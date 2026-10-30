@@ -14,6 +14,7 @@
 
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { OutputStream, asyncChain, closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -369,10 +370,25 @@ export function said(quiet: boolean, text: string): Uint8Array {
 // Write a -D or -o file through the dispatcher: null once written (or with no
 // file handle to write through), else the failure's stderr. Mirrors Python's
 // _write_named.
+// curl's message for a transfer past its deadline: the bytes that arrived, out
+// of the size the server announced when it announced one.
+function timedOut(err: HttpTimeoutError, received: number, response: HttpResponse | null): string {
+  const names = new Map((response?.headers ?? []).map(([k, v]) => [k.toLowerCase(), v]))
+  // The announced size counts the bytes on the wire, which a decoded body no
+  // longer matches.
+  const total = names.has('content-encoding') ? undefined : names.get('content-length')
+  const of = total === undefined ? '' : ` out of ${total}`
+  return `curl: (${String(EXIT_TIMEOUT)}) Operation timed out after ${String(err.elapsedMs)} milliseconds with ${String(received)}${of} bytes received\n`
+}
+
+function unreachable(err: HttpConnectError): string {
+  return `curl: (${String(EXIT_CONNECT)}) Failed to connect to ${err.host} port ${String(err.port)}: Could not connect to server\n`
+}
+
 async function writeNamed(
   ctx: Context,
   target: PathSpec | string,
-  data: Uint8Array,
+  data: ByteSource,
   quiet: boolean,
 ): Promise<Uint8Array | null> {
   if (ctx.vfs === undefined) return null
@@ -493,18 +509,29 @@ async function curl(
   ]
   const traceTail: [string, string][] = [...sent, ...typed]
   const started = performance.now()
-  const finish = async (
-    stdout: ByteSource | null,
-    io: IOResult,
-    response?: HttpResponse,
-  ): Promise<CommandFnResult> => {
+  // The body bytes read so far, and the failure that cut the transfer short:
+  // the status, the message and -w report both once it ends.
+  let received = 0
+  let cut: HttpConnectError | null = null
+  const settle = async (io: IOResult, response?: HttpResponse): Promise<Uint8Array> => {
+    if (cut !== null) {
+      let line: string
+      if (cut instanceof HttpTimeoutError) {
+        io.exitCode = EXIT_TIMEOUT
+        line = timedOut(cut, received, response ?? null)
+      } else {
+        io.exitCode = EXIT_CONNECT
+        line = unreachable(cut)
+      }
+      io.stderr = concat([await materialize(io.stderr), said(quiet, line)])
+    }
     const code = String(response?.status ?? 0).padStart(3, '0')
     const [out, err] = renderWriteOut(template, {
       http_code: code,
       response_code: code,
       url_effective: response?.url ?? url,
       num_redirects: String(response?.history.length ?? 0),
-      size_download: String(response?.body.length ?? 0),
+      size_download: String(received),
       content_type: response?.headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? '',
       method:
         response?.method ?? request ?? (head ? 'HEAD' : hasData || form !== null ? 'POST' : 'GET'),
@@ -513,7 +540,22 @@ async function curl(
     })
     io.stderr = concat([prompt, await materialize(io.stderr), err])
     const saved = cookieJar === null ? new Uint8Array() : await saveCookies(ctx, cookieJar, jar)
-    return [concat([await materialize(stdout), out, saved]), io]
+    return concat([out, saved])
+  }
+  const finish = async (
+    stdout: ByteSource | null,
+    io: IOResult,
+    response?: HttpResponse,
+  ): Promise<CommandFnResult> => {
+    if (stdout === null || stdout instanceof Uint8Array) {
+      return [concat([await materialize(stdout), await settle(io, response)]), io]
+    }
+    // The body streams out first; what curl prints after it waits for its
+    // end, which is when the size and any failure are known.
+    async function* rest(): AsyncGenerator<Uint8Array> {
+      yield await settle(io, response)
+    }
+    return [asyncChain([stdout, rest()]), io]
   }
   let method: string
   let bodyLen: number | null = null
@@ -535,6 +577,7 @@ async function curl(
         followRedirects: location,
         verify,
         cookies: jar,
+        stream: true,
       })
     } else {
       method = request ?? (head ? 'HEAD' : body !== null ? 'POST' : 'GET')
@@ -552,19 +595,36 @@ async function curl(
         followRedirects: location,
         verify,
         cookies: jar,
+        stream: true,
       })
     }
   } catch (err) {
     if (err instanceof HttpTimeoutError) {
-      // Nothing was received: the body is read whole, so a deadline that
-      // hits mid-transfer still counts as zero bytes here.
-      const line = `curl: (${String(EXIT_TIMEOUT)}) Operation timed out after ${String(err.elapsedMs)} milliseconds with 0 bytes received\n`
+      const line = timedOut(err, 0, null)
       return await finish(null, new IOResult({ exitCode: EXIT_TIMEOUT, stderr: said(quiet, line) }))
     }
     if (!(err instanceof HttpConnectError)) throw err
-    const line = `curl: (${String(EXIT_CONNECT)}) Failed to connect to ${err.host} port ${String(err.port)}: Could not connect to server\n`
-    return await finish(null, new IOResult({ exitCode: EXIT_CONNECT, stderr: said(quiet, line) }))
+    return await finish(
+      null,
+      new IOResult({ exitCode: EXIT_CONNECT, stderr: said(quiet, unreachable(err)) }),
+    )
   }
+  const final = resp
+  // The final body as it arrives, counted for -w. A transfer that breaks off
+  // keeps what came, as curl's output does.
+  async function* delivered(): AsyncGenerator<Uint8Array> {
+    try {
+      for await (const chunk of ensureStream(final.body)) {
+        received += chunk.byteLength
+        yield chunk
+      }
+    } catch (err) {
+      if (!(err instanceof HttpConnectError)) throw err
+      cut = err
+    }
+  }
+  // Closing it lets the connection go, whether or not it was ever read.
+  const bodyOut = new OutputStream(delivered(), () => closeQuietly(final.body))
   const hops = [...resp.history, resp]
   // The first request is the one this handler built; each redirect's is
   // the one the client reports, at the URL the server named.
@@ -614,6 +674,7 @@ async function curl(
   if (dumpFile !== null) {
     const refused = await writeNamed(ctx, dumpFile, blocks, quiet)
     if (refused !== null) {
+      await closeQuietly(bodyOut)
       return await finish(
         null,
         new IOResult({ exitCode: EXIT_WRITE, stderr: concat([trace, refused]) }),
@@ -625,6 +686,7 @@ async function curl(
   // Only -f makes an error status an error, and then no body is written; the
   // headers -D already dumped stay dumped.
   if (failOnError && isHttpError(resp)) {
+    await closeQuietly(bodyOut)
     const line = `curl: (${String(EXIT_HTTP_ERROR)}) The requested URL returned error: ${String(resp.status)}\n`
     return await finish(
       headerOut,
@@ -635,15 +697,18 @@ async function curl(
       resp,
     )
   }
-  let result = resp.body
+  let result: ByteSource = bodyOut
   if (head) {
     // -I prints the headers alone, whatever method -X made it send.
+    await closeQuietly(bodyOut)
     result = blocks
   } else if (include) {
-    result = concat([blocks, result])
+    result = asyncChain([blocks, bodyOut])
   }
   if (output !== null && !outputIsStdout) {
     const refused = await writeNamed(ctx, output, result, quiet)
+    await closeQuietly(result)
+    await closeQuietly(bodyOut)
     if (refused !== null) {
       return await finish(
         headerOut,
@@ -658,8 +723,8 @@ async function curl(
   if (dumpToStdout) {
     result =
       head || include
-        ? concat([ENC.encode(doubled(hops)), head ? new Uint8Array() : resp.body])
-        : concat([blocks, result])
+        ? asyncChain([ENC.encode(doubled(hops)), head ? null : bodyOut])
+        : asyncChain([blocks, result])
   }
   return await finish(result, new IOResult({ stderr: trace }), resp)
 }

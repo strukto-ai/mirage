@@ -83,6 +83,11 @@ flowchart LR
         direction LR
         PS["pre_session"] --> Land["write lands"] --> PoS["post_session"]
     end
+    subgraph request["A request"]
+        direction LR
+        PN["pre_network"] --> Send["transfer runs"] --> PoN["post_network"]
+    end
+    Run -. curl, wget, git .-> PN
 ```
 
 | Python | TypeScript | Runs | Can return |
@@ -95,6 +100,8 @@ flowchart LR
 | `post_vfs` | `postVfs` | after each VFS call | Deny, Ask |
 | `pre_session` | `preSession` | before each variable write | Deny, Ask |
 | `post_session` | `postSession` | after the write lands | Deny, Ask |
+| `pre_network` | `preNetwork` | before `curl`, `wget` or `git` over https sends a request | Deny, Ask |
+| `post_network` | `postNetwork` | once that transfer ends, however it ends | Deny, Ask |
 | `pre_workspace` | `preWorkspace` | on a server, before a create, clone or load builds anything | Deny |
 
 | What | Example | Covered by |
@@ -103,6 +110,7 @@ flowchart LR
 | A command or CLI | `rm /data/b` | `pre_command`, `post_command` |
 | A VFS call | `session.vfs.read("/data/a.txt")` | `pre_vfs`, `post_vfs` |
 | A variable write | `export X=1`, `X=1`, `unset X` | `pre_session`, `post_session` |
+| A request | `curl https://api.example.com/x` | `pre_network`, `post_network` |
 
 | Entry point | Sends |
 | --- | --- |
@@ -132,6 +140,7 @@ TypeScript spells the fields in camelCase (`ctx.sessionId`, `ctx.exitCode`).
 | `pre_command`, `post_command` | `line` and the command: `command`, `words`, `paths`, `walks` | `exit_code`, `stderr`, `records` |
 | `pre_vfs`, `post_vfs` | `call`, `path`, `write` | `result` |
 | `pre_session`, `post_session` | `verb`, `key`, `value` | `old` |
+| `pre_network`, `post_network` | `url`, `method`, `host`, `port`, `command` | `status`, `size`, `failed` |
 | `pre_workspace` | `config`: the config as the caller wrote it, secrets still pointers | |
 
 `pre_command` is `pre_execute` narrowed to one command: each entry of
@@ -387,6 +396,64 @@ const noCredentials: Policy = {
 
 `export AWS_SECRET=x` gets `AWS_SECRET: permission denied`, exit 1. A
 Deny at `post_session` gives the same answer and puts the old value back.
+
+### pre_network and post_network
+
+`pre_network` runs before `curl`, `wget` or `git` over https sends a
+request, before any connection opens. `post_network` runs once the
+transfer ends: `status` is the final response's (0 when none came), `size`
+the body bytes read, and `failed` whether the transfer broke off or never
+began. The redirects a request follows are part of it; the workspace's
+[`network`](/home/configuration#network) judges every connection they
+open. Together the two can hold a workspace to a number of requests at
+once:
+
+<CodeGroup>
+
+```python Python
+from mirage.policy import (
+    Deny,
+    NetworkContext,
+    NetworkResultContext,
+    Policy,
+)
+
+class AtMostEight(Policy):
+    def __init__(self) -> None:
+        self.open = 0
+
+    async def pre_network(self, ctx: NetworkContext) -> Deny | None:
+        if self.open >= 8:
+            return Deny("eight requests are already open")
+        self.open += 1
+        return None
+
+    async def post_network(self, ctx: NetworkResultContext) -> None:
+        self.open -= 1
+        return None
+```
+
+```typescript TypeScript
+let open = 0
+const atMostEight: Policy = {
+  preNetwork() {
+    if (open >= 8) return { kind: 'deny', reason: 'eight requests are already open' }
+    open += 1
+    return null
+  },
+  postNetwork() {
+    open -= 1
+    return null
+  },
+}
+```
+
+</CodeGroup>
+
+A refused request fails as a closed port does: `curl` exits 7, `wget` 4.
+A line was admitted without the question, so an Ask refuses the same way.
+A Deny at `post_network` fails the command as a broken transfer; what it
+already wrote stays.
 
 ### pre_workspace
 

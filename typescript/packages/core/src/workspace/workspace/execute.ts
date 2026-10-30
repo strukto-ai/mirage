@@ -1063,22 +1063,25 @@ async function runParsedLine(
         ? env.router.context(command, effectiveSession, await judged())
         : null
       const runLine = (): ReturnType<typeof runWholeLine> =>
-        runWithNetwork(env.registry.network, () =>
-          runWithMemory(env.registry.memory, () =>
-            runWholeLine(
-              lineRuntime,
-              command,
-              stdin,
-              effectiveSession,
-              env.registry,
-              killed,
-              claimantFor(rootNode, handed),
-              route,
-              options.sink,
-              deadline?.seconds ?? null,
-              deadline?.start,
+        runWithNetwork(
+          env.registry.network,
+          () =>
+            runWithMemory(env.registry.memory, () =>
+              runWholeLine(
+                lineRuntime,
+                command,
+                stdin,
+                effectiveSession,
+                env.registry,
+                killed,
+                claimantFor(rootNode, handed),
+                route,
+                options.sink,
+                deadline?.seconds ?? null,
+                deadline?.start,
+              ),
             ),
-          ),
+          env.registry.policies,
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1214,20 +1217,23 @@ async function runParsedLine(
         // Every object a line builds must fit in what the workspace's
         // max_memory has left, a nested line's too, and every connection it
         // opens must clear the workspace's network.
-        const running = runWithNetwork(env.registry.network, () =>
-          runWithMemory(env.registry.memory, async () =>
-            runCommandTree(
-              deadline === null ? deps : { ...deps, signal: deadline.signal },
-              rootNode,
-              context,
-              stdin,
-              false,
-              options.callStack ?? null,
-              (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
-                ? env.router.context(command, context.session, await judged())
-                : null,
+        const running = runWithNetwork(
+          env.registry.network,
+          () =>
+            runWithMemory(env.registry.memory, async () =>
+              runCommandTree(
+                deadline === null ? deps : { ...deps, signal: deadline.signal },
+                rootNode,
+                context,
+                stdin,
+                false,
+                options.callStack ?? null,
+                (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
+                  ? env.router.context(command, context.session, await judged())
+                  : null,
+              ),
             ),
-          ),
+          env.registry.policies,
         ).finally(release)
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.

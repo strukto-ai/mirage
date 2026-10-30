@@ -115,7 +115,14 @@ describe('parseNetwork', () => {
   it.each([
     ['true', true],
     ['false', false],
-    ['{ allow = ["*.github.com", "10.0.0.0/8"] }', { allow: ['*.github.com', '10.0.0.0/8'] }],
+    [
+      '{ allowed_domains = ["*.github.com", "10.0.0.0/8"] }',
+      { allowed_domains: ['*.github.com', '10.0.0.0/8'] },
+    ],
+    [
+      '{ allowed_domains = ["*"], denied_domains = ["*:22"] }',
+      { allowed_domains: ['*'], denied_domains: ['*:22'] },
+    ],
   ])('reads %s', (raw, setting) => {
     expect(parseNetwork(raw)).toEqual(setting)
     expect(() => {
@@ -123,7 +130,13 @@ describe('parseNetwork', () => {
     }).not.toThrow()
   })
 
-  it.each(['off', '{ deny = ["10.0.0.0/8"] }', '{ allow = "a.com" }'])('refuses %s', (raw) => {
+  it.each([
+    'off',
+    '{}',
+    '{ deny = ["10.0.0.0/8"] }',
+    '{ allow = ["a.com"] }',
+    '{ allowed_domains = "a.com" }',
+  ])('refuses %s', (raw) => {
     expect(() => parseNetwork(raw)).toThrow(/network is true, false or/)
   })
 })

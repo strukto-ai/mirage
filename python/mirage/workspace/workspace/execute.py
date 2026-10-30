@@ -934,7 +934,8 @@ async def run_prepared_line(
                         )
                 io = await run_with_network(
                     ws.registry.network,
-                    run_with_memory(
+                    policies=ws.registry.policies,
+                    call=run_with_memory(
                         ws.registry.memory,
                         run_whole_line(
                             line_runtime,
@@ -1072,7 +1073,8 @@ async def run_prepared_line(
             # left, and every connection it opens must clear its network.
             io, _ = await run_with_network(
                 ws.registry.network,
-                run_with_memory(
+                policies=ws.registry.policies,
+                call=run_with_memory(
                     ws.registry.memory,
                     run_with_timeout(
                         run_command_tree(

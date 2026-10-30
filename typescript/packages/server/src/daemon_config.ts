@@ -17,6 +17,9 @@ import { join } from 'node:path'
 import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
+export const NETWORK_SHAPE =
+  'config.toml: [daemon] network is true, false or {allowed_domains = [...], denied_domains = [...]}'
+
 export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'url',
   'socket',
@@ -79,27 +82,35 @@ export function validateDaemonTable(table: Record<string, string>): void {
 }
 
 /**
- * The `[daemon]` table's `network` as written: `true`, `false` or
- * `{ allow = ["host", "10.0.0.0/8"] }` on one line, its entries
- * double-quoted. Only the shape is read here; the server compiles the
+ * The `[daemon]` table's `network` as written: `true`, `false` or an inline
+ * table of `allowed_domains` and `denied_domains`, each a one-line list of
+ * double-quoted entries. Only the shape is read here; the server compiles the
  * entries as it starts.
  */
 export function parseNetwork(raw: string): NetworkSetting {
   if (raw === 'true' || raw === 'false') return raw === 'true'
   const inner = raw.startsWith('{') && raw.endsWith('}') ? raw.slice(1, -1).trim() : ''
-  const value = inner.startsWith('allow') ? inner.slice('allow'.length).trim() : ''
-  let allow: unknown
+  // Each `key = [...]` becomes a JSON member; an entry holds no `=` or space.
+  const members = inner.replace(/(^|,)\s*(allowed_domains|denied_domains)\s*=/g, '$1"$2":')
+  let parsed: unknown
   try {
-    allow = value.startsWith('=') ? JSON.parse(value.slice(1).trim()) : undefined
+    parsed = inner === '' ? undefined : JSON.parse(`{${members}}`)
   } catch {
-    allow = undefined
+    parsed = undefined
   }
-  if (!Array.isArray(allow) || !allow.every((entry) => typeof entry === 'string')) {
-    throw new DaemonConfigError(
-      'config.toml: [daemon] network is true, false or {allow = [hosts and ranges]}',
+  const lists = typeof parsed === 'object' && parsed !== null ? Object.entries(parsed) : []
+  if (
+    lists.length === 0 ||
+    !lists.every(
+      ([key, entries]) =>
+        (key === 'allowed_domains' || key === 'denied_domains') &&
+        Array.isArray(entries) &&
+        entries.every((entry) => typeof entry === 'string'),
     )
+  ) {
+    throw new DaemonConfigError(NETWORK_SHAPE)
   }
-  return { allow: allow }
+  return parsed as NetworkSetting
 }
 
 function parseValue(raw: string): string {

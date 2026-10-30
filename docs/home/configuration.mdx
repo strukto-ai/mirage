@@ -112,20 +112,27 @@ mount opens it.
 | --- | --- |
 | `true` | Anywhere. The default. |
 | `false` | Nowhere: every connection is refused. |
-| `allow: [...]` | Only the hosts and ranges listed. |
+| `allowed_domains: [...]` | Only what the list names. |
+| `denied_domains: [...]` | Anywhere but what the list names. |
 
 ```yaml
 network:
-  allow:
-    - api.github.com
+  allowed_domains:
+    - api.github.com:443
     - "*.slack.com"
     - 10.0.0.0/8
+  denied_domains:
+    - "*:22"
 ```
 
-An entry is a host name, `*.` and a name for every host under it, an
-address, or a range in CIDR form. A name matches the host a connection was
-opened for, and an address or a range the address it reaches. A mount
-connects under the same rule, so a list names the mount's endpoint too.
+An entry is `*` for every host, a host name, `*.` and a name for every
+host under it, an address, or a range in CIDR form. Any of them but a range
+may end in `:port`, which holds it to that port; an IPv6 address takes one
+in brackets, as in `[::1]:8080`. A name matches the host a connection was
+opened for, and an address or a range the address it reaches. A denied
+entry wins over an allowed one, and an empty `allowed_domains` lets nothing
+through. A mount connects under the same rule, so a list names the mount's
+endpoint too.
 
 A refused connection fails as a closed port does: `curl` exits 7 with
 `Could not connect to server`. Write `false` rather than `off`, which only

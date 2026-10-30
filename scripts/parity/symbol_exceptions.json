@@ -34,7 +34,8 @@
   "commands/builtin/utils/http": {
    "typescript_only": {
     "INSECURE": "Node's curl -k agent pools its sockets, so it keeps one per network rule; Python's httpx client is built per call and pools nothing across workspaces.",
-    "insecureAgent": "Node's curl -k agent pools its sockets, so it keeps one per network rule; Python's httpx client is built per call and pools nothing across workspaces."
+    "insecureAgent": "Node's curl -k agent pools its sockets, so it keeps one per network rule; Python's httpx client is built per call and pools nothing across workspaces.",
+    "failure": "fetch rejects a deadline, a cancel and a refused connection alike, so one function tells them apart for the head and the body; httpx raises a distinct exception for each, caught at each await."
    }
   },
   "server/daemon_config": {

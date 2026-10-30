@@ -627,10 +627,12 @@ ScriptMethod = Literal[
     "pre_command",
     "pre_vfs",
     "pre_session",
+    "pre_network",
     "post_execute",
     "post_command",
     "post_vfs",
     "post_session",
+    "post_network",
 ]
 
 # A session's policy programs, by method.
@@ -934,6 +936,55 @@ class VfsResultContext(VfsContext):
 
 
 @dataclass(frozen=True, slots=True)
+class NetworkContext:
+    """Facts about one request a command sends, as pre_network methods
+    see it.
+
+    Fires where ``curl``, ``wget`` and ``git`` over https send a request,
+    before any connection opens. The redirects it follows are the same
+    request; the workspace's ``network`` judges every connection they
+    open.
+
+    Args:
+        url (str): the URL the command asked for.
+        method (str): the HTTP method.
+        host (str): the host the URL names.
+        port (int): the port the URL names, else its scheme's.
+        command (str): the command sending it.
+        session_id (str): the session the command runs in.
+        session (SessionView | None): the session, read only.
+        vfs (FileView | None): the session's files, read only.
+        caller (PolicyCaller | None): who sends it, read only.
+    """
+
+    url: str
+    method: str
+    host: str
+    port: int
+    command: str = ""
+    session_id: str = ""
+    session: SessionView | None = None
+    vfs: FileView | None = None
+    caller: PolicyCaller | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkResultContext(NetworkContext):
+    """One finished request, as post_network methods see it: what
+    pre_network saw, plus how it ended.
+
+    Args:
+        status (int): the final response's status, 0 when none came.
+        size (int): the body bytes read.
+        failed (bool): whether the transfer broke off or never began.
+    """
+
+    status: int = 0
+    size: int = 0
+    failed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ExecuteResultContext(RouteContext):
     """One finished line, as post_execute methods see it: what
     pre_execute saw, plus what came back.
@@ -1031,6 +1082,8 @@ VALIDITY: dict[str, frozenset[str]] = {
     "pre_session": frozenset({Deny.kind, Ask.kind}),
     "post_session": frozenset({Deny.kind, Ask.kind}),
     "pre_workspace": frozenset({Deny.kind}),
+    "pre_network": frozenset({Deny.kind, Ask.kind}),
+    "post_network": frozenset({Deny.kind, Ask.kind}),
 }
 
 

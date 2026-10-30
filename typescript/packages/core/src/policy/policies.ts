@@ -50,6 +50,8 @@ import {
   type CommandResultContext,
   type Deny,
   type ExecuteResultContext,
+  type NetworkContext,
+  type NetworkResultContext,
   type VfsContext,
   type VfsResultContext,
   type Pending,
@@ -584,6 +586,56 @@ async function sessionRefused(
  * workspace's ledger (`Policies.decisions`), inside a line too. A write a
  * method makes while it decides (`ctx.session`) throws EACCES.
  */
+/**
+ * Fire preNetwork where a command sends a request; a Deny, or an Ask,
+ * refuses it with EACCES, the URL as the name refused. Requests are sent by
+ * a running command, whose line was admitted without the question, so an
+ * Ask refuses like a deny. Null policies gate nothing, nor does a dry run's
+ * policy deciding. Mirrors Python's `pre_network_gate`.
+ */
+export async function preNetworkGate(
+  policies: Policies | null,
+  ctx: NetworkContext,
+): Promise<void> {
+  if (
+    policies === null ||
+    explaining() === DryRun.DECIDING ||
+    !(await policies.wantsFor('preNetwork', ctx.sessionId ?? ''))
+  ) {
+    return
+  }
+  const asked = { ...ctx, caller: policyCaller(currentCaller().session, policies.account) }
+  const answer = await apart(() => policies.preNetwork(asked))
+  if (answer !== null) {
+    const refused: Deny = answer.kind === 'deny' ? answer : { kind: 'deny', reason: answer.reason }
+    throw policyDenied(refused, ctx.url)
+  }
+}
+
+/**
+ * Fire postNetwork once a request's transfer ends; a Deny, or an Ask, fails
+ * it with EACCES, what it delivered already delivered. Mirrors Python's
+ * `post_network_gate`.
+ */
+export async function postNetworkGate(
+  policies: Policies | null,
+  ctx: NetworkResultContext,
+): Promise<void> {
+  if (
+    policies === null ||
+    explaining() === DryRun.DECIDING ||
+    !(await policies.wantsFor('postNetwork', ctx.sessionId ?? ''))
+  ) {
+    return
+  }
+  const ended = { ...ctx, caller: policyCaller(currentCaller().session, policies.account) }
+  const answer = await apart(() => policies.postNetwork(ended))
+  if (answer !== null) {
+    const refused: Deny = answer.kind === 'deny' ? answer : { kind: 'deny', reason: answer.reason }
+    throw policyDenied(refused, ctx.url)
+  }
+}
+
 export async function preSessionGate(
   policies: Policies | null,
   ctx: SessionContext,
@@ -711,7 +763,8 @@ export class Policies {
       | VfsResultContext
       | ExecuteResultContext
       | SessionContext
-      | WorkspaceContext,
+      | WorkspaceContext
+      | NetworkContext,
     every: boolean,
     placed = false,
     rulesOnly = false,
@@ -779,7 +832,8 @@ export class Policies {
                   VfsResultContext &
                   ExecuteResultContext &
                   SessionResultContext &
-                  WorkspaceContext,
+                  WorkspaceContext &
+                  NetworkResultContext,
               )
             answered = await abortable(
               asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask(),
@@ -815,7 +869,8 @@ export class Policies {
       | VfsResultContext
       | ExecuteResultContext
       | SessionContext
-      | WorkspaceContext,
+      | WorkspaceContext
+      | NetworkContext,
     placed = false,
     rulesOnly = false,
   ): Promise<[Deny | Ask | null, Limit | null, Route | null]> {
@@ -843,7 +898,8 @@ export class Policies {
       | VfsResultContext
       | ExecuteResultContext
       | SessionContext
-      | WorkspaceContext,
+      | WorkspaceContext
+      | NetworkContext,
     every = true,
     rulesOnly = false,
   ): Promise<(Deny | Ask | Route)[]> {
@@ -893,6 +949,18 @@ export class Policies {
   /** Fire postVfs; a Deny or an Ask holds the result back. */
   async postVfs(ctx: VfsResultContext): Promise<Deny | Ask | null> {
     const [action] = await this.fire('postVfs', ctx)
+    return action
+  }
+
+  /** Fire preNetwork across the policies; the first Deny wins, else the first Ask. */
+  async preNetwork(ctx: NetworkContext): Promise<Deny | Ask | null> {
+    const [action] = await this.fire('preNetwork', ctx)
+    return action
+  }
+
+  /** Fire postNetwork across the policies; the first Deny wins, else the first Ask. */
+  async postNetwork(ctx: NetworkResultContext): Promise<Deny | Ask | null> {
+    const [action] = await this.fire('postNetwork', ctx)
     return action
   }
 

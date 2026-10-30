@@ -26,11 +26,21 @@ import {
 describe('sameNetwork', () => {
   it.each<[NetworkSetting, NetworkSetting, boolean]>([
     [true, true, true],
-    [false, { allow: [] }, true],
-    [{ allow: ['a.com', 'b.com'] }, { allow: ['b.com', 'a.com', 'a.com'] }, true],
-    [true, { allow: [] }, false],
-    [{ allow: ['a.com'] }, { allow: ['b.com'] }, false],
-    [{ allow: ['10.0.0.5'] }, { allow: ['10.0.0.5.'] }, false],
+    [false, { allowed_domains: [] }, true],
+    [
+      { allowed_domains: ['a.com', 'b.com'] },
+      { allowed_domains: ['b.com', 'a.com', 'a.com'] },
+      true,
+    ],
+    [true, { allowed_domains: [] }, false],
+    [{ allowed_domains: ['a.com'] }, { allowed_domains: ['b.com'] }, false],
+    [{ allowed_domains: ['10.0.0.5'] }, { allowed_domains: ['10.0.0.5.'] }, false],
+    [{ denied_domains: ['a.com'] }, { allowed_domains: ['a.com'] }, false],
+    [
+      { allowed_domains: ['*'], denied_domains: ['b.com', 'a.com'] },
+      { denied_domains: ['a.com', 'b.com'], allowed_domains: ['*'] },
+      true,
+    ],
   ])('%o and %o: %s', (a, b, same) => {
     expect(sameNetwork(a, b)).toBe(same)
   })
@@ -40,14 +50,22 @@ describe('networkLayer', () => {
   it.each<[NetworkSetting, Record<string, unknown> | null]>([
     [true, null],
     [false, { allow: [] }],
-    [{ allow: ['a.com'] }, { allow: ['a.com'] }],
+    [{ allowed_domains: ['a.com'] }, { allow: ['a.com'] }],
+    [{ denied_domains: ['*:22'] }, { deny: ['*:22'] }],
+    [
+      { allowed_domains: ['*'], denied_domains: ['evil.test'] },
+      { allow: ['*'], deny: ['evil.test'] },
+    ],
   ])('adds the layer of %o', (setting, layer) => {
     expect(networkLayer(setting)).toEqual(layer)
   })
 
-  it.each(['off', { deny: ['a.com'] }, { allow: 'a.com' }])('refuses %o', (setting) => {
-    expect(() => networkLayer(setting)).toThrow(/network is true, false or/)
-  })
+  it.each(['off', {}, { allow: ['a.com'] }, { deny: ['a.com'] }, { allowed_domains: 'a.com' }])(
+    'refuses %o',
+    (setting) => {
+      expect(() => networkLayer(setting)).toThrow(/network is true, false or/)
+    },
+  )
 })
 
 describe('NetworkRule', () => {

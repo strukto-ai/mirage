@@ -27,7 +27,7 @@ from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpResponse
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -58,6 +58,7 @@ def _stub(monkeypatch, resp=None, exc=None) -> list[dict]:
         follow_redirects=False,
         verify=True,
         cookies=None,
+        stream=False,
     ):
         calls.append(
             {
@@ -86,10 +87,12 @@ def _run(
     spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
     vfs = Files(dispatch, ledger=False) if dispatch is not None else None
     ctx = Context(vfs=vfs, cwd=spec, flags=flags)
-    body, io = asyncio.run(curl(NOOPAccessor(), [], list(texts), ctx))
-    if body is None:
-        return b"", io
-    return bytes(body), io
+
+    async def run() -> tuple[bytes, IOResult]:
+        body, io = await curl(NOOPAccessor(), [], list(texts), ctx)
+        return await materialize(body), io
+
+    return asyncio.run(run())
 
 
 def _run_writing(
@@ -99,7 +102,7 @@ def _run_writing(
     written: dict[str, bytes] = {}
 
     async def dispatch(op, scope, **kwargs):
-        written[scope.virtual] = kwargs["data"]
+        written[scope.virtual] = await materialize(kwargs["data"])
 
     body, io = _run(*texts, dispatch=dispatch, **flags)
     return body, io, written
@@ -267,6 +270,7 @@ def test_form_field_uses_the_form_helper(monkeypatch):
         follow_redirects=False,
         verify=True,
         cookies=None,
+        stream=False,
     ):
         calls.append({"url": url, "method": method, "form_data": form_data})
         return _ok(b"form ok")
@@ -690,7 +694,7 @@ def _run_jar(
             return held[scope.virtual].encode(), IOResult()
         if refuse:
             raise FileNotFoundError(scope.virtual)
-        held[scope.virtual] = kwargs["data"].decode()
+        held[scope.virtual] = (await materialize(kwargs["data"])).decode()
         return None, IOResult()
 
     body, io = _run(JAR_URL, dispatch=dispatch, **flags)

@@ -320,7 +320,7 @@ mirage login
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
 | `max_workspaces` | `MIRAGE_MAX_WORKSPACES` | no cap; past it a new workspace answers 503 |
 | `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |
-| `network` | | `true`; `false` or `{ allow = ["host", "10.0.0.0/8"] }` holds every workspace to it |
+| `network` | | `true`; `false` or `{ allowed_domains = [...], denied_domains = [...] }` holds every workspace to it |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |

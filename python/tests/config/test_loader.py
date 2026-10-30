@@ -166,8 +166,16 @@ def test_max_memory_must_be_a_size():
         ({}, True),
         ({"network": False}, False),
         (
-            {"network": {"allow": ["*.github.com", "10.0.0.0/8"]}},
-            {"allow": ["*.github.com", "10.0.0.0/8"]},
+            {
+                "network": {
+                    "allowed_domains": ["*.github.com", "10.0.0.0/8"],
+                    "denied_domains": ["*:22"],
+                }
+            },
+            {
+                "allowed_domains": ["*.github.com", "10.0.0.0/8"],
+                "denied_domains": ["*:22"],
+            },
         ),
     ],
 )
@@ -185,7 +193,10 @@ def test_network_reaches_the_workspace(block, expected):
     [
         ("off", "network is true, false or"),
         ({"deny": ["10.0.0.0/8"]}, "network is true, false or"),
-        ({"allow": ["10.0.0.0/33"]}, "is not an address, a range"),
+        ({"allow": ["10.0.0.0/8"]}, "network is true, false or"),
+        ({}, "network is true, false or"),
+        ({"allowed_domains": ["10.0.0.0/33"]}, "is not an address, a range"),
+        ({"denied_domains": ["example.com:0"]}, "is not an address, a range"),
     ],
 )
 def test_network_must_be_a_setting(network, message):

@@ -15,7 +15,7 @@
 import base64
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from urllib.parse import quote, urlsplit
 
 from mirage.accessor.base import Accessor
@@ -37,6 +37,12 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io.stream import (
+    OutputStream,
+    async_chain,
+    close_quietly,
+    ensure_stream,
+)
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 
@@ -434,8 +440,44 @@ def said(quiet: bool, text: str) -> bytes:
     return b"" if quiet else text.encode()
 
 
+def _timed_out(
+    exc: HttpTimeoutError, received: int, response: HttpResponse | None
+) -> str:
+    """curl's message for a transfer past its deadline: the bytes that
+    arrived, out of the size the server announced when it announced one.
+
+    Args:
+        exc (HttpTimeoutError): the deadline that passed.
+        received (int): the body bytes read before it did.
+        response (HttpResponse | None): the response whose body was
+            arriving, None when none had.
+    """
+    names = (
+        {} if response is None else {k.lower(): v for k, v in response.headers}
+    )
+    # The announced size counts the bytes on the wire, which a decoded
+    # body no longer matches.
+    total = (
+        names.get("content-length")
+        if "content-encoding" not in names
+        else None
+    )
+    of = "" if total is None else f" out of {total}"
+    return (
+        f"curl: ({EXIT_TIMEOUT}) Operation timed out after "
+        f"{exc.elapsed_ms} milliseconds with {received}{of} bytes received\n"
+    )
+
+
+def _unreachable(exc: HttpConnectError) -> str:
+    return (
+        f"curl: ({EXIT_CONNECT}) Failed to connect to {exc.host} port "
+        f"{exc.port}: Could not connect to server\n"
+    )
+
+
 async def _write_named(
-    ctx: Context, target: PathSpec | str, data: bytes, quiet: bool
+    ctx: Context, target: PathSpec | str, data: ByteSource, quiet: bool
 ) -> bytes | None:
     """Write a ``-D`` or ``-o`` file through the dispatcher.
 
@@ -443,7 +485,7 @@ async def _write_named(
         ctx (Context): the command's context; without a file handle
             there is nothing to write through.
         target (PathSpec | str): the file as the line named it.
-        data (bytes): what the file holds.
+        data (ByteSource): what the file holds, whole or as it arrives.
         quiet (bool): ``-s`` without ``-S``, which silences the failure.
 
     Returns:
@@ -583,12 +625,36 @@ async def curl(
     ]
     trace_tail = [*sent, *typed]
     started = time.monotonic()
+    # The body bytes read so far, and the failure that cut the transfer
+    # short: the status, the message and -w report both once it ends.
+    received = [0]
+    cut: list[HttpConnectError] = []
 
     async def finish(
         stdout: ByteSource | None,
         io: IOResult,
         response: HttpResponse | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
+        if stdout is None or isinstance(stdout, bytes):
+            return (await materialize(stdout)) + await settle(io, response), io
+
+        async def rest() -> AsyncIterator[bytes]:
+            yield await settle(io, response)
+
+        # The body streams out first; what curl prints after it waits for
+        # its end, which is when the size and any failure are known.
+        return async_chain([stdout, rest()]), io
+
+    async def settle(io: IOResult, response: HttpResponse | None) -> bytes:
+        if cut:
+            failure = cut[0]
+            if isinstance(failure, HttpTimeoutError):
+                io.exit_code = EXIT_TIMEOUT
+                line = _timed_out(failure, received[0], response)
+            else:
+                io.exit_code = EXIT_CONNECT
+                line = _unreachable(failure)
+            io.stderr = (await materialize(io.stderr)) + said(quiet, line)
         code = f"{response.status:03d}" if response is not None else "000"
         values = {
             "http_code": code,
@@ -597,9 +663,7 @@ async def curl(
             "num_redirects": str(len(response.history))
             if response is not None
             else "0",
-            "size_download": str(len(response.body))
-            if response is not None
-            else "0",
+            "size_download": str(received[0]),
             "content_type": next(
                 (
                     v
@@ -624,7 +688,7 @@ async def curl(
             if cookie_target is None
             else await _save_cookies(ctx, cookie_target, jar)
         )
-        return (await materialize(stdout)) + out + saved, io
+        return out + saved
 
     body_len: int | None = None
     body_type: str | None = None
@@ -643,6 +707,7 @@ async def curl(
                 follow_redirects=location,
                 verify=verify,
                 cookies=jar,
+                stream=True,
             )
         else:
             method = request or (
@@ -665,23 +730,27 @@ async def curl(
                 follow_redirects=location,
                 verify=verify,
                 cookies=jar,
+                stream=True,
             )
     except HttpTimeoutError as exc:
-        # Nothing was received: the body is read whole, so a deadline
-        # that hits mid-transfer still counts as zero bytes here.
-        err = said(
-            quiet,
-            f"curl: ({EXIT_TIMEOUT}) Operation timed out after "
-            f"{exc.elapsed_ms} milliseconds with 0 bytes received\n",
-        )
+        err = said(quiet, _timed_out(exc, 0, None))
         return await finish(None, IOResult(exit_code=EXIT_TIMEOUT, stderr=err))
     except HttpConnectError as exc:
-        err = said(
-            quiet,
-            f"curl: ({EXIT_CONNECT}) Failed to connect to {exc.host} port "
-            f"{exc.port}: Could not connect to server\n",
-        )
+        err = said(quiet, _unreachable(exc))
         return await finish(None, IOResult(exit_code=EXIT_CONNECT, stderr=err))
+
+    async def delivered() -> AsyncIterator[bytes]:
+        # The final body as it arrives, counted for -w. A transfer that
+        # breaks off keeps what came, as curl's output does.
+        try:
+            async for chunk in ensure_stream(resp.body):
+                received[0] += len(chunk)
+                yield chunk
+        except HttpConnectError as exc:
+            cut.append(exc)
+
+    # Closing it lets the connection go, whether or not it was ever read.
+    body_out = OutputStream(delivered(), lambda: close_quietly(resp.body))
     hops = [*resp.history, resp]
     # The first request is the one this handler built; each redirect's is
     # the one the client reports, at the URL the server named.
@@ -728,6 +797,7 @@ async def curl(
     if dump_file is not None:
         refused = await _write_named(ctx, dump_file, blocks, quiet)
         if refused is not None:
+            await close_quietly(body_out)
             return await finish(
                 None,
                 IOResult(exit_code=EXIT_WRITE, stderr=trace + refused),
@@ -737,6 +807,7 @@ async def curl(
     # Only -f makes an error status an error, and then no body is
     # written; the headers -D already dumped stay dumped.
     if fl.as_bool("fail") and resp.is_error:
+        await close_quietly(body_out)
         err = said(
             quiet,
             f"curl: ({EXIT_HTTP_ERROR}) The requested URL returned error: "
@@ -747,18 +818,21 @@ async def curl(
             IOResult(exit_code=EXIT_HTTP_ERROR, stderr=trace + err),
             resp,
         )
-    result = resp.body
+    result: ByteSource = body_out
     if head:
         # -I prints the headers alone, whatever method -X made it send.
+        await close_quietly(body_out)
         result = blocks
     elif include:
-        result = blocks + result
+        result = async_chain([blocks, body_out])
     if (
         isinstance(output, (PathSpec, str))
         and (output.raw_path if isinstance(output, PathSpec) else output)
         != "-"
     ):
         refused = await _write_named(ctx, output, result, quiet)
+        await close_quietly(result)
+        await close_quietly(body_out)
         if refused is not None:
             return await finish(
                 header_out,
@@ -769,7 +843,9 @@ async def curl(
         # on stdout, the headers -D sends there aside.
         return await finish(header_out, IOResult(stderr=trace), resp)
     if dump_to_stdout and (head or include):
-        result = _doubled(hops).encode() + (b"" if head else resp.body)
+        result = async_chain(
+            [_doubled(hops).encode(), None if head else body_out]
+        )
     elif dump_to_stdout:
-        result = blocks + result
+        result = async_chain([blocks, result])
     return await finish(result, IOResult(stderr=trace), resp)

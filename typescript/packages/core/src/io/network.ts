@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Policies } from '../policy/policies.ts'
 import { StreamRefusal } from '../rs/errors.ts'
 import { MovableStream } from '../rs/stream.ts'
 import type { JsonValue } from '../types.ts'
@@ -22,10 +23,16 @@ const ENC = new TextEncoder()
 
 /**
  * A workspace's `network`: true for no limit, false for none at all, or the
- * hosts and ranges it may reach, `{ allow: [...] }`. Mirrors Python's
+ * hosts and ranges it may and may not reach,
+ * `{ allowed_domains: [...], denied_domains: [...] }`. Mirrors Python's
  * `NetworkSetting`.
  */
-export type NetworkSetting = boolean | { readonly allow: readonly string[] }
+export type NetworkSetting =
+  | boolean
+  | { readonly allowed_domains?: readonly string[]; readonly denied_domains?: readonly string[] }
+
+// Each list a `network` object takes, and the rule layer it fills.
+const LISTS: Record<string, string> = { allowed_domains: 'allow', denied_domains: 'deny' }
 
 /**
  * Whether a workspace may open one connection: its `network` setting, the
@@ -45,47 +52,59 @@ export class NetworkRule {
     }
   }
 
-  /** Whether a connection to `address`, resolved for `host`, opens; either is empty when unknown. */
-  lets(host: string, address: string): boolean {
-    return this.stream.live.test(ENC.encode(`${host}\0${address}`))
+  /**
+   * Whether a connection to `address`, resolved for `host`, opens on `port`;
+   * either name is empty and the port undefined when unknown.
+   */
+  lets(host: string, address: string, port?: number): boolean {
+    return this.stream.live.test(
+      ENC.encode(`${host}\0${address}\0${port === undefined ? '' : String(port)}`),
+    )
   }
 }
 
 /**
  * The layer a `network` setting adds: none for true, one that lets nothing
- * for false, and its allow list for an object. Throws for anything else.
- * Mirrors Python's `network_layer`.
+ * for false, and its allowed and denied lists for an object. Throws for
+ * anything else. Mirrors Python's `network_layer`.
  */
 export function networkLayer(setting: unknown): Record<string, JsonValue> | null {
   if (setting === true) return null
   if (setting === false) return { allow: [] }
-  if (
-    typeof setting === 'object' &&
-    setting !== null &&
-    Object.keys(setting).length === 1 &&
-    'allow' in setting &&
-    Array.isArray(setting.allow) &&
-    setting.allow.every((entry) => typeof entry === 'string')
-  ) {
-    return { allow: [...setting.allow] }
+  if (typeof setting === 'object' && setting !== null && !Array.isArray(setting)) {
+    const lists = Object.entries(setting)
+    if (
+      lists.length > 0 &&
+      lists.every(
+        ([key, entries]) =>
+          key in LISTS &&
+          Array.isArray(entries) &&
+          entries.every((entry) => typeof entry === 'string'),
+      )
+    ) {
+      const layer: Record<string, JsonValue> = {}
+      for (const [key, entries] of lists) layer[LISTS[key] ?? key] = [...(entries as string[])]
+      return layer
+    }
   }
   throw new Error(
-    `network is true, false or {allow: [hosts and ranges]}, not ${JSON.stringify(setting)}`,
+    `network is true, false or {allowed_domains: [...], denied_domains: [...]}, not ${JSON.stringify(setting)}`,
   )
 }
 
 /**
- * Whether two settings hold the same rule: their allow lists name the same
- * entries as written, in any order, `false` being the empty list. An entry
- * is compared as written, since one spelling can be an address and
- * another a host name.
+ * Whether two settings hold the same rule: their allowed and denied lists
+ * name the same entries as written, in any order, `false` being an empty
+ * allowed list. An entry is compared as written, since one spelling can be
+ * an address and another a host name.
  */
 export function sameNetwork(a: NetworkSetting, b: NetworkSetting): boolean {
   const [left, right] = [a, b].map((setting) => {
     const layer = networkLayer(setting)
-    return layer === null
-      ? null
-      : JSON.stringify([...new Set(layer.allow as string[])].sort(compareCodePoints))
+    if (layer === null) return null
+    const sorted = (entries: JsonValue | undefined): string[] | null =>
+      entries === undefined ? null : [...new Set(entries as string[])].sort(compareCodePoints)
+    return JSON.stringify([sorted(layer.allow), sorted(layer.deny)])
   })
   return left === right
 }
@@ -111,23 +130,42 @@ export function networkRule(
 // The rule of the workspace a line or an op runs for, null for no limit.
 const rule = createAsyncContext<NetworkRule | null>()
 
+// The policies of the workspace a line runs for, which judge each request a
+// command sends.
+const policies = createAsyncContext<Policies | null>()
+
 /**
  * `fn` run under a workspace's network rule, which every connection it opens
- * must clear. Mirrors Python's `run_with_network`.
+ * must clear, and, for a line, its policies, which judge every request a
+ * command sends; none keeps the ones already bound. Mirrors Python's
+ * `run_with_network`.
  */
-export function runWithNetwork<T>(bound: NetworkRule | null, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(rule.run(bound, fn))
+export function runWithNetwork<T>(
+  bound: NetworkRule | null,
+  fn: () => Promise<T>,
+  judges?: Policies,
+): Promise<T> {
+  if (judges === undefined) return Promise.resolve(rule.run(bound, fn))
+  return Promise.resolve(rule.run(bound, () => Promise.resolve(policies.run(judges, fn))))
+}
+
+/**
+ * The policies bound to the running line, null outside one, which judge each
+ * request a command sends. Mirrors Python's `network_policies`.
+ */
+export function networkPolicies(): Policies | null {
+  return policies.getStore() ?? null
 }
 
 /**
  * Whether the workspace a call runs for may open a connection to `address`,
- * resolved for `host`. A browser cannot tell one task's binding from
- * another's, so there every live workspace's rule must let it. Mirrors
+ * resolved for `host`, on `port`. A browser cannot tell one task's binding
+ * from another's, so there every live workspace's rule must let it. Mirrors
  * Python's `network_lets`.
  */
-export function networkLets(host: string, address: string): boolean {
+export function networkLets(host: string, address: string, port?: number): boolean {
   for (const live of rule.liveStores()) {
-    if (live !== null && !live.lets(host, address)) return false
+    if (live !== null && !live.lets(host, address, port)) return false
   }
   return true
 }

@@ -26,6 +26,7 @@ from mirage.server.auth import storage as auth_storage
 from mirage.server.auth.config import CONFIG_ENV_KEYS
 from mirage.server.daemon_config import (
     ALLOWED_KEYS,
+    NETWORK_SHAPE,
     NUMERIC_KEYS,
     DaemonConfigError,
     read_daemon_table,
@@ -177,7 +178,10 @@ def _default_for_key(key: str) -> str:
 def _network_text(value: bool | dict[str, list[str]]) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
-    return f"{{ allow = {json.dumps(value['allow'])} }}"
+    lists = ", ".join(
+        f"{key} = {json.dumps(entries)}" for key, entries in value.items()
+    )
+    return f"{{ {lists} }}"
 
 
 def resolved_config() -> dict[str, tuple[str, str]]:
@@ -285,10 +289,7 @@ def set_config(key: str, value: str, path: Path | None = None) -> None:
         try:
             validate_daemon_table(tomllib.loads(f"network = {value}"))
         except tomllib.TOMLDecodeError as exc:
-            raise DaemonConfigError(
-                "config.toml: [daemon] network is true, false or "
-                "{allow = [hosts and ranges]}"
-            ) from exc
+            raise DaemonConfigError(NETWORK_SHAPE) from exc
     use_path = path or config_path()
     lines = _config_lines(use_path)
     rendered = f"{key} = {_format_value(key, value)}"

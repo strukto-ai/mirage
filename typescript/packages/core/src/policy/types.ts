@@ -434,10 +434,12 @@ export type ScriptMethod =
   | 'preCommand'
   | 'preVfs'
   | 'preSession'
+  | 'preNetwork'
   | 'postExecute'
   | 'postCommand'
   | 'postVfs'
   | 'postSession'
+  | 'postNetwork'
 
 /**
  * One program of a profile's policy, as a session carries it: the
@@ -734,6 +736,41 @@ export interface VfsResultContext extends VfsContext {
 }
 
 /**
+ * Facts about one request a command sends, as preNetwork methods see it.
+ * Fires where `curl`, `wget` and `git` over https send a request, before any
+ * connection opens. The redirects it follows are the same request; the
+ * workspace's `network` judges every connection they open. `port` is the
+ * one the URL names, else its scheme's. Mirrors the Python NetworkContext.
+ */
+export interface NetworkContext {
+  url: string
+  method: string
+  host: string
+  port: number
+  /** The command sending it. */
+  command: string
+  sessionId?: string
+  /** The session, read only. */
+  session?: SessionView
+  /** The session's files, read only. */
+  vfs?: FileView
+  /** Who sends it, read only. */
+  caller?: PolicyCaller
+}
+
+/**
+ * One finished request, as postNetwork methods see it: what preNetwork saw,
+ * plus how it ended: the final response's status (0 when none came), the
+ * body bytes read, and whether the transfer broke off or never began.
+ * Mirrors the Python NetworkResultContext.
+ */
+export interface NetworkResultContext extends NetworkContext {
+  status: number
+  size: number
+  failed: boolean
+}
+
+/**
  * One finished line, as postExecute methods see it: what preExecute saw,
  * plus what came back. Fires at the workspace boundary before the
  * line's output reaches the caller, so a Limit returned here bounds
@@ -813,7 +850,9 @@ export const VALIDITY: Readonly<
     | 'postExecute'
     | 'preSession'
     | 'postSession'
-    | 'preWorkspace',
+    | 'preWorkspace'
+    | 'preNetwork'
+    | 'postNetwork',
     ReadonlySet<string>
   >
 > = {
@@ -826,6 +865,8 @@ export const VALIDITY: Readonly<
   preSession: new Set(['deny', 'ask']),
   postSession: new Set(['deny', 'ask']),
   preWorkspace: new Set(['deny']),
+  preNetwork: new Set(['deny', 'ask']),
+  postNetwork: new Set(['deny', 'ask']),
 }
 
 /** The name of one Policy method, as the interface spells it. */

@@ -58,6 +58,8 @@ from mirage.policy.types import (
     Deny,
     DryRun,
     ExecuteResultContext,
+    NetworkContext,
+    NetworkResultContext,
     Outcome,
     Pending,
     PolicyCaller,
@@ -90,6 +92,7 @@ MethodContext = (
     | ExecuteResultContext
     | SessionContext
     | WorkspaceContext
+    | NetworkContext
 )
 
 
@@ -582,6 +585,64 @@ async def post_vfs_gate(
         None if caller.refusals is not None else decisions,
         caller,
     )
+
+
+async def pre_network_gate(
+    policies: "Policies | None", ctx: NetworkContext
+) -> None:
+    """Fire pre_network where a command sends a request; a Deny, or an
+    Ask, refuses it with EACCES, the URL as the name refused.
+
+    Requests are sent by a running command, whose line was admitted
+    without the question, so an Ask refuses like a deny. None policies
+    gate nothing, nor does a dry run's policy deciding.
+
+    Args:
+        policies (Policies | None): the workspace's policies.
+        ctx (NetworkContext): the request about to be sent.
+
+    Raises:
+        PolicyDenied: a policy refused the request.
+    """
+    caller = current_caller()
+    if (
+        policies is None
+        or caller.explaining is DryRun.DECIDING
+        or not await policies.wants_for("pre_network", ctx.session_id)
+    ):
+        return
+    ctx = replace(ctx, caller=policy_caller(caller.session, policies.account))
+    answer = await _apart(policies.pre_network(ctx))
+    if answer is not None:
+        refused = answer if isinstance(answer, Deny) else Deny(answer.reason)
+        raise policy_denied(refused, ctx.url, caller=caller)
+
+
+async def post_network_gate(
+    policies: "Policies | None", ctx: NetworkResultContext
+) -> None:
+    """Fire post_network once a request's transfer ends; a Deny, or an
+    Ask, fails it with EACCES, what it delivered already delivered.
+
+    Args:
+        policies (Policies | None): the workspace's policies.
+        ctx (NetworkResultContext): the request and how it ended.
+
+    Raises:
+        PolicyDenied: a policy refused the finished request.
+    """
+    caller = current_caller()
+    if (
+        policies is None
+        or caller.explaining is DryRun.DECIDING
+        or not await policies.wants_for("post_network", ctx.session_id)
+    ):
+        return
+    ctx = replace(ctx, caller=policy_caller(caller.session, policies.account))
+    answer = await _apart(policies.post_network(ctx))
+    if answer is not None:
+        refused = answer if isinstance(answer, Deny) else Deny(answer.reason)
+        raise policy_denied(refused, ctx.url, caller=caller)
 
 
 async def pre_session_gate(
@@ -1150,6 +1211,28 @@ class Policies:
             ctx (VfsResultContext): the op and its raw result.
         """
         action, _, _ = await self._fire("post_vfs", ctx)
+        return action
+
+    async def pre_network(self, ctx: NetworkContext) -> Deny | Ask | None:
+        """Fire pre_network across the policies; first Deny wins, else
+        the first Ask.
+
+        Args:
+            ctx (NetworkContext): the request about to be sent.
+        """
+        action, _, _ = await self._fire("pre_network", ctx)
+        return action
+
+    async def post_network(
+        self, ctx: NetworkResultContext
+    ) -> Deny | Ask | None:
+        """Fire post_network across the policies; first Deny wins, else
+        the first Ask.
+
+        Args:
+            ctx (NetworkResultContext): the request and how it ended.
+        """
+        action, _, _ = await self._fire("post_network", ctx)
         return action
 
     async def post_execute(

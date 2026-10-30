@@ -22,6 +22,8 @@ enum Hook {
     PreSession,
     PostSession,
     PreWorkspace,
+    PreNetwork,
+    PostNetwork,
 }
 
 impl Hook {

@@ -427,6 +427,33 @@ describe('scriptContext', () => {
 })
 
 describe('ScriptPolicy', () => {
+  it('judges a request and how it ended', async () => {
+    const request = {
+      url: 'https://api.example.com/a',
+      method: 'GET',
+      host: 'api.example.com',
+      port: 443,
+      command: 'curl',
+      sessionId: 's',
+    }
+    const refused = policyWith('preNetwork', new FakeProgram(answer({ kind: 'deny' })))
+    const denied = await refused.preNetwork(request)
+    expect(denied?.[0]?.kind).toBe('deny')
+    const asked = scriptContext(request)
+    expect([asked.url, asked.host, asked.port, asked.command]).toEqual([
+      'https://api.example.com/a',
+      'api.example.com',
+      443,
+      'curl',
+    ])
+    const done = { ...request, status: 200, size: 3, failed: false }
+    const held = policyWith('postNetwork', new FakeProgram(answer({ kind: 'ask' })))
+    const asks = await held.postNetwork(done)
+    expect(asks?.[0]?.kind).toBe('ask')
+    const ended = scriptContext(done)
+    expect([ended.status, ended.size, ended.failed]).toEqual([200, 3, false])
+  })
+
   it('runs nothing at a method without a program', async () => {
     const engine = new FakeProgram(answer({ kind: 'deny' }))
     const policy = policyWith('preCommand', engine)

@@ -26,6 +26,13 @@ from mirage.io.network import (
     network_lets,
     run_with_network,
 )
+from mirage.policy import (
+    Deny,
+    NetworkContext,
+    NetworkResultContext,
+    Policy,
+)
+from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 
 
@@ -34,7 +41,12 @@ from mirage.vfs.ram import RAMVFS
     [
         (True, None),
         (False, {"allow": []}),
-        ({"allow": ["a.com"]}, {"allow": ["a.com"]}),
+        ({"allowed_domains": ["a.com"]}, {"allow": ["a.com"]}),
+        ({"denied_domains": ["*:22"]}, {"deny": ["*:22"]}),
+        (
+            {"allowed_domains": ["*"], "denied_domains": ["evil.test"]},
+            {"allow": ["*"], "deny": ["evil.test"]},
+        ),
     ],
 )
 def test_a_setting_adds_its_layer(setting, layer):
@@ -42,7 +54,14 @@ def test_a_setting_adds_its_layer(setting, layer):
 
 
 @pytest.mark.parametrize(
-    "setting", ["off", {"deny": ["a.com"]}, {"allow": "a.com"}]
+    "setting",
+    [
+        "off",
+        {},
+        {"allow": ["a.com"]},
+        {"deny": ["a.com"]},
+        {"allowed_domains": "a.com"},
+    ],
 )
 def test_a_bad_setting_is_refused(setting):
     with pytest.raises(ValueError, match="network is true, false or"):
@@ -104,9 +123,11 @@ async def _curl(port: int, network, host: str = "127.0.0.1") -> int:
     ("network", "exit_code"),
     [
         (True, 0),
-        ({"allow": ["127.0.0.0/8"]}, 0),
+        ({"allowed_domains": ["127.0.0.0/8"]}, 0),
         (False, 7),
-        ({"allow": ["example.com"]}, 7),
+        ({"allowed_domains": ["example.com"]}, 7),
+        ({"denied_domains": ["127.0.0.0/8"]}, 7),
+        ({"allowed_domains": ["*"], "denied_domains": ["127.0.0.1"]}, 7),
     ],
 )
 async def test_curl_clears_the_workspace_rule(port, network, exit_code):
@@ -114,9 +135,22 @@ async def test_curl_clears_the_workspace_rule(port, network, exit_code):
 
 
 @pytest.mark.asyncio
+async def test_an_entry_can_hold_a_connection_to_one_port(port):
+    assert await _curl(port, {"allowed_domains": [f"127.0.0.1:{port}"]}) == 0
+    assert await _curl(port, {"allowed_domains": ["127.0.0.1:1"]}) == 7
+    assert await _curl(port, {"denied_domains": [f"*:{port}"]}) == 7
+    named = {"allowed_domains": [f"localhost:{port}"]}
+    assert await _curl(port, named, "localhost") == 0
+    named = {"allowed_domains": ["localhost:1"]}
+    assert await _curl(port, named, "localhost") == 7
+
+
+@pytest.mark.asyncio
 async def test_a_name_is_judged_by_the_host_it_was_asked_for(port):
-    assert await _curl(port, {"allow": ["localhost"]}, "localhost") == 0
-    assert await _curl(port, {"allow": ["example.com"]}, "localhost") == 7
+    allowed = {"allowed_domains": ["localhost"]}
+    assert await _curl(port, allowed, "localhost") == 0
+    other = {"allowed_domains": ["example.com"]}
+    assert await _curl(port, other, "localhost") == 7
 
 
 @pytest.mark.asyncio
@@ -129,8 +163,12 @@ async def test_a_name_lends_its_address_to_no_other_name(port, monkeypatch):
         return resolve("127.0.0.1" if named else host, *args, **kwargs)
 
     monkeypatch.setattr(network, "_resolve", local)
-    held = Workspace({"/data": RAMVFS()}, network={"allow": ["allowed.test"]})
-    other = Workspace({"/data": RAMVFS()}, network={"allow": ["other.test"]})
+    held = Workspace(
+        {"/data": RAMVFS()}, network={"allowed_domains": ["allowed.test"]}
+    )
+    other = Workspace(
+        {"/data": RAMVFS()}, network={"allowed_domains": ["other.test"]}
+    )
     try:
         for ws, host, exit_code in [
             (held, "allowed.test", 0),
@@ -143,3 +181,83 @@ async def test_a_name_lends_its_address_to_no_other_name(port, monkeypatch):
     finally:
         await held.close()
         await other.close()
+
+
+class _Watch(Policy):
+    """Refuses the hosts it is given, counts what is in flight, keeps
+    what each method saw."""
+
+    def __init__(self, refused: tuple[str, ...] = ()) -> None:
+        self.refused = refused
+        self.open = 0
+        self.most = 0
+        self.asked: list[NetworkContext] = []
+        self.ended: list[NetworkResultContext] = []
+
+    async def pre_network(self, ctx: NetworkContext) -> Deny | None:
+        self.asked.append(ctx)
+        if ctx.host in self.refused:
+            return Deny(f"{ctx.host} is not for this tenant")
+        self.open += 1
+        self.most = max(self.most, self.open)
+        return None
+
+    async def post_network(self, ctx: NetworkResultContext) -> None:
+        self.ended.append(ctx)
+        self.open -= 1
+        return None
+
+
+async def _watched(watch: _Watch, line: str) -> int:
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)})
+    ws.policies.add(watch)
+    try:
+        return (await ws.shell(line)).exit_code
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_pre_network_refuses_a_request_as_a_closed_port(port):
+    watch = _Watch(refused=("127.0.0.1",))
+    assert await _watched(watch, f"curl -sS http://127.0.0.1:{port}/") == 7
+    assert await _watched(watch, f"wget -q -O - http://127.0.0.1:{port}/") == 4
+    asked = watch.asked[0]
+    assert (asked.url, asked.method, asked.host, asked.port) == (
+        f"http://127.0.0.1:{port}/",
+        "GET",
+        "127.0.0.1",
+        port,
+    )
+    assert [ctx.command for ctx in watch.asked] == ["curl", "wget"]
+    assert watch.ended == []
+
+
+@pytest.mark.asyncio
+async def test_post_network_sees_how_each_request_ended(port):
+    watch = _Watch()
+    line = (
+        f"curl -sS http://127.0.0.1:{port}/ > /data/a; "
+        f"curl -sS -o /data/b http://127.0.0.1:{port}/; "
+        f"curl -sS -o /missing/c http://127.0.0.1:{port}/"
+    )
+    assert await _watched(watch, line) == 23
+    assert [(e.status, e.size, e.failed) for e in watch.ended] == [
+        (200, 3, False),
+        (200, 3, False),
+        (200, 3, True),
+    ]
+    assert (watch.open, watch.most) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_post_network_sees_a_refused_connection_fail(port):
+    watch = _Watch()
+    ws = Workspace({"/data": RAMVFS()}, network=False)
+    ws.policies.add(watch)
+    try:
+        line = f"curl -sS http://127.0.0.1:{port}/"
+        assert (await ws.shell(line)).exit_code == 7
+    finally:
+        await ws.close()
+    assert [(e.status, e.failed) for e in watch.ended] == [(0, True)]

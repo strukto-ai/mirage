@@ -53,6 +53,12 @@ NUMERIC_KEYS = frozenset(
 )
 
 
+NETWORK_SHAPE = (
+    "config.toml: [daemon] network is true, false or "
+    "{allowed_domains = [...], denied_domains = [...]}"
+)
+
+
 class DaemonConfigError(Exception):
     """Raised when config.toml's ``[daemon]`` table is unusable."""
 
@@ -89,14 +95,15 @@ def validate_daemon_table(table: dict[str, Any]) -> None:
     network = table.get("network", True)
     if not isinstance(network, bool) and not (
         isinstance(network, dict)
-        and set(network) == {"allow"}
-        and isinstance(network["allow"], list)
-        and all(isinstance(entry, str) for entry in network["allow"])
-    ):
-        raise DaemonConfigError(
-            "config.toml: [daemon] network is true, false or "
-            "{allow = [hosts and ranges]}"
+        and network
+        and set(network) <= {"allowed_domains", "denied_domains"}
+        and all(
+            isinstance(entries, list)
+            and all(isinstance(entry, str) for entry in entries)
+            for entries in network.values()
         )
+    ):
+        raise DaemonConfigError(NETWORK_SHAPE)
 
 
 def read_daemon_table(home: Path) -> dict[str, Any]:

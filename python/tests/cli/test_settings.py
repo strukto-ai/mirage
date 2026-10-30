@@ -167,7 +167,13 @@ def test_list_config_returns_written_keys(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "value", ["false", "true", '{ allow = ["a.com", "10.0.0.0/8"] }']
+    "value",
+    [
+        "false",
+        "true",
+        '{ allowed_domains = ["a.com", "10.0.0.0/8"] }',
+        '{ allowed_domains = ["*"], denied_domains = ["*:22"] }',
+    ],
 )
 def test_a_printed_network_sets_again(tmp_path, value):
     p = tmp_path / "config.toml"
@@ -253,10 +259,10 @@ def test_resolved_config_reads_network_and_policy_file(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     monkeypatch.setenv("MIRAGE_POLICY_FILE", "/p.yaml")
     (tmp_path / "config.toml").write_text(
-        '[daemon]\nnetwork = { allow = ["a.com"] }\n'
+        '[daemon]\nnetwork = { allowed_domains = ["a.com"] }\n'
     )
     resolved = resolved_config()
-    assert resolved["network"] == ('{ allow = ["a.com"] }', "file")
+    assert resolved["network"] == ('{ allowed_domains = ["a.com"] }', "file")
     assert resolved["policy_file"] == ("/p.yaml", "env MIRAGE_POLICY_FILE")
 
 

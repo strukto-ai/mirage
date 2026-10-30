@@ -53,10 +53,10 @@ function judged(options: ConnectOptions, lets: typeof networkLets): ConnectOptio
       if (err !== null) {
         callback(err, address, family)
       } else if (Array.isArray(address)) {
-        const left = address.filter((entry) => lets(hostname, entry.address))
+        const left = address.filter((entry) => lets(hostname, entry.address, port))
         if (left.length === 0) callback(refusal(hostname, port), [])
         else callback(null, left)
-      } else if (lets(hostname, address)) {
+      } else if (lets(hostname, address, port)) {
         callback(null, address, family)
       } else {
         callback(refusal(hostname, port), address, family)
@@ -87,7 +87,7 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
   const lets = AsyncResource.bind(networkLets)
   const host = options.host ?? 'localhost'
   if (net.isIP(host) !== 0) {
-    if (lets('', host)) return Reflect.apply(connect, this, args)
+    if (lets('', host, options.port)) return Reflect.apply(connect, this, args)
     process.nextTick(() => this.destroy(refusal(host, options.port)))
     return this
   }

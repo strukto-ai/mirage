@@ -14,7 +14,7 @@
 
 import { PathSpec } from '../../../types.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_WGET } from './wget.ts'
 import { enoent } from '../../../errors/fs.ts'
@@ -31,6 +31,7 @@ function mockFetch(respBody: string, status = 200): void {
       status,
       statusText: 'OK',
       arrayBuffer: () => Promise.resolve(ENC.encode(respBody).buffer),
+      body: new Response(respBody).body,
       headers: new Headers(),
     } as unknown as Response),
   ) as typeof fetch
@@ -51,10 +52,10 @@ async function runWget(
   if (cmd === undefined) throw new Error('wget not registered')
   // What each write sent through the dispatcher, by path.
   const writes: Record<string, Uint8Array> = {}
-  const dispatch: DispatchFn = (_op, path, args) => {
-    if (refuse !== undefined) return Promise.reject(refuse)
-    writes[path.virtual] = args?.[0] as Uint8Array
-    return Promise.resolve([null, new IOResult()])
+  const dispatch: DispatchFn = async (_op, path, args) => {
+    if (refuse !== undefined) throw refuse
+    writes[path.virtual] = await materialize(args?.[0] as ByteSource)
+    return [null, new IOResult()]
   }
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,

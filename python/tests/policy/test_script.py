@@ -28,6 +28,8 @@ from mirage.policy.types import (
     CommandWord,
     Deny,
     ExecuteResultContext,
+    NetworkContext,
+    NetworkResultContext,
     PolicyCaller,
     ProfileScript,
     Route,
@@ -436,6 +438,45 @@ def test_what_a_backend_returned_keeps_its_keys():
     )
     assert df["result"][1]["inodes_used"] == 1
     assert df["result"][1]["inodes_free"] == 2
+
+
+def _request() -> NetworkContext:
+    return NetworkContext(
+        url="https://api.example.com/a",
+        method="GET",
+        host="api.example.com",
+        port=443,
+        command="curl",
+        session_id="s",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_program_judges_a_request_and_how_it_ended():
+    refused = _policy("pre_network", FakeProgram(_answer(kind="deny")))
+    answers = await refused.pre_network(_request())
+    assert answers is not None and isinstance(answers[0], Deny)
+    asked = script_context(_request())
+    assert (asked["url"], asked["host"], asked["port"], asked["command"]) == (
+        "https://api.example.com/a",
+        "api.example.com",
+        443,
+        "curl",
+    )
+    done = NetworkResultContext(
+        **{
+            name: getattr(_request(), name)
+            for name in ("url", "method", "host", "port", "command")
+        },
+        session_id="s",
+        status=200,
+        size=3,
+    )
+    held = _policy("post_network", FakeProgram(_answer(kind="ask")))
+    answers = await held.post_network(done)
+    assert answers is not None and isinstance(answers[0], Ask)
+    ended = script_context(done)
+    assert (ended["status"], ended["size"], ended["failed"]) == (200, 3, False)
 
 
 @pytest.mark.asyncio

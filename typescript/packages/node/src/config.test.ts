@@ -393,8 +393,8 @@ describe('configToWorkspaceArgs', () => {
     [{}, undefined],
     [{ network: false }, false],
     [
-      { network: { allow: ['*.github.com', '10.0.0.0/8'] } },
-      { allow: ['*.github.com', '10.0.0.0/8'] },
+      { network: { allowed_domains: ['*.github.com', '10.0.0.0/8'], denied_domains: ['*:22'] } },
+      { allowed_domains: ['*.github.com', '10.0.0.0/8'], denied_domains: ['*:22'] },
     ],
   ])('passes the workspace network %o on', async (block, expected) => {
     const cfg = loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, ...block })
@@ -405,7 +405,10 @@ describe('configToWorkspaceArgs', () => {
   it.each([
     ['off', /network is true, false or/],
     [{ deny: ['10.0.0.0/8'] }, /network is true, false or/],
-    [{ allow: ['10.0.0.0/33'] }, /is not an address, a range/],
+    [{ allow: ['10.0.0.0/8'] }, /network is true, false or/],
+    [{}, /network is true, false or/],
+    [{ allowed_domains: ['10.0.0.0/33'] }, /is not an address, a range/],
+    [{ denied_domains: ['example.com:0'] }, /is not an address, a range/],
   ])('refuses the workspace network %o', (network, message) => {
     expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, network })).toThrow(message)
   })

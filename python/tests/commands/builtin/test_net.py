@@ -28,6 +28,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpResponse
 from mirage.commands.config import Context
+from mirage.io.types import materialize
 from mirage.vfs.base import BaseVFS
 
 curl_mod = sys.modules["mirage.commands.builtin.general.curl"]
@@ -67,8 +68,9 @@ class TestCurl:
     @pytest.mark.asyncio
     async def test_curl_raw_returns_html(self, http_url):
         result, io = await curl(None, None, [http_url], Context())
+        body = await materialize(result)
         assert io.exit_code == 0
-        assert result == b"<html><body><h1>Local Test Page</h1></body></html>"
+        assert body == b"<html><body><h1>Local Test Page</h1></body></html>"
 
 
 @pytest.fixture
@@ -84,10 +86,13 @@ def mock_http(monkeypatch):
         follow_redirects=False,
         verify=True,
         cookies=None,
+        stream=False,
     ):
         return HttpResponse(status=200, reason="OK", body=payload, url=url)
 
-    async def _fake_get(url, headers=None, timeout=30, follow_redirects=True):
+    async def _fake_get(
+        url, headers=None, timeout=30, follow_redirects=True, stream=False
+    ):
         return HttpResponse(status=200, reason="OK", body=payload, url=url)
 
     monkeypatch.setattr(curl_mod, "http_request", _fake_request)
@@ -176,36 +181,14 @@ async def test_wget_O_readonly_mount_fails(multi_mount_ws, mock_http):
 
 
 @pytest.fixture
-def captured_headers(monkeypatch):
-    import httpx
+def captured_headers(httpx_mock):
+    httpx_mock.add_response(url="https://x.test/file")
 
-    captured: dict[str, dict[str, str]] = {}
+    class _Captured:
+        def __getitem__(self, key: str):
+            return httpx_mock.get_requests()[0].headers
 
-    class _Headers:
-        def multi_items(self) -> list[tuple[str, str]]:
-            return []
-
-    class _Request:
-        def __init__(self, method: str) -> None:
-            self.method = method
-
-    class _Resp:
-        content = b""
-        status_code = 200
-        reason_phrase = "OK"
-        headers = _Headers()
-        history: list = []
-
-        def __init__(self, method: str, url: str) -> None:
-            self.request = _Request(method)
-            self.url = url
-
-    async def _fake_request(self, method, url, headers=None, **_kw):
-        captured["headers"] = dict(headers or {})
-        return _Resp(method, url)
-
-    monkeypatch.setattr(httpx.AsyncClient, "request", _fake_request)
-    return captured
+    return _Captured()
 
 
 @pytest.mark.asyncio

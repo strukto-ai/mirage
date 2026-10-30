@@ -72,13 +72,22 @@ def test_validate_accepts_numeric_grace_and_rejects_string():
 
 
 @pytest.mark.parametrize(
-    "network", [True, False, {"allow": ["*.github.com", "10.0.0.0/8"]}]
+    "network",
+    [
+        True,
+        False,
+        {"allowed_domains": ["*.github.com", "10.0.0.0/8"]},
+        {"denied_domains": ["*:22"]},
+    ],
 )
 def test_validate_accepts_a_network_ceiling(network):
     validate_daemon_table({"network": network, "policy_file": "policy.yaml"})
 
 
-@pytest.mark.parametrize("network", ["off", {"deny": ["10.0.0.0/8"]}])
+@pytest.mark.parametrize(
+    "network",
+    ["off", {}, {"deny": ["10.0.0.0/8"]}, {"allow": ["10.0.0.0/8"]}],
+)
 def test_validate_rejects_a_bad_network_ceiling(network):
     with pytest.raises(DaemonConfigError, match="network is true, false or"):
         validate_daemon_table({"network": network})

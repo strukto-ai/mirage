@@ -692,7 +692,10 @@ workspace, so a rule can single one out.
 
     from mirage.server.app import build_app
 
-    app = build_app(policies=[NoHostFiles()], network={"allow": ["*.github.com"]})
+    app = build_app(
+        policies=[NoHostFiles()],
+        network={"allowed_domains": ["*.github.com"]},
+    )
     uvicorn.run(app, host="127.0.0.1", port=8765)
     ```
   </Tab>
@@ -700,7 +703,10 @@ workspace, so a rule can single one out.
     ```typescript
     import { buildApp } from '@struktoai/mirage-server'
 
-    const app = buildApp({ policies: [noHostFiles], network: { allow: ['*.github.com'] } })
+    const app = buildApp({
+      policies: [noHostFiles],
+      network: { allowed_domains: ['*.github.com'] },
+    })
     await app.listen({ host: '127.0.0.1', port: 8765 })
     ```
   </Tab>
@@ -720,7 +726,7 @@ pre_command:
 ```toml ~/.mirage/config.toml
 [daemon]
 policy_file = "policy.yaml"
-network = { allow = ["*.github.com", "10.0.0.0/8"] }
+network = { allowed_domains = ["*.github.com", "10.0.0.0/8"], denied_domains = ["*:22"] }
 ```
 
 `network` is what every workspace's connections are held to besides its
