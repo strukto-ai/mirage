@@ -30,7 +30,9 @@ JSON.
 </Tabs>
 
 The server accepts only the host names in `MIRAGE_ALLOWED_HOSTS`: `127.0.0.1`,
-`localhost` and `::1` by default. Add the name your clients use. Other options
+`localhost` and `::1` by default. Add the name your clients use. It also
+refuses a browser page served from any other origin, a page on another port of
+`localhost` included, even when the list is `*`. Other options
 are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server)
 server pages.
 

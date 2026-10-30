@@ -109,19 +109,13 @@ def test_is_cross_origin_refuses_another_origin():
 
 
 def test_is_cross_origin_admits_its_own_origin():
-    assert is_cross_origin("127.0.0.1:8765", "http://127.0.0.1:8765", None) is (
-        False
-    )
-    assert is_cross_origin("[::1]:8765", "http://[::1]:8765", None) is False
-    assert is_cross_origin("Localhost:8765", "http://localhost:8765", None) is (
-        False
-    )
-    assert (
-        is_cross_origin(
-            "mirage.example.com", "https://mirage.example.com", "same-origin"
-        )
-        is False
-    )
+    for host, origin, site in (
+        ("127.0.0.1:8765", "http://127.0.0.1:8765", None),
+        ("[::1]:8765", "http://[::1]:8765", None),
+        ("Localhost:8765", "http://localhost:8765", None),
+        ("mirage.example.com", "https://mirage.example.com", "same-origin"),
+    ):
+        assert is_cross_origin(host, origin, site) is False, origin
 
 
 def test_resolve_allowed_hosts_explicit_wins(monkeypatch):

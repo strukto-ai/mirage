@@ -14,7 +14,11 @@
 
 import { readDaemonTable } from './daemon_config.ts'
 import { ENV_ALLOWED_HOSTS } from './env.ts'
-import { DEFAULT_ALLOWED_HOSTS, HOST_PATTERN } from './host_validation_constants.ts'
+import {
+  DEFAULT_ALLOWED_HOSTS,
+  HOST_PATTERN,
+  SAME_ORIGIN_FETCH_SITES,
+} from './host_validation_constants.ts'
 import { mirageHome } from './paths.ts'
 
 export function parseAllowedHosts(value: string | undefined): string[] {
@@ -49,4 +53,20 @@ export function isHostAllowed(rawHost: string | undefined, allowed: readonly str
   if (rawHost === undefined || rawHost === '') return false
   const host = stripPort(rawHost)
   return allowed.includes(host)
+}
+
+/**
+ * Whether a browser sent this request from another origin. A browser names
+ * the page that made a request in `Origin` and `Sec-Fetch-Site`; other
+ * clients send neither, so a request without them is never cross-origin.
+ */
+export function isCrossOrigin(
+  rawHost: string | undefined,
+  origin: string | undefined,
+  fetchSite: string | undefined,
+): boolean {
+  if (fetchSite !== undefined && !SAME_ORIGIN_FETCH_SITES.has(fetchSite)) return true
+  if (origin === undefined) return false
+  const sep = origin.indexOf('://')
+  return sep < 0 || origin.slice(sep + 3).toLowerCase() !== (rawHost ?? '').toLowerCase()
 }

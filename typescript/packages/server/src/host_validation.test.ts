@@ -122,9 +122,9 @@ describe('isCrossOrigin', () => {
     expect(isCrossOrigin('127.0.0.1:8765', 'http://127.0.0.1:8765', undefined)).toBe(false)
     expect(isCrossOrigin('[::1]:8765', 'http://[::1]:8765', undefined)).toBe(false)
     expect(isCrossOrigin('Localhost:8765', 'http://localhost:8765', undefined)).toBe(false)
-    expect(
-      isCrossOrigin('mirage.example.com', 'https://mirage.example.com', 'same-origin'),
-    ).toBe(false)
+    expect(isCrossOrigin('mirage.example.com', 'https://mirage.example.com', 'same-origin')).toBe(
+      false,
+    )
   })
 })
 

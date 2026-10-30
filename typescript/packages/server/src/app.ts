@@ -24,7 +24,7 @@ import {
 } from './registry.ts'
 import type { AuthConfig } from './auth/index.ts'
 import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
-import { isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
+import { isCrossOrigin, isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
 import { registerMcpRoutes } from './mcp/http.ts'
 import { registerRpcRoutes } from './rpc/http.ts'
 import { registerAsksRoutes } from './routers/asks.ts'
@@ -116,18 +116,26 @@ export function buildApp(options: BuildAppOptions = {}) {
     timeWindow: '1 minute',
   })
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
-  if (!allowedHosts.includes('*')) {
-    app.addHook('onRequest', (request, reply, done) => {
-      if (!isHostAllowed(request.headers.host, allowedHosts)) {
-        console.warn(
-          `rejecting request from ${request.ip}: Host=${JSON.stringify(request.headers.host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
-        )
-        void reply.code(400).send({ detail: 'Invalid host header' })
-        return
-      }
-      done()
-    })
-  }
+  app.addHook('onRequest', (request, reply, done) => {
+    const { host, origin } = request.headers
+    if (!isHostAllowed(host, allowedHosts)) {
+      console.warn(
+        `rejecting request from ${request.ip}: Host=${JSON.stringify(host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
+      )
+      void reply.code(400).send({ detail: 'Invalid host header' })
+      return
+    }
+    const site = request.headers['sec-fetch-site']
+    const fetchSite = Array.isArray(site) ? site.join(', ') : site
+    if (isCrossOrigin(host, origin, fetchSite)) {
+      console.warn(
+        `rejecting request from ${request.ip}: Origin=${JSON.stringify(origin)} Sec-Fetch-Site=${JSON.stringify(fetchSite)} is not Host=${JSON.stringify(host)}`,
+      )
+      void reply.code(400).send({ detail: 'Cross-origin request refused' })
+      return
+    }
+    done()
+  })
   registerAuth(app, authConfig)
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
