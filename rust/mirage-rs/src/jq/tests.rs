@@ -1101,7 +1101,7 @@ fn numeric_conversion_buffers_cannot_bypass_the_memory_cap() {
     let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
     let mut wire = Vec::new();
     stream
-        .feed(format!("\"{}\"", "1".repeat(60000)).as_bytes(), &mut wire)
+        .feed(format!("\"0{}\"", "1".repeat(59999)).as_bytes(), &mut wire)
         .unwrap();
     stream.finish(&mut wire).unwrap();
     settle(&mut *stream, &mut wire);
@@ -4459,7 +4459,7 @@ fn low_caps_during_compilation_become_terminal_frames_without_panicking() {
 fn compilation_limits_cannot_become_availability_refusals() {
     for (program, zone, memory) in [
         ("remainder(1;2)", "UTC", 0),
-        (r#""\n" | strflocaltime("%Z")"#, "Europe/Paris", 6000),
+        (r#""\n" | strflocaltime("%Z")"#, "Europe/Paris", 3000),
         ("localtime", "/usr/share/zoneinfo/Europe/Paris", 0),
     ] {
         let config = serde_json::json!({"program":program,"zone":zone,"memory":memory});

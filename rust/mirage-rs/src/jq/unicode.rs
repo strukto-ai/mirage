@@ -132,7 +132,17 @@ impl Bytes {
 }
 
 pub(super) fn decode_one(bytes: &Bytes, at: usize) -> (char, usize) {
-    let first = bytes.get(at).unwrap();
+    decode_with(bytes.len(), at, |i| bytes.get(i).unwrap())
+}
+
+/// The character at `at` of `bytes`, by jq's rules for a malformed
+/// sequence, and the bytes it takes.
+pub(super) fn decode_slice(bytes: &[u8], at: usize) -> (char, usize) {
+    decode_with(bytes.len(), at, |i| bytes[i])
+}
+
+fn decode_with(len: usize, at: usize, get: impl Fn(usize) -> u8) -> (char, usize) {
+    let first = get(at);
     let length = match first {
         0..=0x7f => return (char::from(first), 1),
         0xc2..=0xdf => 2,
@@ -140,12 +150,12 @@ pub(super) fn decode_one(bytes: &Bytes, at: usize) -> (char, usize) {
         0xf0..=0xf4 => 4,
         _ => return ('\u{fffd}', 1),
     };
-    if length > bytes.len() - at {
-        return ('\u{fffd}', bytes.len() - at);
+    if length > len - at {
+        return ('\u{fffd}', len - at);
     }
     let mut point = u32::from(first & (0xff >> (length + 1)));
     for k in 1..length {
-        let byte = bytes.get(at + k).unwrap();
+        let byte = get(at + k);
         if !(0x80..=0xbf).contains(&byte) {
             return ('\u{fffd}', k);
         }

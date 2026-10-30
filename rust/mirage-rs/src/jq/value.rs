@@ -72,6 +72,15 @@ impl Number {
 
 /// decNumber's to-scientific-string of a JSON number literal.
 fn canonical(text: &str) -> String {
+    if is_canonical(text) {
+        let out = text.to_string();
+        let _out_charge = Charge::open(out.capacity());
+        return out;
+    }
+    respelled(text)
+}
+
+fn respelled(text: &str) -> String {
     let (negative, rest) = match text.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, text.strip_prefix('+').unwrap_or(text)),
@@ -131,6 +140,25 @@ fn canonical(text: &str) -> String {
     out
 }
 
+/// Whether `text` is already decNumber's spelling of itself: a plain
+/// decimal with no exponent, no leading zero, and at most six places
+/// after a zero integer part.
+fn is_canonical(text: &str) -> bool {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    let (int, frac) = match digits.split_once('.') {
+        Some((int, frac)) => (int, Some(frac)),
+        None => (digits, None),
+    };
+    !int.is_empty()
+        && int.bytes().all(|b| b.is_ascii_digit())
+        && (int == "0" || !int.starts_with('0'))
+        && frac.is_none_or(|frac| {
+            !frac.is_empty()
+                && frac.bytes().all(|b| b.is_ascii_digit())
+                && (int != "0" || frac.len() <= 6)
+        })
+}
+
 /// jvp_dtoa_fmt: the shortest digits that read back as `x`, laid out the
 /// way jq prints a computed number.
 pub(crate) fn format_double(x: f64, out: &mut String) {
@@ -182,6 +210,9 @@ const SCAN: usize = 8;
 /// The most distinct keys a parse shares between the objects it builds.
 const SHARED_KEYS: usize = 4096;
 const INDEX: usize = 32;
+/// The longest number literal read whole; a longer one is read a byte a
+/// step.
+pub(crate) const LITERAL: usize = 4096;
 
 fn list_bytes(len: usize) -> usize {
     BASE + len * std::mem::size_of::<Value>()
@@ -304,6 +335,34 @@ impl From<&str> for Key {
 impl From<String> for Key {
     fn from(text: String) -> Self {
         Self(Arc::new(Text::new(text.into_boxed_str())))
+    }
+}
+
+/// The keys a parse made so far, which the next object to use one shares.
+#[derive(Default)]
+pub(crate) struct Keys(HashSet<Key>);
+
+impl Keys {
+    /// The key spelled `text`: the one made before, else a new one, kept
+    /// while there is room.
+    pub(crate) fn key(&mut self, text: String) -> Key {
+        if let Some(key) = self.0.get(text.as_str()) {
+            return key.clone();
+        }
+        let key = Key::from(text);
+        if self.0.len() < SHARED_KEYS {
+            self.0.insert(key.clone());
+        }
+        key
+    }
+
+    /// The bytes its table holds.
+    pub(crate) fn bytes(&self) -> usize {
+        self.0.capacity() * INDEX
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.0.clear();
     }
 }
 
@@ -1527,7 +1586,9 @@ enum ReadPhase {
     End(Value),
 }
 
-struct NumberReading {
+/// A number literal longer than a page read a byte a step, as
+/// decNumber reads it: its double and its canonical literal.
+pub(crate) struct NumberReading {
     start: usize,
     end: usize,
     at: usize,
@@ -1555,7 +1616,7 @@ struct NumberReading {
 }
 
 impl NumberReading {
-    fn begin(start: usize, end: usize) -> Self {
+    pub(crate) fn begin(start: usize, end: usize) -> Self {
         Self {
             start,
             end,
@@ -1584,8 +1645,8 @@ impl NumberReading {
         }
     }
 
-    fn step(&mut self, bytes: &[u8]) -> Result<Option<Value>, String> {
-        if self.end - self.start <= 4096 {
+    pub(crate) fn step(&mut self, bytes: &[u8]) -> Result<Option<Value>, String> {
+        if self.end - self.start <= LITERAL {
             let token =
                 std::str::from_utf8(&bytes[self.start..self.end]).map_err(|_| "Invalid literal")?;
             let token = token.split('\0').next().unwrap_or(token);
@@ -1785,8 +1846,7 @@ pub(crate) struct Parsing {
     number: Option<usize>,
     numeric: Option<NumberReading>,
     validation_at: usize,
-    /// The keys it made so far, which the next object to use one shares.
-    keys: HashSet<Key>,
+    keys: Keys,
     charge: Charge,
 }
 
@@ -1816,7 +1876,7 @@ impl Parsing {
             number: None,
             numeric: None,
             validation_at,
-            keys: HashSet::new(),
+            keys: Keys::default(),
             charge,
         }
     }
@@ -1858,7 +1918,7 @@ impl Parsing {
         self.charge.set(
             self.text.capacity()
                 + self.stack.capacity() * std::mem::size_of::<Open>()
-                + self.keys.capacity() * INDEX
+                + self.keys.bytes()
                 + self
                     .string
                     .as_ref()
@@ -1903,16 +1963,7 @@ impl Parsing {
             if self.string_step(&mut string)? {
                 if string.key {
                     self.recharge();
-                    let key = match self.keys.get(string.out.as_str()) {
-                        Some(key) => key.clone(),
-                        None => {
-                            let key = Key::from(string.out);
-                            if self.keys.len() < SHARED_KEYS {
-                                self.keys.insert(key.clone());
-                            }
-                            key
-                        }
-                    };
+                    let key = self.keys.key(string.out);
                     if let Some(Open::Object(_, slot)) = self.stack.last_mut() {
                         *slot = Some(key);
                     }
@@ -2176,7 +2227,7 @@ impl Parsing {
 /// A number as jq's reader spells it: a decimal literal (a sign, leading
 /// zeros and a bare point allowed), `nan` or `Infinity`. The reader stops
 /// a token at a NUL.
-fn number_token(token: &str) -> Option<Value> {
+pub(crate) fn number_token(token: &str) -> Option<Value> {
     let (negative, body) = match token.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, token),
@@ -2237,6 +2288,39 @@ fn hex4(bytes: &[u8], at: usize) -> Result<u32, String> {
 mod tests {
     use super::super::meter::{self, Meter};
     use super::*;
+
+    #[test]
+    fn a_literal_kept_as_written_is_its_own_spelling() {
+        let mut kept = 0;
+        for sign in ["", "-", "+"] {
+            for int in ["", "0", "00", "1", "10", "007", "12345678901234567890"] {
+                for frac in [
+                    None,
+                    Some(""),
+                    Some("0"),
+                    Some("5"),
+                    Some("000"),
+                    Some("000001"),
+                    Some("0000001"),
+                    Some("100000"),
+                    Some("1000000"),
+                    Some("25"),
+                ] {
+                    for exponent in ["", "e0", "E+2", "e-7"] {
+                        let text = match frac {
+                            Some(frac) => format!("{sign}{int}.{frac}{exponent}"),
+                            None => format!("{sign}{int}{exponent}"),
+                        };
+                        if is_canonical(&text) {
+                            kept += 1;
+                            assert_eq!(respelled(&text), text);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(kept > 20, "{kept}");
+    }
 
     #[test]
     fn pending_tasks_stop_on_memory_even_with_the_maximum_step_budget() {

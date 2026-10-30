@@ -1,6 +1,7 @@
 // Adapted from jq 1.8.2 (MIT), src/main.c and src/util.c. See licenses/third_party/jq.txt.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use serde::Deserialize;
 
@@ -8,8 +9,10 @@ use crate::{Stream, StreamError};
 
 use super::eval::{self, DEBUG, ERROR, Eval, Formatting, HALT, PRINT, STDERR};
 use super::format;
-use super::parse;
+use super::meter::{self, Meter};
+use super::parse::{Scanned, Scanner};
 use super::unicode::{Bytes, DecodeCursor, WORK};
+use super::value::{List, Value};
 
 /// The most bytes one read of jq's input reader takes (util.c): fgets
 /// into a 4096-byte buffer, less the four bytes it keeps for UTF-8 and
@@ -40,8 +43,6 @@ const ERROR_SYSTEM: i32 = 2;
 /// What the stream fails with once what jq holds outgrows the memory it
 /// was given, which the host reports as the workspace's own refusal.
 pub(crate) const EXHAUSTED: &str = "memory exhausted";
-
-const WHITESPACE: &[u8] = b" \t\r\n";
 
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -149,13 +150,10 @@ impl Input {
     }
 }
 
-/// jq's scanner over the pieces the reader reads, a document's text or
-/// its parse error at a time.
+/// jq's scanner over the pieces the reader reads, a document built as a
+/// value or its parse error at a time.
 struct Parser {
-    scanner: Box<dyn Stream>,
-    wire: Vec<u8>,
-    at: usize,
-    parts: Vec<u8>,
+    scanner: Scanner,
     input: Vec<u8>,
     fed: usize,
     last: bool,
@@ -163,7 +161,7 @@ struct Parser {
 }
 
 enum Parsed {
-    Text(Vec<u8>),
+    Value(Value),
     Error(String),
     /// It did this much work and may have more.
     Worked(usize),
@@ -172,18 +170,14 @@ enum Parsed {
 }
 
 impl Parser {
-    fn new(seq: bool, streaming: bool) -> Result<Self, StreamError> {
-        let config = serde_json::json!({ "seq": seq, "streaming": streaming });
-        Ok(Self {
-            scanner: parse::open(config.to_string().as_bytes())?,
-            wire: Vec::new(),
-            at: 0,
-            parts: Vec::new(),
+    fn new(seq: bool, streaming: bool) -> Self {
+        Self {
+            scanner: Scanner::values(seq, streaming),
             input: Vec::new(),
             fed: 0,
             last: false,
             finished: false,
-        })
+        }
     }
 
     fn feed(&mut self, piece: Vec<u8>, partial: bool) {
@@ -193,69 +187,47 @@ impl Parser {
     }
 
     fn next(&mut self) -> Result<Parsed, StreamError> {
-        while self.at + 5 <= self.wire.len() {
-            let size = u32::from_le_bytes(
-                self.wire[self.at + 1..self.at + 5]
-                    .try_into()
-                    .expect("4 bytes"),
-            ) as usize;
-            if self.at + 5 + size > self.wire.len() {
-                break;
-            }
-            let tag = self.wire[self.at];
-            let payload = self.at + 5..self.at + 5 + size;
-            self.at += 5 + size;
-            match tag {
-                1 => self.parts.extend_from_slice(&self.wire[payload]),
-                2 => return Ok(Parsed::Text(std::mem::take(&mut self.parts))),
-                3 => {
-                    return Ok(Parsed::Error(
-                        String::from_utf8_lossy(&self.wire[payload]).into_owned(),
-                    ));
-                }
-                _ => return Err(StreamError::new("jq: unknown scanner frame")),
-            }
+        match self.scanner.take() {
+            Some(Scanned::Value(value)) => return Ok(Parsed::Value(value)),
+            Some(Scanned::Error(message)) => return Ok(Parsed::Error(message)),
+            None => {}
         }
-        self.wire.drain(..self.at);
-        self.at = 0;
         if self.scanner.busy() {
-            self.scanner.drain(&mut self.wire)?;
+            self.scanner.drain(&mut Vec::new())?;
             return Ok(Parsed::Worked(WORK));
         }
         if self.fed < self.input.len() {
             let stop = (self.fed + WORK).min(self.input.len());
             self.scanner
-                .feed(&self.input[self.fed..stop], &mut self.wire)?;
+                .feed(&self.input[self.fed..stop], &mut Vec::new())?;
             let size = stop - self.fed;
             self.fed = stop;
             return Ok(Parsed::Worked(size));
         }
         if self.last && !self.finished {
             self.finished = true;
-            self.scanner.finish(&mut self.wire)?;
+            self.scanner.finish(&mut Vec::new())?;
             return Ok(Parsed::Worked(WORK));
         }
         Ok(Parsed::Empty)
     }
 
     fn discard(&mut self) {
-        self.wire = Vec::new();
-        self.parts = Vec::new();
         self.input = Vec::new();
         let _ = self.scanner.begin(br#"{"discard":true}"#);
     }
 }
 
 enum Slurp {
-    Json(Vec<Vec<u8>>),
+    Json(List),
     Raw(String),
 }
 
-/// What the reader has next: a document's JSON text, the parse error
-/// that stops it, the end of the stream, a wait on the host for the
-/// next bytes of an input, or a slice of work spent.
+/// What the reader has next: a document, the parse error that stops it,
+/// the end of the stream, a wait on the host for the next bytes of an
+/// input, or a slice of work spent.
 enum Read {
-    Text(Vec<u8>),
+    Value(Value),
     Error(String),
     End,
     Wait(usize),
@@ -292,30 +264,25 @@ struct Reader {
     parser: Option<Parser>,
     json_eof: bool,
     slurp: Option<Slurp>,
-    /// The bytes read into memory: a raw line the pieces read of it, a
-    /// raw slurp the whole input, and a JSON value what was read of it
-    /// from its first byte; and the values a slurp keeps.
+    /// The bytes of raw text read into memory: a line the pieces read of
+    /// it, a slurp the whole input. A JSON value is charged to the run's
+    /// meter as it is built.
     held: usize,
-    kept: usize,
     memory: Option<usize>,
     raw_line: Option<String>,
 }
 
 impl Reader {
-    fn new(config: &Config) -> Result<Self, StreamError> {
-        let parser = if config.raw_input {
-            None
-        } else {
-            Some(Parser::new(config.seq, config.stream)?)
-        };
+    fn new(config: &Config) -> Self {
+        let parser = (!config.raw_input).then(|| Parser::new(config.seq, config.stream));
         let slurp = config.slurp.then(|| {
             if config.raw_input {
                 Slurp::Raw(String::new())
             } else {
-                Slurp::Json(Vec::new())
+                Slurp::Json(List::default())
             }
         });
-        Ok(Self {
+        Self {
             names: config.inputs.clone(),
             opened: 0,
             input: None,
@@ -326,10 +293,9 @@ impl Reader {
             json_eof: false,
             slurp,
             held: 0,
-            kept: 0,
             memory: config.memory,
             raw_line: None,
-        })
+        }
     }
 
     /// Where the reader stands as jq's error reports word it.
@@ -355,7 +321,7 @@ impl Reader {
 
     fn count(&mut self, size: usize) -> Result<(), StreamError> {
         self.held += size;
-        self.check(self.kept + self.held)
+        self.check(self.held)
     }
 
     /// The next value of the stream (jq_util_input_next_input). Under -s
@@ -370,18 +336,12 @@ impl Reader {
                 return Ok(Read::Working);
             }
             match self.parser.as_mut().expect("a JSON reader").next()? {
-                Parsed::Error(message) => {
-                    self.held = 0;
-                    return Ok(Read::Error(message));
-                }
-                Parsed::Text(text) => {
-                    self.held = 0;
-                    let Some(Slurp::Json(texts)) = &mut self.slurp else {
-                        return Ok(Read::Text(text));
+                Parsed::Error(message) => return Ok(Read::Error(message)),
+                Parsed::Value(value) => {
+                    let Some(Slurp::Json(items)) = &mut self.slurp else {
+                        return Ok(Read::Value(value));
                     };
-                    self.kept += text.len() + 1;
-                    texts.push(text);
-                    self.check(self.kept)?;
+                    items.push(value);
                     continue;
                 }
                 Parsed::Worked(work) => {
@@ -398,19 +358,13 @@ impl Reader {
                 Piece::Got(piece, last) => (piece, last),
             };
             self.json_eof = last;
-            let size = if self.held > 0 {
-                piece.len()
-            } else {
-                piece.len() - piece.iter().take_while(|b| WHITESPACE.contains(b)).count()
-            };
-            self.count(size)?;
             *budget = budget.saturating_sub(piece.len());
             self.parser
                 .as_mut()
                 .expect("a JSON reader")
                 .feed(piece, !last);
         }
-        self.take_slurped()
+        Ok(self.take_slurped())
     }
 
     fn next_line(&mut self, budget: &mut usize) -> Result<Read, StreamError> {
@@ -431,7 +385,7 @@ impl Reader {
                     self.held = 0;
                     let mut line = self.raw_line.take().unwrap_or_default();
                     line.push_str(&decode(&piece[..piece.len() - 1]));
-                    return Ok(Read::Text(string_text(&line)));
+                    return Ok(Read::Value(Value::string(line)));
                 } else {
                     self.raw_line
                         .get_or_insert_with(String::new)
@@ -443,32 +397,20 @@ impl Reader {
             }
         }
         if self.slurp.is_some() {
-            return self.take_slurped();
+            return Ok(self.take_slurped());
         }
         Ok(match self.raw_line.take() {
             None => Read::End,
-            Some(line) => Read::Text(string_text(&line)),
+            Some(line) => Read::Value(Value::string(line)),
         })
     }
 
-    fn take_slurped(&mut self) -> Result<Read, StreamError> {
-        Ok(match self.slurp.take() {
+    fn take_slurped(&mut self) -> Read {
+        match self.slurp.take() {
             None => Read::End,
-            Some(Slurp::Raw(text)) => Read::Text(string_text(&text)),
-            Some(Slurp::Json(texts)) => {
-                self.check(self.kept + 1)?;
-                let mut text = Vec::with_capacity(self.kept + 1);
-                text.push(b'[');
-                for (i, each) in texts.into_iter().enumerate() {
-                    if i > 0 {
-                        text.push(b',');
-                    }
-                    text.extend_from_slice(&each);
-                }
-                text.push(b']');
-                Read::Text(text)
-            }
-        })
+            Some(Slurp::Raw(text)) => Read::Value(Value::string(text)),
+            Some(Slurp::Json(items)) => Read::Value(Value::Array(Arc::new(items))),
+        }
     }
 
     /// jq's read_more: the next piece of the input, and whether the stream
@@ -537,10 +479,13 @@ impl Reader {
 
     fn discard(&mut self) {
         self.input = None;
-        self.slurp = None;
         self.raw_line = None;
+        let slurped = self.slurp.take();
         if let Some(parser) = &mut self.parser {
             parser.discard();
+            if let Some(Slurp::Json(items)) = slurped {
+                parser.scanner.retire(Value::Array(Arc::new(items)));
+            }
         }
     }
 
@@ -621,10 +566,6 @@ fn decode(bytes: &[u8]) -> String {
     String::from_utf8(out).expect("the decoder writes UTF-8")
 }
 
-fn string_text(text: &str) -> Vec<u8> {
-    serde_json::to_vec(text).expect("a string encodes")
-}
-
 /// How a run ended early: an error no `try` caught (its text, whether it
 /// is a string), or a halt (its message, whether that is a string, and
 /// its exit code).
@@ -691,6 +632,9 @@ enum Ask {
 /// `take_stderr` what it wrote to stderr.
 struct Main {
     eval: Box<Eval>,
+    /// The run's meter, which each document is charged to as the reader
+    /// builds it.
+    meter: Arc<Meter>,
     reader: Reader,
     debug: format::Config,
     null_input: bool,
@@ -759,9 +703,12 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         eval_config["steps"] = steps.into();
     }
     let eval = Box::new(eval::compile(eval_config.to_string().as_bytes())?);
+    let meter = eval.meter();
+    let _metered = meter::install(&meter);
     Ok(Box::new(Main {
         eval,
-        reader: Reader::new(&config)?,
+        reader: Reader::new(&config),
+        meter: Arc::clone(&meter),
         debug: serde_json::from_value(debug)
             .map_err(|e| StreamError::new(format!("bad jq debug options: {e}")))?,
         null_input: config.null_input,
@@ -789,11 +736,9 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 
 impl Main {
     /// Start a run on one document, from where the reader stands.
-    fn start(&mut self, text: Vec<u8>, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.eval
-            .begin(self.reader.place().to_string().as_bytes())?;
-        self.eval.feed_owned(text)?;
-        self.eval.finish(&mut self.wire)?;
+    fn start(&mut self, input: Value, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let place = self.reader.place().to_string();
+        self.eval.start(place.as_bytes(), input, &mut self.wire)?;
         self.task = Task::Run;
         self.frames(out)
     }
@@ -912,7 +857,7 @@ impl Main {
         match self.task {
             Task::Next if self.null_input && !self.ran => {
                 self.ran = true;
-                self.start(b"null".to_vec(), out)?;
+                self.start(Value::Null, out)?;
             }
             Task::Next if !self.reading && self.reader.failures > 0 => self.end(),
             Task::Next | Task::Input => self.read(out, budget)?,
@@ -1011,17 +956,45 @@ impl Main {
     /// Answer the run's `input` with the reader's next document, the end
     /// of the stream, or its parse error, and where the reader stands
     /// after it.
-    fn answer(&mut self, kind: &str, data: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn answer(&mut self, read: Read, out: &mut Vec<u8>) -> Result<(), StreamError> {
         let mut reply = self.reader.place();
-        reply["kind"] = kind.into();
-        self.eval
-            .respond(reply.to_string().as_bytes(), data, &mut self.wire)?;
+        match read {
+            Read::Value(value) => {
+                reply["kind"] = "value".into();
+                self.eval
+                    .answer(reply.to_string().as_bytes(), value, &mut self.wire)?;
+            }
+            Read::Error(message) => {
+                reply["kind"] = "error".into();
+                self.eval.respond(
+                    reply.to_string().as_bytes(),
+                    message.as_bytes(),
+                    &mut self.wire,
+                )?;
+            }
+            Read::End => {
+                reply["kind"] = "end".into();
+                self.eval
+                    .respond(reply.to_string().as_bytes(), b"", &mut self.wire)?;
+            }
+            Read::Wait(_) | Read::Working => unreachable!("an answer the reader has"),
+        }
         self.task = Task::Run;
         self.frames(out)
     }
 
+    /// Read on toward the next document. A document starts the meter
+    /// afresh, as jq_eval does each run; one that takes it past the
+    /// workspace's room ends the stream.
     fn read(&mut self, out: &mut Vec<u8>, budget: &mut usize) -> Result<(), StreamError> {
+        if self.task == Task::Next && !self.reading {
+            self.meter.reset();
+        }
         let read = self.reader.next(budget)?;
+        if self.memory.is_some() && self.meter.exceeded() {
+            self.flush(out)?;
+            return Err(StreamError::new(EXHAUSTED));
+        }
         self.reading = matches!(read, Read::Working | Read::Wait(_));
         match (self.task, read) {
             (_, Read::Working) => {}
@@ -1029,10 +1002,8 @@ impl Main {
                 self.asking = Some(Ask::Read(index));
                 self.taken = false;
             }
-            (Task::Input, Read::Text(text)) => self.answer("value", &text, out)?,
-            (Task::Input, Read::Error(message)) => self.answer("error", message.as_bytes(), out)?,
-            (Task::Input, Read::End) => self.answer("end", b"", out)?,
-            (_, Read::Text(text)) => self.start(text, out)?,
+            (Task::Input, read) => self.answer(read, out)?,
+            (_, Read::Value(value)) => self.start(value, out)?,
             (_, Read::Error(message)) => {
                 let kind = if self.seq {
                     "ignoring parse error"
@@ -1069,6 +1040,7 @@ impl Stream for Main {
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let _metered = meter::install(&self.meter);
         if self.cancelled {
             if self.eval.busy() {
                 self.eval.drain(&mut Vec::new())?;
@@ -1088,6 +1060,7 @@ impl Stream for Main {
     }
 
     fn cancel(&mut self) -> bool {
+        let _metered = meter::install(&self.meter);
         self.eval.cancel();
         self.reader.discard();
         self.messages.clear();
@@ -1754,6 +1727,50 @@ mod tests {
             }
         }
         assert_eq!(failed.as_deref(), Some(EXHAUSTED));
+    }
+
+    #[test]
+    fn a_document_is_charged_to_the_run_as_it_is_read() {
+        // Each empty array is a list of its own: the text is a fraction of
+        // the memory the value holds.
+        let text: &'static [u8] = Box::leak(
+            format!("[{}[]]", "[],".repeat(2000))
+                .into_bytes()
+                .into_boxed_slice(),
+        );
+        for (memory, refused) in [(1 << 20, false), (50_000, true)] {
+            let options = serde_json::json!({ "memory": memory });
+            let mut stream = open(config("length", 1, options).to_string().as_bytes()).unwrap();
+            let mut out = Vec::new();
+            let mut failed = None;
+            let mut fed = false;
+            'run: loop {
+                while stream.busy() {
+                    if let Err(error) = stream.drain(&mut out) {
+                        failed = Some(error.message);
+                        break 'run;
+                    }
+                }
+                if stream.request(&mut Vec::new()).is_none() {
+                    break;
+                }
+                let (reply, data): (&[u8], &[u8]) = if fed {
+                    (br#"{"kind":"end"}"#, b"")
+                } else {
+                    (br#"{"kind":"data"}"#, text)
+                };
+                fed = true;
+                stream.respond(reply, data, &mut out).unwrap();
+            }
+            if refused {
+                assert_eq!(failed.as_deref(), Some(EXHAUSTED));
+            } else {
+                assert_eq!(
+                    (failed, String::from_utf8(out).unwrap()),
+                    (None, "2001\n".into())
+                );
+            }
+        }
     }
 
     #[test]
