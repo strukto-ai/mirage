@@ -98,6 +98,9 @@ export interface RgFlags {
   // -E: auto (when unset), none, or the WHATWG name of the encoding a label
   // named.
   encoding?: string
+  // ripgrep's compile limits in bytes, null (or unset) for its own.
+  regexSizeLimit?: number | null
+  dfaSizeLimit?: number | null
 }
 
 /**
@@ -223,8 +226,10 @@ function* regexLiterals(pattern: string): Generator<string> {
   }
 }
 
+// Unicode's Uppercase property, which ripgrep's -S asks of a literal: a
+// letter like `ℂ` has no lowercase and still counts.
 function isUpper(ch: string): boolean {
-  return ch.toLowerCase() !== ch && ch.toUpperCase() === ch
+  return /^\p{Uppercase}$/u.test(ch)
 }
 
 /**

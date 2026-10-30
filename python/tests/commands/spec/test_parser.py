@@ -1366,6 +1366,18 @@ def test_tape_records_each_operand_among_the_options():
     ]
 
 
+def test_tape_records_a_dash_number_where_it_was_typed():
+    parsed = parse_command(
+        SPECS["grep"], ["-C0", "-2", "-n1", "x", "f"], "/", "grep"
+    )
+    assert parsed.flags.occurrences == [
+        ("--context", "0"),
+        ("--context", "2"),
+        ("--line-number", True),
+        ("--context", "1"),
+    ]
+
+
 # jq 1.8.2's isoptish(): a dash word is an option only when a letter or a
 # second dash follows the dash, so `-1` is a program, a file or a value.
 def test_jq_dash_words_without_a_letter_are_operands():

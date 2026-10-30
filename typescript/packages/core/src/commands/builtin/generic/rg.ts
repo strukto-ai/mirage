@@ -1,5 +1,3 @@
-import type { JsonValue } from '../../../types.ts'
-import { StreamRefusal } from '../../../rs/errors.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,20 +13,18 @@ import { StreamRefusal } from '../../../rs/errors.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GzipDataError, gunzipStream } from '../../../utils/compress.ts'
-import { encodingFor } from '../rg_stream.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { MountView } from '../../../view/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { enoent, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { UsageError } from '../../errors.ts'
 import { WalkLimitError } from '../../../errors/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
-import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
-import { decodeText, encodeText } from '../../../shell/bytes.ts'
-import { UINTMAX } from '../constants.ts'
+import type { FlagValue } from '../../spec/types.ts'
+import { decodeText, encodeText, textView } from '../../../shell/bytes.ts'
+import { scanned } from '../../../rs/scan.ts'
 import { resolvePattern } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { FileTypes, typeListing, type TypeChange, type TypeSelection } from '../rg_filetypes.ts'
@@ -79,31 +75,67 @@ const STDIN_NAME = '<stdin>'
 // The synthetic cwd operand's spelling (routing's CWD_DEFAULT_RAW.rg): a
 // line that named no path at all.
 const IMPLICIT_CWD = ''
-const SORT_KEYS = ['path', 'modified', 'accessed', 'created', 'none']
-const COLOR_CHOICES = ['never', 'auto', 'always', 'ansi']
-// --engine's values (ripgrep 14.1.1).
-const ENGINES = ['default', 'pcre2', 'auto']
-// The numeric options, each named as ripgrep names it in a refusal. The bag
-// keeps no record of which spelling the line typed, so a long one is refused
-// under its short name.
-const NUMBER_SPELLINGS: Readonly<Record<string, string>> = {
-  max_count: '-m',
-  after_context: '-A',
-  before_context: '-B',
-  context: '-C',
-  max_depth: '-d',
-  threads: '-j',
-  max_columns: '-M',
-}
-const ESCAPES: Readonly<Record<string, string>> = {
-  t: '\t',
-  n: '\n',
-  r: '\r',
-  '0': '\0',
-  '\\': '\\',
-}
-const HEX_ESCAPE = /\\x([0-9A-Fa-f]{2})/y
+// The options whose values mirage-rs reads, with the switches that decide
+// among them.
+const SCANNED = [
+  'threads',
+  'encoding',
+  'no_encoding',
+  'color',
+  'colors',
+  'hyperlink_format',
+  'dfa_size_limit',
+  'regex_size_limit',
+  'passthru',
+  'passthrough',
+  'after_context',
+  'before_context',
+  'context',
+  'sort',
+  'sortr',
+  'sort_files',
+  'no_sort_files',
+  'pcre2',
+  'no_pcre2',
+  'engine',
+  'auto_hybrid_regex',
+  'no_auto_hybrid_regex',
+  'max_columns',
+  'path_separator',
+  'max_count',
+  'max_depth',
+  'max_filesize',
+  'context_separator',
+  'no_context_separator',
+  'field_match_separator',
+  'field_context_separator',
+]
 
+/**
+ * What rg's scan reads, every value checked as ripgrep 14.1.1 checks it. The
+ * separators are byte views, and null where the line asks for none
+ * (--no-context-separator) or for ripgrep's own. Mirrors Python's `RgValues`.
+ */
+export interface RgValues {
+  readonly threads: number | null
+  readonly encoding: string
+  readonly dfa_size_limit: number | null
+  readonly regex_size_limit: number | null
+  readonly passthru: boolean
+  readonly context_before: number
+  readonly context_after: number
+  readonly sort: string | null
+  readonly sort_reverse: boolean
+  readonly engine: string
+  readonly max_columns: number | null
+  readonly path_separator: string | null
+  readonly max_count: number | null
+  readonly max_depth: number | null
+  readonly max_filesize: number | null
+  readonly context_separator: string | null
+  readonly field_match_separator: string
+  readonly field_context_separator: string
+}
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
@@ -115,129 +147,6 @@ export type { RgFlags } from '../rg_search.ts'
 // as typed.
 function operandName(p: PathSpec): string {
   return p.rawPath === '-' ? STDIN_NAME : p.rawPath
-}
-
-// ripgrep's refusal of an option value it cannot parse, exit 2. Mirrors
-// Python's _flag_error.
-function flagError(spelling: string, reason: string): UsageError {
-  return new UsageError(`rg: error parsing flag ${spelling}: ${reason}`)
-}
-
-/**
- * One numeric option's value, refused in ripgrep's words: ripgrep reads
- * every count as an unsigned 64-bit integer, so a sign, a fraction or
- * anything past 2**64-1 is refused, exit 2 (14.1.1).
- */
-export function numberFlag(fl: FlagView, dest: string): number | null {
-  const raw = fl.raw(dest)
-  if (raw === undefined || typeof raw === 'boolean') return null
-  // A number option is never PATH-typed, so its value is the parser's own.
-  const value = String(raw as ParsedFlagValue)
-  const digits = value.startsWith('+') ? value.slice(1) : value
-  let reason: string | null = null
-  if (value === '') reason = 'cannot parse integer from empty string'
-  else if (!/^[0-9]+$/.test(digits)) reason = 'invalid digit found in string'
-  else if (BigInt(digits) > UINTMAX) reason = 'number too large to fit in target type'
-  if (reason !== null) {
-    throw flagError(NUMBER_SPELLINGS[dest] ?? dest, `value is not a valid number: ${reason}`)
-  }
-  return Number(digits)
-}
-
-/**
- * -E resolved in line order: auto, none, or the WHATWG encoding a label
- * names, --no-encoding going back to auto. ripgrep checks every label as it
- * reads it, so an earlier bad one is refused too (14.1.1). Mirrors Python's
- * `encoding_flag`.
- */
-export function encodingFlag(fl: FlagView): string {
-  let found = 'auto'
-  for (const [name, value] of fl.occurrences('encoding', 'no_encoding')) {
-    if (name === 'no_encoding') {
-      if (value === true) found = 'auto'
-      continue
-    }
-    const label = String(value)
-    const named = label === 'auto' || label === 'none' ? label : encodingFor(label)
-    if (named === null) {
-      throw flagError('-E', `grep config error: unknown encoding: ${label}`)
-    }
-    found = named
-  }
-  return found
-}
-
-/**
- * A size option in bytes (--max-filesize, --dfa-size-limit or
- * --regex-size-limit), refused in ripgrep's words. ripgrep parses every
- * occurrence as it reads it, so an earlier bad one is refused too.
- */
-function sizeFlag(fl: FlagView, dest: string): number | null {
-  return (
-    validated({ sizes: fl.occurrences(dest).map(([, value]) => [dest, String(value)]) })[dest] ??
-    null
-  )
-}
-
-function validated(options: Record<string, JsonValue>): Record<string, number> {
-  if (Object.values(options).every((value) => Array.isArray(value) && value.length === 0)) return {}
-  try {
-    return JSON.parse(decodeText(formatMessage({ kind: 'options', ...options }))) as Record<
-      string,
-      number
-    >
-  } catch (error) {
-    if (!(error instanceof StreamRefusal)) throw error
-    throw new UsageError(error.message)
-  }
-}
-
-function checkDisplayFlags(fl: FlagView): void {
-  validated({
-    colors: fl.asList('colors'),
-    hyperlinks: fl.occurrences('hyperlink_format').map(([, value]) => String(value)),
-    sizes: ['dfa_size_limit', 'regex_size_limit'].flatMap((dest) =>
-      fl.occurrences(dest).map(([, value]) => [dest, String(value)]),
-    ),
-  })
-}
-
-function choice(
-  fl: FlagView,
-  dest: string,
-  spelling: string,
-  choices: readonly string[],
-): string | null {
-  const value = fl.asStr(dest)
-  if (value !== undefined && !choices.includes(value)) {
-    throw flagError(spelling, `choice '${value}' is unrecognized`)
-  }
-  return value ?? null
-}
-
-// A separator's escapes read as ripgrep reads them (`\t`, `\n`, `\r`, `\0`,
-// `\\` and `\xHH`).
-export function unescape(value: string): string {
-  const out: string[] = []
-  let i = 0
-  while (i < value.length) {
-    HEX_ESCAPE.lastIndex = i
-    const hexed = HEX_ESCAPE.exec(value)
-    if (hexed !== null) {
-      out.push(String.fromCharCode(Number.parseInt(hexed[1] ?? '0', 16)))
-      i += hexed[0].length
-      continue
-    }
-    const escaped = value[i] === '\\' ? ESCAPES[value[i + 1] ?? ''] : undefined
-    if (escaped !== undefined) {
-      out.push(escaped)
-      i += 2
-      continue
-    }
-    out.push(value[i] ?? '')
-    i += 1
-  }
-  return out.join('')
 }
 
 // The one of `names` the line set last, or null.
@@ -257,37 +166,6 @@ export function filenameFlag(fl: FlagView): string | null {
   return last(fl, 'with_filename', 'no_filename')
 }
 
-/**
- * --passthru and -A/-B/-C resolved in line order, as ripgrep's ContextMode
- * resolves them: --passthru replaces every context option before it, and a
- * context option after it replaces it and starts afresh. -A and -B, even at
- * 0, outrank -C for their own side. Returns --passthru and the before and
- * after counts.
- */
-function contextOf(fl: FlagView): [boolean, number, number] {
-  let passthru = false
-  let counts = new Map<string, number | null>()
-  for (const name of fl.typedOrder(
-    'passthru',
-    'passthrough',
-    'after_context',
-    'before_context',
-    'context',
-  )) {
-    if (name === 'passthru' || name === 'passthrough') {
-      passthru = true
-      counts = new Map()
-      continue
-    }
-    passthru = false
-    counts.set(name, numberFlag(fl, name))
-  }
-  const both = counts.get('context') ?? null
-  const before = counts.get('before_context') ?? null
-  const after = counts.get('after_context') ?? null
-  return [passthru, before ?? both ?? 0, after ?? both ?? 0]
-}
-
 // How rg treats a binary file, the last word of its group deciding: `text`
 // under -a, which searches every byte as text; `binary` under --binary or
 // -uuu, which searches what a walk would skip but still reports a binary
@@ -305,24 +183,6 @@ function binaryModeOf(fl: FlagView, unrestricted: number): 'auto' | 'binary' | '
   return mode
 }
 
-// --path-separator's one byte, null for ripgrep's own `/`; anything but one
-// byte is refused (an empty one is the default).
-function pathSeparator(fl: FlagView): string | null {
-  const value = fl.asStr('path_separator')
-  if (value === undefined) return null
-  const raw = encodeText(unescape(value))
-  if (raw.length === 0) return null
-  if (raw.length !== 1) {
-    throw flagError(
-      '--path-separator',
-      'A path separator must be exactly one byte, ' +
-        `but the given separator is ${String(raw.length)} bytes: ${value}\nIn some shells on ` +
-        "Windows '/' is automatically expanded. Use '//' instead.",
-    )
-  }
-  return decodeText(raw)
-}
-
 /**
  * Convert the raw flag bag into RgFlags, the only string-keyed reads.
  * Options that override one another are read in line order, the last one
@@ -330,14 +190,12 @@ function pathSeparator(fl: FlagView): string | null {
  * and its --no- negation, --hidden/--no-hidden/-uu, the output modes
  * -c/--count-matches/-l/--files-without-match, --heading/--no-heading,
  * --passthru and the context options, --sort/--sortr/--sort-files/
- * --no-sort-files, and --context-separator/--no-context-separator. A value
- * ripgrep refuses throws its words.
+ * --no-sort-files, and --context-separator/--no-context-separator. Every
+ * value is read by mirage-rs (`RgValues`), and one ripgrep refuses throws its
+ * words. Mirrors Python's `parse_flags`.
  */
 export function parseFlags(fl: FlagView): RgFlags {
-  const threads = numberFlag(fl, 'threads')
-  const encoding = encodingFlag(fl)
-  choice(fl, 'color', '--color', COLOR_CHOICES)
-  checkDisplayFlags(fl)
+  const values = scanned('rg', fl.texts(...SCANNED)) as unknown as RgValues
   const caseMode = last(fl, 'ignore_case', 'case_sensitive', 'smart_case')
   const bounds = last(fl, 'word_regexp', 'line_regexp')
   const listing = last(fl, 'count', 'count_matches', 'files_with_matches', 'files_without_match')
@@ -346,7 +204,6 @@ export function parseFlags(fl: FlagView): RgFlags {
   const vimgrep = fl.asBool('vimgrep')
   const columns = last(fl, 'column', 'no_column')
   const column = columns !== null ? columns === 'column' : vimgrep
-  const [passthru, contextBefore, contextAfter] = contextOf(fl)
   // --json prints its own records: no heading or separators, and line
   // numbers unless -N turned them off.
   const jsonRecords = last(fl, 'json', 'no_json') === 'json'
@@ -359,17 +216,8 @@ export function parseFlags(fl: FlagView): RgFlags {
     else if (name === 'no_hidden') hidden = !fl.asBool(name) && hidden
     else if (unrestricted >= 2) hidden = true
   }
-  const sortFlag = last(fl, 'sort', 'sortr', 'sort_files', 'no_sort_files')
-  let sort: string | null = null
-  if (sortFlag === 'sort_files') sort = 'path'
-  else if (sortFlag === 'sort' || sortFlag === 'sortr') {
-    sort = choice(fl, sortFlag, `--${sortFlag}`, SORT_KEYS)
-  }
-  const separator = last(fl, 'context_separator', 'no_context_separator')
-  const typedSeparator = fl.asStr('context_separator')
-  if (sort === 'created') {
-    throw new UsageError('rg: sorting by creation time is not supported by the virtual filesystem')
-  }
+  const separator = values.context_separator
+  const pathSeparator = values.path_separator
   const selections: TypeSelection[] = []
   for (const [name, value] of fl.occurrences('type', 'type_not')) {
     if (typeof value === 'string') selections.push([value, name === 'type_not'])
@@ -379,7 +227,7 @@ export function parseFlags(fl: FlagView): RgFlags {
     if (typeof value === 'string') changes.push([name === 'type_clear' ? 'clear' : 'add', value])
   }
   return {
-    engine: engineFlag(fl),
+    engine: values.engine,
     unicode: !['no_unicode', 'no_pcre2_unicode'].includes(
       last(fl, 'unicode', 'no_unicode', 'pcre2_unicode', 'no_pcre2_unicode') ?? '',
     ),
@@ -396,7 +244,7 @@ export function parseFlags(fl: FlagView): RgFlags {
     onlyMatching: fl.asBool('only_matching'),
     replace: fl.asStr('replace') ?? null,
     trim: last(fl, 'trim', 'no_trim') === 'trim',
-    maxColumns: numberFlag(fl, 'max_columns'),
+    maxColumns: values.max_columns,
     maxColumnsPreview:
       last(fl, 'max_columns_preview', 'no_max_columns_preview') === 'max_columns_preview',
     null: fl.asBool('null'),
@@ -410,7 +258,7 @@ export function parseFlags(fl: FlagView): RgFlags {
     preGlobs: fl.asList('pre_glob'),
     json: jsonRecords,
     multilineDotall: last(fl, 'multiline_dotall', 'no_multiline_dotall') === 'multiline_dotall',
-    pathSeparator: pathSeparator(fl),
+    pathSeparator: pathSeparator === null ? null : textView(pathSeparator),
     quiet: fl.asBool('quiet'),
     countOnly: listing === 'count',
     countMatches: listing === 'count_matches',
@@ -426,19 +274,14 @@ export function parseFlags(fl: FlagView): RgFlags {
       ['heading', 'pretty'].includes(last(fl, 'heading', 'no_heading', 'pretty') ?? '') &&
       !vimgrep &&
       !jsonRecords,
-    passthru,
-    maxCount: numberFlag(fl, 'max_count'),
+    passthru: values.passthru,
+    maxCount: values.max_count,
     stopOnNonmatch: last(fl, 'stop_on_nonmatch', 'multiline') === 'stop_on_nonmatch',
-    contextAfter,
-    contextBefore,
-    contextSeparator:
-      separator === 'no_context_separator' || jsonRecords
-        ? null
-        : typedSeparator !== undefined
-          ? unescape(typedSeparator)
-          : '--',
-    fieldMatchSeparator: unescape(fl.asStr('field_match_separator') ?? ':'),
-    fieldContextSeparator: unescape(fl.asStr('field_context_separator') ?? '-'),
+    contextAfter: values.context_after,
+    contextBefore: values.context_before,
+    contextSeparator: separator === null || jsonRecords ? null : textView(separator),
+    fieldMatchSeparator: textView(values.field_match_separator),
+    fieldContextSeparator: textView(values.field_context_separator),
     globs: fl.asList('glob'),
     iglobs: fl.asList('iglob'),
     globCaseInsensitive:
@@ -446,44 +289,20 @@ export function parseFlags(fl: FlagView): RgFlags {
     typeChanges: changes,
     typeSelections: selections,
     hidden,
-    maxDepth: numberFlag(fl, 'max_depth'),
-    maxFilesize: sizeFlag(fl, 'max_filesize'),
+    maxDepth: values.max_depth,
+    maxFilesize: values.max_filesize,
     follow: last(fl, 'follow', 'no_follow') === 'follow',
     oneFileSystem: last(fl, 'one_file_system', 'no_one_file_system') === 'one_file_system',
     binary: binaryMode !== 'auto',
-    sort,
-    sortReverse: sortFlag === 'sortr',
+    sort: values.sort,
+    sortReverse: values.sort_reverse,
     noMessages: last(fl, 'no_messages', 'messages') === 'no_messages',
-    threads,
+    threads: values.threads,
     text: binaryMode === 'text',
-    encoding,
+    encoding: values.encoding,
+    regexSizeLimit: values.regex_size_limit,
+    dfaSizeLimit: values.dfa_size_limit,
   }
-}
-
-/**
- * The regex engine the line asks for, the last of -P, --no-pcre2, --engine
- * and the deprecated --auto-hybrid-regex pair winning (ripgrep 14.1.1: `rg -P
- * --no-pcre2` is the default engine, `rg --no-pcre2 -P` is PCRE2, and
- * --no-auto-hybrid-regex selects the default engine as --auto-hybrid-regex
- * selects auto). Throws for an --engine ripgrep lacks.
- */
-export function engineFlag(fl: FlagView): string {
-  const chosen = last(
-    fl,
-    'pcre2',
-    'no_pcre2',
-    'engine',
-    'auto_hybrid_regex',
-    'no_auto_hybrid_regex',
-  )
-  if (chosen === 'pcre2') return 'pcre2'
-  if (chosen === 'auto_hybrid_regex') return 'auto'
-  if (chosen !== 'engine') return 'default'
-  const value = fl.asStr('engine') ?? ''
-  if (!ENGINES.includes(value)) {
-    throw flagError('--engine', `unrecognized regex engine '${value}'`)
-  }
-  return value
 }
 
 // What the walk keeps, the globs and types compiled; a glob or a type
@@ -614,8 +433,8 @@ export async function rgGeneric(
       resolution.pattern,
       resolution.neverMatch,
       f,
-      sizeFlag(fl, 'regex_size_limit'),
-      sizeFlag(fl, 'dfa_size_limit'),
+      f.regexSizeLimit ?? null,
+      f.dfaSizeLimit ?? null,
     )
   }
   try {

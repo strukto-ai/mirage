@@ -17,14 +17,11 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from mirage.commands.builtin.generic.grep import (
-    directories_action,
-)
-from mirage.commands.builtin.generic.grep import (
     parse_flags as parse_grep_flags,
 )
-from mirage.commands.builtin.generic.rg import encoding_flag
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
 from mirage.commands.builtin.generic_bind.files import CommandFiles
+from mirage.commands.builtin.grep_binary import GrepFlags
 from mirage.commands.builtin.grep_pattern import (
     compile_pattern,
     pattern_arg,
@@ -32,7 +29,7 @@ from mirage.commands.builtin.grep_pattern import (
 from mirage.commands.builtin.grep_pushdown import (
     search_terms,
 )
-from mirage.commands.builtin.rg_search import folds_case
+from mirage.commands.builtin.rg_search import RgFlags, folds_case
 from mirage.commands.builtin.rg_stream import compiled_terms, open_rg
 from mirage.commands.builtin.types import SearchTerms
 from mirage.commands.builtin.utils.links import (
@@ -60,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 
 def grep_terms(
-    fl: FlagView, texts: list[str], utf8: bool
+    f: GrepFlags, fl: FlagView, texts: list[str], utf8: bool
 ) -> SearchTerms | None:
     """What a grep line asks the mount's search; None when it must read
     every file: -v, -f, or no plain text of three characters every match
@@ -68,14 +65,14 @@ def grep_terms(
     when case folds by Unicode, counts as none).
 
     Args:
+        f (GrepFlags): the line's grep flags, parsed.
         fl (FlagView): the line's grep flags.
         texts (list[str]): pattern arguments.
         utf8 (bool): grep runs under a UTF-8 locale.
 
     Raises:
-        UsageError: a flag or pattern grep refuses.
+        UsageError: a pattern grep refuses.
     """
-    f = parse_grep_flags(fl, False)
     pattern = pattern_arg(texts, fl)
     if f.invert:
         return None
@@ -116,7 +113,7 @@ def grep_terms(
     )
 
 
-def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | None:
+def rg_terms(f: RgFlags, fl: FlagView, texts: list[str]) -> SearchTerms | None:
     """What an rg line asks the mount's search; None when it must read
     every file: -v or --passthru, a listing of files that do not match
     (--files-without-match, -c or --count-matches with --include-zero,
@@ -124,13 +121,13 @@ def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | None:
     -f, or no plain text every match holds.
 
     Args:
+        f (RgFlags): the line's rg flags, parsed.
         fl (FlagView): the line's rg flags.
         texts (list[str]): pattern arguments.
 
     Raises:
-        UsageError: a flag or pattern rg refuses.
+        UsageError: a pattern rg refuses.
     """
-    f = parse_rg_flags(fl)
     pattern = pattern_arg(texts, fl)
     if f.invert or f.passthru:
         return None
@@ -428,7 +425,14 @@ async def search_reads(
         name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
     ):
         return files.read
-    walked = name == "rg" or directories_action(fl) == "recurse"
+    grep: GrepFlags | None = None
+    if name == "grep":
+        try:
+            grep = parse_grep_flags(fl, False)
+        except UsageError as exc:
+            logger.debug("grep search left to the scan: %s", exc)
+            return files.read
+    walked = grep is None or grep.recursive
     mounts = mounts_of(ctx)
     read, charge = capped_reads(files.read, paths if walked else [], mounts)
     containing = (
@@ -447,10 +451,11 @@ async def search_reads(
     links = links_of(ctx)
     home = mount_root(ctx)
     try:
+        f = grep if grep is not None else parse_rg_flags(fl)
         terms = (
-            rg_terms(fl, texts)
-            if name == "rg"
-            else grep_terms(fl, texts, utf8_locale(ctx.env))
+            rg_terms(f, fl, texts)
+            if isinstance(f, RgFlags)
+            else grep_terms(f, fl, texts, utf8_locale(ctx.env))
         )
     except UsageError as exc:
         logger.debug("%s search left to the scan: %s", name, exc)
@@ -458,7 +463,7 @@ async def search_reads(
     dirs = await _directories(files, paths) if walked else []
     if terms is None:
         return read
-    drops_mark = name == "rg" and encoding_flag(fl) != "none"
+    drops_mark = isinstance(f, RgFlags) and f.encoding != "none"
     hits: set[str] | None = None
     if containing is not None and dirs:
         answers = await asyncio.gather(

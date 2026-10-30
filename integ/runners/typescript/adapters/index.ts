@@ -1659,6 +1659,9 @@ async function seedPostgres(dsn: string): Promise<void> {
     await client.query('CREATE TABLE ".hidden".ghost (id int PRIMARY KEY)')
     await client.query('DROP SCHEMA IF EXISTS contract CASCADE')
     await client.query('CREATE SCHEMA contract')
+    await client.query('CREATE TABLE contract.turkish (body text COLLATE "tr-x-icu")')
+    await client.query("INSERT INTO contract.turkish VALUES ('TIE'), ('unrelated')")
+    await client.query('ANALYZE contract.turkish')
     await client.query(
       'CREATE TABLE contract.probes (id int PRIMARY KEY, body text, active boolean)',
     )

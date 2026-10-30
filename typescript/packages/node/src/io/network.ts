@@ -14,7 +14,7 @@
 
 import { liveEgress } from '@struktoai/mirage-core/io/gateway'
 import { type NetworkRule, networkBound, networkLets } from '@struktoai/mirage-core/io/network'
-import type { Policies } from '@struktoai/mirage-core/policy/policies'
+import { Policies } from '@struktoai/mirage-core/policy/policies'
 import { AsyncResource } from 'node:async_hooks'
 import dns, { type LookupAddress, type LookupOptions } from 'node:dns'
 import net from 'node:net'
@@ -114,7 +114,10 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
 // The pools fetch keeps for each rule, and for each workspace whose policies
 // listen for connections, verified and unverified (curl's -k), so a socket a
 // workspace opened is never reused for a request another workspace's rule
-// never let through or its policies never saw.
+// never let through or its policies never saw. A policies pool keeps no
+// socket alive: preNetwork judges each line's connections, and a socket an
+// earlier line opened would carry a later one past it, as Python opens a
+// client per request.
 const pools = new WeakMap<NetworkRule | Policies, { verified?: Agent; unverified?: Agent }>()
 
 /**
@@ -127,21 +130,24 @@ export function rulePool(key: NetworkRule | Policies, unverified = false): Agent
     held = {}
     pools.set(key, held)
   }
-  if (unverified) return (held.unverified ??= new Agent({ connect: { rejectUnauthorized: false } }))
-  return (held.verified ??= new Agent())
+  const reuse = key instanceof Policies ? { pipelining: 0 } : {}
+  if (unverified) {
+    return (held.unverified ??= new Agent({ ...reuse, connect: { rejectUnauthorized: false } }))
+  }
+  return (held.verified ??= new Agent(reuse))
 }
 
 /**
- * What a fetch's pooled sockets are kept apart by: the rule of the call
- * making it, else the policies of a workspace that may judge its
- * connections, so no socket one workspace opened carries another's request
+ * What a fetch's pooled sockets are kept apart by: the policies of a
+ * workspace that may judge its connections, else the rule of the call
+ * making it, so no socket one workspace opened carries another's request
  * past its rule or its policies; null to share the process's pool.
  */
 export function poolOwner(): NetworkRule | Policies | null {
   const bound = liveEgress().at(-1)
   if (bound === undefined) return networkBound()
-  if (bound.rule !== null) return bound.rule
-  return bound.policies !== null && bound.listening !== false ? bound.policies : null
+  if (bound.policies !== null && bound.listening !== false) return bound.policies
+  return bound.rule
 }
 
 /** Close the pools a rule or a workspace's policies hold, as the workspace closes. */

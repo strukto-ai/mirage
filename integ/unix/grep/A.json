@@ -193,6 +193,44 @@
       "flags": [
         "A"
       ]
+    },
+    {
+      "id": "grep_context_refuses_non_ascii_digits_and_blanks",
+      "seq": 19019001,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "for v in \"$(printf '\\331\\241')\" \"$(printf '\\302\\2055')\" \"$(printf '\\357\\273\\2775')\" \"$(printf '\\340\\271\\221')\"; do grep -A \"$v\" o /data/a.txt; echo rc=$?; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "grep: ١: invalid context length argument\ngrep: 5: invalid context length argument\ngrep: ﻿5: invalid context length argument\ngrep: ๑: invalid context length argument\n"
+      },
+      "flags": [
+        "A"
+      ]
     }
   ]
 }

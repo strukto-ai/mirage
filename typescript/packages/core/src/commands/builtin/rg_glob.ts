@@ -41,14 +41,33 @@ function escapeChar(ch: string): string {
   return SPECIAL.test(ch) ? `\\${ch}` : ch
 }
 
-// ripgrep's refusal of a glob it cannot compile, exit 2.
+// What a class gives `lo`-`hi`, one character when the two are the same and,
+// folded, the other case of each ASCII letter in it: globset folds ASCII
+// letters only, so `--iglob é` never matches `É`, where a RegExp's `i` flag
+// would.
+function classPart(lo: string, hi: string, fold: boolean): string {
+  const out = [lo === hi ? escapeChar(lo) : escapeChar(lo) + '-' + escapeChar(hi)]
+  const [from, to] = [lo.charCodeAt(0), hi.charCodeAt(0)]
+  for (const [start, end, shift] of [
+    [0x41, 0x5a, 0x20],
+    [0x61, 0x7a, -0x20],
+  ] as const) {
+    const [a, b] = [Math.max(from, start), Math.min(to, end)]
+    if (fold && a <= b) {
+      const other = String.fromCharCode(a + shift)
+      out.push(a === b ? other : other + '-' + String.fromCharCode(b + shift))
+    }
+  }
+  return out.join('')
+}
+
 export function globError(glob: string, reason: string): UsageError {
   return new UsageError(`rg: error parsing glob '${glob}': ${reason}`)
 }
 
 // One `[...]` class as regex source, and where the text resumes. `shown` is
 // the glob as typed, for the refusal wording; `i` is just past the `[`.
-function classSource(shown: string, text: string, i: number): [string, number] {
+function classSource(shown: string, text: string, i: number, fold = false): [string, number] {
   const negated = i < text.length && (text[i] === '!' || text[i] === '^')
   if (negated) i += 1
   const members: string[] = []
@@ -60,11 +79,11 @@ function classSource(shown: string, text: string, i: number): [string, number] {
     }
     first = false
     if (i + 2 < text.length && text[i + 1] === '-' && text[i + 2] !== ']') {
-      members.push(escapeChar(ch) + '-' + escapeChar(text[i + 2] ?? ''))
+      members.push(classPart(ch, text[i + 2] ?? '', fold))
       i += 3
       continue
     }
-    members.push(escapeChar(ch))
+    members.push(classPart(ch, ch, fold))
     i += 1
   }
   throw globError(shown, UNCLOSED_CLASS)
@@ -88,14 +107,16 @@ function starSource(glob: string, i: number, stars: number): [string, number] {
 
 // Regex source for `text`, one alternative of `glob` or all of it; `nested`
 // says whether `text` already sits inside `{...}`.
-function globBody(glob: string, text: string, nested: boolean): string {
+function globBody(glob: string, text: string, nested: boolean, fold = false): string {
+  const literal = (ch: string): string =>
+    fold && /^[A-Za-z]$/.test(ch) ? `[${classPart(ch, ch, fold)}]` : escapeChar(ch)
   const out: string[] = []
   let i = 0
   while (i < text.length) {
     const ch = text[i] ?? ''
     if (ch === '\\') {
       if (i + 1 >= text.length) throw globError(glob, DANGLING_ESCAPE)
-      out.push(escapeChar(text[i + 1] ?? ''))
+      out.push(literal(text[i + 1] ?? ''))
       i += 2
     } else if (ch === '*') {
       let j = i
@@ -107,18 +128,18 @@ function globBody(glob: string, text: string, nested: boolean): string {
       out.push('[^/]')
       i += 1
     } else if (ch === '[') {
-      const [source, next] = classSource(glob, text, i + 1)
+      const [source, next] = classSource(glob, text, i + 1, fold)
       out.push(source)
       i = next
     } else if (ch === '{') {
       if (nested) throw globError(glob, NESTED_ALTERNATES)
       const [close, parts] = alternates(glob, text, i + 1)
-      out.push('(?:' + parts.map((part) => globBody(glob, part, true)).join('|') + ')')
+      out.push('(?:' + parts.map((part) => globBody(glob, part, true, fold)).join('|') + ')')
       i = close + 1
     } else if (ch === '}' && !nested) {
       throw globError(glob, UNOPENED_ALTERNATES)
     } else {
-      out.push(escapeChar(ch))
+      out.push(literal(ch))
       i += 1
     }
   }
@@ -168,8 +189,7 @@ function alternates(glob: string, text: string, i: number): [number, string[]] {
  * (a `-g` line after ignore-rule rewriting), for the refusal wording.
  */
 export function compileGlob(glob: string, caseInsensitive = false, shown?: string): RegExp {
-  const source = globBody(shown ?? glob, glob, false)
-  return new RegExp(`^(?:${source})$`, caseInsensitive ? 'i' : '')
+  return new RegExp(`^(?:${globBody(shown ?? glob, glob, false, caseInsensitive)})$`)
 }
 
 /**

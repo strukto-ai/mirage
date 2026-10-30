@@ -32,6 +32,8 @@ class RgFlags:
     which turns binary detection off; binary is -a, --binary or -uuu,
     which also searches the files a walk would skip as binary. encoding is
     -E: auto, none, or the WHATWG name of the encoding a label named.
+    regex_size_limit and dfa_size_limit are ripgrep's compile limits in
+    bytes, None for its own.
     """
 
     ignore_case: bool
@@ -98,6 +100,8 @@ class RgFlags:
     text: bool = False
     unicode: bool = True
     encoding: str = "auto"
+    regex_size_limit: int | None = None
+    dfa_size_limit: int | None = None
 
 
 def record_end(f: RgFlags) -> bytes:
