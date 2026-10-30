@@ -24,9 +24,9 @@ export function classifyPattern(pattern: string, fixedString: boolean): PatternT
 
 const MIN_SEARCH_LITERAL = 3
 // The ASCII letters a non-ASCII character matches under Unicode case folding
-// (`ı` for i, the Kelvin sign for k, `ſ` for s): a lowercased search for a
-// word holding one could miss a line.
-const UNICODE_FOLDED = /[iks]/
+// (the Kelvin sign for k, `ſ` for s): a lowercased search for a word holding
+// one could miss a line.
+const UNICODE_FOLDED = /[ks]/
 
 // Whether the pattern is searched verbatim, with no regex extraction.
 // Push-down against a whole-word search index is only complete when the term
@@ -66,7 +66,7 @@ export function wholeWordLiterals(
  * Literals under -w or -x are asked as whole words, which a word index can
  * answer; any other pattern is narrowed on the needles one of which every
  * match contains, asked anywhere. Under -i a literal with a non-ASCII letter,
- * or with i, k or s when case folds by Unicode (`ſ` matches `s`), is left to
+ * or with k or s when case folds by Unicode (`ſ` matches `s`), is left to
  * the scan, since a mount's case folding need not be grep's. Mirrors Python's
  * `search_terms`.
  */

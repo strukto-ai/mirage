@@ -159,8 +159,6 @@
         "sharepoint",
         "sharepoint-prefix",
         "ssh",
-        "nextcloud",
-        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/igA && printf 'x\\n' > /data/igA/$'\\xc5\\xbf'a.txt && printf 'x\\n' > /data/igA/$'\\xe2\\x84\\xaa'1.txt && printf 'x\\n' > /data/igA/$'\\xc3\\x89'2.txt && printf 'x\\n' > /data/igA/B3.TXT && rg -l --sort path --iglob sa.txt --iglob k1.txt --iglob $'\\xc3\\xa9'2.txt --iglob b3.txt x /data/igA; rm -rf /data/igA",

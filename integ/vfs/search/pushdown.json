@@ -321,7 +321,7 @@
       }
     },
     {
-      "id": "search_word_leaves_dotless_i_to_the_scan",
+      "id": "search_word_with_i_leaves_dotless_i_unmatched",
       "seq": 540300,
       "targets": [
         "box",
@@ -330,10 +330,10 @@
         "onedrive",
         "sharepoint"
       ],
-      "command": "mkdir -p /search/dotless && printf 't\\xc4\\xb1e here\\nnone\\n' > /search/dotless/a.txt && LC_ALL=C.UTF-8 grep -rliw tie /search/dotless; LC_ALL=C.UTF-8 grep -riw tie /search/dotless; rm -r /search/dotless",
+      "command": "mkdir -p /search/dotless && printf 't\\xc4\\xb1e here\\nnone\\n' > /search/dotless/a.txt && printf 'TIE there\\n' > /search/dotless/b.txt && LC_ALL=C.UTF-8 grep -rliw tie /search/dotless; LC_ALL=C.UTF-8 grep -riw tie /search/dotless; rm -r /search/dotless",
       "expect": {
         "exit": 0,
-        "stdout": "/search/dotless/a.txt\n/search/dotless/a.txt:tıe here\n",
+        "stdout": "/search/dotless/b.txt\n/search/dotless/b.txt:TIE there\n",
         "stderr": ""
       }
     }
