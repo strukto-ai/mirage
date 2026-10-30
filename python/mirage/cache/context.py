@@ -260,8 +260,8 @@ async def _settle(
             return ABSENT_WRITE
         own = None
     if cached is OwnRead.ABSENT:
-        if own is None:
-            return ABSENT_WRITE if kind in context.creates else ANY_WRITE
+        if own is None and kind in context.creates:
+            return ABSENT_WRITE
         cached = None
     return _condition(context, path, kind, own or cached)
 

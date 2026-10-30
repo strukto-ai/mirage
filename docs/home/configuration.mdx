@@ -156,6 +156,14 @@ Conditional writes and deletes reject changes based on a stale read when the
 backend supports it. Read the file again before retrying. Protection lasts only
 for the live session and does not survive a workspace restart.
 
+A session that last found no file at a path, through a read, a `test -e` or
+its own `rm`, writes it only if it is still missing, where the backend can
+check that (`If-None-Match: *` on the S3 family); elsewhere the write goes
+out plain. A refused write keeps the condition it sent, also when the file is
+gone, so a retry is refused too until the file is read again. A write to a
+path the session never read or checked replaces whatever is there, as on a
+POSIX filesystem.
+
 The shared rewrite helpers and object-store truncate require a file observed
 missing to remain absent at commit, under either policy. These paths cover
 append-open and emulated append, positional write, and nonzero truncate. A

@@ -85,7 +85,7 @@ async def retaken(
 ) -> StaleWriteError | None:
     """The refusal for a copy or move whose cleared destination came back.
 
-    The held version stays held; a folder or web link there keeps none.
+    The condition the op sent stays held, whatever took the name.
 
     Args:
         exc (BoxApiError): Box's answer to the copy or move.
@@ -94,9 +94,7 @@ async def retaken(
     """
     if cond is None or exc.status != CONFLICT_STATUS:
         return None
-    if condition_version(cond) and exc.conflict in (None, "file"):
-        return await stale(dst, version=condition_version(cond))
-    return await stale(dst)
+    return await stale(dst, version=condition_version(cond))
 
 
 async def _landed(
