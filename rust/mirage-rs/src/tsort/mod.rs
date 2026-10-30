@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque, btree_map};
 
+mod options;
+
 use serde::Deserialize;
 
 use crate::{Stream, StreamError, parse_config};
@@ -19,15 +21,16 @@ const PAIR_COST: usize = 32;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
-    /// The input as tsort's messages name it.
-    #[serde(deserialize_with = "crate::latin1")]
-    name: Vec<u8>,
+    /// The files as typed, globs spread, each one character per byte; the
+    /// one read is the input tsort's messages name.
+    #[serde(deserialize_with = "crate::latin1_list")]
+    operands: Vec<Vec<u8>>,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let Config { name } = parse_config(config)?;
+    let Config { operands } = parse_config(config)?;
     Ok(Box::new(Tsort {
-        name,
+        name: options::name(&operands)?.to_vec(),
         ..Tsort::default()
     }))
 }
@@ -320,7 +323,7 @@ mod tests {
         let names: Vec<u8> = (0..200)
             .flat_map(|n| format!("n{n} n{}\n", n + 1).into_bytes())
             .collect();
-        let mut stream = open("tsort", br#"{"name":"-"}"#).expect("opens");
+        let mut stream = open("tsort", br#"{"operands":[]}"#).expect("opens");
         let mut out = Vec::new();
         stream.feed(&names, &mut out).expect("feeds");
         stream.finish(&mut out).expect("finishes");

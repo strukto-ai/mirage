@@ -133,6 +133,17 @@ describe('the SSH route', () => {
     expect(await run(await login(ws, 'w'), 'echo over https')).toBe('over https\n')
   })
 
+  it('refuses a page on another origin', async () => {
+    const { app, address } = await serving()
+    expect(
+      (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { ...RAM, id: 'w' } }))
+        .statusCode,
+    ).toBe(201)
+    const ws = await open(address, 'w', { origin: 'https://evil.example' })
+    if (typeof ws !== 'number') ws.close()
+    expect(ws).toBe(400)
+  })
+
   it('lets the login name only the route workspace', async () => {
     const { app, address } = await serving()
     for (const id of ['w', 'other']) {

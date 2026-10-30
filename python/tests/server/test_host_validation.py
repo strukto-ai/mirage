@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 
 from mirage.server import build_app
 from mirage.server.host_validation import (
+    is_cross_origin,
     is_host_allowed,
     parse_allowed_hosts,
     resolve_allowed_hosts,
@@ -83,6 +84,45 @@ def test_is_host_allowed_accepts_loopback():
     assert is_host_allowed("[::1]", allowed) is True
     assert is_host_allowed("[::1]:8765", allowed) is True
     assert is_host_allowed("127.0.0.1:8765", allowed) is True
+
+
+def test_is_cross_origin_refuses_other_fetch_sites():
+    assert is_cross_origin("127.0.0.1:8765", None, "cross-site") is True
+    assert (
+        is_cross_origin(
+            "127.0.0.1:8765", "https://evil.example", "same-origin"
+        )
+        is True
+    )
+    assert is_cross_origin("localhost:8765", None, "same-site") is True
+
+
+def test_is_cross_origin_admits_own_fetch_sites():
+    assert is_cross_origin("127.0.0.1:8765", None, "same-origin") is False
+    assert is_cross_origin("127.0.0.1:8765", None, "none") is False
+    assert is_cross_origin("127.0.0.1:8765", None, None) is False
+
+
+def test_is_cross_origin_refuses_another_origin():
+    for origin in (
+        "https://evil.example",
+        "http://localhost:3000",
+        "http://127.0.0.1",
+        "null",
+        "",
+    ):
+        assert is_cross_origin("127.0.0.1:8765", origin, None) is True, origin
+
+
+def test_is_cross_origin_admits_its_own_origin():
+    for host, origin, site in (
+        ("127.0.0.1:8765", "http://127.0.0.1:8765", None),
+        ("[::1]:8765", "http://[::1]:8765", None),
+        ("Localhost:8765", "http://localhost:8765", None),
+        ("localhost:8765", "http://LOCALHOST:8765", None),
+        ("mirage.example.com", "https://mirage.example.com", "same-origin"),
+    ):
+        assert is_cross_origin(host, origin, site) is False, origin
 
 
 def test_resolve_allowed_hosts_explicit_wins(monkeypatch):
@@ -194,7 +234,7 @@ async def test_env_override_extends_allowlist(monkeypatch):
 
 @pytest.mark.no_host_override
 @pytest.mark.asyncio
-async def test_explicit_wildcard_disables_enforcement(monkeypatch):
+async def test_explicit_wildcard_skips_host_check(monkeypatch):
     monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
     app = build_app(idle_grace_seconds=10.0, allowed_hosts=["*"])
     transport = ASGITransport(app=app)
@@ -222,6 +262,50 @@ async def test_rejection_emits_log_warning(monkeypatch, caplog):
     ]
     assert rejection_logs, "expected a warning log for the rejected host"
     assert rejection_logs[0].levelname == "WARNING"
+
+
+@pytest.mark.no_host_override
+@pytest.mark.asyncio
+async def test_default_refuses_a_page_on_another_origin(monkeypatch, caplog):
+    monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    caplog.set_level("WARNING", logger="mirage.server.host_validation")
+    async with AsyncClient(
+        transport=transport, base_url="http://127.0.0.1:8765"
+    ) as client:
+        for headers in (
+            {"origin": "https://evil.example"},
+            {"origin": "http://localhost:3000"},
+            {"sec-fetch-site": "cross-site"},
+        ):
+            r = await client.post("/v1/workspaces", headers=headers)
+            assert r.status_code == 400, headers
+            assert r.text == "Cross-origin request refused"
+        r = await client.get(
+            "/v1/workspaces",
+            headers={
+                "origin": "http://127.0.0.1:8765",
+                "sec-fetch-site": "same-origin",
+            },
+        )
+        assert r.status_code == 200
+    assert any("evil.example" in rec.getMessage() for rec in caplog.records)
+
+
+@pytest.mark.no_host_override
+@pytest.mark.asyncio
+async def test_wildcard_still_refuses_a_page_on_another_origin(monkeypatch):
+    monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
+    app = build_app(idle_grace_seconds=10.0, allowed_hosts=["*"])
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://anything.example"
+    ) as client:
+        r = await client.get(
+            "/v1/workspaces", headers={"origin": "https://evil.example"}
+        )
+        assert r.status_code == 400
 
 
 def test_resolve_allowed_hosts_config_beats_default(tmp_path, monkeypatch):

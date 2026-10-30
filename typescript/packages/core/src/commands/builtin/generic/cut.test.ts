@@ -1,11 +1,24 @@
 import { expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
-import { cutGeneric } from './cut.ts'
+import type { FlagValue } from '../../spec/types.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
+import { cutConfig, cutGeneric } from './cut.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+async function cut(
+  paths: PathSpec[],
+  ctx: Context & { flags: Record<string, FlagValue> },
+  stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
+  statFn: (path: PathSpec) => Promise<FileStat>,
+): Promise<CommandFnResult> {
+  const config = cutConfig(ctx.flags)
+  if (config instanceof IOResult) return [null, config]
+  return cutGeneric(config, paths, ctx, stream, statFn)
+}
 
 it('closes stdin when output is never started', async () => {
   let closes = 0
@@ -21,7 +34,7 @@ it('closes stdin when output is never started', async () => {
       return Promise.resolve({ done: true, value: undefined })
     },
   }
-  const result = await cutGeneric(
+  const result = await cut(
     [],
     { stdin: source, flags: { bytes: '1' }, cwd: PathSpec.fromStrPath('/') },
     () => source,
@@ -54,7 +67,7 @@ it.each(['', 'first,x\n'])('reports late read errors and continues (%j)', async 
       closed.push(path.virtual)
     }
   }
-  const result = await cutGeneric(
+  const result = await cut(
     ['/missing', '/denied', '/good'].map((p) => PathSpec.fromStrPath(p)),
     { stdin: null, flags: { fields: '1', delimiter: ',' }, cwd: PathSpec.fromStrPath('/') },
     source,
@@ -79,7 +92,7 @@ it.each([new Error('backend failed'), new DOMException('cancelled', 'AbortError'
       opened.push(path.virtual)
       yield await Promise.reject<Uint8Array>(error)
     }
-    const result = await cutGeneric(
+    const result = await cut(
       ['/failed', '/untouched'].map((p) => PathSpec.fromStrPath(p)),
       { stdin: null, flags: { fields: '1' }, cwd: PathSpec.fromStrPath('/') },
       source,
@@ -91,32 +104,51 @@ it.each([new Error('backend failed'), new DOMException('cancelled', 'AbortError'
   },
 )
 
-it('refuses the list before input stat or read', async () => {
-  function noStat(_path: PathSpec): Promise<FileStat> {
-    throw new Error('cut stat before list refusal')
-  }
-  async function* noRead(_path: PathSpec): AsyncIterable<Uint8Array> {
-    yield await Promise.reject<Uint8Array>(new Error('cut read before list refusal'))
-  }
-  const result = await cutGeneric(
-    [PathSpec.fromStrPath('/missing')],
-    { stdin: null, flags: { fields: '-' }, cwd: PathSpec.fromStrPath('/') },
-    noRead,
-    noStat,
-  )
-  if (result === null) throw new Error('cut returned no result')
-  expect(result[0]).toBeNull()
-  expect(result[1].exitCode).toBe(1)
-  expect(DEC.decode(await materialize(result[1].stderr))).toBe(
+it.each([
+  [
+    { fields: '-' },
     "cut: invalid range with no endpoint: -\nTry 'cut --help' for more information.\n",
-  )
+  ],
+  [{ fields: '1', bytes: '2' }, 'cut: only one type of list may be specified\n'],
+  [{ fields: '1', delimiter: ',,' }, 'cut: the delimiter must be a single character\n'],
+  [
+    { fields: '1', whitespace_delimited: 'tt' },
+    "cut: invalid argument 'tt' for '--whitespace-delimited'\n",
+  ],
+])('refuses %j in its config, before any operand', async (flags, stderr) => {
+  const refusal = cutConfig(flags)
+  if (!(refusal instanceof IOResult)) throw new Error('cut read a refused line')
+  expect(refusal.exitCode).toBe(1)
+  expect(DEC.decode(await materialize(refusal.stderr))).toBe(stderr)
+})
+
+it('reads a bare --whitespace-delimited apart from an empty word', async () => {
+  for (const [value, expected] of [
+    [true, '\n'],
+    ['', 'a\n'],
+  ] as const) {
+    const result = await cut(
+      [],
+      {
+        stdin: ENC.encode(' a  b\n'),
+        flags: { fields: '1', whitespace_delimited: value },
+        cwd: PathSpec.fromStrPath('/'),
+      },
+      () => {
+        throw new Error('unexpected input read')
+      },
+      stat,
+    )
+    if (result === null) throw new Error('cut returned no result')
+    expect(DEC.decode(await materialize(result[0]))).toBe(expected)
+  }
 })
 
 it('preserves a BOM in selected fields', async () => {
   async function* source(_path: PathSpec): AsyncIterable<Uint8Array> {
     yield await Promise.resolve(ENC.encode('\ufeffa,b\n'))
   }
-  const result = await cutGeneric(
+  const result = await cut(
     [],
     {
       stdin: source(PathSpec.fromStrPath('/')),
@@ -135,7 +167,7 @@ it.each(['bytes', 'characters', 'fields'])(
   'keeps raw delimiter sentinels distinct from replacement in %s mode',
   async (mode) => {
     for (const input of [Uint8Array.of(97, 255, 98, 10), ENC.encode('a\ufffdb\n')]) {
-      const result = await cutGeneric(
+      const result = await cut(
         [],
         {
           stdin: input,
@@ -154,8 +186,8 @@ it.each(['bytes', 'characters', 'fields'])(
   },
 )
 
-it('keeps replacement encoding for raw output delimiters', async () => {
-  const result = await cutGeneric(
+it('writes a raw output delimiter byte as typed', async () => {
+  const result = await cut(
     [],
     {
       stdin: ENC.encode('abc\n'),
@@ -169,5 +201,5 @@ it('keeps replacement encoding for raw output delimiters', async () => {
   )
   if (result === null) throw new Error('cut returned no result')
   expect(result[1].exitCode).toBe(0)
-  expect(await materialize(result[0])).toEqual(ENC.encode('a\ufffdc\n'))
+  expect(await materialize(result[0])).toEqual(Uint8Array.of(97, 255, 99, 10))
 })

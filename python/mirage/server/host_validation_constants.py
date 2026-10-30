@@ -17,3 +17,5 @@ import re
 DEFAULT_ALLOWED_HOSTS: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
 
 HOST_PATTERN = re.compile(r"^(?:\[([^\]]+)\]|([^:]+))(?::\d+)?$")
+
+SAME_ORIGIN_FETCH_SITES: frozenset[str] = frozenset({"same-origin", "none"})

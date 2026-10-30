@@ -17,6 +17,7 @@ import { type Clock, ManualClock, SystemClock } from './clock.ts'
 const MAX_SEED = Number.MAX_SAFE_INTEGER
 const WORD_BITS = 32
 const WORD_MASK = 0xffffffff
+const WORDS_AHEAD = 1024
 const TIMESTAMP_BITS = 48n
 const TIMESTAMP_MASK = (1n << TIMESTAMP_BITS) - 1n
 // rand_a carries the intra-millisecond counter (RFC 9562 section 6.2), seeded
@@ -95,6 +96,12 @@ export interface IdSource {
   uuid7(): string
   /** A uniform integer in `[0, 2**32)`. */
   randomU32(): number
+  /**
+   * At least `count` of the words `randomU32` would answer next, each as four
+   * little-endian bytes. A source that replays answers exactly `count`, so its
+   * next word follows the last one taken.
+   */
+  randomWords(count: number): Uint8Array
 }
 
 /** The last id's millisecond and counter, which the next id follows. */
@@ -141,6 +148,19 @@ export class SystemIdSource implements IdSource {
   /** A uniform 32-bit integer from the platform generator. */
   randomU32(): number {
     return Math.floor(Math.random() * 2 ** WORD_BITS)
+  }
+
+  /**
+   * Twice `count` platform words, and at least `WORDS_AHEAD`, each as four
+   * little-endian bytes: a caller drawing below a limit, which redraws up to
+   * half its words, seldom has to ask again.
+   */
+  randomWords(count: number): Uint8Array {
+    count = Math.max(2 * count, WORDS_AHEAD)
+    const bytes = new Uint8Array(count * 4)
+    const view = new DataView(bytes.buffer)
+    for (let at = 0; at < count; at++) view.setUint32(at * 4, this.randomU32(), true)
+    return bytes
   }
 }
 
@@ -212,6 +232,14 @@ export class SeededIdSource implements IdSource {
     s[2] = s2 ^ (s1 << 9)
     s[3] = rotl(s3 >>> 0, 11)
     return Math.imul(rotl(Math.imul(s1, 5) >>> 0, 7), 9) >>> 0
+  }
+
+  /** The next `count` draws of the seeded sequence, each as four little-endian bytes. */
+  randomWords(count: number): Uint8Array {
+    const bytes = new Uint8Array(count * 4)
+    const view = new DataView(bytes.buffer)
+    for (let at = 0; at < count; at++) view.setUint32(at * 4, this.randomU32(), true)
+    return bytes
   }
 
   /** The next UUIDv7 of the seeded sequence, stamped from the clock. */

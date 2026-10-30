@@ -16,16 +16,20 @@ import { uniqFlags, uniqGeneric } from '../../generic/uniq.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
-import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
+import { commandFiles, dirAwareStat } from '../files.ts'
+import { spreadOperands } from '../../../spec/flag_view.ts'
+import type { PathSpec } from '../../../../types.ts'
 
 const uniq: CommandFn = async (_accessor, paths, _texts, ctx) => {
-  const parsed = uniqFlags(ctx.flags)
-  if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
-  const resolved = await resolveOrEmpty(files, paths)
+  const groups: PathSpec[][] = []
+  for (const path of paths) groups.push(await files.resolveGlob([path]))
+  const words = groups.map((group) => group.map((path) => path.rawPath))
+  const parsed = uniqFlags(spreadOperands(ctx.flags, words), words.flat())
+  if (parsed instanceof IOResult) return [null, parsed]
   return uniqGeneric(
     parsed,
-    resolved,
+    groups.flat(),
     ctx,
     files.read,
     files.answers('write') ? files.write : undefined,

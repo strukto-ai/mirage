@@ -15,3 +15,5 @@
 export const DEFAULT_ALLOWED_HOSTS: readonly string[] = ['127.0.0.1', 'localhost', '::1']
 
 export const HOST_PATTERN = /^(?:\[([^\]]+)\]|([^:]+))(?::\d+)?$/
+
+export const SAME_ORIGIN_FETCH_SITES: ReadonlySet<string> = new Set(['same-origin', 'none'])
