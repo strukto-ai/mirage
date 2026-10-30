@@ -152,6 +152,7 @@ from mirage.workspace.dispatcher.constants import (
     HIDDEN_CREATE_OPS,
     HIDE_FILTERED_OPS,
     LINK_ENTRY_OPS,
+    MISS_OPS,
     NAMESPACE_TABLE_OPS,
     NATIVE_WALK_OPS,
     NO_FOLLOW_OPS,
@@ -1421,7 +1422,13 @@ class Dispatcher:
                 )
             if not call.read_records:
                 call.read_records = records
-        except BaseException:
+        except BaseException as exc:
+            if (
+                isinstance(exc, FileNotFoundError)
+                and name in MISS_OPS
+                and mount.cache_manager is not None
+            ):
+                mount.cache_manager.observe_miss(call.path, call.caller)
             if settles:
                 await self._evict_failed_write(mount, name, call.path, kwargs)
             try:

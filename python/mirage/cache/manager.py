@@ -35,6 +35,7 @@ from mirage.cache.index.scope import (
 )
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.index.view import IndexView
+from mirage.cache.types import Measured, OwnRead
 from mirage.cache.versions import VersionScope
 from mirage.context.session_context import Caller, current_caller
 from mirage.io.stream import close_quietly
@@ -547,19 +548,43 @@ class CacheManager:
         return self._file_cache
 
     def lose(self, path: PathSpec, version: str | None) -> None:
-        """Remember a refusal, including a file confirmed gone.
+        """Remember a refusal: the version it lost on stands until a read.
+
+        A refusal without a version, a file found gone included, leaves
+        the session's own observation as it was.
 
         Args:
             path (PathSpec): the refused path.
-            version (str | None): the losing version, None when gone.
+            version (str | None): the losing version, if any.
         """
         session = current_caller().session
-        if self._conditional and session is not None:
+        if self._conditional and session is not None and version is not None:
             session.versions.keep(
                 self.version_scope,
                 "/" + mount_key(path.virtual, self._prefix),
                 version,
             )
+
+    def observe_miss(self, path: PathSpec, caller: Caller) -> None:
+        """Record that ``caller``'s session found no file at ``path``.
+
+        Args:
+            path (PathSpec): the path a read or stat found missing.
+            caller (Caller): the session that looked.
+        """
+        if (
+            not self._conditional
+            or caller.session is None
+            or caller.policy_read
+            or not caller.version_reads
+            or not self._owns_path(path.virtual)
+        ):
+            return
+        caller.session.versions.keep(
+            self.version_scope,
+            "/" + mount_key(path.virtual, self._prefix),
+            OwnRead.ABSENT,
+        )
 
     def observe(self, rec: OpRecord, caller: Caller | None = None) -> None:
         """Record this session's result, never another session's cache entry.
@@ -583,16 +608,17 @@ class CacheManager:
             self.version_scope, "/" + mount_key(rec.path, self._prefix), rec
         )
 
-    async def keep_version(self, path: PathSpec, version: str) -> None:
+    async def keep_version(self, path: PathSpec, version: Measured) -> None:
         """Keep ``version`` for ``path`` without bytes, if this mount caches.
 
-        A refused write keeps the version it lost on, so the next write
+        A refused write keeps the condition it lost on, so the next write
         without a read sends it again. A cache that refuses the entry is
         logged, never raised: the refusal itself already stands.
 
         Args:
             path (PathSpec): the path refused.
-            version (str): the version the write lost on.
+            version (Measured): the version the write lost on, ABSENT for
+                a create.
         """
         key = self._cache_key(path)
         session = current_caller().session
@@ -603,7 +629,11 @@ class CacheManager:
                 version,
             )
             return
-        if self._file_cache is None or not self._owns_path(key):
+        if (
+            self._file_cache is None
+            or not self._owns_path(key)
+            or not isinstance(version, str)
+        ):
             return
         try:
             async with mutation_lock(self._file_cache):
@@ -611,7 +641,7 @@ class CacheManager:
         except Exception:
             logger.warning("version not kept for %s", key, exc_info=True)
 
-    async def read_version(self, path: PathSpec) -> str | None:
+    async def read_version(self, path: PathSpec) -> Measured | None:
         """The version this mount last saw for ``path``, None when none.
 
         Conditional mounts use the live session's own observations, with
@@ -624,7 +654,9 @@ class CacheManager:
         """
         return (await self.read_versions([path]))[0]
 
-    async def read_versions(self, paths: list[PathSpec]) -> list[str | None]:
+    async def read_versions(
+        self, paths: list[PathSpec]
+    ) -> list[Measured | None]:
         """``read_version`` for many paths; session history needs no I/O.
 
         Args:
@@ -633,16 +665,23 @@ class CacheManager:
         session = current_caller().session
         if self._conditional and session is not None:
             recorder = active_recorder()
-            return [
-                recorder.lost.version(path.virtual)
-                if recorder is not None and recorder.lost.holds(path.virtual)
-                else session.versions.read(
-                    self.version_scope,
-                    "/" + mount_key(path.virtual, self._prefix),
+            out: list[Measured | None] = []
+            for path in paths:
+                lost = (
+                    recorder.lost.version(path.virtual)
+                    if recorder is not None
+                    and recorder.lost.holds(path.virtual)
+                    else None
                 )
-                for path in paths
-            ]
-        out: list[str | None] = [None] * len(paths)
+                out.append(
+                    lost
+                    or session.versions.read(
+                        self.version_scope,
+                        "/" + mount_key(path.virtual, self._prefix),
+                    )
+                )
+            return out
+        out = [None] * len(paths)
         pending: list[tuple[int, str]] = []
         recorder = active_recorder()
         for i, path in enumerate(paths):

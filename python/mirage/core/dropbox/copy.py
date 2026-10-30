@@ -63,7 +63,7 @@ async def _retaken(
         return None
     if condition_version(cond) and not exc.summary.startswith(TAKEN_BY_FOLDER):
         return await stale(dst, version=condition_version(cond))
-    return await stale(dst, gone=True)
+    return await stale(dst)
 
 
 async def replace_onto(
@@ -112,7 +112,7 @@ async def replace_onto(
             ):
                 raise
         elif exc.summary.startswith(TAKEN_BY_FOLDER):
-            raise await stale(dst, gone=True) from exc
+            raise await stale(dst) from exc
         try:
             await delete_path(tm, to_path, rev)
         except DropboxApiError as err:

@@ -96,7 +96,7 @@ async def retaken(
         return None
     if condition_version(cond) and exc.conflict in (None, "file"):
         return await stale(dst, version=condition_version(cond))
-    return await stale(dst, gone=True)
+    return await stale(dst)
 
 
 async def _landed(

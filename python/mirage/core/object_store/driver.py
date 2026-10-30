@@ -180,7 +180,7 @@ async def refused(
         exc (ConditionLostError): the store's refusal.
         cond (WriteCondition | None): the condition the op sent.
     """
-    return await stale(path, gone=exc.gone, version=condition_version(cond))
+    return await stale(path, version=condition_version(cond))
 
 
 async def keep_all_lost(

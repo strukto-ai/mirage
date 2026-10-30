@@ -150,9 +150,7 @@ def make_rename(
                         await drop_cached(src_spec, source)
                 elif cond is not None and condition_version(cond):
                     await drop_cached(dst_spec, condition_version(cond))
-                refusal = await stale(
-                    lost, landed=exc.landed, gone=exc.gone, version=sent
-                )
+                refusal = await stale(lost, landed=exc.landed, version=sent)
                 refusal.recovered = exc.recovered
                 refusal.recovery_error = (
                     strerror_of(exc.recovery_error)

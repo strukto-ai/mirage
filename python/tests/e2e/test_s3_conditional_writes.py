@@ -142,6 +142,20 @@ def _restore_f(fake: MultiBucketS3Client) -> None:
     fake.buckets["b"]["f"] = SEED["f"]
 
 
+async def _refused_until_read(
+    fake: MultiBucketS3Client, ws: Workspace, key: str
+) -> None:
+    code, _, err = await _run(ws, f"echo z > /s3/{key}")
+    assert (code, STALE in err) == (1, True), err
+    assert key not in fake.buckets["b"]
+    await _run(ws, f"cat /s3/{key}")
+    fake.ledger.clear()
+    code, _, err = await _run(ws, f"echo z > /s3/{key}")
+    assert code == 0, err
+    assert fake.buckets["b"][key] == b"z\n"
+    assert _sent(fake, PUT) == [{"IfNoneMatch": "*"}]
+
+
 # ── where the version comes from ───────────────────────────────────────
 
 ONE, GEE = {"IfMatch": etag(SEED["f"])}, {"IfMatch": etag(SEED["g"])}
@@ -187,7 +201,13 @@ VERSION_SOURCES = [
         PUT,
         [{"IfMatch": etag(b"hi\n")}],
     ),
-    ("removed", ("cat /s3/f", "rm /s3/f"), "echo x > /s3/f", PUT, [{}]),
+    (
+        "removed",
+        ("cat /s3/f", "rm /s3/f"),
+        "echo x > /s3/f",
+        PUT,
+        [{"IfNoneMatch": "*"}],
+    ),
     ("unread-tee", (), "echo y | tee /s3/g", PUT, [{}]),
     ("unread-cross-cp", (), "echo r > /ram/r; cp /ram/r /s3/g", PUT, [{}]),
     ("unread-cp", (), "cp /s3/f /s3/g", COPY, [{}]),
@@ -196,7 +216,7 @@ VERSION_SOURCES = [
         (),
         "cat /s3/f; rm /s3/f; echo x > /s3/f",
         PUT,
-        [{}],
+        [{"IfNoneMatch": "*"}],
     ),
     (
         "mv-on-line",
@@ -210,14 +230,14 @@ VERSION_SOURCES = [
         (),
         "cat /s3/d/a; rm -r /s3/d; echo x > /s3/d/a",
         PUT,
-        [{}],
+        [{"IfNoneMatch": "*"}],
     ),
     (
         "rm-r",
         ("cat /s3/d/a; rm -r /s3/d",),
         "echo x > /s3/d/a",
         PUT,
-        [{}],
+        [{"IfNoneMatch": "*"}],
     ),
     (
         "dir-mv",
@@ -303,32 +323,35 @@ async def test_a_script_opening_a_read_file_to_write_carries_the_version(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "setup, line",
-    [
-        ("cat /s3/f", "cp /s3/g /s3/f"),
-        ("cat /s3/f", "mv /s3/g /s3/f"),
-        ("grep one /s3/f", "echo x > /s3/f"),
-    ],
-)
-async def test_a_file_deleted_since_it_was_read_is_refused_then_free(
-    fake, workspaces, setup, line
+@pytest.mark.parametrize("setup", ["cat /s3/f", "grep one /s3/f"])
+async def test_a_file_deleted_since_it_was_read_is_refused_until_read(
+    fake, workspaces, setup
 ):
-    # Gone, so no newer bytes to protect: no version is kept, the retry goes plain.
+    # A peer may create it again, so the retry is held to what was read.
     ws = workspaces()
     await _run(ws, setup)
     del fake.buckets["b"]["f"]
+    await _refused_until_read(fake, ws, "f")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["cp /s3/g /s3/f", "mv /s3/g /s3/f"])
+async def test_a_copy_onto_a_file_it_finds_deleted_creates_it(
+    fake, workspaces, line
+):
+    # The copy's own look finds no file, which is the session's to see.
+    ws = workspaces()
+    await _run(ws, "cat /s3/f")
+    del fake.buckets["b"]["f"]
     code, _, err = await _run(ws, line)
-    assert (code, STALE in err) == (1, True)
-    assert "f" not in fake.buckets["b"]
-    assert (await _run(ws, line))[0] == 0
+    assert code == 0, err
+    assert fake.buckets["b"]["f"] == SEED["g"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "call, arg",
     [
-        ("shell", "truncate -s 5 /s3/f"),
         ("shell", "echo x >> /s3/f"),
         ("append", b"x\n"),
         ("append", b""),
@@ -359,6 +382,22 @@ async def test_an_op_finding_a_read_file_gone_refuses_before_writing(
                 await ws.vfs.pwrite("/s3/f", arg, 0)
     assert _mutations(fake) == []
     assert "f" not in fake.buckets["b"]
+
+
+@pytest.mark.asyncio
+async def test_a_truncate_finding_a_read_file_gone_creates_it_only_if_absent(
+    fake, workspaces
+):
+    # truncate looks first and sees no file; a restore beats its create.
+    ws = workspaces()
+    await _run(ws, "cat /s3/f")
+    del fake.buckets["b"]["f"]
+    fake.ledger.clear()
+    fake.before(PUT, lambda: _restore_f(fake))
+    code, _, err = await _run(ws, "truncate -s 5 /s3/f")
+    assert (code, STALE in err) == (1, True), err
+    assert _mutations(fake) == [(PUT, {"IfNoneMatch": "*"})]
+    assert fake.buckets["b"]["f"] == SEED["f"]
 
 
 # ── the condition per op, loss side ────────────────────────────────────
@@ -809,7 +848,7 @@ async def test_a_directory_rename_holds_each_destination_key_it_read(
 async def test_a_directory_rename_onto_a_key_it_holds_no_version_of(
     fake, workspaces, read
 ):
-    # A destination key found gone keeps no version; one never read is replaced plain.
+    # A destination key found gone stays held; one never read is replaced plain.
     ws = workspaces()
     fake.buckets["b"]["e/a"] = b"ea\n"
     if read:
@@ -817,9 +856,7 @@ async def test_a_directory_rename_onto_a_key_it_holds_no_version_of(
         del fake.buckets["b"]["e/a"]
         with pytest.raises(StaleWriteError):
             await ws.vfs.rename("/s3/d", "/s3/e")
-        code, _, err = await _run(ws, "echo z > /s3/e/a")
-        assert code == 0, err
-        assert fake.buckets["b"]["e/a"] == b"z\n"
+        await _refused_until_read(fake, ws, "e/a")
     else:
         await ws.vfs.rename("/s3/d", "/s3/e")
         assert fake.buckets["b"]["e/a"] == b"a\n"
@@ -944,18 +981,19 @@ async def test_a_lost_file_is_not_served_from_the_line_read(fake, workspaces):
 
 
 @pytest.mark.asyncio
-async def test_a_refusal_on_a_file_since_removed_keeps_no_version(
+async def test_a_refusal_on_a_file_since_removed_keeps_its_version(
     fake, workspaces
 ):
-    # Lost on a 412, then found gone: the gone refusal keeps no version.
+    # Lost on a 412, then found gone: every retry sends what was read.
     ws = workspaces()
     await _run(ws, "cat /s3/f")
     fake.before(PUT, lambda: _theirs(fake, "f"))
     fake.before(PUT, lambda: _gone(fake, "f"))
     line = "echo a > /s3/f; echo b > /s3/f; echo c > /s3/f; echo $?"
     _, out, err = await _run(ws, line)
-    assert (out, err.count(STALE)) == ("0\n", 2), err
-    assert fake.buckets["b"]["f"] == b"c\n"
+    assert (out, err.count(STALE)) == ("1\n", 3), err
+    assert "f" not in fake.buckets["b"]
+    assert _sent(fake, PUT) == [ONE] * 3
 
 
 @pytest.mark.asyncio
@@ -967,24 +1005,22 @@ async def test_a_refusal_on_a_file_since_removed_keeps_no_version(
     ],
     ids=["file mv", "dir mv"],
 )
-async def test_a_move_whose_source_is_gone_keeps_it_no_version(
+async def test_a_move_whose_source_is_gone_keeps_its_version(
     fake, workspaces, setup, line, key
 ):
-    # Nothing newer is there to guard, so the path is written plain again.
+    # A peer may create the source again, so it stays held to the read.
     ws = workspaces()
     await _run(ws, setup)
     fake.before(COPY, lambda: _gone(fake, key))
     assert (await _run(ws, line))[0] == 1
-    code, _, err = await _run(ws, f"echo z > /s3/{key}")
-    assert code == 0, err
-    assert fake.buckets["b"][key] == b"z\n"
+    await _refused_until_read(fake, ws, key)
 
 
 @pytest.mark.asyncio
-async def test_a_walk_key_found_gone_beside_the_named_one_keeps_no_version(
+async def test_a_walk_key_found_gone_beside_the_named_one_keeps_its_version(
     fake, workspaces
 ):
-    # d/a is named; d/b, gone too, is kept by the walk and keeps nothing.
+    # d/a is named; d/b, gone too, stays held to what was read.
     ws = workspaces()
     await _run(ws, "cat /s3/d/a /s3/d/b")
 
@@ -994,9 +1030,7 @@ async def test_a_walk_key_found_gone_beside_the_named_one_keeps_no_version(
 
     fake.before(COPY, change_and_remove)
     assert (await _run(ws, "mv /s3/d /s3/e"))[0] == 1
-    code, _, err = await _run(ws, "echo z > /s3/d/b")
-    assert code == 0, err
-    assert fake.buckets["b"]["d/b"] == b"z\n"
+    await _refused_until_read(fake, ws, "d/b")
 
 
 @pytest.mark.asyncio

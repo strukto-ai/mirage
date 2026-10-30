@@ -54,6 +54,9 @@ DISPATCH_READ_OPS = (
     call_names(_VFS_CALLS, effects={Effect.READ}, targets={Target.FILE})
     - READ_SHORTCUT_OPS
 )
+# The calls whose ENOENT tells a session the file is not there, so its
+# next write on a conditional mount asks that it still not be.
+MISS_OPS = DISPATCH_READ_OPS | READ_SHORTCUT_OPS | {"stat"}
 
 # The calls that stand in for a whole read of a file. The cache stage
 # answers each None for a file the read cache holds, so its caller reads

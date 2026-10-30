@@ -176,3 +176,31 @@ def test_versions_that_share_a_short_digest_stay_distinct():
     s.read("a", S0)
     s.commit("a", Intent.WRITES, (lookalike, state_of(S1)))
     assert s.lost() == ["a.1"]
+
+
+def _peer_commit(trace: Trace, at: float, before: State, after: State) -> None:
+    step = StepRef("p", 0)
+    change = Change("k", before, after, 0)
+    trace.append(Served(0, at, step, "put_object", "k", (), (change,), None))
+    trace.append(LineDone(at, step, "", Intent.WRITES, "k", 0, b""))
+
+
+def _read_then_refused(trace: Trace) -> list[str]:
+    trace.append(LineDone(1.0, StepRef("a", 0), "", Intent.READS, "k", 0, S0))
+    trace.append(
+        LineDone(2.0, StepRef("a", 1), "", Intent.WRITES, "k", 1, b"")
+    )
+    return [str(s) for s in no_lost_update(trace).false_refusals]
+
+
+def test_a_refusal_while_the_basis_held_is_false():
+    trace = Trace()
+    _peer_commit(trace, 0.5, ABSENT, state_of(S0))
+    assert _read_then_refused(trace) == ["a.1"]
+
+
+def test_a_refusal_after_a_peer_commit_is_not_false():
+    trace = Trace()
+    _peer_commit(trace, 0.5, ABSENT, state_of(S0))
+    _peer_commit(trace, 1.5, state_of(S0), state_of(S1))
+    assert _read_then_refused(trace) == []
