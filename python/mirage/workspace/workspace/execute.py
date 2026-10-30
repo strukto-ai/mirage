@@ -1116,14 +1116,14 @@ async def run_prepared_line(
         finally:
             reset_caller(line_token)
             if held:
-                ws.registry.decisions.release(
+                await ws.registry.decisions.release(
                     effective_session.session_id, handed
                 )
             elif handed.parent is not None:
                 # A nested evaluation's claims are the outer line's to
                 # keep for the next evaluation from the same node and
                 # to spend at its own end.
-                ws.registry.decisions.hand_up(
+                await ws.registry.decisions.hand_up(
                     effective_session.session_id, handed
                 )
             else:

@@ -412,7 +412,7 @@ class DecisionOwner:
     __slots__ = ()
 
 
-@dataclass(eq=False, slots=True)
+@dataclass(eq=False, slots=True, weakref_slot=True)
 class HandOff:
     """The ONCE grants a line's readers matched to its commands, for the
     line's end to spend.
@@ -507,40 +507,28 @@ class Abandoned:
 
 
 class SessionDecisionsQuery(Protocol):
-    """The session questions the decision ledger asks.
+    """Session facts and confirmed transitions used by the approval adapter."""
 
-    The SessionManager satisfies it structurally, so the ledger reads
-    and writes a session's records by id without this package importing
-    the workspace, and always on the registered session rather than the
-    fork a line may be running in.
-    """
+    def approval_sessions(self) -> tuple[str, ...]: ...
 
-    def decision_sessions(self) -> tuple[str, ...]:
-        """Every session id holding records, oldest first."""
-        ...
+    def approval_state_of(self, session_id: str) -> dict[str, Any] | None: ...
 
-    def decisions_of(self, session_id: str) -> tuple[Decision, ...]:
-        """The records a session holds, oldest first.
+    def incarnation_of(self, session_id: str) -> str | None: ...
 
-        Args:
-            session_id (str): the session.
-        """
-        ...
+    async def ensure_loaded(self) -> None: ...
 
-    def set_decisions(
-        self, session_id: str, records: tuple[Decision, ...]
-    ) -> None:
-        """Replace a session's records.
+    async def activate(self, session_id: str) -> str: ...
 
-        Args:
-            session_id (str): the session.
-            records (tuple[Decision, ...]): the new list.
-        """
-        ...
+    async def refresh_approval(
+        self, session_id: str, incarnation: str
+    ) -> None: ...
 
-    async def flush(self) -> None:
-        """Persist what changed."""
-        ...
+    async def approval_event(
+        self,
+        session_id: str,
+        event: dict[str, Any],
+        incarnation: str | None = None,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)

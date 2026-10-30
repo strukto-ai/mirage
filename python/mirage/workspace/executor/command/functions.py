@@ -188,7 +188,7 @@ async def run_shell_function(
         session._alias_view = outer_view
         session._alias_expansion = outer_expansion
         if nested is not None and decisions is not None:
-            decisions.hand_up(session.session_id, nested)
+            await decisions.hand_up(session.session_id, nested)
         scope.release()
         reset_program_invocation(marked)
         cs.pop()

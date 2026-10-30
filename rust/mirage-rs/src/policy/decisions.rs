@@ -269,8 +269,15 @@ fn same_line(record: &Record, question: &Record) -> bool {
     record.command == question.command && record.argv == question.argv && record.cwd == question.cwd
 }
 
+fn same_rule(left: &Rule, right: &Rule) -> bool {
+    left.reason == right.reason
+        && left.commands == right.commands
+        && left.paths == right.paths
+        && left.mount.as_deref().unwrap_or_default() == right.mount.as_deref().unwrap_or_default()
+}
+
 fn covers(record: &Record, rule: &Rule, question: &Record) -> bool {
-    record.rule == *rule
+    same_rule(&record.rule, rule)
         && match (&record.outcome, &record.scope) {
             (Some(Outcome::Allow), Scope::Session) => true,
             (Some(_), Scope::Once) => same_line(record, question),
@@ -519,7 +526,7 @@ fn apply(
                 if let Some(record) = ledger.records.iter().find(|r| {
                     r.session_id == question.session_id
                         && r.outcome.is_none()
-                        && r.rule == *rule
+                        && same_rule(&r.rule, rule)
                         && same_line(r, question)
                 }) {
                     return Ok(ResultValue::Pending {

@@ -334,7 +334,7 @@ async def execute_command(
                     reset_redirect_paths(token)
                     session._alias_expansion = previous
                     if expansion is not None:
-                        registry.decisions.hand_up(
+                        await registry.decisions.hand_up(
                             session.session_id, expansion
                         )
             finally:

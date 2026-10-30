@@ -321,6 +321,9 @@ class SessionManager(SessionOwner):
         """
         return copy.deepcopy(self.get(session_id).approval_state)
 
+    def approval_sessions(self) -> tuple[str, ...]:
+        return tuple(self._sessions)
+
     def incarnation_of(self, session_id: str) -> str | None:
         """The cached session identity an entry point binds to its caller.
 

@@ -256,3 +256,27 @@ fn close_and_restore_rotate_authority_and_keep_the_storage_requirement() {
         json!({"kind":"blocked","status":"stale_incarnation"})
     );
 }
+
+#[test]
+fn absent_and_empty_mount_anchors_are_the_same_approval_rule() {
+    let (pending, ledger) = commit(&resolving());
+    let mut input = resolving();
+    input["ledger"] = ledger;
+    input["transition"] = json!("other-host");
+    input["event"]["question"]["rule"]["mount"] = Value::Null;
+    input["event"]["rules"][0]["mount"] = Value::Null;
+    let (same, ledger) = commit(&input);
+    assert_eq!(same["kind"], "pending");
+    assert_eq!(same["fresh"], false);
+    assert_eq!(same["record"]["id"], pending["record"]["id"]);
+    input["ledger"] = ledger;
+    input["transition"] = json!("answer");
+    input["event"] = json!({"op":"answer","id":pending["record"]["id"],"outcome":"allow","scope":"session","note":[],"claimant":null});
+    let (_, ledger) = commit(&input);
+    input["ledger"] = ledger;
+    input["transition"] = json!("other-host-run");
+    input["event"] = resolving()["event"].clone();
+    input["event"]["rules"][0]["mount"] = Value::Null;
+    let (allowed, _) = commit(&input);
+    assert_eq!(allowed["kind"], "allow");
+}

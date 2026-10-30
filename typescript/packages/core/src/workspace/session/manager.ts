@@ -272,6 +272,10 @@ export class SessionManager extends SessionOwner {
     return structuredClone(this.get(sessionId).approvalState)
   }
 
+  approvalSessions(): readonly string[] {
+    return [...this.sessions.keys()]
+  }
+
   incarnationOf(sessionId: string): string | null {
     return this.get(sessionId).incarnation
   }
