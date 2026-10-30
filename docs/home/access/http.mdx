@@ -153,23 +153,48 @@ Whether the server takes new workspaces, without requiring a token. Returns
 `max_workspaces` and `{"status": "draining"}` while it shuts down. Point a load
 balancer's readiness check here and its liveness check at `/v1/health`.
 
-### Read metrics
+### Metrics
 
-<Badge color="blue">GET</Badge> `/v1/metrics`
+The server records its metrics through [OpenTelemetry](https://opentelemetry.io/docs/concepts/signals/metrics/),
+under the meter `mirage.server`. Nothing is sent until the process sets up an
+OpenTelemetry SDK, and the exporter it picks decides where they go: OTLP to
+Datadog, New Relic, Honeycomb, Grafana Cloud, CloudWatch or Google Cloud, a
+Prometheus page, or the console. They are server-wide and name no workspace or
+account.
 
-The server's metrics in Prometheus's text format, without requiring a token.
-They are server-wide counts and name no workspace or account.
-
-| Metric | Type | Value |
+| Instrument | Kind | Value |
 | --- | --- | --- |
-| `mirage_uptime_seconds` | gauge | Seconds since the server started. |
-| `mirage_workspaces` | gauge | Workspaces it holds. |
-| `mirage_max_workspaces` | gauge | Its `max_workspaces`, when set. |
-| `mirage_sessions` | gauge | Sessions across its workspaces. |
-| `mirage_jobs_running` | gauge | [Jobs](#jobs) running. |
-| `mirage_draining` | gauge | `1` while it drains for shutdown. |
-| `mirage_http_responses_total{code}` | counter | Responses it sent, by status code, so refusals show as their `403`, `429` and `503`. |
-| `process_resident_memory_bytes` | gauge | Its resident memory; the Python server reports it where `/proc` does. |
+| `mirage.workspace.count` | up-down counter | Workspaces it holds. |
+| `mirage.workspace.limit` | up-down counter | Its `max_workspaces`, when set. |
+| `mirage.session.count` | up-down counter | Sessions across its workspaces. |
+| `mirage.job.running` | up-down counter | [Jobs](#jobs) running. |
+| `mirage.server.draining` | gauge | `1` while it drains for shutdown. |
+| `mirage.request.refused` | counter | Requests refused for a server limit, by `reason`: `rate_limit`, `max_sessions`, `max_workspaces` or `draining`. |
+
+In Python, run the app under `opentelemetry-instrument`, which also records
+each HTTP request:
+
+```bash
+pip install opentelemetry-distro opentelemetry-exporter-otlp
+OTEL_METRICS_EXPORTER=otlp OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.example.com \
+  opentelemetry-instrument uvicorn main:app
+```
+
+In TypeScript, register a meter provider before `buildApp`:
+
+```ts
+import { metrics } from '@opentelemetry/api'
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http'
+import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics'
+import { buildApp } from '@struktoai/mirage-server'
+
+metrics.setGlobalMeterProvider(
+  new MeterProvider({
+    readers: [new PeriodicExportingMetricReader({ exporter: new OTLPMetricExporter() })],
+  }),
+)
+const app = buildApp()
+```
 
 ### Rate limits
 
@@ -191,8 +216,8 @@ forwarded_allow_ips = "10.0.0.0/8"
 | `header:<name>` | That header's value. |
 
 A request with no value for a key (no account, no workspace in its path, no such
-header) is not counted by that limit, and `/v1/health`, `/v1/ready`,
-`/v1/metrics` and WebSocket connections are never counted. In code, a key may also be a function of the
+header) is not counted by that limit, and `/v1/health`, `/v1/ready` and
+WebSocket connections are never counted. In code, a key may also be a function of the
 request that returns the value to count by, or nothing to skip the limit:
 
 <CodeGroup>

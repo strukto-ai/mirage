@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 BEARER_PREFIX = "Bearer "
 PUBLIC_PATHS: frozenset[str] = frozenset(
-    {"/v1/health", "/v1/ready", "/v1/metrics", PROTECTED_RESOURCE_PATH}
+    {"/v1/health", "/v1/ready", PROTECTED_RESOURCE_PATH}
 )
 _JWT_SHAPE = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 

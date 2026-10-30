@@ -35,6 +35,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from mirage.server.auth.middleware import PUBLIC_PATHS
 from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
 from mirage.server.env import ENV_RATE_LIMITS
+from mirage.server.metrics import refused
 from mirage.server.paths import mirage_home
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,7 @@ class RateLimitMiddleware:
             )
             wait = max(1, math.ceil(stats.reset_time - time.time()))
             logger.warning("rate-limiting request from %s", value)
+            refused("rate_limit")
             response = JSONResponse(
                 {"detail": "Too Many Requests"},
                 status_code=429,

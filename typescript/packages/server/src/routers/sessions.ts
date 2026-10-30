@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { refused } from '../metrics.ts'
 import { randomBytes } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -66,6 +67,7 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
       }
       const cap = deps.registry.maxSessions
       if (cap !== null && held.length >= cap) {
+        refused('max_sessions')
         return reply.status(429).send({ detail: `workspace is at max_sessions (${String(cap)})` })
       }
       const mounts = req.body.mounts ?? null

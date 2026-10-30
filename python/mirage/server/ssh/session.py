@@ -24,6 +24,7 @@ import asyncssh
 from asyncssh.connection import SSHConnection
 
 from mirage import Workspace
+from mirage.server.metrics import refused
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.constants import ACCOUNT_OPTION, PROFILE_OPTION
 from mirage.server.ssh.stream import (
@@ -225,6 +226,7 @@ async def open_session(
     """
     await ws.ensure_sessions_loaded()
     if max_sessions is not None and len(ws.list_sessions()) >= max_sessions:
+        refused("max_sessions")
         raise OSError(
             errno.EAGAIN, f"workspace is at max_sessions ({max_sessions})"
         )

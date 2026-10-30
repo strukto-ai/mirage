@@ -12,170 +12,155 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-import os
-from collections import Counter
-from collections.abc import Mapping
+import functools
+import weakref
+from collections.abc import Iterable
 
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from opentelemetry import metrics
+from opentelemetry.metrics import CallbackOptions, Counter, Meter, Observation
 
 from mirage.execution.types import ExecutionStatus
-from mirage.server.jobs import ExecutionTable
 from mirage.server.registry import WorkspaceRegistry
 
-logger = logging.getLogger(__name__)
-
-CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+METER_NAME = "mirage.server"
 
 _RUNNING = frozenset({ExecutionStatus.RUNNING, ExecutionStatus.STOPPING})
+_registries: "weakref.WeakSet[WorkspaceRegistry]" = weakref.WeakSet()
 
 
-class MetricsMiddleware:
-    """ASGI middleware counting the responses the server sends, by status
-    code, for ``/v1/metrics``: refusals show as their 403, 429 and 503.
+def register_metrics(registry: WorkspaceRegistry) -> None:
+    """Report ``registry`` through OpenTelemetry's global meter provider.
 
-    Args:
-        app (ASGIApp): downstream ASGI app.
-        responses (Counter[int]): the counts, by status code.
-    """
-
-    def __init__(self, app: ASGIApp, responses: Counter[int]) -> None:
-        self.app = app
-        self.responses = responses
-
-    async def __call__(
-        self, scope: Scope, receive: Receive, send: Send
-    ) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        async def counted(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                self.responses[message["status"]] += 1
-            await send(message)
-
-        await self.app(scope, receive, counted)
-
-
-def render_metrics(
-    registry: WorkspaceRegistry,
-    jobs: ExecutionTable,
-    uptime: float,
-    responses: Mapping[int, int],
-) -> str:
-    """The server's metrics in Prometheus's text format: workspaces,
-    sessions, running jobs, whether it drains, the responses it sent by
-    status code, and its resident memory where the system reports it.
-    Mirrors TypeScript's ``renderMetrics``.
+    Mirage records through the OpenTelemetry API only, so nothing is sent
+    until the process sets up an SDK (``opentelemetry-instrument``, or a
+    ``MeterProvider`` of its own); the exporter it picks decides where
+    the numbers go. Mirrors TypeScript's ``registerMetrics``.
 
     Args:
-        registry (WorkspaceRegistry): the server's workspaces.
-        jobs (ExecutionTable): the lines its API runs.
-        uptime (float): seconds since it started.
-        responses (Mapping[int, int]): the responses it sent, by status
-            code.
+        registry (WorkspaceRegistry): the app's workspaces.
     """
-    lines = [
-        *_metric(
-            "mirage_uptime_seconds",
-            "gauge",
-            "Seconds since the server started.",
-            [("", round(uptime, 3))],
-        ),
-        *_metric(
-            "mirage_workspaces",
-            "gauge",
-            "Workspaces the server holds.",
-            [("", len(registry))],
-        ),
-    ]
-    if registry.max_workspaces is not None:
-        lines += _metric(
-            "mirage_max_workspaces",
-            "gauge",
-            "The most workspaces the server holds at once.",
-            [("", registry.max_workspaces)],
+    _registries.add(registry)
+    _instruments()
+
+
+def refused(reason: str) -> None:
+    """Count a request the server refused for one of its own limits.
+
+    Args:
+        reason (str): rate_limit, max_sessions, max_workspaces or
+            draining.
+    """
+    _instruments().add(1, {"reason": reason})
+
+
+@functools.cache
+def _instruments() -> Counter:
+    """The server's instruments, made once on the global meter provider;
+    the refusal counter."""
+    return _create(metrics.get_meter(METER_NAME))
+
+
+def _create(meter: Meter) -> Counter:
+    """Make the server's instruments on ``meter``.
+
+    Args:
+        meter (Meter): the meter.
+
+    Returns:
+        Counter: the refusal counter.
+    """
+    meter.create_observable_up_down_counter(
+        "mirage.workspace.count",
+        callbacks=[_workspaces],
+        unit="{workspace}",
+        description="Workspaces the server holds.",
+    )
+    meter.create_observable_up_down_counter(
+        "mirage.workspace.limit",
+        callbacks=[_limit],
+        unit="{workspace}",
+        description="The most workspaces the server holds at once.",
+    )
+    meter.create_observable_up_down_counter(
+        "mirage.session.count",
+        callbacks=[_sessions],
+        unit="{session}",
+        description="Sessions across the server's workspaces.",
+    )
+    meter.create_observable_up_down_counter(
+        "mirage.job.running",
+        callbacks=[_running],
+        unit="{job}",
+        description="Lines the server's API is running.",
+    )
+    meter.create_observable_gauge(
+        "mirage.server.draining",
+        callbacks=[_draining],
+        unit="1",
+        description="1 while the server drains for shutdown, else 0.",
+    )
+    return meter.create_counter(
+        "mirage.request.refused",
+        unit="{request}",
+        description="Requests refused for a server limit, by reason.",
+    )
+
+
+def _workspaces(options: CallbackOptions) -> Iterable[Observation]:
+    """The workspaces held.
+
+    Args:
+        options (CallbackOptions): the collection's options.
+    """
+    yield Observation(sum(len(registry) for registry in _registries))
+
+
+def _limit(options: CallbackOptions) -> Iterable[Observation]:
+    """The workspace cap, when one is set.
+
+    Args:
+        options (CallbackOptions): the collection's options.
+    """
+    caps = [r.max_workspaces for r in _registries if r.max_workspaces]
+    if caps:
+        yield Observation(sum(caps))
+
+
+def _sessions(options: CallbackOptions) -> Iterable[Observation]:
+    """The sessions across every workspace held.
+
+    Args:
+        options (CallbackOptions): the collection's options.
+    """
+    yield Observation(
+        sum(
+            len(entry.runner.ws.list_sessions())
+            for registry in _registries
+            for entry in registry.list()
         )
-    lines += [
-        *_metric(
-            "mirage_sessions",
-            "gauge",
-            "Sessions across the server's workspaces.",
-            [
-                (
-                    "",
-                    sum(
-                        len(entry.runner.ws.list_sessions())
-                        for entry in registry.list()
-                    ),
-                )
-            ],
-        ),
-        *_metric(
-            "mirage_jobs_running",
-            "gauge",
-            "Lines the server's API is running.",
-            [("", sum(1 for job in jobs.list() if job.status in _RUNNING))],
-        ),
-        *_metric(
-            "mirage_draining",
-            "gauge",
-            "1 while the server drains for shutdown, else 0.",
-            [("", int(registry.draining))],
-        ),
-        *_metric(
-            "mirage_http_responses_total",
-            "counter",
-            "Responses the server sent, by status code.",
-            [
-                (f'{{code="{code}"}}', count)
-                for code, count in sorted(responses.items())
-            ],
-        ),
-    ]
-    resident = _resident_bytes()
-    if resident is not None:
-        lines += _metric(
-            "process_resident_memory_bytes",
-            "gauge",
-            "Resident memory size in bytes.",
-            [("", resident)],
-        )
-    return "\n".join(lines) + "\n"
+    )
 
 
-def _metric(
-    name: str, kind: str, about: str, samples: list[tuple[str, float]]
-) -> list[str]:
-    """One metric's lines: its help, its type and each sample, a whole
-    number written bare as TypeScript writes it.
+def _running(options: CallbackOptions) -> Iterable[Observation]:
+    """The lines the API is running.
 
     Args:
-        name (str): the metric's name.
-        kind (str): gauge or counter.
-        about (str): its help text.
-        samples (list[tuple[str, float]]): each sample's labels, as
-            written, and value.
+        options (CallbackOptions): the collection's options.
     """
-    return [
-        f"# HELP {name} {about}",
-        f"# TYPE {name} {kind}",
-        *(
-            f"{name}{labels} "
-            f"{int(value) if value == int(value) else repr(value)}"
-            for labels, value in samples
-        ),
-    ]
+    yield Observation(
+        sum(
+            1
+            for registry in _registries
+            for job in registry.jobs.list()
+            if job.status in _RUNNING
+        )
+    )
 
 
-def _resident_bytes() -> int | None:
-    """The process's resident memory, None where ``/proc`` does not
-    report it."""
-    try:
-        with open("/proc/self/statm") as statm:
-            pages = int(statm.read().split()[1])
-    except OSError as exc:
-        logger.debug("no resident memory to report: %s", exc)
-        return None
-    return pages * os.sysconf("SC_PAGE_SIZE")
+def _draining(options: CallbackOptions) -> Iterable[Observation]:
+    """1 while a server drains.
+
+    Args:
+        options (CallbackOptions): the collection's options.
+    """
+    yield Observation(int(any(r.draining for r in _registries)))

@@ -34,7 +34,6 @@ const BEARER_PREFIX = 'Bearer '
 export const PUBLIC_PATHS: ReadonlySet<string> = new Set([
   '/v1/health',
   '/v1/ready',
-  '/v1/metrics',
   PROTECTED_RESOURCE_PATH,
 ])
 const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/

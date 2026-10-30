@@ -1,5 +1,5 @@
 {
- "baseline": 2653,
+ "baseline": 2652,
  "modules": {
   "server/app": {
    "python_only": {
@@ -10,9 +10,8 @@
    }
   },
   "server/metrics": {
-   "python_only": {
-    "MetricsMiddleware": "Starlette counts the responses in an ASGI middleware; Fastify counts them in an onResponse hook buildApp adds.",
-    "_resident_bytes": "Python reads resident memory from /proc, where the system has it; Node reads process.memoryUsage().rss inline."
+   "typescript_only": {
+    "held": "Python makes the instruments once through functools.cache on _instruments; TypeScript keeps the counter it made in this variable."
    }
   },
   "server/rate_limit": {

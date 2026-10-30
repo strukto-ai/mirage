@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { refused } from '../metrics.ts'
 import { randomBytes } from 'node:crypto'
 import { recordStatus } from '@struktoai/mirage-core/workspace/executor/statement'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -158,6 +159,7 @@ export async function openSession(
 ): Promise<void> {
   await ws.ensureSessionsLoaded()
   if (maxSessions !== null && ws.listSessions().length >= maxSessions) {
+    refused('max_sessions')
     throw Object.assign(new Error(`workspace is at max_sessions (${String(maxSessions)})`), {
       code: 'EAGAIN',
     })

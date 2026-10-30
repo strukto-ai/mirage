@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { refused } from '../metrics.ts'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
@@ -210,9 +211,11 @@ async function claimed(
   build: () => Promise<unknown>,
 ): Promise<unknown> {
   if (deps.registry.draining) {
+    refused('draining')
     return answer(reply, 503, { detail: 'server is draining' })
   }
   if (!deps.registry.hasRoom()) {
+    refused('max_workspaces')
     return answer(reply, 503, {
       detail: `server is at max_workspaces (${String(deps.registry.maxWorkspaces)})`,
     })

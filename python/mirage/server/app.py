@@ -20,7 +20,6 @@ import os
 import signal
 import threading
 import time
-from collections import Counter
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -48,7 +47,7 @@ from mirage.server.host_validation import (
     resolve_forwarded_allow_ips,
 )
 from mirage.server.mcp.http import register_mcp_routes
-from mirage.server.metrics import MetricsMiddleware
+from mirage.server.metrics import register_metrics
 from mirage.server.paths import (
     mirage_home,
     pid_file_path,
@@ -393,8 +392,6 @@ def build_app(
             "MIRAGE_AUTH_MODE to enforce authentication."
         )
     app.add_middleware(AuthMiddleware, config=auth)
-    app.state.responses = Counter()
-    app.add_middleware(MetricsMiddleware, responses=app.state.responses)
     proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
     if proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=proxies)
@@ -416,6 +413,7 @@ def build_app(
     )
     app.state.graceful_timeout = resolve_graceful_timeout(graceful_timeout)
     app.state.jobs = app.state.registry.jobs
+    register_metrics(app.state.registry)
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )

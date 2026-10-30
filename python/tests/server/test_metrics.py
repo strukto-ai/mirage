@@ -12,67 +12,99 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections import Counter
+import weakref
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.server import build_app
-from mirage.server.jobs import ExecutionTable
-from mirage.server.metrics import CONTENT_TYPE, render_metrics
+from mirage.server import RateLimit, build_app
+from mirage.server import metrics as metrics_module
+from mirage.server.metrics import _create, register_metrics
 from mirage.server.registry import WorkspaceRegistry
 
 
+class Refusals:
+    def __init__(self) -> None:
+        self.reasons: list[str] = []
+
+    def add(self, amount: int, attributes: dict[str, str]) -> None:
+        self.reasons += [attributes["reason"]] * amount
+
+
+def _read(reader: InMemoryMetricReader) -> dict[str, list[tuple[dict, float]]]:
+    data = reader.get_metrics_data()
+    assert data is not None
+    return {
+        metric.name: [
+            (dict(point.attributes or {}), point.value)
+            for point in metric.data.data_points
+        ]
+        for resource in data.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+    }
+
+
 @pytest.mark.asyncio
-async def test_metrics_read_the_registry_and_the_responses():
+async def test_the_instruments_read_the_registered_registries(monkeypatch):
+    monkeypatch.setattr(metrics_module, "_registries", weakref.WeakSet())
+    reader = InMemoryMetricReader()
+    refusals = _create(MeterProvider(metric_readers=[reader]).get_meter("t"))
     registry = WorkspaceRegistry(max_workspaces=4, idle_grace_seconds=10.0)
     registry.add(Workspace({"/": (RAMVFS(), MountMode.WRITE)}), "w")
-    text = render_metrics(registry, ExecutionTable(), 1.5, {429: 1, 200: 3})
-    own = [
-        line
-        for line in text.splitlines()
-        if not line.startswith(
-            ("process_", "# HELP process_", "# TYPE process_")
-        )
-    ]
-    assert own == [
-        "# HELP mirage_uptime_seconds Seconds since the server started.",
-        "# TYPE mirage_uptime_seconds gauge",
-        "mirage_uptime_seconds 1.5",
-        "# HELP mirage_workspaces Workspaces the server holds.",
-        "# TYPE mirage_workspaces gauge",
-        "mirage_workspaces 1",
-        "# HELP mirage_max_workspaces The most workspaces the server holds at once.",
-        "# TYPE mirage_max_workspaces gauge",
-        "mirage_max_workspaces 4",
-        "# HELP mirage_sessions Sessions across the server's workspaces.",
-        "# TYPE mirage_sessions gauge",
-        "mirage_sessions 1",
-        "# HELP mirage_jobs_running Lines the server's API is running.",
-        "# TYPE mirage_jobs_running gauge",
-        "mirage_jobs_running 0",
-        "# HELP mirage_draining 1 while the server drains for shutdown, else 0.",
-        "# TYPE mirage_draining gauge",
-        "mirage_draining 0",
-        "# HELP mirage_http_responses_total Responses the server sent, by status code.",
-        "# TYPE mirage_http_responses_total counter",
-        'mirage_http_responses_total{code="200"} 3',
-        'mirage_http_responses_total{code="429"} 1',
-    ]
-    assert text.endswith("\n")
+    register_metrics(registry)
+    refusals.add(1, {"reason": "rate_limit"})
+    got = _read(reader)
+    assert got["mirage.workspace.count"] == [({}, 1)]
+    assert got["mirage.workspace.limit"] == [({}, 4)]
+    assert got["mirage.session.count"] == [({}, 1)]
+    assert got["mirage.job.running"] == [({}, 0)]
+    assert got["mirage.server.draining"] == [({}, 0)]
+    assert got["mirage.request.refused"] == [({"reason": "rate_limit"}, 1)]
+    await registry.drain(0)
+    assert _read(reader)["mirage.server.draining"] == [({}, 1)]
     await registry.close_all()
 
 
 @pytest.mark.asyncio
-async def test_the_app_counts_every_response_it_sends():
-    app = build_app(idle_grace_seconds=10.0)
+async def test_the_server_counts_what_it_refuses(monkeypatch):
+    refusals = Refusals()
+    monkeypatch.setattr(metrics_module, "_instruments", lambda: refusals)
+    app = build_app(
+        idle_grace_seconds=10.0,
+        max_sessions=1,
+        max_workspaces=1,
+        rate_limits=[RateLimit("header:x-tenant", "1/minute")],
+    )
+    config = {"config": {"mounts": {"/": {"vfs": "ram", "mode": "write"}}}}
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        assert (await client.get("/v1/workspaces/nope")).status_code == 404
-        r = await client.get("/v1/metrics")
-    assert r.status_code == 200
-    assert r.headers["content-type"] == CONTENT_TYPE
-    assert 'mirage_http_responses_total{code="404"} 1' in r.text
-    assert app.state.responses == Counter({404: 1, 200: 1})
+        busy = {"x-tenant": "a"}
+        await client.get("/v1/workspaces", headers=busy)
+        assert (
+            await client.get("/v1/workspaces", headers=busy)
+        ).status_code == 429
+        r = await client.post("/v1/workspaces", json={**config, "id": "w"})
+        assert r.status_code == 201
+        assert (
+            await client.post("/v1/workspaces", json=config)
+        ).status_code == 503
+        r = await client.post(
+            "/v1/workspaces/w/sessions", json={"session_id": "s"}
+        )
+        assert r.status_code == 429
+        app.state.registry.draining = True
+        assert (
+            await client.post("/v1/workspaces", json=config)
+        ).status_code == 503
+    assert refusals.reasons == [
+        "rate_limit",
+        "max_workspaces",
+        "max_sessions",
+        "draining",
+    ]
+    await app.state.registry.close_all()

@@ -43,6 +43,7 @@ from mirage.server.clone import (
 )
 from mirage.server.constants import MAX_SNAPSHOT_BYTES
 from mirage.server.io_serde import explanation_to_dict
+from mirage.server.metrics import refused
 from mirage.server.multipart import (
     MAX_REQUEST_PART,
     MAX_SNAPSHOT_PART,
@@ -107,8 +108,10 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
     """
     registry = request.app.state.registry
     if registry.draining:
+        refused("draining")
         raise HTTPException(status_code=503, detail="server is draining")
     if not registry.has_room():
+        refused("max_workspaces")
         raise HTTPException(
             status_code=503,
             detail=f"server is at max_workspaces ({registry.max_workspaces})",

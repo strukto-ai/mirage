@@ -16,10 +16,9 @@ import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from mirage.server.metrics import CONTENT_TYPE, render_metrics
 from mirage.server.schemas import HealthResponse
 
 router = APIRouter()
@@ -57,21 +56,6 @@ async def ready(request: Request) -> JSONResponse:
         status = "full"
     return JSONResponse(
         {"status": status}, status_code=200 if status == "ready" else 503
-    )
-
-
-@router.get("/v1/metrics")
-async def metrics(request: Request) -> Response:
-    """The server's metrics, in Prometheus's text format."""
-    state = request.app.state
-    return Response(
-        content=render_metrics(
-            state.registry,
-            state.jobs,
-            time.time() - state.started_at,
-            state.responses,
-        ),
-        media_type=CONTENT_TYPE,
     )
 
 

@@ -17,6 +17,7 @@ import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 import { PUBLIC_PATHS } from './auth/middleware.ts'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
 import { ENV_RATE_LIMITS } from './env.ts'
+import { refused } from './metrics.ts'
 import { mirageHome } from './paths.ts'
 
 const PER: Readonly<Record<string, number>> = { second: 1, minute: 60, hour: 3600, day: 86400 }
@@ -155,6 +156,7 @@ export function registerRateLimits(app: FastifyInstance, rateLimits: readonly Ra
         if (!(e instanceof RateLimiterRes)) throw e
         reply.header('Retry-After', String(Math.max(1, Math.ceil(e.msBeforeNext / 1000))))
         console.warn(`rate-limiting request from ${counted}`)
+        refused('rate_limit')
         await reply.code(429).send({ detail: 'Too Many Requests' })
         return
       }

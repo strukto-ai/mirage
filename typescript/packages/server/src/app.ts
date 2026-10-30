@@ -15,6 +15,7 @@
 import Fastify from 'fastify'
 import { DiskRecordClient } from '@struktoai/mirage-node'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
+import { registerMetrics } from './metrics.ts'
 import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
 import {
   OWNERS_PREFIX,
@@ -143,6 +144,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   const gracefulTimeout = resolveGracefulTimeout(options.gracefulTimeout)
   const rateLimits = resolveRateLimits(options.rateLimits)
   const jobs = registry.jobs
+  const unregisterMetrics = registerMetrics(registry)
   const pidFile = pidFilePath(options.pidFile)
   const proxies = resolveForwardedAllowIps(options.forwardedAllowIps)
   // A drain serves reads and running lines to the end; it refuses new
@@ -151,11 +153,6 @@ export function buildApp(options: BuildAppOptions = {}) {
     logger: false,
     trustProxy: proxies.includes('*') ? true : proxies.length > 0 ? proxies : false,
     return503OnClosing: false,
-  })
-  const responses = new Map<number, number>()
-  app.addHook('onResponse', (_req, reply, done) => {
-    responses.set(reply.statusCode, (responses.get(reply.statusCode) ?? 0) + 1)
-    done()
   })
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   app.addHook('onRequest', (request, reply, done) => {
@@ -181,7 +178,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
   })
-  registerHealthRoutes(app, { registry, jobs, startedAt, exit: exitFn, responses })
+  registerHealthRoutes(app, { registry, startedAt, exit: exitFn })
   registerOAuthRoutes(app, { auth: authConfig })
   registerWorkspacesRoutes(app, { registry, stateRoot, snapshotStore: options.snapshotStore })
   registerSessionsRoutes(app, { registry })
@@ -219,6 +216,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     })
   }
   app.addHook('onClose', async () => {
+    unregisterMetrics()
     if (ssh.listener !== null) await ssh.listener.close()
     try {
       await mcp.close()

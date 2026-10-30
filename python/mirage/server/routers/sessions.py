@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict
 from mirage.config import _load_profile_policy
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import SessionProfile
+from mirage.server.metrics import refused
 from mirage.server.routers.vfs import require_entry, session_of
 from mirage.server.schemas import CancelLinesResponse, KillJobsResponse
 from mirage.workspace.session import SessionState
@@ -65,6 +66,7 @@ async def create_session(
             )
         cap = request.app.state.registry.max_sessions
         if cap is not None and len(held) >= cap:
+            refused("max_sessions")
             raise HTTPException(
                 status_code=429, detail=f"workspace is at max_sessions ({cap})"
             )

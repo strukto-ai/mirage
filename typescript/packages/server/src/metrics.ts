@@ -12,82 +12,117 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type Counter, type Meter, metrics, type ObservableResult } from '@opentelemetry/api'
 import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
-import type { ExecutionTable } from './jobs.ts'
 import type { WorkspaceRegistry } from './registry.ts'
 
-export const CONTENT_TYPE = 'text/plain; version=0.0.4; charset=utf-8'
+export const METER_NAME = 'mirage.server'
 
 const RUNNING: ReadonlySet<ExecutionStatus> = new Set([
   ExecutionStatus.RUNNING,
   ExecutionStatus.STOPPING,
 ])
+const registries = new Set<WorkspaceRegistry>()
+let held: Counter | null = null
 
 /**
- * The server's metrics in Prometheus's text format: workspaces, sessions,
- * running jobs, whether it drains, the responses it sent by status code,
- * and its resident memory. Mirrors Python's `render_metrics`.
+ * Report `registry` through OpenTelemetry's global meter provider, until
+ * the returned function is called as the app closes. Mirage records through
+ * the OpenTelemetry API only, so nothing is sent until the process sets up
+ * an SDK (a `MeterProvider` registered before the app is built); the
+ * exporter it picks decides where the numbers go. Mirrors Python's
+ * `register_metrics`.
  */
-export function renderMetrics(
-  registry: WorkspaceRegistry,
-  jobs: ExecutionTable,
-  uptime: number,
-  responses: ReadonlyMap<number, number>,
-): string {
-  const lines = [
-    ...metric('mirage_uptime_seconds', 'gauge', 'Seconds since the server started.', [
-      ['', Math.round(uptime * 1000) / 1000],
-    ]),
-    ...metric('mirage_workspaces', 'gauge', 'Workspaces the server holds.', [
-      ['', registry.size()],
-    ]),
-  ]
-  if (registry.maxWorkspaces !== null) {
-    lines.push(
-      ...metric('mirage_max_workspaces', 'gauge', 'The most workspaces the server holds at once.', [
-        ['', registry.maxWorkspaces],
-      ]),
-    )
+export function registerMetrics(registry: WorkspaceRegistry): () => void {
+  registries.add(registry)
+  instruments()
+  return () => {
+    registries.delete(registry)
   }
-  const sessions = registry
-    .list()
-    .reduce((sum, entry) => sum + entry.runner.ws.listSessions().length, 0)
-  const running = jobs.list().filter((job) => RUNNING.has(job.status)).length
-  lines.push(
-    ...metric('mirage_sessions', 'gauge', "Sessions across the server's workspaces.", [
-      ['', sessions],
-    ]),
-    ...metric('mirage_jobs_running', 'gauge', "Lines the server's API is running.", [
-      ['', running],
-    ]),
-    ...metric('mirage_draining', 'gauge', '1 while the server drains for shutdown, else 0.', [
-      ['', registry.draining ? 1 : 0],
-    ]),
-    ...metric(
-      'mirage_http_responses_total',
-      'counter',
-      'Responses the server sent, by status code.',
-      [...responses.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([code, count]) => [`{code="${String(code)}"}`, count]),
-    ),
-    ...metric('process_resident_memory_bytes', 'gauge', 'Resident memory size in bytes.', [
-      ['', process.memoryUsage().rss],
-    ]),
-  )
-  return lines.join('\n') + '\n'
 }
 
-/** One metric's lines: its help, its type and each sample's labels and value. */
-function metric(
-  name: string,
-  kind: string,
-  about: string,
-  samples: readonly (readonly [string, number])[],
-): string[] {
-  return [
-    `# HELP ${name} ${about}`,
-    `# TYPE ${name} ${kind}`,
-    ...samples.map(([labels, value]) => `${name}${labels} ${String(value)}`),
-  ]
+/**
+ * Count a request the server refused for one of its own limits:
+ * rate_limit, max_sessions, max_workspaces or draining.
+ */
+export function refused(reason: string): void {
+  instruments().add(1, { reason })
+}
+
+/** The server's instruments, made once on the global meter provider; the refusal counter. */
+function instruments(): Counter {
+  held ??= create(metrics.getMeter(METER_NAME))
+  return held
+}
+
+/** Make the server's instruments on `meter`, answering the refusal counter. */
+export function create(meter: Meter): Counter {
+  meter
+    .createObservableUpDownCounter('mirage.workspace.count', {
+      unit: '{workspace}',
+      description: 'Workspaces the server holds.',
+    })
+    .addCallback(workspaces)
+  meter
+    .createObservableUpDownCounter('mirage.workspace.limit', {
+      unit: '{workspace}',
+      description: 'The most workspaces the server holds at once.',
+    })
+    .addCallback(limit)
+  meter
+    .createObservableUpDownCounter('mirage.session.count', {
+      unit: '{session}',
+      description: "Sessions across the server's workspaces.",
+    })
+    .addCallback(sessions)
+  meter
+    .createObservableUpDownCounter('mirage.job.running', {
+      unit: '{job}',
+      description: "Lines the server's API is running.",
+    })
+    .addCallback(running)
+  meter
+    .createObservableGauge('mirage.server.draining', {
+      unit: '1',
+      description: '1 while the server drains for shutdown, else 0.',
+    })
+    .addCallback(draining)
+  return meter.createCounter('mirage.request.refused', {
+    unit: '{request}',
+    description: 'Requests refused for a server limit, by reason.',
+  })
+}
+
+/** The workspaces held. */
+function workspaces(result: ObservableResult): void {
+  result.observe([...registries].reduce((sum, registry) => sum + registry.size(), 0))
+}
+
+/** The workspace cap, when one is set. */
+function limit(result: ObservableResult): void {
+  const caps = [...registries].flatMap((r) => (r.maxWorkspaces === null ? [] : [r.maxWorkspaces]))
+  if (caps.length > 0) result.observe(caps.reduce((sum, cap) => sum + cap, 0))
+}
+
+/** The sessions across every workspace held. */
+function sessions(result: ObservableResult): void {
+  let count = 0
+  for (const registry of registries) {
+    for (const entry of registry.list()) count += entry.runner.ws.listSessions().length
+  }
+  result.observe(count)
+}
+
+/** The lines the API is running. */
+function running(result: ObservableResult): void {
+  let count = 0
+  for (const registry of registries) {
+    count += registry.jobs.list().filter((job) => RUNNING.has(job.status)).length
+  }
+  result.observe(count)
+}
+
+/** 1 while a server drains. */
+function draining(result: ObservableResult): void {
+  result.observe([...registries].some((r) => r.draining) ? 1 : 0)
 }
