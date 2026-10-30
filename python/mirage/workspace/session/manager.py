@@ -40,7 +40,11 @@ from mirage.workspace.session.approval import (
     plan_reset,
     transact_approvals,
 )
-from mirage.workspace.session.resolve import apply_profile, narrow
+from mirage.workspace.session.resolve import (
+    apply_profile,
+    narrow,
+    narrowing_of,
+)
 from mirage.workspace.session.session import (
     SessionState,
     vars_from_entries,
@@ -324,6 +328,71 @@ class SessionManager(SessionOwner):
             session_id (str): the registered session identity.
         """
         return self.get(session_id).incarnation
+
+    async def activate(self, session_id: str) -> str:
+        """Establish the stored identity a new line or direct call captures.
+
+        Args:
+            session_id (str): the session the new caller will use.
+        """
+        await self.ensure_loaded()
+        async with self._locks[session_id]:
+            session = self.get(session_id)
+            await self._flush_one(session)
+            incarnation = session.incarnation
+            if incarnation is None:
+                raise ApprovalUnavailable("session_invalid")
+            await self._refresh_approval(session, incarnation)
+            return incarnation
+
+    async def refresh_approval(
+        self, session_id: str, incarnation: str
+    ) -> None:
+        """Refresh policy facts under the identity an existing caller captured.
+
+        Args:
+            session_id (str): the registered session.
+            incarnation (str): the caller's immutable session identity.
+        """
+        await self.ensure_loaded()
+        async with self._locks[session_id]:
+            await self._refresh_approval(self.get(session_id), incarnation)
+
+    async def _refresh_approval(
+        self, session: SessionState, incarnation: str
+    ) -> None:
+        sid = session.session_id
+        if sid in self._resets:
+            raise ApprovalUnavailable("session_transition_pending")
+        current = await self._store.get(sid)
+        if current is None:
+            raise ApprovalUnavailable("session_disappeared")
+        if current.get("closed") is not None:
+            raise ApprovalUnavailable("session_closed")
+        if (
+            current.get("incarnation") != incarnation
+            or session.incarnation != incarnation
+        ):
+            raise ApprovalUnavailable("session_replaced")
+        local = authority_fields(session.to_dict())
+        previous = authority_fields(
+            self._persisted.get(sid, session.to_dict())
+        )
+        if local != previous:
+            proposed = {**current, **local}
+            reply = await transact_approvals(
+                self._store,
+                proposed,
+                {
+                    "op": "session_write",
+                    "baseline": previous,
+                    "local": local,
+                },
+                incarnation,
+            )
+            current = reply.fields
+        _adopt_approval_fields(session, current)
+        self._persisted[sid] = copy.deepcopy(current)
 
     async def approval_event(
         self,
@@ -716,7 +785,7 @@ class SessionManager(SessionOwner):
             candidate = copy.copy(session)
             narrow(candidate, compiled)
             await self._flush_one(candidate)
-            narrow(session, compiled)
+            narrow(session, narrowing_of(candidate))
             session.generation = candidate.generation
             session.approval_state = candidate.approval_state
             session.incarnation = candidate.incarnation

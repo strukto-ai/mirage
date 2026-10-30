@@ -191,6 +191,29 @@ describe('acknowledged approval storage', () => {
 })
 
 describe('session lifecycle fences', () => {
+  it('publishes policy during refresh without publishing unconfirmed scratch state', async () => {
+    const store = new RAMNamespaceStore()
+    const manager = new SessionManager('s', store)
+    const epoch = await manager.activate('s')
+    const session = manager.get('s')
+    seedVar(session, 'UNCONFIRMED', 'pending')
+    session.commands = { allow: [], ask: [], deny: [] }
+    await manager.refreshApproval('s', epoch)
+    expect(await store.get('s')).toMatchObject({ commands: { allow: [] } })
+    expect(await store.get('s')).not.toMatchObject({ env: { UNCONFIRMED: 'pending' } })
+    expect(session.env.UNCONFIRMED).toBe('pending')
+  })
+
+  it('does not activate a clean stale session after closure', async () => {
+    const store = new RAMNamespaceStore()
+    const manager = new SessionManager('default', store)
+    manager.create('s')
+    await manager.activate('s')
+    const old = new SessionManager('default', store)
+    await old.ensureLoaded()
+    await manager.close('s')
+    await expect(old.activate('s')).rejects.toThrow('session_closed')
+  })
   it('fences old writers and explicitly recreates with a fresh identity', async () => {
     const store = new RAMNamespaceStore()
     const manager = new SessionManager('default', store)

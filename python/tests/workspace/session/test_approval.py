@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from mirage.policy.errors import ApprovalUnavailable
+from mirage.policy.types import AdmissionRules
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import RecordNamespaceStore
 from mirage.workspace.record.disk import DiskRecordClient
@@ -211,6 +212,34 @@ async def test_unqualified_store_cannot_create_approval_authority():
             store, SessionState(session_id="s").to_dict(), question(), None
         )
     assert await store.get("s") is None
+
+
+@pytest.mark.asyncio
+async def test_gate_refresh_publishes_policy_without_publishing_unconfirmed_scratch():
+    store = RAMNamespaceStore()
+    manager = SessionManager("s", store)
+    epoch = await manager.activate("s")
+    session = manager.get("s")
+    seed_var(session, "UNCONFIRMED", "pending")
+    session.commands = AdmissionRules(allow=())
+    await manager.refresh_approval("s", epoch)
+    stored = await store.get("s")
+    assert stored["commands"]["allow"] == []
+    assert "UNCONFIRMED" not in stored["env"]
+    assert session.env["UNCONFIRMED"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_a_clean_stale_session_cannot_activate_after_closure():
+    store = RAMNamespaceStore()
+    manager = SessionManager("default", store)
+    manager.create("s")
+    await manager.activate("s")
+    old = SessionManager("default", store)
+    await old.ensure_loaded()
+    await manager.close("s")
+    with pytest.raises(ApprovalUnavailable, match="session_closed"):
+        await old.activate("s")
 
 
 @pytest.mark.asyncio

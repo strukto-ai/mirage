@@ -97,7 +97,7 @@ def test_shared_approval_transition_transcripts():
             assert stream.done()
             result = json.loads(stream.finish())
             assert result["kind"] == step["kind"], (case["name"], index)
-            for field in ("fresh", "status"):
+            for field in ("fresh", "status", "matched"):
                 if field in step:
                     assert result[field] == step[field]
             for field in ("records", "claims"):

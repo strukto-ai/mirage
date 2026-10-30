@@ -33,15 +33,17 @@ import type {
 const RULE: CommandRule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
 const ASK: Ask = { kind: 'ask', reason: 'sign-off', rule: RULE }
 
-const ledgerSchema = z.object({
-  version: z.number(),
-  incarnation: z.string(),
-  revision: z.number(),
-  records: z.array(z.json()),
-  claims: z.array(z.json()),
-  receipts: z.array(z.json()),
-  retired: z.array(z.string()).default([]),
-})
+const ledgerSchema = z
+  .object({
+    version: z.number(),
+    incarnation: z.string(),
+    revision: z.number(),
+    records: z.array(z.json()),
+    claims: z.array(z.json()),
+    receipts: z.array(z.json()),
+    retired: z.array(z.string()).default([]),
+  })
+  .passthrough()
 const approvalCorpusSchema = z.object({
   cases: z.array(
     z.object({
@@ -54,6 +56,7 @@ const approvalCorpusSchema = z.object({
           storage: z.string().optional(),
           stored: z.boolean().optional(),
           fresh: z.boolean().optional(),
+          matched: z.boolean().optional(),
           status: z.string().optional(),
           records: z.number().optional(),
           claims: z.number().optional(),
@@ -117,11 +120,13 @@ it('runs the shared approval transition transcripts through Wasm', async () => {
           .object({
             kind: z.string(),
             fresh: z.boolean().optional(),
+            matched: z.boolean().optional(),
             status: z.string().optional(),
           })
           .parse(JSON.parse(new TextDecoder().decode(stream.finish())))
         expect(result.kind, `${scenario.name} step ${index}`).toBe(step.kind)
         if (step.fresh !== undefined) expect(result.fresh).toBe(step.fresh)
+        if (step.matched !== undefined) expect(result.matched).toBe(step.matched)
         if (step.status !== undefined) expect(result.status).toBe(step.status)
         if (step.records !== undefined) expect(ledger.records).toHaveLength(step.records)
         if (step.claims !== undefined) expect(ledger.claims).toHaveLength(step.claims)

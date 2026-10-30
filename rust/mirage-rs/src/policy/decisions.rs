@@ -105,6 +105,14 @@ struct Claim {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct HolderState {
+    owner: Owner,
+    holder: Holder,
+    active: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum ResultValue {
     Allow,
@@ -125,6 +133,9 @@ enum ResultValue {
     },
     Rebased {
         authority: serde_json::Map<String, serde_json::Value>,
+    },
+    Matches {
+        matched: bool,
     },
 }
 
@@ -152,6 +163,8 @@ struct Ledger {
     #[serde(default)]
     claims: Vec<Claim>,
     #[serde(default)]
+    holders: Vec<HolderState>,
+    #[serde(default)]
     receipts: Vec<Receipt>,
     #[serde(default)]
     retired: Vec<Ticket>,
@@ -160,6 +173,13 @@ struct Ledger {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Event {
+    Validate {
+        owner: Owner,
+        holders: Vec<Holder>,
+    },
+    Inspect {
+        query: Box<Inspection>,
+    },
     Resolve {
         question: Box<Record>,
         rules: Vec<Rule>,
@@ -204,6 +224,20 @@ enum Event {
     Reset {
         incarnation: Incarnation,
         closed: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Inspection {
+    Covers {
+        record: Box<Record>,
+        rule: Rule,
+        question: Box<Record>,
+    },
+    Encloses {
+        scope: Occurrence,
+        occurrence: Occurrence,
     },
 }
 
@@ -322,6 +356,110 @@ fn invalidate(ledger: &mut Ledger) {
         .extend(ledger.records.iter().map(|r| r.id.clone()));
     ledger.records.clear();
     ledger.claims.clear();
+    for holder in &mut ledger.holders {
+        holder.active = false;
+    }
+}
+
+fn holder_active(ledger: &Ledger, owner: &Owner, holder: &Holder) -> Option<bool> {
+    ledger
+        .holders
+        .iter()
+        .find(|entry| entry.owner == *owner && entry.holder == *holder)
+        .map(|entry| entry.active)
+}
+
+fn activate_holder(ledger: &mut Ledger, owner: &Owner, holder: &Holder) {
+    if holder_active(ledger, owner, holder).is_none() {
+        ledger.holders.push(HolderState {
+            owner: owner.clone(),
+            holder: holder.clone(),
+            active: true,
+        });
+    }
+}
+
+fn retire_holder(ledger: &mut Ledger, owner: &Owner, holder: &Holder) {
+    if let Some(entry) = ledger
+        .holders
+        .iter_mut()
+        .find(|entry| entry.owner == *owner && entry.holder == *holder)
+    {
+        entry.active = false;
+    }
+}
+
+fn stale_holder(ledger: &Ledger, event: &Event) -> bool {
+    match event {
+        Event::Resolve {
+            claimant: Some(reader),
+            ..
+        }
+        | Event::Answer {
+            claimant: Some(reader),
+            ..
+        } => std::iter::once(&reader.holder)
+            .chain(&reader.lineage)
+            .any(|holder| holder_active(ledger, &reader.owner, holder) == Some(false)),
+        Event::Validate { owner, holders } => holders
+            .iter()
+            .any(|holder| holder_active(ledger, owner, holder) == Some(false)),
+        Event::Split {
+            owner,
+            lineage,
+            job,
+            ..
+        } => std::iter::once(job)
+            .chain(lineage)
+            .any(|holder| holder_active(ledger, owner, holder) == Some(false)),
+        _ => false,
+    }
+}
+
+fn valid_reader(reader: &Claimant) -> bool {
+    !reader.owner.0.is_empty()
+        && !reader.holder.0.is_empty()
+        && reader.lineage.len() <= ENTRY_LIMIT
+        && reader.lineage.iter().all(|holder| !holder.0.is_empty())
+}
+
+fn valid_identities(event: &Event) -> bool {
+    match event {
+        Event::Resolve {
+            claimant: Some(reader),
+            ..
+        }
+        | Event::Answer {
+            claimant: Some(reader),
+            ..
+        } => valid_reader(reader),
+        Event::Validate { owner, holders } => {
+            !owner.0.is_empty()
+                && holders.len() <= ENTRY_LIMIT
+                && holders.iter().all(|holder| !holder.0.is_empty())
+        }
+        Event::Split {
+            owner,
+            lineage,
+            job,
+            ..
+        } => {
+            !owner.0.is_empty()
+                && !job.0.is_empty()
+                && lineage.len() <= ENTRY_LIMIT
+                && lineage.iter().all(|holder| !holder.0.is_empty())
+        }
+        Event::Release { owner, holder } | Event::Revoke { owner, holder } => {
+            !owner.0.is_empty() && !holder.0.is_empty()
+        }
+        Event::HandUp {
+            owner,
+            holder,
+            parent,
+        } => !owner.0.is_empty() && !holder.0.is_empty() && !parent.0.is_empty(),
+        Event::Recover { owner } => !owner.0.is_empty(),
+        _ => true,
+    }
 }
 
 fn apply(
@@ -330,6 +468,17 @@ fn apply(
     current_facts: Option<&serde_json::Value>,
 ) -> Result<ResultValue, StreamError> {
     match event {
+        Event::Validate { .. } => Ok(ResultValue::Allow),
+        Event::Inspect { query } => Ok(ResultValue::Matches {
+            matched: match query.as_ref() {
+                Inspection::Covers {
+                    record,
+                    rule,
+                    question,
+                } => covers(record, rule, question),
+                Inspection::Encloses { scope, occurrence } => encloses(scope, occurrence),
+            },
+        }),
         Event::Resolve {
             question,
             rules,
@@ -361,6 +510,11 @@ fn apply(
                 return Ok(ResultValue::Deny { reason });
             }
             if let Some(index) = answered.iter().position(Option::is_none) {
+                if !explain {
+                    if let Some(reader) = claimant {
+                        activate_holder(ledger, &reader.owner, &reader.holder);
+                    }
+                }
                 let rule = &rules[index];
                 if let Some(record) = ledger.records.iter().find(|r| {
                     r.session_id == question.session_id
@@ -393,6 +547,9 @@ fn apply(
                 });
             }
             if !explain {
+                if let Some(reader) = claimant {
+                    activate_holder(ledger, &reader.owner, &reader.holder);
+                }
                 let once: Vec<_> = answered
                     .into_iter()
                     .flatten()
@@ -431,6 +588,11 @@ fn apply(
             };
             record.note = note.clone();
             let record = record.clone();
+            if record.outcome == Some(Outcome::Allow) {
+                if let Some(reader) = claimant {
+                    activate_holder(ledger, &reader.owner, &reader.holder);
+                }
+            }
             if record.outcome == Some(Outcome::Allow) && record.scope == Scope::Once {
                 if let Some(reader) = claimant {
                     claim(ledger, reader, &record);
@@ -439,6 +601,7 @@ fn apply(
             Ok(ResultValue::Answered { record })
         }
         Event::Release { owner, holder } | Event::Revoke { owner, holder } => {
+            retire_holder(ledger, owner, holder);
             let ids: Vec<_> = ledger
                 .claims
                 .iter()
@@ -461,6 +624,16 @@ fn apply(
             if holder == parent {
                 return Err(error("a holder cannot be its own parent"));
             }
+            if holder_active(ledger, owner, parent) == Some(false) {
+                return Ok(ResultValue::Blocked {
+                    status: "stale_holder".into(),
+                });
+            }
+            if holder_active(ledger, owner, holder) != Some(true) {
+                return Ok(ResultValue::Applied);
+            }
+            activate_holder(ledger, owner, parent);
+            retire_holder(ledger, owner, holder);
             let claims: Vec<_> = ledger
                 .claims
                 .iter()
@@ -486,6 +659,12 @@ fn apply(
             job,
             scope,
         } => {
+            if lineage
+                .iter()
+                .any(|holder| holder_active(ledger, owner, holder) == Some(true))
+            {
+                activate_holder(ledger, owner, job);
+            }
             let claims: Vec<_> = ledger
                 .claims
                 .iter()
@@ -509,6 +688,11 @@ fn apply(
             Ok(ResultValue::Applied)
         }
         Event::Recover { owner } => {
+            for holder in &mut ledger.holders {
+                if holder.owner == *owner {
+                    holder.active = false;
+                }
+            }
             let ids: Vec<_> = ledger
                 .claims
                 .iter()
@@ -538,6 +722,7 @@ fn apply(
                 protected: ledger.protected,
                 records: Vec::new(),
                 claims: Vec::new(),
+                holders: Vec::new(),
                 receipts: Vec::new(),
                 retired: Vec::new(),
             };
@@ -586,6 +771,7 @@ fn validate(ledger: &Ledger) -> Result<(), StreamError> {
     }
     if ledger.records.len() > ENTRY_LIMIT
         || ledger.claims.len() > ENTRY_LIMIT
+        || ledger.holders.len() > ENTRY_LIMIT
         || ledger.receipts.len() >= ENTRY_LIMIT
         || ledger.retired.len() > ENTRY_LIMIT
     {
@@ -598,11 +784,20 @@ fn validate(ledger: &Ledger) -> Result<(), StreamError> {
             return Err(error("duplicate or empty request ticket"));
         }
     }
-    if ledger
-        .claims
-        .iter()
-        .any(|c| !ids.contains(&c.decision) || c.owner.0.is_empty() || c.holder.0.is_empty())
-    {
+    let mut holders = std::collections::HashSet::new();
+    let mut active = std::collections::HashSet::new();
+    for holder in &ledger.holders {
+        let key = (holder.owner.0.as_str(), holder.holder.0.as_str());
+        if key.0.is_empty() || key.1.is_empty() || !holders.insert(key) {
+            return Err(error("duplicate or empty holder identity"));
+        }
+        if holder.active {
+            active.insert(key);
+        }
+    }
+    if ledger.claims.iter().any(|c| {
+        !ids.contains(&c.decision) || !active.contains(&(c.owner.0.as_str(), c.holder.0.as_str()))
+    }) {
         return Err(error("invalid claim reference"));
     }
     Ok(())
@@ -646,9 +841,18 @@ impl Decisions {
             facts,
             expected_incarnation,
         } = serde_json::from_slice(bytes).map_err(|_| error("invalid event"))?;
+        if !valid_identities(&event) {
+            return Err(error("empty or excessive caller identities"));
+        }
         validate(&ledger)?;
-        ledger.protected |=
-            !ledger.records.is_empty() || !ledger.claims.is_empty() || !ledger.retired.is_empty();
+        if matches!(event, Event::Inspect { .. }) {
+            self.state = State::Complete(apply(&mut ledger, &event, None)?);
+            return Ok(());
+        }
+        ledger.protected |= !ledger.records.is_empty()
+            || !ledger.claims.is_empty()
+            || !ledger.holders.is_empty()
+            || !ledger.retired.is_empty();
         if matches!(&event, Event::Resolve { rules, explain: false, .. } if !rules.is_empty()) {
             ledger.protected = true;
         }
@@ -664,7 +868,7 @@ impl Decisions {
             });
             return Ok(());
         }
-        if matches!(event, Event::Resolve { .. })
+        if matches!(event, Event::Resolve { .. } | Event::Validate { .. })
             && facts
                 .as_ref()
                 .is_some_and(|facts| facts.expected != facts.current)
@@ -699,12 +903,52 @@ impl Decisions {
             };
             return Ok(());
         }
+        if stale_holder(&ledger, &event) {
+            self.state = State::Complete(ResultValue::Blocked {
+                status: "stale_holder".into(),
+            });
+            return Ok(());
+        }
+        let unchanged = match &event {
+            Event::Release { owner, holder } | Event::Revoke { owner, holder } => {
+                holder_active(&ledger, owner, holder) != Some(true)
+            }
+            Event::HandUp { owner, holder, .. } => {
+                holder_active(&ledger, owner, holder) != Some(true)
+            }
+            Event::Split { owner, lineage, .. } => !lineage
+                .iter()
+                .any(|holder| holder_active(&ledger, owner, holder) == Some(true)),
+            Event::Recover { owner } => !ledger
+                .holders
+                .iter()
+                .any(|holder| holder.owner == *owner && holder.active),
+            Event::Invalidate => {
+                ledger.records.is_empty() && !ledger.holders.iter().any(|holder| holder.active)
+            }
+            _ => false,
+        };
+        if unchanged {
+            self.state = State::Complete(ResultValue::Applied);
+            return Ok(());
+        }
+        if let Event::Validate { owner, holders } = &event {
+            if !holders
+                .iter()
+                .any(|holder| holder_active(&ledger, owner, holder) == Some(true))
+            {
+                self.state = State::Complete(ResultValue::Allow);
+                return Ok(());
+            }
+        }
         let result = apply(
             &mut ledger,
             &event,
             facts.as_ref().map(|facts| &facts.current),
         )?;
-        if matches!(event, Event::Resolve { explain: true, .. }) {
+        if matches!(event, Event::Resolve { explain: true, .. })
+            || matches!(result, ResultValue::Blocked { .. })
+        {
             self.state = State::Complete(result);
             return Ok(());
         }

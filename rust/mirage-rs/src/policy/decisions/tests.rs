@@ -46,7 +46,7 @@ fn shared_approval_lifecycle_transcripts() {
                 "{} step {index}: {result}",
                 case["name"]
             );
-            for field in ["fresh", "status"] {
+            for field in ["fresh", "status", "matched"] {
                 if !step[field].is_null() {
                     assert_eq!(result[field], step[field], "{} step {index}", case["name"]);
                 }

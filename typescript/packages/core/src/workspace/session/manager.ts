@@ -20,7 +20,7 @@ import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import { applyProfile, narrow } from './resolve.ts'
+import { applyProfile, narrow, narrowingOf } from './resolve.ts'
 import { ApprovalUnavailable } from '../../policy/errors.ts'
 import {
   approvalSession,
@@ -209,7 +209,7 @@ export class SessionManager extends SessionOwner {
       const candidate = SessionState.fromDict(session.toDict() as StoredSession)
       narrow(candidate, compiled)
       await this.flushOne(candidate)
-      narrow(session, compiled)
+      narrow(session, narrowingOf(candidate))
       session.generation = candidate.generation
       session.approvalState = candidate.approvalState
       session.incarnation = candidate.incarnation
@@ -274,6 +274,59 @@ export class SessionManager extends SessionOwner {
 
   incarnationOf(sessionId: string): string | null {
     return this.get(sessionId).incarnation
+  }
+
+  /** Establish the stored identity a new line or direct call captures. */
+  async activate(sessionId: string): Promise<string> {
+    await this.ensureLoaded()
+    return this.persistLock.withLock(sessionId, async () => {
+      const session = this.get(sessionId)
+      await this.flushOne(session)
+      const incarnation = session.incarnation
+      if (incarnation === null) throw new ApprovalUnavailable('session_invalid')
+      await this.refreshApprovalLocked(session, incarnation)
+      return incarnation
+    })
+  }
+
+  /** Refresh policy facts under the identity an existing caller captured. */
+  async refreshApproval(sessionId: string, incarnation: string): Promise<void> {
+    await this.ensureLoaded()
+    return this.persistLock.withLock(sessionId, () =>
+      this.refreshApprovalLocked(this.get(sessionId), incarnation),
+    )
+  }
+
+  private async refreshApprovalLocked(session: SessionState, incarnation: string): Promise<void> {
+    const sid = session.sessionId
+    if (this.resets.has(sid)) throw new ApprovalUnavailable('session_transition_pending')
+    let current = await this.sessionStore.get(sid)
+    if (current === null) throw new ApprovalUnavailable('session_disappeared')
+    if (current.closed != null) throw new ApprovalUnavailable('session_closed')
+    if (current.incarnation !== incarnation || session.incarnation !== incarnation)
+      throw new ApprovalUnavailable('session_replaced')
+    const local = authorityFields(session.toDict())
+    const baseline = this.persisted.get(sid)
+    const previous = authorityFields(
+      baseline === undefined
+        ? session.toDict()
+        : z.record(z.string(), z.unknown()).parse(JSON.parse(baseline)),
+    )
+    if (JSON.stringify(local) !== JSON.stringify(previous)) {
+      const reply = await transactApprovals(
+        this.sessionStore,
+        { ...current, ...local },
+        {
+          op: 'session_write',
+          baseline: previous,
+          local,
+        },
+        incarnation,
+      )
+      current = reply.fields
+    }
+    adoptApprovalFields(session, current)
+    this.persisted.set(sid, JSON.stringify(current))
   }
 
   async approvalEvent(
