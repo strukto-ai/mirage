@@ -131,9 +131,10 @@ export const OPERAND = ''
 // RETURN_IN_ORDER too, so `join a b c -a 3` refuses the extra operand before
 // the bad file number, and a missing-operand line names the line's last word
 // rather than its last operand: `join a.txt -t ,` is missing an operand after
-// ',' (coreutils 9.7). Info-ZIP's unzip reads its words in order too: -x takes
-// every operand after it, up to a -d (UnZip 6.00).
-export const IN_ORDER_OPERANDS: ReadonlySet<string> = new Set(['jq', 'join', 'unzip'])
+// ',' (coreutils 9.7). uniq's loop does as well: `uniq a b c -f x` refuses the
+// extra operand, `uniq -f x a b c` the count. Info-ZIP's unzip reads its words
+// in order too: -x takes every operand after it, up to a -d (UnZip 6.00).
+export const IN_ORDER_OPERANDS: ReadonlySet<string> = new Set(['jq', 'join', 'uniq', 'unzip'])
 
 // The option words an IN_ORDER_OPERANDS program's own loop reads by their
 // spelling, so the tape keeps each one where it was typed, as [SPELLED, word]

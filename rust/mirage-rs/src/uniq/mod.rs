@@ -1,8 +1,10 @@
+mod options;
+
 use serde::Deserialize;
 
-use crate::number;
 use crate::records::{Records, Take};
-use crate::{Stream, StreamError, latin1_bytes, parse_config};
+use crate::{Stream, StreamError, parse_config};
+use options::Keys;
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -20,63 +22,22 @@ struct Config {
     count: bool,
     repeated: bool,
     unique: bool,
-    /// `-f`, `-s` and `-w` as typed, `[name, value]` in the order typed,
-    /// each value one character per byte.
+    /// `-f`, `-s` and `-w` and the operands as typed, `[name, value]` in
+    /// the order typed, an operand named `""`, each value one character
+    /// per byte.
     #[serde(default)]
-    counts: Vec<(String, String)>,
+    typed: Vec<(String, String)>,
     ignore_case: bool,
     all_repeated: Option<Method>,
     group: Option<Method>,
     zero_terminated: bool,
 }
 
-/// What the key leaves out and keeps: `-f`, `-s` and `-w`.
-#[derive(Default)]
-struct Keys {
-    skip_fields: usize,
-    skip_chars: usize,
-    check_chars: Option<usize>,
-}
-
-/// `-f`, `-s` and `-w` as GNU uniq 9.7 reads each one typed: a whole
-/// decimal past blanks, at most one sign, refused below 0, a count past
-/// `usize` the largest. The last of each counts.
-fn keys(counts: &[(String, String)]) -> Result<Keys, StreamError> {
-    let mut keys = Keys::default();
-    for (name, text) in counts {
-        let raw = latin1_bytes(text)
-            .ok_or_else(|| StreamError::new("a uniq count holds a character past U+00FF"))?;
-        let what = match name.as_str() {
-            "skip_fields" => "fields to skip",
-            "skip_chars" => "bytes to skip",
-            "check_chars" => "bytes to compare",
-            _ => return Err(StreamError::new(format!("uniq reads no count {name}"))),
-        };
-        let Some(count) = number::signed_decimal(&raw).filter(|&count| count >= 0) else {
-            let refused = [
-                b"uniq: ".as_slice(),
-                &raw,
-                b": invalid number of ",
-                what.as_bytes(),
-            ]
-            .concat();
-            return Err(StreamError::refusal(&refused, 1));
-        };
-        let count = usize::try_from(count).unwrap_or(usize::MAX);
-        match name.as_str() {
-            "skip_fields" => keys.skip_fields = count,
-            "skip_chars" => keys.skip_chars = count,
-            _ => keys.check_chars = Some(count),
-        }
-    }
-    Ok(keys)
-}
-
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
     Ok(Box::new(Uniq {
         terminator: if config.zero_terminated { 0 } else { b'\n' },
-        keys: keys(&config.counts)?,
+        keys: options::keys(&config.typed)?,
         config,
         records: Records::default(),
         first: None,
@@ -227,7 +188,7 @@ mod tests {
 
     fn uniq(options: &str, input: &[u8]) -> Vec<u8> {
         let config = config(
-            r#"{"count":false,"repeated":false,"unique":false,"counts":[],"ignore_case":false,"all_repeated":null,"group":null,"zero_terminated":false}"#,
+            r#"{"count":false,"repeated":false,"unique":false,"typed":[],"ignore_case":false,"all_repeated":null,"group":null,"zero_terminated":false}"#,
             options,
         );
         let whole = run("uniq", &config, &[input]);
@@ -240,49 +201,18 @@ mod tests {
     }
 
     #[test]
-    fn each_count_typed_is_refused_in_its_turn() {
-        let refused = |counts: &str| {
-            let config = format!(
-                r#"{{"count":false,"repeated":false,"unique":false,"counts":{counts},"ignore_case":false,"all_repeated":null,"group":null,"zero_terminated":false}}"#
-            );
-            crate::open("uniq", config.as_bytes())
-                .err()
-                .map(|e| (e.message, e.status))
-        };
-        let x = r#"[["skip_chars","y"],["skip_fields","x"]]"#;
-        assert_eq!(
-            refused(x),
-            Some(("uniq: y: invalid number of bytes to skip".to_owned(), 1))
-        );
-        let late = r#"[["skip_fields","3"],["skip_fields","5 "]]"#;
-        assert_eq!(
-            refused(late),
-            Some(("uniq: 5 : invalid number of fields to skip".to_owned(), 1))
-        );
-        let w = r#"[["check_chars","-1"]]"#;
-        assert_eq!(
-            refused(w),
-            Some(("uniq: -1: invalid number of bytes to compare".to_owned(), 1))
-        );
-        assert_eq!(
-            refused(r#"[["skip_fields","99999999999999999999999"],["skip_chars","-0"]]"#),
-            None
-        );
-    }
-
-    #[test]
     fn keys_count_bytes_and_fold_ascii_only() {
         let folded = uniq(r#"{"ignore_case":true}"#, "é\nÉ\nA\na".as_bytes());
         assert_eq!(folded, "é\nÉ\nA\n".as_bytes());
-        let skipped = uniq(r#"{"counts":[["skip_chars","1"]]}"#, "éa\nèa\n".as_bytes());
+        let skipped = uniq(r#"{"typed":[["skip_chars","1"]]}"#, "éa\nèa\n".as_bytes());
         assert_eq!(skipped, "éa\nèa\n".as_bytes());
         let fields = uniq(
-            r#"{"counts":[["skip_fields","1"],["skip_chars","2"],["check_chars","2"]]}"#,
+            r#"{"typed":[["skip_fields","1"],["skip_chars","2"],["check_chars","2"]]}"#,
             b"x  abc\ny  abd\n",
         );
         assert_eq!(fields, b"x  abc\n");
         let blanks = uniq(
-            r#"{"counts":[["skip_fields","1"],["check_chars"," +2"]]}"#,
+            r#"{"typed":[["skip_fields","1"],["check_chars"," +2"]]}"#,
             b"x  abc\ny\tabd\n",
         );
         assert_eq!(blanks, b"x  abc\ny\tabd\n");
