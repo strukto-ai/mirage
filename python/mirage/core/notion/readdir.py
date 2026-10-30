@@ -22,7 +22,6 @@ from mirage.core.notion.normalize import (
     normalize_data_source,
     normalize_database,
     page_segment_name,
-    to_json_bytes,
 )
 from mirage.core.notion.pages import (
     get_data_source,
@@ -36,6 +35,7 @@ from mirage.core.notion.pathing import (
 )
 from mirage.core.notion.resolve import guard_row
 from mirage.core.notion.scope import detect_scope
+from mirage.core.render.json import json_bytes
 from mirage.types import DirListing, FileStat, FileType
 
 PAGE = entry_stat("page_id", FileType.DIRECTORY)
@@ -120,7 +120,7 @@ async def _list_database(
         FileStat(
             name="database.json",
             type=FileType.FILE,
-            size=len(to_json_bytes(normalize_database(database))),
+            size=len(json_bytes(normalize_database(database))),
             extra={"database_id": database_id},
         )
     ]
@@ -152,7 +152,7 @@ async def _list_data_source(
             FileStat(
                 name="data_source.json",
                 type=FileType.FILE,
-                size=len(to_json_bytes(normalize_data_source(data_source))),
+                size=len(json_bytes(normalize_data_source(data_source))),
                 extra=extra,
             ),
             FileStat(name="rows.jsonl", type=FileType.FILE, extra=extra),

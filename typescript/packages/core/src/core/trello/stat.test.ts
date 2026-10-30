@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../render/json.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../accessor/trello.ts'
@@ -19,7 +20,7 @@ import { ContentType, FileType, PathSpec, type FileStat } from '../../types.ts'
 import { TrelloVFS } from '../../vfs/trello/trello.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TrelloTransport } from './client.ts'
-import { normalizeCard, normalizeWorkspace, toJsonBytes } from './normalize.ts'
+import { normalizeCard, normalizeWorkspace } from './normalize.ts'
 import { stat } from './stat.ts'
 
 class NoopTransport implements TrelloTransport {
@@ -94,7 +95,7 @@ describe('trello stat workspace nodes', () => {
     const s = await statAt(new TreeTransport(), '/mnt/trello/workspaces/Acme__w1/workspace.json')
     expect(s.content).toBe(ContentType.JSON)
     expect(s.name).toBe('workspace.json')
-    expect(s.size).toBe(toJsonBytes(normalizeWorkspace(WORKSPACE)).byteLength)
+    expect(s.size).toBe(jsonBytes(normalizeWorkspace(WORKSPACE)).byteLength)
     expect(s.extra.workspace_id).toBe('w1')
   })
 
@@ -130,7 +131,7 @@ describe('trello stat card leaves', () => {
     const cardJson = await statAt(new TreeTransport(), `${cardDir}/card.json`)
     expect(cardJson.content).toBe(ContentType.JSON)
     expect(cardJson.name).toBe('card.json')
-    expect(cardJson.size).toBe(toJsonBytes(normalizeCard(CARD)).byteLength)
+    expect(cardJson.size).toBe(jsonBytes(normalizeCard(CARD)).byteLength)
 
     const comments = await statAt(new TreeTransport(), `${cardDir}/comments.jsonl`)
     expect(comments.content).toBe(ContentType.TEXT)

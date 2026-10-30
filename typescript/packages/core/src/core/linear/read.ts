@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonlBytesByCreatedAt, jsonBytes } from '../render/json.ts'
 import type { LinearAccessor } from '../../accessor/linear.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { jsonlBytesByCreatedAt } from '../render/json.ts'
 import {
   getIssue,
   listIssueComments,
@@ -37,7 +37,6 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
-  toJsonBytes,
   type NormalizedProjectIssue,
 } from './normalize.ts'
 import { filteredTeams } from './readdir.ts'
@@ -55,7 +54,7 @@ async function readTeamJson(
 ): Promise<Uint8Array> {
   const teamId = match.slots.team_id ?? ''
   for (const team of await filteredTeams(accessor)) {
-    if (team.id === teamId) return toJsonBytes(normalizeTeam(team))
+    if (team.id === teamId) return jsonBytes(normalizeTeam(team))
   }
   throw enoent(path.virtual)
 }
@@ -68,14 +67,14 @@ async function readMember(
   const memberId = match.slots.member_id ?? ''
   const users = await listTeamMembers(accessor.transport, match.slots.team_id ?? '')
   for (const user of users) {
-    if (user.id === memberId) return toJsonBytes(normalizeUser(user))
+    if (user.id === memberId) return jsonBytes(normalizeUser(user))
   }
   throw enoent(path.virtual)
 }
 
 async function readIssueJson(accessor: LinearAccessor, match: ScopeMatch): Promise<Uint8Array> {
   const issue = await getIssue(accessor.transport, match.slots.issue_id ?? '')
-  return toJsonBytes(normalizeIssue(issue))
+  return jsonBytes(normalizeIssue(issue))
 }
 
 async function readComments(accessor: LinearAccessor, match: ScopeMatch): Promise<Uint8Array> {
@@ -110,7 +109,7 @@ async function readProject(
       if (projObj.id !== projectId) continue
       projectIssues.push(buildProjectIssue(issue))
     }
-    return toJsonBytes(
+    return jsonBytes(
       normalizeProject(project, {
         teamId,
         teamKey: pickString(team, 'key') || null,
@@ -130,7 +129,7 @@ async function readCycle(
   const teamId = match.slots.team_id ?? ''
   const cycles = await listTeamCycles(accessor.transport, teamId)
   for (const cycle of cycles) {
-    if (cycle.id === match.slots.cycle_id) return toJsonBytes(normalizeCycle(cycle, teamId))
+    if (cycle.id === match.slots.cycle_id) return jsonBytes(normalizeCycle(cycle, teamId))
   }
   throw enoent(path.virtual)
 }
@@ -143,7 +142,7 @@ async function readDocument(
   const documents = await listTeamDocuments(accessor.transport, match.slots.team_id ?? '')
   for (const document of documents) {
     if (document.id === match.slots.document_id) {
-      return toJsonBytes(normalizeDocument(document))
+      return jsonBytes(normalizeDocument(document))
     }
   }
   throw enoent(path.virtual)

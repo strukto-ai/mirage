@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../render/json.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import { DirListing, FileStat, FileType } from '../../types.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
@@ -23,7 +24,6 @@ import {
   normalizeDataSource,
   normalizeDatabase,
   pageSegmentName,
-  toJsonBytes,
 } from './normalize.ts'
 import {
   getChildPages,
@@ -112,7 +112,7 @@ async function listDatabase(
     new FileStat({
       name: 'database.json',
       type: FileType.FILE,
-      size: toJsonBytes(normalizeDatabase(database)).byteLength,
+      size: jsonBytes(normalizeDatabase(database)).byteLength,
       extra: { database_id: databaseId },
     }),
   ]
@@ -146,7 +146,7 @@ async function listDataSource(
       new FileStat({
         name: 'data_source.json',
         type: FileType.FILE,
-        size: toJsonBytes(normalizeDataSource(dataSource)).byteLength,
+        size: jsonBytes(normalizeDataSource(dataSource)).byteLength,
         extra,
       }),
       new FileStat({ name: 'rows.jsonl', type: FileType.FILE, extra }),

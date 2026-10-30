@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonlBytesByCreatedAt, jsonBytes } from '../render/json.ts'
 import type { LinearAccessor } from '../../accessor/linear.ts'
 import { ContentType, FileStat, FileType } from '../../types.ts'
 import { cutListing, type Listed, makeReaddir } from '../hierarchy/readdir.ts'
@@ -35,9 +36,8 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
-  toJsonBytes,
   type NormalizedProjectIssue,
-  unsearchedText,
+  SEARCHED_FIELDS,
 } from './normalize.ts'
 import {
   cycleFilename,
@@ -48,8 +48,7 @@ import {
   teamDirname,
 } from './pathing.ts'
 import { detectScope } from './scope.ts'
-import { jsonlBytesByCreatedAt } from '../render/json.ts'
-import { keptText } from '../../utils/record_search.ts'
+import { keptText, unsearchedText } from '../../utils/record_search.ts'
 
 export const TEAM_DIRS = ['members', 'issues', 'projects', 'cycles', 'documents'] as const
 
@@ -98,7 +97,7 @@ async function listTeamsDir(accessor: LinearAccessor, _match: ScopeMatch): Promi
       extra: {
         team_key: pickString(team, 'key'),
         team_name: pickString(team, 'name'),
-        json_size: toJsonBytes(normalizeTeam(team)).length,
+        json_size: jsonBytes(normalizeTeam(team)).length,
       },
     }),
   )
@@ -134,7 +133,7 @@ async function listMembers(
 ): Promise<Listed> {
   const users = await listTeamMembers(accessor.transport, match.slots.team_id ?? '', match.limit)
   const rows = users.map((user) => {
-    const rendered = toJsonBytes(normalizeUser(user))
+    const rendered = jsonBytes(normalizeUser(user))
     return MEMBER(memberFilename(user), pickString(user, 'id'), {
       size: rendered.length,
       modified: pickString(user, 'updatedAt'),
@@ -155,8 +154,10 @@ async function listIssues(
       modified: pickString(issue, 'updatedAt'),
       extra: {
         issue_key: pickString(issue, 'identifier'),
-        json_size: toJsonBytes(normalizeIssue(issue)).length,
-        ...(accessor.capped() ? { unsearched: unsearchedText(issue) } : {}),
+        json_size: jsonBytes(normalizeIssue(issue)).length,
+        ...(accessor.capped()
+          ? { unsearched: unsearchedText(Object.entries(normalizeIssue(issue)), SEARCHED_FIELDS) }
+          : {}),
       },
     }),
   )
@@ -216,7 +217,7 @@ async function listProjects(
       if (projObj.id !== projectId) continue
       projectIssues.push(buildProjectIssue(issue))
     }
-    const rendered = toJsonBytes(
+    const rendered = jsonBytes(
       normalizeProject(project, {
         teamId,
         teamKey: extraString(entry, 'team_key') || null,
@@ -241,7 +242,7 @@ async function listCycles(
   const teamId = match.slots.team_id ?? ''
   const cycles = await listTeamCycles(accessor.transport, teamId, match.limit)
   const rows = cycles.map((cycle) => {
-    const rendered = toJsonBytes(normalizeCycle(cycle, teamId))
+    const rendered = jsonBytes(normalizeCycle(cycle, teamId))
     return CYCLE(cycleFilename(cycle), pickString(cycle, 'id'), {
       size: rendered.length,
       modified: pickString(cycle, 'updatedAt'),
@@ -262,7 +263,7 @@ async function listDocuments(
     match.limit,
   )
   const rows = documents.map((document) => {
-    const rendered = toJsonBytes(normalizeDocument(document))
+    const rendered = jsonBytes(normalizeDocument(document))
     return DOCUMENT(documentFilename(document), pickString(document, 'id'), {
       size: rendered.length,
       modified: pickString(document, 'updatedAt'),

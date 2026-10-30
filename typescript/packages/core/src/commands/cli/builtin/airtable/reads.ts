@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../../../../core/render/json.ts'
 import type { AirtableAccessor } from '../../../../accessor/airtable.ts'
 import {
   getRecord,
@@ -26,7 +27,6 @@ import {
   normalizeComment,
   normalizeTable,
   recordsJsonl,
-  toJsonBytes,
 } from '../../../../core/airtable/normalize.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -42,7 +42,7 @@ async function baseListBody(
 ): Promise<CommandFnResult> {
   noOperands(texts)
   const bases = await listBases(accessor)
-  return [toJsonBytes(bases.map(normalizeBaseSummary)), new IOResult()]
+  return [jsonBytes(bases.map(normalizeBaseSummary)), new IOResult()]
 }
 
 async function baseGetBody(
@@ -55,7 +55,7 @@ async function baseGetBody(
   for (const base of await listBases(accessor)) {
     if (base.id === baseId) {
       const tables = await listTables(accessor, baseId)
-      return [toJsonBytes(normalizeBase(base, tables)), new IOResult()]
+      return [jsonBytes(normalizeBase(base, tables)), new IOResult()]
     }
   }
   throw new Error(`${baseId}: no such base`)
@@ -71,7 +71,7 @@ async function tableGetBody(
   const baseId = scopedBase(accessor.config, fl.asStr('base') ?? '')
   const table = findTable(await listTables(accessor, baseId), ref)
   if (table === undefined) throw new Error(`${ref}: no such table in ${baseId}`)
-  return [toJsonBytes(normalizeTable(table, baseId)), new IOResult()]
+  return [jsonBytes(normalizeTable(table, baseId)), new IOResult()]
 }
 
 async function recordListBody(
@@ -122,7 +122,7 @@ async function commentListBody(
   const recordId = oneOperand(texts, 'RECORD')
   const baseId = scopedBase(accessor.config, fl.asStr('base') ?? '')
   const comments = await listComments(accessor, baseId, fl.asStr('table') ?? '', recordId)
-  return [toJsonBytes(comments.map(normalizeComment)), new IOResult()]
+  return [jsonBytes(comments.map(normalizeComment)), new IOResult()]
 }
 
 export const baseList = run(baseListBody)

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonText } from '../core/render/json.ts'
+
 const HEX_LETTERS = /^[a-f]+$/
 // The letters a JSON escape ends with: `\b \f \n \r \t`, and the hex digit
 // closing a `\u00XX` control character. Each can run into the word after it,
@@ -69,6 +71,20 @@ export function recordQueries(
  */
 export function nonPlainWords(text: string): string[] {
   return text.split(ASCII_SPACE).filter((word) => word !== '' && !PLAIN_WORD.test(word))
+}
+
+/** The normalized fields and words a provider's search does not read. */
+export function unsearchedText(
+  fields: Iterable<readonly [string, unknown]>,
+  searched: ReadonlySet<string>,
+): string {
+  const rest: [string, unknown][] = []
+  const words: string[] = []
+  for (const [key, value] of fields) {
+    if (!searched.has(key)) rest.push([key, value])
+    else if (typeof value === 'string') for (const word of nonPlainWords(value)) words.push(word)
+  }
+  return [jsonText(Object.fromEntries(rest)), ...words].join(' ').toLowerCase()
 }
 
 /**

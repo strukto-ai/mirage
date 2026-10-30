@@ -15,12 +15,18 @@
 import json
 from typing import Any
 
-from mirage.core.api.client import status_error
 from mirage.core.google.client import (
     TokenManager,
     google_request,
     sheets_base,
 )
+
+
+def _parse_values(values_json: str) -> Any:
+    try:
+        return json.loads(values_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON: {exc}") from exc
 
 
 async def append_values(
@@ -40,10 +46,7 @@ async def append_values(
     Returns:
         dict: API response.
     """
-    try:
-        values = json.loads(values_json)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON: {exc}") from exc
+    values = _parse_values(values_json)
     base = f"{sheets_base(token_manager)}/spreadsheets/{spreadsheet_id}"
     url = f"{base}/values/{range_}:append?valueInputOption=USER_ENTERED"
     data: dict[str, Any] = await google_request(
@@ -51,7 +54,6 @@ async def append_values(
         "POST",
         url,
         json_body={"values": values},
-        error_of=status_error,
     )
     return data
 
@@ -73,10 +75,7 @@ async def update_values(
     Returns:
         dict: API response.
     """
-    try:
-        values = json.loads(values_json)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON: {exc}") from exc
+    values = _parse_values(values_json)
     base = f"{sheets_base(token_manager)}/spreadsheets/{spreadsheet_id}"
     url = f"{base}/values/{range_}?valueInputOption=USER_ENTERED"
     data: dict[str, Any] = await google_request(
@@ -84,6 +83,5 @@ async def update_values(
         "PUT",
         url,
         json_body={"values": values},
-        error_of=status_error,
     )
     return data

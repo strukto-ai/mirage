@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { unsearchedText } from '../../utils/record_search.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { LinearAccessor } from '../../accessor/linear.ts'
 import { PathSpec } from '../../types.ts'
 import type { LinearTransport } from './client.ts'
-import { unsearchedText } from './normalize.ts'
+import { normalizeIssue, SEARCHED_FIELDS } from './normalize.ts'
 import { SEARCH_LIMIT, filesContaining } from './search.ts'
 
 const TEAM = { id: 'T1', key: 'ENG', name: 'Engineering' }
@@ -118,7 +119,7 @@ function documents(out: PathSpec[] | null): string[] {
 // Twin of python/tests/core/linear/test_search.py.
 describe('linear filesContaining', () => {
   it('leaves the title and description out of the unsearched text', () => {
-    const kept = unsearchedText(ISSUES[0] ?? {})
+    const kept = unsearchedText(Object.entries(normalizeIssue(ISSUES[0] ?? {})), SEARCHED_FIELDS)
     expect(kept).toContain('todo')
     expect(kept).toContain('engineering')
     expect(kept).not.toContain('login')

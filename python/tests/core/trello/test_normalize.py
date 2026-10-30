@@ -23,7 +23,6 @@ from mirage.core.trello.normalize import (
     normalize_list,
     normalize_member,
     normalize_workspace,
-    to_json_bytes,
 )
 
 
@@ -114,12 +113,6 @@ def test_normalize_comment():
     assert result["card_id"] == "c1"
     assert result["member_id"] == "m1"
     assert result["text"] == "This needs fixing"
-
-
-def test_to_json_bytes():
-    data = {"key": "value"}
-    result = to_json_bytes(data)
-    assert json.loads(result) == data
 
 
 def test_jsonl_bytes_by_created_at():

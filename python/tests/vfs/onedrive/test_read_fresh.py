@@ -14,13 +14,10 @@
 
 import pytest
 
+from mirage.context import session_context as caller
 from mirage.core.onedrive.read import read
 from mirage.core.onedrive.stream import read_stream
-from mirage.observe.context import (
-    RecordingScope,
-    push_revisions,
-    reset_revisions,
-)
+from mirage.observe.context import RecordingScope
 from mirage.types import MountMode, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -143,7 +140,9 @@ async def test_a_pinned_read_gets_that_versions_bytes(pin, expected):
     with serve(FakeGraph(drives={ME: {"a.txt": OLD}})) as graph:
         graph.write(ME, "a.txt", NEW)
         vfs = _vfs(graph)
-        token = push_revisions({"/a.txt": pin})
+        token = caller.bind_caller(
+            caller.current_caller().changed({"revisions": {"/a.txt": pin}})
+        )
         try:
             if expected is None:
                 with pytest.raises(FileNotFoundError):
@@ -152,7 +151,7 @@ async def test_a_pinned_read_gets_that_versions_bytes(pin, expected):
             else:
                 data = await read(vfs.accessor, _spec("a.txt"))
         finally:
-            reset_revisions(token)
+            caller.reset_caller(token)
             await vfs.accessor.close()
     # A snapshot pin reads the version it names, straight from its content
     # route, even after a rewrite; a version the item never had is absent.

@@ -16,7 +16,6 @@ from typing import Any
 
 from mirage.core.notion.pathing import format_segment
 from mirage.core.notion.render import blocks_to_markdown
-from mirage.core.render.json import json_bytes
 
 
 def _page_fields(page: dict[str, Any]) -> dict[str, Any]:
@@ -115,10 +114,6 @@ def normalize_data_source(data_source: dict[str, Any]) -> dict[str, Any]:
         ),
         "properties": data_source.get("properties", {}),
     }
-
-
-def to_json_bytes(obj: dict[str, Any] | list[Any]) -> bytes:
-    return json_bytes(obj)
 
 
 def page_segment_name(page: dict[str, Any]) -> str:

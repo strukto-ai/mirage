@@ -14,10 +14,9 @@
 
 import { resolveWorkspaceConfig } from '@struktoai/mirage-server/workspace_config'
 import type { Command } from 'commander'
-import { makeClient, type DaemonClient } from './client.ts'
+import { makeClient, DaemonClient } from './client.ts'
 import { LoginError } from './credentials.ts'
 import { fail, handleResponse } from './output.ts'
-import { loadDaemonSettings } from './settings.ts'
 
 export const MCP_ENV_NAMES = ['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG']
 
@@ -95,7 +94,7 @@ async function deleteWorkspace(client: DaemonClient, workspaceId: string): Promi
   const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}`
   const { url, idleGraceSeconds } = client.settings
   const attempt = (bearer: string): Promise<Response> =>
-    makeClient({ url, idleGraceSeconds, authToken: bearer }).request('DELETE', path)
+    new DaemonClient({ url, idleGraceSeconds, authToken: bearer }).request('DELETE', path)
   let done = await attempt(client.held)
   if (done.status === 401 && client.settings.login !== undefined) {
     let fresh: string
@@ -130,7 +129,7 @@ export async function relayWorkspace(
   relay: (url: string, token: () => Promise<string>) => Promise<void>,
   allCalls = false,
 ): Promise<void> {
-  const client = makeClient(loadDaemonSettings())
+  const client = makeClient()
   try {
     await client.ensureRunning({ allowSpawn: true })
   } catch (error) {

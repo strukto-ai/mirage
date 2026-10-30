@@ -29,7 +29,6 @@ from mirage.utils.hidden import path_visible
 from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.session.resolve import (
     apply_profile,
-    compile_commands,
     compile_profile,
     narrow,
     resolve_profile,
@@ -70,7 +69,7 @@ def test_compile_preserves_empty_mount_through_inline_restrictions():
     )
     assert restricted is not None
     for profile in (base, restricted):
-        compiled = compile_commands(profile)
+        compiled = compile_profile(profile).policies.commands
         assert compiled is not None
         assert compiled.ask[0] == rule
         assert compiled.ask[0].mount == ""
@@ -188,10 +187,12 @@ def test_with_inline_leaves_a_stated_block_alone_when_the_other_is_bare():
     )
 
 
-def test_compile_commands_lists_mount_rules_before_the_role_s_own():
-    rules = compile_commands(
+def test_compile_profile_commands_lists_mount_rules_before_the_role_s_own():
+    rules = compile_profile(
         SessionProfile(
-            commands=CommandsBlock(allow=("ls",), deny=("shutdown",)),
+            commands=CommandsBlock(
+                allow=("ls", "rm", "git"), deny=("shutdown",)
+            ),
             mounts={
                 "/repo": ProfileMount(
                     commands=MountCommandsBlock(
@@ -208,9 +209,9 @@ def test_compile_commands_lists_mount_rules_before_the_role_s_own():
                 "/scratch": ProfileMount(mode=MountMode.READ),
             },
         )
-    )
+    ).policies.commands
     assert rules is not None
-    assert rules.allow == ("ls",)
+    assert rules.allow == ("ls", "rm", "git")
     # Every mount rule carries the root it was written under, which is
     # what scopes it to a line working inside that mount; its paths are
     # kept exactly as typed.
@@ -222,8 +223,8 @@ def test_compile_commands_lists_mount_rules_before_the_role_s_own():
     assert rules.ask[0].mount == "/repo" and not rules.ask[0].paths
 
 
-def test_compile_commands_anchors_a_name_pattern_to_its_mount():
-    rules = compile_commands(
+def test_compile_profile_commands_anchors_a_name_pattern_to_its_mount():
+    rules = compile_profile(
         SessionProfile(
             mounts={
                 "/repo": ProfileMount(
@@ -233,7 +234,7 @@ def test_compile_commands_anchors_a_name_pattern_to_its_mount():
                 )
             }
         )
-    )
+    ).policies.commands
     assert rules is not None
     rule = rules.deny[0]
     assert rule.paths == ("/repo/*.pem",)
@@ -261,13 +262,18 @@ def _read_op(virtual: str) -> VfsContext:
     )
 
 
-def test_compile_commands_is_none_when_the_role_states_no_rules():
-    assert compile_commands(SessionProfile()) is None
-    assert compile_commands(SessionProfile(commands=CommandsBlock())) is None
+def test_compile_profile_commands_is_none_when_the_role_states_no_rules():
+    assert compile_profile(SessionProfile()).policies.commands is None
     assert (
-        compile_commands(
+        compile_profile(
+            SessionProfile(commands=CommandsBlock())
+        ).policies.commands
+        is None
+    )
+    assert (
+        compile_profile(
             SessionProfile(mounts={"/repo": ProfileMount(mode=MountMode.READ)})
-        )
+        ).policies.commands
         is None
     )
 

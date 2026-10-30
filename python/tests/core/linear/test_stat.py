@@ -21,13 +21,10 @@ from mirage.core.hierarchy.scope import Slot
 from mirage.core.linear import read as linear_read
 from mirage.core.linear import readdir as linear_readdir
 from mirage.core.linear.config import LinearConfig
-from mirage.core.linear.normalize import (
-    normalize_issue,
-    normalize_team,
-    to_json_bytes,
-)
+from mirage.core.linear.normalize import normalize_issue, normalize_team
 from mirage.core.linear.scope import detect_scope
 from mirage.core.linear.stat import stat
+from mirage.core.render.json import json_bytes
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.vfs.linear import LinearVFS
 from mirage.workspace import Workspace
@@ -236,7 +233,7 @@ async def test_stat_issue_json(accessor, monkeypatch):
     _fake_tree(monkeypatch)
     result = await _stat_at(accessor, _ISSUE_DIR + "/issue.json")
     assert result.content == ContentType.JSON
-    assert result.size == len(to_json_bytes(normalize_issue(_ISSUES[0])))
+    assert result.size == len(json_bytes(normalize_issue(_ISSUES[0])))
     assert result.modified == "2026-04-03T00:00:00Z"
     assert result.extra["issue_id"] == "ISSUE1"
 
@@ -258,7 +255,7 @@ async def test_stat_team_json_reports_rendered_size(accessor, monkeypatch):
         accessor, "/teams/ENG__Engineering__TEAM1/team.json"
     )
     assert result.content == ContentType.JSON
-    assert result.size == len(to_json_bytes(normalize_team(_TEAM)))
+    assert result.size == len(json_bytes(normalize_team(_TEAM)))
     assert result.modified == "2026-04-05T00:00:00Z"
     assert result.extra["team_id"] == "TEAM1"
 

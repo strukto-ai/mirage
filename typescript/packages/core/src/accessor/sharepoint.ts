@@ -16,6 +16,7 @@ import { z } from 'zod'
 import { Accessor } from './base.ts'
 import {
   MSGRAPH_CONFIG_SHAPE,
+  optionalText,
   resolveMsGraphConfig,
   type MsGraphConfig,
   type MsGraphConfigResolved,
@@ -74,11 +75,6 @@ function normalizePrefix(value: string | undefined): string {
   if (normalized.split('/').includes('..'))
     throw new Error("keyPrefix must not contain '..' segments")
   return normalized
-}
-
-function optionalText(value: string | undefined): string | null {
-  const normalized = value?.trim()
-  return normalized === undefined || normalized === '' ? null : normalized
 }
 
 function resolveSharePointConfig(config: SharePointConfig): SharePointConfigResolved {

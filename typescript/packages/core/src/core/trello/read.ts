@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonlBytesByCreatedAt, jsonBytes } from '../render/json.ts'
 import type { TrelloAccessor } from '../../accessor/trello.ts'
 import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
-import { jsonlBytesByCreatedAt } from '../render/json.ts'
 import {
   getBoard,
   getCard,
@@ -35,7 +35,6 @@ import {
   normalizeList,
   normalizeMember,
   normalizeWorkspace,
-  toJsonBytes,
 } from './normalize.ts'
 import { detectScope } from './scope.ts'
 
@@ -46,14 +45,14 @@ async function readWorkspaceJson(
 ): Promise<Uint8Array> {
   const workspaceId = match.slots.workspace_id ?? ''
   for (const workspace of await listWorkspaces(accessor.transport)) {
-    if (workspace.id === workspaceId) return toJsonBytes(normalizeWorkspace(workspace))
+    if (workspace.id === workspaceId) return jsonBytes(normalizeWorkspace(workspace))
   }
   throw enoent(path.virtual)
 }
 
 async function readBoardJson(accessor: TrelloAccessor, match: ScopeMatch): Promise<Uint8Array> {
   const board = await getBoard(accessor.transport, match.slots.board_id ?? '')
-  return toJsonBytes(normalizeBoard(board))
+  return jsonBytes(normalizeBoard(board))
 }
 
 async function readMember(
@@ -64,7 +63,7 @@ async function readMember(
   const memberId = match.slots.member_id ?? ''
   const members = await listBoardMembers(accessor.transport, match.slots.board_id ?? '')
   for (const member of members) {
-    if (member.id === memberId) return toJsonBytes(normalizeMember(member))
+    if (member.id === memberId) return jsonBytes(normalizeMember(member))
   }
   throw enoent(path.virtual)
 }
@@ -77,7 +76,7 @@ async function readLabel(
   const labelId = match.slots.label_id ?? ''
   const labels = await listBoardLabels(accessor.transport, match.slots.board_id ?? '')
   for (const label of labels) {
-    if (label.id === labelId) return toJsonBytes(normalizeLabel(label))
+    if (label.id === labelId) return jsonBytes(normalizeLabel(label))
   }
   throw enoent(path.virtual)
 }
@@ -90,14 +89,14 @@ async function readListJson(
   const listId = match.slots.list_id ?? ''
   const lists = await listBoardLists(accessor.transport, match.slots.board_id ?? '')
   for (const lst of lists) {
-    if (lst.id === listId) return toJsonBytes(normalizeList(lst))
+    if (lst.id === listId) return jsonBytes(normalizeList(lst))
   }
   throw enoent(path.virtual)
 }
 
 async function readCardJson(accessor: TrelloAccessor, match: ScopeMatch): Promise<Uint8Array> {
   const card = await getCard(accessor.transport, match.slots.card_id ?? '')
-  return toJsonBytes(normalizeCard(card))
+  return jsonBytes(normalizeCard(card))
 }
 
 async function readComments(accessor: TrelloAccessor, match: ScopeMatch): Promise<Uint8Array> {

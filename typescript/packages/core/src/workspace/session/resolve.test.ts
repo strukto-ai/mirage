@@ -23,14 +23,7 @@ import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
 import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
-import {
-  applyProfile,
-  compileCommands,
-  compileProfile,
-  narrow,
-  resolveProfile,
-  withInline,
-} from './resolve.ts'
+import { applyProfile, compileProfile, narrow, resolveProfile, withInline } from './resolve.ts'
 import { SessionState } from './session.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { CALLS } from '../../workspace/dispatcher/constants.ts'
@@ -77,7 +70,7 @@ it('preserves saved rule mount identity through compilation and inline restricti
     const restricted = withInline(base, { paths: { hide: ['/secret'] } })
     if (restricted === null) throw new Error('Expected a restricted profile')
     for (const profile of [base, restricted]) {
-      const compiled = compileCommands(profile)?.ask[0]
+      const compiled = compileProfile(profile).policies.commands?.ask[0]
       if (compiled === undefined) throw new Error('Expected an ask rule')
       expect(compiled.mount).toBe(rule.mount)
       const saved = {
@@ -215,11 +208,11 @@ describe('withInline', () => {
   })
 })
 
-describe('compileCommands', () => {
+describe('compileProfile commands', () => {
   it("lists mount rules before the profile's own", () => {
-    const rules = compileCommands(
+    const rules = compileProfile(
       parseSessionProfile({
-        commands: { allow: ['ls'], deny: ['shutdown'] },
+        commands: { allow: ['ls', 'rm', 'git'], deny: ['shutdown'] },
         mounts: {
           '/repo': {
             commands: {
@@ -230,8 +223,8 @@ describe('compileCommands', () => {
           '/scratch': 'r',
         },
       }),
-    )
-    expect(rules?.allow).toEqual(['ls'])
+    ).policies.commands
+    expect(rules?.allow).toEqual(['ls', 'rm', 'git'])
     // Every mount rule carries the root it was written under, which is
     // what scopes it to a line working inside that mount; its paths are
     // kept exactly as typed.
@@ -249,11 +242,11 @@ describe('compileCommands', () => {
   })
 
   it('anchors a name pattern to its mount', () => {
-    const rules = compileCommands(
+    const rules = compileProfile(
       parseSessionProfile({
         mounts: { '/repo': { commands: { deny: [{ reason: 'no pems', paths: ['*.pem'] }] } } },
       }),
-    )
+    ).policies.commands
     const rule = rules?.deny[0] ?? { reason: 'missing' }
     expect(rule.paths).toEqual(['/repo/*.pem'])
     // The stamp scopes the rule at admission, but the dispatcher reads the
@@ -264,9 +257,11 @@ describe('compileCommands', () => {
   })
 
   it('is null when the profile states no rules', () => {
-    expect(compileCommands({})).toBeNull()
-    expect(compileCommands(parseSessionProfile({ commands: {} }))).toBeNull()
-    expect(compileCommands(parseSessionProfile({ mounts: { '/repo': 'r' } }))).toBeNull()
+    expect(compileProfile({}).policies.commands).toBeNull()
+    expect(compileProfile(parseSessionProfile({ commands: {} })).policies.commands).toBeNull()
+    expect(
+      compileProfile(parseSessionProfile({ mounts: { '/repo': 'r' } })).policies.commands,
+    ).toBeNull()
   })
 })
 

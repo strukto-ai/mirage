@@ -14,9 +14,6 @@
 
 from typing import Any
 
-from mirage.core.render.json import json_bytes
-from mirage.utils.record_search import non_plain_words
-
 
 def normalize_team(team: dict[str, Any]) -> dict[str, Any]:
     states = []
@@ -194,33 +191,6 @@ def normalize_cycle(cycle: dict[str, Any], *, team_id: str) -> dict[str, Any]:
     }
 
 
-def to_json_bytes(value: dict[str, Any] | list[Any]) -> bytes:
-    return json_bytes(value)
-
-
 # The fields of an issue's JSON Linear's issue search reads; every other
 # field is checked against the listing instead (``unsearched_text``).
 SEARCHED_FIELDS = ("title", "description")
-
-
-def unsearched_text(issue: dict[str, Any]) -> str:
-    """What an issue's ``issue.json`` holds beyond the plain words Linear's
-    search reads, lowercased: every other field as the file renders it,
-    then each word of the title and description that is not plain
-    (``non_plain_words``), such as one inside a link.
-
-    Args:
-        issue (dict[str, Any]): the issue as the listing fetched it.
-    """
-    normalized = normalize_issue(issue)
-    rest = {
-        key: value
-        for key, value in normalized.items()
-        if key not in SEARCHED_FIELDS
-    }
-    kept = [to_json_bytes(rest).decode()]
-    for field in SEARCHED_FIELDS:
-        value = normalized.get(field)
-        if isinstance(value, str):
-            kept.extend(non_plain_words(value))
-    return " ".join(kept).lower()

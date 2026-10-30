@@ -15,11 +15,6 @@
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, exitCodeFromResponse, handleResponse } from './output.ts'
-import { loadDaemonSettings } from './settings.ts'
-
-function buildClient() {
-  return makeClient(loadDaemonSettings())
-}
 
 export function registerJobCommands(program: Command): void {
   const job = program.command('job').description('Manage daemon jobs.')
@@ -28,7 +23,7 @@ export function registerJobCommands(program: Command): void {
     .command('list')
     .option('-w, --workspace <id>')
     .action(async (opts: { workspace?: string }) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const path =
         '/v1/jobs' +
@@ -40,7 +35,7 @@ export function registerJobCommands(program: Command): void {
     .command('get')
     .argument('<id>')
     .action(async (id: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const response = await handleResponse(
         await c.request('GET', `/v1/jobs/${encodeURIComponent(id)}`),
@@ -54,7 +49,7 @@ export function registerJobCommands(program: Command): void {
     .argument('<id>')
     .option('--timeout <s>')
     .action(async (id: string, opts: { timeout?: string }) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const body: Record<string, unknown> = {}
       if (opts.timeout !== undefined) body.timeout_s = Number(opts.timeout)
@@ -71,7 +66,7 @@ export function registerJobCommands(program: Command): void {
     .command('cancel')
     .argument('<id>')
     .action(async (id: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(await handleResponse(await c.request('DELETE', `/v1/jobs/${encodeURIComponent(id)}`)))
     })

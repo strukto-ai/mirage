@@ -17,12 +17,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.core.render.json import json_bytes
 from mirage.core.trello.config import TrelloConfig
-from mirage.core.trello.normalize import (
-    normalize_card,
-    normalize_workspace,
-    to_json_bytes,
-)
+from mirage.core.trello.normalize import normalize_card, normalize_workspace
 from mirage.core.trello.readdir import (
     board_in_scope,
     filtered_boards,
@@ -82,7 +79,7 @@ async def test_readdir_workspace_dir_carries_sized_workspace_json(accessor):
         row,
     )
     assert (workspace_json.name, boards.name) == ("workspace.json", "boards")
-    assert workspace_json.size == len(to_json_bytes(normalize_workspace(ws)))
+    assert workspace_json.size == len(json_bytes(normalize_workspace(ws)))
 
 
 @pytest.mark.asyncio
@@ -135,7 +132,7 @@ async def test_readdir_card_dir_carries_sized_card_json(accessor):
         f"/trello{base}/cards/Fix_login__c1/card.json",
         f"/trello{base}/cards/Fix_login__c1/comments.jsonl",
     ]
-    assert card_json.size == len(to_json_bytes(normalize_card(card)))
+    assert card_json.size == len(json_bytes(normalize_card(card)))
     assert comments.size is None
 
 
