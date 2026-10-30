@@ -188,8 +188,8 @@ describe('an asked line with an approval channel', () => {
     const third = await runOn(shell, shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(third.exitCode).toBe(126)
     expect(asked).toHaveLength(2)
-    // Both questions were the same line, so they quote one identity.
-    expect(asked[0]?.callId).toBe(asked[1]?.callId)
+    // A fresh question receives a fresh opaque ticket.
+    expect(asked[0]?.callId).not.toBe(asked[1]?.callId)
   })
 
   it('grants once and never for the session, so the next line asks again', async () => {
@@ -233,7 +233,7 @@ describe('an asked line with no approval channel', () => {
     // The operator's document said `ask`; the refusal says so too, and
     // names the approval a host can grant.
     expect(run.stderr.text).toMatch(
-      /^rm: Permission denied\nrequires approval: deletes are reviewed \(ask [0-9a-f]+\)\n$/,
+      /^rm: Permission denied\nrequires approval: deletes are reviewed \(ask [^\s)]+\)\n$/,
     )
     expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
     const pending = ws.decisions.pending('agent')
@@ -374,10 +374,10 @@ describe('an ask that outlives the run that raised it', () => {
     await new Promise((settle) => setTimeout(settle, 500))
     // The human said yes to a line that no longer existed. Banking that
     // as a spent-once grant would hand it to the next identical line
-    // with nobody asked, so the question stays open instead.
+    // with nobody asked, so the canceled ticket is retired.
     expect(await ws.vfs.exists('/data/notes.txt')).toBe(true)
-    expect(ws.decisions.pending('agent')).toHaveLength(1)
-    expect(ws.decisions.list('agent')[0]?.outcome).toBeNull()
+    expect(ws.decisions.pending('agent')).toHaveLength(0)
+    expect(ws.decisions.list('agent')).toEqual([])
   })
 })
 
