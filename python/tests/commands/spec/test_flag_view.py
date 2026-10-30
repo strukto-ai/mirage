@@ -145,6 +145,31 @@ def _jq_view(*words: str) -> FlagView:
     )
 
 
+def _view(name: str, *words: str) -> FlagView:
+    return FlagView(
+        parse_to_kwargs(parse_command(SPECS[name], list(words), "/", name)),
+        spec=SPECS[name],
+    )
+
+
+def test_texts_read_a_numeric_shorthand_where_it_was_typed():
+    assert _view("tail", "-n", "x", "-4").texts("n") == [
+        ("n", "x"),
+        ("n", "4"),
+    ]
+    assert _view("head", "-4", "-n", "x").texts("lines") == [
+        ("lines", "4"),
+        ("lines", "x"),
+    ]
+
+
+def test_texts_read_a_digit_cluster_count_where_it_was_typed():
+    assert _view("grep", "-C", "1", "-i5", "p").texts("context") == [
+        ("context", "1"),
+        ("context", "5"),
+    ]
+
+
 def test_texts_leave_out_a_switch_that_is_off():
     fl = FlagView(
         {"verbose": False, "quiet": True, "bytes": "4"}, spec=SPECS["cmp"]

@@ -170,11 +170,33 @@ describe('FlagView.typedOrder', () => {
   })
 })
 
+function view(name: string, ...words: string[]): FlagView {
+  return new FlagView(parseToKwargs(parseCommand(specOf(name), words, '/', name)), specOf(name))
+}
+
 function jqView(...words: string[]): FlagView {
   return new FlagView(parseToKwargs(parseCommand(specOf('jq'), words, '/', 'jq')), specOf('jq'))
 }
 
 describe('FlagView.texts', () => {
+  it('reads a numeric shorthand where it was typed', () => {
+    expect(view('tail', '-n', 'x', '-4').texts('n')).toEqual([
+      ['n', 'x'],
+      ['n', '4'],
+    ])
+    expect(view('head', '-4', '-n', 'x').texts('lines')).toEqual([
+      ['lines', '4'],
+      ['lines', 'x'],
+    ])
+  })
+
+  it('reads a digit cluster count where it was typed', () => {
+    expect(view('grep', '-C', '1', '-i5', 'p').texts('context')).toEqual([
+      ['context', '1'],
+      ['context', '5'],
+    ])
+  })
+
   it('leaves out a switch that is off', () => {
     const fl = new FlagView({ verbose: false, quiet: true, bytes: '4' }, specOf('cmp'))
     expect(fl.texts('verbose', 'quiet', 'bytes')).toEqual([

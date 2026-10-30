@@ -1,6 +1,6 @@
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal, cast, get_args
 
 from mirage.commands.builtin.utils.paths import absent_dest_error
 from mirage.commands.errors import UsageError
@@ -32,6 +32,8 @@ SizeMode = Literal[
     "round_down",
     "round_up",
 ]
+
+MODES: frozenset[str] = frozenset(get_args(SizeMode))
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,10 +101,13 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
     except StreamRefusal as refusal:
         return refused(refusal)
     size = values["size"]
-    assert isinstance(size, dict)
-    mode = size["mode"]
-    number = size["size"]
-    assert isinstance(mode, str) and isinstance(number, str)
+    if not (
+        isinstance(size, dict)
+        and isinstance(mode := size.get("mode"), str)
+        and mode in MODES
+        and isinstance(number := size.get("size"), str)
+    ):
+        raise ValueError(f"truncate: mirage-rs read -s as {size!r}")
     return TruncateFlags(
         size=Size(mode=cast(SizeMode, mode), number=int(number)),
         no_create=fl.as_bool("no_create"),
