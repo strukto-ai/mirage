@@ -14,6 +14,10 @@
 
 import asyncio
 import base64
+import hmac
+import os
+import secrets
+import signal
 import tempfile
 from pathlib import Path
 
@@ -22,8 +26,11 @@ from aiohttp import web
 # A stand-in for the execution service, so the example runs on one machine.
 # POST /run takes {argv, stdin, files} with base64 bytes, runs argv in a
 # fresh directory holding those files, and answers {stdout, stderr,
-# exit_code, files} with the files the program created or changed. A
-# dropped connection kills the program.
+# exit_code, files} with the files the program created or changed. Each run
+# needs the token the service was started with, starts in its own process
+# group, and a dropped connection kills the whole group.
+
+TOKEN = web.AppKey("token", str)
 
 
 async def run(request: web.Request) -> web.Response:
@@ -32,6 +39,11 @@ async def run(request: web.Request) -> web.Response:
     Args:
         request (web.Request): the run request.
     """
+    expected = f"Bearer {request.app[TOKEN]}"
+    if not hmac.compare_digest(
+        request.headers.get("Authorization", ""), expected
+    ):
+        raise web.HTTPUnauthorized()
     body = await request.json()
     sent = {rel: base64.b64decode(b) for rel, b in body["files"].items()}
     with tempfile.TemporaryDirectory() as tmp:
@@ -46,6 +58,7 @@ async def run(request: web.Request) -> web.Response:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
         except FileNotFoundError:
             return _answer(
@@ -53,10 +66,9 @@ async def run(request: web.Request) -> web.Response:
             )
         try:
             out, err = await proc.communicate(base64.b64decode(body["stdin"]))
-        except asyncio.CancelledError:
-            proc.kill()
+        finally:
+            _stop_group(proc.pid)
             await proc.wait()
-            raise
         changed = {
             str(p.relative_to(root)): p.read_bytes()
             for p in root.rglob("*")
@@ -64,6 +76,15 @@ async def run(request: web.Request) -> web.Response:
             and sent.get(str(p.relative_to(root))) != p.read_bytes()
         }
     return _answer(out, err, proc.returncode or 0, changed)
+
+
+def _stop_group(pid: int) -> None:
+    # The program and anything it started share the group, so one kill
+    # stops them all; a group that already exited has nothing to stop.
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
 
 
 def _answer(
@@ -82,12 +103,16 @@ def _answer(
     )
 
 
-async def start() -> tuple[web.AppRunner, str]:
-    """Serve on a free localhost port; returns the runner and run URL."""
+async def start() -> tuple[web.AppRunner, str, str]:
+    """Serve on a free localhost port.
+
+    Returns the runner, the run URL and the token a caller must send.
+    """
     app = web.Application(client_max_size=64 * 1024 * 1024)
+    app[TOKEN] = secrets.token_urlsafe(32)
     app.router.add_post("/run", run)
     runner = web.AppRunner(app, handler_cancellation=True)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
     port = runner.addresses[0][1]
-    return runner, f"http://127.0.0.1:{port}/run"
+    return runner, f"http://127.0.0.1:{port}/run", app[TOKEN]

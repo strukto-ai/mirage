@@ -14,6 +14,7 @@
 
 import base64
 import posixpath
+from contextlib import aclosing
 from dataclasses import dataclass
 
 import aiohttp
@@ -26,6 +27,8 @@ from mirage import (
     Runtime,
     RuntimeConfig,
 )
+from mirage.io.cooperative import chunks
+from mirage.io.memory import check_memory
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.types import OutputFn
 
@@ -48,11 +51,13 @@ class RemoteConfig(RuntimeConfig):
 
     Args:
         url (str): the execution service's run endpoint.
+        token (str): the bearer token the service accepts.
         max_bytes (int): the most bytes one run sends, for the working
             directory and for stdin each.
     """
 
     url: str = ""
+    token: str = ""
     max_bytes: int = 16 * 1024 * 1024
 
 
@@ -111,7 +116,10 @@ class RemoteRuntime(
             "stdin": _b64(stdin),
             "files": {rel: _b64(data) for rel, data in files.items()},
         }
-        async with engine.post(self.config.url, json=request) as resp:
+        headers = {"Authorization": f"Bearer {self.config.token}"}
+        async with engine.post(
+            self.config.url, json=request, headers=headers
+        ) as resp:
             resp.raise_for_status()
             answer = await resp.json()
         for rel, data in answer["files"].items():
@@ -134,19 +142,19 @@ class RemoteRuntime(
     async def _stdin(self, ctx: Context) -> bytes:
         # The service takes a run's input whole, so stop reading at the
         # budget: an endless producer fails the run instead of hanging it.
+        # The bytes also count against the workspace's memory budget, as
+        # materialize counts them.
         if ctx.stdin is None:
             return b""
         data = bytearray()
-        source = ctx.stdin if not isinstance(ctx.stdin, bytes) else None
-        if source is None:
-            data += ctx.stdin
-        else:
+        async with aclosing(chunks(ctx.stdin)) as source:
             async for chunk in source:
                 data += chunk
+                check_memory(len(data))
                 if len(data) > self.config.max_bytes:
-                    break
-        if len(data) > self.config.max_bytes:
-            raise ValueError(f"stdin is over {self.config.max_bytes} bytes")
+                    raise ValueError(
+                        f"stdin is over {self.config.max_bytes} bytes"
+                    )
         return bytes(data)
 
     async def _snapshot(self, ctx: Context, cwd: str) -> dict[str, bytes]:

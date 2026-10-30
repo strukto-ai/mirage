@@ -56,12 +56,13 @@ LINES = [
 
 
 async def main() -> None:
-    runner, url = await start()
+    runner, url, token = await start()
     with tempfile.TemporaryDirectory() as archive:
         (Path(archive) / "report.py").write_bytes(REPORT)
         (Path(archive) / "orders.csv").write_bytes(ORDERS)
         os.environ["ARCHIVE_DIR"] = archive
         os.environ["EXEC_URL"] = url
+        os.environ["EXEC_TOKEN"] = token
         config = load_config(HERE / "workspace.yaml")
         ws = Workspace(**config.to_workspace_kwargs())
         try:

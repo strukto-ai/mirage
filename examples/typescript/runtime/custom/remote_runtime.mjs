@@ -25,7 +25,7 @@ import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-
 // working directory and writes back the files the program changed. Both go
 // through ctx.vfs, so mount modes, policy and the cache apply to them.
 
-const CONFIG_KEYS = ['url', 'maxBytes']
+const CONFIG_KEYS = ['url', 'token', 'maxBytes']
 const MAX_BYTES = 16 * 1024 * 1024
 
 export class RemoteRuntime extends Runtime {
@@ -59,7 +59,10 @@ export class RemoteRuntime extends Runtime {
     }
     const resp = await fetch(this.config.url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${this.config.token ?? ''}`,
+      },
       body: JSON.stringify(request),
       signal: ctx.signal,
     })
@@ -83,7 +86,8 @@ export class RemoteRuntime extends Runtime {
 }
 
 async function snapshot(ctx, cwd, maxBytes) {
-  const files = {}
+  // No prototype, so a file named __proto__ is an entry like any other.
+  const files = Object.create(null)
   let total = 0
   const mount = ctx.vfs.mountOf(cwd)
   const pending = [cwd]

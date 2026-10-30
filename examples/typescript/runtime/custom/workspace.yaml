@@ -20,4 +20,5 @@ runtimes:
   - name: ./remote_runtime.mjs:RemoteRuntime
     config:
       url: ${EXEC_URL}
+      token: ${EXEC_TOKEN}
   - workspace

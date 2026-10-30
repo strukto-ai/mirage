@@ -60,13 +60,14 @@ const LINES: [string, string][] = [
 const dec = new TextDecoder()
 
 async function main(): Promise<void> {
-  const { server, url } = await start()
+  const { server, url, token } = await start()
   const archive = mkdtempSync(join(tmpdir(), 'archive-'))
   try {
     writeFileSync(join(archive, 'report.py'), REPORT)
     writeFileSync(join(archive, 'orders.csv'), ORDERS)
     process.env.ARCHIVE_DIR = archive
     process.env.EXEC_URL = url
+    process.env.EXEC_TOKEN = token
     const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(CONFIG))
     const ws = new Workspace(args.mounts, args.options)
     try {

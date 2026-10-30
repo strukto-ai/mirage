@@ -15,6 +15,7 @@ runtimes:
   - name: ./remote_runtime.py:RemoteRuntime     # TypeScript: ./remote_runtime.mjs:RemoteRuntime
     config:
       url: ${EXEC_URL}
+      token: ${EXEC_TOKEN}
   - workspace
 ```
 
@@ -84,6 +85,7 @@ stand-in service, so it runs on one machine.
     @dataclass(frozen=True, slots=True)
     class RemoteConfig(RuntimeConfig):
         url: str = ""
+        token: str = ""
         max_bytes: int = 16 * 1024 * 1024
 
 
@@ -103,13 +105,14 @@ stand-in service, so it runs on one machine.
         async def run_process(self, engine, paths, texts, ctx: Context, output=None, errors=None) -> RunResult:
             cwd = ctx.cwd.virtual
             files = await self._snapshot(ctx, cwd)
-            stdin = await self._stdin(ctx)  # read up to max_bytes; the full example shows it
+            stdin = await self._stdin(ctx)  # up to max_bytes, within the memory budget; see the full example
             request = {
                 "argv": texts,
                 "stdin": base64.b64encode(stdin).decode(),
                 "files": {rel: base64.b64encode(data).decode() for rel, data in files.items()},
             }
-            async with engine.post(self.config.url, json=request) as resp:
+            headers = {"Authorization": f"Bearer {self.config.token}"}
+            async with engine.post(self.config.url, json=request, headers=headers) as resp:
                 resp.raise_for_status()
                 answer = await resp.json()
             for rel, data in answer["files"].items():
@@ -150,7 +153,7 @@ stand-in service, so it runs on one machine.
       reach = 'remote'
 
       constructor(options = {}) {
-        super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], ['url', 'maxBytes'])
+        super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], ['url', 'token', 'maxBytes'])
       }
 
       /** @param {import('@struktoai/mirage-node').Context} ctx */
@@ -160,8 +163,12 @@ stand-in service, so it runs on one machine.
         const files = await snapshot(ctx, cwd, maxBytes)
         const resp = await fetch(this.config.url, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ argv: texts, stdin: b64(await collect(ctx.stdin, maxBytes)), files }),
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.config.token}` },
+          body: JSON.stringify({
+            argv: texts,
+            stdin: b64(await collect(ctx.stdin, maxBytes)),
+            files: Object.fromEntries(Object.entries(files).map(([rel, data]) => [rel, b64(data)])),
+          }),
           signal: ctx.signal,
         })
         if (!resp.ok) throw new Error(`execution service answered ${resp.status}`)
@@ -176,9 +183,8 @@ stand-in service, so it runs on one machine.
     }
 
     // snapshot() walks ctx.vfs.readdir from cwd within its mount and reads
-    // each file with { raw: true } into base64; collect() reads stdin up to
-    // maxBytes; b64() and
-    // unb64() convert. All four are in the full example.
+    // each file with { raw: true }; collect() reads stdin up to maxBytes;
+    // b64() and unb64() convert. All four are in the full example.
     ```
   </Tab>
 </Tabs>
@@ -221,6 +227,10 @@ runs these lines, are in
 and
 [`examples/typescript/runtime/custom`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/runtime/custom).
 
+The stand-in service accepts work only with the token it was started with, and
+your real service should authenticate callers too: it runs whatever program it
+is sent.
+
 ## Stop when the run stops
 
 `timeout`, a closed session or a reader that stops early cancels the run. In
@@ -229,7 +239,9 @@ in TypeScript, `ctx.signal` aborts. Pass the cancellation on to whatever runs
 the program, and make sure that stops it:
 
 - The example's request is cancelled with the run (`ctx.signal` in TypeScript),
-  and the service kills the program when the connection drops.
+  and the service kills the program when the connection drops. It starts each
+  program in its own process group and kills the group, so children the
+  program started stop too.
 - A runtime that spawns a process itself kills it and waits for it before it
   removes the process's files.
 - A process that exits without reading its input closes the pipe. In Node, give
