@@ -3,13 +3,6 @@ from dataclasses import dataclass, replace
 
 from mirage.commands.builtin.generic.archive.extract import extract_dest
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
-from mirage.commands.builtin.generic.tar.constants import (
-    CREATE_ERROR_EXIT,
-    MODE_CONFLICT,
-    MULTIPLE_ARCHIVES,
-    NO_MODE,
-    USAGE_HINT,
-)
 from mirage.commands.builtin.generic.tar.create import (
     check_directories,
     plan_create,
@@ -26,7 +19,6 @@ from mirage.commands.builtin.utils.stream_host import (
     hosted_stream,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -52,7 +44,7 @@ class TarFlags:
     to_stdout: bool = False
     archive: PathSpec | None = None
     directories: tuple[PathSpec, ...] = ()
-    strip_components: tuple[str, ...] = ()
+    typed: tuple[tuple[str, str], ...] = ()
     exclude: str | None = None
     one_file_system: bool = False
 
@@ -61,48 +53,30 @@ _MODES = ("create", "extract", "list")
 _CODECS = ("gzip", "bzip2", "xz")
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
-    """tar's flags as argp reads them, refusing what tar refuses.
+def _typed_config(typed: tuple[tuple[str, str], ...]) -> list[JsonValue]:
+    """The options the tar engine reads, each text as a byte view.
 
-    argp meets the options in line order and stops at the first it
-    refuses: a second main operation where one is already set, or a
-    --strip-components value that is no count, which the tar engine
-    reads, so only the values typed before a conflict reach it. After the
-    scan, more than one archive is refused without -M, which mirage does
-    not have (tar 1.35).
+    Args:
+        typed (tuple[tuple[str, str], ...]): ``[name, text]`` as typed.
+    """
+    return [[name, byte_view(text)] for name, text in typed]
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
+    """tar's flags, refused by the tar engine as argp refuses them.
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flag bag.
 
     Returns:
-        TarFlags | IOResult: the flags, or the engine's refusal of a
-        --strip-components, exit 2.
-
-    Raises:
-        UsageError: tar's other refusals, exit 2.
+        TarFlags | IOResult: the flags, or tar's refusal, exit 2.
     """
     fl = FlagView(flags, spec=SPECS["tar"])
-    mode: str | None = None
-    strip: list[str] = []
-    conflict = False
-    for name, text in fl.texts(*_MODES, "strip_components"):
-        if name == "strip_components":
-            strip.append(text)
-        elif mode is not None and name != mode:
-            conflict = True
-            break
-        else:
-            mode = name
+    typed = tuple(fl.texts(*_MODES, "strip_components", "file"))
     try:
-        open_stream("tar", {"strip": [byte_view(text) for text in strip]})
+        open_stream("tar", {"typed": _typed_config(typed)})
     except StreamRefusal as refusal:
         return refused(refusal)
-    if conflict:
-        raise UsageError(f"{MODE_CONFLICT}\n{USAGE_HINT}", CREATE_ERROR_EXIT)
-    if len(fl.occurrences("file")) > 1:
-        raise UsageError(
-            f"{MULTIPLE_ARCHIVES}\n{USAGE_HINT}", CREATE_ERROR_EXIT
-        )
     archive = fl.raw("file")
     return TarFlags(
         create=fl.as_bool("create"),
@@ -114,7 +88,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
         to_stdout=fl.as_bool("to_stdout"),
         archive=archive if isinstance(archive, PathSpec) else None,
         directories=tuple(fl.as_paths("directory")),
-        strip_components=tuple(strip),
+        typed=typed,
         exclude=fl.as_str("exclude"),
         one_file_system=fl.as_bool("one_file_system"),
     )
@@ -216,21 +190,19 @@ async def tar(
             "status": plan.exit_code,
         }
         host = StreamHost(reads, stream, None, dispatch, cwd, dash=False)
-    elif flags.list_only or flags.extract:
+    else:
         refusal = await check_directories(directories, is_dir, stat)
         dest = directories[-1] if directories else None
         config |= {
             "mode": "list" if flags.list_only else "extract",
             "probe": archive.walk_error is None,
             "selectors": [byte_view(selector) for selector in selectors],
-            "strip": [byte_view(text) for text in flags.strip_components],
+            "typed": _typed_config(flags.typed),
             "to_stdout": flags.to_stdout,
             "base": byte_view(extract_dest(dest, cwd).rstrip("/")),
             "refusal": [byte_view(line) for line in refusal],
         }
         host = StreamHost([archive], stream, stdin, dispatch, cwd, dash=False)
-    else:
-        raise UsageError(f"{NO_MODE}\n{USAGE_HINT}", CREATE_ERROR_EXIT)
     io = IOResult()
     return hosted_stream("tar", config, host, io), io
 
