@@ -14,65 +14,59 @@
 
 import asyncio
 import os
-import sqlite3
 import tempfile
 from pathlib import Path
+
+from exec_server import start
 
 from mirage import Workspace
 from mirage.config import load_config
 
-# workspace.yaml loads SqliteRuntime from sqlite_runtime.py beside it. The
-# agent only ever types sqlite3; the yaml decides where that runs. Needs the
-# sqlite3 command-line tool on PATH.
+# workspace.yaml loads RemoteRuntime from remote_runtime.py beside it and
+# points it at an execution service; exec_server.py stands in for the
+# service on this machine. The agent only types commands: the yaml decides
+# that python3 runs on the service and cat runs in the workspace.
 
 HERE = Path(__file__).resolve().parent
 
+REPORT = b"""import csv
+rows = list(csv.DictReader(open("orders.csv")))
+total = sum(int(r["total"]) for r in rows)
+open("summary.txt", "w").write(f"{len(rows)} orders, total {total}\\n")
+print(f"wrote summary.txt on the service: total {total}")
+"""
+
+ORDERS = b"id,item,total\n1,desk,120\n2,chair,80\n3,shelf,45\n"
+
 LINES = [
-    ("sqlite3 /data/shop.db 'select count(*) from orders'", "a query"),
+    ("cd /work && python3 report.py", "runs on the service"),
+    ("cat /work/summary.txt", "its output file is back in the mount"),
     (
-        "sqlite3 -json /data/shop.db 'select * from orders' | jq -r '.[].item'",
-        "its output pipes into workspace commands",
+        "cd /work && python3 report.py | grep -o 'total [0-9]*'",
+        "its stdout pipes into workspace commands",
     ),
+    ("echo 'print(6 * 7)' | python3 -", "stdin reaches the program"),
+    ("cd /archive && python3 report.py", "a read-only mount refuses it"),
+    ("ls /archive", "and nothing was written"),
     (
-        "echo 'select sum(total) from orders;' | sqlite3 /data/shop.db",
-        "SQL on stdin",
+        "timeout 1 python3 -c 'import time; time.sleep(30)'",
+        "a timeout stops the program on the service",
     ),
-    (
-        "cd /data && sqlite3 shop.db \"insert into orders values (4, 'lamp', 30)\"",
-        "a write, relative to the cwd, lands back in the mount",
-    ),
-    ("sqlite3 /data/shop.db 'select count(*) from orders'", "and stays"),
-    (
-        "sqlite3 /archive/2025.db \"insert into orders values (9, 'x', 1)\"",
-        "a read-only mount refuses the write-back",
-    ),
-    ("sqlite3 /archive/2025.db 'select count(*) from orders'", "unchanged"),
 ]
 
 
-def database() -> bytes:
-    """A small orders database, as bytes to seed the mounts with."""
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "shop.db"
-        db = sqlite3.connect(path)
-        db.execute("create table orders (id int, item text, total int)")
-        db.executemany(
-            "insert into orders values (?, ?, ?)",
-            [(1, "desk", 120), (2, "chair", 80), (3, "shelf", 45)],
-        )
-        db.commit()
-        db.close()
-        return path.read_bytes()
-
-
 async def main() -> None:
+    runner, url = await start()
     with tempfile.TemporaryDirectory() as archive:
-        (Path(archive) / "2025.db").write_bytes(database())
+        (Path(archive) / "report.py").write_bytes(REPORT)
+        (Path(archive) / "orders.csv").write_bytes(ORDERS)
         os.environ["ARCHIVE_DIR"] = archive
+        os.environ["EXEC_URL"] = url
         config = load_config(HERE / "workspace.yaml")
         ws = Workspace(**config.to_workspace_kwargs())
         try:
-            await ws.vfs.write("/data/shop.db", database())
+            await ws.vfs.write("/work/report.py", REPORT)
+            await ws.vfs.write("/work/orders.csv", ORDERS)
             for line, note in LINES:
                 res = await ws.shell(line)
                 print(f"$ {line}    # {note}")
@@ -81,6 +75,7 @@ async def main() -> None:
                 print(f"[exit {res.exit_code}]\n")
         finally:
             await ws.close()
+            await runner.cleanup()
 
 
 if __name__ == "__main__":

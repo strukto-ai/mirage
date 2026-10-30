@@ -1,13 +1,14 @@
 # A runtime Mirage does not ship, named from yaml by file and class. The
-# path is relative to this file. sqlite3 goes to SqliteRuntime; everything
-# else (cat, ls, jq, ...) stays in the workspace.
+# path is relative to this file. Programs Mirage does not run itself go to
+# the execution service at EXEC_URL; cat, grep, pipes and redirects stay in
+# the workspace.
 #
 #   pnpm -C examples/typescript exec tsx runtime/custom/custom_runtime.ts
 
 mode: WRITE
 
 mounts:
-  /data:
+  /work:
     vfs: ram
   /archive:
     vfs: disk
@@ -16,7 +17,7 @@ mounts:
       root: ${ARCHIVE_DIR}
 
 runtimes:
-  - name: ./sqlite_runtime.mjs:SqliteRuntime
+  - name: ./remote_runtime.mjs:RemoteRuntime
     config:
-      binary: sqlite3
+      url: ${EXEC_URL}
   - workspace

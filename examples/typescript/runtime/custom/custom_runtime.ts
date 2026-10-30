@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   Workspace,
@@ -23,54 +23,55 @@ import {
   loadWorkspaceConfigFile,
 } from '@struktoai/mirage-node'
 
-// workspace.yaml loads SqliteRuntime from sqlite_runtime.mjs beside it. The
-// agent only ever types sqlite3; the yaml decides where that runs. Needs the
-// sqlite3 command-line tool on PATH.
+import { start } from './exec_server.ts'
 
-const CONFIG = new URL('./workspace.yaml', import.meta.url).pathname
+// workspace.yaml loads RemoteRuntime from remote_runtime.mjs beside it and
+// points it at an execution service; exec_server.ts stands in for the
+// service on this machine. The agent only types commands: the yaml decides
+// that python3 runs on the service and cat runs in the workspace.
+
+const CONFIG = fileURLToPath(new URL('./workspace.yaml', import.meta.url))
+
+const REPORT = `import csv
+rows = list(csv.DictReader(open("orders.csv")))
+total = sum(int(r["total"]) for r in rows)
+open("summary.txt", "w").write(f"{len(rows)} orders, total {total}\\n")
+print(f"wrote summary.txt on the service: total {total}")
+`
+
+const ORDERS = 'id,item,total\n1,desk,120\n2,chair,80\n3,shelf,45\n'
 
 const LINES: [string, string][] = [
-  ["sqlite3 /data/shop.db 'select count(*) from orders'", 'a query'],
+  ['cd /work && python3 report.py', 'runs on the service'],
+  ['cat /work/summary.txt', 'its output file is back in the mount'],
   [
-    "sqlite3 -json /data/shop.db 'select * from orders' | jq -r '.[].item'",
-    'its output pipes into workspace commands',
+    "cd /work && python3 report.py | grep -o 'total [0-9]*'",
+    'its stdout pipes into workspace commands',
   ],
-  ["echo 'select sum(total) from orders;' | sqlite3 /data/shop.db", 'SQL on stdin'],
+  ["echo 'print(6 * 7)' | python3 -", 'stdin reaches the program'],
+  ['cd /archive && python3 report.py', 'a read-only mount refuses it'],
+  ['ls /archive', 'and nothing was written'],
   [
-    `cd /data && sqlite3 shop.db "insert into orders values (4, 'lamp', 30)"`,
-    'a write, relative to the cwd, lands back in the mount',
+    "timeout 1 python3 -c 'import time; time.sleep(30)'",
+    'a timeout stops the program on the service',
   ],
-  ["sqlite3 /data/shop.db 'select count(*) from orders'", 'and stays'],
-  [
-    `sqlite3 /archive/2025.db "insert into orders values (9, 'x', 1)"`,
-    'a read-only mount refuses the write-back',
-  ],
-  ["sqlite3 /archive/2025.db 'select count(*) from orders'", 'unchanged'],
 ]
-
-const SEED = `create table orders (id int, item text, total int);
-insert into orders values (1, 'desk', 120), (2, 'chair', 80), (3, 'shelf', 45);`
-
-/** A small orders database, as bytes to seed the mounts with. */
-function database(dir: string, name: string): Uint8Array {
-  const path = join(dir, name)
-  execFileSync('sqlite3', [path], { input: SEED })
-  return new Uint8Array(readFileSync(path))
-}
 
 const dec = new TextDecoder()
 
 async function main(): Promise<void> {
+  const { server, url } = await start()
   const archive = mkdtempSync(join(tmpdir(), 'archive-'))
   try {
-    database(archive, '2025.db')
+    writeFileSync(join(archive, 'report.py'), REPORT)
+    writeFileSync(join(archive, 'orders.csv'), ORDERS)
     process.env.ARCHIVE_DIR = archive
+    process.env.EXEC_URL = url
     const args = await configToWorkspaceArgs(loadWorkspaceConfigFile(CONFIG))
     const ws = new Workspace(args.mounts, args.options)
     try {
-      const seed = mkdtempSync(join(tmpdir(), 'seed-'))
-      await ws.vfs.write('/data/shop.db', database(seed, 'shop.db'))
-      rmSync(seed, { recursive: true, force: true })
+      await ws.vfs.write('/work/report.py', REPORT)
+      await ws.vfs.write('/work/orders.csv', ORDERS)
       for (const [line, note] of LINES) {
         const res = await ws.shell(line)
         console.log(`$ ${line}    # ${note}`)
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
       await ws.close()
     }
   } finally {
+    server.close()
     rmSync(archive, { recursive: true, force: true })
   }
 }
