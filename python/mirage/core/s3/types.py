@@ -15,3 +15,18 @@ class S3Conn:
 
     client: Any
     config: S3Config
+
+
+@dataclass(frozen=True, slots=True)
+class CopyReceipt:
+    """The copied object's identity, as returned by the store.
+
+    Args:
+        fingerprint (str | None): the destination ETag.
+        revision (str | None): the exact destination version, when enabled.
+        retried (bool): whether an earlier copy attempt may have committed.
+    """
+
+    fingerprint: str | None
+    revision: str | None
+    retried: bool = False

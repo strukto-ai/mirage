@@ -60,7 +60,7 @@ from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror, inner_suffix, strerror_of, with_inner
 from mirage.errors.posix import posix_phrase
-from mirage.errors.types import FsCondition, StaleWriteError
+from mirage.errors.types import FsCondition, MoveError, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import (
@@ -808,7 +808,20 @@ async def mv_generic(
         else:
             try:
                 await strategy.rename(src, target)
-            except FS_ERRORS as exc:
+            except Exception as exc:
+                if not isinstance(exc, (MoveError, *FS_ERRORS)):
+                    raise
+                if isinstance(exc, MoveError):
+                    errors.append(
+                        f"mv: cannot remove '{src.raw_path}': {strerror_of(exc.error)}"
+                    )
+                    errors.append(
+                        f"mv: rollback of '{target.raw_path}' incomplete: "
+                        f"{exc.recovery_reason}; destination may remain"
+                    )
+                    if not src_is_dir and not exc.recovered:
+                        created.add(key_of(target))
+                    continue
                 stale = exc if isinstance(exc, StaleWriteError) else None
                 # A stale key inside a walk is named; other refusals, the operand.
                 inner = (
@@ -817,13 +830,23 @@ async def mv_generic(
                     else ""
                 )
                 shown_src = with_inner(src.raw_path, inner)
-                # Copy landed, source delete lost: GNU's cross-device unlink failure.
+                # Report the source refusal even when compensation reverted the copy.
                 if stale is not None and stale.landed:
                     errors.append(
                         f"mv: cannot remove '{shown_src}': {fs_strerror(exc)}"
                     )
-                    if not src_is_dir:
+                    if not src_is_dir and stale.recovered is not True:
                         created.add(key_of(target))
+                    if stale.recovered is False:
+                        reason = (
+                            stale.recovery_error
+                            or stale.recovery_reason
+                            or "cleanup incomplete"
+                        )
+                        errors.append(
+                            f"mv: rollback of '{target.raw_path}' incomplete: "
+                            f"{reason}; destination may remain"
+                        )
                     continue
                 shown_dst = with_inner(target.raw_path, inner)
                 # A refused write names the end that changed.

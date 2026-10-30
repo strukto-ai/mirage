@@ -1,0 +1,142 @@
+{
+  "cases": [
+    {
+      "name": "new destination",
+      "recovered": true,
+      "destination": null,
+      "deletes": 2,
+      "workspace": {
+        "command": "mv /s3/f /s3/new",
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot remove '/s3/f': changed since it was read; read it again before writing\n",
+        "destination": null
+      }
+    },
+    {
+      "name": "overwritten unversioned destination",
+      "initial": "old",
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 1
+    },
+    {
+      "name": "destination changed before cleanup",
+      "replacement": "theirs",
+      "cleanup_code": "PreconditionFailed",
+      "recovered": false,
+      "destination": "theirs",
+      "deletes": 2,
+      "workspace": {
+        "command": "mv /s3/f /s3/new",
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot remove '/s3/f': changed since it was read; read it again before writing\nmv: rollback of '/s3/new' incomplete: PreconditionFailed; destination may remain\n",
+        "destination": "external\n"
+      }
+    },
+    {
+      "name": "cleanup denied",
+      "cleanup_code": "AccessDenied",
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 2,
+      "workspace": {
+        "command": "mv /s3/f /s3/new",
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot remove '/s3/f': changed since it was read; read it again before writing\nmv: rollback of '/s3/new' incomplete: Permission denied; destination may remain\n",
+        "destination": "one\n"
+      }
+    },
+    {
+      "name": "copy omitted its ETag",
+      "no_etag": true,
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 1
+    },
+    {
+      "name": "exact copied version",
+      "initial": "old",
+      "version": "our-version",
+      "recovered": true,
+      "destination": "old",
+      "deletes": 2
+    },
+    {
+      "name": "newer destination version",
+      "initial": "old",
+      "version": "our-version",
+      "replacement": "theirs",
+      "recovered": true,
+      "destination": "theirs",
+      "deletes": 2
+    },
+    {
+      "name": "source already gone",
+      "source_code": "NoSuchKey",
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 1
+    },
+    {
+      "name": "refusal after retry",
+      "retries": 1,
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 1
+    },
+    {
+      "name": "source conflict is not a precondition refusal",
+      "source_code": "ConditionalRequestConflict",
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 1
+    },
+    {
+      "name": "source denied after copy",
+      "source_code": "AccessDenied",
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 1,
+      "workspace": {
+        "command": "mv /s3/f /s3/new",
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot remove '/s3/f': Permission denied\nmv: rollback of '/s3/new' incomplete: source deletion outcome is unknown; destination may remain\n",
+        "destination": "one\n"
+      }
+    },
+    {
+      "name": "cleanup target already absent",
+      "cleanup_code": "NoSuchKey",
+      "recovered": true,
+      "destination": null,
+      "deletes": 2
+    },
+    {
+      "name": "copy returned an empty ETag",
+      "etag": "\"\"",
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 1
+    },
+    {
+      "name": "versioned copy was retried",
+      "initial": "old",
+      "version": "our-version",
+      "copy_retries": 1,
+      "recovered": false,
+      "destination": "copy",
+      "deletes": 1
+    },
+    {
+      "name": "unversioned create-only copy was retried",
+      "copy_retries": 1,
+      "recovered": true,
+      "destination": null,
+      "deletes": 2
+    }
+  ]
+}

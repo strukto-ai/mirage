@@ -1,6 +1,9 @@
+import { runWithCaller, currentCaller } from '../../context/session_context.ts'
+import { readFileSync } from 'node:fs'
 import { ABSENT_WRITE, ANY_WRITE } from '../../cache/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { ConditionLostError } from '../object_store/errors.ts'
+import { requireHook } from '../object_store/driver.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import { LOST_CODES, sdkError } from '../../../tests/core/s3/_test_util.ts'
 import type { S3Module } from './types.ts'
@@ -314,4 +317,343 @@ it('refuses protected presigned uploads before sending a request', async () => {
     DRIVER.putStream?.(conn, 'k', new Uint8Array([1]), ABSENT_WRITE),
   ).rejects.toMatchObject({ code: 'ENOTSUP' })
   expect(sent).toEqual([])
+})
+
+interface MoveRecoveryCase {
+  name: string
+  initial?: string
+  replacement?: string
+  cleanup_code?: string
+  source_code?: string
+  no_etag?: boolean
+  etag?: string
+  version?: string
+  retries?: number
+  copy_retries?: number
+  recovered: boolean
+  destination: string | null
+  deletes: number
+}
+
+const MOVE_RECOVERY = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/fixtures/write/move_recovery.json', import.meta.url),
+    'utf8',
+  ),
+) as { cases: MoveRecoveryCase[] }
+
+class MoveHead {
+  constructor(readonly input: Record<string, unknown>) {}
+}
+class MoveCopy {
+  constructor(readonly input: Record<string, unknown>) {}
+}
+class MoveDelete {
+  constructor(readonly input: Record<string, unknown>) {}
+}
+
+describe('a failed move compensates only its copy', () => {
+  it.each(MOVE_RECOVERY.cases)('$name', async (c) => {
+    const objects = new Map([['src', 'source']])
+    if (c.initial !== undefined) objects.set('dst', c.initial)
+    const calls: Record<string, unknown>[] = []
+    const conn: S3Conn = {
+      config: { bucket: 'b' } as S3Config,
+      mod: {
+        HeadObjectCommand: MoveHead,
+        CopyObjectCommand: MoveCopy,
+        DeleteObjectCommand: MoveDelete,
+      } as unknown as S3Module,
+      send(cmd: unknown): Promise<Record<string, unknown>> {
+        const { input } = cmd as MoveHead
+        if (cmd instanceof MoveHead) {
+          const value = objects.get(input.Key as string)
+          if (value === undefined) return Promise.reject(sdkError('NoSuchKey', 404))
+          return Promise.resolve({
+            ContentLength: 6,
+            LastModified: new Date('2026-01-01'),
+            ETag: `"${value}"`,
+          })
+        }
+        if (cmd instanceof MoveCopy) {
+          expect(input.CopySourceIfMatch).toBe('"source"')
+          if (c.initial === undefined) expect(input.IfNoneMatch).toBe('*')
+          objects.set('dst', 'copy')
+          return Promise.resolve({
+            CopyObjectResult: c.no_etag === true ? {} : { ETag: c.etag ?? '"copy"' },
+            $metadata: { attempts: (c.copy_retries ?? 0) + 1 },
+            ...(c.version !== undefined ? { VersionId: c.version } : {}),
+          })
+        }
+        calls.push(input)
+        if (input.Key === 'src') {
+          const code = c.source_code ?? 'PreconditionFailed'
+          if (code === 'NoSuchKey') objects.delete('src')
+          else objects.set('src', 'new-source')
+          const err = sdkError(
+            code,
+            code === 'NoSuchKey'
+              ? 404
+              : code === 'ConditionalRequestConflict'
+                ? 409
+                : code === 'AccessDenied'
+                  ? 403
+                  : 412,
+          )
+          Object.assign(err, {
+            $metadata: {
+              httpStatusCode:
+                code === 'NoSuchKey'
+                  ? 404
+                  : code === 'ConditionalRequestConflict'
+                    ? 409
+                    : code === 'AccessDenied'
+                      ? 403
+                      : 412,
+              attempts: (c.retries ?? 0) + 1,
+            },
+          })
+          return Promise.reject(err)
+        }
+        if (c.replacement !== undefined) objects.set('dst', c.replacement)
+        if (c.cleanup_code !== undefined) {
+          if (c.cleanup_code === 'NoSuchKey') objects.delete('dst')
+          return Promise.reject(
+            sdkError(
+              c.cleanup_code,
+              c.cleanup_code === 'NoSuchKey'
+                ? 404
+                : c.cleanup_code === 'PreconditionFailed'
+                  ? 412
+                  : 403,
+            ),
+          )
+        }
+        if (c.version !== undefined) {
+          expect(input.VersionId).toBe(c.version)
+          expect(input.IfMatch).toBeUndefined()
+          if (objects.get('dst') === 'copy') {
+            if (c.initial === undefined) objects.delete('dst')
+            else objects.set('dst', c.copy_retries === undefined ? c.initial : 'copy')
+          }
+        } else {
+          expect(input.IfMatch).toBe('"copy"')
+          objects.delete('dst')
+        }
+        return Promise.resolve({})
+      },
+    }
+    let refusal: (ConditionLostError & { recovered: boolean; recoveryError: unknown }) | undefined
+    try {
+      await requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ANY_WRITE, 'source')
+    } catch (err) {
+      if (c.source_code !== 'AccessDenied') expect(err).toBeInstanceOf(ConditionLostError)
+      refusal = err as typeof refusal
+    }
+    expect(refusal).toBeDefined()
+    expect(objects.get('dst') ?? null).toBe(c.destination)
+    expect(calls).toHaveLength(c.deletes)
+    expect(refusal?.recovered).toBe(c.recovered)
+    if (c.cleanup_code !== undefined && !c.recovered) expect(refusal?.recoveryError).toBeTruthy()
+  })
+})
+
+it('compensates cancellation after a confirmed copy before source deletion', async () => {
+  const controller = new AbortController()
+  const deleted: string[] = []
+  const conn: S3Conn = {
+    config: { bucket: 'b' } as S3Config,
+    mod: { CopyObjectCommand: MoveCopy, DeleteObjectCommand: MoveDelete } as unknown as S3Module,
+    send(cmd: unknown) {
+      if (cmd instanceof MoveCopy) {
+        controller.abort()
+        return Promise.resolve({ CopyObjectResult: { ETag: '"copy"' } })
+      }
+      deleted.push((cmd as MoveDelete).input.Key as string)
+      return Promise.resolve({})
+    },
+  }
+  await expect(
+    runWithCaller({ ...currentCaller(), stop: controller }, () =>
+      requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ABSENT_WRITE, 'source'),
+    ),
+  ).rejects.toMatchObject({ name: 'AbortError' })
+  expect(deleted).toEqual(['dst'])
+})
+
+it('does not require new destination read permissions for a move', async () => {
+  const sent: Record<string, unknown>[] = []
+  const conn: S3Conn = {
+    config: { bucket: 'b' } as S3Config,
+    mod: {
+      HeadObjectCommand: MoveHead,
+      CopyObjectCommand: MoveCopy,
+      DeleteObjectCommand: MoveDelete,
+    } as unknown as S3Module,
+    send(cmd: unknown) {
+      if (cmd instanceof MoveHead) return Promise.reject(sdkError('AccessDenied', 403))
+      sent.push((cmd as MoveCopy).input)
+      return Promise.resolve(
+        cmd instanceof MoveCopy ? { CopyObjectResult: { ETag: '"copy"' } } : {},
+      )
+    },
+  }
+  await expect(
+    requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ANY_WRITE, 'source'),
+  ).resolves.toBe(true)
+  expect(sent[0]?.IfNoneMatch).toBeUndefined()
+  expect(sent[1]?.Key).toBe('src')
+})
+
+it('keeps the abort result when cancellation arrives during compensation', async () => {
+  const controller = new AbortController()
+  let release!: () => void
+  let started!: () => void
+  const cleanupStarted = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  const objects = new Map([
+    ['src', 'new-source'],
+    ['dst', 'copy'],
+  ])
+  const conn: S3Conn = {
+    config: { bucket: 'b' } as S3Config,
+    mod: { CopyObjectCommand: MoveCopy, DeleteObjectCommand: MoveDelete } as unknown as S3Module,
+    send(cmd: unknown) {
+      if (cmd instanceof MoveCopy) return Promise.resolve({ CopyObjectResult: { ETag: '"copy"' } })
+      if ((cmd as MoveDelete).input.Key === 'src')
+        return Promise.reject(sdkError('PreconditionFailed', 412))
+      started()
+      return new Promise<Record<string, unknown>>((resolve) => {
+        release = () => {
+          objects.delete('dst')
+          resolve({})
+        }
+      })
+    },
+  }
+  const move = runWithCaller({ ...currentCaller(), stop: controller }, () =>
+    requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ABSENT_WRITE, 'source'),
+  )
+  const rejected = expect(move).rejects.toMatchObject({ name: 'AbortError' })
+  await cleanupStarted
+  controller.abort()
+  release()
+  await rejected
+  expect(Object.fromEntries(objects)).toEqual({ src: 'new-source' })
+})
+
+it('bounds an unknown source delete and reports partial completion on cancellation', async () => {
+  const controller = new AbortController()
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  let started!: () => void
+  const deletionStarted = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  const deleted: string[] = []
+  const conn: S3Conn = {
+    config: { bucket: 'b' } as S3Config,
+    mod: { CopyObjectCommand: MoveCopy, DeleteObjectCommand: MoveDelete } as unknown as S3Module,
+    send(cmd: unknown, options?: { abortSignal?: AbortSignal }) {
+      if (cmd instanceof MoveCopy) return Promise.resolve({ CopyObjectResult: { ETag: '"copy"' } })
+      deleted.push((cmd as MoveDelete).input.Key as string)
+      started()
+      return new Promise<Record<string, unknown>>((_resolve, reject) => {
+        options?.abortSignal?.addEventListener(
+          'abort',
+          () => {
+            reject(new DOMException('stopped', 'AbortError'))
+          },
+          { once: true },
+        )
+      })
+    },
+  }
+  try {
+    const move = runWithCaller({ ...currentCaller(), stop: controller }, () =>
+      requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ABSENT_WRITE, 'source'),
+    )
+    const rejected = expect(move).rejects.toMatchObject({ name: 'AbortError' })
+    await deletionStarted
+    controller.abort()
+    await rejected
+    expect(deleted).toEqual(['src'])
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('source deletion outcome unknown'))
+  } finally {
+    warning.mockRestore()
+  }
+})
+
+it.each(['refused', 'committed'])(
+  'joins a source delete that %s during cancellation',
+  async (outcome) => {
+    const controller = new AbortController()
+    let started!: () => void
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const objects = new Map([['src', 'original']])
+    const deleted: string[] = []
+    const conn: S3Conn = {
+      config: { bucket: 'b' } as S3Config,
+      mod: { CopyObjectCommand: MoveCopy, DeleteObjectCommand: MoveDelete } as unknown as S3Module,
+      send(cmd: unknown) {
+        if (cmd instanceof MoveCopy) {
+          objects.set('dst', 'original')
+          return Promise.resolve({ CopyObjectResult: { ETag: '"copy"' } })
+        }
+        const key = (cmd as MoveDelete).input.Key as string
+        deleted.push(key)
+        if (key === 'dst') {
+          objects.delete('dst')
+          return Promise.resolve({})
+        }
+        if (outcome === 'committed') objects.delete('src')
+        else objects.set('src', 'new-source')
+        started()
+        return new Promise<Record<string, unknown>>((resolve, reject) => {
+          finish = () => {
+            if (outcome === 'committed') resolve({})
+            else reject(sdkError('PreconditionFailed', 412))
+          }
+        })
+      },
+    }
+    const move = runWithCaller({ ...currentCaller(), stop: controller }, () =>
+      requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', ABSENT_WRITE, 'source'),
+    )
+    const rejected = expect(move).rejects.toMatchObject({ name: 'AbortError' })
+    await pending
+    controller.abort()
+    finish()
+    await rejected
+    expect(deleted).toEqual(outcome === 'committed' ? ['src'] : ['src', 'dst'])
+    expect(Object.fromEntries(objects)).toEqual(
+      outcome === 'committed' ? { dst: 'original' } : { src: 'new-source' },
+    )
+  },
+)
+
+it('competing destination creation names the destination', async () => {
+  let heads = 0
+  const conn: S3Conn = {
+    config: { bucket: 'b' } as S3Config,
+    mod: { HeadObjectCommand: MoveHead, CopyObjectCommand: MoveCopy } as unknown as S3Module,
+    send(cmd: unknown): Promise<Record<string, unknown>> {
+      if (cmd instanceof MoveHead) {
+        if (heads++ === 0) return Promise.reject(sdkError('NoSuchKey', 404))
+        return Promise.resolve({
+          ContentLength: 6,
+          LastModified: new Date('2026-01-01'),
+          ETag: '"theirs"',
+        })
+      }
+      expect(cmd).toBeInstanceOf(MoveCopy)
+      return Promise.reject(sdkError('PreconditionFailed', 412))
+    },
+  }
+  await expect(
+    requireHook(DRIVER.moveFileIf)(conn, 'src', 'dst', { kind: 'any' }, 'source'),
+  ).rejects.toMatchObject({ keys: ['dst'], gone: false })
 })

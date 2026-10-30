@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createHash } from 'node:crypto'
-import { constants } from 'node:fs'
+import { constants, readFileSync } from 'node:fs'
 import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { markLost } from '@struktoai/mirage-core/observe/context'
 import { MountMode, PathSpec, WritePolicy } from '@struktoai/mirage-core/types'
@@ -529,8 +529,7 @@ describe('conditional writes on an S3 mount', () => {
       expect(code, err).toBe(exit)
       expect(err.includes(STALE) && err.startsWith(prefix), err).toBe(true)
       expect(object(key)).toBe('theirs\n')
-      // Only a move whose copy landed before its delete lost keeps the copy.
-      expect(object('new')).toBe(name === 'mv-src-delete' ? 'gee\n' : undefined)
+      expect(object('new')).toBeUndefined()
       mock.ledger.length = 0
       expect(await run(ws, `cat /s3/${key}`)).toEqual([0, 'theirs\n', ''])
       expect(mock.ledger.filter(([op]) => op === 'GetObject').length).toBe(1)
@@ -561,8 +560,7 @@ describe('conditional writes on an S3 mount', () => {
     },
   )
 
-  it('still guards the file a landed move made', async () => {
-    // GNU's mv will not overwrite a target this mv made with its second source.
+  it('allows a later source to use a recovered destination', async () => {
     mock.store.set('b', 'x/g', ENC.encode('ex\n'))
     mock.store.set('b', 'y/g', ENC.encode('why\n'))
     mock.store.set('b', 't/k', ENC.encode('k\n'))
@@ -571,10 +569,9 @@ describe('conditional writes on an S3 mount', () => {
     expect(await run(ws, 'mv /s3/x/g /s3/y/g /s3/t/')).toEqual([
       1,
       '',
-      `mv: cannot remove '/s3/x/g': ${STALE}\n` +
-        "mv: will not overwrite just-created '/s3/t/g' with '/s3/y/g'\n",
+      `mv: cannot remove '/s3/x/g': ${STALE}\n`,
     ])
-    expect(object('t/g')).toBe('ex\n')
+    expect(object('t/g')).toBe('why\n')
   })
 
   it.each([
@@ -1267,7 +1264,9 @@ describe('conditional writes on an S3 mount', () => {
       expect(code, `${policy}: ${err}`).toBe(0)
       ops[policy] = mock.ledger.map(([op]) => op)
     }
-    expect(ops[WritePolicy.CONDITIONAL]).toEqual(ops[WritePolicy.UNCONDITIONAL])
+    const expected = [...(ops[WritePolicy.UNCONDITIONAL] ?? [])]
+    if (line === 'mv /s3/g /s3/i') expected.splice(expected.indexOf('CopyObject'), 0, 'HeadObject')
+    expect(ops[WritePolicy.CONDITIONAL]).toEqual(expected)
   })
 
   it.each([
@@ -1285,4 +1284,80 @@ describe('conditional writes on an S3 mount', () => {
       keeps,
     ])
   })
+})
+
+it('compensates workspace cancellation immediately after a confirmed copy', async () => {
+  const isolated = installS3Mock()
+  isolated.store.set('b', 'f', ENC.encode('original'))
+  const ws = buildWorkspace()
+  try {
+    isolated.before('CopyObject', () => {
+      currentCaller().stop?.abort()
+    })
+    await expect(ws.shell('mv /s3/f /s3/new')).rejects.toMatchObject({ name: 'AbortError' })
+    expect(isolated.store.objects('b').has('new')).toBe(false)
+    expect(isolated.store.objects('b').has('f')).toBe(true)
+  } finally {
+    await ws.close()
+    isolated.restore()
+  }
+})
+
+interface WorkspaceRecoveryCase {
+  name: string
+  source_code?: string
+  replacement?: string
+  cleanup_code?: string
+  workspace?: {
+    command: string
+    exit: number
+    stdout: string
+    stderr: string
+    destination: string | null
+  }
+}
+
+const WORKSPACE_RECOVERY = (
+  JSON.parse(
+    readFileSync(
+      new URL('../../../../../../integ/fixtures/write/move_recovery.json', import.meta.url),
+      'utf8',
+    ),
+  ) as { cases: WorkspaceRecoveryCase[] }
+).cases.filter((c) => c.workspace !== undefined)
+
+it.each(WORKSPACE_RECOVERY)('shared workspace move recovery: $name', async (c) => {
+  const isolated = installS3Mock()
+  isolated.store.set('b', 'f', ENC.encode('one\n'))
+  const ws = buildWorkspace()
+  try {
+    isolated.before('DeleteObject', () => {
+      if (c.source_code === 'AccessDenied')
+        throw Object.assign(new Error('Permission denied'), { code: 'EACCES' })
+      isolated.store.set('b', 'f', ENC.encode('theirs\n'))
+    })
+    if (c.replacement !== undefined)
+      isolated.before('DeleteObject', () => {
+        isolated.store.set('b', 'new', ENC.encode('external\n'))
+      })
+    else if (c.cleanup_code !== undefined)
+      isolated.before('DeleteObject', () => {
+        throw Object.assign(new Error('Permission denied'), { code: 'EACCES' })
+      })
+    const expected = c.workspace
+    if (expected === undefined) throw new Error('workspace recovery case is missing its golden')
+    expect(await run(ws, expected.command)).toEqual([
+      expected.exit,
+      expected.stdout,
+      expected.stderr,
+    ])
+    const actual = isolated.store.get('b', 'new')
+    expect(actual === undefined ? null : DEC.decode(actual)).toBe(expected.destination)
+    expect(DEC.decode(isolated.store.get('b', 'f'))).toBe(
+      c.source_code === 'AccessDenied' ? 'one\n' : 'theirs\n',
+    )
+  } finally {
+    await ws.close()
+    isolated.restore()
+  }
 })

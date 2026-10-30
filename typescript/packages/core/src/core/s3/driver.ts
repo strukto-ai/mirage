@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { callerSignal, currentCaller } from '../../context/session_context.ts'
+import { ABORT_JOIN_MS, joinOrAbort, hasAborted, makeAbortError } from '../../utils/abort.ts'
+import { MoveError } from '../../errors/types.ts'
 import { CONDITION_SUPPORT } from './constants.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
@@ -22,6 +25,7 @@ import { VFSName } from '../../types.ts'
 import { eacces, enoent, enotsup, unnamedFsError } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import {
+  ABSENT_WRITE,
   ANY_WRITE,
   type KnownVersions,
   type Measured,
@@ -44,7 +48,7 @@ import {
   loadS3Module,
   streamToBuffer,
 } from './client.ts'
-import type { S3Conn, S3SendClient } from './types.ts'
+import type { CopyReceipt, S3Conn, S3SendClient } from './types.ts'
 import {
   CONDITION_LOST_CODES,
   MAX_PARTS,
@@ -204,8 +208,8 @@ async function copyObject(
   dstKey: string,
   cond: WriteCondition | null = null,
   source: string | null = null,
-): Promise<void> {
-  await conn.send(
+): Promise<CopyReceipt> {
+  const response = await conn.send(
     new conn.mod.CopyObjectCommand({
       Bucket: conn.config.bucket,
       CopySource: `${conn.config.bucket}/${srcKey}`,
@@ -214,6 +218,14 @@ async function copyObject(
       ...(cond !== null ? condition(cond) : {}),
     }),
   )
+  const copied = response.CopyObjectResult as { ETag?: string } | undefined
+  const metadata = response.$metadata as { attempts?: number } | undefined
+  const fingerprint = copied?.ETag?.replace(/^"|"$/g, '')
+  return {
+    fingerprint: fingerprint === undefined || fingerprint === '' ? null : fingerprint,
+    revision: versionOf(response),
+    retried: (metadata?.attempts ?? 1) > 1,
+  }
 }
 
 function isMissingBucket(err: unknown): boolean {
@@ -485,6 +497,61 @@ function lostOn(key: string, version: Measured, landed = false): ConditionLostEr
   return new ConditionLostError([key], { landed, versions: new Map([[key, quoted(version)]]) })
 }
 
+function deleteRejected(err: unknown): boolean {
+  const e = err as { name?: string; Code?: string; $metadata?: { attempts?: number } }
+  return (
+    (e.name === 'PreconditionFailed' || e.Code === 'PreconditionFailed') &&
+    (e.$metadata?.attempts ?? 1) === 1
+  )
+}
+
+/** Join an owned move request within the caller's cancellation grace. */
+function joinMove<T>(request: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  return joinOrAbort(request, signal, ABORT_JOIN_MS)
+}
+
+async function recoverCopy(
+  conn: S3Conn,
+  dstKey: string,
+  receipt: CopyReceipt,
+  absent: boolean,
+): Promise<readonly [boolean, unknown, string | null]> {
+  if (receipt.revision !== null && receipt.retried)
+    return [false, null, 'copy was retried; earlier copied versions may remain']
+  let condition: Record<string, string>
+  if (receipt.revision !== null) condition = { VersionId: receipt.revision }
+  else if (absent && receipt.fingerprint !== null)
+    condition = { IfMatch: quoted(receipt.fingerprint) }
+  else
+    return [false, null, absent ? 'copy identity unavailable' : 'destination was not confirmed new']
+  const controller = new AbortController()
+  try {
+    const cleanup = conn.send(
+      new conn.mod.DeleteObjectCommand({ Bucket: conn.config.bucket, Key: dstKey, ...condition }),
+      { abortSignal: controller.signal },
+    )
+    await joinMove(cleanup, callerSignal() ?? currentCaller().stop?.signal)
+  } catch (err) {
+    if (isNotFound(err) && !isMissingBucket(err)) return [true, null, null]
+    console.debug('recovering a failed move copy failed:', err)
+    return [false, err, 'conditional cleanup failed']
+  } finally {
+    controller.abort()
+  }
+  return [true, null, null]
+}
+
+/** Give cancellation cleanup its own bounded lifetime. */
+async function recoverCancelledCopy(
+  conn: S3Conn,
+  dstKey: string,
+  receipt: CopyReceipt,
+  absent: boolean,
+): Promise<void> {
+  const [recovered] = await recoverCopy(conn, dstKey, receipt, absent)
+  if (!recovered) console.warn('S3 move cancelled; destination cleanup incomplete')
+}
+
 async function moveFileIf(
   conn: S3Conn,
   srcKey: string,
@@ -492,7 +559,7 @@ async function moveFileIf(
   cond: WriteCondition,
   source: string | null,
 ): Promise<boolean> {
-  // Pin the source to the agent's version, else to this lookup's.
+  // S3 compensation intentionally differs from GNU's cross-device mv.
   let pinned = source
   if (pinned === null) {
     const meta = await head(conn, srcKey)
@@ -500,30 +567,77 @@ async function moveFileIf(
     pinned = meta.fingerprint ?? ''
   }
   const match = quoted(pinned)
+  let destination = cond
+  if (cond.kind === 'any') {
+    try {
+      if ((await head(conn, dstKey)) === null) destination = ABSENT_WRITE
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'EACCES') throw err
+      console.debug('move destination inspection refused; recovery needs a version ID')
+    }
+  }
+  let receipt: CopyReceipt
   try {
-    await copyObject(conn, srcKey, dstKey, cond, match)
+    receipt = await copyObject(conn, srcKey, dstKey, destination, match)
   } catch (err) {
     if (!lostCondition(err, true)) throw err
-    const [named, version] = await copyLoser(conn, srcKey, dstKey, cond, match)
+    if (destination.kind === 'absent') {
+      let observed: ObjectMeta | null = null
+      try {
+        observed = await head(conn, dstKey)
+      } catch (probeError) {
+        console.debug('copy destination probe failed:', probeError)
+      }
+      if (observed !== null) throw new ConditionLostError([dstKey])
+    }
+    const [named, version] = await copyLoser(conn, srcKey, dstKey, destination, match)
     throw lostOn(named, version)
   }
+  const signal = callerSignal() ?? currentCaller().stop?.signal
+  if (hasAborted(signal)) {
+    await recoverCancelledCopy(conn, dstKey, receipt, destination.kind === 'absent')
+    throw makeAbortError(signal)
+  }
+  const controller = new AbortController()
+  let sourceRemoved = false
   try {
-    await guarded(
-      srcKey,
-      conn.send(
-        new conn.mod.DeleteObjectCommand({
-          Bucket: conn.config.bucket,
-          Key: srcKey,
-          IfMatch: match,
-        }),
-      ),
-      true,
+    const deletion = conn.send(
+      new conn.mod.DeleteObjectCommand({ Bucket: conn.config.bucket, Key: srcKey, IfMatch: match }),
+      { abortSignal: controller.signal },
     )
+    await joinMove(deletion, signal)
+    sourceRemoved = true
+    if (hasAborted(signal)) throw makeAbortError(signal)
   } catch (err) {
-    if (err instanceof ConditionLostError) {
-      throw lostOn(srcKey, err.gone ? OwnRead.ABSENT : match, true)
+    if (hasAborted(signal)) {
+      if (deleteRejected(err))
+        await recoverCancelledCopy(conn, dstKey, receipt, destination.kind === 'absent')
+      else if (!sourceRemoved)
+        console.warn('S3 move cancelled; source deletion outcome unknown, destination may remain')
+      throw makeAbortError(signal)
     }
-    throw err
+    if (!lostCondition(err, true)) {
+      if ((err as { name?: string }).name === 'AbortError') throw err
+      throw new MoveError(err, 'source deletion outcome is unknown')
+    }
+    const gone = !isConditionLost(err)
+    const [recovered, recoveryError, recoveryReason] = deleteRejected(err)
+      ? await recoverCopy(conn, dstKey, receipt, destination.kind === 'absent')
+      : ([false, null, 'source deletion outcome is unknown'] as const)
+    if (hasAborted(signal)) {
+      if (!recovered) console.warn('S3 move cancelled; destination cleanup incomplete')
+      throw makeAbortError(signal)
+    }
+    throw new ConditionLostError([srcKey], {
+      landed: true,
+      gone,
+      ...(gone ? {} : { versions: new Map([[srcKey, match]]) }),
+      recovered,
+      recoveryError,
+      recoveryReason,
+    })
+  } finally {
+    controller.abort()
   }
   return true
 }

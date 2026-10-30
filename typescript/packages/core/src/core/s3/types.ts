@@ -2,7 +2,7 @@ import type { S3Client } from '@aws-sdk/client-s3'
 import type { S3Config } from '../../vfs/s3/config.ts'
 
 export interface S3SendClient {
-  send: (cmd: unknown) => Promise<Record<string, unknown>>
+  send: (cmd: unknown, options?: { abortSignal?: AbortSignal }) => Promise<Record<string, unknown>>
   destroy?: () => void
 }
 
@@ -26,4 +26,11 @@ export interface S3Conn {
   send: S3SendClient['send']
   mod: S3Module
   config: S3Config
+}
+
+/** The copied object's identity returned by the store. Mirrors Python's CopyReceipt. */
+export interface CopyReceipt {
+  readonly fingerprint: string | null
+  readonly revision: string | null
+  readonly retried: boolean
 }

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import aclosing, asynccontextmanager
@@ -20,6 +21,7 @@ from typing import Any, BinaryIO, NoReturn, TypeVar, assert_never
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import condition_version
 from mirage.cache.types import (
+    ABSENT_WRITE,
     ANY_WRITE,
     AbsentWrite,
     AnyWrite,
@@ -29,6 +31,8 @@ from mirage.cache.types import (
     OwnRead,
     WriteCondition,
 )
+from mirage.concurrency.limiter import owned_task
+from mirage.context.session_context import current_caller
 from mirage.core.object_store.driver import (
     ChildEntry,
     ObjectMeta,
@@ -52,11 +56,13 @@ from mirage.core.s3.constants import (
     PART_SIZE,
     SCOPE_ERROR,
 )
-from mirage.core.s3.types import S3Conn
+from mirage.core.s3.types import CopyReceipt, S3Conn
 from mirage.errors.fs import enoent
+from mirage.errors.types import MoveError
 from mirage.io.cooperative import chunks
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource
+from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.utils.dates import to_iso_z
 
 logger = logging.getLogger(__name__)
@@ -206,7 +212,7 @@ async def _copy_object(
     dst_key: str,
     cond: WriteCondition | None = None,
     source: str | None = None,
-) -> None:
+) -> CopyReceipt:
     """Copy ``src_key`` onto ``dst_key`` within the bucket.
 
     Args:
@@ -219,11 +225,22 @@ async def _copy_object(
     extra = _condition(cond) if cond is not None else {}
     if source is not None:
         extra["CopySourceIfMatch"] = source
-    await conn.client.copy_object(
+    response = await conn.client.copy_object(
         Bucket=conn.config.bucket,
         CopySource={"Bucket": conn.config.bucket, "Key": src_key},
         Key=dst_key,
         **extra,
+    )
+
+    if not isinstance(response, dict):
+        return CopyReceipt(None, None)
+    return CopyReceipt(
+        _etag_of(response.get("CopyObjectResult") or {}) or None,
+        _version_of(response),
+        bool(
+            (response.get("ResponseMetadata") or {}).get("RetryAttempts", 0)
+            > 0
+        ),
     )
 
 
@@ -490,6 +507,99 @@ def _lost_on(
     )
 
 
+def _delete_rejected(exc: Exception) -> bool:
+    """Whether the first delete attempt was explicitly refused.
+
+    Args:
+        exc (Exception): the SDK's delete error, before classification.
+    """
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    metadata = response.get("ResponseMetadata") or {}
+    return bool(
+        response.get("Error", {}).get("Code") == "PreconditionFailed"
+        and metadata.get("RetryAttempts", 0) == 0
+    )
+
+
+async def _recover_copy(
+    conn: S3Conn, dst_key: str, receipt: CopyReceipt, absent: bool
+) -> tuple[bool, Exception | None, str | None]:
+    """Undo only the copy identified by its response.
+
+    Args:
+        conn (S3Conn): the open connection.
+        dst_key (str): the destination key.
+        receipt (CopyReceipt): the confirmed copy's identity.
+        absent (bool): the copy atomically required an absent destination.
+    """
+    if receipt.revision is not None and receipt.retried:
+        return (
+            False,
+            None,
+            "copy was retried; earlier copied versions may remain",
+        )
+    condition: dict[str, str]
+    if receipt.revision is not None:
+        condition = {"VersionId": receipt.revision}
+    elif absent and receipt.fingerprint:
+        condition = {"IfMatch": _quoted(receipt.fingerprint)}
+    else:
+        reason = (
+            "copy identity unavailable"
+            if absent
+            else "destination was not confirmed new"
+        )
+        return False, None, reason
+    try:
+        await conn.client.delete_object(
+            Bucket=conn.config.bucket, Key=dst_key, **condition
+        )
+    except Exception as exc:
+        if is_key_gone(exc):
+            return True, None, None
+        logger.debug("recovering a failed move's copy failed", exc_info=True)
+        return False, exc, "conditional cleanup failed"
+    return True, None, None
+
+
+async def _join_move(task: asyncio.Task[T]) -> bool:
+    """Join a move's owned request within the cancellation grace.
+
+    Args:
+        task (asyncio.Task): the request whose outcome must be known.
+    """
+    deadline = asyncio.get_running_loop().time() + ABORT_JOIN_SECONDS
+    while not task.done():
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            return False
+        try:
+            await asyncio.wait({task}, timeout=remaining)
+        except asyncio.CancelledError:
+            logger.debug("joining a cancelled move's owned request")
+    return not task.cancelled()
+
+
+async def _recover_cancelled_copy(
+    conn: S3Conn, dst_key: str, receipt: CopyReceipt, absent: bool
+) -> None:
+    """Give cancellation cleanup its own bounded lifetime.
+
+    Args:
+        conn (S3Conn): the open connection.
+        dst_key (str): the copied destination key.
+        receipt (CopyReceipt): the confirmed copy's identity.
+        absent (bool): whether the copy required absence atomically.
+    """
+    cleanup = owned_task(_recover_copy(conn, dst_key, receipt, absent))
+    if not await _join_move(cleanup) or not cleanup.result()[0]:
+        logger.warning("S3 move cancelled; destination cleanup incomplete")
+
+
 async def _move_file_if(
     conn: S3Conn,
     src_key: str,
@@ -497,33 +607,109 @@ async def _move_file_if(
     cond: WriteCondition,
     source: str | None,
 ) -> bool:
-    # Pin the source to the agent's version, else to this lookup's.
+    # S3 compensation intentionally differs from GNU's cross-device mv:
+    # a confirmed delete refusal can undo a copy that has its own identity.
     if source is None:
         meta = await _head(conn, src_key)
         if meta is None:
             return False
         source = meta.fingerprint or ""
     source = _quoted(source)
+    if isinstance(cond, AnyWrite):
+        try:
+            if await _head(conn, dst_key) is None:
+                cond = ABSENT_WRITE
+        except PermissionError:
+            logger.debug(
+                "move destination inspection refused; recovery needs a version ID",
+                exc_info=True,
+            )
     try:
-        await _copy_object(conn, src_key, dst_key, cond, source)
+        receipt = await _copy_object(conn, src_key, dst_key, cond, source)
     except Exception as exc:
         if not _lost_condition(exc, matched=True):
             raise
+        if isinstance(cond, AbsentWrite):
+            try:
+                destination = await _head(conn, dst_key)
+            except Exception:
+                logger.debug("copy destination probe failed", exc_info=True)
+                destination = None
+            if destination is not None:
+                raise ConditionLostError([dst_key]) from exc
         named, version = await _copy_loser(
             conn, src_key, dst_key, cond, source
         )
         raise _lost_on(named, version) from exc
     try:
-        await _guarded(
-            src_key,
-            conn.client.delete_object(
-                Bucket=conn.config.bucket, Key=src_key, IfMatch=source
-            ),
-            matched=True,
+        await asyncio.sleep(0)
+        stop = current_caller().stop
+        if stop is not None and stop.is_set():
+            raise MirageAbortError()
+    except (asyncio.CancelledError, MirageAbortError):
+        await _recover_cancelled_copy(
+            conn, dst_key, receipt, isinstance(cond, AbsentWrite)
         )
+        raise
+    deletion = owned_task(
+        conn.client.delete_object(
+            Bucket=conn.config.bucket, Key=src_key, IfMatch=source
+        )
+    )
+    try:
+        await _guarded(src_key, asyncio.shield(deletion), matched=True)
+    except asyncio.CancelledError:
+        if await _join_move(deletion):
+            source_error = deletion.exception()
+            if isinstance(source_error, Exception) and _delete_rejected(
+                source_error
+            ):
+                await _recover_cancelled_copy(
+                    conn, dst_key, receipt, isinstance(cond, AbsentWrite)
+                )
+            elif source_error is not None:
+                logger.warning(
+                    "S3 move cancelled; source deletion outcome unknown, "
+                    "destination may remain"
+                )
+        else:
+            logger.warning(
+                "S3 move cancelled; source deletion outcome unknown, "
+                "destination may remain"
+            )
+        raise
     except ConditionLostError as exc:
         pinned: Measured = OwnRead.ABSENT if exc.gone else source
-        raise _lost_on(src_key, pinned, landed=True) from exc
+        failure = _lost_on(src_key, pinned, landed=True)
+        if (
+            exc.__cause__ is not None
+            and isinstance(exc.__cause__, Exception)
+            and _delete_rejected(exc.__cause__)
+        ):
+            cleanup = owned_task(
+                _recover_copy(
+                    conn, dst_key, receipt, isinstance(cond, AbsentWrite)
+                )
+            )
+            try:
+                recovered, recovery_error, reason = await asyncio.shield(
+                    cleanup
+                )
+            except asyncio.CancelledError:
+                if not await _join_move(cleanup) or not cleanup.result()[0]:
+                    logger.warning(
+                        "S3 move cancelled; destination cleanup incomplete"
+                    )
+                raise
+            failure.recovered = recovered
+            failure.recovery_error = recovery_error
+            failure.recovery_reason = reason
+        else:
+            failure.recovered = False
+            failure.recovery_reason = "source deletion outcome is unknown"
+        raise failure from exc
+    except Exception as exc:
+        raise MoveError(exc, "source deletion outcome is unknown") from exc
     return True
 
 

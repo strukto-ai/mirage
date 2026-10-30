@@ -22,7 +22,7 @@ import {
   stale,
 } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, strerrorOf } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import {
@@ -130,7 +130,12 @@ export function makeRename<A extends Accessor, C>(
       else if (lost === dst) {
         if (source !== null && source !== '') await dropCached(src, source)
       } else if (cond?.kind === 'match') await dropCached(dst, cond.version)
-      throw await stale(lost, { landed: err.landed, gone: err.gone, version: sent })
+      const refusal = await stale(lost, { landed: err.landed, gone: err.gone, version: sent })
+      throw Object.assign(refusal, {
+        recovered: err.recovered,
+        recoveryError: err.recoveryError !== null ? strerrorOf(err.recoveryError) : null,
+        recoveryReason: err.recoveryReason,
+      })
     }
     if (!moved) throw enoent(src)
     liftLost(src, upto, op !== 'rename')

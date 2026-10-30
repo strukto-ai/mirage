@@ -22,8 +22,8 @@ class ConditionLostError(Exception):
     Args:
         keys (list[str]): the raw keys whose condition did not hold, in
             the order they were met.
-        landed (bool): a move's copy landed and only its source's delete
-            lost, so the destination holds the copy.
+        landed (bool): a move's copy landed before its source delete
+            lost; ``recovered`` says whether compensation removed it.
         gone (bool): the object no longer exists, so no newer bytes are
             there for a retry to overwrite.
         versions (dict[str, Measured] | None): the version each lost key
@@ -48,3 +48,6 @@ class ConditionLostError(Exception):
         self.gone = gone
         self.versions = versions or {}
         self.error = error
+        self.recovered: bool | None = None
+        self.recovery_error: Exception | None = None
+        self.recovery_reason: str | None = None

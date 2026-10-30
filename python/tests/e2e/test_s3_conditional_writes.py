@@ -15,8 +15,10 @@
 import asyncio
 import hashlib
 import io
+import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -30,6 +32,7 @@ from mirage.observe.context import mark_lost
 from mirage.runtime.handles.mode import open_mode
 from mirage.runtime.types import ScriptSource
 from mirage.types import PathSpec
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
@@ -453,9 +456,7 @@ async def test_a_stale_write_is_refused_and_leaves_the_object(
     assert code == exit_code, err
     assert STALE in err and err.startswith(prefix), err
     assert fake.buckets["b"][key] == b"theirs\n"
-    # Only a move whose copy landed before its delete lost keeps the copy.
-    kept = SEED["g"] if name == "mv-src-delete" else None
-    assert fake.buckets["b"].get("new") == kept
+    assert fake.buckets["b"].get("new") is None
     fake.ledger.clear()
     code, out, _ = await _run(ws, f"cat /s3/{key}")
     assert (code, out) == (0, "theirs\n")
@@ -499,8 +500,9 @@ async def test_a_directory_op_keeps_and_names_a_changed_file(
 
 
 @pytest.mark.asyncio
-async def test_a_landed_move_still_guards_the_file_it_made(fake, workspaces):
-    # GNU's mv will not overwrite a target this mv made with its second source.
+async def test_a_recovered_move_allows_a_later_source_to_use_the_destination(
+    fake, workspaces
+):
     fake.buckets["b"]["x/g"] = b"ex\n"
     fake.buckets["b"]["y/g"] = b"why\n"
     fake.buckets["b"]["t/k"] = b"k\n"
@@ -508,11 +510,8 @@ async def test_a_landed_move_still_guards_the_file_it_made(fake, workspaces):
     fake.before("delete_object", lambda: _theirs(fake, "x/g"))
     code, _, err = await _run(ws, "mv /s3/x/g /s3/y/g /s3/t/")
     assert code == 1
-    assert err == (
-        f"mv: cannot remove '/s3/x/g': {STALE}\n"
-        "mv: will not overwrite just-created '/s3/t/g' with '/s3/y/g'\n"
-    )
-    assert fake.buckets["b"]["t/g"] == b"ex\n"
+    assert err == f"mv: cannot remove '/s3/x/g': {STALE}\n"
+    assert fake.buckets["b"]["t/g"] == b"why\n"
 
 
 @pytest.mark.asyncio
@@ -1319,7 +1318,10 @@ async def test_a_conditional_line_sends_the_same_requests(line):
                 ops[policy] = [e[0] for e in session._client.ledger]
             finally:
                 await ws.close()
-    assert ops[WritePolicy.CONDITIONAL] == ops[WritePolicy.UNCONDITIONAL]
+    expected = list(ops[WritePolicy.UNCONDITIONAL])
+    if line == "mv /s3/g /s3/i":
+        expected.insert(expected.index("copy_object"), "head_object")
+    assert ops[WritePolicy.CONDITIONAL] == expected
 
 
 @pytest.mark.asyncio
@@ -1638,3 +1640,91 @@ async def test_live_session_checksum_keeps_observed_version(
     assert refused.exit_code == 1
     assert STALE in await refused.stderr_str()
     assert fake.buckets["b"]["f"] == b"peer\n"
+
+
+@pytest.mark.asyncio
+async def test_workspace_cancel_after_copy_compensates_and_keeps_abort(
+    fake, workspaces
+):
+    ws = workspaces()
+    copy = fake.copy_object
+
+    async def cancel_after_copy(**params):
+        result = await copy(**params)
+        current_caller().stop.set()
+        return result
+
+    fake.copy_object = cancel_after_copy
+    with pytest.raises(MirageAbortError):
+        await ws.shell("mv /s3/f /s3/new")
+    assert fake.buckets["b"]["f"] == SEED["f"]
+    assert "new" not in fake.buckets["b"]
+
+
+@pytest.mark.asyncio
+async def test_incomplete_move_cleanup_keeps_primary_error_and_refreshes_cache(
+    fake, workspaces
+):
+    ws = workspaces()
+    await _run(ws, "cat /s3/f")
+    fake.before("delete_object", lambda: _theirs(fake, "f"))
+    fake.before("delete_object", _denied)
+    code, _, err = await _run(ws, "mv /s3/f /s3/new")
+    assert code == 1
+    assert err == (
+        f"mv: cannot remove '/s3/f': {STALE}\n"
+        "mv: rollback of '/s3/new' incomplete: Permission denied; "
+        "destination may remain\n"
+    )
+    fake.ledger.clear()
+    code, out, _ = await _run(ws, "cat /s3/f /s3/new")
+    assert (code, out) == (0, "theirs\none\n")
+    assert [name for name, _ in fake.ledger].count("get_object") == 2
+
+
+_WORKSPACE_RECOVERY = [
+    case
+    for case in json.loads(
+        (
+            Path(__file__).parents[3]
+            / "integ/fixtures/write/move_recovery.json"
+        ).read_text()
+    )["cases"]
+    if "workspace" in case
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case", _WORKSPACE_RECOVERY, ids=[c["name"] for c in _WORKSPACE_RECOVERY]
+)
+async def test_shared_workspace_move_recovery(case, fake, workspaces):
+    ws = workspaces()
+    fake.before(
+        "delete_object",
+        _denied
+        if case.get("source_code") == "AccessDenied"
+        else lambda: _theirs(fake, "f"),
+    )
+    if case.get("replacement"):
+        fake.before(
+            "delete_object",
+            lambda: fake.buckets["b"].__setitem__("new", b"external\n"),
+        )
+    elif case.get("cleanup_code"):
+        fake.before("delete_object", _denied)
+    expected = case["workspace"]
+    assert await _run(ws, expected["command"]) == (
+        expected["exit"],
+        expected["stdout"],
+        expected["stderr"],
+    )
+    actual = fake.buckets["b"].get("new")
+    assert actual == (
+        expected["destination"].encode()
+        if expected["destination"] is not None
+        else None
+    )
+    assert fake.buckets["b"]["f"] == (
+        SEED["f"] if case.get("source_code") == "AccessDenied" else b"theirs\n"
+    )
