@@ -43,6 +43,7 @@ from mirage.policy import (
     refusal_of,
     render_deny,
 )
+from mirage.policy.errors import ApprovalUnavailable
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.policies import agreed, settled
 from mirage.policy.profile import SessionProfile
@@ -753,6 +754,32 @@ async def test_wants_for_refines_wants_per_session():
     # A policy speaking for every session settles it, wherever it stands.
     both = Policies([ForSomeSessions(), ForEveryone()])
     assert await both.wants_for("pre_session", "b") is True
+
+
+@pytest.mark.asyncio
+async def test_a_false_scope_check_cannot_skip_a_policy_added_while_it_waited():
+    entered, resume = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    class Wait(Policy, SessionScopedMixin):
+        async def pre_session(self, ctx):
+            return None
+
+        async def wants_for(self, method, session_id):
+            nonlocal calls
+            calls += 1
+            entered.set()
+            await resume.wait()
+            return False
+
+    policies = Policies([Wait()])
+    running = asyncio.create_task(policies.wants_for("pre_session", "s"))
+    await asyncio.wait_for(entered.wait(), 5)
+    policies.add(ForEveryone())
+    resume.set()
+    with pytest.raises(ApprovalUnavailable, match="policy_changed"):
+        await running
+    assert calls == 1
 
 
 @pytest.mark.asyncio

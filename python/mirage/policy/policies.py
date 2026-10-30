@@ -957,7 +957,14 @@ class Policies:
                 continue
             if not isinstance(policy, SessionScopedMixin):
                 return True
-            if await policy.wants_for(method, session_id):
+            guard = explaining() is not DryRun.DECIDING and not isinstance(
+                explaining(), list
+            )
+            before = self.decisions.facts(session_id) if guard else None
+            wanted = await policy.wants_for(method, session_id)
+            if before is not None:
+                await self.decisions.assert_current(session_id, None, before)
+            if wanted:
                 return True
         return False
 
