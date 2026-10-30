@@ -32,7 +32,7 @@ import {
 import { mountKey } from '../../utils/key_prefix.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { coerceReadPolicy } from './read_policy.ts'
-import { coerceWritePolicy, writeConditions } from './write_policy.ts'
+import { coerceWritePolicy, createConditions, writeConditions } from './write_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { type IndexConfig, LookupStatus } from '../../cache/index/config.ts'
 import { buildIndex } from '../../cache/index/factory.ts'
@@ -1817,6 +1817,9 @@ export class MountEntry {
           // Judged at each write: an S3 mount with no endpoint reads the environment.
           get conditions() {
             return writeConditions(vfs)
+          },
+          get creates() {
+            return createConditions(vfs)
           },
           readVersion: (path) => manager.readVersion(path),
           readVersions: (paths) => manager.readVersions(paths),

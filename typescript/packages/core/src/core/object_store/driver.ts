@@ -292,7 +292,7 @@ export function refused(
   err: ConditionLostError,
   cond: WriteCondition | null,
 ): Promise<StaleWriteError> {
-  return stale(path, { gone: err.gone, version: conditionVersion(cond) })
+  return stale(path, { version: conditionVersion(cond) })
 }
 
 /**

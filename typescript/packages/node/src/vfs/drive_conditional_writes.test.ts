@@ -128,6 +128,13 @@ function refusal(verb: string): string {
   return `mv: cannot move '${r}/f' to '${r}/g': '${r}/g' ${STALE}\n`
 }
 
+async function refusedUntilRead(ws: Workspace, path: string): Promise<void> {
+  const [code, , err] = await run(ws, `echo y > ${path}`)
+  expect([code, err.includes(STALE)]).toEqual([1, true])
+  await run(ws, `cat ${path}`)
+  expect(await run(ws, `echo y > ${path}`)).toEqual([0, '', ''])
+}
+
 function readGate(): { promise: Promise<void>; resolve: () => void } {
   let release!: () => void
   const promise = new Promise<void>((resolve) => {
@@ -392,7 +399,7 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
   )
 
   it.each(['cp', 'mv'])(
-    "keeps no version when a folder retakes %s's destination after its clear",
+    "keeps its version when a folder retakes %s's destination after its clear",
     async (verb) => {
       const r = drive.root
       const ws = await workspace()
@@ -405,20 +412,27 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
       })
       expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
       drive.drop('g')
-      expect(await run(ws, `echo y > ${r}/g`)).toEqual([0, '', ''])
+      await refusedUntilRead(ws, `${r}/g`)
     },
   )
 
-  it.each(['cp', 'mv'])('refuses once %s onto a destination gone since its read', async (verb) => {
-    const r = drive.root
-    const ws = await workspace()
-    await run(ws, `cat ${r}/g`)
-    drive.drop('g')
-    expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
-    expect([drive.text('f'), drive.text('g')]).toEqual(['one\n', undefined])
-    expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([0, '', ''])
-    expect(drive.text('g')).toBe('one\n')
-  })
+  it.each(['cp', 'mv'])(
+    'lands %s onto a destination gone since its read once seen gone',
+    async (verb) => {
+      // Box answers the copy's own look from its cached listing, which still
+      // names g, so only the refusal's fresh look sees it gone.
+      const r = drive.root
+      const ws = await workspace()
+      await run(ws, `cat ${r}/g`)
+      drive.drop('g')
+      if (drive.kind === 'box') {
+        expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
+        expect([drive.text('f'), drive.text('g')]).toEqual(['one\n', undefined])
+      }
+      expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([0, '', ''])
+      expect(drive.text('g')).toBe('one\n')
+    },
+  )
 
   it.each(['cp', 'mv'])('lets the line write after %s onto a read file', async (verb) => {
     const r = drive.root
@@ -803,7 +817,7 @@ describe('conditional writes only Box has', () => {
   })
 
   it.each(['cp', 'mv'])(
-    "keeps no version when a web link retakes %s's destination",
+    "keeps its version when a web link retakes %s's destination",
     async (verb) => {
       const ws = await workspace()
       await run(ws, 'cat /box/g')
@@ -813,7 +827,7 @@ describe('conditional writes only Box has', () => {
       })
       expect(await run(ws, `${verb} /box/f /box/g`)).toEqual([1, '', refusal(verb)])
       drive.drop('g')
-      expect(await run(ws, 'echo y > /box/g')).toEqual([0, '', ''])
+      await refusedUntilRead(ws, '/box/g')
     },
   )
 
@@ -925,7 +939,7 @@ describe('conditional writes only Dropbox has', () => {
     expect(drive.fake.count('delete')).toBe(0)
     expect([drive.text('f'), drive.text('g/x')]).toEqual(['one\n', 'x\n'])
     drive.drop('g')
-    expect(await run(ws, 'echo y > /dbx/g')).toEqual([0, '', ''])
+    await refusedUntilRead(ws, '/dbx/g')
   })
 
   it.each(['cp', 'mv'])('names a source gone before the retry for %s', async (verb) => {

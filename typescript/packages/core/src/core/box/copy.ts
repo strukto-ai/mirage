@@ -78,7 +78,7 @@ export async function retaken(
   ) {
     return stale(dst, { version: cond.version })
   }
-  return stale(dst, { gone: true })
+  return stale(dst)
 }
 
 /**

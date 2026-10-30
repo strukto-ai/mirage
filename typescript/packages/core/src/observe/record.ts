@@ -72,6 +72,8 @@ export const RETRACT_FINGERPRINT_OPS: ReadonlySet<string> = new Set([
   'copy',
   'copy_prefix',
 ])
+// The subset that leaves no file at the path: the session saw it gone.
+export const REMOVAL_OPS: ReadonlySet<string> = new Set(['unlink', 'rm_r', 'rmdir'])
 // Stamps name the bytes at a path; retracts mean the line no longer knows them.
 export const VERSION_OPS: ReadonlySet<string> = new Set([
   ...STAMP_FINGERPRINT_OPS,

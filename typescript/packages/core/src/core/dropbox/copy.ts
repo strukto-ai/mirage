@@ -48,7 +48,7 @@ async function retaken(
   if (cond.kind === 'match' && cond.version !== '' && !err.summary.startsWith(TAKEN_BY_FOLDER)) {
     return stale(dst, { version: cond.version })
   }
-  return stale(dst, { gone: true })
+  return stale(dst)
 }
 
 /**
@@ -86,7 +86,7 @@ export async function replaceOnto<T>(
         !(emptyFolder && (await listFolder(tm, to, { limit: 1 })).length === 0)
       if (blocks) throw err
     } else if (err.summary.startsWith(TAKEN_BY_FOLDER)) {
-      throw await stale(dst, { gone: true })
+      throw await stale(dst)
     }
     try {
       await deletePath(tm, to, rev)

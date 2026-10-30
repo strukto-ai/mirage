@@ -122,6 +122,7 @@ import {
   FILE_CREATE_OPS,
   HIDDEN_CREATE_OPS,
   LINK_ENTRY_OPS,
+  MISS_OPS,
   NAMESPACE_TABLE_OPS,
   HIDE_FILTERED_OPS,
   NATIVE_WALK_OPS,
@@ -1136,6 +1137,8 @@ export class Dispatcher {
       ran = answer
       if (call.readRecords.length === 0) call.readRecords = records
     } catch (err) {
+      if (isEnoent(err) && MISS_OPS.has(name))
+        mount.cacheManager?.observeMiss(call.path, call.caller)
       if (settles) {
         await this.evictFailedWrite(
           name,

@@ -193,11 +193,8 @@ export async function refused(
   rev: string | null,
 ): Promise<StaleWriteError | null> {
   if (rev === null || rev === '' || !(err instanceof DropboxApiError)) return null
-  if (LOST_SUMMARIES.some((s) => err.summary.startsWith(s))) {
-    return stale(path, { version: conditionVersion(cond) })
-  }
-  if (GONE_SUMMARIES.some((s) => err.summary.startsWith(s))) return stale(path, { gone: true })
-  return null
+  if (![...LOST_SUMMARIES, ...GONE_SUMMARIES].some((s) => err.summary.startsWith(s))) return null
+  return stale(path, { version: conditionVersion(cond) })
 }
 
 /**

@@ -48,6 +48,13 @@ export function writeConditions(vfs: BaseVFS): readonly WriteKind[] {
   )
 }
 
+/** The operations this mount's backend can condition on absence. Mirrors Python's `create_conditions`. */
+export function createConditions(vfs: BaseVFS): readonly WriteKind[] {
+  return (['put', 'copy', 'delete'] satisfies WriteKind[]).filter((kind) =>
+    (vfs.conditionSupport[kind] ?? []).includes('absent'),
+  )
+}
+
 /**
  * Refuse a write policy this mount cannot honour.
  *

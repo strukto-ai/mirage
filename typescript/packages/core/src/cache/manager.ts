@@ -30,6 +30,7 @@ import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/const
 import { commandStarted, soleCommandStarted, tick } from './index/scope.ts'
 import { IndexView } from './index/view.ts'
 import { mutationLock, latestFingerprint } from './file/io.ts'
+import { type Measured, OwnRead } from './types.ts'
 
 /**
  * Post-mutation cache coherence for one mount.
@@ -468,12 +469,32 @@ export class CacheManager {
     return history
   }
 
-  /** Remember a refusal, including a file confirmed gone. */
+  /**
+   * Remember a refusal: the version it lost on stands until a read. A refusal
+   * without a version, a file found gone included, leaves the session's own
+   * observation as it was.
+   */
   lose(path: PathSpec, version: string | null): void {
+    if (version === null) return
     this.sessionHistory(path)?.keep(
       this.versionScope,
       '/' + mountKey(path.virtual, this.prefix),
       version,
+    )
+  }
+
+  /**
+   * Record that `caller`'s session found no file at `path` on a read or stat.
+   * A miss no one session owns (overlapping sessions on the fallback storage)
+   * is recorded nowhere, so the next write goes as it would have.
+   */
+  observeMiss(path: PathSpec, caller: Caller | undefined): void {
+    const session = caller?.versionReads === true ? caller.session : null
+    if (!this.conditional || session === null || !this.ownsPath(path.virtual)) return
+    session.versions.keep(
+      this.versionScope,
+      '/' + mountKey(path.virtual, this.prefix),
+      OwnRead.ABSENT,
     )
   }
 
@@ -491,8 +512,11 @@ export class CacheManager {
     history?.observe(this.versionScope, '/' + mountKey(rec.path, this.prefix), rec)
   }
 
-  /** Retain the refused token in its session, or in the cache without a session. */
-  async keepVersion(path: PathSpec, version: string): Promise<void> {
+  /**
+   * Retain the refused condition in its session, or in the cache without a
+   * session. ABSENT, a refused create, is kept only in session history.
+   */
+  async keepVersion(path: PathSpec, version: Measured): Promise<void> {
     const key = this.cacheKey(path)
     const history = this.sessionHistory(path)
     if (history !== null) {
@@ -500,7 +524,7 @@ export class CacheManager {
       return
     }
     const cache = this.fileCache
-    if (cache === null || !this.ownsPath(key)) return
+    if (cache === null || !this.ownsPath(key) || typeof version !== 'string') return
     try {
       await mutationLock(cache, () => cache.keepFingerprints({ [key]: version }))
     } catch (err) {
@@ -515,22 +539,23 @@ export class CacheManager {
    * mounts, use current-line records then the shared cache's token.
    * Cache eviction never clears a session's history.
    */
-  async readVersion(path: PathSpec): Promise<string | null> {
+  async readVersion(path: PathSpec): Promise<Measured | null> {
     return (await this.readVersions([path]))[0] ?? null
   }
 
   /** `readVersion` for many paths; session history needs no I/O. */
-  async readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]> {
+  async readVersions(paths: readonly PathSpec[]): Promise<(Measured | null)[]> {
     const history = this.sessionHistory(paths[0] ?? this.prefix)
     if (history !== null) {
       const lost = lostPaths(activeRecords())
-      return paths.map((path) =>
-        lost?.holds(path.virtual) === true
-          ? lost.version(path.virtual)
-          : history.read(this.versionScope, '/' + mountKey(path.virtual, this.prefix)),
-      )
+      return paths.map((path) => {
+        const token = lost?.holds(path.virtual) === true ? lost.version(path.virtual) : null
+        return token !== null && token !== ''
+          ? token
+          : history.read(this.versionScope, '/' + mountKey(path.virtual, this.prefix))
+      })
     }
-    const out: (string | null)[] = paths.map(() => null)
+    const out: (Measured | null)[] = paths.map(() => null)
     const pending: [number, string][] = []
     const records = activeRecords()
     const lost = lostPaths(records)

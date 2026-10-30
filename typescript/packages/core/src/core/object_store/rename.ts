@@ -130,7 +130,7 @@ export function makeRename<A extends Accessor, C>(
       else if (lost === dst) {
         if (source !== null && source !== '') await dropCached(src, source)
       } else if (cond?.kind === 'match') await dropCached(dst, cond.version)
-      const refusal = await stale(lost, { landed: err.landed, gone: err.gone, version: sent })
+      const refusal = await stale(lost, { landed: err.landed, version: sent })
       throw Object.assign(refusal, {
         recovered: err.recovered,
         recoveryError: err.recoveryError !== null ? strerrorOf(err.recoveryError) : null,

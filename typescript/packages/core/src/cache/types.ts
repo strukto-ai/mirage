@@ -77,18 +77,23 @@ export interface WriteContext {
   readonly vfs: string
   /** The ops the backend can condition: put, copy, delete. */
   readonly conditions: readonly WriteKind[]
-  /** The live session's observed version, or the mount's version without a session. */
-  readVersion(path: PathSpec): Promise<string | null>
+  /**
+   * The live session's observed version, ABSENT when it found no file, or the
+   * mount's version without a session.
+   */
+  readVersion(path: PathSpec): Promise<Measured | null>
   /** `readVersion` for many paths at once. */
-  readVersions(paths: readonly PathSpec[]): Promise<(string | null)[]>
+  readVersions(paths: readonly PathSpec[]): Promise<(Measured | null)[]>
   /** Drops the mount's cached copy, so the read a refusal asks for fetches. */
   drop(path: PathSpec): Promise<void>
   /** Keeps a version for a path without bytes, the one a refused write lost on. */
-  keep(path: PathSpec, version: string): Promise<void>
+  keep(path: PathSpec, version: Measured): Promise<void>
   /** Record this caller's read or mutation result. */
   observe?(record: OpRecord): void
-  /** Retain a refusal token, or clear it for a file confirmed gone. */
+  /** Retain a refused token. */
   lose?(path: PathSpec, version: string | null): void
+  /** The ops the backend can condition on the file not existing. */
+  readonly creates?: readonly WriteKind[]
 }
 
 export type WriteKind = 'put' | 'copy' | 'delete'
