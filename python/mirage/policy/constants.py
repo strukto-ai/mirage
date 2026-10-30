@@ -47,8 +47,8 @@ SUBTREE_COMMANDS = frozenset({"rm", "rmdir", "mv"})
 # SUBTREE_OPS's VFS ops.
 METADATA_OPS = frozenset({"stat", "exists"})
 
-# The methods a profile's policy names programs for: the pre_ four,
-# answered before the action runs, and the post_ four, after it.
+# The methods a profile's policy names programs for: the pre_ five,
+# answered before the action runs, and the post_ five, after it.
 METHODS = get_args(ScriptMethod)
 
 # The runtimes a policy program runs on: monty, and Python on wasm.

@@ -17,6 +17,8 @@ from mirage.policy.types import (
     CommandContext,
     CommandResultContext,
     ExecuteResultContext,
+    NetworkContext,
+    NetworkResultContext,
     RouteContext,
     SessionContext,
     SessionResultContext,
@@ -128,6 +130,36 @@ class Policy:
 
         Args:
             ctx (VfsResultContext): what ``pre_vfs`` saw, plus the result.
+        """
+        return None
+
+    async def pre_network(
+        self, ctx: NetworkContext
+    ) -> Action | tuple[Action, ...] | None:
+        """Admit or refuse one request a command sends.
+
+        Fires before any connection opens, for ``curl``, ``wget`` and
+        ``git`` over https. A Deny refuses it as a closed port would
+        (``curl`` exits 7); an Ask refuses it too, since the line was
+        admitted without it.
+
+        Args:
+            ctx (NetworkContext): the request about to be sent.
+        """
+        return None
+
+    async def post_network(
+        self, ctx: NetworkResultContext
+    ) -> Action | tuple[Action, ...] | None:
+        """Judge one finished request.
+
+        Fires once the transfer ends, however it ends, so a method can
+        count what is in flight. A Deny fails the command as a broken
+        transfer; what it already wrote stays.
+
+        Args:
+            ctx (NetworkResultContext): what ``pre_network`` saw, plus
+                how it ended.
         """
         return None
 

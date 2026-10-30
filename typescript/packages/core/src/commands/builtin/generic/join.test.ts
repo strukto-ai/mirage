@@ -133,8 +133,8 @@ describe('parseFlags', () => {
       { autoColumns: true, terminator: '\0' },
     ],
     [{ nocheck_order: true }, { order: OrderCheck.OFF }],
-  ])('%j', (flags, expected) => {
-    expect(parseFlags(flags)).toEqual({ ...DEFAULTS, ...expected })
+  ])('%j', async (flags, expected) => {
+    expect(await parseFlags(flags)).toEqual({ ...DEFAULTS, ...expected })
   })
 })
 
@@ -155,8 +155,8 @@ describe('parseFlags without a tape', () => {
   it.each<[Record<string, string>, string[], string[], Partial<JoinFlags>]>([
     [{}, ['a', 'b'], ['a', 'b'], {}],
     [{ j: '2' }, ['a', 'b'], [], { keys: [1, 1] }],
-  ])('%j files %j', (flags, operands, argv, expected) => {
-    expect(parseFlags(flags, operands, argv)).toEqual({ ...DEFAULTS, ...expected })
+  ])('%j files %j', async (flags, operands, argv, expected) => {
+    expect(await parseFlags(flags, operands, argv)).toEqual({ ...DEFAULTS, ...expected })
   })
 
   it.each<[Record<string, string>, string[], string[], string]>([
@@ -164,8 +164,8 @@ describe('parseFlags without a tape', () => {
     [{ v: '2' }, ['x', 'a', 'b'], [], "join: extra operand 'b'\n"],
     [{}, ['a'], [], "join: missing operand after 'a'\n"],
     [{}, ['a'], ['-a1', 'a'], "join: missing operand after 'a'\n"],
-  ])('%j refuses %j', (flags, operands, argv, message) => {
-    expect(() => parseFlags(flags, operands, argv)).toThrow(message)
+  ])('%j refuses %j', async (flags, operands, argv, message) => {
+    await expect(parseFlags(flags, operands, argv)).rejects.toThrow(message)
   })
 })
 
@@ -179,7 +179,7 @@ describe('join over two large groups of one key', () => {
         yield files[p.virtual] ?? new Uint8Array()
       },
       stdin: null,
-      flags: parseFlags({}),
+      flags: await parseFlags({}),
     })
     const chunks = (source as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
     const first = await chunks.next()
@@ -211,7 +211,7 @@ describe('join over input that stays open', () => {
           yield bytes(other)
         },
         stdin: live(),
-        flags: parseFlags(flags),
+        flags: await parseFlags(flags),
       },
     )
     const chunks = (source as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
@@ -246,7 +246,7 @@ describe('join over a file it cannot read', () => {
   ])('reports %s without reading stdin', async (_name, operands, stderr) => {
     const [source, result] = join(
       operands.map((word) => PathSpec.fromStrPath(word)),
-      { read: unopenable, stdin: silentStdin(), flags: parseFlags({}) },
+      { read: unopenable, stdin: silentStdin(), flags: await parseFlags({}) },
     )
     const drained = (async (): Promise<string> => {
       const parts: string[] = []
@@ -279,7 +279,7 @@ describe('join over input in any chunking', () => {
           for (let at = 0; at < body.length; at += size) yield body.subarray(at, at + size)
         },
         stdin: null,
-        flags: parseFlags(flags),
+        flags: await parseFlags(flags),
       })
       const parts: string[] = []
       for await (const chunk of source as AsyncIterable<Uint8Array>) parts.push(view(chunk))
@@ -310,7 +310,7 @@ describe('join over one long record', () => {
           yield p.virtual === '/a' ? a : bytes('k y\n')
         },
         stdin: null,
-        flags: parseFlags({ a: '1' }),
+        flags: await parseFlags({ a: '1' }),
       })
       let out = 0
       for await (const chunk of source as AsyncIterable<Uint8Array>) out += chunk.length
@@ -336,7 +336,7 @@ describe('join over a source that reuses its buffer', () => {
     const [source, result] = join([PathSpec.fromStrPath('/a'), PathSpec.fromStrPath('/b')], {
       read: (p: PathSpec) => reusing(bodies[p.virtual] ?? new Uint8Array(), size),
       stdin: null,
-      flags: parseFlags({ a: '1' }),
+      flags: await parseFlags({ a: '1' }),
     })
     const parts: string[] = []
     for await (const chunk of source as AsyncIterable<Uint8Array>) parts.push(view(chunk))

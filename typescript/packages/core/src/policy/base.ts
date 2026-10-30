@@ -18,6 +18,8 @@ import type {
   CommandContext,
   CommandResultContext,
   ExecuteResultContext,
+  NetworkContext,
+  NetworkResultContext,
   VfsContext,
   VfsResultContext,
   SessionContext,
@@ -95,6 +97,21 @@ export interface Policy {
    * mount reads in ranges and must get each whole.
    */
   postVfs?(ctx: VfsResultContext): Action | Action[] | null | Promise<Action | Action[] | null>
+  /**
+   * Admit or refuse one request a command sends, before any connection
+   * opens, for `curl`, `wget` and `git` over https. A Deny refuses it as a
+   * closed port would (`curl` exits 7); an Ask refuses it too, since the
+   * line was admitted without it.
+   */
+  preNetwork?(ctx: NetworkContext): Action | Action[] | null | Promise<Action | Action[] | null>
+  /**
+   * Judge one finished request, once the transfer ends however it ends, so
+   * a method can count what is in flight. A Deny fails the command as a
+   * broken transfer; what it already wrote stays.
+   */
+  postNetwork?(
+    ctx: NetworkResultContext,
+  ): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
    * Admit, hold or refuse one session write (set, unset, mark) on the
    * session plane, before it lands. Not path-scoped on purpose: the

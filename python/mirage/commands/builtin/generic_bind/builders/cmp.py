@@ -42,6 +42,7 @@ async def cmp_cmd(
         ctx,
         files.read,
         file_size(files, ctx),
+        file_size(files, ctx, opened=True),
     )
 
 

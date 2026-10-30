@@ -703,3 +703,13 @@ def test_new_shell_starts_from_the_environment():
     assert child._random_seed == "42"
     assert set(parent.functions) == {"f", "g"}
     assert parent.vars["PLAIN"] == ShellVar("p")
+
+
+def test_a_profile_network_survives_the_record():
+    session = SessionState(session_id="s")
+    session.network = {"allowed_domains": ["*.github.com"]}
+    data = json.loads(json.dumps(session.to_dict()))
+    assert SessionState.from_dict(data).network == {
+        "allowed_domains": ["*.github.com"]
+    }
+    assert "network" not in SessionState(session_id="t").to_dict()

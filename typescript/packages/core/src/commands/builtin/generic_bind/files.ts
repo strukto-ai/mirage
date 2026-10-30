@@ -416,12 +416,19 @@ export function dirAwareStat(
 export function fileSize(
   files: CommandFiles,
   ctx: Context,
+  opened = false,
 ): (p: PathSpec) => Promise<number | null> {
   return async (p) => {
+    if (READINGS.get(ctx)?.stream != null || (opened && crossesMounts(ctx))) return null
     if (revisionFor(p.virtual) !== null) return null
     if (await files.isWarm(p)) return null
     const st = await statRefusingDirs(files, ctx, p)
-    if (st.type !== FileType.FILE || st.mode !== null) return null
+    if (
+      st.type !== FileType.FILE ||
+      st.size === null ||
+      (st.mode !== null && (!opened || st.size === 0))
+    )
+      return null
     if (ctx.vfs === undefined) return st.size
     const [now] = await ctx.vfs.dispatch('stat', p, [], { fresh: true })
     return now instanceof FileStat && now.size === st.size ? st.size : null
@@ -646,8 +653,10 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
       noted,
     ),
     answers: (name: string) =>
-      crossing
-        ? CROSSING_CALLS.has(name) || name === 'read_tree'
-        : (mounts?.answers(anchor, name) ?? false),
+      name === 'read_range' && reading?.stream != null
+        ? false
+        : crossing
+          ? CROSSING_CALLS.has(name) || name === 'read_tree'
+          : (mounts?.answers(anchor, name) ?? false),
   }
 }

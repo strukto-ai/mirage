@@ -109,26 +109,24 @@ class _FakeClient:
         self.kwargs = kwargs
         self.calls: list[dict] = []
 
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_exc) -> None:
-        return None
-
-    async def request(
+    def build_request(
         self, method, url, headers=None, content=None, data=None
     ):
-        self.calls.append(
-            {
-                "method": method,
-                "url": url,
-                "headers": headers,
-                "content": content,
-            }
-        )
+        return {
+            "method": method,
+            "url": url,
+            "headers": headers,
+            "content": content,
+        }
+
+    async def send(self, request, stream=False):
+        self.calls.append(request)
         if self.exc is not None:
             raise self.exc
         return self.resp
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class _FakeTransportError(Exception):

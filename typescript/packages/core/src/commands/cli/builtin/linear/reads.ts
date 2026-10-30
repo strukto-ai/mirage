@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../../../../core/render/json.ts'
 import type { LinearAccessor } from '../../../../accessor/linear.ts'
 import {
   getIssue,
@@ -36,7 +37,6 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
-  toJsonBytes,
   type NormalizedProjectIssue,
 } from '../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -101,7 +101,7 @@ export async function teamList(
     const keep = new Set(accessor.teamIds)
     teams = teams.filter((team) => typeof team.id === 'string' && keep.has(team.id))
   }
-  return [toJsonBytes(teams.map((team) => normalizeTeam(team))), new IOResult()]
+  return [jsonBytes(teams.map((team) => normalizeTeam(team))), new IOResult()]
 }
 
 export async function teamGet(
@@ -111,7 +111,7 @@ export async function teamGet(
   _ctx: Context,
 ): Promise<CommandFnResult> {
   const team = await resolveTeam(accessor.transport, firstText(texts, 'team key'))
-  return [toJsonBytes(normalizeTeam(team)), new IOResult()]
+  return [jsonBytes(normalizeTeam(team)), new IOResult()]
 }
 
 export async function teamMembers(
@@ -123,7 +123,7 @@ export async function teamMembers(
   const team = await resolveTeam(accessor.transport, firstText(texts, 'team key'))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const users = await listTeamMembers(accessor.transport, teamId)
-  return [toJsonBytes(users.map((user) => normalizeUser(user))), new IOResult()]
+  return [jsonBytes(users.map((user) => normalizeUser(user))), new IOResult()]
 }
 
 export async function issueList(
@@ -135,7 +135,7 @@ export async function issueList(
   const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const issues = await listTeamIssues(accessor.transport, teamId)
-  return [toJsonBytes(issues.map((issue) => normalizeIssue(issue))), new IOResult()]
+  return [jsonBytes(issues.map((issue) => normalizeIssue(issue))), new IOResult()]
 }
 
 export async function issueGet(
@@ -146,7 +146,7 @@ export async function issueGet(
 ): Promise<CommandFnResult> {
   const issueId = await resolveIssue(accessor, firstText(texts, 'issue key'))
   const issue = await getIssue(accessor.transport, issueId)
-  return [toJsonBytes(normalizeIssue(issue)), new IOResult()]
+  return [jsonBytes(normalizeIssue(issue)), new IOResult()]
 }
 
 export async function projectList(
@@ -171,7 +171,7 @@ export async function projectList(
       }),
     )
   }
-  return [toJsonBytes(payload), new IOResult()]
+  return [jsonBytes(payload), new IOResult()]
 }
 
 export async function projectGet(
@@ -188,7 +188,7 @@ export async function projectGet(
     if (project.id === projectId) {
       const rows = await teamProjectRows(accessor, teamId, projectId)
       return [
-        toJsonBytes(
+        jsonBytes(
           normalizeProject(project, {
             teamId,
             teamKey: teamStr(team, 'key'),
@@ -212,7 +212,7 @@ export async function cycleList(
   const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const cycles = await listTeamCycles(accessor.transport, teamId)
-  return [toJsonBytes(cycles.map((cycle) => normalizeCycle(cycle, teamId))), new IOResult()]
+  return [jsonBytes(cycles.map((cycle) => normalizeCycle(cycle, teamId))), new IOResult()]
 }
 
 export async function cycleCurrent(
@@ -235,7 +235,7 @@ export async function cycleCurrent(
     if (a > b) current = cycle
   }
   if (current === undefined) throw enoent('cycles')
-  return [toJsonBytes(normalizeCycle(current, teamId)), new IOResult()]
+  return [jsonBytes(normalizeCycle(current, teamId)), new IOResult()]
 }
 
 export async function cycleGet(
@@ -249,7 +249,7 @@ export async function cycleGet(
   const cycleId = firstText(texts, 'cycle id')
   const cycles = await listTeamCycles(accessor.transport, teamId)
   for (const cycle of cycles) {
-    if (cycle.id === cycleId) return [toJsonBytes(normalizeCycle(cycle, teamId)), new IOResult()]
+    if (cycle.id === cycleId) return [jsonBytes(normalizeCycle(cycle, teamId)), new IOResult()]
   }
   throw enoent(cycleId)
 }
@@ -263,7 +263,7 @@ export async function labelList(
   const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const labels = await listTeamLabels(accessor.transport, teamId)
-  return [toJsonBytes(labels.map((label) => normalizeLabel(label))), new IOResult()]
+  return [jsonBytes(labels.map((label) => normalizeLabel(label))), new IOResult()]
 }
 
 export async function commentList(
@@ -277,7 +277,7 @@ export async function commentList(
   const issueKey = typeof issue.identifier === 'string' ? issue.identifier : null
   const comments = await listIssueComments(accessor.transport, issueId)
   return [
-    toJsonBytes(comments.map((comment) => normalizeComment(comment, issueId, issueKey))),
+    jsonBytes(comments.map((comment) => normalizeComment(comment, issueId, issueKey))),
     new IOResult(),
   ]
 }
@@ -289,7 +289,7 @@ export async function userList(
   _ctx: Context,
 ): Promise<CommandFnResult> {
   const users = await allUsers(accessor)
-  return [toJsonBytes(users.map((user) => normalizeUser(user))), new IOResult()]
+  return [jsonBytes(users.map((user) => normalizeUser(user))), new IOResult()]
 }
 
 export async function userGet(
@@ -300,7 +300,7 @@ export async function userGet(
 ): Promise<CommandFnResult> {
   const email = firstText(texts, 'user email')
   for (const user of await allUsers(accessor)) {
-    if (user.email === email) return [toJsonBytes(normalizeUser(user)), new IOResult()]
+    if (user.email === email) return [jsonBytes(normalizeUser(user)), new IOResult()]
   }
   throw enoent(email)
 }
@@ -314,7 +314,7 @@ export async function documentList(
   const team = await resolveTeam(accessor.transport, requireTeam(new FlagView(ctx.flags)))
   const teamId = typeof team.id === 'string' ? team.id : ''
   const documents = await listTeamDocuments(accessor.transport, teamId)
-  return [toJsonBytes(documents.map((document) => normalizeDocument(document))), new IOResult()]
+  return [jsonBytes(documents.map((document) => normalizeDocument(document))), new IOResult()]
 }
 
 export async function documentGet(
@@ -328,8 +328,7 @@ export async function documentGet(
   const documentId = firstText(texts, 'document id')
   const documents = await listTeamDocuments(accessor.transport, teamId)
   for (const document of documents) {
-    if (document.id === documentId)
-      return [toJsonBytes(normalizeDocument(document)), new IOResult()]
+    if (document.id === documentId) return [jsonBytes(normalizeDocument(document)), new IOResult()]
   }
   throw enoent(documentId)
 }
@@ -345,5 +344,5 @@ export async function search(
   const query = flagQuery !== undefined && flagQuery !== '' ? flagQuery : (texts[0] ?? null)
   if (query === null || query === '') throw new Error('a search query is required')
   const results = await searchIssues(accessor.transport, query)
-  return [toJsonBytes(results), new IOResult()]
+  return [jsonBytes(results), new IOResult()]
 }

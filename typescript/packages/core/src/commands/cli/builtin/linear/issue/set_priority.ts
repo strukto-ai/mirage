@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../../../../../core/render/json.ts'
 import type { LinearAccessor } from '../../../../../accessor/linear.ts'
 import { issueUpdate } from '../../../../../core/linear/client.ts'
-import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
+import { normalizeIssue } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
@@ -33,5 +34,5 @@ export async function setPriority(
     issueId,
     priority: fl.asInt('priority') ?? 0,
   })
-  return [toJsonBytes(normalizeIssue(issue)), new IOResult()]
+  return [jsonBytes(normalizeIssue(issue)), new IOResult()]
 }

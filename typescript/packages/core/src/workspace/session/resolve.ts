@@ -238,6 +238,8 @@ export function withInline(
   const restriction = restrictMatching(base, inline)
   if (inline.commandLimits != null)
     throw new PolicyError('command_limits belong on the profile, not inline permissions')
+  if (inline.network != null)
+    throw new PolicyError('network belongs on the profile, not inline permissions')
   if (inline.policy !== undefined && inline.policy !== null) {
     throw new PolicyError(
       'inline permissions may add ask and deny rules, not a policy; state one on the profile',
@@ -254,20 +256,11 @@ export function withInline(
     ...restriction,
     commandLimits: base.commandLimits ?? null,
     processes,
+    network: base.network ?? null,
     cwd: inline.cwd ?? base.cwd ?? null,
     ...(base.env != null || inline.env != null ? { env: { ...base.env, ...inline.env } } : {}),
     ...(base.policy != null ? { policy: base.policy } : {}),
   }
-}
-
-/**
- * A profile's admission rules: its own, plus every mount section's, in one
- * list; null when the profile states none. Mount rules come first so the
- * section closest to the data speaks first when several rules match at
- * the same anchor depth and only the message differs.
- */
-export function compileCommands(profile: SessionProfile): AdmissionRules | null {
-  return rulesFrom(compilePlan(profile).commands)
 }
 
 /**
@@ -308,6 +301,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
         scripts: {},
         commandLimits: null,
         processes: DEFAULT_PROCESS_PERMISSIONS,
+        network: null,
       },
       hideReasons: [],
       profile,
@@ -332,6 +326,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
       scripts: compileScripts(effective, name),
       commandLimits: effective.commandLimits ?? null,
       processes,
+      network: effective.network ?? null,
     },
     hideReasons: plan.hide_reasons.map(reasonFrom),
     profile,
@@ -357,6 +352,7 @@ export function narrow(session: SessionState, compiled: CompiledProfile): void {
   session.profile = compiled.profile
   session.commandLimits = { ...policies.commandLimits }
   session.processes = policies.processes
+  session.network = policies.network
 }
 
 /**
@@ -375,6 +371,7 @@ export function narrowingOf(session: SessionState): CompiledProfile {
       scripts: session.scripts,
       commandLimits: session.commandLimits,
       processes: session.processes,
+      network: session.network,
     },
     hideReasons: session.hideReasons,
     profile: session.profile,

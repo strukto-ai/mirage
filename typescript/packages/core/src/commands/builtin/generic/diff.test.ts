@@ -24,6 +24,7 @@ import { UsageError } from '../../errors.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
+import { MemoryBudget, runWithMemory } from '../../../io/memory.ts'
 import type { DiffComputer, PairOutcome } from '../../../rs/diff_types.ts'
 import { DiffPool } from '../../../rs/diff_pool.ts'
 import { eacces } from '../../../errors/fs.ts'
@@ -46,6 +47,30 @@ function operand(raw: string, virtual: string): PathSpec {
 const DASH = operand('-', '/d/-')
 const DEV_STDIN = new PathSpec({ virtual: '/dev/stdin', directory: '/dev', vfsPath: 'stdin' })
 const DIRS: Record<string, string[]> = { '/d/sub': ['x'], '/d/sub2': ['x', 'y'] }
+
+it('compares inputs larger than the default budget in brief mode', async () => {
+  let readBytes = 0
+  async function* read(): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    const chunk = new Uint8Array(16384).fill(120)
+    for (let i = 0; i < 2176; i++) {
+      readBytes += chunk.byteLength
+      yield chunk
+    }
+  }
+  await runWithMemory(new MemoryBudget(32 << 20, () => 0), async () => {
+    const [out, io] = await diffRun(
+      [operand('a', '/d/a'), operand('b', '/d/b')],
+      { flags: { brief: true }, stdin: null, cwd: operand('/', '/') },
+      read,
+      readdir,
+      stat,
+    )
+    expect(await materialize(out)).toEqual(new Uint8Array())
+    expect(io.exitCode).toBe(0)
+  })
+  expect(readBytes).toBe(68 << 20)
+})
 
 function statFiles(modified: string): Files {
   const dispatch: DispatchFn = (op, path) => {

@@ -95,9 +95,10 @@ from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
 
-# These producers write no named file while their output is consumed, so
-# their output streams into a redirect's file; any other command's output
-# is replayed once it ends.
+# These producers write no named file while their output is consumed (curl
+# writes its cookie jar once its body has ended), so their output streams
+# into a redirect's file; any other command's output is replayed once it
+# ends.
 STREAM_OUTPUT_BUILTINS = frozenset(
     {
         "cat",
@@ -129,6 +130,8 @@ STREAM_OUTPUT_BUILTINS = frozenset(
         "stat",
         "readlink",
         "realpath",
+        "curl",
+        "wget",
     }
 )
 

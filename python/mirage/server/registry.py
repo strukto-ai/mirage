@@ -140,23 +140,6 @@ def resolve_policy_file(
     return load_policy_file(path)
 
 
-def resolve_network(network: NetworkSetting | None = None) -> NetworkSetting:
-    """What every workspace the server builds is held to besides its own
-    ``network``: ``network`` when given, else the ``network`` key in
-    config.toml's ``[daemon]`` table, else no limit. Mirrors TypeScript's
-    ``resolveNetwork``.
-
-    Args:
-        network (NetworkSetting | None): the ceiling the caller set.
-    """
-    if network is not None:
-        return network
-    named: NetworkSetting = read_daemon_table(mirage_home()).get(
-        "network", True
-    )
-    return named
-
-
 class _Programs:
     """The server's policy programs, which every session answers to."""
 
@@ -188,7 +171,6 @@ class WorkspaceRegistry:
         max_workspaces: int | None = None,
         policies: Sequence[Policy] = (),
         programs: ProfileScripts | None = None,
-        network: NetworkSetting = True,
     ) -> None:
         """Construct an empty registry.
 
@@ -212,10 +194,6 @@ class WorkspaceRegistry:
                 workspace it builds, after the workspace's own.
             programs (ProfileScripts | None): the server's policy
                 programs, by method, which answer the same way.
-            network (NetworkSetting): what every workspace it builds is
-                held to besides its own ``network``; in jwt mode
-                (``accounts_required``) the cloud metadata addresses are
-                refused too.
         """
         self._entries: dict[str, WorkspaceEntry] = {}
         self.max_workspaces = max_workspaces
@@ -229,9 +207,6 @@ class WorkspaceRegistry:
             _Programs(dict(programs or {}))
         )
         self._admission = Policies([*self.policies, self._admission_programs])
-        self.network = network
-        # A bad ceiling fails the server as it starts, not its first create.
-        network_rule(True, network)
         self.jobs = ExecutionTable()
         self.accounts_required = accounts_required
         self._owners = owners
@@ -282,7 +257,8 @@ class WorkspaceRegistry:
 
     def rule_for(self, setting: NetworkSetting = True) -> NetworkRule | None:
         """The rule a workspace with this ``network`` is held to here: its
-        own setting under the server's, None when nothing limits it.
+        own setting, with the cloud metadata addresses refused in jwt mode
+        (``accounts_required``); None when nothing limits it.
 
         Args:
             setting (NetworkSetting): the workspace's ``network``.
@@ -290,7 +266,7 @@ class WorkspaceRegistry:
         Raises:
             ValueError: the setting or one of its entries is not valid.
         """
-        return network_rule(setting, self.network, self.accounts_required)
+        return network_rule(setting, self.accounts_required)
 
     def __contains__(self, workspace_id: str) -> bool:
         return workspace_id in self._entries

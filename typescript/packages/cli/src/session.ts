@@ -16,11 +16,6 @@ import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, handleResponse } from './output.ts'
 import { loadProfileArgument } from './workspace.ts'
-import { loadDaemonSettings } from './settings.ts'
-
-function buildClient() {
-  return makeClient(loadDaemonSettings())
-}
 
 const MODES = new Set(['read', 'write', 'exec', 'r', 'rw', 'rwx'])
 
@@ -67,7 +62,7 @@ export function registerSessionCommands(program: Command): void {
         'omit it to take the workspace default',
     )
     .action(async (wsId: string, opts: { id?: string; mount?: string[]; profile?: string }) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const body: Record<string, unknown> = {}
       if (opts.id !== undefined) body.session_id = opts.id
@@ -88,7 +83,7 @@ export function registerSessionCommands(program: Command): void {
     .command('list')
     .argument('<wsId>')
     .action(async (wsId: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         await handleResponse(
@@ -102,7 +97,7 @@ export function registerSessionCommands(program: Command): void {
     .argument('<wsId>')
     .argument('<sessionId>')
     .action(async (wsId: string, sessionId: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         await handleResponse(
@@ -120,7 +115,7 @@ export function registerSessionCommands(program: Command): void {
     .argument('<wsId>')
     .argument('<sessionId>')
     .action(async (wsId: string, sessionId: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         await handleResponse(
@@ -138,7 +133,7 @@ export function registerSessionCommands(program: Command): void {
     .argument('<wsId>')
     .argument('<sessionId>')
     .action(async (wsId: string, sessionId: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         await handleResponse(
@@ -174,7 +169,7 @@ export function registerSessionCommands(program: Command): void {
           opts.profileFile !== undefined
             ? await loadProfileArgument(opts.profileFile)
             : (opts.profile ?? null)
-        const c = buildClient()
+        const c = makeClient()
         await c.ensureRunning({ allowSpawn: false })
         emit(
           await handleResponse(

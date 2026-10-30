@@ -14,7 +14,6 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
@@ -33,7 +32,6 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'login_client_id',
   'idle_grace_seconds',
   'max_workspaces',
-  'network',
   'policy_file',
   'port',
   'ssh_port',
@@ -75,31 +73,6 @@ export function validateDaemonTable(table: Record<string, string>): void {
       'config.toml: the following [daemon] keys have the wrong ' + `type: ${badTypes.join(', ')}`,
     )
   }
-  if (table.network !== undefined) parseNetwork(table.network)
-}
-
-/**
- * The `[daemon]` table's `network` as written: `true`, `false` or
- * `{ allow = ["host", "10.0.0.0/8"] }` on one line, its entries
- * double-quoted. Only the shape is read here; the server compiles the
- * entries as it starts.
- */
-export function parseNetwork(raw: string): NetworkSetting {
-  if (raw === 'true' || raw === 'false') return raw === 'true'
-  const inner = raw.startsWith('{') && raw.endsWith('}') ? raw.slice(1, -1).trim() : ''
-  const value = inner.startsWith('allow') ? inner.slice('allow'.length).trim() : ''
-  let allow: unknown
-  try {
-    allow = value.startsWith('=') ? JSON.parse(value.slice(1).trim()) : undefined
-  } catch {
-    allow = undefined
-  }
-  if (!Array.isArray(allow) || !allow.every((entry) => typeof entry === 'string')) {
-    throw new DaemonConfigError(
-      'config.toml: [daemon] network is true, false or {allow = [hosts and ranges]}',
-    )
-  }
-  return { allow: allow }
 }
 
 function parseValue(raw: string): string {

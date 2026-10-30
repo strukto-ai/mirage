@@ -25,10 +25,16 @@ struct LayerConfig {
     deny: Vec<String>,
 }
 
-enum Entry {
+enum Target {
+    Any,
     Range(IpAddr, u8),
     Host(String),
     Suffix(String),
+}
+
+struct Entry {
+    target: Target,
+    port: Option<u16>,
 }
 
 struct Layer {
@@ -44,8 +50,9 @@ struct Network {
 /// the workspace's own `network` setting and an operator's ceiling among
 /// them, and a connection opens only when every layer lets it: a layer with
 /// an allow list lets what an entry names, and none lets what its deny list
-/// names. The hosts ask once per connection with the host name and the
-/// address it resolved to, `host\0address`, either part empty when not known.
+/// names. The hosts ask once per connection with the host name, the address
+/// it resolved to and the port, `host\0address\0port`, any part empty when
+/// not known.
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
     let mut layers = config
@@ -78,20 +85,77 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     Ok(Box::new(Network { layers }))
 }
 
-/// One allow or deny entry: an address, a range in CIDR form, a host name,
-/// or `*.` and a name for every host under it.
+/// One allow or deny entry: `*` for every host, an address (an IPv6 one
+/// bracketed when a port follows), a range in CIDR form, a host name, or `*.`
+/// and a name for every host under it; any but a range may end in `:port`.
 fn entry(text: &str) -> Result<Entry, StreamError> {
     let bad = || {
         StreamError::new(format!(
             "network: {text} is not an address, a range or a host name"
         ))
     };
+    if let Ok(target) = target(text) {
+        return Ok(Entry { target, port: None });
+    }
+    let (head, port) = match text.rsplit_once(':') {
+        Some((head, port))
+            if !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            (
+                head,
+                port.parse::<u16>()
+                    .ok()
+                    .filter(|port| *port > 0)
+                    .ok_or_else(bad)?,
+            )
+        }
+        _ => return Err(bad()),
+    };
+    let head = head
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .map_or(Ok(head), |inner| {
+            inner.parse::<IpAddr>().map(|_| inner).map_err(|_| bad())
+        })?;
+    // An IPv6 address names its port only in brackets, as in a URL.
+    if !text.starts_with('[') && head.contains(':') {
+        return Err(bad());
+    }
+    let target = target(head).map_err(|_| bad())?;
+    if matches!(target, Target::Range(address, bits) if bits < width(address)) {
+        return Err(bad());
+    }
+    Ok(Entry {
+        target,
+        port: Some(port),
+    })
+}
+
+fn width(address: IpAddr) -> u8 {
+    if address.is_ipv4() { 32 } else { 128 }
+}
+
+/// What an entry names, without its port.
+fn target(text: &str) -> Result<Target, StreamError> {
+    let bad = || {
+        StreamError::new(format!(
+            "network: {text} is not an address, a range or a host name"
+        ))
+    };
+    if text == "*" {
+        return Ok(Target::Any);
+    }
+    let text = text
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .filter(|inner| inner.parse::<IpAddr>().is_ok())
+        .unwrap_or(text);
     let (head, prefix) = match text.split_once('/') {
         Some((head, prefix)) => (head, Some(prefix)),
         None => (text, None),
     };
     if let Ok(address) = head.parse::<IpAddr>() {
-        let width: u8 = if address.is_ipv4() { 32 } else { 128 };
+        let width = width(address);
         let bits = match prefix {
             None => width,
             Some(prefix) => prefix
@@ -102,10 +166,10 @@ fn entry(text: &str) -> Result<Entry, StreamError> {
         };
         return Ok(match address {
             IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-                Some(v4) if bits >= 96 => Entry::Range(IpAddr::V4(v4), bits - 96),
-                _ => Entry::Range(address, bits),
+                Some(v4) if bits >= 96 => Target::Range(IpAddr::V4(v4), bits - 96),
+                _ => Target::Range(address, bits),
             },
-            IpAddr::V4(_) => Entry::Range(address, bits),
+            IpAddr::V4(_) => Target::Range(address, bits),
         });
     }
     if prefix.is_some() {
@@ -120,9 +184,9 @@ fn entry(text: &str) -> Result<Entry, StreamError> {
         return Err(bad());
     }
     Ok(if wildcard {
-        Entry::Suffix(name)
+        Target::Suffix(name)
     } else {
-        Entry::Host(name)
+        Target::Host(name)
     })
 }
 
@@ -162,25 +226,37 @@ fn within(range: IpAddr, bits: u8, address: IpAddr) -> bool {
 }
 
 impl Entry {
-    fn names(&self, host: &str, address: Option<IpAddr>) -> bool {
-        match self {
-            Self::Range(range, bits) => {
+    /// Whether the entry names a connection. A port it names matches a port
+    /// not yet known only when `unknown` says so: a lookup's answer is let
+    /// through for the connect to judge, never refused for a port it lacks.
+    fn names(&self, host: &str, address: Option<IpAddr>, port: Option<u16>, unknown: bool) -> bool {
+        let reached = match &self.target {
+            Target::Any => true,
+            Target::Range(range, bits) => {
                 address.is_some_and(|address| within(*range, *bits, address))
             }
-            Self::Host(name) => host == name,
-            Self::Suffix(name) => host
+            Target::Host(name) => host == name,
+            Target::Suffix(name) => host
                 .strip_suffix(name.as_str())
                 .is_some_and(|head| head.ends_with('.') && head.len() > 1),
-        }
+        };
+        reached
+            && self
+                .port
+                .is_none_or(|wanted| port.map_or(unknown, |port| port == wanted))
     }
 }
 
 impl Layer {
-    fn lets(&self, host: &str, address: Option<IpAddr>) -> bool {
-        self.allow
-            .as_ref()
-            .is_none_or(|allow| allow.iter().any(|entry| entry.names(host, address)))
-            && !self.deny.iter().any(|entry| entry.names(host, address))
+    fn lets(&self, host: &str, address: Option<IpAddr>, port: Option<u16>) -> bool {
+        self.allow.as_ref().is_none_or(|allow| {
+            allow
+                .iter()
+                .any(|entry| entry.names(host, address, port, true))
+        }) && !self
+            .deny
+            .iter()
+            .any(|entry| entry.names(host, address, port, false))
     }
 }
 
@@ -196,7 +272,16 @@ impl Stream for Network {
     fn test(&mut self, input: &[u8]) -> Result<bool, StreamError> {
         let text = std::str::from_utf8(input)
             .map_err(|_| StreamError::new("network: the subject is not UTF-8"))?;
-        let (host, given) = text.split_once('\0').unwrap_or((text, ""));
+        let mut parts = text.splitn(3, '\0');
+        let host = parts.next().unwrap_or("");
+        let given = parts.next().unwrap_or("");
+        let port = match parts.next().unwrap_or("") {
+            "" => None,
+            port => Some(
+                port.parse::<u16>()
+                    .map_err(|_| StreamError::new(format!("network: {port} is not a port")))?,
+            ),
+        };
         let host = host.trim_end_matches('.').to_ascii_lowercase();
         let found =
             if given.is_empty() {
@@ -211,7 +296,10 @@ impl Stream for Network {
         } else {
             host
         };
-        Ok(self.layers.iter().all(|layer| layer.lets(&host, found)))
+        Ok(self
+            .layers
+            .iter()
+            .all(|layer| layer.lets(&host, found, port)))
     }
 }
 
@@ -225,6 +313,11 @@ mod tests {
 
     fn lets(rule: &mut Box<dyn Stream>, host: &str, address: &str) -> bool {
         rule.test(format!("{host}\0{address}").as_bytes())
+            .expect("answers")
+    }
+
+    fn reaches(rule: &mut Box<dyn Stream>, host: &str, address: &str, port: &str) -> bool {
+        rule.test(format!("{host}\0{address}\0{port}").as_bytes())
             .expect("answers")
     }
 
@@ -259,6 +352,39 @@ mod tests {
         assert!(!lets(&mut allow, "", "11.0.0.1"));
         assert!(lets(&mut allow, "", "[::1]"));
         assert!(lets(&mut allow, "::1", ""));
+    }
+
+    #[test]
+    fn an_entry_can_name_a_port_and_every_host() {
+        let mut ported = rule(
+            r#"{"layers": [{"allow": ["api.github.com:443", "*.example.com", "127.0.0.1:3000", "[::1]:8080"], "deny": ["*:22"]}]}"#,
+        );
+        assert!(reaches(
+            &mut ported,
+            "api.github.com",
+            "140.82.112.6",
+            "443"
+        ));
+        assert!(!reaches(
+            &mut ported,
+            "api.github.com",
+            "140.82.112.6",
+            "80"
+        ));
+        assert!(reaches(&mut ported, "files.example.com", "", "8443"));
+        assert!(!reaches(&mut ported, "files.example.com", "", "22"));
+        assert!(reaches(&mut ported, "", "127.0.0.1", "3000"));
+        assert!(!reaches(&mut ported, "", "127.0.0.1", "3001"));
+        assert!(reaches(&mut ported, "", "::1", "8080"));
+        assert!(!reaches(&mut ported, "", "::1", "8081"));
+        // A lookup knows no port yet: an allowed name passes for the connect
+        // to judge, and a port's denial waits for that connect too.
+        assert!(lets(&mut ported, "api.github.com", "140.82.112.6"));
+        assert!(lets(&mut ported, "files.example.com", ""));
+        let mut all = rule(r#"{"layers": [{"allow": ["*"]}]}"#);
+        assert!(reaches(&mut all, "anything.test", "1.2.3.4", "9"));
+        let mut none = rule(r#"{"layers": [{"deny": ["*"]}]}"#);
+        assert!(!reaches(&mut none, "", "127.0.0.1", "80"));
     }
 
     #[test]
@@ -299,10 +425,15 @@ mod tests {
             r#"{"layers": [{"allow": ["*."]}]}"#,
             r#"{"layers": [{"deny": [""]}]}"#,
             r#"{"layers": [{"other": []}]}"#,
+            r#"{"layers": [{"allow": ["example.com:0"]}]}"#,
+            r#"{"layers": [{"allow": ["example.com:70000"]}]}"#,
+            r#"{"layers": [{"allow": ["10.0.0.0/8:443"]}]}"#,
+            r#"{"layers": [{"allow": ["example.com:"]}]}"#,
         ] {
             assert!(open(config.as_bytes()).is_err(), "{config}");
         }
         let mut allow = rule(r#"{"layers": [{"allow": ["10.0.0.0/8"]}]}"#);
         assert!(allow.test(b"example.com\0not an address").is_err());
+        assert!(allow.test(b"example.com\0\0not a port").is_err());
     }
 }

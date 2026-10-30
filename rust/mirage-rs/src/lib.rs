@@ -563,6 +563,16 @@ pub(crate) fn drain_all(stream: &mut dyn Stream, out: &mut Vec<u8>) {
     }
 }
 
+/// Release a transient giant byte buffer once little of it remains. Keep
+/// ordinary working chunks to avoid an allocation on every record.
+pub fn release_capacity(buffer: &mut Vec<u8>) {
+    const KEPT: usize = 64 * 1024;
+    let needed = buffer.len().max(KEPT);
+    if buffer.capacity() / 4 > needed {
+        buffer.shrink_to(needed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{PIECE, STEPS, Stream, StreamError, drain_steps};

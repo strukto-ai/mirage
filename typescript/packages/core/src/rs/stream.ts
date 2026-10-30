@@ -511,6 +511,11 @@ export async function* mergeOutput(
   }
   const tail = stream.finish()
   if (tail.byteLength > 0) yield tail
+  while (stream.busy()) {
+    await budget.run()
+    const output = stream.drain()
+    if (output.byteLength > 0) yield output
+  }
 }
 
 /**
@@ -544,6 +549,7 @@ export async function* streamOutputChunks(
   stream: OpenStream,
   source: Uint8Array | AsyncIterable<Uint8Array>,
   signal?: AbortSignal,
+  ownsStream = true,
 ): AsyncGenerator<Uint8Array> {
   const budget = new YieldBudget(signal)
   try {
@@ -555,6 +561,7 @@ export async function* streamOutputChunks(
         const output = stream.drain()
         if (output.byteLength > 0) yield output
       }
+      if (stream.done()) break
     }
     const tail = stream.finish()
     if (tail.byteLength > 0) yield tail
@@ -564,7 +571,7 @@ export async function* streamOutputChunks(
       if (output.byteLength > 0) yield output
     }
   } finally {
-    await closeStream(stream)
+    if (ownsStream) await closeStream(stream)
   }
 }
 

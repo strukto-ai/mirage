@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
+import { NetworkRule, networkLayer, type NetworkSetting } from '../io/network.ts'
 import type { Limit } from '../types.ts'
 import {
   checkCommandLimits,
@@ -179,6 +180,12 @@ export interface SessionProfile {
   readonly commandLimits?: Readonly<Record<string, Limit>> | null
   /** A bare scope for both `list` and `kill`, or any of the fields. */
   readonly processes?: ProcessScope | Partial<ProcessPermissions> | null
+  /**
+   * Where the session's lines may connect, the workspace's `network`
+   * grammar, held besides the workspace's own; unset leaves the
+   * workspace's alone.
+   */
+  readonly network?: NetworkSetting | null
 }
 
 /**
@@ -230,6 +237,8 @@ export interface ProfilePolicies {
   readonly scripts: ProfileScripts
   readonly commandLimits: Readonly<Record<string, Limit>> | null
   readonly processes: ProcessPermissions
+  /** Where the session's lines may connect besides the workspace's `network`. */
+  readonly network: NetworkSetting | null
 }
 
 /**
@@ -265,6 +274,7 @@ const PROFILE_FIELDS = [
   'policy',
   'command_limits',
   'processes',
+  'network',
 ] as const
 const PROGRAM_FIELDS = ['script', 'runtime', 'env'] as const
 
@@ -635,13 +645,34 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
 export function parseProgram(raw: unknown, at: string, code = false): ProfilePolicySpec {
   const program = asObject(raw, at)
   rejectUnknownKeys(program, PROGRAM_FIELDS, at)
-  const script = program.script
-  if (script === undefined || script === null) {
+  const given = program.script
+  if (given === undefined || given === null) {
     throw new Error(`${at}.script names the policy's program, and is required`)
   }
-  if (!(script instanceof ScriptSource) && typeof script !== 'string') {
+  // A path, a ScriptSource code built, or the {source, language, module} a
+  // JSON profile spells one as, as Python's model reads it.
+  const fields =
+    typeof given === 'object' && !(given instanceof ScriptSource) && !Array.isArray(given)
+      ? (given as Record<string, unknown>)
+      : null
+  if (
+    !(typeof given === 'string' || given instanceof ScriptSource) &&
+    (fields === null ||
+      Object.keys(fields).some((key) => !['source', 'language', 'module'].includes(key)) ||
+      typeof fields.source !== 'string' ||
+      (fields.language !== undefined && fields.language !== 'python' && fields.language !== 'js') ||
+      (fields.module !== undefined && typeof fields.module !== 'boolean'))
+  ) {
     throw new Error(`${at}.script must be a script path or source`)
   }
+  const script =
+    fields === null
+      ? (given as string | ScriptSource)
+      : new ScriptSource(
+          fields.source as string,
+          (fields.language ?? 'python') as Language,
+          fields.module === true,
+        )
   let env = {}
   if (program.env !== undefined) {
     const entries = asObject(program.env, `${at}.env`)
@@ -732,7 +763,13 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     policy?: ProfilePolicy | null
     commandLimits?: Readonly<Record<string, Limit>> | null
     processes?: ProcessPermissions
+    network?: NetworkSetting
   } = {}
+  if (obj.network != null) {
+    const layer = networkLayer(obj.network)
+    new NetworkRule(layer === null ? [] : [layer])
+    out.network = obj.network as NetworkSetting
+  }
   if (obj.command_limits != null) {
     out.commandLimits = parseCommandLimits(obj.command_limits)
     checkCommandLimits(out.commandLimits, 'profile', true)
@@ -815,6 +852,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
   }
   if (profile.commandLimits != null) doc.command_limits = commandLimitsToJSON(profile.commandLimits)
   if (profile.processes != null) doc.processes = parseProcessPermissions(profile.processes)
+  if (profile.network != null) doc.network = profile.network
   if (profile.mounts != null) {
     doc.mounts = Object.fromEntries(
       [...profile.mounts].map(([prefix, entry]) => [prefix, mountDoc(entry)]),

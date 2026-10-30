@@ -57,3 +57,43 @@ describe('a warm read command reads nothing from the backend', () => {
     }
   })
 })
+
+it.each([
+  ['tail -n 1 /c/a', 'beta\n', 0],
+  ['tail -c 5 /c/a', 'beta\n', 0],
+  ['cmp -l /c/a /c/b', ' 1 141 101\n 7 142 102\n', 1],
+] as const)('sized commands use the warm body length: %s', async (line, expected, code) => {
+  const ram = new RAMVFS()
+  Object.assign(ram, { cachesReads: true })
+  const enc = new TextEncoder()
+  ram.store.files.set('/a', enc.encode('alpha\nbeta\n'))
+  ram.store.files.set('/b', enc.encode('Alpha\nBeta\n'))
+  const ws = new Workspace({ '/c': ram }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell('cat /c/a /c/b')
+    ram.store.files.set('/a', enc.encode('x'))
+    ram.store.files.set('/b', enc.encode('y'))
+    const out = await ws.shell(line)
+    expect(new TextDecoder().decode(out.stdout)).toBe(expected)
+    expect(out.exitCode).toBe(code)
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each(['-n 1', '-c 4'])('tail rechecks a stale listing size: %s', async (option) => {
+  const ram = new RAMVFS()
+  Object.assign(ram, { indexTtl: 60 })
+  const enc = new TextEncoder()
+  ram.store.files.set('/a', enc.encode('old\n'))
+  const ws = new Workspace({ '/c': ram }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell('ls /c')
+    ram.store.files.set('/a', enc.encode('old\nnew\n'))
+    const out = await ws.shell(`tail ${option} /c/a`)
+    expect(new TextDecoder().decode(out.stdout)).toBe('new\n')
+    expect(out.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+})

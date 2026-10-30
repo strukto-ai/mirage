@@ -17,7 +17,8 @@ from mirage.commands.cli.builtin.linear.util import text_or_stdin
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import issue_create, resolve_team
-from mirage.core.linear.normalize import normalize_issue, to_json_bytes
+from mirage.core.linear.normalize import normalize_issue
+from mirage.core.render.json import json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -41,4 +42,4 @@ async def create(
         title=fl.as_str("title") or "",
         description=description,
     )
-    return to_json_bytes(normalize_issue(issue)), IOResult()
+    return json_bytes(normalize_issue(issue)), IOResult()

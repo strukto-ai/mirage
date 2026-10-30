@@ -357,3 +357,33 @@ async def test_external_sort_preserves_stability_across_spill_and_merge_levels(
         lines, key=lambda line: line.split()[0]
     )
     assert result.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_merge_retires_groups_before_reading_all_operands(monkeypatch):
+    live = set()
+    peak = 0
+    spool = sort_module.ByteSpool
+
+    class TrackingSpool(spool):
+        def __init__(self):
+            nonlocal peak
+            super().__init__()
+            live.add(self)
+            peak = max(peak, len(live))
+
+        async def close(self):
+            await super().close()
+            live.discard(self)
+
+    monkeypatch.setattr(sort_module, "ByteSpool", TrackingSpool)
+    files = {f"/f{i}": f"x {i:04d}\n".encode() for i in range(1024)}
+    stdout, result = await sort_generic(
+        [_spec(path) for path in files],
+        read=_reader(files),
+        flags={"merge": True, "stable": True, "key": ["1,1"]},
+    )
+    assert await materialize(stdout) == b"".join(files.values())
+    assert result.exit_code == 0
+    assert peak < 32
+    assert not live

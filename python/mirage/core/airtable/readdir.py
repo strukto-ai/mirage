@@ -20,7 +20,6 @@ from mirage.core.airtable.normalize import (
     as_rows,
     normalize_base,
     normalize_table,
-    to_json_bytes,
 )
 from mirage.core.airtable.pathing import (
     base_dirname,
@@ -31,6 +30,7 @@ from mirage.core.airtable.scope import detect_scope
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import entry_stat
+from mirage.core.render.json import json_bytes
 from mirage.errors.fs import enoent
 from mirage.types import ContentType, DirListing, FileStat, FileType
 
@@ -68,7 +68,7 @@ def table_children(table: dict[str, Any], base_id: str) -> list[FileStat]:
         TABLE_JSON(
             "table.json",
             table_id,
-            size=len(to_json_bytes(normalize_table(table, base_id))),
+            size=len(json_bytes(normalize_table(table, base_id))),
         ),
         RECORDS("records.jsonl", table_id),
         VIEWS("views", table_id),
@@ -110,7 +110,7 @@ async def _list_base(
     # views directory under it, so they are seeded rather than refetched.
     base_id = match.slots["base_id"]
     tables = await list_tables(accessor, base_id)
-    base_json = to_json_bytes(normalize_base(_base_row(entry), tables))
+    base_json = json_bytes(normalize_base(_base_row(entry), tables))
     rows = [BASE_JSON("base.json", base_id, size=len(base_json))]
     seeds: dict[str, list[FileStat]] = {}
     for table in tables:

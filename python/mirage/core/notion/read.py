@@ -23,7 +23,6 @@ from mirage.core.notion.normalize import (
     normalize_database,
     normalize_page,
     normalize_row,
-    to_json_bytes,
 )
 from mirage.core.notion.pages import (
     get_data_source,
@@ -34,7 +33,7 @@ from mirage.core.notion.pages import (
 )
 from mirage.core.notion.resolve import guard_row, resolve_row
 from mirage.core.notion.scope import detect_scope
-from mirage.core.render.json import jsonl_bytes
+from mirage.core.render.json import json_bytes, jsonl_bytes
 from mirage.errors.fs import enoent
 from mirage.io.types import materialize
 from mirage.types import FileStat, PathSpec
@@ -44,7 +43,7 @@ async def read_page_json(accessor: NotionAccessor, page_id: str) -> bytes:
     page = await get_page(accessor, page_id)
     blocks = await list_block_tree(accessor, page_id)
     normalized = normalize_page(page, blocks)
-    return to_json_bytes(normalized)
+    return json_bytes(normalized)
 
 
 async def _read_page_json(
@@ -57,7 +56,7 @@ async def _read_page_json(
     if match.kind == "row_json":
         page = await resolve_row(accessor, match, path.virtual)
         blocks = await list_block_tree(accessor, match.slots["row_id"])
-        return to_json_bytes(normalize_page(page, blocks))
+        return json_bytes(normalize_page(page, blocks))
     await guard_row(accessor, match, path.virtual)
     return await read_page_json(accessor, match.slots["page_id"])
 
@@ -70,7 +69,7 @@ async def _read_database_json(
     parent: FileStat | None,
 ) -> bytes:
     database = await get_database(accessor, match.slots["database_id"])
-    return to_json_bytes(normalize_database(database))
+    return json_bytes(normalize_database(database))
 
 
 async def _read_data_source_json(
@@ -83,7 +82,7 @@ async def _read_data_source_json(
     data_source = await get_data_source(
         accessor, match.slots["data_source_id"]
     )
-    return to_json_bytes(normalize_data_source(data_source))
+    return json_bytes(normalize_data_source(data_source))
 
 
 async def _read_rows_jsonl(

@@ -144,7 +144,7 @@ async def test_rejects_a_non_numeric_page_limit(raw):
 async def test_files_delete_outputs_nothing():
     method = METHODS[("drive", "files", "delete")]
     with patch(
-        "mirage.commands.cli.builtin.gws.api.google_delete",
+        "mirage.commands.cli.builtin.gws.api.google_request",
         new_callable=AsyncMock,
     ) as delete:
         out, io = await run_gws_method(
@@ -156,7 +156,7 @@ async def test_files_delete_outputs_nothing():
         )
     assert out is None
     assert io.exit_code == 0
-    assert "/files/f1" in delete.await_args.args[1]
+    assert "/files/f1" in delete.await_args.args[2]
 
 
 @pytest.mark.asyncio
@@ -179,7 +179,7 @@ async def test_malformed_json_flag_is_a_usage_error():
 async def test_permissions_create_posts_body():
     method = METHODS[("drive", "permissions", "create")]
     with patch(
-        "mirage.commands.cli.builtin.gws.api.google_post",
+        "mirage.commands.cli.builtin.gws.api.google_request",
         new_callable=AsyncMock,
         return_value={"id": "p1"},
     ) as post:
@@ -196,8 +196,11 @@ async def test_permissions_create_posts_body():
             ),
         )
     assert await materialize(out) == b'{"id":"p1"}'
-    assert post.await_args.args[1].endswith("/files/f1/permissions")
-    assert post.await_args.args[2] == {"role": "reader", "type": "anyone"}
+    assert post.await_args.args[2].endswith("/files/f1/permissions")
+    assert post.await_args.kwargs["json_body"] == {
+        "role": "reader",
+        "type": "anyone",
+    }
 
 
 @pytest.mark.asyncio
@@ -239,7 +242,7 @@ async def test_files_export_streams_and_closes(count):
         assert await read_prefix(out, count) == b"%PDF"
         assert events == ["pull", "close"]
     assert (
-        "/files/f1/export?mimeType=application/pdf"
+        "/files/f1/export?mimeType=application%2Fpdf"
         in get_stream.call_args.args[1]
     )
 
@@ -255,15 +258,18 @@ async def test_injected_parent_declares_shared_drive_support():
     rejects from a client that has not sent supportsAllDrives."""
     method = METHODS[("drive", "files", "create")]
     with patch(
-        "mirage.commands.cli.builtin.gws.api.google_post",
+        "mirage.commands.cli.builtin.gws.api.google_request",
         new_callable=AsyncMock,
         return_value={"id": "f9"},
     ) as post:
         await run_gws_method(
             method, SCOPED, [], [], Context(flags={"json": '{"name": "n"}'})
         )
-    assert post.await_args.args[2] == {"name": "n", "parents": ["F1"]}
-    assert "supportsAllDrives=true" in post.await_args.args[1]
+    assert post.await_args.kwargs["json_body"] == {
+        "name": "n",
+        "parents": ["F1"],
+    }
+    assert post.await_args.kwargs["params"] == {"supportsAllDrives": "true"}
 
 
 @pytest.mark.asyncio
@@ -272,7 +278,7 @@ async def test_explicit_parents_stay_a_passthrough():
     nothing is injected into either half of the request."""
     method = METHODS[("drive", "files", "create")]
     with patch(
-        "mirage.commands.cli.builtin.gws.api.google_post",
+        "mirage.commands.cli.builtin.gws.api.google_request",
         new_callable=AsyncMock,
         return_value={"id": "f9"},
     ) as post:
@@ -283,8 +289,11 @@ async def test_explicit_parents_stay_a_passthrough():
             [],
             Context(flags={"json": '{"name": "n", "parents": ["OTHER"]}'}),
         )
-    assert post.await_args.args[2] == {"name": "n", "parents": ["OTHER"]}
-    assert "supportsAllDrives" not in post.await_args.args[1]
+    assert post.await_args.kwargs["json_body"] == {
+        "name": "n",
+        "parents": ["OTHER"],
+    }
+    assert "supportsAllDrives" not in post.await_args.kwargs["params"]
 
 
 @pytest.mark.asyncio
@@ -293,7 +302,7 @@ async def test_relocation_declares_shared_drive_support():
     so a move that fails on a Shared Drive scope strands the new file."""
     method = METHODS[("sheets", "spreadsheets", "create")]
     with patch(
-        "mirage.commands.cli.builtin.gws.api.google_post",
+        "mirage.commands.cli.builtin.gws.api.google_request",
         new_callable=AsyncMock,
         return_value={"spreadsheetId": "s1"},
     ):
@@ -320,7 +329,7 @@ async def test_relocation_declares_shared_drive_support():
 async def test_unscoped_install_places_nothing():
     method = METHODS[("sheets", "spreadsheets", "create")]
     with patch(
-        "mirage.commands.cli.builtin.gws.api.google_post",
+        "mirage.commands.cli.builtin.gws.api.google_request",
         new_callable=AsyncMock,
         return_value={"spreadsheetId": "s1"},
     ):
@@ -344,7 +353,7 @@ async def test_an_explicitly_empty_parents_array_is_still_the_callers():
     does; reading it as absent would relocate the caller's file."""
     method = METHODS[("drive", "files", "create")]
     with patch(
-        "mirage.commands.cli.builtin.gws.api.google_post",
+        "mirage.commands.cli.builtin.gws.api.google_request",
         new_callable=AsyncMock,
         return_value={"id": "f9"},
     ) as post:
@@ -355,8 +364,8 @@ async def test_an_explicitly_empty_parents_array_is_still_the_callers():
             [],
             Context(flags={"json": '{"name": "n", "parents": []}'}),
         )
-    assert post.await_args.args[2] == {"name": "n", "parents": []}
-    assert "supportsAllDrives" not in post.await_args.args[1]
+    assert post.await_args.kwargs["json_body"] == {"name": "n", "parents": []}
+    assert "supportsAllDrives" not in post.await_args.kwargs["params"]
 
 
 def test_fill_path_percent_encodes_a_reserved_character():

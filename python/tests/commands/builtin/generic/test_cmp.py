@@ -16,8 +16,10 @@ import pytest
 from mirage.commands.builtin.generic.cmp import (
     CmpFlags,
     cmp_cmd,
+    cmp_generic,
     parse_flags,
 )
+from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import materialize
 from mirage.io.types import IOResult
@@ -285,3 +287,39 @@ async def test_s_answers_from_the_sizes_when_they_differ(
         limit=limit,
     )
     assert (src, io.exit_code, bool(pulled)) == (None, code, read)
+
+
+@pytest.mark.asyncio
+async def test_verbose_known_sizes_emit_before_eof_and_close_both_inputs():
+    paths = [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")]
+    reads = [0, 0]
+    closed = [False, False]
+
+    async def stream(path):
+        side = int(path.virtual == "/b")
+        try:
+            for _ in range(4096):
+                reads[side] += 1
+                yield bytes([65 + side]) * 16384
+        finally:
+            closed[side] = True
+
+    async def size(path):
+        return 64 << 20
+
+    out, io = await cmp_generic(
+        _flags({"verbose": True}),
+        paths,
+        [],
+        Context(flags={"verbose": True}),
+        stream,
+        length_of=size,
+    )
+    try:
+        first = await anext(out)
+        assert first.startswith(b"       1 101 102\n")
+        assert max(reads) < 10
+    finally:
+        await out.aclose()
+    assert closed == [True, True]
+    assert io.exit_code == 1

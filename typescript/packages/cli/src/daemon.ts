@@ -17,7 +17,6 @@ import { pidFilePath } from '@struktoai/mirage-server/paths'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge } from './output.ts'
-import { loadDaemonSettings } from './settings.ts'
 
 interface DaemonStatus {
   running: boolean
@@ -75,14 +74,10 @@ function processAlive(pid: number): boolean {
   }
 }
 
-function buildClient() {
-  return makeClient(loadDaemonSettings())
-}
-
 async function waitForUnreachable(timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const c = buildClient()
+    const c = makeClient()
     if (!(await c.isReachable(300))) return true
     await new Promise((r) => setTimeout(r, 200))
   }
@@ -96,7 +91,7 @@ export function registerDaemonCommands(program: Command): void {
     .description('Show daemon health, PID, uptime, workspace count.')
     .action(async () => {
       const pid = readPid()
-      const c = buildClient()
+      const c = makeClient()
       const url = c.settings.url
       try {
         const r = await c.request('GET', '/v1/health')
@@ -117,7 +112,7 @@ export function registerDaemonCommands(program: Command): void {
     .option('--timeout <s>', 'Seconds to wait for graceful exit', '5')
     .action(async (opts: { timeout: string }) => {
       const timeoutMs = Number(opts.timeout) * 1000
-      const c = buildClient()
+      const c = makeClient()
       let r: Response
       try {
         r = await c.request('POST', '/v1/shutdown')
@@ -149,7 +144,7 @@ export function registerDaemonCommands(program: Command): void {
     .action(async (opts: { timeout: string; eager?: boolean }) => {
       const timeoutMs = Number(opts.timeout) * 1000
       try {
-        await buildClient().request('POST', '/v1/shutdown')
+        await makeClient().request('POST', '/v1/shutdown')
       } catch {
         // already unreachable; fall through to pid cleanup
       }
@@ -164,7 +159,7 @@ export function registerDaemonCommands(program: Command): void {
         }
       }
       if (opts.eager === true) {
-        await buildClient().ensureRunning({ allowSpawn: true })
+        await makeClient().ensureRunning({ allowSpawn: true })
         emit({ restarted: true, spawned_fresh: true }, formatRestart)
         return
       }

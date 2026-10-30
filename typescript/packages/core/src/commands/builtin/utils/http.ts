@@ -19,6 +19,8 @@
 // 4xx and leaked 'fetch failed' onto stderr for a refused connection.
 
 import { callerSignal } from '../../../context/session_context.ts'
+import { primeStream } from '../../../io/stream.ts'
+import type { ByteSource } from '../../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
 import { HTTP_TIMEOUT_SECONDS } from './constants.ts'
@@ -30,7 +32,9 @@ const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 }
 export interface HttpResponse {
   status: number
   reason: string
-  body: Uint8Array
+  // Whole for every redirect hop; the final hop's arrives as it is read when
+  // the request asked for a stream.
+  body: ByteSource
   // The URL this hop was asked for and the method the client sent for it:
   // a redirect can move both (a POST becomes a GET on 301, 302 and 303, in
   // fetch as in curl).
@@ -68,11 +72,11 @@ function nextHop(location: string, current: string): { url: string; sameOrigin: 
   }
 }
 
-function hopOf(resp: Response, url: string, method: string, buf: ArrayBuffer): HttpResponse {
+function hopOf(resp: Response, url: string, method: string, body: ByteSource): HttpResponse {
   return {
     status: resp.status,
     reason: resp.statusText,
-    body: new Uint8Array(buf),
+    body,
     url,
     method,
     headers: [...resp.headers.entries()],
@@ -124,6 +128,57 @@ export interface HttpRequestOptions {
   // its fetch drops a Cookie header and hides Set-Cookie, so there the jar
   // sends and keeps nothing.
   cookies?: CookieJar
+  // Hand the final body over as it arrives instead of holding all of it
+  // first, so a download costs one chunk of memory however large it is.
+  stream?: boolean
+}
+
+// What a failed transfer is reported as. Past a canceled invocation, the only
+// abort is the deadline, which curl answers with its own code (28), so it is
+// told apart from a connection that never opened.
+function failure(
+  err: unknown,
+  caller: AbortSignal | undefined,
+  url: string,
+  started: number,
+): Error {
+  if (caller?.aborted === true) return makeAbortError(caller)
+  const { host, port } = endpoint(url)
+  if (err instanceof DOMException && err.name === 'AbortError') {
+    return new HttpTimeoutError(host, port, Date.now() - started)
+  }
+  return new HttpConnectError(host, port)
+}
+
+// The body as it arrives, under the same deadline and with the same failures
+// as the request; the deadline ends with it, and letting it go cancels the
+// rest of the transfer.
+async function* streamed(
+  resp: Response,
+  url: string,
+  caller: AbortSignal | undefined,
+  started: number,
+  timer: ReturnType<typeof setTimeout> | null,
+): AsyncGenerator<Uint8Array> {
+  const reader = resp.body?.getReader()
+  try {
+    if (reader === undefined) return
+    for (;;) {
+      let step: ReadableStreamReadResult<Uint8Array>
+      try {
+        step = await reader.read()
+      } catch (err) {
+        throw failure(err, caller, url, started)
+      }
+      if (step.done) return
+      yield step.value
+    }
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+    await reader?.cancel().catch((err: unknown) => {
+      console.debug('body cancel failed:', err)
+    })
+  }
 }
 
 async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
@@ -142,6 +197,8 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       : setTimeout(() => {
           controller.abort()
         }, timeoutMs)
+  // A streamed body takes the deadline with it.
+  let handed = false
   try {
     // Header names are case-insensitive, so a `user-agent` the caller set
     // replaces the default rather than riding beside it.
@@ -182,7 +239,6 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
         init.body = body as BodyInit
       }
       let resp: Response
-      let buf: ArrayBuffer
       try {
         resp = await send(current, init)
         if (follow && resp.type === 'opaqueredirect') {
@@ -200,29 +256,32 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
             .filter(([name]) => name === 'set-cookie')
             .map(([, value]) => value),
         )
-        // The deadline can fire while the body is still arriving, so the
-        // body is read inside the same catch, as httpx reads it inside the
-        // request the python twin wraps.
-        buf = await resp.arrayBuffer()
       } catch (err) {
-        // A transport failure carries no status. Past a canceled
-        // invocation, the only abort here is the deadline above, which curl
-        // answers with its own code (28), so it is told apart from a
-        // connection that never opened.
-        if (caller?.aborted === true) throw makeAbortError(caller)
-        const { host, port } = endpoint(current)
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          throw new HttpTimeoutError(host, port, Date.now() - started)
-        }
-        throw new HttpConnectError(host, port)
+        throw failure(err, caller, current, started)
       }
-      const hop = hopOf(resp, current, method, buf)
       const location = resp.headers.get('location')
       const next =
         follow && REDIRECT_STATUSES.has(resp.status) && location !== null
           ? nextHop(location, current)
           : null
-      if (next === null) return { ...hop, history }
+      if (next === null && options.stream === true) {
+        const body = await primeStream(streamed(resp, current, caller, started, timer))
+        handed = true
+        return { ...hopOf(resp, current, method, body), history }
+      }
+      let buf: ArrayBuffer
+      try {
+        // The deadline can fire while the body is still arriving, so the
+        // body is read under the same failures, as httpx reads it inside
+        // the request the python twin wraps.
+        buf = await resp.arrayBuffer()
+      } catch (err) {
+        throw failure(err, caller, current, started)
+      }
+      const hop = hopOf(resp, current, method, new Uint8Array(buf))
+      if (next === null) {
+        return { ...hop, history }
+      }
       if (history.length >= MAX_REDIRECTS) {
         const { host, port } = endpoint(current)
         throw new HttpConnectError(host, port)
@@ -244,7 +303,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       current = next.url
     }
   } finally {
-    if (timer !== null) clearTimeout(timer)
+    if (!handed && timer !== null) clearTimeout(timer)
   }
 }
 
@@ -264,6 +323,7 @@ export function httpFormRequest(
     verify?: boolean
     signal?: AbortSignal
     cookies?: CookieJar
+    stream?: boolean
   } = {},
 ): Promise<HttpResponse> {
   const method = opts.method ?? 'POST'
@@ -284,16 +344,23 @@ export function httpFormRequest(
     ...(opts.verify !== undefined ? { verify: opts.verify } : {}),
     ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     ...(opts.cookies !== undefined ? { cookies: opts.cookies } : {}),
+    ...(opts.stream !== undefined ? { stream: opts.stream } : {}),
   })
 }
 
 export function httpGet(
   url: string,
-  opts: { headers?: Record<string, string>; timeoutMs?: number | null; signal?: AbortSignal } = {},
+  opts: {
+    headers?: Record<string, string>
+    timeoutMs?: number | null
+    signal?: AbortSignal
+    stream?: boolean
+  } = {},
 ): Promise<HttpResponse> {
   const options: HttpRequestOptions = { method: 'GET' }
   if (opts.headers !== undefined) options.headers = opts.headers
   if (opts.timeoutMs !== undefined) options.timeoutMs = opts.timeoutMs
   if (opts.signal !== undefined) options.signal = opts.signal
+  if (opts.stream !== undefined) options.stream = opts.stream
   return httpRequest(url, options)
 }

@@ -27,7 +27,14 @@ import { rstripSlash } from '../utils/slash.ts'
 import { leadsHidden, pathVisible } from '../utils/hidden.ts'
 import { eacces, enoent, enotsup, erofs } from '../errors/fs.ts'
 import { norm, parent } from '../utils/path.ts'
-import type { DecisionOwner, DryRun, EntryGate, HandOff, VfsExplanation } from '../policy/types.ts'
+import type {
+  CommandContext,
+  DecisionOwner,
+  DryRun,
+  EntryGate,
+  HandOff,
+  VfsExplanation,
+} from '../policy/types.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { Limit, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MountMode, weakerMode } from '../types.ts'
@@ -136,6 +143,11 @@ export interface Caller {
   // The managed runner the call runs in, whose kill signal a native
   // program it started receives.
   readonly process: ProcessHandle | null
+  // What preCommand judged the running command on, which a connection it
+  // opens reports.
+  readonly invocation: CommandContext | null
+  // The prefix of the mount whose VFS serves the call, null outside one.
+  readonly vfsMount: string | null
 }
 
 /**
@@ -182,6 +194,8 @@ const UNBOUND: Caller = {
   enclosing: null,
   execution: null,
   process: null,
+  invocation: null,
+  vfsMount: null,
 }
 
 const callerStorage = createAsyncContext<Caller>()

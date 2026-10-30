@@ -985,7 +985,13 @@ async def test_follow_infinite_interval_never_polls():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "flags, asked",
-    [({}, 10), ({"n": "2"}, 2), ({"n": "+2"}, None), ({"c": "2"}, None)],
+    [
+        ({}, 10),
+        ({"n": "2"}, 2),
+        ({"n": "-2"}, 2),
+        ({"n": "+2"}, None),
+        ({"c": "2"}, None),
+    ],
 )
 async def test_tail_asks_last_lines_for_a_count_from_the_end(flags, asked):
     fs = _Growing({"/d/log": b"a\nb\nc\n"})
@@ -1117,3 +1123,74 @@ async def test_a_polled_follow_reads_its_first_print_whole():
     chunks = await _drain_for(stream, 0.15)
     await grower
     assert b"".join(chunks) == b"b\nc\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,expected,maximum",
+    [
+        ({"n": "2"}, 16, 16384),
+        ({"c": "1000"}, 1000, 1000),
+        ({"n": str(2 << 20)}, 16 << 20, 17 << 20),
+    ],
+)
+async def test_seekable_tail_keeps_only_a_range_window(
+    flags, expected, maximum
+):
+    size = 40 << 20
+    requested = 0
+    block = b"1234567\n" * 2048
+
+    async def stat(path):
+        return FileStat(name="log", type=FileType.FILE, size=size)
+
+    async def read(path):
+        raise AssertionError("a known-size range reader must not scan forward")
+        yield b""
+
+    async def read_range(path, *, offset, size):
+        nonlocal requested
+        assert size <= 1 << 20
+        requested += size
+        for at in range(offset, offset + size, len(block)):
+            count = min(len(block), offset + size - at)
+            shift = at % 8
+            yield (block + block[:8])[shift : shift + count]
+
+    async def run():
+        source, io = await tail_generic(
+            _paths("/d/log"), [], Context(flags=flags), stat, read, read_range
+        )
+        seen = 0
+        async for part in source:
+            assert len(part) <= 16384
+            seen += len(part)
+        assert seen == expected
+        assert io.exit_code == 0
+
+    await run_with_memory(MemoryBudget(32 << 20, lambda: 0), run())
+    assert requested <= maximum + expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags", [{"n": "1"}, {"c": "4"}])
+async def test_a_zero_stat_size_does_not_hide_streamed_bytes(flags):
+    data = b"first\nlast"
+
+    async def stat(path):
+        return FileStat(name="pipe", type=FileType.FILE, size=0, mode=0o600)
+
+    async def read(path):
+        yield data
+
+    async def read_range(path, *, offset, size):
+        raise AssertionError(
+            f"a zero-size stat does not establish a seekable file: {data!r}"
+        )
+        yield b""
+
+    source, io = await tail_generic(
+        _paths("/pipe"), [], Context(flags=flags), stat, read, read_range
+    )
+    assert await _drain(source) == b"last"
+    assert io.exit_code == 0

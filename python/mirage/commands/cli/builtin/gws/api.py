@@ -14,10 +14,8 @@
 
 import functools
 import json as json_lib
-from collections.abc import Awaitable, Callable
-from enum import Enum, auto
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.cli.builtin.gws.methods import (
@@ -34,15 +32,14 @@ from mirage.commands.spec.types import Argument, CommandSpec, FlagValue
 from mirage.core.google.client import (
     TokenManager,
     drive_base,
-    google_delete,
     google_get,
     google_get_stream,
     google_patch,
-    google_post,
+    google_request,
 )
 from mirage.core.google.config import GoogleConfig
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import JsonValue, PathSpec
+from mirage.types import PathSpec
 
 _PARAMS_HELP = (
     'JSON object of path and query parameters, e.g. \'{"fileId":"abc"}\''
@@ -120,48 +117,6 @@ def _query_str(query: dict[str, Any]) -> dict[str, str]:
         else:
             out[k] = str(v)
     return out
-
-
-class _NoContent(Enum):
-    """A 204 body: distinct from a JSON null, which is a value."""
-
-    TOKEN = auto()
-
-
-_NO_CONTENT = _NoContent.TOKEN
-
-
-async def _call_get(
-    tm: TokenManager, url: str, body: dict[str, Any], query: dict[str, str]
-) -> JsonValue:
-    return await google_get(tm, url, params=query)
-
-
-async def _call_post(
-    tm: TokenManager, url: str, body: dict[str, Any], query: dict[str, str]
-) -> JsonValue:
-    return await google_post(tm, _with_query(url, query), body)
-
-
-async def _call_patch(
-    tm: TokenManager, url: str, body: dict[str, Any], query: dict[str, str]
-) -> JsonValue:
-    return await google_patch(tm, url, body, params=query)
-
-
-async def _call_delete(
-    tm: TokenManager, url: str, body: dict[str, Any], query: dict[str, str]
-) -> _NoContent:
-    await google_delete(tm, _with_query(url, query))
-    return _NO_CONTENT
-
-
-_CALLERS: dict[str, Callable[..., Awaitable["JsonValue | _NoContent"]]] = {
-    "GET": _call_get,
-    "POST": _call_post,
-    "PATCH": _call_patch,
-    "DELETE": _call_delete,
-}
 
 
 def scope_request(
@@ -269,21 +224,25 @@ async def run_gws_method(
         # is indistinguishable from a complete one, so mirage follows
         # the token by default and --page-limit is how you opt out.
         out = await _paginate(
-            method,
             token_manager,
             url,
-            body,
             query_params,
             _parse_page_limit(fl.as_str("page_limit")),
         )
         return out, IOResult()
-    result = await _CALLERS[method.http](
-        token_manager, url, body, query_params
+    deleting = method.http == "DELETE"
+    result = await google_request(
+        token_manager,
+        method.http,
+        url,
+        params=query_params,
+        json_body=None if deleting else body,
+        read="none" if deleting else "json",
     )
+    if deleting:
+        return None, IOResult()
     if method.placement == "relocate" and isinstance(result, dict):
         await place_in_scope(method, token_manager, result)
-    if result is _NO_CONTENT:
-        return None, IOResult()
     out = json_lib.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()
@@ -307,10 +266,8 @@ def _parse_page_limit(raw: str | None) -> int | None:
 
 
 async def _paginate(
-    method: GwsMethod,
     token_manager: TokenManager,
     url: str,
-    body: dict[str, Any],
     query: dict[str, str],
     page_limit: int | None,
 ) -> bytes:
@@ -321,10 +278,8 @@ async def _paginate(
     caller can pipe straight into `jq`, which evaluates per document.
 
     Args:
-        method (GwsMethod): the Discovery method being wrapped.
         token_manager (TokenManager): the installation's OAuth handle.
         url (str): the fully built request URL.
-        body (dict): the request body, unused for GET.
         query (dict): query parameters; pageToken is overwritten per page.
         page_limit (int | None): stop after this many pages, or None for all.
 
@@ -340,9 +295,7 @@ async def _paginate(
         params = dict(query)
         if token is not None:
             params["pageToken"] = token
-        result = await _CALLERS[method.http](token_manager, url, body, params)
-        if result is _NO_CONTENT:
-            break
+        result = await google_get(token_manager, url, params=params)
         pages.append(
             json_lib.dumps(
                 result, ensure_ascii=False, separators=(",", ":")
@@ -368,7 +321,7 @@ def _with_query(url: str, query: dict[str, str]) -> str:
     if not query:
         return url
     sep = "&" if "?" in url else "?"
-    return url + sep + "&".join(f"{k}={v}" for k, v in query.items())
+    return url + sep + urlencode(query)
 
 
 def method_leaf(method: GwsMethod) -> CommandSpec:

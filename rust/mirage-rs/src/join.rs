@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::records::{Records, Take};
 use crate::{Stream, StreamError, parse_config};
@@ -7,7 +7,7 @@ use crate::{Stream, StreamError, parse_config};
 /// equal keys print their product.
 const CHUNK: usize = 1 << 16;
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Order {
     Warn,
@@ -15,11 +15,13 @@ enum Order {
     Off,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     /// Each file's join field, counted from 0.
     keys: [u64; 2],
+    #[serde(default = "default_files")]
+    files: [usize; 2],
     /// Whether each file's unpairable lines print (`-a`, `-v`).
     unpaired: [bool; 2],
     /// Whether joined lines print; any `-v` clears it.
@@ -46,7 +48,13 @@ struct Config {
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let config: Config = parse_config(config)?;
+    let value: serde_json::Value = parse_config(config)?;
+    let config: Config = if value.get("options").is_some() {
+        let raw: RawOptions = parse_config(config)?;
+        raw.parse()?
+    } else {
+        parse_config(config)?
+    };
     if config.names.len() != 2 || config.delimiter.as_ref().is_some_and(|d| d.len() != 1) {
         return Err(StreamError::new("join takes two names and a one-byte tab"));
     }
@@ -69,6 +77,313 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         stderr: Vec::new(),
         status: 0,
     }))
+}
+
+fn default_files() -> [usize; 2] {
+    [0, 1]
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOptions {
+    options: Vec<(String, serde_json::Value)>,
+    operands: Vec<String>,
+    argv: Vec<String>,
+}
+
+fn option_bytes(text: &str) -> Vec<u8> {
+    text.chars().map(|ch| ch as u8).collect()
+}
+fn option_text(text: &str) -> String {
+    String::from_utf8_lossy(&option_bytes(text)).into_owned()
+}
+fn refusal(message: impl AsRef<str>) -> StreamError {
+    StreamError::new(format!("join: {}", message.as_ref()))
+}
+fn number(text: &str) -> Option<u64> {
+    let text = text.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+    let text = text.strip_prefix('+').unwrap_or(text);
+    if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(text.bytes().fold(0u64, |n, b| {
+        n.saturating_mul(10).saturating_add(u64::from(b - b'0'))
+    }))
+}
+fn field(text: &str) -> Result<u64, StreamError> {
+    number(text)
+        .filter(|n| *n != 0)
+        .map(|n| n.min(i64::MAX as u64) - 1)
+        .ok_or_else(|| {
+            refusal(format!(
+                "invalid field number: '{}'",
+                crate::quoted(&option_bytes(text))
+            ))
+        })
+}
+fn file_number(text: &str) -> Result<usize, StreamError> {
+    number(text)
+        .filter(|n| matches!(n, 1 | 2))
+        .map(|n| n as usize)
+        .ok_or_else(|| {
+            refusal(format!(
+                "invalid file number: '{}'",
+                crate::quoted(&option_bytes(text))
+            ))
+        })
+}
+
+struct Operand {
+    position: usize,
+    word: String,
+    lone: Option<usize>,
+    listed: bool,
+}
+struct Reading {
+    config: Config,
+    keys: [Option<u64>; 2],
+    names: Vec<Operand>,
+    lone: Vec<(usize, bool)>,
+    seen: usize,
+}
+impl Reading {
+    fn new() -> Self {
+        Self {
+            config: Config {
+                keys: [0, 0],
+                files: [0, 1],
+                unpaired: [false; 2],
+                paired: true,
+                filler: None,
+                columns: Vec::new(),
+                auto_columns: false,
+                delimiter: None,
+                separator: vec![b' '],
+                fold_case: false,
+                zero_terminated: false,
+                order: Order::Warn,
+                header: false,
+                names: Vec::new(),
+            },
+            keys: [None; 2],
+            names: Vec::new(),
+            lone: Vec::new(),
+            seen: 0,
+        }
+    }
+    fn set_key(&mut self, side: usize, key: u64) -> Result<(), StreamError> {
+        if let Some(before) = self.keys[side] {
+            if before != key {
+                return Err(refusal(format!("incompatible join fields {before}, {key}")));
+            }
+        }
+        self.keys[side] = Some(key);
+        Ok(())
+    }
+    fn items(&mut self, text: &str) -> Result<(), StreamError> {
+        let mut items: Vec<&str> = text.split([',', ' ', '\t']).collect();
+        if items.len() > 1 && items.last() == Some(&"") {
+            items.pop();
+        }
+        for item in items {
+            let column = if item == "0" {
+                [0, 0]
+            } else if item.starts_with("1.") || item.starts_with("2.") {
+                [u64::from(item.as_bytes()[0] - b'0'), field(&item[2..])?]
+            } else {
+                let kind = if matches!(item.as_bytes().first(), Some(b'0' | b'1' | b'2')) {
+                    "invalid field specifier"
+                } else {
+                    "invalid file number in field spec"
+                };
+                return Err(refusal(format!(
+                    "{kind}: '{}'",
+                    crate::quoted(&option_bytes(item))
+                )));
+            };
+            self.config.columns.push(column);
+        }
+        Ok(())
+    }
+    fn operand(
+        &mut self,
+        word: String,
+        lone: Option<usize>,
+        listed: bool,
+    ) -> Result<(), StreamError> {
+        let position = self.seen;
+        self.seen += 1;
+        if self.names.len() == 2 {
+            let Some(at) = self.names.iter().position(|n| n.lone.is_some() || n.listed) else {
+                return Err(refusal(format!(
+                    "extra operand '{}'\nTry 'join --help' for more information.",
+                    option_text(&word)
+                )));
+            };
+            let taken = self.names.remove(at);
+            if let Some(index) = taken.lone {
+                self.lone[index].1 = true;
+                self.set_key(self.lone[index].0 - 1, field(&taken.word)?)?;
+            } else {
+                self.items(&taken.word)?;
+            }
+        }
+        self.names.push(Operand {
+            position,
+            word,
+            lone,
+            listed,
+        });
+        Ok(())
+    }
+    fn option(&mut self, name: &str, value: &serde_json::Value) -> Result<(), StreamError> {
+        if value == &serde_json::Value::Bool(false) {
+            return Ok(());
+        }
+        let text = if value == &serde_json::Value::Bool(true) {
+            String::new()
+        } else if let Some(text) = value.as_str() {
+            text.to_owned()
+        } else {
+            value.to_string()
+        };
+        match name {
+            "a" | "v" => {
+                self.config.unpaired[file_number(&text)? - 1] = true;
+                self.config.paired &= name == "a";
+            }
+            "e" => {
+                let filler = option_bytes(&text);
+                if self
+                    .config
+                    .filler
+                    .as_ref()
+                    .is_some_and(|old| old != &filler)
+                {
+                    return Err(refusal("conflicting empty-field replacement strings"));
+                }
+                self.config.filler = Some(filler);
+            }
+            "args_1" | "2" => self.set_key(usize::from(name == "2"), field(&text)?)?,
+            "j" => {
+                let key = field(&text)?;
+                self.set_key(0, key)?;
+                self.set_key(1, key)?;
+            }
+            "o" if text == "auto" => self.config.auto_columns = true,
+            "o" => self.items(&text)?,
+            "t" => {
+                let raw = option_bytes(&text);
+                let byte = match raw.as_slice() {
+                    b"" => b'\n',
+                    b"\\0" => 0,
+                    [byte] => *byte,
+                    _ => {
+                        return Err(refusal(format!(
+                            "multi-character tab '{}'",
+                            crate::quoted(&raw)
+                        )));
+                    }
+                };
+                if self
+                    .config
+                    .delimiter
+                    .as_ref()
+                    .is_some_and(|old| old != &[byte])
+                {
+                    return Err(refusal("incompatible tabs"));
+                }
+                self.config.delimiter = Some(vec![byte]);
+                if !raw.is_empty() {
+                    self.config.separator = vec![byte];
+                }
+            }
+            "ignore_case" => self.config.fold_case = true,
+            "zero_terminated" => self.config.zero_terminated = true,
+            "check_order" => self.config.order = Order::Fail,
+            "nocheck_order" => self.config.order = Order::Off,
+            "header" => self.config.header = true,
+            _ => {}
+        }
+        Ok(())
+    }
+}
+impl RawOptions {
+    fn parse(self) -> Result<Config, StreamError> {
+        let mut reading = Reading::new();
+        let mut spelled: Option<String> = None;
+        let mut fresh = None;
+        let mut listing = false;
+        for (name, value) in self.options {
+            let after_word = spelled.take();
+            let after_lone = fresh.take();
+            let after_list = std::mem::take(&mut listing);
+            if name == "=" {
+                spelled = value.as_str().map(str::to_owned);
+            } else if name.is_empty() {
+                let word = self
+                    .operands
+                    .get(reading.seen)
+                    .cloned()
+                    .unwrap_or_else(|| value.as_str().unwrap_or_default().to_owned());
+                reading.operand(word, after_lone, after_list)?;
+                listing = after_list;
+            } else if name == "j" && matches!(after_word.as_deref(), Some("-j1" | "-j2")) {
+                fresh = Some(reading.lone.len());
+                reading.lone.push((
+                    if after_word.as_deref() == Some("-j1") {
+                        1
+                    } else {
+                        2
+                    },
+                    false,
+                ));
+            } else {
+                reading.option(&name, &value)?;
+                listing = name == "o" && value.as_str() != Some("auto");
+            }
+        }
+        if reading.seen == 0 {
+            for word in self.operands {
+                reading.operand(word, None, false)?;
+            }
+        }
+        if reading.names.len() < 2 && (reading.seen > 0 || !self.argv.is_empty()) {
+            let last = reading
+                .names
+                .last()
+                .map(|n| &n.word)
+                .map(|last| self.argv.last().unwrap_or(last));
+            let after = last
+                .map(|last| format!(" after '{}'", option_text(last)))
+                .unwrap_or_default();
+            return Err(refusal(format!(
+                "missing operand{after}\nTry 'join --help' for more information."
+            )));
+        }
+        for file in [1, 2] {
+            if reading
+                .lone
+                .iter()
+                .any(|(number, claimed)| *number == file && !claimed)
+            {
+                reading.set_key(0, file as u64 - 1)?;
+                reading.set_key(1, file as u64 - 1)?;
+            }
+        }
+        if reading.names.len() == 2 {
+            reading.config.files = [reading.names[0].position, reading.names[1].position];
+            reading.config.names = reading
+                .names
+                .iter()
+                .map(|n| option_bytes(&n.word))
+                .collect();
+        } else {
+            reading.config.names = vec![Vec::new(), Vec::new()];
+        }
+        reading.config.keys = reading.keys.map(|key| key.unwrap_or(0));
+        Ok(reading.config)
+    }
 }
 
 struct Line {
@@ -504,6 +819,9 @@ impl Join {
 }
 
 impl Stream for Join {
+    fn metadata(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&serde_json::to_vec(&self.config).expect("join configuration"));
+    }
     fn feed(&mut self, _: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
         Err(StreamError::new("join reads two inputs"))
     }

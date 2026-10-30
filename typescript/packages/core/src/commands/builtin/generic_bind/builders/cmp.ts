@@ -23,7 +23,15 @@ const cmpCmd: CommandFn = async (_accessor, paths, texts, ctx) => {
   if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return cmpGeneric(parsed, resolved, texts, ctx, files.read, fileSize(files, ctx))
+  return cmpGeneric(
+    parsed,
+    resolved,
+    texts,
+    ctx,
+    files.read,
+    fileSize(files, ctx),
+    fileSize(files, ctx, true),
+  )
 }
 
 export const BUILDER: GenericCommand = {

@@ -22,7 +22,7 @@ import { Workspace } from '@struktoai/mirage-node'
 import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { buildApp, type MirageApp } from '../app.ts'
+import { buildApp } from '../app.ts'
 import type * as multipart from '../multipart.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
@@ -273,17 +273,16 @@ describe('workspaces router', () => {
     }
   })
 
-  it('holds every workspace to the server network', async () => {
+  it('holds a workspace to its posted network', async () => {
     const server = createServer((_req, res) => res.end('ok\n'))
     await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
     const port = (server.address() as AddressInfo).port
-    const held = buildApp({ network: false })
-    const free = buildApp()
-    const curl = async (app: MirageApp): Promise<number> => {
+    const app = buildApp()
+    const curl = async (network: boolean): Promise<number> => {
       const made = await app.inject({
         method: 'POST',
         url: '/v1/workspaces',
-        payload: { config: { ...RAM, network: true } },
+        payload: { config: { ...RAM, network } },
       })
       const id = made.json<{ id: string }>().id
       const ran = await app.inject({
@@ -294,11 +293,10 @@ describe('workspaces router', () => {
       return ran.json<{ exit_code: number }>().exit_code
     }
     try {
-      expect(await curl(free)).toBe(0)
-      expect(await curl(held)).toBe(7)
+      expect(await curl(true)).toBe(0)
+      expect(await curl(false)).toBe(7)
     } finally {
-      await held.close()
-      await free.close()
+      await app.close()
       server.close()
     }
   })

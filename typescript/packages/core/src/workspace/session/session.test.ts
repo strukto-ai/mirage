@@ -597,3 +597,15 @@ describe('varsToFields / varsFromFields', () => {
     expect(varsFromFields(fields).T?.value).toBeNull()
   })
 })
+
+describe('a profile network', () => {
+  it('survives the record', () => {
+    const session = new SessionState({ sessionId: 's' })
+    session.network = { allowed_domains: ['*.github.com'] }
+    const data = JSON.parse(JSON.stringify(session.toDict())) as Parameters<
+      typeof SessionState.fromDict
+    >[0]
+    expect(SessionState.fromDict(data).network).toEqual({ allowed_domains: ['*.github.com'] })
+    expect(new SessionState({ sessionId: 't' }).toDict()).not.toHaveProperty('network')
+  })
+})

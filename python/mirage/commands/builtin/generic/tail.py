@@ -2,7 +2,7 @@ import asyncio
 import functools
 import inspect
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -37,10 +37,12 @@ from mirage.commands.spec.usage import word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import enoent, fs_strerror
-from mirage.io.cooperative import chunks
+from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.memory import check_memory
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.yield_budget import YieldBudget
+from mirage.observe.context import revision_for
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -180,7 +182,7 @@ async def tail(
     c: int | None = None,
     from_line: int | None = None,
     from_byte: int | None = None,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     async with aclosing(chunks(src)) as source:
         if from_byte is not None:
             # GNU counts `-c +N` from byte N, 1-indexed, so +0 and +1 both mean
@@ -292,6 +294,7 @@ async def tail_multi(
     show_headers: bool = False,
     unread: frozenset[str] = frozenset(),
     io: IOResult | None = None,
+    selected: bool = False,
 ) -> AsyncIterator[bytes]:
     """Run tail over multiple already-resolved paths.
 
@@ -329,9 +332,14 @@ async def tail_multi(
             source = read(p)
             if inspect.isawaitable(source):
                 source = await source
-            async for chunk in tail(
-                source, n=n, c=c, from_line=from_line, from_byte=from_byte
-            ):
+            output = (
+                chunks(source)
+                if selected
+                else tail(
+                    source, n=n, c=c, from_line=from_line, from_byte=from_byte
+                )
+            )
+            async for chunk in output:
                 if pending:
                     yield pending
                     pending = b""
@@ -418,29 +426,109 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
     return b"".join([chunk async for chunk in _counted(read(path), [0])])
 
 
-def _read_last(
-    read: Callable[..., Any],
-    last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]],
-    n: int,
-) -> Callable[[PathSpec], Awaitable[Any]]:
-    """``read``, answered by the mount's ``last_lines(path, n)`` where it
-    can: the last ``n`` lines without the rest of the file.
+async def _tail_range(
+    read: ReadStreamFn, path: PathSpec, offset: int, end: int
+) -> AsyncGenerator[bytes, None]:
+    # A range-capable backend may return bytes, so bound the request too.
+    while offset < end:
+        size = min(1 << 20, end - offset)
+        async with aclosing(
+            chunks(read(path, offset=offset, size=size))
+        ) as source:
+            async for part in source:
+                yield part
+        offset += size
 
-    Args:
-        read (Callable[..., Any]): bound whole-file reader, for a file
-            the mount does not answer and for standard input.
-        last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]):
-            the mount's ``last_lines``.
-        n (int): the line count, at least 1.
-    """
 
-    async def read_last(path: PathSpec) -> Any:
-        if is_stdin(path):
-            return read(path)
-        data = await last_lines(path, n)
-        return read(path) if data is None else data
-
-    return read_last
+async def _tail_file(
+    path: PathSpec,
+    *,
+    read: PolymorphicReadFn,
+    stat: StatFn,
+    read_range: ReadStreamFn | None,
+    last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]] | None,
+    counts: TailCounts,
+) -> AsyncIterator[bytes]:
+    n = counts.lines if counts.lines is not None else 10
+    from_end = counts.from_line is None and counts.from_byte is None
+    if not is_stdin(path) and from_end:
+        if counts.byte_count is None and last_lines is not None:
+            answer = await last_lines(path, abs(n))
+            if answer is not None:
+                async for part in chunks(answer):
+                    yield part
+                return
+        if read_range is not None and revision_for(path.virtual) is None:
+            info = await stat(path)
+            if (
+                info.type == FileType.FILE
+                and info.size is not None
+                and info.size > 0
+            ):
+                size = info.size
+                if counts.byte_count is not None:
+                    offset = max(0, size - abs(counts.byte_count))
+                    if offset == size:
+                        return
+                    async with aclosing(
+                        _tail_range(read_range, path, offset, size)
+                    ) as source:
+                        async for part in source:
+                            yield part
+                    return
+                end = size
+                wanted = abs(n)
+                window = CHUNK_SIZE
+                budget = YieldBudget()
+                while end > 0:
+                    await budget.run()
+                    start = max(0, end - window)
+                    data = await materialize(
+                        read_range(path, offset=start, size=end - start)
+                    )
+                    if len(data) != end - start:
+                        break
+                    if end == size and data.endswith(b"\n"):
+                        wanted += 1
+                    found = data.count(b"\n")
+                    if found < wanted and start > 0:
+                        wanted -= found
+                        end = start
+                        window = min(window * 2, 1 << 20)
+                        continue
+                    at = len(data)
+                    while wanted:
+                        at = data.rfind(b"\n", 0, at)
+                        if at < 0:
+                            break
+                        wanted -= 1
+                    if not wanted or start == 0:
+                        if piece := data[at + 1 :] if not wanted else data:
+                            async for part in chunks(piece):
+                                yield part
+                        if end < size:
+                            async with aclosing(
+                                _tail_range(read_range, path, end, size)
+                            ) as source:
+                                async for part in source:
+                                    yield part
+                        return
+                    end = start
+                    window = min(window * 2, 1 << 20)
+    raw = read(path)
+    if inspect.isawaitable(raw):
+        raw = await raw
+    async with aclosing(
+        tail(
+            raw,
+            n=counts.lines,
+            c=counts.byte_count,
+            from_line=counts.from_line,
+            from_byte=counts.from_byte,
+        )
+    ) as selected:
+        async for part in selected:
+            yield part
 
 
 async def _polled_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
@@ -852,8 +940,8 @@ async def tail_generic(
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
         read_range (ReadStreamFn | None): Bound byte-window reader
-            called as ``read_range(path, offset, size)``, for a follow
-            that only wants what the file gained; None reads whole.
+            called as ``read_range(path, offset, size)``, for a seekable
+            tail or a follow that only wants what the file gained.
         last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]
             | None): the mount's ``last_lines`` called as
             ``last_lines(path, n)``; None, or an answer of None, reads
@@ -879,11 +967,6 @@ async def tail_generic(
         counts.byte_count is None
         and counts.from_line is None
         and counts.from_byte is None
-    )
-    read_last = (
-        _read_last(stream, last_lines, n)
-        if last_lines is not None and from_end and n > 0
-        else None
     )
     if (
         parsed.follow
@@ -952,7 +1035,15 @@ async def tail_generic(
             return None, io
         return tail_multi(
             opened,
-            read=read_last or stream,
+            read=functools.partial(
+                _tail_file,
+                read=stream,
+                stat=stat,
+                read_range=read_range,
+                last_lines=last_lines,
+                counts=counts,
+            ),
+            selected=True,
             n=counts.lines,
             c=counts.byte_count,
             from_line=counts.from_line,
@@ -962,7 +1053,7 @@ async def tail_generic(
             io=io,
         ), io
     source = resolve_source(ctx.stdin)
-    body = tail(
+    body: AsyncIterator[bytes] = tail(
         source,
         n=counts.lines,
         c=counts.byte_count,
