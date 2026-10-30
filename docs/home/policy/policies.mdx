@@ -469,6 +469,24 @@ A host answers through [`ws.decisions`](/python/access/in-app#ws-decisions),
 method comes after the action ran, so nothing is undone: what came back is
 held, and the approved retry runs it again.
 
+Each question has an opaque ID. Answer the ID returned with that question;
+independent overlapping callers receive separate questions. A canceled inline prompt retires
+its question. An ordinary pending response keeps the question available for an
+external answer and retry.
+
+Python and TypeScript use the same Rust approval model. A grant takes effect
+only after its session-store write is confirmed. Closing or restoring a session
+replaces its approval identity, and changing policy invalidates its grants.
+An old question or writer cannot restore them. Grants saved by the older
+host-specific model do not authorize actions under this model.
+
+RAM approvals are local to one process. Disk approvals require a local filesystem
+on the same machine, with atomic file creation and rename and working file and
+directory synchronization. Sharing that directory across machines is unsupported.
+S3 and Redis session stores currently refuse approval-backed actions because
+their persistence guarantees have not been qualified. Ordinary actions that
+require no approval remain available.
+
 ## When answers disagree
 
 - Any Deny beats any Ask, so answering an ask never reopens a refusal.

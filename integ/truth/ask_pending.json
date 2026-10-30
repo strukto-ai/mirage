@@ -21,8 +21,12 @@
   "lines": [
     "cat /data/secret.txt: refused (pending), exit 126",
     "rm /data/a.txt: refused (pending), exit 126",
-    "host: 1a1ab32acd5c asks cat /data/secret.txt (secrets are reviewed): allow once",
-    "host: 894a2da6e5a7 asks rm /data/a.txt (deletes are reviewed): allow session",
+    {
+      "re": "host: \\S+ asks cat /data/secret\\.txt \\(secrets are reviewed\\): allow once"
+    },
+    {
+      "re": "host: \\S+ asks rm /data/a\\.txt \\(deletes are reviewed\\): allow session"
+    },
     "cat /data/secret.txt: ran, exit 0",
     "rm /data/a.txt: ran, exit 0",
     "cat /data/secret.txt: refused (pending), exit 126",

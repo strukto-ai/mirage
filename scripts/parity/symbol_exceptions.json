@@ -1,5 +1,5 @@
 {
- "baseline": 2693,
+ "baseline": 2690,
  "modules": {
   "workspace/session/approval": {
    "typescript_only": {
@@ -1137,6 +1137,18 @@
   "cli/settings": {
    "python_only": {
     "_network_text": "tomllib hands Python the network table parsed, so it writes it back as config.toml spells it; the TypeScript CLI reads the line by hand and shows it as written."
+   }
+  },
+  "policy/decisions": {
+   "typescript_only": {
+    "ApprovalResult": "Type inferred from the TypeScript JSON result boundary; Python uses RecordFields for the opaque Rust result.",
+    "ScopeBinding": "Named TypeScript shape for a caller binding; Python represents the same session, incarnation and revision as a typed tuple.",
+    "decisionSchema": "Zod validates decision text and rule fields arriving from Rust; Python decodes the same known result with typed helpers.",
+    "effectSchema": "Zod validates the unknown JSON persistence effect before TypeScript reads it; Python checks the decoded effect directly.",
+    "ledgerSchema": "Zod validates the opaque ledger envelope before TypeScript projects records; Python reads the same fields from RecordFields.",
+    "resultSchema": "Zod validates the Rust result union at the TypeScript boundary; Python checks its result kind.",
+    "ruleSchema": "TypeScript boundary schema for the Rust rule wire shape; Python uses rule_wire and decision_from_wire.",
+    "unitSchema": "TypeScript boundary validation for Unicode code points; Python units/from_units supply the corresponding conversion."
    }
   }
  }
