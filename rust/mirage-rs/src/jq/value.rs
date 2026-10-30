@@ -4,7 +4,7 @@ use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::fmt::{self, Write};
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
@@ -60,23 +60,12 @@ impl Number {
         self.value
     }
 
-    /// The literal spelled out: the double's own spelling for one that
-    /// prints the same.
-    fn written(&self) -> Option<Arc<Text>> {
-        self.literal.as_ref().map(|text| {
-            if text.is_empty() {
-                Arc::new(Text::new(printed(self.value).into_boxed_str()))
-            } else {
-                Arc::clone(text)
-            }
-        })
-    }
-
     /// decNumber's minus: a literal keeps its digits, and zero its sign
     /// dropped.
     pub(crate) fn negate(&self) -> Self {
         let value = -self.value;
-        let literal = self.written().map(|text| {
+        let literal = self.literal.as_ref().map(|text| {
+            let text = spelled(text, self.value);
             let negated: Box<str> = if text
                 .bytes()
                 .take_while(|byte| *byte != b'E')
@@ -95,6 +84,16 @@ impl Number {
             }
         });
         Self { value, literal }
+    }
+}
+
+/// A number's literal spelled out: the double's own spelling for one
+/// that prints the same.
+fn spelled(literal: &Arc<Text>, value: f64) -> Arc<Text> {
+    if literal.is_empty() {
+        Arc::new(Text::new(printed(value).into_boxed_str()))
+    } else {
+        Arc::clone(literal)
     }
 }
 
@@ -222,7 +221,6 @@ fn is_canonical(text: &str) -> bool {
 /// jvp_dtoa_fmt: the shortest digits that read back as `x`, laid out the
 /// way jq prints a computed number.
 pub(crate) fn format_double(x: f64, out: &mut String) {
-    use std::fmt::Write;
     if x.is_nan() {
         out.push_str("null");
         return;
@@ -1579,15 +1577,14 @@ impl Comparing {
                         if order != Ordering::Equal || a.value.is_nan() {
                             return Ok(Some(order));
                         }
-                        let printed = |n: &Number| n.literal.as_ref().is_some_and(|t| t.is_empty());
-                        if printed(&a) && printed(&b) {
-                            return Ok(None);
-                        }
-                        if let (Some(a), Some(b)) = (a.written(), b.written()) {
+                        if let (Some(x), Some(y)) = (&a.literal, &b.literal) {
+                            if x.is_empty() && y.is_empty() {
+                                return Ok(None);
+                            }
                             self.stack
                                 .push(ComparePiece::Number(Box::new(DecimalComparing {
-                                    a: DecimalScan::begin(a),
-                                    b: DecimalScan::begin(b),
+                                    a: DecimalScan::begin(spelled(x, a.value)),
+                                    b: DecimalScan::begin(spelled(y, b.value)),
                                     x: 0,
                                     y: 0,
                                     at: 0,
