@@ -234,6 +234,40 @@ async def test_match_without_a_native_token_refuses_without_mount_context():
         )
 
 
+async def _unseen(_path: PathSpec) -> str | None:
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "live", [None, LiveVersion(content="s2", native="n2")]
+)
+async def test_native_refusal_keeps_the_version_it_sent(live):
+    # The session may not have seen the version the write sent, so the
+    # refusal keeps it whether the file changed or went.
+    path = PathSpec(virtual="/box/f", directory="/box/", vfs_path="/f")
+    kept: list[tuple[PathSpec, str]] = []
+
+    async def keep(spec: PathSpec, version: str) -> None:
+        kept.append((spec, version))
+
+    context = WriteContext(
+        vfs="box",
+        conditions=frozenset({"put"}),
+        read_version=_unseen,
+        read_versions=_held_all,
+        drop=_noop,
+        keep=keep,
+    )
+    prev = bind_caller(replace(current_caller(), write_context=context))
+    try:
+        with pytest.raises(StaleWriteError):
+            await native_condition(path, MatchWrite("s1"), live, "put")
+    finally:
+        reset_caller(prev)
+    assert kept == [(path, "s1")]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["put", "copy", "delete"])
 async def test_native_condition_names_the_op_it_cannot_condition(kind):

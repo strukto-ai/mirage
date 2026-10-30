@@ -137,6 +137,19 @@ describe('nativeCondition', () => {
     }
   }
 
+  it.each([null, { content: 's2', native: 'n2' }])(
+    'keeps the version a refusal sent: %j',
+    async (live) => {
+      const kept: Measured[] = []
+      const unseen = { ...context(kept), readVersion: () => Promise.resolve(null) }
+      const call = runWithWriteContext('/box/', unseen, () =>
+        nativeCondition(path, { kind: 'match', version: 's1' }, live, 'put'),
+      )
+      await expect(call).rejects.toMatchObject({ code: 'STALE_WRITE' })
+      expect(kept).toEqual(['s1'])
+    },
+  )
+
   it.each(['put', 'copy', 'delete'] as const)(
     'names the op it cannot condition: %s',
     async (kind) => {

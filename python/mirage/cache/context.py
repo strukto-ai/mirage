@@ -323,9 +323,7 @@ async def native_condition(
     held = condition_version(cond)
     if not held:
         return None
-    if live is None:
-        raise await stale(path)
-    if live.content != held:
+    if live is None or live.content != held:
         raise await stale(path, version=held)
     if not live.native:
         context = current_caller().write_context

@@ -356,8 +356,7 @@ export async function nativeCondition(
     throw enotsup(activeWriteContext(path)?.vfs ?? 'native', `conditional ${kind} (absent)`, path)
   const held = conditionVersion(cond)
   if (held === null || held === '') return null
-  if (live === null) throw await stale(path)
-  if (live.content !== held) throw await stale(path, { version: held })
+  if (live?.content !== held) throw await stale(path, { version: held })
   if (live.native === null || live.native === '') {
     throw enotsup(activeWriteContext(path)?.vfs ?? 'native', `conditional ${kind}`, path)
   }
