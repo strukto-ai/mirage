@@ -31,19 +31,6 @@ export const ERANGE_REASON = 'Numerical result out of range'
 export const EOVERFLOW_REASON = 'Value too large for defined data type'
 
 /**
- * `text` as an unsigned decimal operand, as GNU's counts read: a minus, any
- * other byte, or a blank after the digits makes it no number. The value is
- * exact, so a caller's range check also catches one that overflows
- * `uintmax_t`.
- * Mirrors Python's `unsigned_decimal`.
- */
-export function unsignedDecimal(text: string): bigint | null {
-  const match = DECIMAL.exec(text)
-  if (match?.[0].length !== text.length || match[1] === '-') return null
-  return decimalValue(match[2] ?? '0')
-}
-
-/**
  * `text` as a signed decimal operand, as GNU's counts read. Mirrors Python's
  * `signed_decimal`.
  */

@@ -1,16 +1,18 @@
+mod options;
+
 use serde::Deserialize;
 
 use crate::{Stream, StreamError, parse_config};
 
-const MISSING_TRANSLATION: &str = "tr: missing translation operand";
+const EMPTY_SET2: &str = "tr: when not truncating set1, string2 must be non-empty";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
-    #[serde(deserialize_with = "crate::latin1")]
-    set1: Vec<u8>,
-    #[serde(deserialize_with = "crate::latin1_opt")]
-    set2: Option<Vec<u8>>,
+    /// STRING1 and STRING2 as typed, and any extra operand, each one
+    /// character per byte.
+    #[serde(deserialize_with = "crate::latin1_list")]
+    operands: Vec<Vec<u8>>,
     delete: bool,
     squeeze: bool,
     complement: bool,
@@ -49,16 +51,18 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 
 fn prepare(config: &[u8]) -> Result<Tr, StreamError> {
     let config = parse_config::<Config>(config)?;
-    let mut set1 = expand(&config.set1)?;
+    let (set1, set2) = options::sets(&config.operands, config.delete, config.squeeze)?;
+    let mut set1 = expand(set1)?;
     if config.complement {
         let members = membership(&set1);
         set1 = (u8::MIN..=u8::MAX)
             .filter(|&byte| !members[usize::from(byte)])
             .collect();
     }
-    let set2 = expand(config.set2.as_deref().unwrap_or_default())?;
-    if !config.delete && !config.squeeze && set2.is_empty() {
-        return Err(StreamError::new(MISSING_TRANSLATION));
+    let given = set2.is_some();
+    let set2 = expand(set2.unwrap_or_default())?;
+    if given && !config.delete && !config.truncate_set1 && set2.is_empty() {
+        return Err(StreamError::new(EMPTY_SET2));
     }
     if !set2.is_empty() && config.truncate_set1 {
         set1.truncate(set2.len());
@@ -79,7 +83,7 @@ fn prepare(config: &[u8]) -> Result<Tr, StreamError> {
             [false; 256]
         },
         squeeze: if config.squeeze {
-            membership(if set2.is_empty() { &set1 } else { &set2 })
+            membership(if given { &set2 } else { &set1 })
         } else {
             [false; 256]
         },
@@ -258,9 +262,9 @@ mod tests {
 
     fn config(set1: &[u8], set2: Option<&[u8]>, flags: &[&str]) -> String {
         let text = |bytes: &[u8]| bytes.iter().copied().map(char::from).collect::<String>();
+        let operands: Vec<String> = std::iter::once(set1).chain(set2).map(text).collect();
         json!({
-            "set1": text(set1),
-            "set2": set2.map(text),
+            "operands": operands,
             "delete": flags.contains(&"delete"),
             "squeeze": flags.contains(&"squeeze"),
             "complement": flags.contains(&"complement"),
@@ -323,7 +327,6 @@ mod tests {
             b"ab",
         );
         splits(&config(b"a", None, &["squeeze"]), b"aaabbbaa", b"abbba");
-        splits(&config(b"a", Some(b""), &["squeeze"]), b"aaa", b"a");
         splits(&config(b"a", None, &["squeeze"]), b"", b"");
         splits(
             &config(b"ab", Some(b"a"), &["delete", "squeeze", "truncate"]),
@@ -434,17 +437,36 @@ mod tests {
                 .expect("invalid class refuses");
             assert_eq!(error.message, expected);
         }
-        for set2 in [None, Some(&b""[..]), Some(&b"z-a"[..])] {
-            let error = open("tr", config(b"a", set2, &[]).as_bytes())
+        for (set2, flags) in [
+            (&b""[..], &[][..]),
+            (b"z-a", &[]),
+            (b"", &["squeeze"]),
+            (b"", &["complement"]),
+        ] {
+            let error = open("tr", config(b"a", Some(set2), flags).as_bytes())
                 .err()
-                .expect("missing translation refuses");
-            assert_eq!(error.message, super::MISSING_TRANSLATION);
+                .expect("an empty string2 refuses");
+            assert_eq!(
+                (error.message.as_str(), error.status),
+                (super::EMPTY_SET2, 1)
+            );
         }
+        splits(&config(b"a", Some(b""), &["truncate"]), b"aab", b"aab");
+        splits(
+            &config(b"a", Some(b""), &["truncate", "squeeze"]),
+            b"aab",
+            b"aab",
+        );
+        splits(
+            &config(b"_", Some(b""), &["delete", "squeeze"]),
+            b"a_a",
+            b"aa",
+        );
         let mut invalid: Value = serde_json::from_str(&config(b"a", Some(b"b"), &[])).unwrap();
         invalid["unknown"] = json!(true);
         assert!(open("tr", invalid.to_string().as_bytes()).is_err());
         invalid.as_object_mut().unwrap().remove("unknown");
-        invalid["set1"] = json!("\u{100}");
+        invalid["operands"] = json!(["\u{100}"]);
         assert!(open("tr", invalid.to_string().as_bytes()).is_err());
     }
 }

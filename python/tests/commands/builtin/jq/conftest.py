@@ -17,7 +17,7 @@ import json
 import time
 from pathlib import Path
 
-from mirage.core.jq import JqError, read_texts
+from mirage.core.jq import JqError
 from mirage.core.jq.eval import read_frames
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import open_stream
@@ -112,10 +112,15 @@ def documents(backend, path):
         backend: the mount holding the file.
         path (str): the file.
     """
-    store = backend.accessor.store
-    texts, failure = asyncio.run(read_texts(store.files[_norm(path)]))
-    assert failure is None, failure
-    return [json.loads(text) for text in texts]
+    text = backend.accessor.store.files[_norm(path)].decode()
+    decoder = json.JSONDecoder()
+    docs: list[JsonValue] = []
+    at = 0
+    while text[at:].strip():
+        at += len(text[at:]) - len(text[at:].lstrip())
+        doc, at = decoder.raw_decode(text, at)
+        docs.append(doc)
+    return docs
 
 
 def jq_all(backend, path, expression):

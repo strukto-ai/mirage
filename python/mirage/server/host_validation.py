@@ -24,6 +24,7 @@ from mirage.server.env import ENV_ALLOWED_HOSTS
 from mirage.server.host_validation_constants import (
     DEFAULT_ALLOWED_HOSTS,
     HOST_PATTERN,
+    SAME_ORIGIN_FETCH_SITES,
 )
 from mirage.server.paths import mirage_home
 
@@ -108,8 +109,34 @@ def is_host_allowed(raw_host: str | None, allowed: list[str]) -> bool:
     return strip_port(raw_host) in allowed
 
 
+def is_cross_origin(
+    raw_host: str, origin: str | None, fetch_site: str | None
+) -> bool:
+    """Decide whether a browser sent this request from another origin.
+
+    A browser names the page that made a request in ``Origin`` and
+    ``Sec-Fetch-Site``; other clients send neither, so a request
+    without them is never cross-origin.
+
+    Args:
+        raw_host (str): raw Host header value.
+        origin (str | None): raw Origin header value.
+        fetch_site (str | None): raw Sec-Fetch-Site header value.
+
+    Returns:
+        bool: True when either header names another origin.
+    """
+    if fetch_site is not None and fetch_site not in SAME_ORIGIN_FETCH_SITES:
+        return True
+    if origin is None:
+        return False
+    _, sep, authority = origin.partition("://")
+    return not sep or authority.lower() != raw_host.lower()
+
+
 class HostHeaderMiddleware:
-    """ASGI middleware that 400s requests with disallowed Host headers.
+    """ASGI middleware that 400s requests with disallowed Host headers
+    and browser requests from another origin.
 
     Replaces Starlette's TrustedHostMiddleware so we can log on
     rejection. Port is stripped before comparison (parity with
@@ -118,32 +145,52 @@ class HostHeaderMiddleware:
     Args:
         app (ASGIApp): downstream ASGI app.
         allowed_hosts (list[str]): exact hosts to accept. ``"*"`` in
-            the list disables enforcement.
+            the list disables the Host check, not the origin check.
     """
 
     def __init__(self, app: ASGIApp, allowed_hosts: list[str]) -> None:
         self.app = app
         self.allowed_hosts = allowed_hosts
-        self.allow_any = "*" in allowed_hosts
 
     async def __call__(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        if scope["type"] not in ("http", "websocket") or self.allow_any:
+        if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
-        headers = dict(scope.get("headers") or [])
-        raw_host = headers.get(b"host", b"").decode("latin-1")
-        if is_host_allowed(raw_host, self.allowed_hosts):
-            await self.app(scope, receive, send)
-            return
+        headers = {
+            k: v.decode("latin-1") for k, v in scope.get("headers") or []
+        }
+        raw_host = headers.get(b"host", "")
         client = scope.get("client") or ("?", 0)
-        logger.warning(
-            "rejecting request from %s:%s: Host=%r not in allowlist %s",
-            client[0],
-            client[1],
-            raw_host,
-            self.allowed_hosts,
-        )
-        response = PlainTextResponse("Invalid host header", status_code=400)
-        await response(scope, receive, send)
+        if not is_host_allowed(raw_host, self.allowed_hosts):
+            logger.warning(
+                "rejecting request from %s:%s: Host=%r not in allowlist %s",
+                client[0],
+                client[1],
+                raw_host,
+                self.allowed_hosts,
+            )
+            response = PlainTextResponse(
+                "Invalid host header", status_code=400
+            )
+            await response(scope, receive, send)
+            return
+        origin = headers.get(b"origin")
+        fetch_site = headers.get(b"sec-fetch-site")
+        if is_cross_origin(raw_host, origin, fetch_site):
+            logger.warning(
+                "rejecting request from %s:%s: Origin=%r Sec-Fetch-Site=%r "
+                "is not Host=%r",
+                client[0],
+                client[1],
+                origin,
+                fetch_site,
+                raw_host,
+            )
+            response = PlainTextResponse(
+                "Cross-origin request refused", status_code=400
+            )
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)

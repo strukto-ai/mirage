@@ -19,6 +19,7 @@ import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/ty
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { watch } from './io/gateway.ts'
 import { watchNetwork } from './io/network.ts'
+import './io/spool.ts'
 
 // TODO(MIRAGE-36): an OPFS spool store, so spools spill here too.
 export class Workspace extends CoreWorkspace {

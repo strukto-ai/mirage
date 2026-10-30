@@ -34,7 +34,7 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `authConfig` | from `MIRAGE_AUTH_MODE` | Token or JWT [configuration](/home/access/http#configure-authentication). |
-| `allowedHosts` | `MIRAGE_ALLOWED_HOSTS`, else loopback | `Host` headers accepted by the server. `['*']` turns the check off, safe only behind a trusted proxy. |
+| `allowedHosts` | `MIRAGE_ALLOWED_HOSTS`, else loopback | `Host` headers accepted by the server. `['*']` turns the check off, safe only behind a trusted proxy. Browser requests from another origin are refused either way. |
 | `maxWorkspaces` | `MIRAGE_MAX_WORKSPACES`, else the `max_workspaces` key, else no cap | The most workspaces the app holds at once. A create, clone or load past it answers 503, and the ones it holds keep running. |
 | `policies` | none | The server's own [policies](/home/access/http#server-policies): each answers `preWorkspace` before a workspace is built, and is registered on every workspace the app builds. |
 | `policyFile` | `MIRAGE_POLICY_FILE`, else the `policy_file` key, else none | A file of policy programs that answer the same way. |

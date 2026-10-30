@@ -1,5 +1,5 @@
 {
- "baseline": 2666,
+ "baseline": 2651,
  "modules": {
   "workspace/executor/builtins/help/help": {
    "typescript_only": {
@@ -337,7 +337,13 @@
   },
   "core/disk/constants": {
    "python_only": {
-    "STREAM_FLUSH_SECONDS": "Python's aiofiles writer buffers, so a streamed write flushes on this interval for a reader to see it; Node's file handle writes reach the file at once."
+    "STREAM_FLUSH_SECONDS": "Python's aiofiles writer buffers, so a streamed write flushes on this interval for a reader to see it; Node's file handle writes reach the file at once.",
+    "STREAM_BATCH_BYTES": "Python hands each aiofiles write to a worker thread, so a streamed write gathers its chunks into batches; Node's file handle writes each chunk straight to the file."
+   }
+  },
+  "core/disk/utils": {
+   "python_only": {
+    "_libc": "Python reaches the native realpath on macOS through ctypes, loading libc once; Node's fs.realpath calls the native realpath itself."
    }
   },
   "core/disk/readdir": {
@@ -1138,6 +1144,11 @@
    },
    "typescript_only": {
     "measured": "A page's fetch takes its body as a string, a buffer, a Blob, a form or a stream, which the browser gateway sizes before sending to hold an upload to its Limit; Python's relay counts the bytes as they cross the socket."
+   }
+  },
+  "commands/builtin/generic/ls": {
+   "typescript_only": {
+    "versionSortConfig": "The version-sort configuration is read once: Python's _version_sort carries functools.cache, and TypeScript keeps the value in this binding."
    }
   }
  }

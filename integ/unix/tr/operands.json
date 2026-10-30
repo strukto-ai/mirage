@@ -261,6 +261,114 @@
         "stderr": "tr: extra operand 'c'\nTry 'tr --help' for more information.\n"
       },
       "flags": []
+    },
+    {
+      "id": "tr_ds_with_one_operand_needs_two",
+      "seq": 19990142,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x | tr -ds a",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tr: missing operand after 'a'\nTwo strings must be given when both deleting and squeezing repeats.\nTry 'tr --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "tr_extra_operand_is_quoted",
+      "seq": 19990143,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo x | tr a b \"c'd\"",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tr: extra operand 'c\\'d'\nTry 'tr --help' for more information.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "tr_empty_string2_is_refused_unless_truncating",
+      "seq": 19990144,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo aab | tr a ''; echo rc=$?; echo aab | tr -s a ''; echo rc=$?; echo aabb | tr -t a ''; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\naabb\nrc=0\n",
+        "stderr": "tr: when not truncating set1, string2 must be non-empty\ntr: when not truncating set1, string2 must be non-empty\n"
+      },
+      "flags": []
     }
   ]
 }

@@ -72,12 +72,10 @@ import {
   lostPaths,
   record,
   recordIndex,
-  runWithMountContext,
   runWithRecording,
   startOp,
   finishRecord,
 } from '../../observe/context.ts'
-import { wrapStream } from '../mount/mount.ts'
 import type { LostPaths, OpRecord } from '../../observe/record.ts'
 import { RETRACT_FINGERPRINT_OPS, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
@@ -2406,25 +2404,16 @@ export class Dispatcher {
         return [await recorded(() => this.openStream(call, mount, scope, filler)), dst, fullArgs]
       }
       const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
-        mount.use(async () =>
-          // On the mount, as Python's `_on_mount` binds an op: a connection
-          // the backend opens names the mount it serves.
-          runWithCaller({ ...currentCaller(), vfsMount: mount.prefix }, async () => {
-            const answer = await runWithMountContext(
-              () =>
-                mount.runWithWriteRevisions(async () => {
-                  const pending = Promise.resolve(
-                    name === 'setattr'
-                      ? this.applySetattr(mount, scope, p, opKwargs)
-                      : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
-                  )
-                  onCall?.(pending)
-                  return pending
-                }),
-              mount.mountId,
+        mount.use(() =>
+          mount.framed(() => {
+            const pending = Promise.resolve(
+              name === 'setattr'
+                ? this.applySetattr(mount, scope, p, opKwargs)
+                : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
             )
-            return wrapStream(answer, mount.mountId, mount.activity, call.egress)
-          }),
+            onCall?.(pending)
+            return pending
+          }, call.egress),
         )
       if (filler !== null) {
         const kept = await recorded(() =>
@@ -3249,31 +3238,26 @@ export class Dispatcher {
       // denial.
       await boundary.admit(mark, spec, true, {}, issuer)
     }
-    // The fence reruns backend ops outside `dispatch`, so the revision
-    // pins have to ride here as on the main path above, or a cascade
-    // read answers from the wrong version of a revision-pinned mount.
-    // Python's twin gets both bindings from `Mount.call`.
+    // The fence reruns backend ops outside `dispatch`, so the mount's frame
+    // has to ride here as on the main path above, or a cascade read answers
+    // from the wrong version of a revision-pinned mount. Python's twin gets
+    // it from `Mount.call`.
     await mount.ensureReady()
     try {
-      const result = await mount.use(async () => {
-        const answer = await runWithMountContext(
-          () =>
-            mount.runWithWriteRevisions(() =>
-              mount.callKeyed(
-                name,
-                spec,
-                [],
-                {
-                  ...this.indexKwargs(mount),
-                  ...kwargs,
-                },
-                this.access,
-              ),
-            ),
-          mount.mountId,
-        )
-        return wrapStream(answer, mount.mountId, mount.activity)
-      })
+      const result = await mount.use(() =>
+        mount.framed(() =>
+          mount.callKeyed(
+            name,
+            spec,
+            [],
+            {
+              ...this.indexKwargs(mount),
+              ...kwargs,
+            },
+            this.access,
+          ),
+        ),
+      )
       // A deletion is not completed through postVfs, which could only
       // refuse after the entry is gone and strand the cascade.
       return result

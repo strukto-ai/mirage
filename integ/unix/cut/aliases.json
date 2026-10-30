@@ -312,6 +312,45 @@
       ]
     },
     {
+      "id": "cut_whitespace_delimited_bare_reads_apart_from_an_empty_word",
+      "seq": 9940209,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf ' a  b\\n' | cut -f1 --whitespace-delimited; printf ' a  b\\n' | cut -f1 --whitespace-delimited=",
+      "expect": {
+        "exit": 0,
+        "stdout": "\na\n",
+        "stderr": ""
+      },
+      "flags": [
+        "whitespace-delimited",
+        "f"
+      ]
+    },
+    {
       "id": "cut_zero_terminated",
       "seq": 610142,
       "targets": [

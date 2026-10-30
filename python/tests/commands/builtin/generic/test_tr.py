@@ -2,46 +2,58 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.generic.tr import tr_generic
+from mirage.commands.builtin.generic.tr import tr_engine, tr_generic
 from mirage.io.stream import materialize
-from mirage.types import PathSpec
+from mirage.io.types import IOResult
 
 
 def _unused_read_stream(_path):
     raise AssertionError("read_stream should not be called for stdin input")
 
 
-async def _run(texts, flags, data):
-    source, io = await tr_generic(
-        [],
-        tuple(texts),
-        read_stream=_unused_read_stream,
-        stdin=data,
-        flags=flags,
+def _output(texts, flags, data):
+    engine = tr_engine(texts, flags)
+    assert not isinstance(engine, IOResult)
+    source, _ = tr_generic(
+        engine, [], read_stream=_unused_read_stream, stdin=data
     )
-    return io.exit_code, await materialize(source)
+    return source
+
+
+async def _run(texts, flags, data):
+    return await materialize(_output(texts, flags, data))
+
+
+async def _refusal(texts, flags):
+    refused = tr_engine(texts, flags)
+    assert isinstance(refused, IOResult)
+    return refused.exit_code, (await materialize(refused.stderr)).decode()
 
 
 @pytest.mark.asyncio
 async def test_default_pads_set2_to_set1_length():
-    _, out = await _run(["abcde", "xy"], {}, b"abcde")
+    out = await _run(["abcde", "xy"], {}, b"abcde")
     assert out == b"xyyyy"
 
 
 @pytest.mark.asyncio
 async def test_complement_long_form():
-    _, comp = await _run(["0-9", "_"], {"complement": True}, b"abc123")
+    comp = await _run(["0-9", "_"], {"complement": True}, b"abc123")
     assert comp == b"___123"
 
 
 @pytest.mark.asyncio
 async def test_delete_without_squeeze_names_the_second_operand_as_extra():
-    with pytest.raises(
-        ValueError, match="extra operand 'b'\nOnly one string may be given"
-    ):
-        await _run(["a", "b"], {"delete": True}, b"x")
-    with pytest.raises(Exception, match=r"extra operand 'c'\nTry"):
-        await _run(["a", "b", "c"], {}, b"x")
+    assert await _refusal(["a", "b"], {"delete": True}) == (
+        1,
+        "tr: extra operand 'b'\n"
+        "Only one string may be given when deleting without squeezing "
+        "repeats.\nTry 'tr --help' for more information.\n",
+    )
+    assert await _refusal(["a", "b", "c"], {}) == (
+        1,
+        "tr: extra operand 'c'\nTry 'tr --help' for more information.\n",
+    )
 
 
 @pytest.mark.asyncio
@@ -54,7 +66,7 @@ async def test_byte_translation_and_squeeze_are_independent_of_chunk_boundaries(
             yield b""
             yield data[split:]
 
-        _, out = await _run(
+        out = await _run(
             [r"\377\200", "ab"], {"squeeze_repeats": True}, source()
         )
         assert out == b"ab\xc3\xa9"
@@ -66,7 +78,7 @@ async def test_deleted_only_chunks_keep_the_previous_emitted_byte():
         for chunk in (b"aa", b"___", b"", b"aaa", b"___", b"bbb"):
             yield chunk
 
-    _, out = await _run(
+    out = await _run(
         ["_", "ab"],
         {"delete": True, "squeeze_repeats": True},
         source(),
@@ -81,36 +93,32 @@ async def test_deleted_only_chunks_keep_the_previous_emitted_byte():
         (
             ["[:bogus:]"],
             {"delete": True},
-            "tr: invalid character class 'bogus'",
+            "tr: invalid character class 'bogus'\n",
         ),
         (
-            ["a", "z-a"],
+            ["a"],
             {},
             "tr: missing operand after 'a'\n"
             "Two strings must be given when translating.\n"
-            "Try 'tr --help' for more information.",
+            "Try 'tr --help' for more information.\n",
+        ),
+        (
+            ["a", ""],
+            {},
+            "tr: when not truncating set1, string2 must be non-empty\n",
         ),
     ],
 )
 async def test_operand_compilation_refuses_before_source_is_opened(
     texts, flags, message
 ):
-    with pytest.raises(ValueError) as refused:
-        await tr_generic(
-            [PathSpec.from_str_path("/input")],
-            texts,
-            read_stream=_unused_read_stream,
-            flags=flags,
-        )
-    assert str(refused.value) == message
+    assert await _refusal(texts, flags) == (1, message)
 
 
 @pytest.mark.asyncio
 async def test_large_input_yields_bounded_output_chunks():
     data = b"x" * (64 * 1024 + 1)
-    output, _ = await tr_generic(
-        [], ["a", "b"], read_stream=_unused_read_stream, stdin=data
-    )
+    output = _output(["a", "b"], {}, data)
     parts = [part async for part in output]
     assert b"".join(parts) == data
     assert max(map(len, parts)) <= 16 * 1024
@@ -128,9 +136,7 @@ async def test_early_consumer_closes_input_without_reading_ahead():
         finally:
             closed += 1
 
-    output, _ = await tr_generic(
-        [], ["a", "b"], read_stream=_unused_read_stream, stdin=source()
-    )
+    output = _output(["a", "b"], {}, source())
     assert await anext(output) == b"bbb"
     await output.aclose()
     assert closed == 1
@@ -148,9 +154,7 @@ async def test_ready_empty_source_can_be_cancelled_and_is_closed():
         finally:
             closed = True
 
-    output, _ = await tr_generic(
-        [], ["a", "b"], read_stream=_unused_read_stream, stdin=source()
-    )
+    output = _output(["a", "b"], {}, source())
     task = asyncio.create_task(materialize(output))
     timer = asyncio.get_running_loop().call_later(0.005, task.cancel)
     try:

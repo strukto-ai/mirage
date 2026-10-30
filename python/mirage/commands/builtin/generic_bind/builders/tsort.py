@@ -23,12 +23,12 @@ from mirage.commands.builtin.generic_bind.files import (
 )
 from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import Context
-from mirage.commands.spec.types import CommandName
-from mirage.commands.spec.usage import extra_operand_error
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused
 from mirage.rs.stream import OpenStream, chain_output, open_stream
 from mirage.shell.bytes import byte_view
-from mirage.types import PathSpec
+from mirage.types import JsonValue, PathSpec
 
 
 async def _ordered(
@@ -54,13 +54,12 @@ async def tsort(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
-    if len(resolved) > 1:
-        raise extra_operand_error(
-            CommandName.TSORT, resolved[1].raw_path or resolved[1].virtual
-        )
+    operands: list[JsonValue] = [byte_view(path.raw_path) for path in resolved]
+    try:
+        engine = open_stream("tsort", {"operands": operands})
+    except StreamRefusal as refusal:
+        return None, refused(refusal)
     first = resolved[0] if resolved else None
-    name = "-" if first is None else first.raw_path or first.virtual
-    engine = open_stream("tsort", {"name": byte_view(name)})
     source = (
         ctx.stdin or b""
         if first is None

@@ -19,7 +19,6 @@ from mirage.commands.builtin.utils.strtol import (
     bounded_decimal,
     signed_decimal,
     strtol,
-    unsigned_decimal,
 )
 
 
@@ -43,26 +42,24 @@ def test_strtol_reads_base_zero_and_leaves_the_rest(raw, value):
 
 
 @pytest.mark.parametrize(
-    "raw,unsigned,signed",
+    "raw,signed",
     [
-        ("5", 5, 5),
-        (" \t+5", 5, 5),
-        ("-5", None, -5),
-        ("5 ", None, None),
-        ("0x5", None, None),
-        ("", None, None),
-        ("+ 5", None, None),
-        ("99999999999999999999", 99999999999999999999, 99999999999999999999),
+        ("5", 5),
+        (" \t+5", 5),
+        ("-5", -5),
+        ("5 ", None),
+        ("0x5", None),
+        ("", None),
+        ("+ 5", None),
+        ("99999999999999999999", 99999999999999999999),
     ],
 )
-def test_decimal_scanners_read_a_whole_decimal_word(raw, unsigned, signed):
-    assert unsigned_decimal(raw) == unsigned
+def test_signed_decimal_reads_a_whole_decimal_word(raw, signed):
     assert signed_decimal(raw) == signed
 
 
 def test_scanners_read_a_number_past_the_int_digit_limit():
     digits = "9" * 5000
-    assert unsigned_decimal(digits) == 10**5000 - 1
     assert signed_decimal("-" + digits) == -(10**5000 - 1)
     assert strtol(digits) == (2**63 - 1, "")
 

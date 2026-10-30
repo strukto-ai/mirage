@@ -319,7 +319,9 @@ it.each(['canonical', 'preserved', 'wrong_leaf', 'different_path', 'symlink', 'i
       })
       listing.mockClear()
       expect(await resolveInside(root, spec('/file.txt'))).toBe(join(root, 'file.txt'))
-      expect(listing).toHaveBeenCalledTimes(proof === 'canonical' ? 0 : 1)
+      expect(listing).toHaveBeenCalledTimes(
+        ['canonical', 'symlink', 'inode'].includes(proof) ? 0 : 1,
+      )
     } finally {
       vi.unstubAllGlobals()
       lookup.mockReset().mockImplementation(actual.lstat)
@@ -329,3 +331,80 @@ it.each(['canonical', 'preserved', 'wrong_leaf', 'different_path', 'symlink', 'i
     }
   },
 )
+
+it.each(['linux', 'darwin'])(
+  'proves an ASCII name by a case probe without listing on %s',
+  async (platform) => {
+    const { root, cleanup } = tmpRoot('mirage-disk-case-probe-')
+    const actual = await vi.importActual<typeof fs>('node:fs/promises')
+    const lookup = vi.mocked(fs.lstat)
+    const listing = vi.mocked(fs.readdir)
+    try {
+      await mkdir(join(root, 'lib'))
+      await writeFile(join(root, 'lib', 'a.txt'), 'a')
+      for (let i = 0; i < 30; i++) await writeFile(join(root, 'lib', String(i)), 'x')
+      vi.stubGlobal(
+        'process',
+        new Proxy(process, {
+          get(target, property, receiver) {
+            return property === 'platform'
+              ? platform
+              : (Reflect.get(target, property, receiver) as unknown)
+          },
+        }),
+      )
+      lookup.mockImplementation(async (file) =>
+        ['LIB', 'Lib', 'A.txt'].includes(String(file).split(sep).pop() ?? '')
+          ? Promise.reject(Object.assign(new Error('absent'), { code: 'ENOENT' }))
+          : actual.lstat(file),
+      )
+      listing.mockClear()
+      for (const key of ['/lib/a.txt', '/lib/7', '/lib/29'])
+        expect(await resolveInside(root, spec(key))).toBe(join(root, key.slice(1)))
+      expect(listing).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+      lookup.mockReset().mockImplementation(actual.lstat)
+      cleanup()
+    }
+  },
+)
+
+it('lists the parent of a name past ASCII', async () => {
+  const { root, cleanup } = tmpRoot('mirage-disk-past-ascii-')
+  const listing = vi.mocked(fs.readdir)
+  try {
+    await writeFile(join(root, 'caf\u00e9'), 'x')
+    vi.stubGlobal(
+      'process',
+      new Proxy(process, {
+        get(target, property, receiver) {
+          return property === 'platform'
+            ? 'linux'
+            : (Reflect.get(target, property, receiver) as unknown)
+        },
+      }),
+    )
+    listing.mockClear()
+    expect(await resolveInside(root, spec('/caf\u00e9'))).toBe(join(root, 'caf\u00e9'))
+    expect(listing).toHaveBeenCalledOnce()
+  } finally {
+    vi.unstubAllGlobals()
+    cleanup()
+  }
+})
+
+it('still opens the parent of a name a probe proves', async () => {
+  const { root, cleanup } = tmpRoot('mirage-disk-probe-permission-')
+  const actual = await vi.importActual<typeof fs>('node:fs/promises')
+  const openDir = vi.mocked(fs.opendir)
+  try {
+    await writeFile(join(root, '7'), 'x')
+    openDir.mockClear().mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }))
+    await expect(resolveInside(root, spec('/7'))).rejects.toMatchObject({ code: 'EACCES' })
+    expect(openDir).toHaveBeenCalledOnce()
+  } finally {
+    openDir.mockReset().mockImplementation(actual.opendir)
+    cleanup()
+  }
+})

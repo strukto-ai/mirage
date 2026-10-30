@@ -110,9 +110,9 @@ enum Asking {
 /// document, and each reply for the document `input` took.
 #[derive(Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct Position {
-    filename: Option<String>,
-    line: f64,
+pub(super) struct Position {
+    pub(super) filename: Option<String>,
+    pub(super) line: f64,
 }
 
 /// The host's answer to `input`: `value` with the document's JSON text,
@@ -828,7 +828,7 @@ impl Eval {
     /// for it instead, and retires the input.
     pub(super) fn start(
         &mut self,
-        place: &[u8],
+        position: Position,
         input: Value,
         out: &mut Vec<u8>,
     ) -> Result<(), StreamError> {
@@ -839,7 +839,7 @@ impl Eval {
             return Err(StreamError::new("jq_eval: the run has not ended"));
         }
         let _metered = meter::install(&self.meter);
-        self.position = crate::parse_config(place)?;
+        self.position = position;
         if self.compile_limited || self.meter.exceeded() {
             memory_error_frame(self.limits, out);
             let mut vm = Box::new(Vm::retiring(
@@ -859,7 +859,7 @@ impl Eval {
     /// where the reader stands after it.
     pub(super) fn answer(
         &mut self,
-        reply: &[u8],
+        position: Position,
         input: Value,
         out: &mut Vec<u8>,
     ) -> Result<(), StreamError> {
@@ -870,7 +870,6 @@ impl Eval {
             return Err(StreamError::new("jq_eval: the host answered no request"));
         }
         let _metered = meter::install(&self.meter);
-        let reply: InputReply = crate::parse_config(reply)?;
         self.asking = Asking::No;
         if self.meter.exceeded() {
             memory_error_frame(self.limits, out);
@@ -882,13 +881,7 @@ impl Eval {
             return Ok(());
         }
         vm.host.set_reply(Reply::Value(input));
-        place(
-            &mut vm.host,
-            Position {
-                filename: reply.filename,
-                line: reply.line,
-            },
-        );
+        place(&mut vm.host, position);
         Ok(())
     }
 

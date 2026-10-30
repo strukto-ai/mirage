@@ -1,12 +1,12 @@
 use std::cmp::Ordering;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::number::{general_order, human_order, leading_number};
 use super::version::version_cmp;
 
 /// One key's ordering options.
-#[derive(Deserialize, Clone, Copy, Default)]
+#[derive(Deserialize, Serialize, Clone, Copy, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Mods {
     pub numeric: bool,
@@ -18,15 +18,13 @@ pub(crate) struct Mods {
     pub reverse: bool,
     pub dictionary: bool,
     pub ignore_nonprinting: bool,
-    /// `-R`: sent by the hosts, which check it against the other
-    /// orderings; nothing shuffles here.
-    #[serde(rename = "random")]
-    pub _random: bool,
+    /// `-R`: it counts against the other orderings; nothing shuffles.
+    pub random: bool,
 }
 
-/// A `-k` KEYDEF as the host parsed it: fields count from 1, the start
+/// A `-k` KEYDEF as `options` read it: fields count from 1, the start
 /// character from 1, and an end character of `None` or 0 is the field's end.
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Key {
     #[serde(deserialize_with = "crate::saturating_usize")]
@@ -44,7 +42,7 @@ pub(crate) struct Key {
 
 /// The comparison: each key in turn, then the whole record unless
 /// `-s` or `-u` stops at the keys.
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Compare {
     pub keys: Vec<Key>,
