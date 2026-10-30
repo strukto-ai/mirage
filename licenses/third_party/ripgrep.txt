@@ -1,4 +1,5 @@
 grep-matcher 0.1.7 capture-reference grammar, grep-searcher 0.1.14 selection and grep-printer 0.2.2 output algorithms
+ripgrep 14.1.1's default file types, in scripts/rg_types.toml and the rg_types tables generated from it
 
 The MIT License (MIT)
 
