@@ -26,6 +26,7 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.policy import resolve_producer
 from mirage.policy.base import Policy
 from mirage.policy.builtin import output_cap as sg
@@ -451,31 +452,62 @@ async def test_python3_timeout_reclaims_monty_interpreter():
         "tail -n 1 /blank /blank /blank /blank /blank",
     ],
 )
-async def test_large_ram_command_honors_caller_cancel(command):
-    # Large enough that every command outlasts several yield slices: a
-    # line starts eagerly, so one done within its first slice ends before
-    # the cancel's timer can fire, and the cancel must land mid-run.
-
+async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
     ram = RAMVFS()
     ram.accessor.store.files["/big"] = b"line\n" * 2_000_000
     ram.accessor.store.files["/blank"] = b"\n" * 10_000_000
-    ws = Workspace({"/": ram})
     cancel = asyncio.Event()
     loop = asyncio.get_running_loop()
-    start = loop.time()
+    start = time.monotonic()
     fired: list[float] = []
+    consumed = 0
+    available = 0
+    progress: list[tuple[int, int]] = []
+    now = loop.time()
+    timer: asyncio.Handle | None = None
+    original_read = ram.read
+
+    def clock() -> float:
+        nonlocal now
+        if timer is not None:
+            now += 0.02
+        return now
 
     def stop() -> None:
-        fired.append(loop.time() - start)
+        fired.append(time.monotonic() - start)
+        progress.append((consumed, available))
         cancel.set()
 
-    timer = loop.call_later(0.005, stop)
-    try:
-        with pytest.raises(MirageAbortError):
-            await ws.shell(command, cancel=cancel)
-    finally:
-        timer.cancel()
-    assert fired[0] < 1
+    async def read(path, offset=0, size=None):
+        nonlocal timer, consumed, available
+        source = await original_read(path, offset, size)
+        assert isinstance(source, bytes)
+        available += len(source)
+        yield source[:CHUNK_SIZE]
+        consumed += CHUNK_SIZE
+        if timer is None:
+            timer = loop.call_soon(stop)
+        yield source[CHUNK_SIZE:]
+        consumed += len(source) - CHUNK_SIZE
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ram, "read", read)
+        ws = Workspace({"/": ram})
+        try:
+            patch.setattr(loop, "time", clock)
+            # Requesting the next chunk proves the first was consumed.
+            # Keep the remaining RAM input ready, and let elapsed budget
+            # time offer the abort callback a real loop turn.
+            with pytest.raises(MirageAbortError):
+                await ws.shell(command, cancel=cancel)
+            assert timer is not None
+            assert fired[0] < 1
+            assert 0 < progress[0][0] < progress[0][1]
+        finally:
+            if timer is not None:
+                timer.cancel()
+            patch.undo()
+            await ws.close()
 
 
 _UNCAPPED = {"@all": Limit(walk_limit=-1)}

@@ -25,6 +25,7 @@ import { Workspace } from './workspace/workspace.ts'
 import { programs } from './lookup/lookup.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { CHUNK_SIZE } from '../io/cooperative.ts'
 import { PipeRecorder } from './executor/redirect.ts'
 import { Channel } from '../shell/console/index.ts'
 import type * as Brace from './expand/brace.ts'
@@ -396,15 +397,46 @@ describe('large in-memory commands', () => {
     ram.store.files.set('/blank', new TextEncoder().encode('\n'.repeat(2_500_000)))
     const ws = new Workspace({ '/': ram })
     const abort = new AbortController()
-    const timer = setTimeout(() => {
-      abort.abort()
-    }, 5)
+    let now = 0
+    let timer: ReturnType<typeof setImmediate> | undefined
+    let fired = false
+    let consumed = 0
+    let available = 0
+    let progress: [number, number] | undefined
+    const originalRead = ram.read.bind(ram)
+    async function* read(...args: Parameters<RAMVFS['read']>): AsyncGenerator<Uint8Array> {
+      const source = await originalRead(...args)
+      if (!(source instanceof Uint8Array)) throw new Error('RAM input must be bytes')
+      available += source.byteLength
+      yield source.subarray(0, CHUNK_SIZE)
+      consumed += CHUNK_SIZE
+      timer ??= setImmediate(() => {
+        fired = true
+        progress = [consumed, available]
+        abort.abort()
+      })
+      yield source.subarray(CHUNK_SIZE)
+      consumed += source.byteLength - CHUNK_SIZE
+    }
+    const reading = vi.spyOn(ram, 'read').mockImplementation(read)
+    // Requesting the next chunk proves the first was consumed. Keep the
+    // remaining RAM input ready, and let elapsed budget time offer a loop turn.
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => {
+      if (timer !== undefined) now += 20
+      return now
+    })
     try {
       await expect(ws.shell(command, { signal: abort.signal })).rejects.toMatchObject({
         name: 'AbortError',
       })
+      expect(reading).toHaveBeenCalled()
+      expect(fired).toBe(true)
+      expect(progress?.[0]).toBeGreaterThan(0)
+      expect(progress?.[0]).toBeLessThan(progress?.[1] ?? 0)
     } finally {
-      clearTimeout(timer)
+      clearImmediate(timer)
+      clock.mockRestore()
+      reading.mockRestore()
       await ws.close()
     }
   })
