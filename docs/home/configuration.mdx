@@ -137,8 +137,9 @@ narrower `network` of its own.
 
 A refused connection fails as a closed port does: `curl` exits 7 with
 `Could not connect to server`. Write `false` rather than `off`, which only
-some YAML readers take as false. A [server](/home/access/http#server-policies)
-can hold every workspace to a narrower setting. In a browser, `fetch` and
+some YAML readers take as false. A workspace's policies can also judge each
+connection the lists let through, and cap how much it carries, at
+[`pre_network`](/home/policy/policies#pre_network-and-post_network). In a browser, `fetch` and
 `WebSocket` are judged by host name, and a limited workspace follows no
 redirect, since a page cannot see where one goes. A connection another process opens,
 such as one under the `local` runtime or a sandbox, follows that process's

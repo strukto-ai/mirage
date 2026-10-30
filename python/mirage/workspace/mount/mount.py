@@ -2732,6 +2732,7 @@ class MountEntry:
                     caller.recorder, mount_id=self.mount_id
                 ),
                 "write_context": self.write_context(),
+                "vfs_mount": self.prefix,
             }
         )
 

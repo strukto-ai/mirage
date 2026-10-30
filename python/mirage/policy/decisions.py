@@ -163,7 +163,9 @@ def ask_rule(
     if isinstance(ctx, SessionContext):
         return CommandRule(reason=ask.reason, commands=(ctx.key,))
     if isinstance(ctx, NetworkContext):
-        return CommandRule(reason=ask.reason, commands=(ctx.url,))
+        return CommandRule(
+            reason=ask.reason, commands=(ctx.host or ctx.address,)
+        )
     return CommandRule(reason=ask.reason, commands=(ctx.line,))
 
 

@@ -27,6 +27,7 @@ import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { reapHostRun } from './runtime/sandbox/program.ts'
+import { watch } from './io/gateway.ts'
 import { releaseNetwork, watchNetwork } from './io/network.ts'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
@@ -69,6 +70,7 @@ export class Workspace extends CoreWorkspace {
     super(mounts, options)
     this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()
+    watch()
     if (mountTargets.length > 0) {
       // Kick off mounts eagerly; await inside fuseReady() / execute() / close()
       // so callers don't need to await the constructor (Python mirrors this).
@@ -157,6 +159,7 @@ export class Workspace extends CoreWorkspace {
     await super.close()
     if (this.registry.network !== null) await releaseNetwork(this.registry.network)
     for (const rule of this.registry.narrowedNetworks()) await releaseNetwork(rule)
+    await releaseNetwork(this.registry.policies)
   }
 
   // The kernel mounts come down first here too: the core teardown never
@@ -167,5 +170,6 @@ export class Workspace extends CoreWorkspace {
     await super.delete()
     if (this.registry.network !== null) await releaseNetwork(this.registry.network)
     for (const rule of this.registry.narrowedNetworks()) await releaseNetwork(rule)
+    await releaseNetwork(this.registry.policies)
   }
 }

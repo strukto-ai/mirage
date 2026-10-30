@@ -15,7 +15,7 @@
 import { networkBound, networkLets } from '@struktoai/mirage-core/io/network'
 
 // The schemes that reach a host; data:, blob: and the like never leave the page.
-const REACHING = new Set(['http:', 'https:', 'ws:', 'wss:'])
+export const REACHING = new Set(['http:', 'https:', 'ws:', 'wss:'])
 
 let watching = false
 

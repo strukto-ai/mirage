@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithMemory } from '../../io/memory.ts'
-import { runWithNetwork } from '../../io/network.ts'
+import { runWithEgress } from '../../io/gateway.ts'
 import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 
@@ -816,7 +816,7 @@ export class Dispatcher {
       // Under the workspace's max_memory and network, which FUSE and ws.vfs
       // calls reach only here.
       const run = (): ReturnType<DispatchFn> =>
-        runWithNetwork(this.namespace.network, () =>
+        runWithEgress(this.namespace.network, this.policies, () =>
           runWithMemory(this.namespace.memory, () =>
             name === 'read' &&
             kwargs?.warm !== true &&

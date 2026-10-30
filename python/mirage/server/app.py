@@ -25,7 +25,6 @@ from typing import cast
 from fastapi import FastAPI
 
 from mirage.concurrency.limiter import run_blocking
-from mirage.io.network import NetworkSetting
 from mirage.policy.base import Policy
 from mirage.server.auth import (
     AuthConfig,
@@ -51,7 +50,6 @@ from mirage.server.registry import (
     OWNERS_PREFIX,
     WorkspaceRegistry,
     resolve_max_workspaces,
-    resolve_network,
     resolve_policy_file,
 )
 from mirage.server.routers import (
@@ -184,7 +182,6 @@ def build_app(
     max_workspaces: int | None = None,
     policies: Sequence[Policy] = (),
     policy_file: str | Path | None = None,
-    network: NetworkSetting | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -239,11 +236,6 @@ def build_app(
             answer the same way. ``None`` (default) reads
             ``$MIRAGE_POLICY_FILE`` or the ``policy_file`` config key,
             else runs none.
-        network (NetworkSetting | None): what every workspace's
-            connections are held to besides its own ``network``.
-            ``None`` (default) reads the ``network`` config key, else
-            sets no limit. In jwt mode the cloud metadata addresses are
-            refused too.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -275,7 +267,6 @@ def build_app(
         max_workspaces=resolve_max_workspaces(max_workspaces),
         policies=policies,
         programs=resolve_policy_file(policy_file),
-        network=resolve_network(network),
     )
     app.state.jobs = app.state.registry.jobs
     app.state.pid_file = (

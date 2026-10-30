@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createServer, type Server } from 'node:http'
+import { connect as netConnect } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
@@ -22,7 +23,10 @@ import type {
   NetworkResultContext,
 } from '@struktoai/mirage-core/policy/types'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
+import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
+import { IOResult } from '@struktoai/mirage-core/io/types'
+import { type FileStat, Limit, MountMode, type PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
@@ -34,7 +38,7 @@ describe('a workspace network rule', () => {
 
   beforeAll(async () => {
     server = createServer((_req, res) => {
-      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.writeHead(200, { 'content-type': 'text/plain', connection: 'close' })
       res.end('ok\n')
     })
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -113,23 +117,24 @@ describe('a workspace network rule', () => {
     expect(rulePool(rule)).not.toBe(pool)
   })
 
-  // Refuses the hosts it is given, counts what is in flight, keeps what each
+  // Refuses the addresses it is given, counts what is open, keeps what each
   // method saw.
   class Watch implements Policy {
     open = 0
-    most = 0
     readonly asked: NetworkContext[] = []
     readonly ended: NetworkResultContext[] = []
-    constructor(private readonly refused: readonly string[] = []) {}
+    constructor(
+      private readonly refused: readonly string[] = [],
+      private readonly limit: Limit | null = null,
+    ) {}
 
-    preNetwork(ctx: NetworkContext): Deny | null {
+    preNetwork(ctx: NetworkContext): Deny | Limit | null {
       this.asked.push(ctx)
-      if (this.refused.includes(ctx.host)) {
-        return { kind: 'deny', reason: `${ctx.host} is not for this tenant` }
+      if (this.refused.includes(ctx.address)) {
+        return { kind: 'deny', reason: `${ctx.address} is not for this tenant` }
       }
       this.open += 1
-      this.most = Math.max(this.most, this.open)
-      return null
+      return this.limit
     }
 
     postNetwork(ctx: NetworkResultContext): null {
@@ -139,66 +144,12 @@ describe('a workspace network rule', () => {
     }
   }
 
-  async function watched(watch: Watch, line: string): Promise<number> {
-    const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] as const })
-    ws.policies.add(watch)
-    try {
-      return (await ws.shell(line)).exitCode
-    } finally {
-      await ws.close()
-    }
-  }
-
-  it('refuses a request preNetwork denies as a closed port', async () => {
-    const watch = new Watch(['127.0.0.1'])
-    const url = `http://127.0.0.1:${String(port)}/`
-    expect(await watched(watch, `curl -sS ${url}`)).toBe(7)
-    expect(await watched(watch, `wget -q -O - ${url}`)).toBe(4)
-    const [asked] = watch.asked
-    expect([asked?.url, asked?.method, asked?.host, asked?.port]).toEqual([
-      url,
-      'GET',
-      '127.0.0.1',
-      port,
-    ])
-    expect(watch.asked.map((ctx) => ctx.command)).toEqual(['curl', 'wget'])
-    expect(watch.ended).toEqual([])
-  })
-
-  it('shows postNetwork how each request ended', async () => {
-    const watch = new Watch()
-    const url = `http://127.0.0.1:${String(port)}/`
-    const line = `curl -sS ${url} > /data/a; curl -sS -o /data/b ${url}; curl -sS -o /missing/c ${url}`
-    expect(await watched(watch, line)).toBe(23)
-    expect(watch.ended.map((ctx) => [ctx.status, ctx.size, ctx.failed])).toEqual([
-      [200, 3, false],
-      [200, 3, false],
-      [200, 3, true],
-    ])
-    expect([watch.open, watch.most]).toEqual([0, 1])
-  })
-
-  it('shows postNetwork a refused connection fail', async () => {
-    const watch = new Watch()
-    const ws = new Workspace({ '/data': new RAMVFS() }, { network: false })
-    ws.policies.add(watch)
-    try {
-      expect((await ws.shell(`curl -sS http://127.0.0.1:${String(port)}/`)).exitCode).toBe(7)
-    } finally {
-      await ws.close()
-    }
-    expect(watch.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[0, true]])
-  })
-
-  // Refuses every request once it has ended.
-  class Shut implements Policy {
-    postNetwork(): Deny {
-      return { kind: 'deny', reason: 'no more requests' }
-    }
-  }
-
-  async function held(line: string, ...policies: Policy[]): Promise<number> {
-    const ws = new Workspace({ '/data': new RAMVFS() })
+  async function held(
+    line: string,
+    policies: Policy[],
+    network: NetworkSetting = true,
+  ): Promise<number> {
+    const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] as const }, { network })
     for (const policy of policies) ws.policies.add(policy)
     try {
       return (await ws.shell(line)).exitCode
@@ -207,34 +158,157 @@ describe('a workspace network rule', () => {
     }
   }
 
-  it('shows postNetwork to each policy that let a request through', async () => {
+  // Waits for the gateway to hand a connection's end to postNetwork.
+  async function settled(watch: Watch, count: number): Promise<void> {
+    for (let i = 0; i < 100 && watch.ended.length < count; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
+
+  it('refuses a connection preNetwork denies as a closed port', async () => {
+    const watch = new Watch(['127.0.0.1'])
+    const url = `http://127.0.0.1:${String(port)}/a`
+    expect(await held(`curl -sS ${url}`, [watch])).toBe(7)
+    expect(await held(`wget -q -O - ${url}`, [watch])).toBe(4)
+    const [asked] = watch.asked
+    expect([asked?.address, asked?.port, asked?.command, asked?.program]).toEqual([
+      '127.0.0.1',
+      port,
+      'curl',
+      ['curl'],
+    ])
+    expect(asked?.line).toBe(`curl -sS ${url}`)
+    expect(asked?.words?.map((word) => word.text)).toEqual(['curl', '-sS', url])
+    expect(watch.asked.map((ctx) => ctx.command)).toEqual(['curl', 'wget'])
+    expect(watch.ended).toEqual([])
+  })
+
+  it('hands a name to the hooks as its host', async () => {
+    const watch = new Watch()
+    expect(await held(`curl -sS http://localhost:${String(port)}/`, [watch])).toBe(0)
+    expect([watch.asked[0]?.host, watch.asked[0]?.port]).toEqual(['localhost', port])
+  })
+
+  it('shows postNetwork how each connection went', async () => {
+    const watch = new Watch()
+    const url = `http://127.0.0.1:${String(port)}/`
+    expect(await held(`curl -sS ${url} > /data/a; curl -sS -o /data/b ${url}`, [watch])).toBe(0)
+    await settled(watch, 2)
+    expect(watch.ended.map((ctx) => ctx.ended)).toEqual(['closed', 'closed'])
+    expect(watch.ended.every((ctx) => ctx.bytesSent > 0 && ctx.bytesReceived > 0)).toBe(true)
+    expect(watch.open).toBe(0)
+  })
+
+  it('refuses through the lists before any hook', async () => {
+    const watch = new Watch()
+    expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, [watch], false)).toBe(7)
+    expect([watch.asked, watch.ended]).toEqual([[], []])
+  })
+
+  it('shows postNetwork to each policy that let a connection through', async () => {
     const counted = new Watch()
     const refusing = new Watch(['127.0.0.1'])
-    expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, counted, refusing)).toBe(7)
-    expect(counted.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[0, true]])
+    expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, [counted, refusing])).toBe(7)
+    expect(counted.ended.map((ctx) => ctx.ended)).toEqual(['refused'])
     expect([counted.open, refusing.open, refusing.ended]).toEqual([0, 0, []])
   })
 
-  it('lets no postNetwork deny stop another policy', async () => {
-    const counted = new Watch()
-    expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, new Shut(), counted)).toBe(7)
-    expect(counted.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[200, false]])
-    expect(counted.open).toBe(0)
+  it('cuts a connection past its Limit with a reset', async () => {
+    const watch = new Watch([], new Limit({ maxBytes: 40 }))
+    expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, [watch])).not.toBe(0)
+    await settled(watch, 1)
+    expect(watch.ended.map((ctx) => ctx.ended)).toEqual(['limit'])
+    expect((watch.ended[0]?.bytesSent ?? 0) + (watch.ended[0]?.bytesReceived ?? 0)).toBe(40)
   })
 
-  it('ends a request a timeout cuts short', async () => {
+  it('ends a connection a timeout cuts short', async () => {
     const silent = createServer(() => undefined)
     await new Promise<void>((resolve) => silent.listen(0, '127.0.0.1', resolve))
     const counted = new Watch()
     try {
       const at = (silent.address() as AddressInfo).port
-      expect(await held(`timeout 0.3 curl -sS http://127.0.0.1:${String(at)}/`, counted)).toBe(124)
-    } finally {
+      expect(await held(`timeout 0.3 curl -sS http://127.0.0.1:${String(at)}/`, [counted])).toBe(
+        124,
+      )
       silent.closeAllConnections()
+      await settled(counted, 1)
+    } finally {
       await new Promise((resolve) => silent.close(resolve))
     }
-    expect(counted.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[0, true]])
+    expect(counted.ended).toHaveLength(1)
     expect(counted.open).toBe(0)
+  })
+
+  // Asks the server once, as a remote client would before it answers.
+  async function ask(at: number): Promise<void> {
+    const socket = netConnect({ host: '127.0.0.1', port: at })
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', () => {
+        socket.end('GET / HTTP/1.1\r\nHost: remote\r\n\r\n')
+      })
+      socket.on('data', () => undefined)
+      socket.once('close', () => {
+        resolve()
+      })
+      socket.once('error', reject)
+    })
+  }
+
+  // A RAM mount whose listing first asks a server, as a remote VFS's client
+  // would.
+  class Remote extends RAMVFS {
+    override async readdir(path: PathSpec): Promise<FileStat[]> {
+      await ask(port)
+      return super.readdir(path)
+    }
+  }
+
+  it('names the mount and the command a mount connection opens for', async () => {
+    const watch = new Watch()
+    const ws = new Workspace({ '/remote': new Remote() })
+    ws.policies.add(watch)
+    try {
+      expect((await ws.shell('ls /remote')).exitCode).toBe(0)
+      await settled(watch, 1)
+    } finally {
+      await ws.close()
+    }
+    expect(watch.asked.map((ctx) => [ctx.mount, ctx.command, ctx.port])).toEqual([
+      ['/remote', 'ls', port],
+    ])
+    expect(watch.ended.map((ctx) => ctx.ended)).toEqual(['closed'])
+  })
+
+  it("names a CLI's program and words for a connection it opens", async () => {
+    const watch = new Watch()
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    ws.registerCli(
+      'acme',
+      new CLI({
+        spec: new CommandSpec({ name: 'acme', subcommands: [new CommandSpec({ name: 'deploy' })] }),
+        handlers: {
+          deploy: new CLIHandler({
+            fn: async () => {
+              await ask(port)
+              return [null, new IOResult()]
+            },
+          }),
+        },
+      }),
+    )
+    ws.policies.add(watch)
+    try {
+      expect((await ws.shell('acme deploy')).exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+    const [asked] = watch.asked
+    expect([asked?.command, asked?.program, asked?.line]).toEqual([
+      'acme',
+      ['acme', 'deploy'],
+      'acme deploy',
+    ])
+    expect(asked?.words?.map((word) => word.text)).toEqual(['acme', 'deploy'])
   })
 
   it('holds each session to its profile network besides the workspace one', async () => {

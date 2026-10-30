@@ -1767,6 +1767,7 @@ export class MountEntry {
       recording: bound.recording === null ? null : { ...bound.recording, mountId: this.mountId },
       write: { prefix: this.prefix, context: this.writeContext() },
       revisions: { map: revisions },
+      vfsMount: this.prefix,
     }
     const signal = callerSignal()
     const stream =
@@ -2038,6 +2039,7 @@ export class MountEntry {
         revisions: { map: this.revisions.size > 0 ? this.revisions : null },
         cache: { manager: this.cacheManager },
         write: { prefix: this.prefix, context: this.writeContext() },
+        vfsMount: this.prefix,
         mount: [this.prefix, this.mode],
         walkProbe: probe === null ? outer.walkProbe : [this.prefix, probe],
       },
@@ -2362,7 +2364,9 @@ export class MountEntry {
    * and write contexts. Mirrors Python's `_framed`.
    */
   private framed<T>(work: () => Promise<T>): Promise<T> {
-    return runWithMountContext(() => this.runWithWriteRevisions(work), this.mountId)
+    return runWithCaller({ ...currentCaller(), vfsMount: this.prefix }, () =>
+      runWithMountContext(() => this.runWithWriteRevisions(work), this.mountId),
+    )
   }
 
   /**

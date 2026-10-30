@@ -19,10 +19,9 @@
 # any 4xx and leaked httpx's exception text (complete with a documentation URL)
 # onto stderr.
 
-import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, fields, replace
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -33,18 +32,8 @@ from mirage.commands.builtin.utils.cookie import (
     cookie_value,
     same_origin,
 )
-from mirage.context.session_context import current_caller
 from mirage.io.stream import prime_stream
 from mirage.io.types import ByteSource
-from mirage.policy.base import Policy
-from mirage.policy.errors import PolicyDenied
-from mirage.policy.policies import (
-    Policies,
-    line_policies,
-    post_network_gate,
-    pre_network_gate,
-)
-from mirage.policy.types import NetworkContext, NetworkResultContext
 
 # httpx is the [http] extra, so it stays optional: top-level import guarded the
 # same way the databricks accessor guards its SDK.
@@ -59,8 +48,6 @@ else:
 DEFAULT_USER_AGENT = "Mozilla/5.0 (compatible; mirage/1.0)"
 DEFAULT_PORTS = {"http": 80, "https": 443}
 MISSING_HTTPX = "httpx is required for curl/wget: pip install 'mirage[http]'"
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,57 +113,22 @@ def _timeout(url: str, started: float) -> HttpTimeoutError:
     )
 
 
-async def _ended(
-    policies: Policies,
-    asked: NetworkContext,
-    passed: tuple[Policy, ...] | None,
-    status: int,
-    size: int,
-    failed: bool,
-) -> None:
-    # post_network once the transfer ends, however it ends: a refusal of
-    # one that worked fails it as a broken transfer does, and one of a
-    # transfer that already broke leaves that failure standing.
-    seen = {field.name: getattr(asked, field.name) for field in fields(asked)}
-    ended = NetworkResultContext(
-        **seen, status=status, size=size, failed=failed
-    )
-    try:
-        await post_network_gate(policies, ended, passed)
-    except PolicyDenied as exc:
-        if not failed:
-            raise HttpConnectError(asked.host, asked.port) from exc
-        logger.debug("post_network refused a failed request: %s", exc)
-
-
 async def _streamed(
-    client: Any,
-    resp: Any,
-    url: str,
-    started: float,
-    end: Callable[[int, int, bool], Awaitable[None]],
+    client: Any, resp: Any, url: str, started: float
 ) -> AsyncIterator[bytes]:
     # The body as it arrives, under the same deadline and with the same
-    # failures as the request; the client closes once it ends or is let go,
-    # and the transfer ends then, however it stopped.
-    size = 0
-    whole = False
+    # failures as the request; the client closes once it ends or is let go.
     try:
         async for chunk in resp.aiter_bytes():
-            size += len(chunk)
             yield chunk
-        whole = True
     except httpx.TimeoutException as exc:
         raise _timeout(url, started) from exc
     except httpx.TransportError as exc:
         host, port = _endpoint(url)
         raise HttpConnectError(host, port) from exc
     finally:
-        try:
-            await resp.aclose()
-            await client.aclose()
-        finally:
-            await end(resp.status_code, size, not whole)
+        await resp.aclose()
+        await client.aclose()
 
 
 async def http_request(
@@ -199,44 +151,7 @@ async def http_request(
     # costs one chunk of memory however large it is.
     if httpx is None:
         raise ImportError(MISSING_HTTPX)
-    # The policies of the line sending it judge the request before any
-    # connection opens; a refusal reads as a port that would not open.
-    # Each that let it through hears how it ends, once.
     host, port = _endpoint(url)
-    caller = current_caller()
-    asked = NetworkContext(
-        url=url,
-        method=method,
-        host=host,
-        port=port,
-        command=caller.command or "",
-        session_id="" if caller.session is None else caller.session.session_id,
-    )
-    passed: list[tuple[Policies, tuple[Policy, ...] | None]] = []
-    over = False
-
-    async def end(status: int, size: int, failed: bool) -> None:
-        nonlocal over
-        if over:
-            return
-        over = True
-        refused: HttpConnectError | None = None
-        for judge, held in passed:
-            try:
-                await _ended(judge, asked, held, status, size, failed)
-            except HttpConnectError as exc:
-                refused = refused or exc
-        if refused is not None:
-            raise refused
-
-    try:
-        for judge in line_policies():
-            passed.append((judge, await pre_network_gate(judge, asked)))
-    except BaseException as exc:
-        await end(0, 0, True)
-        if isinstance(exc, PolicyDenied):
-            raise HttpConnectError(host, port) from exc
-        raise
     started = time.monotonic()
     event_hooks: dict[str, list[Any]] = {}
     if cookies is not None:
@@ -295,19 +210,13 @@ async def http_request(
         except httpx.TransportError as exc:
             raise HttpConnectError(host, port) from exc
         if not stream:
-            await end(resp.status_code, len(resp.content), False)
             return _response(resp, resp.content)
-        body = await prime_stream(_streamed(client, resp, url, started, end))
+        body = await prime_stream(_streamed(client, resp, url, started))
         handed = True
         return _response(resp, body)
     finally:
-        # Every exit the body was not handed over by, a cancel among them,
-        # ends the transfer as failed; one the body owns ends there.
         if not handed:
-            try:
-                await client.aclose()
-            finally:
-                await end(0, 0, True)
+            await client.aclose()
 
 
 async def http_form_request(

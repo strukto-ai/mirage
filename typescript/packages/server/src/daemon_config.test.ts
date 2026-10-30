@@ -17,7 +17,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  parseNetwork,
   ALLOWED_KEYS,
   DaemonConfigError,
   parseDaemonTable,
@@ -111,32 +110,10 @@ describe('parseDaemonTable unclosed section header', () => {
   })
 })
 
-describe('parseNetwork', () => {
-  it.each([
-    ['true', true],
-    ['false', false],
-    [
-      '{ allowed_domains = ["*.github.com", "10.0.0.0/8"] }',
-      { allowed_domains: ['*.github.com', '10.0.0.0/8'] },
-    ],
-    [
-      '{ allowed_domains = ["*"], denied_domains = ["*:22"] }',
-      { allowed_domains: ['*'], denied_domains: ['*:22'] },
-    ],
-  ])('reads %s', (raw, setting) => {
-    expect(parseNetwork(raw)).toEqual(setting)
+describe('network', () => {
+  it('is left to each workspace', () => {
     expect(() => {
-      validateDaemonTable({ network: raw, policy_file: 'policy.yaml' })
-    }).not.toThrow()
-  })
-
-  it.each([
-    'off',
-    '{}',
-    '{ deny = ["10.0.0.0/8"] }',
-    '{ allow = ["a.com"] }',
-    '{ allowed_domains = "a.com" }',
-  ])('refuses %s', (raw) => {
-    expect(() => parseNetwork(raw)).toThrow(/network is true, false or/)
+      validateDaemonTable({ network: 'false' })
+    }).toThrow(/network/)
   })
 })

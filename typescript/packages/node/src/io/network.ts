@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { networkBound, networkLets, type NetworkRule } from '@struktoai/mirage-core/io/network'
+import { liveEgress } from '@struktoai/mirage-core/io/gateway'
+import { networkBound, networkLets } from '@struktoai/mirage-core/io/network'
 import { AsyncResource } from 'node:async_hooks'
 import dns, { type LookupAddress, type LookupOptions } from 'node:dns'
 import net from 'node:net'
@@ -22,13 +23,24 @@ import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici'
 type Found = string | LookupAddress[]
 type LookupDone = (err: NodeJS.ErrnoException | null, address: Found, family?: number) => void
 type Lookup = (hostname: string, options: LookupOptions, callback: LookupDone) => void
-type ConnectOptions = net.TcpSocketConnectOpts & { path?: string }
+export type ConnectOptions = net.TcpSocketConnectOpts & { path?: string }
 
 const connect = Reflect.get(net.Socket.prototype, 'connect') as (
   this: net.Socket,
   ...args: unknown[]
 ) => net.Socket
 let watching = false
+// The listeners the gateway relays from, which a connect may always reach:
+// the gateway judges what is behind them.
+const relays = new Set<string>()
+
+/**
+ * Let connections to a gateway listener through the connect hook, which
+ * judges each one behind it. Mirrors Python's `relay_at`.
+ */
+export function relayAt(host: string, port: number): void {
+  relays.add(`${host}:${String(port)}`)
+}
 
 /** What a refused connection fails with, as Node's own connect errors read. */
 function refusal(host: string, port: number): NodeJS.ErrnoException {
@@ -86,6 +98,7 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
   // asks the rule of the call that opened the connection.
   const lets = AsyncResource.bind(networkLets)
   const host = options.host ?? 'localhost'
+  if (relays.has(`${host}:${String(options.port)}`)) return Reflect.apply(connect, this, args)
   if (net.isIP(host) !== 0) {
     if (lets('', host, options.port)) return Reflect.apply(connect, this, args)
     process.nextTick(() => this.destroy(refusal(host, options.port)))
@@ -97,26 +110,30 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
   return Reflect.apply(connect, this, args)
 }
 
-// The pools fetch keeps for each rule, verified and unverified (curl's -k),
-// so a socket a workspace opened is never reused for a request another
-// workspace's rule never let through.
-const pools = new WeakMap<NetworkRule, { verified?: Agent; unverified?: Agent }>()
+// The pools fetch keeps for each rule, and for each workspace whose policies
+// listen for connections, verified and unverified (curl's -k), so a socket a
+// workspace opened is never reused for a request another workspace's rule
+// never let through or its policies never saw.
+const pools = new WeakMap<object, { verified?: Agent; unverified?: Agent }>()
 
-/** The pool a fetch under `rule` takes, built on first use; `unverified` for curl's -k. */
-export function rulePool(rule: NetworkRule, unverified = false): Agent {
-  let held = pools.get(rule)
+/**
+ * The pool a fetch under `key` (a rule, or a workspace's policies) takes,
+ * built on first use; `unverified` for curl's -k.
+ */
+export function rulePool(key: object, unverified = false): Agent {
+  let held = pools.get(key)
   if (held === undefined) {
     held = {}
-    pools.set(rule, held)
+    pools.set(key, held)
   }
   if (unverified) return (held.unverified ??= new Agent({ connect: { rejectUnauthorized: false } }))
   return (held.verified ??= new Agent())
 }
 
-/** Close the pools a rule holds, as the workspace it judges closes. */
-export async function releaseNetwork(rule: NetworkRule): Promise<void> {
-  const held = pools.get(rule)
-  pools.delete(rule)
+/** Close the pools a rule or a workspace's policies hold, as the workspace closes. */
+export async function releaseNetwork(key: object): Promise<void> {
+  const held = pools.get(key)
+  pools.delete(key)
   await Promise.all([held?.verified?.close(), held?.unverified?.close()])
 }
 
@@ -133,9 +150,10 @@ export function watchNetwork(): void {
   net.Socket.prototype.connect = connecting as typeof net.Socket.prototype.connect
   setGlobalDispatcher(
     getGlobalDispatcher().compose((dispatch) => (options, handler) => {
-      const rule = networkBound()
-      if (rule === null) return dispatch(options, handler)
-      return rulePool(rule).dispatch(options, handler)
+      const bound = liveEgress().at(-1)
+      const key = bound?.rule ?? (bound?.listening === true ? bound.policies : networkBound())
+      if (key === null) return dispatch(options, handler)
+      return rulePool(key).dispatch(options, handler)
     }),
   )
 }

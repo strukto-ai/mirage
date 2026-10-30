@@ -83,11 +83,11 @@ flowchart LR
         direction LR
         PS["pre_session"] --> Land["write lands"] --> PoS["post_session"]
     end
-    subgraph request["A request"]
+    subgraph connection["A connection"]
         direction LR
-        PN["pre_network"] --> Send["transfer runs"] --> PoN["post_network"]
+        PN["pre_network"] --> Send["bytes flow"] --> PoN["post_network"]
     end
-    Run -. curl, wget, git .-> PN
+    Run -. any client in the line .-> PN
 ```
 
 | Python | TypeScript | Runs | Can return |
@@ -100,8 +100,8 @@ flowchart LR
 | `post_vfs` | `postVfs` | after each VFS call | Deny, Ask |
 | `pre_session` | `preSession` | before each variable write | Deny, Ask |
 | `post_session` | `postSession` | after the write lands | Deny, Ask |
-| `pre_network` | `preNetwork` | before `curl`, `wget` or `git` over https sends a request | Deny, Ask |
-| `post_network` | `postNetwork` | once that transfer ends, however it ends | Deny, Ask |
+| `pre_network` | `preNetwork` | before a connection the workspace opens carries any byte | Deny, Ask, Limit |
+| `post_network` | `postNetwork` | once that connection is over, however it ended | nothing; it observes |
 | `pre_workspace` | `preWorkspace` | on a server, before a create, clone or load builds anything | Deny |
 
 | What | Example | Covered by |
@@ -110,7 +110,7 @@ flowchart LR
 | A command or CLI | `rm /data/b` | `pre_command`, `post_command` |
 | A VFS call | `session.vfs.read("/data/a.txt")` | `pre_vfs`, `post_vfs` |
 | A variable write | `export X=1`, `X=1`, `unset X` | `pre_session`, `post_session` |
-| A request | `curl https://api.example.com/x` | `pre_network`, `post_network` |
+| A connection | `curl https://api.example.com/x`, a CLI's API call, a mount's read | `pre_network`, `post_network` |
 
 | Entry point | Sends |
 | --- | --- |
@@ -140,7 +140,7 @@ TypeScript spells the fields in camelCase (`ctx.sessionId`, `ctx.exitCode`).
 | `pre_command`, `post_command` | `line` and the command: `command`, `words`, `paths`, `walks` | `exit_code`, `stderr`, `records` |
 | `pre_vfs`, `post_vfs` | `call`, `path`, `write` | `result` |
 | `pre_session`, `post_session` | `verb`, `key`, `value` | `old` |
-| `pre_network`, `post_network` | `url`, `method`, `host`, `port`, `command` | `status`, `size`, `failed` |
+| `pre_network`, `post_network` | `host`, `address`, `port`, and who opened it: `command`, `program`, `words`, `line`, `mount` | `bytes_sent`, `bytes_received`, `seconds`, `ended` |
 | `pre_workspace` | `config`: the config as the caller wrote it, secrets still pointers | |
 
 `pre_command` is `pre_execute` narrowed to one command: each entry of
@@ -399,53 +399,65 @@ Deny at `post_session` gives the same answer and puts the old value back.
 
 ### pre_network and post_network
 
-`pre_network` runs before `curl`, `wget` or `git` over https sends a
-request, before any connection opens. `post_network` runs once the
-transfer ends: `status` is the final response's (0 when none came), `size`
-the body bytes read, and `failed` whether the transfer broke off or never
-began. It runs once for each policy whose `pre_network` let the request
-through, however the request ended: refused by a later policy, cut short
-by a reader or a `timeout`, or finished. A Deny from one does not keep
-the others from running. The redirects a request follows are part of it;
-the workspace's [`network`](/home/configuration#network) judges every
-connection they open. Together the two can hold a workspace to a number
-of requests at once:
+`pre_network` runs once for each connection the workspace opens, before it
+carries any byte, whoever opens it: `curl`, `wget` or `git`, a builtin or
+installed CLI, a mount's VFS, a runtime or an SDK in the process. The
+workspace's [`network`](/home/configuration#network) lists judge it first,
+and a connection they refuse reaches no policy. The context says where it
+goes (`host`, empty for a bare address; `address`; `port`) and who opened
+it: `command`, `program` and `words` as `pre_command` reads them, `line`,
+and `mount`, the prefix of the mount whose VFS opened it. URL, method and
+status are not in it: under https only the program and the server see
+them.
+
+A `pre_network` answer refuses the connection (Deny, or Ask, since a
+running command cannot wait on a question) or caps it: a `Limit` cuts it
+once it carries `max_bytes`, sent and received together, or stays open
+`timeout_seconds`. The tightest Limit among the policies wins. A refused or
+cut connection is reset, so the program reads a broken connection, never a
+clean end: `curl` exits 7 for a refusal.
+
+`post_network` runs once the connection is over, once for each policy
+whose `pre_network` let it through, however it ended: `ended` is `closed`,
+`refused` (by a later policy), `limit` or `error`, with `bytes_sent`,
+`bytes_received` and `seconds`. It observes only. A client that keeps a
+connection open and sends on it again is judged once, as it opens.
+
+Together the two hold a workspace to a byte budget:
 
 <CodeGroup>
 
 ```python Python
 from mirage.policy import (
     Deny,
+    Limit,
     NetworkContext,
     NetworkResultContext,
     Policy,
 )
 
-class AtMostEight(Policy):
-    def __init__(self) -> None:
-        self.open = 0
+class Budget(Policy):
+    def __init__(self, total: int) -> None:
+        self.left = total
 
-    async def pre_network(self, ctx: NetworkContext) -> Deny | None:
-        if self.open >= 8:
-            return Deny("eight requests are already open")
-        self.open += 1
-        return None
+    async def pre_network(self, ctx: NetworkContext) -> Deny | Limit:
+        if self.left <= 0:
+            return Deny("the egress budget is spent")
+        return Limit(max_bytes=self.left, timeout_seconds=300)
 
     async def post_network(self, ctx: NetworkResultContext) -> None:
-        self.open -= 1
-        return None
+        self.left -= ctx.bytes_sent + ctx.bytes_received
 ```
 
 ```typescript TypeScript
-let open = 0
-const atMostEight: Policy = {
+let left = 500_000_000
+const budget: Policy = {
   preNetwork() {
-    if (open >= 8) return { kind: 'deny', reason: 'eight requests are already open' }
-    open += 1
-    return null
+    if (left <= 0) return { kind: 'deny', reason: 'the egress budget is spent' }
+    return new Limit({ maxBytes: left, timeoutSeconds: 300 })
   },
-  postNetwork() {
-    open -= 1
+  postNetwork(ctx) {
+    left -= ctx.bytesSent + ctx.bytesReceived
     return null
   },
 }
@@ -453,10 +465,10 @@ const atMostEight: Policy = {
 
 </CodeGroup>
 
-A refused request fails as a closed port does: `curl` exits 7, `wget` 4.
-A line was admitted without the question, so an Ask refuses the same way.
-A Deny at `post_network` fails the command as a broken transfer; what it
-already wrote stays.
+In a browser a page sees no socket: `fetch` is judged by host name with an
+empty `address`, the counts are the body's bytes, and while a policy
+listens for connections a `WebSocket` is refused, since its handshake
+cannot wait for an answer.
 
 ### pre_workspace
 

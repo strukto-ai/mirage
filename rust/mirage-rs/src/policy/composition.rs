@@ -30,8 +30,9 @@ impl Hook {
     fn legal(self) -> Vec<&'static str> {
         match self {
             Self::PreExecute => vec!["ask", "deny", "route"],
-            Self::PostExecute => vec!["ask", "deny", "limit"],
+            Self::PostExecute | Self::PreNetwork => vec!["ask", "deny", "limit"],
             Self::PreWorkspace => vec!["deny"],
+            Self::PostNetwork => vec![],
             _ => vec!["ask", "deny"],
         }
     }
@@ -365,7 +366,7 @@ impl Evaluation {
         };
         let limits = if self.fold.deny.is_none()
             && self.projection == Projection::Fire
-            && self.hook == Some(Hook::PostExecute)
+            && matches!(self.hook, Some(Hook::PostExecute | Hook::PreNetwork))
         {
             self.fold.limits.clone()
         } else {

@@ -172,30 +172,23 @@ def network_layer(setting: NetworkSetting) -> dict[str, JsonValue] | None:
 
 
 def network_rule(
-    setting: NetworkSetting = True,
-    ceiling: NetworkSetting = True,
-    metadata: bool = False,
+    setting: NetworkSetting = True, metadata: bool = False
 ) -> NetworkRule | None:
-    """The rule a workspace's connections are judged by: its own setting
-    and the ceiling of the server that built it, each a layer, with the
-    cloud metadata addresses refused when ``metadata`` is set; None when
-    nothing limits it. The first rule built starts watching the process's
-    connections. Mirrors TS's ``networkRule``.
+    """The rule a workspace's connections are judged by: its ``network``,
+    with the cloud metadata addresses refused when ``metadata`` is set;
+    None when nothing limits it. The first rule built starts watching the
+    process's connections. Mirrors TS's ``networkRule``.
 
     Args:
         setting (NetworkSetting): the workspace's ``network``.
-        ceiling (NetworkSetting): what its server holds every workspace to.
         metadata (bool): refuse the addresses clouds serve a machine its
             credentials at.
 
     Raises:
-        ValueError: a setting or one of its entries is not valid.
+        ValueError: the setting or one of its entries is not valid.
     """
-    layers = [
-        layer
-        for layer in (network_layer(ceiling), network_layer(setting))
-        if layer is not None
-    ]
+    layer = network_layer(setting)
+    layers = [] if layer is None else [layer]
     if not layers and not metadata:
         return None
     rule = NetworkRule(layers, metadata)
@@ -247,6 +240,78 @@ _resolve = socket.getaddrinfo
 _loop_resolve = asyncio.base_events.BaseEventLoop.getaddrinfo
 _watching = False
 _watch_lock = threading.Lock()
+# The name each address a lookup answered was asked for, with the port
+# it was for (None when it named none), which a connect, naming only its
+# address, reports its host by.
+_named: OrderedDict[tuple[str, int | None], str] = OrderedDict()
+# What each name's last lookup answered for a port, in its order.
+_answers: OrderedDict[tuple[str, int | None], tuple[str, ...]] = OrderedDict()
+_named_lock = threading.Lock()
+# The listeners the gateway relays from, which a connect may always reach:
+# the gateway judges what is behind them.
+_relays: set[tuple[str, int]] = set()
+
+
+def named(address: str, port: int | None = None) -> str:
+    """The name a lookup was asked for when it answered ``address``, for
+    this port or for none; empty when no lookup did.
+
+    Args:
+        address (str): the address a connection reaches.
+        port (int | None): the port it reaches.
+    """
+    with _named_lock:
+        return _named.get((address, port)) or _named.get((address, None), "")
+
+
+def answers(host: str, port: int | None = None) -> tuple[str, ...]:
+    """The addresses the last lookup of ``host`` answered, for this port
+    or for none, in the order it gave them.
+
+    Args:
+        host (str): the name looked up.
+        port (int | None): the port it was looked up for.
+    """
+    with _named_lock:
+        return _answers.get((host, port)) or _answers.get((host, None), ())
+
+
+def relay_at(host: str, port: int) -> None:
+    """Let connections to a gateway listener through the connect hook,
+    which judges each one behind it.
+
+    Args:
+        host (str): the listener's address.
+        port (int): its port.
+    """
+    _relays.add((host, port))
+
+
+def _remember(
+    host: bytes | str | None, port: int | None, found: list[Any]
+) -> None:
+    if not host:
+        return
+    name = host.decode() if isinstance(host, bytes) else host
+    addresses = tuple(dict.fromkeys(str(info[4][0]) for info in found))
+    with _named_lock:
+        for address in addresses:
+            key = (address, port)
+            _named.pop(key, None)
+            _named[key] = name
+        _answers.pop((name, port), None)
+        _answers[(name, port)] = addresses
+        while len(_named) > _RESOLVED_SIZE:
+            _named.popitem(last=False)
+        while len(_answers) > _RESOLVED_SIZE:
+            _answers.popitem(last=False)
+
+
+def _port_of(port: bytes | str | int | None) -> int | None:
+    text = port.decode() if isinstance(port, bytes) else port
+    if isinstance(text, int):
+        return text
+    return int(text) if text is not None and text.isdigit() else None
 
 
 def _judged(
@@ -271,14 +336,7 @@ def _judged(
         return found
     name = host.decode() if isinstance(host, bytes) else host
     # A service name or none at all leaves the port to the connect.
-    text = port.decode() if isinstance(port, bytes) else port
-    wanted = (
-        text
-        if isinstance(text, int)
-        else int(text)
-        if text is not None and text.isdigit()
-        else None
-    )
+    wanted = _port_of(port)
     let = [
         info for info in found if rule.resolved(name, str(info[4][0]), wanted)
     ]
@@ -295,7 +353,9 @@ def _getaddrinfo(
 ) -> list[Any]:
     found = _resolve(host, port, *args, **kwargs)
     rule = _rule.get()
-    return found if rule is None else _judged(rule, host, port, found)
+    let = found if rule is None else _judged(rule, host, port, found)
+    _remember(host, _port_of(port), let)
+    return let
 
 
 async def _loop_getaddrinfo(
@@ -307,7 +367,9 @@ async def _loop_getaddrinfo(
 ) -> list[Any]:
     found = await _loop_resolve(loop, host, port, *args, **kwargs)
     rule = _rule.get()
-    return found if rule is None else _judged(rule, host, port, found)
+    let = found if rule is None else _judged(rule, host, port, found)
+    _remember(host, _port_of(port), let)
+    return let
 
 
 def _connecting(event: str, args: tuple[Any, ...]) -> None:
@@ -322,6 +384,8 @@ def _connecting(event: str, args: tuple[Any, ...]) -> None:
     port = (
         target[1] if len(target) > 1 and isinstance(target[1], int) else None
     )
+    if port is not None and (target[0], port) in _relays:
+        return
     if not rule.connects(target[0], port):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
 

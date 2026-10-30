@@ -27,7 +27,6 @@ import {
   type VfsContext,
 } from './types.ts'
 import { currentCaller, runWithCaller } from '../context/session_context.ts'
-import { Policies, linePolicies, runWithPolicies } from './policies.ts'
 import { scriptContext } from './script.ts'
 
 // The browser-runtime branch under node's test runner: no task isolation,
@@ -425,23 +424,3 @@ it('carries the script issuer through postVfs without task isolation', async () 
     await ws.close()
   }
 }, 30_000)
-
-describe('linePolicies without task isolation', () => {
-  it("answers every live line's policies, since it cannot tell whose request it is", async () => {
-    const first = new Policies()
-    const second = new Policies()
-    let release = (): void => undefined
-    const held = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const waiting = runWithPolicies(first, async () => {
-      await held
-      return linePolicies()
-    })
-    const overlapping = await runWithPolicies(second, () => Promise.resolve(linePolicies()))
-    expect(overlapping).toEqual([first, second])
-    release()
-    expect(await waiting).toEqual([first])
-    expect(linePolicies()).toEqual([])
-  })
-})

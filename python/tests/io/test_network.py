@@ -18,6 +18,8 @@ import pytest
 import pytest_asyncio
 
 from mirage import Workspace
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.io import network
 from mirage.io.network import (
     NetworkRule,
@@ -26,6 +28,7 @@ from mirage.io.network import (
     network_lets,
     run_with_network,
 )
+from mirage.io.types import IOResult
 from mirage.policy import (
     Deny,
     NetworkContext,
@@ -33,7 +36,7 @@ from mirage.policy import (
     Policy,
 )
 from mirage.policy.profile import SessionProfile
-from mirage.types import MountMode
+from mirage.types import FileStat, Limit, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 
 
@@ -194,92 +197,32 @@ async def test_a_name_lends_its_address_to_no_other_name(port, monkeypatch):
 
 
 class _Watch(Policy):
-    """Refuses the hosts it is given, counts what is in flight, keeps
+    """Refuses the addresses it is given, counts what is open, keeps
     what each method saw."""
 
-    def __init__(self, refused: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self, refused: tuple[str, ...] = (), limit: Limit | None = None
+    ) -> None:
         self.refused = refused
+        self.limit = limit
         self.open = 0
-        self.most = 0
         self.asked: list[NetworkContext] = []
         self.ended: list[NetworkResultContext] = []
 
-    async def pre_network(self, ctx: NetworkContext) -> Deny | None:
+    async def pre_network(self, ctx: NetworkContext) -> Deny | Limit | None:
         self.asked.append(ctx)
-        if ctx.host in self.refused:
-            return Deny(f"{ctx.host} is not for this tenant")
+        if ctx.address in self.refused:
+            return Deny(f"{ctx.address} is not for this tenant")
         self.open += 1
-        self.most = max(self.most, self.open)
-        return None
+        return self.limit
 
     async def post_network(self, ctx: NetworkResultContext) -> None:
         self.ended.append(ctx)
         self.open -= 1
-        return None
 
 
-async def _watched(watch: _Watch, line: str) -> int:
-    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)})
-    ws.policies.add(watch)
-    try:
-        return (await ws.shell(line)).exit_code
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_pre_network_refuses_a_request_as_a_closed_port(port):
-    watch = _Watch(refused=("127.0.0.1",))
-    assert await _watched(watch, f"curl -sS http://127.0.0.1:{port}/") == 7
-    assert await _watched(watch, f"wget -q -O - http://127.0.0.1:{port}/") == 4
-    asked = watch.asked[0]
-    assert (asked.url, asked.method, asked.host, asked.port) == (
-        f"http://127.0.0.1:{port}/",
-        "GET",
-        "127.0.0.1",
-        port,
-    )
-    assert [ctx.command for ctx in watch.asked] == ["curl", "wget"]
-    assert watch.ended == []
-
-
-@pytest.mark.asyncio
-async def test_post_network_sees_how_each_request_ended(port):
-    watch = _Watch()
-    line = (
-        f"curl -sS http://127.0.0.1:{port}/ > /data/a; "
-        f"curl -sS -o /data/b http://127.0.0.1:{port}/; "
-        f"curl -sS -o /missing/c http://127.0.0.1:{port}/"
-    )
-    assert await _watched(watch, line) == 23
-    assert [(e.status, e.size, e.failed) for e in watch.ended] == [
-        (200, 3, False),
-        (200, 3, False),
-        (200, 3, True),
-    ]
-    assert (watch.open, watch.most) == (0, 1)
-
-
-@pytest.mark.asyncio
-async def test_post_network_sees_a_refused_connection_fail(port):
-    watch = _Watch()
-    ws = Workspace({"/data": RAMVFS()}, network=False)
-    ws.policies.add(watch)
-    try:
-        line = f"curl -sS http://127.0.0.1:{port}/"
-        assert (await ws.shell(line)).exit_code == 7
-    finally:
-        await ws.close()
-    assert [(e.status, e.failed) for e in watch.ended] == [(0, True)]
-
-
-class _Shut(Policy):
-    async def post_network(self, ctx: NetworkResultContext) -> Deny:
-        return Deny("no more requests")
-
-
-async def _held(port: int, line: str, *policies: Policy) -> int:
-    ws = Workspace({"/data": RAMVFS()})
+async def _held(port: int, line: str, *policies: Policy, network=True) -> int:
+    ws = Workspace({"/data": (RAMVFS(), MountMode.WRITE)}, network=network)
     for policy in policies:
         ws.policies.add(policy)
     try:
@@ -288,24 +231,83 @@ async def _held(port: int, line: str, *policies: Policy) -> int:
         await ws.close()
 
 
+_ANSWER = (
+    b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nok\n"
+)
+
+
 @pytest.mark.asyncio
-async def test_post_network_reaches_each_policy_that_let_a_request_through(
-    port,
-):
+async def test_pre_network_refuses_a_connection_as_a_closed_port(port):
+    watch = _Watch(refused=("127.0.0.1",))
+    line = "curl -sS http://127.0.0.1:{port}/a"
+    assert await _held(port, line, watch) == 7
+    assert (
+        await _held(port, "wget -q -O - http://127.0.0.1:{port}/", watch) == 4
+    )
+    asked = watch.asked[0]
+    assert (asked.address, asked.port, asked.command, asked.program) == (
+        "127.0.0.1",
+        port,
+        "curl",
+        ("curl",),
+    )
+    assert asked.line == f"curl -sS http://127.0.0.1:{port}/a"
+    assert [w.text for w in asked.words] == [
+        "curl",
+        "-sS",
+        f"http://127.0.0.1:{port}/a",
+    ]
+    assert [ctx.command for ctx in watch.asked] == ["curl", "wget"]
+    assert watch.ended == []
+
+
+@pytest.mark.asyncio
+async def test_a_name_reaches_the_hooks_as_its_host(port):
+    watch = _Watch()
+    assert await _held(port, "curl -sS http://localhost:{port}/", watch) == 0
+    assert (watch.asked[0].host, watch.asked[0].port) == ("localhost", port)
+
+
+@pytest.mark.asyncio
+async def test_post_network_sees_how_each_connection_went(port):
+    watch = _Watch()
+    line = (
+        "curl -sS http://127.0.0.1:{port}/ > /data/a; "
+        "curl -sS -o /data/b http://127.0.0.1:{port}/"
+    )
+    assert await _held(port, line, watch) == 0
+    assert [(e.bytes_received, e.ended) for e in watch.ended] == [
+        (len(_ANSWER), "closed"),
+        (len(_ANSWER), "closed"),
+    ]
+    assert all(e.bytes_sent > 0 and e.seconds >= 0 for e in watch.ended)
+    assert watch.open == 0
+
+
+@pytest.mark.asyncio
+async def test_the_lists_refuse_before_any_hook(port):
+    watch = _Watch()
+    line = "curl -sS http://127.0.0.1:{port}/"
+    assert await _held(port, line, watch, network=False) == 7
+    assert (watch.asked, watch.ended) == ([], [])
+
+
+@pytest.mark.asyncio
+async def test_post_network_reaches_each_policy_that_let_it_through(port):
     counted, refusing = _Watch(), _Watch(refused=("127.0.0.1",))
     line = "curl -sS http://127.0.0.1:{port}/"
     assert await _held(port, line, counted, refusing) == 7
-    assert [(e.status, e.failed) for e in counted.ended] == [(0, True)]
+    assert [e.ended for e in counted.ended] == ["refused"]
     assert (counted.open, refusing.open, refusing.ended) == (0, 0, [])
 
 
 @pytest.mark.asyncio
-async def test_a_post_network_deny_stops_no_other_policy(port):
-    counted = _Watch()
+async def test_a_limit_cuts_the_connection_with_a_reset(port):
+    watch = _Watch(limit=Limit(max_bytes=40))
     line = "curl -sS http://127.0.0.1:{port}/"
-    assert await _held(port, line, _Shut(), counted) == 7
-    assert [(e.status, e.failed) for e in counted.ended] == [(200, False)]
-    assert counted.open == 0
+    assert await _held(port, line, watch) != 0
+    assert [e.ended for e in watch.ended] == ["limit"]
+    assert watch.ended[0].bytes_sent + watch.ended[0].bytes_received == 40
 
 
 @pytest_asyncio.fixture
@@ -323,12 +325,89 @@ async def silent():
 
 
 @pytest.mark.asyncio
-async def test_a_cancelled_request_still_ends(silent):
-    counted = _Watch()
+async def test_a_limit_ends_a_connection_past_its_seconds(silent):
+    watch = _Watch(limit=Limit(timeout_seconds=0.2))
+    line = "curl -sS -m 5 http://127.0.0.1:{port}/"
+    assert await _held(silent, line, watch) != 0
+    assert [e.ended for e in watch.ended] == ["limit"]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_command_still_ends_its_connection(silent):
+    watch = _Watch()
     line = "timeout 0.3 curl -sS http://127.0.0.1:{port}/"
-    assert await _held(silent, line, counted) == 124
-    assert [(e.status, e.failed) for e in counted.ended] == [(0, True)]
-    assert counted.open == 0
+    assert await _held(silent, line, watch) == 124
+    for _ in range(50):
+        if watch.ended:
+            break
+        await asyncio.sleep(0.02)
+    assert len(watch.ended) == 1
+    assert watch.open == 0
+
+
+class _Remote(RAMVFS):
+    """A RAM mount whose listing first asks a server, as a remote VFS's
+    client would."""
+
+    def __init__(self, port: int) -> None:
+        super().__init__()
+        self.port = port
+
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        writer.write(b"GET / HTTP/1.1\r\nHost: remote\r\n\r\n")
+        await reader.read()
+        writer.close()
+        return await super().readdir(path)
+
+
+@pytest.mark.asyncio
+async def test_a_mount_connection_names_its_mount_and_command(port):
+    watch = _Watch()
+    ws = Workspace({"/remote": _Remote(port)})
+    ws.policies.add(watch)
+    try:
+        assert (await ws.shell("ls /remote")).exit_code == 0
+    finally:
+        await ws.close()
+    assert [(c.mount, c.command, c.port) for c in watch.asked] == [
+        ("/remote", "ls", port)
+    ]
+    assert [e.ended for e in watch.ended] == ["closed"]
+
+
+@pytest.mark.asyncio
+async def test_a_cli_connection_names_its_program_and_words(port):
+    async def deploy(accessor, paths, texts, ctx):
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        writer.write(b"GET / HTTP/1.1\r\nHost: acme\r\n\r\n")
+        await reader.read()
+        writer.close()
+        return None, IOResult()
+
+    watch = _Watch()
+    ws = Workspace({"/data": RAMVFS()})
+    ws.register_cli(
+        "acme",
+        CLI(
+            spec=CommandSpec(
+                name="acme", subcommands=(CommandSpec(name="deploy"),)
+            ),
+            handlers={"deploy": CLIHandler(fn=deploy)},
+        ),
+    )
+    ws.policies.add(watch)
+    try:
+        assert (await ws.shell("acme deploy")).exit_code == 0
+    finally:
+        await ws.close()
+    [asked] = watch.asked
+    assert (asked.command, asked.program, asked.line) == (
+        "acme",
+        ("acme", "deploy"),
+        "acme deploy",
+    )
+    assert [w.text for w in asked.words] == ["acme", "deploy"]
 
 
 @pytest.mark.asyncio

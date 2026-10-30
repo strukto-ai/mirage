@@ -622,6 +622,9 @@ class SessionCommandsQuery(Protocol):
 
 # A method a profile's policy names programs for: the pre_ four and the
 # post_ four.
+# How a connection ended, as post_network reads it.
+NetworkEnd = Literal["closed", "refused", "limit", "error"]
+
 ScriptMethod = Literal[
     "pre_execute",
     "pre_command",
@@ -937,31 +940,46 @@ class VfsResultContext(VfsContext):
 
 @dataclass(frozen=True, slots=True)
 class NetworkContext:
-    """Facts about one request a command sends, as pre_network methods
-    see it.
+    """Facts about one connection the workspace is about to open, as
+    pre_network methods see it.
 
-    Fires where ``curl``, ``wget`` and ``git`` over https send a request,
-    before any connection opens. The redirects it follows are the same
-    request; the workspace's ``network`` judges every connection they
-    open.
+    Fires once per connection, before any byte reaches the server,
+    whoever opens it: a builtin command, a builtin or installed CLI, a
+    mount's VFS, a runtime or an SDK in the process. The workspace's
+    ``network`` lists have already let it through. A client that keeps
+    a connection open and sends on it again is judged once, as it
+    opens.
 
     Args:
-        url (str): the URL the command asked for.
-        method (str): the HTTP method.
-        host (str): the host the URL names.
-        port (int): the port the URL names, else its scheme's.
-        command (str): the command sending it.
-        session_id (str): the session the command runs in.
+        host (str): the name the program asked to connect to; empty
+            when it connected to a bare address.
+        address (str): the address the connection reaches.
+        port (int): the port it connects to.
+        command (str): the command running when it opened; empty
+            outside a command.
+        program (tuple[str, ...]): the command name plus a CLI's verb
+            path, as ``CommandContext.program`` reads it; empty outside
+            a command.
+        words (tuple[CommandWord, ...]): the command line word by word
+            as its spec read it, as ``CommandContext.words`` holds it;
+            empty outside a command.
+        line (str): the line the command runs in; empty outside one.
+        mount (str): the prefix of the mount whose VFS opened it, empty
+            when no mount did.
+        session_id (str): the session it opens for; empty outside one.
         session (SessionView | None): the session, read only.
         vfs (FileView | None): the session's files, read only.
-        caller (PolicyCaller | None): who sends it, read only.
+        caller (PolicyCaller | None): who opens it, read only.
     """
 
-    url: str
-    method: str
     host: str
+    address: str
     port: int
     command: str = ""
+    program: tuple[str, ...] = ()
+    words: tuple[CommandWord, ...] = ()
+    line: str = ""
+    mount: str = ""
     session_id: str = ""
     session: SessionView | None = None
     vfs: FileView | None = None
@@ -970,18 +988,23 @@ class NetworkContext:
 
 @dataclass(frozen=True, slots=True)
 class NetworkResultContext(NetworkContext):
-    """One finished request, as post_network methods see it: what
-    pre_network saw, plus how it ended.
+    """One finished connection, as post_network methods see it: what
+    pre_network saw, plus how it went. Asked of each policy whose
+    pre_network let the connection through, once, however it ended.
 
     Args:
-        status (int): the final response's status, 0 when none came.
-        size (int): the body bytes read.
-        failed (bool): whether the transfer broke off or never began.
+        bytes_sent (int): bytes the program sent to the server.
+        bytes_received (int): bytes it got back.
+        seconds (float): how long the connection was open.
+        ended (NetworkEnd): ``closed``; ``refused``, by a later policy;
+            ``limit``, cut by a Limit; or ``error``, unreachable or
+            broken.
     """
 
-    status: int = 0
-    size: int = 0
-    failed: bool = False
+    bytes_sent: int = 0
+    bytes_received: int = 0
+    seconds: float = 0.0
+    ended: NetworkEnd = "closed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1082,8 +1105,8 @@ VALIDITY: dict[str, frozenset[str]] = {
     "pre_session": frozenset({Deny.kind, Ask.kind}),
     "post_session": frozenset({Deny.kind, Ask.kind}),
     "pre_workspace": frozenset({Deny.kind}),
-    "pre_network": frozenset({Deny.kind, Ask.kind}),
-    "post_network": frozenset({Deny.kind, Ask.kind}),
+    "pre_network": frozenset({Deny.kind, Ask.kind, Limit.kind}),
+    "post_network": frozenset(),
 }
 
 

@@ -114,19 +114,13 @@ export function sameNetwork(a: NetworkSetting, b: NetworkSetting): boolean {
 }
 
 /**
- * The rule a workspace's connections are judged by: its own setting and the
- * ceiling of the server that built it, each a layer, with the cloud metadata
- * addresses refused when `metadata` is set; null when nothing limits it.
- * Mirrors Python's `network_rule`.
+ * The rule a workspace's connections are judged by: its `network`, with the
+ * cloud metadata addresses refused when `metadata` is set; null when nothing
+ * limits it. Mirrors Python's `network_rule`.
  */
-export function networkRule(
-  setting: NetworkSetting = true,
-  ceiling: NetworkSetting = true,
-  metadata = false,
-): NetworkRule | null {
-  const layers = [networkLayer(ceiling), networkLayer(setting)].filter(
-    (layer): layer is Record<string, JsonValue> => layer !== null,
-  )
+export function networkRule(setting: NetworkSetting = true, metadata = false): NetworkRule | null {
+  const layer = networkLayer(setting)
+  const layers = layer === null ? [] : [layer]
   if (layers.length === 0 && !metadata) return null
   return new NetworkRule(layers, metadata)
 }

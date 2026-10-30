@@ -427,31 +427,38 @@ describe('scriptContext', () => {
 })
 
 describe('ScriptPolicy', () => {
-  it('judges a request and how it ended', async () => {
-    const request = {
-      url: 'https://api.example.com/a',
-      method: 'GET',
+  it('judges a connection and sees how it ended', async () => {
+    const connection = {
       host: 'api.example.com',
+      address: '93.184.216.34',
       port: 443,
       command: 'curl',
+      program: ['curl'],
+      line: 'curl https://api.example.com/a',
       sessionId: 's',
     }
     const refused = policyWith('preNetwork', new FakeProgram(answer({ kind: 'deny' })))
-    const denied = await refused.preNetwork(request)
+    const denied = await refused.preNetwork(connection)
     expect(denied?.[0]?.kind).toBe('deny')
-    const asked = scriptContext(request)
-    expect([asked.url, asked.host, asked.port, asked.command]).toEqual([
-      'https://api.example.com/a',
+    const asked = scriptContext(connection)
+    expect([asked.host, asked.address, asked.port, asked.command, asked.line]).toEqual([
       'api.example.com',
+      '93.184.216.34',
       443,
       'curl',
+      'curl https://api.example.com/a',
     ])
-    const done = { ...request, status: 200, size: 3, failed: false }
-    const held = policyWith('postNetwork', new FakeProgram(answer({ kind: 'ask' })))
-    const asks = await held.postNetwork(done)
-    expect(asks?.[0]?.kind).toBe('ask')
+    const done = {
+      ...connection,
+      bytesSent: 80,
+      bytesReceived: 512,
+      seconds: 0.5,
+      ended: 'closed' as const,
+    }
+    const held = policyWith('postNetwork', new FakeProgram())
+    expect(await held.postNetwork(done)).toBeNull()
     const ended = scriptContext(done)
-    expect([ended.status, ended.size, ended.failed]).toEqual([200, 3, false])
+    expect([ended.bytes_sent, ended.bytes_received, ended.ended]).toEqual([80, 512, 'closed'])
   })
 
   it('runs nothing at a method without a program', async () => {

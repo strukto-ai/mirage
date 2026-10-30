@@ -212,25 +212,6 @@ describe('config writer', () => {
     }
   })
 
-  it.each([
-    'false',
-    'true',
-    '{ allowed_domains = ["a.com", "10.0.0.0/8"] }',
-    '{ allowed_domains = ["*"], denied_domains = ["*:22"] }',
-  ])('prints network %s so it sets again', (value) => {
-    const { dir, path } = tmpConfigPath()
-    try {
-      setConfig('network', value, path)
-      const printed = getConfig('network', path)
-      expect(printed).toBe(value)
-      expect(listConfig(path)).toEqual({ network: value })
-      setConfig('network', printed ?? '', path)
-      expect(getConfig('network', path)).toBe(value)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
   it('setConfig updates an existing key in place without duplicating', () => {
     const { dir, path } = tmpConfigPath()
     try {
@@ -431,15 +412,11 @@ describe('resolvedConfig', () => {
   it('reports env, file, and default origins', () => {
     const home = mkdtempSync(join(tmpdir(), 'mirage-cli-resolved-'))
     try {
-      writeFileSync(
-        join(home, 'config.toml'),
-        '[daemon]\nport = 9001\nurl = "http://f:1"\nnetwork = { allowed_domains = ["a.com"] }\n',
-      )
+      writeFileSync(join(home, 'config.toml'), '[daemon]\nport = 9001\nurl = "http://f:1"\n')
       const env = { MIRAGE_HOME: home, MIRAGE_DAEMON_PORT: '9314', MIRAGE_POLICY_FILE: '/p.yaml' }
       const resolved = resolvedConfig(env)
       expect(resolved.port).toEqual(['9314', 'env MIRAGE_DAEMON_PORT'])
       expect(resolved.url).toEqual(['http://f:1', 'file'])
-      expect(resolved.network).toEqual(['{ allowed_domains = ["a.com"] }', 'file'])
       expect(resolved.policy_file).toEqual(['/p.yaml', 'env MIRAGE_POLICY_FILE'])
       expect(resolved.idle_grace_seconds).toEqual(['30', 'default'])
     } finally {
@@ -454,7 +431,6 @@ describe('resolvedConfig', () => {
       const resolved = resolvedConfig(env)
       expect(resolved.url).toEqual([DEFAULT_DAEMON_URL, 'default'])
       expect(resolved.idle_grace_seconds).toEqual(['30', 'default'])
-      expect(resolved.network).toEqual(['true', 'default'])
       expect(resolved.policy_file).toEqual(['', 'default'])
     } finally {
       rmSync(home, { recursive: true, force: true })

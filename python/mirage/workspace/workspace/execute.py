@@ -31,6 +31,7 @@ from mirage.errors.types import CommandTimeoutError
 from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.errors import MemoryExhausted
+from mirage.io.gateway import run_with_egress
 from mirage.io.memory import run_with_memory
 from mirage.io.network import run_with_network
 from mirage.io.types import ByteSource
@@ -40,7 +41,6 @@ from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
 from mirage.policy.decisions import is_pending
-from mirage.policy.policies import run_with_policies
 from mirage.process.table import ProcessTable
 from mirage.process.types import ProcessInfo
 from mirage.runtime.routing import RouteError
@@ -933,34 +933,30 @@ async def run_prepared_line(
                                 await ws.secret_sources(),
                             ),
                         )
-                io = await run_with_network(
+                io = await run_with_egress(
                     ws.registry.network_of(effective_session.network),
-                    run_with_policies(
-                        ws.registry.policies,
-                        run_with_memory(
-                            ws.registry.memory,
-                            run_whole_line(
-                                line_runtime,
-                                command,
-                                stdin,
-                                effective_session,
-                                ws.registry,
-                                claimant_for(ast, handed),
-                                cancel,
-                                ws.router.context(
-                                    command, effective_session, await judged()
-                                )
-                                if await ws.registry.policies.wants_for(
-                                    "post_execute",
-                                    effective_session.session_id,
-                                )
-                                else None,
-                                sink,
-                                context.frame.line_timeout
-                                if top_level
-                                else None,
-                                budget_start,
-                            ),
+                    ws.registry.policies,
+                    run_with_memory(
+                        ws.registry.memory,
+                        run_whole_line(
+                            line_runtime,
+                            command,
+                            stdin,
+                            effective_session,
+                            ws.registry,
+                            claimant_for(ast, handed),
+                            cancel,
+                            ws.router.context(
+                                command, effective_session, await judged()
+                            )
+                            if await ws.registry.policies.wants_for(
+                                "post_execute",
+                                effective_session.session_id,
+                            )
+                            else None,
+                            sink,
+                            context.frame.line_timeout if top_level else None,
+                            budget_start,
                         ),
                     ),
                 )
@@ -1077,40 +1073,38 @@ async def run_prepared_line(
             # deadline, which a nested one shares, and every object a
             # line builds must fit in what the workspace's max_memory has
             # left, and every connection it opens must clear its network.
-            io, _ = await run_with_network(
+            io, _ = await run_with_egress(
                 ws.registry.network_of(effective_session.network),
-                run_with_policies(
-                    ws.registry.policies,
-                    run_with_memory(
-                        ws.registry.memory,
-                        run_with_timeout(
-                            run_command_tree(
-                                ws.dispatch,
-                                ws.registry,
-                                ws.namespace,
-                                job_table or ws.job_table,
-                                exec_recursion,
-                                ast,
-                                context,
-                                stdin,
-                                cancel,
-                                handed=handed,
-                                sink=sink,
-                                call_stack=call_stack,
-                                execution_scope=execution_scope,
-                                route=ws.router.context(
-                                    command, effective_session, await judged()
-                                )
-                                if await ws.registry.policies.wants_for(
-                                    "post_execute",
-                                    effective_session.session_id,
-                                )
-                                else None,
-                            ),
-                            context.frame.line_timeout if top_level else None,
-                            LINE_NAME,
-                            budget_start,
+                ws.registry.policies,
+                run_with_memory(
+                    ws.registry.memory,
+                    run_with_timeout(
+                        run_command_tree(
+                            ws.dispatch,
+                            ws.registry,
+                            ws.namespace,
+                            job_table or ws.job_table,
+                            exec_recursion,
+                            ast,
+                            context,
+                            stdin,
+                            cancel,
+                            handed=handed,
+                            sink=sink,
+                            call_stack=call_stack,
+                            execution_scope=execution_scope,
+                            route=ws.router.context(
+                                command, effective_session, await judged()
+                            )
+                            if await ws.registry.policies.wants_for(
+                                "post_execute",
+                                effective_session.session_id,
+                            )
+                            else None,
                         ),
+                        context.frame.line_timeout if top_level else None,
+                        LINE_NAME,
+                        budget_start,
                     ),
                 ),
             )

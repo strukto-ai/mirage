@@ -440,43 +440,53 @@ def test_what_a_backend_returned_keeps_its_keys():
     assert df["result"][1]["inodes_free"] == 2
 
 
-def _request() -> NetworkContext:
+def _connection() -> NetworkContext:
     return NetworkContext(
-        url="https://api.example.com/a",
-        method="GET",
         host="api.example.com",
+        address="93.184.216.34",
         port=443,
         command="curl",
+        program=("curl",),
+        line="curl https://api.example.com/a",
         session_id="s",
     )
 
 
 @pytest.mark.asyncio
-async def test_a_program_judges_a_request_and_how_it_ended():
+async def test_a_program_judges_a_connection_and_sees_how_it_ended():
     refused = _policy("pre_network", FakeProgram(_answer(kind="deny")))
-    answers = await refused.pre_network(_request())
+    answers = await refused.pre_network(_connection())
     assert answers is not None and isinstance(answers[0], Deny)
-    asked = script_context(_request())
-    assert (asked["url"], asked["host"], asked["port"], asked["command"]) == (
-        "https://api.example.com/a",
+    asked = script_context(_connection())
+    assert (
+        asked["host"],
+        asked["address"],
+        asked["port"],
+        asked["command"],
+        asked["line"],
+    ) == (
         "api.example.com",
+        "93.184.216.34",
         443,
         "curl",
+        "curl https://api.example.com/a",
     )
+    seen = {
+        name: getattr(_connection(), name)
+        for name in ("host", "address", "port", "command", "session_id")
+    }
     done = NetworkResultContext(
-        **{
-            name: getattr(_request(), name)
-            for name in ("url", "method", "host", "port", "command")
-        },
-        session_id="s",
-        status=200,
-        size=3,
+        **seen, bytes_sent=80, bytes_received=512, seconds=0.5
     )
-    held = _policy("post_network", FakeProgram(_answer(kind="ask")))
-    answers = await held.post_network(done)
-    assert answers is not None and isinstance(answers[0], Ask)
+    watched = FakeProgram()
+    held = _policy("post_network", watched)
+    assert await held.post_network(done) is None
     ended = script_context(done)
-    assert (ended["status"], ended["size"], ended["failed"]) == (200, 3, False)
+    assert (
+        ended["bytes_sent"],
+        ended["bytes_received"],
+        ended["ended"],
+    ) == (80, 512, "closed")
 
 
 @pytest.mark.asyncio

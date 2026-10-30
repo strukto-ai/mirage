@@ -141,7 +141,8 @@ export function askRule(
 ): CommandRule {
   if (ask.rule != null) return ask.rule
   if ('verb' in ctx) return { reason: ask.reason, commands: [ctx.key] }
-  if ('url' in ctx) return { reason: ask.reason, commands: [ctx.url] }
+  if ('address' in ctx)
+    return { reason: ask.reason, commands: [ctx.host === '' ? ctx.address : ctx.host] }
   if ('call' in ctx) return { reason: ask.reason, paths: [ctx.path.virtual] }
   if ('commands' in ctx) return { reason: ask.reason, commands: [ctx.line] }
   const program = (ctx.program ?? [ctx.command]).join(' ')
