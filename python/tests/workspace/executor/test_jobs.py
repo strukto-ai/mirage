@@ -853,15 +853,16 @@ async def test_loop_body_jobs_write_after_the_foreground_line(
 
     monkeypatch.setattr(vfs, "read", read)
     try:
-        res = await ws.shell(
-            "for i in 1 2; do { cat /m/$i; echo $i; } & done; echo launched"
-        )
-        assert res.stdout == b"launched\n"
-        for job_id in order:
-            gates[str(job_id)].set()
-            await ws.job_table.wait(job_id, ws.default_session_id)
-        res = await ws.shell("wait")
-        assert res.stdout == "".join(f"{i}\n" for i in order).encode()
+        async with asyncio.timeout(5):
+            res = await ws.shell(
+                "for i in 1 2; do { cat /m/$i; echo $i; } & done; echo launched"
+            )
+            assert res.stdout == b"launched\n"
+            for job_id in order:
+                gates[str(job_id)].set()
+                await ws.job_table.wait(job_id, ws.default_session_id)
+            res = await ws.shell("wait")
+            assert res.stdout == "".join(f"{i}\n" for i in order).encode()
     finally:
         for gate in gates.values():
             gate.set()
