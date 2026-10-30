@@ -161,6 +161,13 @@ impl Reader {
     }
 
     pub(super) fn next(&mut self, rs: &[u8], regexes: &mut Regexes) -> Result<Next, Vec<u8>> {
+        if self.start > self.buf.len() / 2 {
+            self.search.shift(self.start);
+            self.buf.drain(..self.start);
+            self.start = 0;
+            crate::release_capacity(&mut self.buf);
+        }
+
         if let Some((start, end, next)) = take_record(
             &self.buf,
             self.start,
@@ -214,6 +221,7 @@ impl Reader {
         } else {
             self.search.shift(self.start);
             self.buf.drain(..self.start);
+            crate::release_capacity(&mut self.buf);
             self.start = 0;
             self.buf.extend_from_slice(data);
         }

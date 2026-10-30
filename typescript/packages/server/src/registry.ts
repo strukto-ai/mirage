@@ -33,7 +33,7 @@ import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
 import { watchNetwork } from '@struktoai/mirage-node/io/network'
-import { DaemonConfigError, parseNetwork, readDaemonTable } from './daemon_config.ts'
+import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
 import { ENV_MAX_WORKSPACES, ENV_POLICY_FILE } from './env.ts'
 import { ExecutionTable } from './jobs.ts'
 import { mirageHome } from './paths.ts'
@@ -98,12 +98,6 @@ export interface WorkspaceRegistryOptions {
   policies?: readonly Policy[]
   /** The server's policy programs, by method, which answer the same way. */
   programs?: ProfileScripts
-  /**
-   * What every workspace it builds is held to besides its own `network`; in
-   * jwt mode (`accountsRequired`) the cloud metadata addresses are refused
-   * too.
-   */
-  network?: NetworkSetting
 }
 
 /**
@@ -153,20 +147,6 @@ export function resolvePolicyFile(
   return loadPolicyFile(path)
 }
 
-/**
- * What every workspace the server builds is held to besides its own
- * `network`: `network` when given, else the `network` key in config.toml's
- * `[daemon]` table, else no limit. Mirrors Python's `resolve_network`.
- */
-export function resolveNetwork(
-  network?: NetworkSetting,
-  env: Record<string, string | undefined> = process.env,
-): NetworkSetting {
-  if (network !== undefined) return network
-  const named = readDaemonTable(mirageHome(env)).network
-  return named === undefined ? true : parseNetwork(named)
-}
-
 /** The server's policy programs, which every session answers to. */
 class Programs {
   constructor(private readonly programs: ProfileScripts) {}
@@ -188,7 +168,6 @@ export class WorkspaceRegistry {
   private readonly owners: DiskRecordClient | null
   readonly maxWorkspaces: number | null
   readonly policies: readonly Policy[]
-  readonly network: NetworkSetting
   private readonly programs: ProfileScripts
   private readonly admissionPrograms: ScriptPolicy
   private readonly admission: Policies
@@ -201,9 +180,6 @@ export class WorkspaceRegistry {
     )
     this.admissionPrograms = new ScriptPolicy(new Programs(options.programs ?? {}))
     this.admission = new Policies([...this.policies, this.admissionPrograms])
-    this.network = options.network ?? true
-    // A bad ceiling fails the server as it starts, not its first create.
-    networkRule(true, this.network)
     this.idleGraceSeconds = options.idleGraceSeconds ?? 30
     this.onIdleExit = options.onIdleExit ?? null
     this.accountsRequired = options.accountsRequired ?? false
@@ -212,11 +188,12 @@ export class WorkspaceRegistry {
 
   /**
    * The rule a workspace with this `network` is held to here: its own
-   * setting under the server's, null when nothing limits it. Throws when the
+   * setting, with the cloud metadata addresses refused in jwt mode
+   * (`accountsRequired`); null when nothing limits it. Throws when the
    * setting or one of its entries is not valid.
    */
   ruleFor(setting: NetworkSetting = true): NetworkRule | null {
-    const rule = networkRule(setting, this.network, this.accountsRequired)
+    const rule = networkRule(setting, this.accountsRequired)
     if (rule !== null) watchNetwork()
     return rule
   }

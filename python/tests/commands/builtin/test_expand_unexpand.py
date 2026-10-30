@@ -13,11 +13,46 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import json
+from dataclasses import dataclass
+from types import SimpleNamespace
+
 import pytest
 
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import open_stream
+from mirage.shell.bytes import byte_view
 from tests.commands.builtin.conftest import output_bytes as _bytes
 from tests.commands.builtin.conftest import ram_workspace as _ws
 from tests.commands.builtin.conftest import run_raw as _run_raw
+
+
+@dataclass(frozen=True)
+class TabStops:
+    stops: tuple[int, ...] = ()
+    extend: int = 0
+    increment: int = 0
+
+
+def read_tab_stops(occurrences: list[str], prog: str = "expand") -> TabStops:
+    try:
+        engine = open_stream(
+            "expand",
+            {
+                "tabs": [byte_view(tab) for tab in occurrences],
+                "initial_only": False,
+            },
+        )
+    except StreamRefusal as exc:
+        raise ValueError(exc.message) from exc
+    fields = json.loads(engine.metadata())
+    return TabStops(
+        tuple(fields["stops"]), fields["extend"], fields["increment"]
+    )
+
+
+def parse_flags(flags):
+    return SimpleNamespace(tabs=read_tab_stops([flags["tabs"]]))
 
 
 def test_expand_default_tab():
@@ -59,6 +94,25 @@ def test_expand_tab_size_with_no_digits_quotes_the_whole_argument():
     assert not stdout
 
 
+@pytest.mark.parametrize("raw", ["1_0", "0x10", "1e3", "-4"])
+def test_expand_tab_size_is_as_strict_as_gnu(raw):
+    """GNU refuses what `int()` accepts.
+
+    `_` is read whole by `int()`; GNU refuses it. `-` is not a sign to
+    expand but the first invalid character, so `-4` is refused too.
+
+    Surrounding BLANKS used to be in this list and are not: `isblank` is
+    a tab-stop separator, so GNU reads `-t ' 5 '` as an empty element,
+    5 and another empty element, and answers with tab size 5 (measured;
+    ground truth NL2-D). The row below is that case, the right way up.
+    """
+    with pytest.raises(ValueError) as refusal:
+        parse_flags({"tabs": raw})
+    assert str(refusal.value).startswith(
+        "expand: tab size contains invalid character(s): '"
+    )
+
+
 @pytest.mark.parametrize("raw", [" 5 ", " 5", "5 ", "\t5\t"])
 def test_expand_blanks_around_a_tab_size_are_separators(raw):
     """GNU accepts each of these and reads one stop at 5 (measured)."""
@@ -69,8 +123,50 @@ def test_expand_blanks_around_a_tab_size_are_separators(raw):
     assert _bytes(stdout) == b"a    b"
 
 
+@pytest.mark.parametrize(
+    "raw,quoted", [("-4", "-4"), ("8x", "x"), ("abc", "abc"), ("+x", "x")]
+)
+def test_expand_quotes_from_the_first_unparseable_character(raw, quoted):
+    """GNU quotes from where the scan stopped, not "after the digits".
+
+    `8x` stops at `x` and quotes only it, while `-4` stops at position 0
+    and quotes the whole argument. A leading `+` is consumed as a sign,
+    so `+x` stops at `x`.
+    """
+    with pytest.raises(ValueError) as refusal:
+        parse_flags({"tabs": raw})
+    assert str(refusal.value) == (
+        f"expand: tab size contains invalid character(s): '{quoted}'"
+    )
+
+
+def test_expand_reads_a_stop_past_the_int_digit_limit():
+    # GNU 9.7: 5,000 zeros before a number leave the number, and a
+    # 5,000-digit stop is too large.
+    zeros = "0" * 5000
+    assert read_tab_stops([f"{zeros}4"]) == TabStops(stops=(4,))
+    assert read_tab_stops([f"2,/{zeros}4"]) == TabStops(stops=(2,), extend=4)
+    nines = "9" * 5000
+    with pytest.raises(ValueError, match="^expand: tab stop is too large '9"):
+        read_tab_stops([nines])
+
+
+def test_expand_tab_size_accepts_a_leading_plus():
+    """`+4` is not a sign: it is the specifier that makes 4 an increment.
+
+    A bare `+4` and a bare `4` coincide (an increment of 4 from column 0
+    is the same sequence as a repeating size of 4), which is why round 2
+    read `+` as a sign, but they are different parses -- `-t 2,+4` and
+    `-t 2,4` render differently (ground truth NL2-E).
+    """
+    assert parse_flags({"tabs": "4"}).tabs == TabStops(stops=(4,))
+    assert parse_flags({"tabs": "+4"}).tabs == TabStops(increment=4)
+    assert parse_flags({"tabs": "/4"}).tabs == TabStops(extend=4)
+
+
 def test_expand_empty_tab_list_is_the_default_size():
     """`--tabs=''` is zero tab stops, which leaves GNU on its default 8."""
+    assert parse_flags({"tabs": ""}).tabs == TabStops()
     ws, _ = _ws()
     stdout, io = _run_raw(ws, "expand -t ''", stdin=b"a\tb")
     assert io.exit_code == 0
@@ -270,6 +366,13 @@ _EXPAND_REFUSALS = [
 
 
 @pytest.mark.parametrize("raw,message", _EXPAND_REFUSALS)
+def test_expand_refuses_a_tab_list_gnu_refuses(raw, message):
+    with pytest.raises(ValueError) as refusal:
+        read_tab_stops([raw])
+    assert str(refusal.value) == message
+
+
+@pytest.mark.parametrize("raw,message", _EXPAND_REFUSALS)
 def test_expand_tab_list_refusal_is_fatal_before_any_operand(raw, message):
     """Exit 1, empty stdout, and one line per problem with no hint."""
     ws, _ = _ws()
@@ -300,21 +403,56 @@ def test_expand_tab_list_refusal_is_fatal_before_any_operand(raw, message):
 )
 def test_expand_refuses_across_occurrences(occurrences, message):
     """The accumulated state is what a second `-t` is checked against."""
-    ws, _ = _ws()
-    argv = " ".join(f"-t '{raw}'" for raw in occurrences)
-    stdout, io = _run_raw(ws, f"expand {argv}", stdin=b"a\tb\n")
-    assert io.exit_code == 1
-    assert not _bytes(stdout)
-    assert io.stderr == f"{message}\n".encode()
+    with pytest.raises(ValueError) as refusal:
+        read_tab_stops(occurrences)
+    assert str(refusal.value) == message
 
 
 @pytest.mark.parametrize("raw", ["", ",", ",,", " ", "+", "/"])
 def test_expand_an_empty_list_leaves_the_default(raw):
     """No stop and neither specifier: GNU stays on 8."""
-    ws, _ = _ws()
-    stdout, io = _run_raw(ws, f"expand -t '{raw}'", stdin=b"a\tb")
-    assert io.exit_code == 0
-    assert _bytes(stdout) == b"a       b"
+    assert read_tab_stops([raw]) == TabStops()
+
+
+# A newline is not `isblank` in C (that is space and TAB and nothing
+# else), so it is an invalid character rather than a separator. The
+# character scan gets this for free where the old `^\+?[0-9]+$` with
+# `re.match` accepted it, because python's `$` also matches immediately
+# BEFORE a trailing newline (ground truth NL2-A). The remainder is quoted
+# and escaped as every coreutils diagnostic quotes one, so each of these is
+# the escape's two characters and never the byte (NL3-A).
+@pytest.mark.parametrize(
+    "raw,quoted",
+    [
+        ("8\n", "\\n"),
+        ("8\n4", "\\n4"),
+        ("8\r", "\\r"),
+        ("8\x0b", "\\v"),
+        ("8\x0c", "\\f"),
+        ("8\x07", "\\a"),
+        ("8\x01", "\\001"),
+    ],
+)
+def test_expand_refuses_a_non_blank_separator(raw, quoted):
+    with pytest.raises(ValueError) as refusal:
+        read_tab_stops([raw])
+    assert str(refusal.value) == (
+        f"expand: tab size contains invalid character(s): '{quoted}'"
+    )
+
+
+@pytest.mark.parametrize("raw", ["\u0663", "8\u0663"])
+def test_expand_digits_are_ascii_only(raw):
+    """GNU scans with `c_isdigit`; a unicode-aware test accepts U+0663.
+
+    And the refusal names its BYTES: U+0663 is two of them, so it reads
+    as two octal escapes rather than as the character (NL3-A).
+    """
+    with pytest.raises(ValueError) as refusal:
+        read_tab_stops([raw])
+    assert str(refusal.value) == (
+        "expand: tab size contains invalid character(s): '\\331\\243'"
+    )
 
 
 # Only a NEWLINE resets the column. `str.expandtabs` treats a carriage
@@ -392,3 +530,80 @@ def test_expand_backspace_ends_the_leading_run_under_initial_only():
     stdout, io = _run_raw(ws, "expand -i -t 4", stdin=b"  \b \tx\n")
     assert io.exit_code == 0
     assert _bytes(stdout) == b"  \b \tx\n"
+
+
+# A misplaced `/` or `+` is REPORTED AND THEN THE SCAN CONTINUES, where an
+# invalid character breaks it. Round 8 returned on both, so `-t 4+5+6`
+# printed one line where GNU prints two and `-t 4+x` printed one where GNU
+# prints the misplaced line and then the invalid-character one. Measured,
+# ground truth NL3-A's slot table and the probe behind it.
+@pytest.mark.parametrize(
+    "raw,message",
+    [
+        ("4+", "expand: '+' specifier not at start of number: '+'"),
+        ("4+5", "expand: '+' specifier not at start of number: '+5'"),
+        (
+            "4+x",
+            "expand: '+' specifier not at start of number: '+x'\n"
+            "expand: tab size contains invalid character(s): 'x'",
+        ),
+        (
+            "4/x",
+            "expand: '/' specifier not at start of number: '/x'\n"
+            "expand: tab size contains invalid character(s): 'x'",
+        ),
+        (
+            "4+,x",
+            "expand: '+' specifier not at start of number: '+,x'\n"
+            "expand: tab size contains invalid character(s): 'x'",
+        ),
+        (
+            "4+5+6",
+            "expand: '+' specifier not at start of number: '+5+6'\n"
+            "expand: '+' specifier not at start of number: '+6'",
+        ),
+        (
+            "1,2+x",
+            "expand: '+' specifier not at start of number: '+x'\n"
+            "expand: tab size contains invalid character(s): 'x'",
+        ),
+        ("+4+5", "expand: '+' specifier not at start of number: '+5'"),
+        ("+4/5", "expand: '/' specifier not at start of number: '/5'"),
+    ],
+)
+def test_expand_a_misplaced_specifier_does_not_end_the_scan(raw, message):
+    with pytest.raises(ValueError) as refusal:
+        read_tab_stops([raw])
+    assert str(refusal.value) == message
+
+
+@pytest.mark.parametrize(
+    "raw,message",
+    [
+        ("x+", "expand: tab size contains invalid character(s): 'x+'"),
+        ("x/", "expand: tab size contains invalid character(s): 'x/'"),
+        ("x,3,1", "expand: tab size contains invalid character(s): 'x,3,1'"),
+        ("1,x,0", "expand: tab size contains invalid character(s): 'x,0'"),
+        ("1;3;5", "expand: tab size contains invalid character(s): ';3;5'"),
+        ("x0", "expand: tab size contains invalid character(s): 'x0'"),
+    ],
+)
+def test_expand_an_invalid_character_does_end_the_scan(raw, message):
+    """The other direction: one line, and nothing to its right is read."""
+    with pytest.raises(ValueError) as refusal:
+        read_tab_stops([raw])
+    assert str(refusal.value) == message
+
+
+@pytest.mark.parametrize("command", ["expand", "unexpand"])
+def test_tab_error_quotes_raw_argument_bytes(command):
+    ws, _ = _ws()
+    stdout, io = _run_raw(ws, command + r" -t $'\377'")
+    assert io.exit_code == 1
+    assert (
+        io.stderr
+        == (
+            command + ": tab size contains invalid character(s): '\\377'\n"
+        ).encode()
+    )
+    assert not stdout

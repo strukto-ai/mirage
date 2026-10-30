@@ -826,3 +826,17 @@ describe('MountRegistry.heldInMemory', () => {
     expect(reg.heldInMemory()).toBe(6)
   })
 })
+
+describe('MountRegistry.networkOf', () => {
+  it('starts the host watch once a profile narrows a workspace that limits nothing', () => {
+    const reg = new MountRegistry({ '/data': new RAMVFS() }, MountMode.WRITE)
+    const watch = vi.fn()
+    reg.setNetworkWatch(watch)
+    expect(reg.networkOf(true)).toBeNull()
+    expect(watch).not.toHaveBeenCalled()
+    const narrowed = reg.networkOf(false)
+    expect(narrowed?.lets('', '127.0.0.1', 80)).toBe(false)
+    expect(reg.networkOf(false)).toBe(narrowed)
+    expect(watch).toHaveBeenCalledTimes(1)
+  })
+})

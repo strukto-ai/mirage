@@ -18,11 +18,10 @@ import type { GoogleApiAccessor } from '../../../../accessor/google_api.ts'
 import type { TokenManager } from '../../../../core/google/client.ts'
 import {
   driveBase,
-  googleDelete,
   googleGet,
   googleGetStream,
   googlePatch,
-  googlePost,
+  googleRequest,
 } from '../../../../core/google/client.ts'
 import type { GoogleConfig } from '../../../../core/google/config.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -102,30 +101,9 @@ function queryStr(query: Record<string, unknown>): Record<string, string> {
 }
 
 function withQuery(url: string, query: Record<string, string>): string {
-  const pairs = Object.entries(query)
-    .map(([k, v]) => `${k}=${v}`)
-    .join('&')
+  const pairs = new URLSearchParams(query).toString()
   if (pairs === '') return url
   return url + (url.includes('?') ? '&' : '?') + pairs
-}
-
-const NO_CONTENT = Symbol('no-content')
-
-type Caller = (
-  tm: TokenManager,
-  url: string,
-  body: Record<string, unknown>,
-  query: Record<string, string>,
-) => Promise<unknown>
-
-const CALLERS: Record<GwsMethod['http'], Caller> = {
-  GET: (tm, url, _body, query) => googleGet(tm, url, query),
-  POST: (tm, url, body, query) => googlePost(tm, withQuery(url, query), body),
-  PATCH: (tm, url, body, query) => googlePatch(tm, url, body, query),
-  DELETE: async (tm, url, _body, query) => {
-    await googleDelete(tm, withQuery(url, query))
-    return NO_CONTENT
-  },
 }
 
 /**
@@ -241,14 +219,23 @@ export async function runGwsMethod(
     // page unless --page-all is passed: a truncated listing is
     // indistinguishable from a complete one, so mirage follows the token by
     // default and --page-limit is how you opt out.
-    const out = await paginate(method, tm, url, body, queryParams, pageLimit)
+    const out = await paginate(tm, url, queryParams, pageLimit)
     return [out, new IOResult()]
   }
-  const result = await CALLERS[method.http](tm, url, body, queryParams)
-  if (method.placement === 'relocate' && result !== NO_CONTENT && result !== null) {
+  const deleting = method.http === 'DELETE'
+  const result = await googleRequest(tm, method.http, url, {
+    params: queryParams,
+    ...(deleting ? { read: 'none' } : { json: body }),
+  })
+  if (deleting) return [null, new IOResult()]
+  if (
+    method.placement === 'relocate' &&
+    result !== null &&
+    typeof result === 'object' &&
+    !Array.isArray(result)
+  ) {
     await placeInScope(method, tm, result as Record<string, unknown>)
   }
-  if (result === NO_CONTENT) return [null, new IOResult()]
   return [ENC.encode(JSON.stringify(result)), new IOResult()]
 }
 
@@ -262,10 +249,8 @@ function parsePageLimit(raw: unknown): number | null {
 // silently returns a partial listing. Pages are emitted as NDJSON so a
 // caller can pipe straight into `jq`, which evaluates per document.
 async function paginate(
-  method: GwsMethod,
   tm: TokenManager,
   url: string,
-  body: Record<string, unknown>,
   query: Record<string, string>,
   pageLimit: number | null,
 ): Promise<Uint8Array> {
@@ -277,8 +262,7 @@ async function paginate(
     // so a mutated one would let a later token leak backwards.
     const params = { ...query }
     if (token !== null) params.pageToken = token
-    const result = await CALLERS[method.http](tm, url, body, params)
-    if (result === NO_CONTENT) break
+    const result = await googleGet(tm, url, params)
     pages.push(JSON.stringify(result))
     fetched += 1
     if (pageLimit !== null && fetched >= pageLimit) break

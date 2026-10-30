@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { extractTitle, normalizePage, pageSegmentName, toJsonBytes } from './normalize.ts'
+import { extractTitle, normalizePage, pageSegmentName } from './normalize.ts'
 
 describe('extractTitle', () => {
   it('joins title.title plain_text fragments', () => {
@@ -160,13 +160,5 @@ describe('normalizePage', () => {
       { object: 'block', id: 'b3', type: 'child_database' },
     ]
     expect(normalizePage(page, blocks).blocks).toEqual([keep])
-  })
-})
-
-describe('toJsonBytes', () => {
-  it('encodes JSON with two-space indent', () => {
-    const bytes = toJsonBytes({ a: 1 })
-    const decoded = new TextDecoder().decode(bytes)
-    expect(decoded).toBe('{\n  "a": 1\n}')
   })
 })

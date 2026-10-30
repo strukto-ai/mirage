@@ -110,6 +110,7 @@ impl Uniq {
             let first = self.first.get_or_insert_with(Vec::new);
             first.clear();
             first.extend_from_slice(line);
+            crate::release_capacity(first);
             self.count = 0;
             self.groups += 1;
         }

@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { OutputStream, closeQuietly, drain, ensureStream } from '../../../io/stream.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { PathSpec } from '../../../types.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -73,6 +75,7 @@ async function wget(
       ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
       timeoutMs:
         timeout === undefined ? HTTP_TIMEOUT_SECONDS * 1000 : timeout === 0 ? null : timeout * 1000,
+      stream: true,
     })
   } catch (err) {
     if (!(err instanceof HttpConnectError) && !(err instanceof HttpTimeoutError)) throw err
@@ -80,9 +83,36 @@ async function wget(
     const line = `Connecting to ${err.host}:${String(err.port)}... failed: ${reason}.\n`
     return [null, new IOResult({ exitCode: EXIT_NETWORK, stderr: said(q, line) })]
   }
+  const final = resp
+  // The body bytes read so far, and the failure that cut the transfer short,
+  // which the status reports once it ends.
+  let received = 0
+  let cut: HttpConnectError | null = null
+  async function* delivered(): AsyncGenerator<Uint8Array> {
+    try {
+      for await (const chunk of ensureStream(final.body)) {
+        received += chunk.byteLength
+        yield chunk
+      }
+    } catch (err) {
+      if (!(err instanceof HttpConnectError)) throw err
+      cut = err
+    }
+  }
+  // Closing it lets the connection go, whether or not it was ever read.
+  const body = new OutputStream(delivered(), () => closeQuietly(final.body))
+  const broke = async (io: IOResult): Promise<void> => {
+    if (cut === null) return
+    const reason =
+      cut instanceof HttpTimeoutError ? 'Connection timed out' : 'Connection reset by peer'
+    const line = `Read error at byte ${String(received)} (${reason}). Giving up.\n`
+    io.exitCode = EXIT_NETWORK
+    io.stderr = concat([await materialize(io.stderr), said(q, line)])
+  }
   // --spider reports its verdict on stderr, not stdout, and inherits the same
   // exit 8 an error status gives a real download.
   if (spider) {
+    await closeQuietly(body)
     if (isHttpError(resp)) {
       const line = 'Remote file does not exist -- broken link!!!\n'
       return [null, new IOResult({ exitCode: EXIT_SERVER_ERROR, stderr: said(q, line) })]
@@ -94,22 +124,30 @@ async function wget(
     (argsO instanceof PathSpec && argsO.rawPath === '-') ||
     (isHttpError(resp) && argsO === null)
   ) {
-    return [
-      isHttpError(resp) ? null : resp.body,
-      new IOResult({
-        exitCode: isHttpError(resp) ? EXIT_SERVER_ERROR : 0,
-        stderr: isHttpError(resp)
-          ? said(q, `ERROR ${String(resp.status)}: ${resp.reason}.\n`)
-          : new Uint8Array(),
-      }),
-    ]
+    if (isHttpError(resp)) {
+      await closeQuietly(body)
+      const line = `ERROR ${String(resp.status)}: ${resp.reason}.\n`
+      return [null, new IOResult({ exitCode: EXIT_SERVER_ERROR, stderr: said(q, line) })]
+    }
+    const io = new IOResult({ stderr: new Uint8Array() })
+    async function* out(): AsyncGenerator<Uint8Array> {
+      for await (const chunk of body) yield chunk
+      await broke(io)
+    }
+    return [new OutputStream(out(), () => closeQuietly(body)), io]
   }
   const target = argsO ?? paths[0] ?? (url.slice(url.lastIndexOf('/') + 1) || 'index.html')
   const dest = target instanceof PathSpec ? target.virtual : target
   // An error status still creates the destination, empty, the way GNU wget
   // truncates the -O target before it learns the response code.
-  const data = isHttpError(resp) ? new Uint8Array() : resp.body
-  if (ctx.vfs !== undefined) {
+  let data: ByteSource = body
+  if (isHttpError(resp)) {
+    await closeQuietly(body)
+    data = new Uint8Array()
+  }
+  if (ctx.vfs === undefined) {
+    await drain(data)
+  } else {
     const scope = resolveTarget(target, ctx.cwd.virtual)
     try {
       await ctx.vfs.dispatch('write', scope, [data])
@@ -124,15 +162,20 @@ async function wget(
         null,
         new IOResult({ exitCode: EXIT_GENERIC, stderr: ENC.encode(`${dest}: ${detail}\n`) }),
       ]
+    } finally {
+      await closeQuietly(body)
     }
   }
   if (isHttpError(resp)) {
     const line = `ERROR ${String(resp.status)}: ${resp.reason}.\n`
     return [null, new IOResult({ exitCode: EXIT_SERVER_ERROR, stderr: said(q, line) })]
   }
+  const io = new IOResult()
+  await broke(io)
+  if (io.exitCode !== 0) return [null, io]
   // Real wget puts its progress report on stderr and nothing on stdout.
-  const line = `'${dest}' saved [${String(data.byteLength)}/${String(data.byteLength)}]\n`
-  return [null, new IOResult({ stderr: said(q, line) })]
+  io.stderr = said(q, `'${dest}' saved [${String(received)}/${String(received)}]\n`)
+  return [null, io]
 }
 
 export const GENERAL_WGET = command({

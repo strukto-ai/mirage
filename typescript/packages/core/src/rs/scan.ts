@@ -23,12 +23,10 @@ const decoder = new TextDecoder()
 /**
  * A command's typed words, read by mirage-rs before any input is read. The
  * tape holds each option as `[dest, value]` in the order typed, a switch with
- * an empty value. A grammar that reads more gets more: each operand as
+ * an empty value. A grammar that reads its operands also gets each operand as
  * `[OPERAND, word]` where it was typed, a glob already expanded into its
- * matches in its place; each word it reads by its spelling as
- * `[SPELLED, word]` just before the occurrence it spells; and the line's last
- * word as `[LAST_WORD, word]`. A value the command refuses never reaches an
- * input. Returns the values keyed as the command's grammar answers; throws
+ * matches in its place. A value the command refuses never reaches an input.
+ * Returns the values keyed as the command's grammar answers; throws
  * StreamRefusal for the first word the command refuses, with the command's
  * exit status. Mirrors Python's `scan`.
  */

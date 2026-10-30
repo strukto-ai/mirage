@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from mirage.io.types import ByteSource, IOResult
     from mirage.observe.record import OpRecord, Recorder
     from mirage.policy.types import (
+        CommandContext,
         DecisionOwner,
         DryRun,
         EntryGate,
@@ -165,6 +166,10 @@ class Caller:
             process) the call runs in, which its records name.
         process (ProcessHandle | None): the managed runner the call runs
             in, whose kill signal a native program it started receives.
+        invocation (CommandContext | None): what ``pre_command`` judged
+            the running command on, which a connection it opens reports.
+        vfs_mount (str | None): the prefix of the mount whose VFS serves
+            the call, None outside one.
     """
 
     session: SessionState | None = None
@@ -204,6 +209,8 @@ class Caller:
     enclosing: JobConsole | None = None
     execution: str | None = None
     process: ProcessHandle | None = None
+    invocation: CommandContext | None = None
+    vfs_mount: str | None = None
 
     @property
     def visibility(self) -> Visibility | None:
@@ -673,9 +680,8 @@ def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
     """Bind the executing mount's prefix and configured mode to the
     current async context, for the run of one command.
 
-    ``Mount.run_command`` binds the same around the handler: its files'
-    calls read it (``get_mount_gate``) to tell a run on one mount from a
-    line that spans mounts, and to ask that mount's facts.
+    The mount's command scope binds the same caller field around its
+    handler; file calls read it through ``current_caller().mount``.
 
     Args:
         prefix (str): the mount's prefix.
@@ -687,13 +693,6 @@ def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
 def reset_mount_gate(token: CallerToken) -> None:
     """Restore the previous mount binding."""
     reset_caller(token)
-
-
-def get_mount_gate() -> tuple[str, MountMode] | None:
-    """The executing mount's (prefix, configured mode), None outside a
-    mount's command: a line that spans mounts, run through the dispatcher
-    alone, or the scratch tier."""
-    return _caller.get().mount
 
 
 def set_refusal_sink(sink: RefusalSink) -> CallerToken:

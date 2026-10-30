@@ -6,6 +6,7 @@ from yarl import URL
 
 import mirage.core.msgraph.drive as drive_ops
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
+from mirage.context import session_context as caller
 from mirage.core.msgraph.client import GraphError
 from mirage.core.msgraph.drive import (
     DriveLoc,
@@ -19,11 +20,7 @@ from mirage.core.msgraph.drive import (
 from mirage.core.onedrive.read import read as onedrive_read
 from mirage.core.onedrive.stream import read_stream as onedrive_stream
 from mirage.io.types import ByteSource
-from mirage.observe.context import (
-    RecordingScope,
-    push_revisions,
-    reset_revisions,
-)
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
 _CONFLICT = {"error": {"code": "nameAlreadyExists", "message": "x"}}
@@ -296,7 +293,9 @@ async def test_read_item_records_the_virtual_path_on_a_pinned_read(
     # A pinned read must record the full virtual path, or the pin a
     # snapshot restores is never found again. Reached through the onedrive
     # reader; the pinned branch is the one the onedrive read test skips.
-    revisions = push_revisions({"/m/m/k.txt": "3.0"})
+    revisions = caller.bind_caller(
+        caller.current_caller().changed({"revisions": {"/m/m/k.txt": "3.0"}})
+    )
     scope = RecordingScope()
     try:
         with aioresponses() as m:
@@ -306,7 +305,7 @@ async def test_read_item_records_the_virtual_path_on_a_pinned_read(
             data = await onedrive_read(_accessor(), _OD_SPEC)
     finally:
         scope.close()
-        reset_revisions(revisions)
+        caller.reset_caller(revisions)
     assert data == b"old"
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
 
@@ -316,7 +315,9 @@ async def test_stream_item_records_the_virtual_path_on_a_pinned_read(
     exact_cloud_paths,
 ):
     # The stream twin of the above, through the onedrive streamer.
-    revisions = push_revisions({"/m/m/k.txt": "3.0"})
+    revisions = caller.bind_caller(
+        caller.current_caller().changed({"revisions": {"/m/m/k.txt": "3.0"}})
+    )
     scope = RecordingScope()
     try:
         with aioresponses() as m:
@@ -326,7 +327,7 @@ async def test_stream_item_records_the_virtual_path_on_a_pinned_read(
             chunks = [c async for c in onedrive_stream(_accessor(), _OD_SPEC)]
     finally:
         scope.close()
-        reset_revisions(revisions)
+        caller.reset_caller(revisions)
     assert b"".join(chunks) == b"old"
     assert [r.path for r in scope.records] == ["/m/m/k.txt"]
 

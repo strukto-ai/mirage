@@ -832,6 +832,7 @@ describe('tail asks the mount for the last lines', () => {
   it.each([
     [{}, 10],
     [{ n: '2' }, 2],
+    [{ n: '-2' }, 2],
     [{ n: '+2' }, null],
     [{ c: '2' }, null],
   ] as const)('with %j asks for %s', async (flags, asked) => {
@@ -981,3 +982,67 @@ describe('tail asks the mount for the last lines', () => {
     expect(text).toBe('b\nc\n')
   })
 })
+
+it.each([
+  [{ n: '2' }, 16, 16384],
+  [{ c: '1000' }, 1000, 1000],
+  [{ n: String(2 << 20) }, 16 << 20, 17 << 20],
+] as const)('reads seekable tails through bounded ranges: %j', async (flags, expected, maximum) => {
+  const size = 40 << 20
+  let requested = 0
+  const block = ENC.encode('1234567\n'.repeat(2049))
+  const stat = (): Promise<FileStat> =>
+    Promise.resolve(new FileStat({ name: 'log', type: FileType.FILE, size }))
+  const read = (): AsyncIterable<Uint8Array> => {
+    throw new Error('must use range reads')
+  }
+  async function* range(
+    _path: PathSpec,
+    offset: number,
+    count: number,
+  ): AsyncGenerator<Uint8Array> {
+    expect(count).toBeLessThanOrEqual(1 << 20)
+    requested += count
+    await Promise.resolve()
+    for (let at = offset; at < offset + count; at += 16384) {
+      yield block.subarray(at % 8, (at % 8) + Math.min(16384, offset + count - at))
+    }
+  }
+  await runWithMemory(new MemoryBudget(32 << 20, () => 0), async () => {
+    const result = await tailGeneric([spec('/d/log')], [], ctx({ ...flags }), read, stat, range)
+    if (result === null) throw new Error('missing command result')
+    const [source, io] = result
+    let seen = 0
+    for await (const part of source as AsyncIterable<Uint8Array>) {
+      expect(part.length).toBeLessThanOrEqual(16384)
+      seen += part.length
+    }
+    expect(seen).toBe(expected)
+    expect(io.exitCode).toBe(0)
+  })
+  expect(requested).toBeLessThanOrEqual(maximum + expected)
+})
+
+it.each([{ n: '1' }, { c: '4' }])(
+  'reads streamed bytes when stat reports zero: %j',
+  async (flags) => {
+    const read = async function* (): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode('first\nlast')
+    }
+    const result = await tailGeneric(
+      [spec('/pipe')],
+      [],
+      ctx(flags),
+      read,
+      () =>
+        Promise.resolve(new FileStat({ name: 'pipe', type: FileType.FILE, size: 0, mode: 0o600 })),
+      () => {
+        throw new Error('a zero-size stat does not establish a seekable file')
+      },
+    )
+    if (result === null) throw new Error('missing command result')
+    expect(await materialize(result[0])).toEqual(ENC.encode('last'))
+    expect(result[1].exitCode).toBe(0)
+  },
+)

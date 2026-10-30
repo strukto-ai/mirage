@@ -28,7 +28,7 @@ async function runTr(
   texts: string[],
   flags: Record<string, string | boolean | number | string[]> = {},
   stdin: Uint8Array | null = null,
-): Promise<{ out: string; exitCode: number }> {
+): Promise<{ out: string; err: string; exitCode: number }> {
   const cmd = RAM_TR[0]
   const vfs = new RAMVFS()
   if (cmd === undefined) throw new Error('tr not registered')
@@ -40,7 +40,7 @@ async function runTr(
       cwd: PathSpec.fromStrPath('/'),
     }),
   )
-  if (result === null) return { out: '', exitCode: -1 }
+  if (result === null) return { out: '', err: '', exitCode: -1 }
   const [out, ioResult] = result
   const buf =
     out === null
@@ -48,7 +48,7 @@ async function runTr(
       : out instanceof Uint8Array
         ? out
         : await materialize(out as AsyncIterable<Uint8Array>)
-  return { out: DEC.decode(buf), exitCode: ioResult.exitCode }
+  return { out: DEC.decode(buf), err: await ioResult.stderrStr(), exitCode: ioResult.exitCode }
 }
 
 describe('tr', () => {
@@ -65,6 +65,8 @@ describe('tr', () => {
   it('-d without -s names the second operand as extra', async () => {
     const two = await runTr(['a', 'b'], { delete: true }, ENC.encode('x'))
     expect(two.exitCode).toBe(1)
-    await expect(runTr(['a', 'b', 'c'])).rejects.toThrow("tr: extra operand 'c'")
+    const three = await runTr(['a', 'b', 'c'])
+    expect(three.exitCode).toBe(1)
+    expect(three.err).toBe("tr: extra operand 'c'\nTry 'tr --help' for more information.\n")
   })
 })

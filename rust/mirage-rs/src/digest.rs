@@ -13,6 +13,8 @@ use crate::{Stream, StreamError, parse_config, quoted};
 #[serde(deny_unknown_fields)]
 struct Config {
     algorithm: String,
+    #[serde(default)]
+    check_lines: bool,
     /// BLAKE2b's digest length in bits as b2sum's -l was typed, one
     /// character per byte; none is 512.
     #[serde(default, deserialize_with = "crate::latin1_opt")]
@@ -60,6 +62,14 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         }
         other => return Err(StreamError::new(format!("unknown digest: {other}"))),
     };
+    if config.check_lines {
+        return Ok(Box::new(CheckLines {
+            algorithm: config.algorithm,
+            records: crate::records::Records::default(),
+            line: 0,
+            busy: false,
+        }));
+    }
     Ok(Box::new(hasher))
 }
 
@@ -131,6 +141,110 @@ impl Stream for Hasher {
             Self::Blake2b(state) => state.2 * 8,
         };
         out.extend_from_slice(serde_json::json!({ "bits": bits }).to_string().as_bytes());
+    }
+}
+
+/// Checksum-list grammar, shared by both hosts. Paths stay on the host,
+/// which hashes through the same dispatcher as any other file read.
+struct CheckLines {
+    algorithm: String,
+    records: crate::records::Records,
+    line: u64,
+    busy: bool,
+}
+
+fn check_line(line: &str, algorithm: &str) -> Option<(String, String, String)> {
+    let mut named_bits = None;
+    let tagged = line.split_once(" (").and_then(|(tag, rest)| {
+        if algorithm == "blake2b" {
+            named_bits = Some(if tag == "BLAKE2b" {
+                512
+            } else {
+                let bits = tag.strip_prefix("BLAKE2b-")?;
+                if bits.is_empty() || !bits.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                bits.parse::<usize>().ok()?
+            });
+        } else if tag != algorithm.to_ascii_uppercase() {
+            return None;
+        }
+        let (name, digest) = rest.rsplit_once(") = ")?;
+        Some((digest, name))
+    });
+    let (digest, name) = tagged.or_else(|| {
+        named_bits = None;
+        let (digest, rest) = line.split_once(' ')?;
+        let name = rest.strip_prefix(' ').or_else(|| rest.strip_prefix('*'))?;
+        Some((digest, name))
+    })?;
+    if digest.is_empty() || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bits = digest.len() * 4;
+    let named = if algorithm == "blake2b" {
+        if bits % 8 != 0 || bits > 512 || named_bits.is_some_and(|n| n != bits) {
+            return None;
+        }
+        if bits == 512 {
+            algorithm.to_owned()
+        } else {
+            format!("blake2b-{bits}")
+        }
+    } else {
+        let expected = match algorithm {
+            "md5" => 128,
+            "sha1" => 160,
+            "sha224" => 224,
+            "sha256" => 256,
+            "sha384" => 384,
+            "sha512" => 512,
+            _ => return None,
+        };
+        if bits != expected {
+            return None;
+        }
+        algorithm.to_owned()
+    };
+    Some((digest.to_ascii_lowercase(), name.to_owned(), named))
+}
+
+impl CheckLines {
+    fn pump(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let start = out.len();
+        self.busy = true;
+        while out.len() - start < 64 * 1024 {
+            let crate::records::Take::Record(line) = self.records.next_span(b'\n') else {
+                self.busy = false;
+                break;
+            };
+            self.line += 1;
+            let line = String::from_utf8_lossy(line);
+            if line.trim().is_empty() {
+                continue;
+            }
+            let record = serde_json::json!({"line": self.line, "parsed": check_line(&line, &self.algorithm)});
+            serde_json::to_writer(&mut *out, &record)
+                .map_err(|err| StreamError::new(err.to_string()))?;
+            out.push(b'\n');
+        }
+        Ok(())
+    }
+}
+impl Stream for CheckLines {
+    fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.records.push(input);
+        self.pump(out)
+    }
+    fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.records.end();
+        self.pump(out)
+    }
+    fn busy(&self) -> bool {
+        self.busy
+    }
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.pump(out)
     }
 }
 

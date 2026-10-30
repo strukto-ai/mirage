@@ -434,10 +434,12 @@ export type ScriptMethod =
   | 'preCommand'
   | 'preVfs'
   | 'preSession'
+  | 'preNetwork'
   | 'postExecute'
   | 'postCommand'
   | 'postVfs'
   | 'postSession'
+  | 'postNetwork'
 
 /**
  * One program of a profile's policy, as a session carries it: the
@@ -734,6 +736,56 @@ export interface VfsResultContext extends VfsContext {
 }
 
 /**
+ * Facts about one connection the workspace is about to open, as preNetwork
+ * methods see it. Fires once per connection, before any byte reaches the
+ * server, whoever opens it: a builtin command, a builtin or installed CLI, a
+ * mount's VFS, a runtime or an SDK in the process. The workspace's `network`
+ * lists have already let it through. A client that keeps a connection open
+ * and sends on it again is judged once, as it opens. Mirrors the Python
+ * NetworkContext.
+ */
+export interface NetworkContext {
+  /** The name the program asked to connect to; empty for a bare address. */
+  host: string
+  /** The address the connection reaches; empty where a browser hides it. */
+  address: string
+  port: number
+  /** The command running when it opened; empty outside a command. */
+  command?: string
+  /** The command name plus a CLI's verb path, as `CommandContext.program` reads it. */
+  program?: readonly string[]
+  /** The command line word by word as its spec read it, as `CommandContext.words` holds it. */
+  words?: readonly CommandWord[]
+  /** The line the command runs in; empty outside one. */
+  line?: string
+  /** The prefix of the mount whose VFS opened it; empty when no mount did. */
+  mount?: string
+  sessionId?: string
+  /** The session, read only. */
+  session?: SessionView
+  /** The session's files, read only. */
+  vfs?: FileView
+  /** Who opens it, read only. */
+  caller?: PolicyCaller
+}
+
+/** How a connection ended, as postNetwork reads it. Mirrors the Python NetworkEnd. */
+export type NetworkEnd = 'closed' | 'refused' | 'limit' | 'error'
+
+/**
+ * One finished connection, as postNetwork methods see it: what preNetwork
+ * saw, plus how it went. Asked of each policy whose preNetwork let the
+ * connection through, once, however it ended. Mirrors the Python
+ * NetworkResultContext.
+ */
+export interface NetworkResultContext extends NetworkContext {
+  bytesSent: number
+  bytesReceived: number
+  seconds: number
+  ended: NetworkEnd
+}
+
+/**
  * One finished line, as postExecute methods see it: what preExecute saw,
  * plus what came back. Fires at the workspace boundary before the
  * line's output reaches the caller, so a Limit returned here bounds
@@ -813,7 +865,9 @@ export const VALIDITY: Readonly<
     | 'postExecute'
     | 'preSession'
     | 'postSession'
-    | 'preWorkspace',
+    | 'preWorkspace'
+    | 'preNetwork'
+    | 'postNetwork',
     ReadonlySet<string>
   >
 > = {
@@ -826,6 +880,8 @@ export const VALIDITY: Readonly<
   preSession: new Set(['deny', 'ask']),
   postSession: new Set(['deny', 'ask']),
   preWorkspace: new Set(['deny']),
+  preNetwork: new Set(['deny', 'ask', 'limit']),
+  postNetwork: new Set(),
 }
 
 /** The name of one Policy method, as the interface spells it. */

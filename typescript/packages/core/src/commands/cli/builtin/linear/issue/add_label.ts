@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../../../../../core/render/json.ts'
 import type { LinearAccessor } from '../../../../../accessor/linear.ts'
 import { getIssue, issueUpdate } from '../../../../../core/linear/client.ts'
-import { normalizeIssue, toJsonBytes } from '../../../../../core/linear/normalize.ts'
+import { normalizeIssue } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
@@ -46,5 +47,5 @@ export async function addLabel(
   }
   if (!existing.includes(labelId)) existing.push(labelId)
   const updated = await issueUpdate(accessor.transport, { issueId, labelIds: existing })
-  return [toJsonBytes(normalizeIssue(updated)), new IOResult()]
+  return [jsonBytes(normalizeIssue(updated)), new IOResult()]
 }

@@ -58,6 +58,8 @@ from mirage.policy.types import (
     Deny,
     DryRun,
     ExecuteResultContext,
+    NetworkContext,
+    NetworkResultContext,
     Outcome,
     Pending,
     PolicyCaller,
@@ -90,6 +92,7 @@ MethodContext = (
     | ExecuteResultContext
     | SessionContext
     | WorkspaceContext
+    | NetworkContext
 )
 
 
@@ -584,6 +587,82 @@ async def post_vfs_gate(
     )
 
 
+async def pre_network_gate(
+    policies: "Policies", ctx: NetworkContext
+) -> tuple[tuple[Policy, ...] | None, Limit | None]:
+    """Fire pre_network as a connection is about to open; a Deny, or an
+    Ask, refuses it with EACCES, the host as the name refused.
+
+    A connection opens under a command that was admitted without the
+    question, so an Ask refuses like a deny. A dry run's policy deciding
+    opens nothing to judge. Only the policies that let the connection
+    through hear how it ends, so a refusal, or a cancel while they
+    decide, ends it as refused for those already passed.
+
+    Args:
+        policies (Policies): the workspace's policies.
+        ctx (NetworkContext): the connection about to open.
+
+    Returns:
+        tuple[tuple[Policy, ...] | None, Limit | None]: the policies
+        that let it through, for ``post_network_gate``, None when none
+        was asked, so every policy hears; and the tightest Limit they
+        answered, None for none.
+
+    Raises:
+        PolicyDenied: a policy refused the connection.
+    """
+    caller = current_caller()
+    if caller.explaining is DryRun.DECIDING or not await policies.wants_for(
+        "pre_network", ctx.session_id
+    ):
+        return None, None
+    ctx = replace(ctx, caller=policy_caller(caller.session, policies.account))
+    passed: list[Policy] = []
+    seen = {field.name: getattr(ctx, field.name) for field in fields(ctx)}
+    try:
+        answer, limit = await _apart(policies.pre_network(ctx, passed))
+    except BaseException:
+        await post_network_gate(
+            policies,
+            NetworkResultContext(**seen, ended="error"),
+            tuple(passed),
+        )
+        raise
+    if answer is not None:
+        await post_network_gate(
+            policies,
+            NetworkResultContext(**seen, ended="refused"),
+            tuple(passed),
+        )
+        refused = answer if isinstance(answer, Deny) else Deny(answer.reason)
+        raise policy_denied(refused, ctx.host or ctx.address, caller=caller)
+    return tuple(passed), limit
+
+
+async def post_network_gate(
+    policies: "Policies",
+    ctx: NetworkResultContext,
+    passed: tuple[Policy, ...] | None = None,
+) -> None:
+    """Fire post_network once a connection is over, for every policy
+    among ``passed``, each asked past another's answer.
+
+    Args:
+        policies (Policies): the workspace's policies.
+        ctx (NetworkResultContext): the connection and how it went.
+        passed (tuple[Policy, ...] | None): what ``pre_network_gate``
+            returned; None for every policy.
+    """
+    caller = current_caller()
+    if caller.explaining is DryRun.DECIDING or not await policies.wants_for(
+        "post_network", ctx.session_id
+    ):
+        return
+    ctx = replace(ctx, caller=policy_caller(caller.session, policies.account))
+    await _apart(policies.post_network(ctx, passed))
+
+
 async def pre_session_gate(
     policies: "Policies | None", ctx: SessionContext
 ) -> None:
@@ -906,6 +985,9 @@ class Policies:
         placed: bool = False,
         rules_only: bool = False,
         projection: str = "fire",
+        *,
+        among: tuple[Policy, ...] | None = None,
+        passed: list[Policy] | None = None,
     ) -> CompositionResult:
         snapshot = tuple(self._policies)
         placement = self._placement
@@ -914,6 +996,11 @@ class Policies:
             *((placement,) if placement is not None else ()),
             self._mode,
         )
+        if all(
+            getattr(type(policy), method) is getattr(Policy, method)
+            for policy in policies
+        ):
+            return CompositionResult((), None, None, None)
         composition = Composition()
         try:
             descriptors = []
@@ -929,14 +1016,18 @@ class Policies:
                     policy, PermissionsPolicy
                 ):
                     role = "permissions"
+                asked = getattr(type(policy), method) is not getattr(
+                    Policy, method
+                )
+                if not asked and passed is not None:
+                    passed.append(policy)
+                if among is not None and all(p is not policy for p in among):
+                    asked = False
                 descriptors.append(
                     {
                         "slot": slot,
                         "role": role,
-                        "hooks": [method]
-                        if getattr(type(policy), method)
-                        is not getattr(Policy, method)
-                        else [],
+                        "hooks": [method] if asked else [],
                     }
                 )
                 composition.names[slot] = type(policy).__name__
@@ -996,6 +1087,15 @@ class Policies:
                         )
                     finally:
                         reset_explaining(token)
+                    if passed is not None and all(
+                        item is None or isinstance(item, Limit)
+                        for item in (
+                            answered
+                            if isinstance(answered, tuple)
+                            else (answered,)
+                        )
+                    ):
+                        passed.append(policy)
                     pending = (
                         answered
                         if isinstance(answered, tuple)
@@ -1151,6 +1251,36 @@ class Policies:
         """
         action, _, _ = await self._fire("post_vfs", ctx)
         return action
+
+    async def pre_network(
+        self, ctx: NetworkContext, passed: list[Policy]
+    ) -> tuple[Deny | Ask | None, Limit | None]:
+        """Fire pre_network across the policies; first Deny wins, else
+        the first Ask, and Limits merge to the tightest.
+
+        Args:
+            ctx (NetworkContext): the connection about to open.
+            passed (list[Policy]): filled, as they answer, with the
+                policies that let the connection through, and those with
+                no pre_network.
+        """
+        result = await self._evaluate("pre_network", ctx, False, passed=passed)
+        return result.action, result.limit
+
+    async def post_network(
+        self,
+        ctx: NetworkResultContext,
+        among: tuple[Policy, ...] | None = None,
+    ) -> None:
+        """Fire post_network across the policies, every one asked;
+        none answers, since the connection is already over.
+
+        Args:
+            ctx (NetworkResultContext): the connection and how it went.
+            among (tuple[Policy, ...] | None): the policies that let the
+                connection through, None for every one.
+        """
+        await self._evaluate("post_network", ctx, True, among=among)
 
     async def post_execute(
         self, ctx: ExecuteResultContext

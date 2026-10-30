@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../../../../../core/render/json.ts'
 import type { LinearAccessor } from '../../../../../accessor/linear.ts'
 import { commentUpdate } from '../../../../../core/linear/client.ts'
-import { normalizeComment, toJsonBytes } from '../../../../../core/linear/normalize.ts'
+import { normalizeComment } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
@@ -35,7 +36,7 @@ export async function update(
     issue !== null && typeof issue === 'object' ? (issue as Record<string, unknown>) : null
   if (issueObj !== null && typeof issueObj.id === 'string') {
     const issueKey = typeof issueObj.identifier === 'string' ? issueObj.identifier : null
-    return [toJsonBytes(normalizeComment(comment, issueObj.id, issueKey)), new IOResult()]
+    return [jsonBytes(normalizeComment(comment, issueObj.id, issueKey)), new IOResult()]
   }
-  return [toJsonBytes(comment), new IOResult()]
+  return [jsonBytes(comment), new IOResult()]
 }

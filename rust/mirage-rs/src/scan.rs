@@ -6,11 +6,7 @@
 //!   empty value;
 //! - for a grammar that reads its operands, each operand as
 //!   `[OPERAND, word]` where it was typed, a glob already expanded into
-//!   its matches in its place, as the shell does before exec;
-//! - each word a grammar reads by its spelling as `[SPELLED, word]`, just
-//!   before the occurrence it spells;
-//! - the line's last word as `[LAST_WORD, word]`, for a grammar that
-//!   names it.
+//!   its matches in its place, as the shell does before exec.
 //!
 //! `open` fails with the first word the command refuses, in its words and
 //! with its exit status. Otherwise `finish` writes one JSON object, keyed
@@ -23,13 +19,6 @@ use crate::{Stream, StreamError, latin1_bytes, parse_config};
 
 /// The tape name of an operand. No option's dest is empty.
 pub(crate) const OPERAND: &str = "";
-
-/// The tape name of a word read by its spelling. No option is spelled
-/// `-=`, so no dest is `=`.
-pub(crate) const SPELLED: &str = "=";
-
-/// The tape name of the line's last word.
-pub(crate) const LAST_WORD: &str = "last_word";
 
 /// One option as typed: its name and its value's bytes.
 pub(crate) type Typed = (String, Vec<u8>);
@@ -71,7 +60,6 @@ fn grammar(command: &str) -> Result<Grammar, StreamError> {
         "cmp" => crate::cmp::scan,
         "fmt" => crate::reflow::scan,
         "fold" => crate::fold::scan,
-        "join" => crate::join::options::scan,
         "sort" => crate::sort::options::scan,
         "xxd" => crate::xxd::scan,
         _ => return Err(StreamError::new(format!("scan: no grammar for {command}"))),

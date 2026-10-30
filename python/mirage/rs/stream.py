@@ -291,6 +291,10 @@ async def merge_output(
             yield output
     if output := stream.finish():
         yield output
+    while stream.busy():
+        await budget.run()
+        if output := stream.drain():
+            yield output
 
 
 async def chain_output(
@@ -313,13 +317,14 @@ async def chain_output(
             async for chunk in output:
                 yield chunk
     finally:
+        await close_stream(stream)
         for each, source in zip(inputs, sources):
             await each.aclose()
             await close_quietly(source)
 
 
 async def stream_output_chunks(
-    stream: OpenStream, source: ByteSource
+    stream: OpenStream, source: ByteSource, *, owns_stream: bool = True
 ) -> AsyncGenerator[bytes, None]:
     budget = YieldBudget()
     try:
@@ -331,6 +336,8 @@ async def stream_output_chunks(
                     await budget.run()
                     if output := stream.drain():
                         yield output
+                if stream.done():
+                    break
         if output := stream.finish():
             yield output
         while stream.busy():
@@ -338,7 +345,8 @@ async def stream_output_chunks(
             if output := stream.drain():
                 yield output
     finally:
-        await close_stream(stream)
+        if owns_stream:
+            await close_stream(stream)
 
 
 async def close_stream(stream: OpenStream) -> None:

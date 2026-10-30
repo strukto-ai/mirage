@@ -1745,6 +1745,41 @@
       "flags": [
         "t"
       ]
+    },
+    {
+      "id": "expand_tabs_quotes_raw_argument_bytes",
+      "seq": 17010007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "expand -t $'\\377'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "expand: tab size contains invalid character(s): '\\377'\n"
+      }
     }
   ]
 }

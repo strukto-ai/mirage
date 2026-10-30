@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from typing import Any, Protocol
@@ -39,7 +40,12 @@ from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
 from mirage.io.config import IOConfig
 from mirage.io.memory import MemoryBudget
-from mirage.io.network import NetworkRule
+from mirage.io.network import (
+    NetworkRule,
+    NetworkSetting,
+    network_layer,
+    watch_network,
+)
 from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
@@ -181,6 +187,9 @@ class MountRegistry:
         # The rule the workspace's connections are judged by; None for no
         # limit.
         self.network: NetworkRule | None = None
+        # The rule each profile's ``network`` narrows it to, by the layer
+        # it adds, with the rule it narrowed.
+        self._networks: dict[str, tuple[NetworkRule | None, NetworkRule]] = {}
         # Why a command that SOME runtime class captures has no live
         # binding: default-world entries that failed to build (missing
         # extra) record their construction error per captured command,
@@ -280,6 +289,31 @@ class MountRegistry:
         await runtime.settle()
         if not runtime.file_effects_dispatched:
             await self.drop_caches()
+
+    def network_of(self, setting: NetworkSetting | None) -> NetworkRule | None:
+        """The rule a session's lines are held to: the workspace's,
+        narrowed by the ``network`` its profile states, built once per
+        setting.
+
+        Args:
+            setting (NetworkSetting | None): the session's profile's
+                ``network``; None for none.
+        """
+        layer = None if setting is None else network_layer(setting)
+        if layer is None:
+            return self.network
+        key = json.dumps(layer, sort_keys=True)
+        held = self._networks.get(key)
+        if held is None or held[0] is not self.network:
+            base = self.network
+            rule = NetworkRule(
+                [*(base.layers if base is not None else ()), layer],
+                base is not None and base.metadata,
+            )
+            watch_network()
+            held = (base, rule)
+            self._networks[key] = held
+        return held[1]
 
     def set_default_read(self, read: ReadSpec) -> None:
         """Install the workspace-level read policy a mount overrides.

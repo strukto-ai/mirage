@@ -32,6 +32,7 @@ import { linkView, mountView } from '../commands/builtin/utils/links.ts'
 import { MontyRuntime } from './python/monty/runtime.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
+import type { NetworkSetting } from '../io/network.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { context } from '../../tests/workspace/fixtures/context.ts'
@@ -346,6 +347,36 @@ it('refuses a native runtime before running with hidden files', async () => {
     await ws.close()
   }
 })
+
+it.each<[string, NetworkSetting, boolean, boolean]>([
+  ['an open network', true, false, false],
+  ['no network', false, false, true],
+  ['a domain list', { allowed_domains: ['example.com'] }, false, true],
+  ['a listening policy', true, true, true],
+])(
+  'refuses a native runtime under %s where the network is judged',
+  async (_name, network, listening, refused) => {
+    const runtime = new ShellProbe({ captures: ['@line'] })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [runtime], network },
+    )
+    if (listening) ws.policies.add({ preNetwork: () => null })
+    try {
+      const result = await ws.shell('echo ran')
+      if (!refused) {
+        expect([result.exitCode, dec.decode(result.stdout)]).toEqual([0, 'echo ran:/'])
+        return
+      }
+      expect(result.exitCode).toBe(126)
+      expect(dec.decode(result.stdout)).toBe('')
+      expect(dec.decode(result.stderr)).toBe(`${runtime.name}: Permission denied\n`)
+      expect(result.refusal?.reason).toBe("runtime cannot enforce this workspace's network")
+    } finally {
+      await ws.close()
+    }
+  },
+)
 
 it.each([
   [['/data/secret'], ['/data/']],

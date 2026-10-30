@@ -6,13 +6,12 @@ import pytest
 
 from mirage.commands.builtin.generic.join import (
     JoinFlags,
+    OrderCheck,
     join,
     parse_flags,
 )
-from mirage.commands.spec.constants import OPERAND
-from mirage.commands.spec.flag_view import FlagBag
+from mirage.commands.errors import UsageError
 from mirage.core.ram.write import write
-from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -74,10 +73,27 @@ async def test_matches_gnu(case, a, b, cmd, stdin, code, stdout, stderr):
     )
 
 
-def _flags(flags: dict, operands: list[PathSpec]) -> JoinFlags:
-    parsed = parse_flags(flags, [path.raw_path for path in operands])
-    assert isinstance(parsed, JoinFlags), parsed
-    return parsed
+@pytest.mark.parametrize(
+    "flags,expected",
+    [
+        ({}, JoinFlags()),
+        (
+            {"a": "2", "v": "1"},
+            JoinFlags(unpaired=(True, True), paired=False),
+        ),
+        ({"j": "3"}, JoinFlags(keys=(2, 2))),
+        ({"t": ""}, JoinFlags(delimiter=b"\n", separator=b" ")),
+        ({"t": "\\0"}, JoinFlags(delimiter=b"\0", separator=b"\0")),
+        ({"o": "0,2.3 1.1"}, JoinFlags(columns=((0, 0), (2, 2), (1, 0)))),
+        (
+            {"o": "auto", "zero_terminated": True},
+            JoinFlags(auto_columns=True, terminator=b"\0"),
+        ),
+        ({"nocheck_order": True}, JoinFlags(order=OrderCheck.OFF)),
+    ],
+)
+def test_parse_flags(flags, expected):
+    assert parse_flags(flags) == expected
 
 
 @pytest.mark.asyncio
@@ -99,66 +115,43 @@ async def test_cross_mount_relay_reads_every_flag():
     )
 
 
+@pytest.mark.asyncio
+async def test_join_refuses_a_missing_file():
+    with pytest.raises(UsageError, match="missing operand after '/a'"):
+        await join([PathSpec.from_str_path("/a")], read_stream=_drain)
+
+
 @pytest.mark.parametrize(
-    "flags,operands,argv,keys,files",
+    "flags,operands,argv,expected",
     [
-        ({}, ("a", "b"), ("a", "b"), [0, 0], (0, 1)),
-        ({"j": "2"}, ("a", "b"), (), [1, 1], (0, 1)),
+        ({}, ("a", "b"), ("a", "b"), JoinFlags()),
+        ({"j": "2"}, ("a", "b"), (), JoinFlags(keys=(1, 1))),
+        ({"v": "2"}, ("x", "a", "b"), (), None),
     ],
 )
 def test_parse_flags_files_operands_without_a_tape(
-    flags, operands, argv, keys, files
+    flags, operands, argv, expected
 ):
     # A plain mapping places no operand on a tape; the operands given are
-    # read after every option and a ``--``, as plain files.
-    parsed = parse_flags(flags, operands, argv)
-    assert isinstance(parsed, JoinFlags)
-    assert (parsed.engine["keys"], parsed.files) == (keys, files)
+    # read after every option, as plain files.
+    if expected is None:
+        with pytest.raises(UsageError, match="^join: extra operand 'b'\n"):
+            parse_flags(flags, operands, argv)
+    else:
+        assert parse_flags(flags, operands, argv) == expected
 
 
 @pytest.mark.parametrize(
-    "flags,operands,argv,message",
+    "operands,argv,message",
     [
-        ({}, ("a", "b", "c"), (), "join: extra operand 'c'"),
-        ({"o": "1.1"}, ("a", "b", "c"), (), "join: extra operand 'c'"),
-        ({"v": "2"}, ("x", "a", "b"), (), "join: extra operand 'b'"),
-        ({}, ("a",), (), "join: missing operand after 'a'"),
-        ({}, ("a",), ("-a1", "a"), "join: missing operand after 'a'"),
-        ({}, ("a",), ("a", "-t", ","), "join: missing operand after ','"),
+        (("a", "b", "c"), (), "join: extra operand 'c'"),
+        (("a",), (), "join: missing operand after 'a'"),
+        (("a",), ("-a1", "a"), "join: missing operand after 'a'"),
     ],
 )
-def test_parse_flags_refuses_operands_without_a_tape(
-    flags, operands, argv, message
-):
-    parsed = parse_flags(flags, operands, argv)
-    assert isinstance(parsed, IOResult)
-    assert parsed.exit_code == 1
-    assert parsed.stderr == (
-        f"{message}\nTry 'join --help' for more information.\n".encode()
-    )
-
-
-def test_parse_flags_refuses_a_tape_that_places_other_operands():
-    flags = FlagBag({"j": "1"})
-    flags.occurrences = [("j", "1"), (OPERAND, "a"), (OPERAND, "b")]
-    with pytest.raises(ValueError, match="places 2 operands, not its 3"):
-        parse_flags(flags, ("a", "b", "c"))
-
-
-@pytest.mark.asyncio
-async def test_join_refuses_files_past_its_operands():
-    flags = _flags({}, [PathSpec.from_str_path("/a")] * 2)
-    with pytest.raises(ValueError, match="are not among its operands"):
-        await join(
-            [PathSpec.from_str_path("/a")],
-            read_stream=_unused_read,
-            flags=flags,
-        )
-
-
-async def _unused_read(_path: PathSpec):
-    raise AssertionError("join read an operand")
-    yield b""
+def test_parse_flags_refuses_operands_without_a_tape(operands, argv, message):
+    with pytest.raises(UsageError, match=f"^{message}\n"):
+        parse_flags({}, operands, argv)
 
 
 @pytest.mark.asyncio
@@ -173,8 +166,10 @@ async def test_join_hands_on_output_while_pairing_two_large_groups():
     async def read(path):
         yield bodies[path.virtual]
 
-    paths = [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")]
-    source, _ = await join(paths, read_stream=read, flags=_flags({}, paths))
+    source, _ = await join(
+        [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")],
+        read_stream=read,
+    )
     async with aclosing(source) as chunks:
         first = await anext(chunks)
     assert first.startswith(b"k a0 b0\nk a0 b1\n")
@@ -226,7 +221,7 @@ async def test_join_hands_on_output_before_waiting_for_input(
         paths,
         read_stream=read,
         stdin=live(),
-        flags=_flags(flags, paths),
+        flags=parse_flags(flags),
     )
     async with aclosing(source) as chunks:
         first = await asyncio.wait_for(anext(chunks), 5)
@@ -261,10 +256,7 @@ async def test_join_reports_an_unreadable_file_without_reading_stdin(
     # read never waits on input that has not come.
     paths = [PathSpec.from_str_path(word) for word in operands]
     source, io = await join(
-        paths,
-        read_stream=_unopenable,
-        stdin=_silent_stdin(),
-        flags=_flags({}, paths),
+        paths, read_stream=_unopenable, stdin=_silent_stdin()
     )
     out = await asyncio.wait_for(_drain(source), 5)
     assert (io.exit_code, out, io.stderr) == (1, b"", stderr)
@@ -290,9 +282,10 @@ async def test_join_reads_records_across_any_chunking(flags, a, b):
             for at in range(0, len(body), size):
                 yield body[at : at + size]
 
-        paths = [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")]
         source, io = await join(
-            paths, read_stream=read, flags=_flags(flags, paths)
+            [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")],
+            read_stream=read,
+            flags=parse_flags(flags),
         )
         out = await _drain(source)
         return out, io.exit_code, io.stderr
@@ -315,9 +308,10 @@ async def _best_seconds(body: bytes) -> float:
     best = float("inf")
     for _ in range(3):
         started = time.perf_counter()
-        paths = [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")]
         source, _ = await join(
-            paths, read_stream=read, flags=_flags({"a": "1"}, paths)
+            [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")],
+            read_stream=read,
+            flags=parse_flags({"a": "1"}),
         )
         await _drain(source)
         best = min(best, time.perf_counter() - started)
@@ -381,8 +375,9 @@ async def test_join_keeps_records_whole_over_a_source_that_reuses_its_buffer(
         async for chunk in _reusing(bodies[path.virtual], size, kind):
             yield chunk
 
-    paths = [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")]
     source, io = await join(
-        paths, read_stream=read, flags=_flags({"a": "1"}, paths)
+        [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/b")],
+        read_stream=read,
+        flags=parse_flags({"a": "1"}),
     )
     assert (await _drain(source), io.exit_code) == (expected, 0)

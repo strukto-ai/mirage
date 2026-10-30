@@ -1,3 +1,4 @@
+import json
 from collections.abc import (
     AsyncGenerator,
     Awaitable,
@@ -7,6 +8,7 @@ from collections.abc import (
 )
 from contextlib import aclosing
 from dataclasses import dataclass
+from enum import Enum
 
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -14,19 +16,28 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stream,
 )
 from mirage.commands.config import Context
+from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.constants import LAST_WORD, OPERAND, SPELLED
+from mirage.commands.spec.constants import OPERAND, SPELLED
 from mirage.commands.spec.flag_view import FlagView, spread_operands
 from mirage.commands.spec.types import CommandName, FlagValue
+from mirage.commands.spec.usage import (
+    missing_operand_error,
+)
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.stream import OutputStream
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.scan import refused, scan
-from mirage.rs.stream import OpenStream, merge_output, open_stream
-from mirage.shell.bytes import encode_text
+from mirage.rs.stream import (
+    OpenStream,
+    close_stream,
+    merge_output,
+    open_stream,
+)
+from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 
 OPTION_DESTS = (
@@ -46,64 +57,114 @@ OPTION_DESTS = (
 )
 
 
+class OrderCheck(Enum):
+    """What join does with a line whose key sorts before the one above it.
+
+    WARN, the default, names the first such line of each file, but only
+    once some line has gone unpaired, then finishes and exits 1 under
+    ``input is not in sorted order``. FAIL (``--check-order``) names the
+    first one and stops there. OFF (``--nocheck-order``) never looks.
+    """
+
+    WARN = "warn"
+    FAIL = "fail"
+    OFF = "off"
+
+
 @dataclass(frozen=True)
 class JoinFlags:
-    """join's line as mirage-rs read it.
+    """join's options as one line set them.
 
     Attributes:
-        engine (dict[str, JsonValue]): the ``join`` engine's config.
+        keys (tuple[int, int]): each file's join field, counted from 0.
+        unpaired (tuple[bool, bool]): whether each file's unpairable lines
+            print (``-a``, ``-v``).
+        paired (bool): whether joined lines print; any ``-v`` clears it.
+        filler (bytes | None): the ``-e`` text for an empty field.
+        columns (tuple[tuple[int, int], ...]): the ``-o`` list, each item
+            a file number and a field counted from 0; file 0 is the join
+            field.
+        auto_columns (bool): ``-o auto``.
+        delimiter (bytes | None): the ``-t`` byte; None parts fields at
+            runs of blanks and WHOLE_RECORD keeps each record whole.
+        separator (bytes): what output fields are joined with.
+        fold_case (bool): ``-i``.
+        terminator (bytes): what ends a record, NUL under ``-z``.
+        order (OrderCheck): what an unsorted line does.
+        header (bool): ``--header``.
         files (tuple[int, int]): the operand positions of FILE1 and FILE2.
     """
 
-    engine: dict[str, JsonValue]
-    files: tuple[int, int]
+    keys: tuple[int, int] = (0, 0)
+    unpaired: tuple[bool, bool] = (False, False)
+    paired: bool = True
+    filler: bytes | None = None
+    columns: tuple[tuple[int, int], ...] = ()
+    auto_columns: bool = False
+    delimiter: bytes | None = None
+    separator: bytes = b" "
+    fold_case: bool = False
+    terminator: bytes = b"\n"
+    order: OrderCheck = OrderCheck.WARN
+    header: bool = False
+    files: tuple[int, int] = (0, 1)
+
+
+def _options(
+    flags: Mapping[str, FlagValue],
+    operands: Sequence[str],
+    argv: Sequence[str],
+) -> dict[str, JsonValue]:
+    tape = FlagView(flags, SPECS[CommandName.JOIN]).occurrences(
+        OPERAND, SPELLED, *OPTION_DESTS
+    )
+    return {
+        "options": [
+            [
+                name,
+                byte_view(value)
+                if isinstance(value, str)
+                else value
+                if isinstance(value, (int, bool))
+                else str(value),
+            ]
+            for name, value in tape
+        ],
+        "operands": [byte_view(word) for word in operands],
+        "argv": [byte_view(word) for word in argv],
+    }
+
+
+def _parsed(stream: OpenStream) -> JoinFlags:
+    config = json.loads(stream.metadata())
+    return JoinFlags(
+        keys=tuple(config["keys"]),
+        unpaired=tuple(config["unpaired"]),
+        paired=config["paired"],
+        filler=None if config["filler"] is None else bytes(config["filler"]),
+        columns=tuple(tuple(column) for column in config["columns"]),
+        auto_columns=config["auto_columns"],
+        delimiter=None
+        if config["delimiter"] is None
+        else bytes(config["delimiter"]),
+        separator=bytes(config["separator"]),
+        fold_case=config["fold_case"],
+        terminator=b"\0" if config["zero_terminated"] else b"\n",
+        order=OrderCheck(config["order"]),
+        header=config["header"],
+        files=tuple(config["files"]),
+    )
 
 
 def parse_flags(
     flags: Mapping[str, FlagValue],
     operands: Sequence[str] = (),
     argv: Sequence[str] = (),
-) -> JoinFlags | IOResult:
-    """Read join's options and operands in the order the line typed them.
-
-    mirage-rs reads the tape in one pass, as GNU join's getopt loop does,
-    so the first problem left to right is the one reported.
-
-    Args:
-        flags (Mapping[str, FlagValue]): the parsed flags and their tape.
-        operands (Sequence[str]): the operands, in order, a glob's
-            matches in its place; when the tape places none, they are
-            read after every option and a ``--``, so each is a file.
-        argv (Sequence[str]): the line's words after ``join``, which the
-            missing-operand line names the last of.
-
-    Returns:
-        JoinFlags | IOResult: the engine's config and the two files, or
-            join's refusal.
-
-    Raises:
-        ValueError: the tape places other operands than ``operands``.
-    """
-    typed = FlagView(flags, SPECS[CommandName.JOIN]).texts(
-        OPERAND, SPELLED, *OPTION_DESTS
-    )
-    placed = sum(name == OPERAND for name, _ in typed)
-    if placed == 0 and operands:
-        typed += [(SPELLED, "--"), *((OPERAND, word) for word in operands)]
-    elif placed != len(operands):
-        raise ValueError(
-            f"join's tape places {placed} operands, not its {len(operands)}"
-        )
-    if argv:
-        typed.append((LAST_WORD, argv[-1]))
+) -> JoinFlags:
     try:
-        values = scan("join", typed)
-    except StreamRefusal as refusal:
-        return refused(refusal)
-    match values:
-        case {"engine": dict(engine), "files": [int(first), int(second)]}:
-            return JoinFlags(engine, (first, second))
-    raise ValueError(f"join's scan read no engine and files: {values!r}")
+        return _parsed(open_stream("join", _options(flags, operands, argv)))
+    except StreamRefusal as exc:
+        raise UsageError(exc.message, 1) from exc
 
 
 def _operand_word(path: PathSpec) -> str:
@@ -114,8 +175,9 @@ async def join(
     paths: list[PathSpec],
     *,
     read_stream: PolymorphicReadFn,
-    flags: JoinFlags,
     stdin: ByteSource | None = None,
+    flags: JoinFlags = JoinFlags(),
+    engine: OpenStream | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU ``join`` of two files over already-parsed options.
 
@@ -123,22 +185,53 @@ async def join(
         paths (list[PathSpec]): the operands, of which ``flags.files``
             names the two files; ``-`` reads stdin.
         read_stream (PolymorphicReadFn): reads one operand's bytes.
-        flags (JoinFlags): the options, from ``parse_flags``.
         stdin (ByteSource | None): the line's input.
-
-    Raises:
-        ValueError: ``flags.files`` names an operand ``paths`` lacks.
+        flags (JoinFlags): the options, from ``parse_flags``.
     """
-    if not all(0 <= index < len(paths) for index in flags.files):
-        raise ValueError(
-            f"join's files {flags.files} are not among its operands"
+    if len(paths) <= max(flags.files):
+        raise missing_operand_error(
+            CommandName.JOIN, _operand_word(paths[-1]) if paths else None
         )
     file1, file2 = (paths[index] for index in flags.files)
+    if file1.raw_path == "-" and file2.raw_path == "-":
+        return None, IOResult(
+            exit_code=1, stderr=b"join: both files cannot be standard input\n"
+        )
     read = stdin_stream(read_stream, stdin)
     readers = (AsyncLineIterator(read(file1)), AsyncLineIterator(read(file2)))
-    stream = open_stream("join", flags.engine)
+    names = (_operand_word(file1), _operand_word(file2))
+    stream = engine or open_stream(
+        "join",
+        {
+            "keys": list(flags.keys),
+            "unpaired": list(flags.unpaired),
+            "paired": flags.paired,
+            "filler": None
+            if flags.filler is None
+            else byte_view(flags.filler),
+            "columns": [list(column) for column in flags.columns],
+            "auto_columns": flags.auto_columns,
+            "delimiter": (
+                None if flags.delimiter is None else byte_view(flags.delimiter)
+            ),
+            "separator": byte_view(flags.separator),
+            "fold_case": flags.fold_case,
+            "zero_terminated": flags.terminator == b"\0",
+            "order": flags.order.value,
+            "header": flags.header,
+            "names": [byte_view(name) for name in names],
+        },
+    )
     io = IOResult()
-    return _join_stream(stream, readers, (file1, file2), io), io
+
+    async def close() -> None:
+        await close_stream(stream)
+        for reader in readers:
+            await reader.discard()
+
+    return OutputStream(
+        _join_stream(stream, readers, (file1, file2), io), close
+    ), io
 
 
 def _failure(
@@ -224,6 +317,7 @@ async def _join_stream(
     finally:
         io.stderr = stream.take_stderr() + error
         io.exit_code = 1 if error else stream.status()
+        await close_stream(stream)
         for reader in readers:
             await reader.discard()
 
@@ -253,14 +347,29 @@ async def join_generic(
         ctx.flags,
         [[_operand_word(path) for path in group] for group in groups],
     )
-    parsed = parse_flags(
-        flags, [_operand_word(path) for path in resolved], ctx.argv
-    )
-    if isinstance(parsed, IOResult):
-        return None, parsed
-    return await join(
-        resolved, read_stream=read_stream, stdin=ctx.stdin, flags=parsed
-    )
+    try:
+        engine = open_stream(
+            "join",
+            _options(
+                flags, [_operand_word(path) for path in resolved], ctx.argv
+            ),
+        )
+    except StreamRefusal as exc:
+        raise UsageError(exc.message, 1) from exc
+    try:
+        result = await join(
+            resolved,
+            read_stream=read_stream,
+            stdin=ctx.stdin,
+            flags=_parsed(engine),
+            engine=engine,
+        )
+        if result[0] is None:
+            await close_stream(engine)
+        return result
+    except BaseException:
+        await close_stream(engine)
+        raise
 
 
-__all__ = ["JoinFlags", "join", "join_generic", "parse_flags"]
+__all__ = ["JoinFlags", "OrderCheck", "join", "join_generic", "parse_flags"]

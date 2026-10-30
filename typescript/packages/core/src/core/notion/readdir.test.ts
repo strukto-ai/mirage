@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../render/json.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { NotionTransport } from './client.ts'
-import { normalizeDatabase, toJsonBytes } from './normalize.ts'
+import { normalizeDatabase } from './normalize.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import { readdir as rawOperation } from './readdir.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
@@ -262,7 +263,7 @@ describe('notion readdir databases', () => {
     const dirPath = `/databases/Tasks__${DB_ID}`
     await ws.dispatch('readdir', dirPath)
     const row = (await ws.dispatch('stat', `${dirPath}/database.json`)) as FileStat
-    expect(row.size).toBe(toJsonBytes(normalizeDatabase(database())).byteLength)
+    expect(row.size).toBe(jsonBytes(normalizeDatabase(database())).byteLength)
   })
 })
 

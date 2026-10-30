@@ -18,6 +18,7 @@ from mirage.accessor.trello import TrelloAccessor
 from mirage.core.hierarchy.readdir import make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import entry_stat
+from mirage.core.render.json import json_bytes
 from mirage.core.trello.client import (
     get_board,
     list_board_labels,
@@ -28,14 +29,13 @@ from mirage.core.trello.client import (
     list_workspaces,
 )
 from mirage.core.trello.normalize import (
+    SEARCHED_FIELDS,
     normalize_board,
     normalize_card,
     normalize_label,
     normalize_list,
     normalize_member,
     normalize_workspace,
-    to_json_bytes,
-    unsearched_text,
 )
 from mirage.core.trello.pathing import (
     board_dirname,
@@ -47,6 +47,7 @@ from mirage.core.trello.pathing import (
 )
 from mirage.core.trello.scope import detect_scope
 from mirage.types import ContentType, FileStat, FileType
+from mirage.utils.record_search import unsearched_text
 
 
 async def filtered_workspaces(
@@ -148,9 +149,7 @@ async def _list_workspaces_dir(
             workspace_dirname(workspace),
             workspace["id"],
             extra={
-                "json_size": len(
-                    to_json_bytes(normalize_workspace(workspace))
-                ),
+                "json_size": len(json_bytes(normalize_workspace(workspace))),
             },
         )
         for workspace in await filtered_workspaces(accessor)
@@ -180,7 +179,7 @@ async def _list_boards(
             board_dirname(board),
             board["id"],
             modified=board.get("dateLastActivity"),
-            extra={"json_size": len(to_json_bytes(normalize_board(board)))},
+            extra={"json_size": len(json_bytes(normalize_board(board)))},
         )
         for board in await filtered_boards(
             accessor, match.slots["workspace_id"]
@@ -212,7 +211,7 @@ async def _list_members(
         MEMBER(
             member_filename(member),
             member["id"],
-            size=len(to_json_bytes(normalize_member(member))),
+            size=len(json_bytes(normalize_member(member))),
         )
         for member in members
     ]
@@ -226,7 +225,7 @@ async def _list_labels(
         LABEL(
             label_filename(label),
             label["id"],
-            size=len(to_json_bytes(normalize_label(label))),
+            size=len(json_bytes(normalize_label(label))),
         )
         for label in labels
     ]
@@ -242,7 +241,7 @@ async def _list_lists(
         LIST(
             list_dirname(lst),
             lst["id"],
-            extra={"json_size": len(to_json_bytes(normalize_list(lst)))},
+            extra={"json_size": len(json_bytes(normalize_list(lst)))},
         )
         for lst in lists
     ]
@@ -270,10 +269,12 @@ async def _list_cards(
         # card.json's normalizer only uses fields the card listing already
         # carries, so its exact size is free here.
         extra: dict[str, Any] = {
-            "json_size": len(to_json_bytes(normalize_card(card)))
+            "json_size": len(json_bytes(normalize_card(card)))
         }
         if accessor.capped():
-            extra["unsearched"] = unsearched_text(card)
+            extra["unsearched"] = unsearched_text(
+                normalize_card(card).items(), SEARCHED_FIELDS
+            )
         rows.append(
             CARD(
                 card_dirname(card),

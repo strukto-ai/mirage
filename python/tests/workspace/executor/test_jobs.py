@@ -836,12 +836,37 @@ async def test_loop_body_jobs_are_still_running_when_the_loop_ends():
 
 
 @pytest.mark.asyncio
-async def test_loop_body_jobs_write_after_the_foreground_line():
-    ws = _workspace()
-    res = await ws.shell(
-        "for i in 1 2; do { sleep 0.05; echo $i; } & done; echo launched; wait"
-    )
-    assert res.stdout == b"launched\n1\n2\n"
+@pytest.mark.parametrize("order", [(1, 2), (2, 1)])
+async def test_loop_body_jobs_write_after_the_foreground_line(
+    order: tuple[int, int], monkeypatch: pytest.MonkeyPatch
+):
+    vfs = RAMVFS()
+    ws = Workspace({"/m": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    gates = {str(i): asyncio.Event() for i in (1, 2)}
+    await ws.shell("touch /m/1 /m/2")
+
+    async def read(
+        path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> bytes:
+        await gates[path.vfs_path].wait()
+        return b""
+
+    monkeypatch.setattr(vfs, "read", read)
+    try:
+        async with asyncio.timeout(5):
+            res = await ws.shell(
+                "for i in 1 2; do { cat /m/$i; echo $i; } & done; echo launched"
+            )
+            assert res.stdout == b"launched\n"
+            for job_id in order:
+                gates[str(job_id)].set()
+                await ws.job_table.wait(job_id, ws.default_session_id)
+            res = await ws.shell("wait")
+            assert res.stdout == "".join(f"{i}\n" for i in order).encode()
+    finally:
+        for gate in gates.values():
+            gate.set()
+        await ws.close()
 
 
 @pytest.mark.asyncio

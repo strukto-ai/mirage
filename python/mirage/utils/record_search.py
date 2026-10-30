@@ -13,7 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from collections.abc import Collection, Iterable
+from typing import Any
 
+from mirage.core.render.json import json_text
 from mirage.types import JsonValue
 
 _HEX_LETTERS = frozenset("abcdef")
@@ -84,6 +87,25 @@ def non_plain_words(text: str) -> list[str]:
         for word in _ASCII_SPACE.split(text)
         if word and not _PLAIN_WORD.fullmatch(word)
     ]
+
+
+def unsearched_text(
+    fields: Iterable[tuple[str, Any]], searched: Collection[str]
+) -> str:
+    """The normalized fields and words a provider's search does not read.
+
+    Args:
+        fields (Iterable[tuple[str, Any]]): normalized record fields.
+        searched (Collection[str]): fields searched for plain words.
+    """
+    rest = {}
+    words = []
+    for key, value in fields:
+        if key not in searched:
+            rest[key] = value
+        elif isinstance(value, str):
+            words.extend(non_plain_words(value))
+    return " ".join([json_text(rest), *words]).lower()
 
 
 def may_hold(

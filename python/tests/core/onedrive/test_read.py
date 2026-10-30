@@ -5,12 +5,9 @@ from aioresponses import CallbackResult, aioresponses
 from yarl import URL
 
 from mirage.accessor.onedrive import OneDriveAccessor, OneDriveConfig
+from mirage.context import session_context as caller
 from mirage.core.onedrive.read import read
-from mirage.observe.context import (
-    RecordingScope,
-    push_revisions,
-    reset_revisions,
-)
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -93,7 +90,9 @@ async def test_a_read_falls_back_to_content_when_graph_omits_the_download_url(
 @pytest.mark.asyncio
 async def test_read_pinned_revision_hits_version_content():
     version_url = _BASE + "/root:/Docs/a.txt:/versions/3.0/content"
-    token = push_revisions({"/Docs/a.txt": "3.0"})
+    token = caller.bind_caller(
+        caller.current_caller().changed({"revisions": {"/Docs/a.txt": "3.0"}})
+    )
     try:
         with aioresponses() as m:
             m.get(version_url, body=b"old version bytes")
@@ -101,7 +100,7 @@ async def test_read_pinned_revision_hits_version_content():
                 _accessor(), PathSpec.from_str_path("/Docs/a.txt")
             )
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
     assert data == b"old version bytes"
 
 

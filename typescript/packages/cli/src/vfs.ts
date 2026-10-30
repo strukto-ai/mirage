@@ -26,7 +26,6 @@ import {
 } from '@struktoai/mirage-server/vfs_calls'
 import { makeClient } from './client.ts'
 import { emit, handleResponse } from './output.ts'
-import { loadDaemonSettings } from './settings.ts'
 
 interface Target {
   workspace: string
@@ -42,7 +41,7 @@ export async function post(
   route: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
-  const c = makeClient(loadDaemonSettings())
+  const c = makeClient()
   await c.ensureRunning({ allowSpawn: false })
   const query = new URLSearchParams()
   if (target.session !== undefined) query.set('session_id', target.session)

@@ -122,6 +122,12 @@ impl LineReader {
 
     /// The next line, None at the end.
     pub(super) fn line(&mut self, io: &mut Io) -> Poll<Result<Option<Line>, Failure>> {
+        if self.start > self.buf.len() / 2 {
+            self.buf.drain(..self.start);
+            self.scanned = self.scanned.saturating_sub(self.start);
+            self.start = 0;
+            crate::release_capacity(&mut self.buf);
+        }
         let from = self.scanned.max(self.start);
         let cut = memchr::memchr(b'\n', &self.buf[from..]).map(|at| from + at);
         // A line longer than sed holds is a read it cannot make.
@@ -178,6 +184,7 @@ impl LineReader {
             self.started = true;
             if self.start > self.buf.len() / 2 {
                 self.buf.drain(..self.start);
+                crate::release_capacity(&mut self.buf);
                 self.scanned -= self.start;
                 self.start = 0;
             }

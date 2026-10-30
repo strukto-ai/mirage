@@ -112,6 +112,10 @@ After the folder is mounted and granted, run the shared
 - An interpreter installed outside the system paths needs an `fs_readable`
   grant.
 - Host credentials are not passed to the program.
+- A workspace whose [`network`](/home/configuration#network) limits
+  anything, or whose policies judge connections, runs nothing here: the
+  program connects from this host, around both. It answers `Permission
+  denied`, exit 126.
 - The runtime does not create the FUSE folder or bind it to a session.
 
 - Program lookup uses the sandbox's `PATH`, with the CLI's system default when

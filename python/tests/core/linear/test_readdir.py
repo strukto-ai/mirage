@@ -23,10 +23,9 @@ from mirage.core.linear.normalize import (
     normalize_issue,
     normalize_team,
     normalize_user,
-    to_json_bytes,
 )
 from mirage.core.linear.readdir import readdir
-from mirage.core.render.json import jsonl_bytes_by_created_at
+from mirage.core.render.json import json_bytes, jsonl_bytes_by_created_at
 from mirage.types import FileStat, FileType, PathSpec
 
 _ISSUE_DIR = "/teams/ENG__Engineering__TEAM1/issues/ENG-123__ISSUE1"
@@ -70,9 +69,7 @@ async def test_readdir_teams(accessor):
     assert team.extra["team_id"] == "TEAM1"
     assert team.extra["team_key"] == "ENG"
     assert team.extra["team_name"] == "Engineering"
-    assert team.extra["json_size"] == len(
-        to_json_bytes(normalize_team(teams[0]))
-    )
+    assert team.extra["json_size"] == len(json_bytes(normalize_team(teams[0])))
 
 
 _TEAM_STUB = {
@@ -118,7 +115,7 @@ async def test_readdir_team_members(accessor):
         )
     assert [row.name for row in result] == ["Alice__USER1.json"]
     assert result[0].extra["member_id"] == "USER1"
-    assert result[0].size == len(to_json_bytes(normalize_user(users[0])))
+    assert result[0].size == len(json_bytes(normalize_user(users[0])))
 
 
 # A project's file names its issues, so the listing asks Linear for the
@@ -221,7 +218,7 @@ async def test_readdir_issue_folder(accessor):
     assert comments_file.name == "comments.jsonl"
     # issue.json is sized from the issue the team listing already fetched,
     # never from a per-issue refetch.
-    assert issue_file.size == len(to_json_bytes(normalize_issue(issue)))
+    assert issue_file.size == len(json_bytes(normalize_issue(issue)))
     expected = jsonl_bytes_by_created_at(
         [
             normalize_comment(

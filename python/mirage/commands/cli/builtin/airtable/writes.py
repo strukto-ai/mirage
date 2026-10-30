@@ -46,9 +46,8 @@ from mirage.core.airtable.normalize import (
     deletions_jsonl,
     normalize_comment,
     records_jsonl,
-    to_json_bytes,
 )
-from mirage.core.render.json import compact_json_text
+from mirage.core.render.json import compact_json_text, json_bytes
 from mirage.io.types import IOResult
 
 Rows = list[dict[str, Any]]
@@ -251,7 +250,7 @@ async def _comment_add_body(
     comment = await create_comment(
         accessor, base_id, fl.as_str("table") or "", record_id, text
     )
-    return to_json_bytes(normalize_comment(comment)), IOResult()
+    return json_bytes(normalize_comment(comment)), IOResult()
 
 
 record_create = functools.partial(run, _record_create_body)

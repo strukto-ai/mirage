@@ -1,3 +1,4 @@
+import { YieldBudget } from '../../../io/yield_budget.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,12 +38,13 @@ import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import { reportFsError, splitOpened } from '../utils/operands.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { chunks } from '../../../io/cooperative.ts'
+import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { checkMemory } from '../../../io/memory.ts'
 import { quoteText } from '../../quote.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
+import { revisionFor } from '../../../observe/context.ts'
 import { dispatchOf } from '../utils/links.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
@@ -202,24 +204,84 @@ async function* polledWindow(
   yield await materialize(data as ByteSource)
 }
 
-// `stream`, answered by the mount's `lastLines(p, n)` where it can: the last
-// `n` lines without the rest of the file. Mirrors Python's `_read_last`.
-function readLast(
-  stream: Stream,
-  lastLines: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
-  n: number,
-): Stream {
-  return (p) => {
-    const source = stream(p)
-    return (async function* (): AsyncIterable<Uint8Array> {
-      try {
-        const answer = isStdin(p) ? null : await lastLines(p, n)
-        yield* chunks(answer ?? source)
-      } finally {
-        await closeQuietly(source)
-      }
-    })()
+async function* tailRange(
+  read: ReadStreamFn<[PathSpec, number, number]>,
+  path: PathSpec,
+  offset: number,
+  end: number,
+): AsyncGenerator<Uint8Array> {
+  // A range-capable backend may return bytes, so bound the request too.
+  while (offset < end) {
+    const size = Math.min(1 << 20, end - offset)
+    yield* chunks(read(path, offset, size))
+    offset += size
   }
+}
+
+async function* tailFile(
+  path: PathSpec,
+  read: Stream,
+  stat: Stat,
+  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
+  lastLines: ((p: PathSpec, n: number) => Promise<Uint8Array | null>) | undefined,
+  counts: TailCounts,
+): AsyncGenerator<Uint8Array> {
+  const n = counts.lines ?? 10
+  const fromEnd = counts.fromLine === null && counts.fromByte === null
+  if (!isStdin(path) && fromEnd) {
+    if (counts.byteCount === null && lastLines !== undefined) {
+      const answer = await lastLines(path, Math.abs(n))
+      if (answer !== null) {
+        yield* chunks(answer)
+        return
+      }
+    }
+    if (readRange !== null && revisionFor(path.virtual) === null) {
+      const info = await stat(path)
+      if (info.type === FileType.FILE && info.size !== null && info.size > 0) {
+        const size = info.size
+        if (counts.byteCount !== null) {
+          const offset = Math.max(0, size - Math.abs(counts.byteCount))
+          yield* tailRange(readRange, path, offset, size)
+          return
+        }
+        let end = size
+        let wanted = Math.abs(n)
+        let window = CHUNK_SIZE
+        const budget = new YieldBudget()
+        while (end > 0) {
+          await budget.run()
+          const start = Math.max(0, end - window)
+          const data = await materialize(readRange(path, start, end - start))
+          if (data.byteLength !== end - start) break
+          if (end === size && data.at(-1) === 10) wanted++
+          let found = 0
+          for (let at = data.indexOf(10); at >= 0; at = data.indexOf(10, at + 1)) found++
+          if (found < wanted && start > 0) {
+            wanted -= found
+            end = start
+            window = Math.min(window * 2, 1 << 20)
+            continue
+          }
+          let at = data.length
+          while (wanted > 0) {
+            at = at === 0 ? -1 : data.lastIndexOf(10, at - 1)
+            if (at < 0) break
+            wanted--
+          }
+          if (wanted === 0 || start === 0) {
+            const piece = wanted === 0 ? data.subarray(at + 1) : data
+            yield* chunks(piece)
+            yield* tailRange(readRange, path, end, size)
+            return
+          }
+          end = start
+          window = Math.min(window * 2, 1 << 20)
+        }
+      }
+    }
+  }
+  yield* tail(read(path), counts)
 }
 
 // The tail of one source, read as it streams. Mirrors Python's `tail`.
@@ -320,6 +382,7 @@ async function* tailMulti(
   showHeaders: boolean,
   unread: ReadonlySet<string>,
   io: IOResult,
+  selected = false,
 ): AsyncIterable<Uint8Array> {
   let printed = 0
   for (const p of paths) {
@@ -333,7 +396,7 @@ async function* tailMulti(
     }
     const source = read(p)
     try {
-      for await (const part of tail(source, counts)) {
+      for await (const part of selected ? chunks(source) : tail(source, counts)) {
         if (pending !== null) {
           yield pending
           pending = null
@@ -684,8 +747,6 @@ export async function tailGeneric(
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
   const n = counts.lines ?? 10
   const fromEnd = counts.byteCount === null && counts.fromLine === null && counts.fromByte === null
-  const lastOf = (s: Stream): Stream | null =>
-    lastLines !== undefined && fromEnd && n > 0 ? readLast(s, lastLines, n) : null
   if (
     following.follow &&
     following.byName &&
@@ -719,7 +780,18 @@ export async function tailGeneric(
     })
     if (!following.follow) {
       if (opened.length === 0) return [null, io]
-      return [tailMulti(opened, lastOf(stream) ?? stream, counts, showHeaders, unread, io), io]
+      return [
+        tailMulti(
+          opened,
+          (p) => tailFile(p, stream, stat, readRange, lastLines, counts),
+          counts,
+          showHeaders,
+          unread,
+          io,
+          true,
+        ),
+        io,
+      ]
     }
     const readable = opened.filter((p) => !unread.has(p.virtual))
     const pending = await unfollowable(

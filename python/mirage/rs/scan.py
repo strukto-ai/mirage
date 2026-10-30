@@ -28,12 +28,10 @@ def scan(
     """A command's typed words, read by mirage-rs before any input is read.
 
     The tape holds each option as ``(dest, value)`` in the order typed, a
-    switch with an empty value. A grammar that reads more gets more: each
-    operand as ``(OPERAND, word)`` where it was typed, a glob already
-    expanded into its matches in its place; each word it reads by its
-    spelling as ``(SPELLED, word)`` just before the occurrence it spells;
-    and the line's last word as ``(LAST_WORD, word)``. A value the command
-    refuses never reaches an input.
+    switch with an empty value. A grammar that reads its operands also gets
+    each operand as ``(OPERAND, word)`` where it was typed, a glob already
+    expanded into its matches in its place. A value the command refuses
+    never reaches an input.
 
     Args:
         command (str): the command whose grammar reads them.

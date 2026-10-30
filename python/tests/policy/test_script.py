@@ -28,6 +28,8 @@ from mirage.policy.types import (
     CommandWord,
     Deny,
     ExecuteResultContext,
+    NetworkContext,
+    NetworkResultContext,
     PolicyCaller,
     ProfileScript,
     Route,
@@ -436,6 +438,55 @@ def test_what_a_backend_returned_keeps_its_keys():
     )
     assert df["result"][1]["inodes_used"] == 1
     assert df["result"][1]["inodes_free"] == 2
+
+
+def _connection() -> NetworkContext:
+    return NetworkContext(
+        host="api.example.com",
+        address="93.184.216.34",
+        port=443,
+        command="curl",
+        program=("curl",),
+        line="curl https://api.example.com/a",
+        session_id="s",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_program_judges_a_connection_and_sees_how_it_ended():
+    refused = _policy("pre_network", FakeProgram(_answer(kind="deny")))
+    answers = await refused.pre_network(_connection())
+    assert answers is not None and isinstance(answers[0], Deny)
+    asked = script_context(_connection())
+    assert (
+        asked["host"],
+        asked["address"],
+        asked["port"],
+        asked["command"],
+        asked["line"],
+    ) == (
+        "api.example.com",
+        "93.184.216.34",
+        443,
+        "curl",
+        "curl https://api.example.com/a",
+    )
+    seen = {
+        name: getattr(_connection(), name)
+        for name in ("host", "address", "port", "command", "session_id")
+    }
+    done = NetworkResultContext(
+        **seen, bytes_sent=80, bytes_received=512, seconds=0.5
+    )
+    watched = FakeProgram()
+    held = _policy("post_network", watched)
+    assert await held.post_network(done) is None
+    ended = script_context(done)
+    assert (
+        ended["bytes_sent"],
+        ended["bytes_received"],
+        ended["ended"],
+    ) == (80, 512, "closed")
 
 
 @pytest.mark.asyncio

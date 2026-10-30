@@ -23,6 +23,7 @@ import {
   parseProcessPermissions,
   type ProcessPermissions,
 } from '../../process/config.ts'
+import type { NetworkSetting } from '../../io/network.ts'
 import type { Limit } from '../../types.ts'
 import { type SharedInput, releaseInputs } from '../../io/async_line_iterator.ts'
 import { parseCommandLimits, commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
@@ -150,6 +151,11 @@ export interface SessionInit {
    */
   profile?: string | null
   commandLimits?: Readonly<Record<string, Limit>>
+  /**
+   * Where the session's lines may connect besides the workspace's
+   * network, from its profile. A durable restriction like commands.
+   */
+  network?: NetworkSetting | null
   processes?: ProcessPermissions
   processId?: number | null
   shellPid?: number | null
@@ -534,6 +540,7 @@ export class SessionState {
   scripts: ProfileScripts
   profile: string | null
   commandLimits: Readonly<Record<string, Limit>>
+  network: NetworkSetting | null
   terminalOutput = true
   processes: ProcessPermissions
   processId: number | null
@@ -567,6 +574,7 @@ export class SessionState {
     this.processDepth = init.processDepth ?? 0
     this.profile = init.profile ?? null
     this.commandLimits = { ...init.commandLimits }
+    this.network = init.network ?? null
     this.processes = parseProcessPermissions(init.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     this.decisions = init.decisions ?? []
     this.generation = init.generation ?? 0
@@ -637,6 +645,7 @@ export class SessionState {
       scripts: overrides.scripts ?? this.scripts,
       profile: overrides.profile ?? this.profile,
       commandLimits: overrides.commandLimits ?? this.commandLimits,
+      network: overrides.network ?? this.network,
       processes: overrides.processes ?? this.processes,
       processId: overrides.processId ?? this.processId,
       shellPid: overrides.shellPid ?? this.shellPid,
@@ -963,6 +972,7 @@ export class SessionState {
     if (Object.keys(this.scripts).length > 0) data.scripts = scriptsToDict(this.scripts)
     if (Object.keys(this.commandLimits).length > 0)
       data.command_limits = commandLimitsToJSON(this.commandLimits)
+    if (this.network !== null) data.network = this.network
     if (JSON.stringify(this.processes) !== JSON.stringify(DEFAULT_PROCESS_PERMISSIONS))
       data.processes = this.processes
     if (this.profile !== null) data.profile = this.profile
@@ -986,6 +996,7 @@ export class SessionState {
     scripts?: Record<string, ScriptJSON[]> | null
     profile?: string | null
     command_limits?: unknown
+    network?: NetworkSetting | null
     processes?: ProcessPermissions
     decisions?: DecisionJSON[] | null
     generation?: number
@@ -1042,6 +1053,7 @@ export class SessionState {
       scripts: scriptsFromDict(data.scripts ?? {}),
       profile: data.profile ?? null,
       commandLimits: parseCommandLimits(data.command_limits),
+      network: data.network ?? null,
       processes,
       decisions: data.decisions != null ? data.decisions.map(decisionFromDict) : [],
     })

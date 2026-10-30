@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../render/json.ts'
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { FileStat } from '../../types.ts'
@@ -20,7 +21,7 @@ import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
 import { listBases, listTables } from './client.ts'
-import { asRows, normalizeBase, normalizeTable, toJsonBytes } from './normalize.ts'
+import { asRows, normalizeBase, normalizeTable } from './normalize.ts'
 import { baseDirname, tableDirname, viewFilename } from './pathing.ts'
 import { detectScope } from './scope.ts'
 
@@ -56,7 +57,7 @@ export function tableChildren(table: Record<string, unknown>, baseId: string): F
   const tableId = text(table, 'id')
   return [
     TABLE_JSON('table.json', tableId, {
-      size: toJsonBytes(normalizeTable(table, baseId)).byteLength,
+      size: jsonBytes(normalizeTable(table, baseId)).byteLength,
     }),
     RECORDS('records.jsonl', tableId),
     VIEWS('views', tableId),
@@ -88,7 +89,7 @@ async function listBase(
 ): Promise<DirListing> {
   const baseId = match.slots.base_id ?? ''
   const tables = await listTables(accessor, baseId)
-  const baseJson = toJsonBytes(normalizeBase(baseRow(entry), tables))
+  const baseJson = jsonBytes(normalizeBase(baseRow(entry), tables))
   const rows = [BASE_JSON('base.json', baseId, { size: baseJson.byteLength })]
   const seeds = new Map<string, FileStat[]>()
   for (const table of tables) {

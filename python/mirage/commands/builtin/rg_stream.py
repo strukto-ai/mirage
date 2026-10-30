@@ -163,6 +163,10 @@ async def drained(
         output = stream.drain()
 
 
+def format_message(message: dict[str, JsonValue]) -> bytes:
+    return open_stream("rg_format", {}).feed(json.dumps(message).encode())
+
+
 def encoding_for(label: str) -> str | None:
     """Resolve a WHATWG label with the registry used by the rg decoder.
 

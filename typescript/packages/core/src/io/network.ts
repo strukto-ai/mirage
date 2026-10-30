@@ -22,10 +22,16 @@ const ENC = new TextEncoder()
 
 /**
  * A workspace's `network`: true for no limit, false for none at all, or the
- * hosts and ranges it may reach, `{ allow: [...] }`. Mirrors Python's
+ * hosts and ranges it may and may not reach,
+ * `{ allowed_domains: [...], denied_domains: [...] }`. Mirrors Python's
  * `NetworkSetting`.
  */
-export type NetworkSetting = boolean | { readonly allow: readonly string[] }
+export type NetworkSetting =
+  | boolean
+  | { readonly allowed_domains?: readonly string[]; readonly denied_domains?: readonly string[] }
+
+// Each list a `network` object takes, and the rule layer it fills.
+const LISTS: Record<string, string> = { allowed_domains: 'allow', denied_domains: 'deny' }
 
 /**
  * Whether a workspace may open one connection: its `network` setting, the
@@ -36,7 +42,11 @@ export type NetworkSetting = boolean | { readonly allow: readonly string[] }
 export class NetworkRule {
   private readonly stream: MovableStream
 
-  constructor(layers: readonly Record<string, JsonValue>[], metadata = false) {
+  constructor(
+    // What it was built from, which a narrower rule builds on.
+    readonly layers: readonly Record<string, JsonValue>[],
+    readonly metadata = false,
+  ) {
     try {
       this.stream = new MovableStream('network', { layers: [...layers], metadata })
     } catch (error) {
@@ -45,65 +55,72 @@ export class NetworkRule {
     }
   }
 
-  /** Whether a connection to `address`, resolved for `host`, opens; either is empty when unknown. */
-  lets(host: string, address: string): boolean {
-    return this.stream.live.test(ENC.encode(`${host}\0${address}`))
+  /**
+   * Whether a connection to `address`, resolved for `host`, opens on `port`;
+   * either name is empty and the port undefined when unknown.
+   */
+  lets(host: string, address: string, port?: number): boolean {
+    return this.stream.live.test(
+      ENC.encode(`${host}\0${address}\0${port === undefined ? '' : String(port)}`),
+    )
   }
 }
 
 /**
  * The layer a `network` setting adds: none for true, one that lets nothing
- * for false, and its allow list for an object. Throws for anything else.
- * Mirrors Python's `network_layer`.
+ * for false, and its allowed and denied lists for an object. Throws for
+ * anything else. Mirrors Python's `network_layer`.
  */
 export function networkLayer(setting: unknown): Record<string, JsonValue> | null {
   if (setting === true) return null
   if (setting === false) return { allow: [] }
-  if (
-    typeof setting === 'object' &&
-    setting !== null &&
-    Object.keys(setting).length === 1 &&
-    'allow' in setting &&
-    Array.isArray(setting.allow) &&
-    setting.allow.every((entry) => typeof entry === 'string')
-  ) {
-    return { allow: [...setting.allow] }
+  if (typeof setting === 'object' && setting !== null && !Array.isArray(setting)) {
+    const lists = Object.entries(setting)
+    if (
+      lists.length > 0 &&
+      lists.every(
+        ([key, entries]) =>
+          key in LISTS &&
+          Array.isArray(entries) &&
+          entries.every((entry) => typeof entry === 'string'),
+      )
+    ) {
+      const layer: Record<string, JsonValue> = {}
+      for (const [key, entries] of lists) layer[LISTS[key] ?? key] = [...(entries as string[])]
+      return layer
+    }
   }
   throw new Error(
-    `network is true, false or {allow: [hosts and ranges]}, not ${JSON.stringify(setting)}`,
+    `network is true, false or {allowed_domains: [...], denied_domains: [...]}, not ${JSON.stringify(setting)}`,
   )
 }
 
 /**
- * Whether two settings hold the same rule: their allow lists name the same
- * entries as written, in any order, `false` being the empty list. An entry
- * is compared as written, since one spelling can be an address and
- * another a host name.
+ * Whether two settings hold the same rule: their allowed and denied lists
+ * name the same entries as written, in any order, `false` being an empty
+ * allowed list and an empty denied list none at all, since it refuses
+ * nothing. An entry is compared as written, since one spelling can be an
+ * address and another a host name.
  */
 export function sameNetwork(a: NetworkSetting, b: NetworkSetting): boolean {
   const [left, right] = [a, b].map((setting) => {
     const layer = networkLayer(setting)
-    return layer === null
-      ? null
-      : JSON.stringify([...new Set(layer.allow as string[])].sort(compareCodePoints))
+    const sorted = (entries: JsonValue | undefined): string[] | null =>
+      entries === undefined ? null : [...new Set(entries as string[])].sort(compareCodePoints)
+    const denied = sorted(layer?.deny)
+    return JSON.stringify([sorted(layer?.allow), denied?.length === 0 ? null : denied])
   })
   return left === right
 }
 
 /**
- * The rule a workspace's connections are judged by: its own setting and the
- * ceiling of the server that built it, each a layer, with the cloud metadata
- * addresses refused when `metadata` is set; null when nothing limits it.
- * Mirrors Python's `network_rule`.
+ * The rule a workspace's connections are judged by: its `network`, with the
+ * cloud metadata addresses refused when `metadata` is set; null when nothing
+ * limits it. Mirrors Python's `network_rule`.
  */
-export function networkRule(
-  setting: NetworkSetting = true,
-  ceiling: NetworkSetting = true,
-  metadata = false,
-): NetworkRule | null {
-  const layers = [networkLayer(ceiling), networkLayer(setting)].filter(
-    (layer): layer is Record<string, JsonValue> => layer !== null,
-  )
+export function networkRule(setting: NetworkSetting = true, metadata = false): NetworkRule | null {
+  const layer = networkLayer(setting)
+  const layers = layer === null ? [] : [layer]
   if (layers.length === 0 && !metadata) return null
   return new NetworkRule(layers, metadata)
 }
@@ -121,13 +138,13 @@ export function runWithNetwork<T>(bound: NetworkRule | null, fn: () => Promise<T
 
 /**
  * Whether the workspace a call runs for may open a connection to `address`,
- * resolved for `host`. A browser cannot tell one task's binding from
- * another's, so there every live workspace's rule must let it. Mirrors
+ * resolved for `host`, on `port`. A browser cannot tell one task's binding
+ * from another's, so there every live workspace's rule must let it. Mirrors
  * Python's `network_lets`.
  */
-export function networkLets(host: string, address: string): boolean {
+export function networkLets(host: string, address: string, port?: number): boolean {
   for (const live of rule.liveStores()) {
-    if (live !== null && !live.lets(host, address)) return false
+    if (live !== null && !live.lets(host, address, port)) return false
   }
   return true
 }

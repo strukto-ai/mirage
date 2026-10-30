@@ -41,8 +41,8 @@ from mirage.core.linear.normalize import (
     normalize_project,
     normalize_team,
     normalize_user,
-    to_json_bytes,
 )
+from mirage.core.render.json import json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
@@ -85,14 +85,14 @@ async def _team_list(
     team_ids = accessor.config.team_ids
     if team_ids:
         teams = [t for t in teams if t.get("id") in team_ids]
-    return to_json_bytes([normalize_team(team) for team in teams])
+    return json_bytes([normalize_team(team) for team in teams])
 
 
 async def _team_get(
     accessor: LinearAccessor, texts: list[str], fl: FlagView
 ) -> bytes:
     team = await resolve_team(accessor, first_text(texts, "team key"))
-    return to_json_bytes(normalize_team(team))
+    return json_bytes(normalize_team(team))
 
 
 async def _team_members(
@@ -100,7 +100,7 @@ async def _team_members(
 ) -> bytes:
     team = await resolve_team(accessor, first_text(texts, "team key"))
     users = await list_team_members(accessor, team["id"])
-    return to_json_bytes([normalize_user(user) for user in users])
+    return json_bytes([normalize_user(user) for user in users])
 
 
 async def _issue_list(
@@ -108,7 +108,7 @@ async def _issue_list(
 ) -> bytes:
     team = await resolve_team(accessor, _require_team(fl))
     issues = await list_team_issues(accessor, team["id"])
-    return to_json_bytes([normalize_issue(issue) for issue in issues])
+    return json_bytes([normalize_issue(issue) for issue in issues])
 
 
 async def _issue_get(
@@ -116,7 +116,7 @@ async def _issue_get(
 ) -> bytes:
     issue_id = await resolve_issue(accessor, first_text(texts, "issue key"))
     issue = await get_issue(accessor, issue_id)
-    return to_json_bytes(normalize_issue(issue))
+    return json_bytes(normalize_issue(issue))
 
 
 async def _project_list(
@@ -136,7 +136,7 @@ async def _project_list(
                 issues=rows,
             )
         )
-    return to_json_bytes(payload)
+    return json_bytes(payload)
 
 
 async def _project_get(
@@ -148,7 +148,7 @@ async def _project_get(
     for project in projects:
         if project.get("id") == project_id:
             rows = await _project_issue_rows(accessor, team["id"], project_id)
-            return to_json_bytes(
+            return json_bytes(
                 normalize_project(
                     project,
                     team_id=team["id"],
@@ -165,7 +165,7 @@ async def _cycle_list(
 ) -> bytes:
     team = await resolve_team(accessor, _require_team(fl))
     cycles = await list_team_cycles(accessor, team["id"])
-    return to_json_bytes(
+    return json_bytes(
         [normalize_cycle(cycle, team_id=team["id"]) for cycle in cycles]
     )
 
@@ -178,7 +178,7 @@ async def _cycle_current(
     if not cycles:
         raise FileNotFoundError("no cycles")
     current = max(cycles, key=lambda cycle: cycle.get("number") or 0)
-    return to_json_bytes(normalize_cycle(current, team_id=team["id"]))
+    return json_bytes(normalize_cycle(current, team_id=team["id"]))
 
 
 async def _cycle_get(
@@ -189,7 +189,7 @@ async def _cycle_get(
     cycles = await list_team_cycles(accessor, team["id"])
     for cycle in cycles:
         if cycle.get("id") == cycle_id:
-            return to_json_bytes(normalize_cycle(cycle, team_id=team["id"]))
+            return json_bytes(normalize_cycle(cycle, team_id=team["id"]))
     raise FileNotFoundError(cycle_id)
 
 
@@ -198,7 +198,7 @@ async def _label_list(
 ) -> bytes:
     team = await resolve_team(accessor, _require_team(fl))
     labels = await list_team_labels(accessor, team["id"])
-    return to_json_bytes([normalize_label(label) for label in labels])
+    return json_bytes([normalize_label(label) for label in labels])
 
 
 async def _comment_list(
@@ -208,7 +208,7 @@ async def _comment_list(
     issue = await get_issue(accessor, issue_id)
     issue_key = issue.get("identifier")
     comments = await list_issue_comments(accessor, issue_id)
-    return to_json_bytes(
+    return json_bytes(
         [
             normalize_comment(comment, issue_id=issue_id, issue_key=issue_key)
             for comment in comments
@@ -234,7 +234,7 @@ async def _user_list(
     accessor: LinearAccessor, texts: list[str], fl: FlagView
 ) -> bytes:
     users = await _all_users(accessor)
-    return to_json_bytes([normalize_user(user) for user in users])
+    return json_bytes([normalize_user(user) for user in users])
 
 
 async def _user_get(
@@ -243,7 +243,7 @@ async def _user_get(
     email = first_text(texts, "user email")
     for user in await _all_users(accessor):
         if user.get("email") == email:
-            return to_json_bytes(normalize_user(user))
+            return json_bytes(normalize_user(user))
     raise FileNotFoundError(email)
 
 
@@ -252,9 +252,7 @@ async def _document_list(
 ) -> bytes:
     team = await resolve_team(accessor, _require_team(fl))
     documents = await list_team_documents(accessor, team["id"])
-    return to_json_bytes(
-        [normalize_document(document) for document in documents]
-    )
+    return json_bytes([normalize_document(document) for document in documents])
 
 
 async def _document_get(
@@ -265,7 +263,7 @@ async def _document_get(
     documents = await list_team_documents(accessor, team["id"])
     for document in documents:
         if document.get("id") == document_id:
-            return to_json_bytes(normalize_document(document))
+            return json_bytes(normalize_document(document))
     raise FileNotFoundError(document_id)
 
 
@@ -276,7 +274,7 @@ async def _search(
     if not query:
         raise ValueError("a search query is required")
     results = await search_issues(accessor, query)
-    return to_json_bytes(results)
+    return json_bytes(results)
 
 
 Runner = Callable[[LinearAccessor, list[str], FlagView], Awaitable[bytes]]

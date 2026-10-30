@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
@@ -9,6 +10,7 @@ from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stat,
     stdin_stream,
+    stream_output,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -17,86 +19,39 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.scan import refused
-from mirage.rs.stream import open_stream, run_stream
+from mirage.rs.stream import close_stream, open_stream
 from mirage.shell.bytes import byte_view
-from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 
-def tabs_config(
-    command: str, names: tuple[str, ...], flags: Mapping[str, FlagValue]
-) -> dict[str, JsonValue] | IOResult:
-    """expand's or unexpand's engine config, refused by the engine before
-    any operand is resolved.
-
-    Every ``-t`` and switch goes as typed, in typed order: ``-t``
-    accumulates across occurrences into one tab list.
-
-    Args:
-        command (str): expand or unexpand, the engine and the name its
-            refusals give.
-        names (tuple[str, ...]): the options the command reads.
-        flags (Mapping[str, FlagValue]): the parsed flags.
-
-    Returns:
-        dict[str, JsonValue] | IOResult: the config, or the refusal.
-    """
-    fl = FlagView(flags, spec=SPECS[command])
-    options: list[JsonValue] = [
-        [name, byte_view(text)] for name, text in fl.texts(*names)
-    ]
-    config: dict[str, JsonValue] = {"options": options}
-    try:
-        open_stream(command, config)
-    except StreamRefusal as refusal:
-        return refused(refusal)
-    return config
+@dataclass(frozen=True, slots=True)
+class ExpandFlags:
+    tabs: tuple[str, ...] = ()
+    initial_only: bool = False
 
 
-def expand_config(
-    flags: Mapping[str, FlagValue],
-) -> dict[str, JsonValue] | IOResult:
-    """expand's engine config: ``tabs_config`` over ``-t`` and ``-i``.
+def parse_flags(flags: Mapping[str, FlagValue]) -> ExpandFlags:
+    """Read expand's flags once, refusing a tab list GNU refuses.
+
+    ``-t`` accumulates across occurrences, so it is declared
+    ``multiple`` and read as the list it typed.
 
     Args:
-        flags (Mapping[str, FlagValue]): the parsed flags.
+        flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
+
+    Raises:
+        ValueError: the stderr text to print, exit 1.
     """
-    return tabs_config("expand", ("tabs", "initial"), flags)
-
-
-async def tabs_generic(
-    command: str,
-    config: Mapping[str, JsonValue],
-    paths: list[PathSpec],
-    ctx: Context,
-    stat: StatFn,
-    stream: PolymorphicReadFn,
-) -> tuple[ByteSource | None, IOResult]:
-    """Run expand or unexpand over resolved operands, one stream over all.
-
-    Args:
-        command (str): expand or unexpand.
-        config (Mapping[str, JsonValue]): ``tabs_config``'s config.
-        paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
-        ctx (Context): Stdin from the dispatcher.
-        stat (StatFn): Bound stat called as ``stat(path)``.
-        stream (PolymorphicReadFn): Bound reader called as
-            ``stream(path)``.
-    """
-    readable, err = await split_readable(paths, stdin_stat(stat), command)
-    if err and not readable:
-        return None, IOResult(exit_code=1, stderr=err)
-    io = IOResult()
-    read = stdin_stream(stream, ctx.stdin)
-    sources = [reported_stream(read(p), io, p, command) for p in readable]
-    source = async_chain(sources) if readable else resolve_source(ctx.stdin)
-    output = run_stream(command, config, source)
-    return await merge_split_errors((output, io), err)
+    fl = FlagView(flags, spec=SPECS["expand"])
+    return ExpandFlags(
+        tabs=tuple(fl.as_list("tabs")),
+        initial_only=fl.as_bool("initial"),
+    )
 
 
 async def expand_generic(
-    config: Mapping[str, JsonValue],
     paths: list[PathSpec],
+    texts: list[str],
     ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
@@ -104,19 +59,39 @@ async def expand_generic(
     """Run expand over resolved operands; mirrors expandGeneric.
 
     Args:
-        config (Mapping[str, JsonValue]): ``expand_config``'s config.
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
-        ctx (Context): Stdin from the dispatcher.
+        texts (list[str]): Non-path words, unused by expand.
+        ctx (Context): Flags and stdin from the dispatcher.
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
     """
-    return await tabs_generic("expand", config, paths, ctx, stat, stream)
+    stat = stdin_stat(stat)
+    try:
+        parsed = parse_flags(ctx.flags)
+        engine = open_stream(
+            "expand",
+            {
+                "tabs": [byte_view(tab) for tab in parsed.tabs],
+                "initial_only": parsed.initial_only,
+            },
+        )
+    except (ValueError, StreamRefusal) as exc:
+        return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
+    try:
+        readable, err = await split_readable(paths, stat, "expand")
+    except BaseException:
+        await close_stream(engine)
+        raise
+    if err and not readable:
+        await close_stream(engine)
+        return None, IOResult(exit_code=1, stderr=err)
+    io = IOResult()
+    read = stdin_stream(stream, ctx.stdin)
+    sources = [reported_stream(read(p), io, p, "expand") for p in readable]
+    source = async_chain(sources) if readable else resolve_source(ctx.stdin)
+    output = stream_output(engine, source)
+    return await merge_split_errors((output, io), err)
 
 
-__all__ = [
-    "expand_config",
-    "expand_generic",
-    "tabs_config",
-    "tabs_generic",
-]
+__all__ = ["ExpandFlags", "expand_generic", "parse_flags"]

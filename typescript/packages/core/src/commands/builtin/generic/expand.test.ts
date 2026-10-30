@@ -14,12 +14,15 @@
 
 import { PathSpec } from '../../../types.ts'
 import { describe, expect, it } from 'vitest'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { materialize } from '../../../io/types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
-import { expandConfig, expandGeneric } from './expand.ts'
+import { expandGeneric } from './expand.ts'
+import { openStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -46,9 +49,9 @@ async function run(
   // `CommandFnResult` is nullable — null is how a handler says it does not
   // apply — and expand never answers that way, so say so rather than
   // destructure a union.
-  const config = expandConfig(ctx.flags)
-  const result = config instanceof IOResult ? null : expandGeneric(config, [], ctx, stubStream)
-  const [out, io] = result ?? [null, config as IOResult]
+  const result = await expandGeneric([], ctx, stubStream)
+  if (result === null) throw new Error('expand declined to handle its own operands')
+  const [out, io] = result
   return {
     exit: io.exitCode,
     stdout: out === null ? '' : DEC.decode(await materialize(out)),
@@ -110,11 +113,33 @@ function expandBag(...argv: string[]): Line {
   return { flags: parseToKwargs(parseCommand(specOf('expand'), argv, '/')) }
 }
 
-async function refusal(tabs: string | string[]): Promise<string> {
-  const got = await run({ flags: { tabs } }, stdinOf('a\tb\n'))
-  expect(got.exit).toBe(1)
-  expect(got.stdout).toBe('')
-  return got.stderr
+interface TabStops {
+  stops: number[]
+  extend: number
+  increment: number
+}
+
+async function readTabStops(occurrences: readonly string[]): Promise<TabStops | string> {
+  try {
+    const engine = await openStream('expand', {
+      tabs: occurrences.map((tab) => byteView(tab)),
+      initial_only: false,
+    })
+    try {
+      return JSON.parse(new TextDecoder().decode(engine.metadata())) as TabStops
+    } finally {
+      engine.close()
+    }
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    return `${error.message}\n`
+  }
+}
+
+async function stops(list: string): Promise<TabStops> {
+  const parsed = await readTabStops([list])
+  if (typeof parsed === 'string') throw new Error(`refused: ${parsed}`)
+  return parsed
 }
 
 // GNU `expand -t` takes a LIST of tab stops, not one size. The tightened
@@ -125,6 +150,15 @@ async function refusal(tabs: string | string[]): Promise<string> {
 // harness ran 2464 more combinations of these lists against the real binary
 // with no mismatch beyond one known diagnostic-quoting gap.
 const ABCDE = 'a\tb\tc\td\te\n'
+
+// GNU 9.7: 5,000 zeros before a number leave the number, and a 5,000-digit
+// stop is too large. Mirrors test_expand_unexpand.py.
+it('reads a stop past any digit limit', async () => {
+  const zeros = '0'.repeat(5000)
+  expect(await stops(`${zeros}4`)).toEqual({ stops: [4], extend: 0, increment: 0 })
+  expect(await stops(`2,/${zeros}4`)).toEqual({ stops: [2], extend: 4, increment: 0 })
+  expect(await readTabStops(['9'.repeat(5000)])).toMatch(/^expand: tab stop is too large '9+'\n$/)
+})
 
 describe('expand renders a tab stop list as GNU does', () => {
   it.each([
@@ -219,7 +253,7 @@ describe('expand accumulates tab stops across -t occurrences', () => {
     [['+4', '+5'], "expand: '+' specifier only allowed with the last value\n"],
     [['/4', '/5'], "expand: '/' specifier only allowed with the last value\n"],
   ])('refuses %s across occurrences', async (occurrences, message) => {
-    expect(await refusal(occurrences)).toBe(message)
+    expect(await readTabStops(occurrences)).toBe(message)
   })
 })
 
@@ -279,6 +313,10 @@ const EXPAND_REFUSALS: readonly (readonly [string, string])[] = [
 ]
 
 describe('expand refuses a tab list GNU refuses', () => {
+  it.each(EXPAND_REFUSALS)('-t %s', async (list, message) => {
+    expect(await readTabStops([list])).toBe(message)
+  })
+
   // Exit 1, empty stdout, and one line per problem with no hint. The stub
   // stream throws, so a refusal that opened an operand would fail here.
   it.each(EXPAND_REFUSALS)('-t %s is fatal before any operand', async (list, message) => {
@@ -290,8 +328,7 @@ describe('expand refuses a tab list GNU refuses', () => {
 
   // No stop and neither specifier: GNU stays on 8.
   it.each(['', ',', ',,', ' ', '+', '/'])('reads -t %s as the default', async (list) => {
-    const got = await run({ flags: { tabs: list } }, stdinOf('a\tb\n'))
-    expect(got.stdout).toBe('a       b\n')
+    expect(await stops(list)).toEqual({ stops: [], extend: 0, increment: 0 })
   })
 
   // A newline is not `isblank` in C (that is space and TAB and nothing
@@ -310,7 +347,7 @@ describe('expand refuses a tab list GNU refuses', () => {
     ['8\x07', '\\a'],
     ['8\x01', '\\001'],
   ])('refuses -t %j, a non-blank separator', async (list, quoted) => {
-    expect(await refusal(list)).toBe(
+    expect(await readTabStops([list])).toBe(
       `expand: tab size contains invalid character(s): '${quoted}'\n`,
     )
   })
@@ -319,9 +356,29 @@ describe('expand refuses a tab list GNU refuses', () => {
   // refusal names its BYTES: U+0663 is two of them, so it reads as two octal
   // escapes rather than as the character (NL3-A).
   it.each(['\u0663', '8\u0663'])('refuses -t %j, a non-ASCII digit', async (list) => {
-    expect(await refusal(list)).toBe(
+    expect(await readTabStops([list])).toBe(
       "expand: tab size contains invalid character(s): '\\331\\243'\n",
     )
+  })
+})
+
+// `+4` is not a sign: it is the specifier that makes 4 an increment, and
+// `/4` the one that sets stops at multiples of 4 past the last. A bare `+4`
+// and a bare `4` coincide (an increment of 4 from column 0 is the same
+// sequence as a repeating size of 4), which is why an earlier round read `+`
+// as a sign, but they are different parses.
+describe('expand parses the / and + specifiers', () => {
+  it.each([
+    ['4', { stops: [4], extend: 0, increment: 0 }],
+    ['+4', { stops: [], extend: 0, increment: 4 }],
+    ['/4', { stops: [], extend: 4, increment: 0 }],
+    ['2,+4', { stops: [2], extend: 0, increment: 4 }],
+    ['2,/4', { stops: [2], extend: 4, increment: 0 }],
+    // `/` wins when both were seen, matching GNU's `if (extend) ... else`.
+    ['/+4', { stops: [], extend: 4, increment: 0 }],
+    ['+/4', { stops: [], extend: 4, increment: 0 }],
+  ])('-t %s', async (list, expected) => {
+    expect(await stops(list)).toEqual(expected)
   })
 })
 
@@ -434,7 +491,7 @@ describe('a misplaced specifier does not end the scan', () => {
     ['+4+5', "expand: '+' specifier not at start of number: '+5'\n"],
     ['+4/5', "expand: '/' specifier not at start of number: '/5'\n"],
   ])('-t %j', async (list, message) => {
-    expect(await refusal(list)).toBe(message)
+    expect(await readTabStops([list])).toBe(message)
   })
 
   // The other direction: one line, and nothing to its right is read.
@@ -446,6 +503,12 @@ describe('a misplaced specifier does not end the scan', () => {
     ['1;3;5', "expand: tab size contains invalid character(s): ';3;5'\n"],
     ['x0', "expand: tab size contains invalid character(s): 'x0'\n"],
   ])('-t %j ends it', async (list, message) => {
-    expect(await refusal(list)).toBe(message)
+    expect(await readTabStops([list])).toBe(message)
   })
+})
+
+it('quotes a raw byte in the tab argument', async () => {
+  const result = await run({ flags: { tabs: ['\udcff'] } })
+  expect(result.exit).toBe(1)
+  expect(result.stderr).toBe("expand: tab size contains invalid character(s): '\\377'\n")
 })

@@ -12,19 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { OutputStream } from '../../../io/stream.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { LAST_WORD, OPERAND, SPELLED } from '../../spec/constants.ts'
+import { OPERAND, SPELLED } from '../../spec/constants.ts'
 import { FlagView, spreadOperands } from '../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { JsonValue, PathSpec } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
+import { UsageError } from '../../errors.ts'
+import { missingOperandError } from '../../spec/usage.ts'
 import { CommandName } from '../../spec/types.ts'
-import { encodeText } from '../../../shell/bytes.ts'
-import { StreamRefusal } from '../../../rs/errors.ts'
-import { refused, scan } from '../../../rs/scan.ts'
-import { closeStream, mergeOutput, openStream } from '../../../rs/stream.ts'
+import { byteView, encodeText } from '../../../shell/bytes.ts'
+import { closeStream, mergeOutput, openStream, type OpenStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import type { JsonValue } from '../../../types.ts'
 import { isStdin, neverOpened, stdinStream } from '../utils/stream.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
@@ -45,70 +48,131 @@ const OPTION_DESTS = [
   'header',
 ]
 
-/** join's line as mirage-rs read it. Mirrors JoinFlags in join.py. */
+/**
+ * What join does with a line whose key sorts before the one above it. WARN,
+ * the default, names the first such line of each file, but only once some
+ * line has gone unpaired, then finishes and exits 1 under `input is not in
+ * sorted order`. FAIL (`--check-order`) names the first one and stops there.
+ * OFF (`--nocheck-order`) never looks. Mirrors OrderCheck in join.py.
+ */
+export enum OrderCheck {
+  WARN = 'warn',
+  FAIL = 'fail',
+  OFF = 'off',
+}
+
+/** A -o item: a file number and a field counted from 0; file 0 is the join field. */
+export type Column = readonly [number, number]
+
+/**
+ * join's options as one line set them; every byte string is a byte view, one
+ * character per byte. Mirrors JoinFlags in join.py.
+ */
 export interface JoinFlags {
-  /** The `join` engine's config. */
-  readonly engine: Record<string, JsonValue>
+  /** Each file's join field, counted from 0. */
+  readonly keys: readonly [number, number]
+  /** Whether each file's unpairable lines print (-a, -v). */
+  readonly unpaired: readonly [boolean, boolean]
+  /** Whether joined lines print; any -v clears it. */
+  readonly paired: boolean
+  /** The -e text for an empty field. */
+  readonly filler: string | null
+  /** The -o list. */
+  readonly columns: readonly Column[]
+  /** -o auto. */
+  readonly autoColumns: boolean
+  /** The -t byte; null parts fields at runs of blanks, WHOLE_RECORD keeps each record whole. */
+  readonly delimiter: string | null
+  /** What output fields are joined with. */
+  readonly separator: string
+  /** -i. */
+  readonly foldCase: boolean
+  /** What ends a record, NUL under -z. */
+  readonly terminator: string
+  /** What an unsorted line does. */
+  readonly order: OrderCheck
+  /** --header. */
+  readonly header: boolean
   /** The operand positions of FILE1 and FILE2. */
   readonly files: readonly [number, number]
 }
 
-/**
- * Read join's options and operands in the order the line typed them.
- * mirage-rs reads the tape in one pass, as GNU join's getopt loop does, so
- * the first problem left to right is the one reported. `operands` are the
- * operands in order, a glob's matches in its place; when the tape places
- * none, they are read after every option and a `--`, so each is a file.
- * `argv` is the line's words after `join`, which the missing-operand line
- * names the last of. The engine's config and the two files, or join's
- * refusal; throws when the tape places other operands than `operands`.
- * Mirrors parse_flags in join.py.
- */
-export function parseFlags(
+function options(
   flags: Context['flags'],
-  operands: readonly string[] = [],
-  argv: readonly string[] = [],
-): JoinFlags | IOResult {
-  const typed = new FlagView(flags, specOf(CommandName.JOIN)).texts(
+  operands: readonly string[],
+  argv: readonly string[],
+): Record<string, JsonValue> {
+  const tape = new FlagView(flags, specOf(CommandName.JOIN)).occurrences(
     OPERAND,
     SPELLED,
     ...OPTION_DESTS,
   )
-  const placed = typed.filter(([name]) => name === OPERAND).length
-  if (placed === 0 && operands.length > 0) {
-    typed.push([SPELLED, '--'], ...operands.map((word): [string, string] => [OPERAND, word]))
-  } else if (placed !== operands.length) {
-    throw new Error(
-      `join's tape places ${String(placed)} operands, not its ${String(operands.length)}`,
-    )
+  return {
+    options: tape.map(([name, value]) => [
+      name,
+      typeof value === 'string' ? byteView(value) : value,
+    ]),
+    operands: operands.map((word) => byteView(word)),
+    argv: argv.map((word) => byteView(word)),
   }
-  const last = argv.at(-1)
-  if (last !== undefined) typed.push([LAST_WORD, last])
-  let values: Record<string, JsonValue>
+}
+
+function parsed(stream: OpenStream): JoinFlags {
+  const config = JSON.parse(new TextDecoder().decode(stream.metadata())) as {
+    keys: [number, number]
+    unpaired: [boolean, boolean]
+    paired: boolean
+    filler: number[] | null
+    columns: [number, number][]
+    auto_columns: boolean
+    delimiter: number[] | null
+    separator: number[]
+    fold_case: boolean
+    zero_terminated: boolean
+    order: OrderCheck
+    header: boolean
+    files: [number, number]
+  }
+  return {
+    keys: config.keys,
+    unpaired: config.unpaired,
+    paired: config.paired,
+    filler: config.filler === null ? null : byteView(new Uint8Array(config.filler)),
+    columns: config.columns,
+    autoColumns: config.auto_columns,
+    delimiter: config.delimiter === null ? null : byteView(new Uint8Array(config.delimiter)),
+    separator: byteView(new Uint8Array(config.separator)),
+    foldCase: config.fold_case,
+    terminator: config.zero_terminated ? '\0' : '\n',
+    order: config.order,
+    header: config.header,
+    files: config.files,
+  }
+}
+
+export async function parseFlags(
+  flags: Context['flags'],
+  operands: readonly string[] = [],
+  argv: readonly string[] = [],
+): Promise<JoinFlags> {
   try {
-    values = scan('join', typed)
-  } catch (err) {
-    if (!(err instanceof StreamRefusal)) throw err
-    return refused(err)
+    const engine = await openStream('join', options(flags, operands, argv))
+    try {
+      return parsed(engine)
+    } finally {
+      await closeStream(engine)
+    }
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    throw new UsageError(error.message, 1)
   }
-  const { engine, files } = values
-  if (
-    typeof engine === 'object' &&
-    engine !== null &&
-    !Array.isArray(engine) &&
-    Array.isArray(files) &&
-    typeof files[0] === 'number' &&
-    typeof files[1] === 'number'
-  ) {
-    return { engine, files: [files[0], files[1]] }
-  }
-  throw new Error(`join's scan read no engine and files: ${JSON.stringify(values)}`)
 }
 
 export interface JoinIO {
   read: (p: PathSpec) => AsyncIterable<Uint8Array>
   stdin: ByteSource | null
   flags: JoinFlags
+  engine?: OpenStream
 }
 
 /**
@@ -117,14 +181,32 @@ export interface JoinIO {
  * join.py.
  */
 export function join(paths: PathSpec[], io: JoinIO): [ByteSource | null, IOResult] {
-  const [p1, p2] = io.flags.files.map((index) => paths[index])
+  const p1 = paths[io.flags.files[0]]
+  const p2 = paths[io.flags.files[1]]
   if (p1 === undefined || p2 === undefined) {
-    throw new Error(`join's files ${String(io.flags.files)} are not among its operands`)
+    throw missingOperandError(CommandName.JOIN, paths.at(-1)?.rawPath ?? null, [])
+  }
+  if (p1.rawPath === '-' && p2.rawPath === '-') {
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: new TextEncoder().encode('join: both files cannot be standard input\n'),
+      }),
+    ]
   }
   const stream = stdinStream(io.read, io.stdin)
   const readers = [new AsyncLineIterator(stream(p1)), new AsyncLineIterator(stream(p2))] as const
   const result = new IOResult()
-  return [joinStream(io.flags, readers, [p1, p2], result), result]
+  const produced = joinStream(io.flags, readers, [p1, p2], result, io.engine)
+  return [
+    new OutputStream(produced, async () => {
+      await produced.return(undefined)
+      if (io.engine !== undefined) await closeStream(io.engine)
+      for (const reader of readers) await reader.discard()
+    }),
+    result,
+  ]
 }
 
 // join's line for an operand it cannot read: named as a missing one when it
@@ -172,8 +254,25 @@ async function* joinStream(
   readers: readonly [AsyncLineIterator, AsyncLineIterator],
   paths: readonly [PathSpec, PathSpec],
   io: IOResult,
-): AsyncIterable<Uint8Array> {
-  const stream = await openStream('join', flags.engine)
+  engine?: OpenStream,
+): AsyncGenerator<Uint8Array> {
+  const stream =
+    engine ??
+    (await openStream('join', {
+      keys: [...flags.keys],
+      unpaired: [...flags.unpaired],
+      paired: flags.paired,
+      filler: flags.filler,
+      columns: flags.columns.map((item) => [...item]),
+      auto_columns: flags.autoColumns,
+      delimiter: flags.delimiter,
+      separator: flags.separator,
+      fold_case: flags.foldCase,
+      zero_terminated: flags.terminator === '\0',
+      order: flags.order,
+      header: flags.header,
+      names: paths.map((path) => byteView(path.rawPath)),
+    }))
   let failed: 0 | 1 = 0
   const pull = (side: number): Promise<Uint8Array | null> => {
     failed = side === 0 ? 0 : 1
@@ -214,11 +313,25 @@ export async function joinGeneric(
     ctx.flags,
     groups.map((group) => group.map((path) => path.rawPath)),
   )
-  const parsed = parseFlags(
-    flags,
-    resolved.map((path) => path.rawPath),
-    ctx.argv ?? [],
-  )
-  if (parsed instanceof IOResult) return [null, parsed]
-  return join(resolved, { read, stdin: ctx.stdin, flags: parsed })
+  try {
+    const engine = await openStream(
+      'join',
+      options(
+        flags,
+        resolved.map((path) => path.rawPath),
+        ctx.argv ?? [],
+      ),
+    )
+    try {
+      const result = join(resolved, { read, stdin: ctx.stdin, flags: parsed(engine), engine })
+      if (result[0] === null) await closeStream(engine)
+      return result
+    } catch (error) {
+      await closeStream(engine)
+      throw error
+    }
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    throw new UsageError(error.message, 1)
+  }
 }

@@ -24,11 +24,12 @@ import {
   lineRunning,
   noteRefusal,
   runExplaining,
+  runLanding,
 } from '../context/session_context.ts'
 import { eacces, erofs } from '../errors/fs.ts'
 import { commandRecords } from '../observe/context.ts'
 import { fsErrorLine } from '../errors/render.ts'
-import { FileType, type Limit, type PathSpec, type Refusal } from '../types.ts'
+import { FileType, Limit, type PathSpec, type Refusal } from '../types.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import type { Policy } from './base.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
@@ -50,6 +51,8 @@ import {
   type CommandResultContext,
   type Deny,
   type ExecuteResultContext,
+  type NetworkContext,
+  type NetworkResultContext,
   type VfsContext,
   type VfsResultContext,
   type Pending,
@@ -584,6 +587,75 @@ async function sessionRefused(
  * workspace's ledger (`Policies.decisions`), inside a line too. A write a
  * method makes while it decides (`ctx.session`) throws EACCES.
  */
+/**
+ * Fire preNetwork as a connection is about to open; a Deny, or an Ask,
+ * refuses it with EACCES, the host as the name refused. A connection opens
+ * under a command that was admitted without the question, so an Ask refuses
+ * like a deny. A dry run's policy deciding opens nothing to judge. Only the
+ * policies that let the connection through hear how it ends, so a refusal,
+ * or an abort while they decide, ends it as refused for those already
+ * passed. Returns them, for `postNetworkGate` (null when none was asked, so
+ * every policy hears), and the tightest Limit they answered. Mirrors
+ * Python's `pre_network_gate`.
+ */
+export async function preNetworkGate(
+  policies: Policies,
+  ctx: NetworkContext,
+): Promise<[readonly Policy[] | null, Limit | null]> {
+  if (
+    explaining() === DryRun.DECIDING ||
+    !(await policies.wantsFor('preNetwork', ctx.sessionId ?? ''))
+  ) {
+    return [null, null]
+  }
+  const asked = { ...ctx, caller: policyCaller(currentCaller().session, policies.account) }
+  const passed: Policy[] = []
+  let answer: Deny | Ask | null
+  let limit: Limit | null
+  try {
+    ;[answer, limit] = await apart(() => policies.preNetwork(asked, passed))
+  } catch (err) {
+    await runLanding(() =>
+      postNetworkGate(
+        policies,
+        { ...asked, bytesSent: 0, bytesReceived: 0, seconds: 0, ended: 'error' },
+        passed,
+      ),
+    )
+    throw err
+  }
+  if (answer !== null) {
+    await postNetworkGate(
+      policies,
+      { ...asked, bytesSent: 0, bytesReceived: 0, seconds: 0, ended: 'refused' },
+      passed,
+    )
+    const refused: Deny = answer.kind === 'deny' ? answer : { kind: 'deny', reason: answer.reason }
+    throw policyDenied(refused, ctx.host === '' ? ctx.address : ctx.host)
+  }
+  return [passed, limit]
+}
+
+/**
+ * Fire postNetwork once a connection is over, for every policy among
+ * `passed` (null for every policy), each asked past another's answer.
+ * Mirrors Python's `post_network_gate`.
+ */
+export async function postNetworkGate(
+  policies: Policies,
+  ctx: NetworkResultContext,
+  passed: readonly Policy[] | null = null,
+): Promise<void> {
+  if (
+    explaining() === DryRun.DECIDING ||
+    !(await policies.wantsFor('postNetwork', ctx.sessionId ?? ''))
+  ) {
+    return
+  }
+  const ended = { ...ctx, caller: policyCaller(currentCaller().session, policies.account) }
+  await apart(() => policies.postNetwork(ended, passed))
+}
+
 export async function preSessionGate(
   policies: Policies | null,
   ctx: SessionContext,
@@ -711,17 +783,23 @@ export class Policies {
       | VfsResultContext
       | ExecuteResultContext
       | SessionContext
-      | WorkspaceContext,
+      | WorkspaceContext
+      | NetworkContext,
     every: boolean,
     placed = false,
     rulesOnly = false,
     projection: 'answers' | 'fire' = 'fire',
+    among: readonly Policy[] | null = null,
+    passed: Policy[] | null = null,
   ): Promise<CompositionResult> {
+    const snapshot = [...this.policies]
+    const placement = this.placement
+    const policies = [...snapshot, ...(placement === null ? [] : [placement]), this.mode]
+    if (policies.every((policy) => policy[method] === undefined)) {
+      return { answers: [], action: null, route: null, limit: null }
+    }
     const composition = new Composition()
     try {
-      const snapshot = [...this.policies]
-      const placement = this.placement
-      const policies = [...snapshot, ...(placement === null ? [] : [placement]), this.mode]
       const hook = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
       const descriptors = policies.map((policy, slot) => {
         const role =
@@ -733,7 +811,8 @@ export class Policies {
               ? 'mount_mode'
               : 'placement'
         composition.names.set(slot, policy.constructor.name || 'policy')
-        return { slot, role, hooks: [hook] }
+        if (passed !== null && policy[method] === undefined) passed.push(policy)
+        return { slot, role, hooks: among === null || among.includes(policy) ? [hook] : [] }
       })
       let seen = ctx
       const signal = callerSignal()
@@ -779,7 +858,8 @@ export class Policies {
                   VfsResultContext &
                   ExecuteResultContext &
                   SessionResultContext &
-                  WorkspaceContext,
+                  WorkspaceContext &
+                  NetworkResultContext,
               )
             answered = await abortable(
               asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask(),
@@ -792,6 +872,8 @@ export class Policies {
             console.error(`${method} policy ${name} raised: ${detail}`)
             answered = { kind: 'deny', reason: `${name} failed`, policy: name, failed: true }
           }
+          const items: unknown[] = Array.isArray(answered) ? answered : [answered]
+          if (items.every((item) => item === null || item instanceof Limit)) passed?.push(policy)
           pending = Array.isArray(answered) ? answered : [answered]
           cursor = 0
         }
@@ -815,7 +897,8 @@ export class Policies {
       | VfsResultContext
       | ExecuteResultContext
       | SessionContext
-      | WorkspaceContext,
+      | WorkspaceContext
+      | NetworkContext,
     placed = false,
     rulesOnly = false,
   ): Promise<[Deny | Ask | null, Limit | null, Route | null]> {
@@ -843,7 +926,8 @@ export class Policies {
       | VfsResultContext
       | ExecuteResultContext
       | SessionContext
-      | WorkspaceContext,
+      | WorkspaceContext
+      | NetworkContext,
     every = true,
     rulesOnly = false,
   ): Promise<(Deny | Ask | Route)[]> {
@@ -894,6 +978,31 @@ export class Policies {
   async postVfs(ctx: VfsResultContext): Promise<Deny | Ask | null> {
     const [action] = await this.fire('postVfs', ctx)
     return action
+  }
+
+  /**
+   * Fire preNetwork across the policies; the first Deny wins, else the first
+   * Ask, and Limits merge to the tightest. `passed` fills, as they answer,
+   * with the policies that let the connection through, and those with no
+   * preNetwork.
+   */
+  async preNetwork(
+    ctx: NetworkContext,
+    passed: Policy[],
+  ): Promise<[Deny | Ask | null, Limit | null]> {
+    const result = await this.evaluate('preNetwork', ctx, false, false, false, 'fire', null, passed)
+    return [result.action, result.limit]
+  }
+
+  /**
+   * Fire postNetwork across the policies among `among` (null for every one),
+   * every one asked; none answers, since the connection is already over.
+   */
+  async postNetwork(
+    ctx: NetworkResultContext,
+    among: readonly Policy[] | null = null,
+  ): Promise<void> {
+    await this.evaluate('postNetwork', ctx, true, false, false, 'fire', among)
   }
 
   /** Fire postExecute; a Deny or an Ask holds the output back, Limits merge to the boundary bound. */

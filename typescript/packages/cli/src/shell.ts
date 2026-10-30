@@ -15,7 +15,6 @@
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, handleResponse } from './output.ts'
-import { loadDaemonSettings } from './settings.ts'
 import { answer, post } from './vfs.ts'
 
 interface ExplainedNode {
@@ -109,7 +108,7 @@ export function registerShellCommand(program: Command): void {
         const session =
           opts.session === undefined ? '' : `session_id=${encodeURIComponent(opts.session)}`
         const path = `/v1/workspaces/${encodeURIComponent(opts.workspace)}/shell`
-        const c = makeClient(loadDaemonSettings())
+        const c = makeClient()
         await c.ensureRunning({ allowSpawn: false })
         const foreground = session === '' ? path : `${path}?${session}`
         const background =

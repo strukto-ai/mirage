@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../../../../core/render/json.ts'
 import type { TrelloAccessor } from '../../../../accessor/trello.ts'
 import {
   getBoard,
@@ -30,7 +31,6 @@ import {
   normalizeLabel,
   normalizeList,
   normalizeMember,
-  toJsonBytes,
 } from '../../../../core/trello/normalize.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
@@ -56,7 +56,7 @@ export async function boardList(
       boards.push(normalizeBoard(board))
     }
   }
-  return [toJsonBytes(boards), new IOResult()]
+  return [jsonBytes(boards), new IOResult()]
 }
 
 export async function boardShow(
@@ -68,7 +68,7 @@ export async function boardShow(
   const boardId = first(texts, 'board id')
   await requireBoard(accessor, boardId)
   const board = await getBoard(accessor.transport, boardId)
-  return [toJsonBytes(normalizeBoard(board)), new IOResult()]
+  return [jsonBytes(normalizeBoard(board)), new IOResult()]
 }
 
 export async function boardMembers(
@@ -80,7 +80,7 @@ export async function boardMembers(
   const boardId = first(texts, 'board id')
   await requireBoard(accessor, boardId)
   const members = await listBoardMembers(accessor.transport, boardId)
-  return [toJsonBytes(members.map((member) => normalizeMember(member))), new IOResult()]
+  return [jsonBytes(members.map((member) => normalizeMember(member))), new IOResult()]
 }
 
 export async function listList(
@@ -92,7 +92,7 @@ export async function listList(
   const boardId = first(texts, 'board id')
   await requireBoard(accessor, boardId)
   const lists = await listBoardLists(accessor.transport, boardId)
-  return [toJsonBytes(lists.map((lst) => normalizeList(lst))), new IOResult()]
+  return [jsonBytes(lists.map((lst) => normalizeList(lst))), new IOResult()]
 }
 
 export async function labelList(
@@ -104,7 +104,7 @@ export async function labelList(
   const boardId = first(texts, 'board id')
   await requireBoard(accessor, boardId)
   const labels = await listBoardLabels(accessor.transport, boardId)
-  return [toJsonBytes(labels.map((label) => normalizeLabel(label))), new IOResult()]
+  return [jsonBytes(labels.map((label) => normalizeLabel(label))), new IOResult()]
 }
 
 export async function cardList(
@@ -116,7 +116,7 @@ export async function cardList(
   const listId = first(texts, 'list id')
   await requireList(accessor, listId)
   const cards = await listListCards(accessor.transport, listId)
-  return [toJsonBytes(cards.map((card) => normalizeCard(card))), new IOResult()]
+  return [jsonBytes(cards.map((card) => normalizeCard(card))), new IOResult()]
 }
 
 export async function cardShow(
@@ -128,7 +128,7 @@ export async function cardShow(
   const cardId = first(texts, 'card id')
   await requireCard(accessor, cardId)
   const card = await getCard(accessor.transport, cardId)
-  return [toJsonBytes(normalizeCard(card)), new IOResult()]
+  return [jsonBytes(normalizeCard(card)), new IOResult()]
 }
 
 export async function cardComments(
@@ -140,5 +140,5 @@ export async function cardComments(
   const cardId = first(texts, 'card id')
   await requireCard(accessor, cardId)
   const comments = await listCardComments(accessor.transport, cardId)
-  return [toJsonBytes(comments.map((comment) => normalizeComment(comment, cardId))), new IOResult()]
+  return [jsonBytes(comments.map((comment) => normalizeComment(comment, cardId))), new IOResult()]
 }

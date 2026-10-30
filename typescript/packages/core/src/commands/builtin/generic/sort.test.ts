@@ -11,8 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
+import { ByteSpool } from '../../../io/spool.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { unreadableStdin } from '../../../shell/descriptors.ts'
@@ -361,4 +362,50 @@ it('preserves input order for equal keys across multiple merge levels', async ()
     '',
     0,
   ])
+})
+
+it('merge retires groups before reading all operands', async () => {
+  const live = new Set<ByteSpool>()
+  let peak = 0
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the tested spool
+  const append = ByteSpool.prototype.append
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- called with the tested spool
+  const close = ByteSpool.prototype.close
+  const appendSpy = vi.spyOn(ByteSpool.prototype, 'append').mockImplementation(async function (
+    this: ByteSpool,
+    data,
+  ) {
+    live.add(this)
+    peak = Math.max(peak, live.size)
+    await append.call(this, data)
+  })
+  const closeSpy = vi.spyOn(ByteSpool.prototype, 'close').mockImplementation(async function (
+    this: ByteSpool,
+  ) {
+    await close.call(this)
+    live.delete(this)
+  })
+  const enc = new TextEncoder()
+  const lines = Array.from({ length: 1024 }, (_, i) => `x ${String(i).padStart(4, '0')}\n`)
+  const paths = lines.map((_, i) => spec(`/f${String(i)}`))
+  async function* read(path: PathSpec): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    yield enc.encode(lines[Number(path.virtual.slice(2))])
+  }
+  try {
+    const context = {
+      stdin: null,
+      flags: { merge: true, stable: true, key: ['1,1'] },
+      cwd: PathSpec.fromStrPath('/'),
+    } as Context
+    const result = await sortGeneric(paths, context, read)
+    if (result === null) throw new Error('sort declined')
+    expect(DEC.decode(await materialize(result[0]))).toBe(lines.join(''))
+    expect(result[1].exitCode).toBe(0)
+    expect(peak).toBeLessThan(32)
+    expect(live.size).toBe(0)
+  } finally {
+    appendSpy.mockRestore()
+    closeSpy.mockRestore()
+  }
 })

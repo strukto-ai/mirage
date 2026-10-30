@@ -14,70 +14,50 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { type FlagValue } from '../../spec/types.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { JsonValue, PathSpec } from '../../../types.ts'
+import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { stdinStream } from '../utils/stream.ts'
+import { stdinStream, streamOutput } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
-import { openStreamSync, runStream } from '../../../rs/stream.ts'
-import { StreamRefusal } from '../../../rs/errors.ts'
-import { refused } from '../../../rs/scan.ts'
+import { openStream } from '../../../rs/stream.ts'
 import { byteView } from '../../../shell/bytes.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 
-/**
- * expand's or unexpand's engine config, refused by the engine before any
- * operand is resolved: every `-t` and switch as typed, in typed order, since
- * `-t` accumulates across occurrences into one tab list. Mirrors Python's
- * `tabs_config`.
- */
-export function tabsConfig(
-  command: string,
-  names: readonly string[],
-  bag: Record<string, FlagValue>,
-): Record<string, JsonValue> | IOResult {
-  const fl = new FlagView(bag, specOf(command))
-  const options: JsonValue[] = fl.texts(...names).map(([name, text]) => [name, byteView(text)])
-  const config = { options }
+interface ExpandFlags {
+  readonly tabs: readonly string[]
+  readonly initialOnly: boolean
+}
+
+export function parseFlags(bag: Record<string, FlagValue>): ExpandFlags {
+  const fl = new FlagView(bag, specOf('expand'))
+  const tabs = fl.asList('tabs')
+  return { tabs, initialOnly: fl.asBool('initial') }
+}
+
+export async function expandGeneric(
+  paths: PathSpec[],
+  ctx: Context,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+): Promise<CommandFnResult> {
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
+  let engine
   try {
-    openStreamSync(command, config).close()
+    engine = await openStream('expand', {
+      tabs: parsed.tabs.map((tab) => byteView(tab)),
+      initial_only: parsed.initialOnly,
+    })
   } catch (error) {
     if (!(error instanceof StreamRefusal)) throw error
-    return refused(error)
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${error.message}\n`) }),
+    ]
   }
-  return config
-}
-
-/** expand's engine config: `tabsConfig` over `-t` and `-i`. Mirrors Python's
- * `expand_config`. */
-export function expandConfig(bag: Record<string, FlagValue>): Record<string, JsonValue> | IOResult {
-  return tabsConfig('expand', ['tabs', 'initial'], bag)
-}
-
-/** Run expand or unexpand over resolved operands, one stream over all.
- * Mirrors Python's `tabs_generic`. */
-export function tabsGeneric(
-  command: string,
-  config: Record<string, JsonValue>,
-  paths: PathSpec[],
-  ctx: Context,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): CommandFnResult {
-  stream = stdinStream(stream, ctx.stdin)
   const io = new IOResult()
-  const sources = paths.map((p) => reportedStream(stream(p), io, p, command))
+  const sources = paths.map((p) => reportedStream(stream(p), io, p, 'expand'))
   const source = paths.length > 0 ? asyncChain(sources) : (ctx.stdin ?? new Uint8Array())
-  return [runStream(command, config, source, ctx.signal), io]
-}
-
-/** Run expand over resolved operands with `expandConfig`'s config. Mirrors
- * Python's `expand_generic`. */
-export function expandGeneric(
-  config: Record<string, JsonValue>,
-  paths: PathSpec[],
-  ctx: Context,
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): CommandFnResult {
-  return tabsGeneric('expand', config, paths, ctx, stream)
+  return [streamOutput(engine, source, ctx.signal), io]
 }

@@ -12,27 +12,52 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import type { IOResult } from '../../../io/types.ts'
-import type { JsonValue, PathSpec } from '../../../types.ts'
+import { IOResult } from '../../../io/types.ts'
+import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { tabsConfig, tabsGeneric } from './expand.ts'
+import { stdinStream, streamOutput } from '../utils/stream.ts'
+import { reportedStream } from '../utils/operands.ts'
+import { asyncChain } from '../../../io/stream.ts'
+import { openStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 
-/** unexpand's engine config: `tabsConfig` over `-t`, `-a` and `--first-only`.
- * Mirrors Python's `unexpand_config`. */
-export function unexpandConfig(
-  bag: Record<string, FlagValue>,
-): Record<string, JsonValue> | IOResult {
-  return tabsConfig('unexpand', ['tabs', 'all', 'first_only'], bag)
+interface UnexpandFlags {
+  readonly tabs: readonly string[]
+  readonly allSpaces: boolean
 }
 
-/** Run unexpand over resolved operands with `unexpandConfig`'s config.
- * Mirrors Python's `unexpand_generic`. */
-export function unexpandGeneric(
-  config: Record<string, JsonValue>,
+export function parseFlags(bag: Record<string, FlagValue>): UnexpandFlags {
+  const fl = new FlagView(bag, specOf('unexpand'))
+  const tabs = fl.asList('tabs')
+  return { tabs, allSpaces: (fl.asBool('all') || tabs.length > 0) && !fl.asBool('first_only') }
+}
+
+export async function unexpandGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): CommandFnResult {
-  return tabsGeneric('unexpand', config, paths, ctx, stream)
+): Promise<CommandFnResult> {
+  stream = stdinStream(stream, ctx.stdin)
+  const parsed = parseFlags(ctx.flags)
+  let engine
+  try {
+    engine = await openStream('unexpand', {
+      tabs: parsed.tabs.map((tab) => byteView(tab)),
+      all: parsed.allSpaces,
+    })
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${error.message}\n`) }),
+    ]
+  }
+  const io = new IOResult()
+  const sources = paths.map((p) => reportedStream(stream(p), io, p, 'unexpand'))
+  const source = paths.length > 0 ? asyncChain(sources) : (ctx.stdin ?? new Uint8Array())
+  return [streamOutput(engine, source, ctx.signal), io]
 }

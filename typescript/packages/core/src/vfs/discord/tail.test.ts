@@ -32,6 +32,7 @@ describe('discord tail', () => {
       return null
     })
     const out = await runDiscord(transport, `tail -n 2 "${CHAT}"`, ['2016-04-30'])
+    expect(out.exitCode).toBe(0)
     const lines = out.stdout.trimEnd().split('\n')
     expect(lines).toHaveLength(2)
     const last = JSON.parse(lines[1] ?? '{}') as { content?: string }
