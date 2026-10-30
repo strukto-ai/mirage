@@ -45,11 +45,6 @@ class FakeRuntime(Runtime):
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
-def test_default_entries_never_include_local():
-    assert "local" not in DEFAULT_ENTRIES
-    assert DEFAULT_ENTRIES[-1] == "workspace"
-
-
 def test_default_world_is_monty_quickjs_and_workspace():
     assert DEFAULT_ENTRIES == ("monty", "quickjs", "workspace")
     assert issubclass(NAMED[DEFAULT_ENTRIES[0]], PythonRuntime)

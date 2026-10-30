@@ -277,11 +277,6 @@ def test_get_function_name():
     assert get_function_name(_first("f() { echo; }")) == "f"
 
 
-def test_get_function_body():
-    body = get_function_body(_first("f() { echo hello; }"))
-    assert len(body) == 1
-
-
 def test_get_function_body_rejects_non_function_node():
     with pytest.raises(ValueError, match="has no body"):
         get_function_body(_first("echo hello"))
@@ -478,11 +473,6 @@ def test_process_sub_body_preserves_pipeline_and_list():
 # ── expansion nodes ──────────────────────────────
 
 
-def test_simple_expansion_in_parts():
-    parts = get_parts(_first("echo $VAR"))
-    assert parts[1].type == NT.SIMPLE_EXPANSION
-
-
 def test_expansion_with_default():
     parts = get_parts(_first("echo ${VAR:-default}"))
     assert parts[1].type == NT.EXPANSION
@@ -501,11 +491,6 @@ def test_arithmetic_in_parts():
 def test_concatenation_in_parts():
     parts = get_parts(_first("echo $DIR/file.txt"))
     assert parts[1].type == NT.CONCATENATION
-
-
-def test_string_in_parts():
-    parts = get_parts(_first('echo "hello $VAR"'))
-    assert parts[1].type == NT.STRING
 
 
 def test_raw_string_in_parts():

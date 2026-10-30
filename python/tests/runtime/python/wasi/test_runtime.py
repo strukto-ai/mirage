@@ -35,10 +35,17 @@ def _build_dir() -> str | None:
     return None
 
 
-live = pytest.mark.skipif(
-    _build_dir() is None,
-    reason=f"{WASI_HOME_ENV} does not point at a CPython WASI build",
-)
+def live(test):
+    """Select a test needing the real CPython WASI build.
+
+    Args:
+        test (Callable): the test function.
+    """
+    test = pytest.mark.runtime_assets(test)
+    return pytest.mark.skipif(
+        _build_dir() is None,
+        reason=f"{WASI_HOME_ENV} does not point at a CPython WASI build",
+    )(test)
 
 
 def _args(code: str, env: dict[str, str] | None = None, **fields):

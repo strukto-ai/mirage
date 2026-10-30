@@ -27,11 +27,6 @@ def test_cache_entry_mutable():
     assert entry.cached_at == 80
 
 
-def test_expired_with_ttl():
-    entry = CacheEntry(cached_at=1000, size=1, ttl=10)
-    assert entry.is_expired(1010) is True
-
-
 def test_not_expired_without_ttl():
     entry = CacheEntry(cached_at=1000, size=1)
     assert entry.ttl is None

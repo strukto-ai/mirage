@@ -37,13 +37,19 @@ def _quickjs_available() -> bool:
     return bool(root) and (Path(root) / "qjs-wasi.wasm").is_file()
 
 
-wasi_live = pytest.mark.skipif(
-    not _wasi_available(),
-    reason=f"{WASI_HOME_ENV} does not point at a CPython WASI build",
+wasi_live = (
+    pytest.mark.runtime_assets,
+    pytest.mark.skipif(
+        not _wasi_available(),
+        reason=f"{WASI_HOME_ENV} does not point at a CPython WASI build",
+    ),
 )
-quickjs_live = pytest.mark.skipif(
-    not _quickjs_available(),
-    reason=f"{QUICKJS_HOME_ENV} does not point at a quickjs WASI build",
+quickjs_live = (
+    pytest.mark.runtime_assets,
+    pytest.mark.skipif(
+        not _quickjs_available(),
+        reason=f"{QUICKJS_HOME_ENV} does not point at a quickjs WASI build",
+    ),
 )
 
 

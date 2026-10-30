@@ -805,14 +805,17 @@ jobs:
           typescript-build-artifact: integ-typescript-dist
           start-services: "false"
 
+      # Pre-commit runs this gate on every push and pull request. A manual
+      # Integ dispatch has no companion Pre-commit run, so keep it here then.
+      - name: Check cross-mount command coverage
+        if: github.event_name == 'workflow_dispatch'
+        run: ./python/.venv/bin/python integ/runners/tools/check_crossmount_coverage.py --selftest
+
       # The two long checks run behind the fake selftests below, which leave
       # most of the runner's cores idle: the gates spawn one runner after
       # another, and the Airtable replay pages every table through its fake.
       # Neither binds a fixed port. Each is collected, output and status, by
       # the step that bears its name at the end of the job.
-      - name: Check cross-mount command coverage
-        run: ./python/.venv/bin/python integ/runners/tools/check_crossmount_coverage.py --selftest
-
       - name: Start the runner gates and the Airtable replay (background)
         run: |
           integ/scripts/background.sh start gates \

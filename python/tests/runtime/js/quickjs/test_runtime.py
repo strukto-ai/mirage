@@ -36,10 +36,17 @@ def _home_dir() -> str | None:
     return None
 
 
-live = pytest.mark.skipif(
-    _home_dir() is None,
-    reason=f"{QUICKJS_HOME_ENV} does not point at a qjs-wasi.wasm build",
-)
+def live(test):
+    """Select a test needing the real QuickJS WASI build.
+
+    Args:
+        test (Callable): the test function.
+    """
+    test = pytest.mark.runtime_assets(test)
+    return pytest.mark.skipif(
+        _home_dir() is None,
+        reason=f"{QUICKJS_HOME_ENV} does not point at a qjs-wasi.wasm build",
+    )(test)
 
 
 async def _run(rt: QuickJsRuntime, program: Program, **fields) -> RunResult:
