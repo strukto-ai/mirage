@@ -16,7 +16,6 @@ import asyncio
 
 import pytest
 
-from mirage.policy.match import Outcome
 from mirage.policy.profile import (
     CompiledProfile,
     ProfilePolicies,
@@ -25,10 +24,8 @@ from mirage.policy.profile import (
 from mirage.policy.types import (
     AdmissionRules,
     CommandRule,
-    Decision,
     HideReason,
     ProfileScript,
-    Scope,
 )
 from mirage.runtime.types import ScriptSource
 from mirage.shell.variable import ShellVar
@@ -607,77 +604,6 @@ async def test_manager_admission_rules_ride_the_session_record():
     stored = await store.load()
     assert stored["restored"]["commands"]["allow"] == ["ls", "git log"]
     assert stored["restored"]["commands"]["deny"][0]["reason"] == "no"
-
-
-@pytest.mark.asyncio
-async def test_manager_decisions_live_on_the_registered_session_and_persist():
-    store = RAMNamespaceStore()
-    mgr = SessionManager("default", store=store)
-    await mgr.ensure_loaded()
-    live = mgr.create("agent")
-    assert mgr.decisions_of("agent") == ()
-    rule = CommandRule(reason="sign-off", commands=("git push",))
-    grant = Decision(
-        id="d1",
-        session_id="agent",
-        command="git",
-        argv=("push",),
-        cwd="/repo",
-        paths=(),
-        reason="r",
-        rule=rule,
-        outcome=Outcome.ALLOW,
-        scope=Scope.SESSION,
-    )
-    # Written by id onto the registered session, so a fork made before
-    # or after reads the same answers through the manager, whatever
-    # its own copy holds; durable at the next flush.
-    fork = live.fork()
-    mgr.set_decisions("agent", (grant,))
-    assert live.decisions == (grant,)
-    assert fork.decisions == ()
-    assert mgr.decisions_of(fork.session_id) == (grant,)
-    await mgr.flush()
-    stored = (await store.load())["agent"]
-    assert stored["decisions"][0]["scope"] == "session"
-    # A manager reading that record back holds the grant.
-    again = SessionManager("default", store=store)
-    await again.ensure_loaded()
-    assert again.decisions_of("agent") == (grant,)
-    with pytest.raises(KeyError):
-        mgr.decisions_of("nobody")
-
-
-@pytest.mark.asyncio
-async def test_manager_default_session_hydrates_its_decisions():
-    store = RAMNamespaceStore()
-    mgr = SessionManager("default", store=store)
-    await mgr.ensure_loaded()
-    rule = CommandRule(reason="sign-off", commands=("git push",))
-    grant = Decision(
-        id="d1",
-        session_id="agent",
-        command="git",
-        argv=("push",),
-        cwd="/repo",
-        paths=(),
-        reason="r",
-        rule=rule,
-        outcome=Outcome.ALLOW,
-        scope=Scope.SESSION,
-    )
-    mgr.set_decisions("default", (grant,))
-    await mgr.flush()
-    # The default session takes the stored durable fields on reopen;
-    # the grants are among them, so an approved line does not ask
-    # again after a restart and the next flush keeps the grant.
-    again = SessionManager("default", store=store)
-    await again.ensure_loaded()
-    assert again.decisions_of("default") == (grant,)
-    await again.flush()
-    assert (await store.load())["default"]["decisions"][0]["scope"] == (
-        "session"
-    )
 
 
 def test_restore_seed_templates_later_sessions():

@@ -6,8 +6,17 @@ from pathlib import Path
 
 import pytest
 
+from mirage.policy.decisions import Decisions
 from mirage.policy.errors import ApprovalUnavailable
-from mirage.policy.types import AdmissionRules
+from mirage.policy.types import (
+    AdmissionRules,
+    Ask,
+    CommandContext,
+    CommandRule,
+    Outcome,
+    Pending,
+    Scope,
+)
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import RecordNamespaceStore
 from mirage.workspace.record.disk import DiskRecordClient
@@ -44,6 +53,31 @@ def question(ticket: str = "request"):
         "rules": [rule],
         "claimant": None,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("default_id", ["s", "default"])
+async def test_session_approval_survives_manager_hydration(default_id):
+    store = RAMNamespaceStore()
+    manager = SessionManager(default_id, store)
+    if default_id != "s":
+        manager.create("s")
+    ledger = Decisions(manager)
+    ctx = CommandContext(
+        command="git", paths=(), argv=("push",), cwd="/", session_id="s"
+    )
+    ask = Ask(
+        "review", rule=CommandRule(reason="review", commands=("git push",))
+    )
+    waiting = await ledger.resolve(ctx, ask)
+    assert isinstance(waiting, Pending)
+    await ledger.answer(waiting.id, Outcome.ALLOW, Scope.SESSION)
+    await manager.flush()
+    hydrated = SessionManager(default_id, store)
+    await hydrated.ensure_loaded()
+    restored = Decisions(hydrated)
+    assert restored.list("s") == ledger.list("s")
+    assert await restored.resolve(ctx, ask) is None
 
 
 class UncertainStore(RAMNamespaceStore):

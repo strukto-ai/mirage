@@ -24,9 +24,6 @@ from mirage.policy.decisions import (
     Decisions,
     answered,
     ask_rule,
-    covers,
-    decision_id,
-    encloses,
 )
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
@@ -135,52 +132,11 @@ def _at(handed: HandOff, index: int = 0) -> Claimant:
     return Claimant(handed, Occurrence(None, "line", index, index + 1))
 
 
-def _record(**over: object) -> Decision:
-    base = Decision(
-        id="d1",
-        session_id="s",
-        command="git",
-        argv=("push",),
-        cwd="/repo",
-        paths=(),
-        reason="sign-off",
-        rule=RULE,
-    )
-    return dataclasses.replace(base, **over)  # type: ignore[arg-type]
-
-
-def test_decision_id_is_stable_for_the_same_line_and_session():
-    same = decision_id("s", "/repo", ("git", "push"))
-    assert same == decision_id("s", "/repo", ("git", "push"))
-    assert same != decision_id("other", "/repo", ("git", "push"))
-    assert same != decision_id("s", "/elsewhere", ("git", "push"))
-    assert len(same) == 12
-
-
 def test_ask_rule_synthesizes_one_over_the_program_for_a_coded_ask():
     assert ask_rule(_ctx(), Ask("sign-off", rule=RULE)) is RULE
     coded = ask_rule(_ctx(), Ask("sign-off"))
     assert coded.commands == ("git",)
     assert coded.reason == "sign-off"
-
-
-def test_covers_reads_scope_and_never_answers_a_waiting_record():
-    argv = ("git", "push")
-    assert not covers(_record(), RULE, argv, "/repo")
-    once = _record(outcome=Outcome.ALLOW, scope=Scope.ONCE)
-    assert covers(once, RULE, argv, "/repo")
-    # A ONCE answer is for the exact line, so a different line or a
-    # different directory is not it.
-    assert not covers(once, RULE, ("git", "push", "-f"), "/repo")
-    assert not covers(once, RULE, argv, "/elsewhere")
-    # A SESSION answer covers any line the same rule asks about.
-    forever = _record(outcome=Outcome.ALLOW, scope=Scope.SESSION)
-    assert covers(forever, RULE, ("git", "push", "-f"), "/elsewhere")
-    # An answer never answers a rule it was not given for: a persisted
-    # record reopened under an edited profile must not speak for the
-    # new rule.
-    other = CommandRule(reason="different", commands=("git push",))
-    assert not covers(forever, other, argv, "/repo")
 
 
 @pytest.mark.asyncio
@@ -523,16 +479,6 @@ async def test_a_grant_one_line_claimed_is_not_on_offer_to_another():
     assert len(ledger.list("s")) == 2
     await ledger.answer(second_ticket.id, Outcome.ALLOW)
     assert await ledger.resolve(_ctx(), ask, None, _at(second)) is None
-
-
-def test_encloses_reads_a_span_and_the_lines_evaluated_inside_it():
-    line = "sleep 1 && cat s & ls"
-    scope = Occurrence(None, line, 0, 18)
-    inside = Occurrence(None, line, 11, 16)
-    assert encloses(scope, inside)
-    assert encloses(scope, Occurrence(inside, "cat s", 0, 5))
-    assert not encloses(scope, Occurrence(None, line, 19, 21))
-    assert not encloses(scope, Occurrence(None, "cat s", 0, 5))
 
 
 @pytest.mark.asyncio

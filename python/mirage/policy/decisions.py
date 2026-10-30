@@ -15,7 +15,6 @@
 import asyncio
 import builtins
 import dataclasses
-import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -117,29 +116,6 @@ async def answered(
         await asyncio.gather(wait_task, cancel_task, return_exceptions=True)
 
 
-def decision_id(session_id: str, cwd: str, argv: tuple[str, ...]) -> str:
-    """The id a record is named by: a digest of what was asked, so a
-    retry of the same line quotes the same id and a host answers it
-    once.
-
-    The id names the record; it does not decide what a retry matches.
-    That comparison is made against the recorded fields themselves
-    (:func:`covers`), so a line the digest cannot tell apart from
-    another still cannot borrow its answer.
-
-    Args:
-        session_id (str): the session running the line.
-        cwd (str): its working directory.
-        argv (tuple[str, ...]): the line as expanded, command name
-            first.
-    """
-    digest = hashlib.sha256()
-    for part in (session_id, cwd, *argv):
-        digest.update(part.encode())
-        digest.update(b"\0")
-    return digest.hexdigest()[:12]
-
-
 def ask_rule(
     ctx: CommandContext
     | RouteContext
@@ -170,44 +146,6 @@ def ask_rule(
     return CommandRule(reason=ask.reason, commands=(ctx.line,))
 
 
-def covers(
-    record: Decision, rule: CommandRule, argv: tuple[str, ...], cwd: str
-) -> bool:
-    """Whether an answered record answers this rule of this line.
-
-    A ONCE answer covers the exact line it was given for, compared
-    field by field. A SESSION answer covers every line the same rule
-    asks about. Both are keyed on the rule as well as the words: an
-    answer that outlives a rule change (a persisted store reopened
-    under an edited profile) must not answer the new rule's ask, and a
-    stale refusal must not speak in its voice.
-
-    Args:
-        record (Decision): the answered record.
-        rule (CommandRule): the rule to answer.
-        argv (tuple[str, ...]): the line's words, name first.
-        cwd (str): the session working directory.
-    """
-    question = dataclasses.replace(
-        record, command=argv[0], argv=argv[1:], cwd=cwd
-    )
-    result = inspect_approval(
-        empty_ledger("inspection"),
-        {
-            "op": "inspect",
-            "query": {
-                "kind": "covers",
-                "record": decision_wire(record),
-                "rule": rule_wire(rule),
-                "question": decision_wire(question),
-            },
-        },
-    )
-    if result["kind"] != "matches":
-        raise RuntimeError("invalid approval comparison")
-    return bool(result["matched"])
-
-
 def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
     """A hand-off and every line it was evaluated from, innermost
     first; empty outside a line.
@@ -220,30 +158,6 @@ def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
         out.append(handed)
         handed = handed.parent
     return tuple(out)
-
-
-def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
-    """Whether a command stands inside a scope: within the scope's span
-    of the same text, or on a line evaluated from a node that does.
-
-    Args:
-        scope (Occurrence): the enclosing node, a background job's.
-        occurrence (Occurrence): the command's place.
-    """
-    result = inspect_approval(
-        empty_ledger("inspection"),
-        {
-            "op": "inspect",
-            "query": {
-                "kind": "encloses",
-                "scope": occurrence_wire(scope),
-                "occurrence": occurrence_wire(occurrence),
-            },
-        },
-    )
-    if result["kind"] != "matches":
-        raise RuntimeError("invalid approval comparison")
-    return bool(result["matched"])
 
 
 def is_pending(refusal: Refusal | None) -> bool:

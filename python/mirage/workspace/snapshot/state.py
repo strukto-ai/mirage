@@ -808,7 +808,7 @@ async def _gate_restored_state(
     ``script_of`` answers for an id the manager does not know and the
     profile ``_restore_sessions`` then puts the created session under.
     A workspace built for the state seats every table first, its
-    narrowing, ask decisions, cwd and variables, so each is judged as
+    narrowing, cwd and variables, so each is judged as
     the session it records, under the policy it then runs under.
 
     Args:
@@ -830,7 +830,6 @@ async def _gate_restored_state(
             sid = fields.session_id
             session = mgr.get(sid) if mgr.has(sid) else mgr.create(sid)
             narrow(session, narrowing_of(fields))
-            session.decisions = fields.decisions
             set_cwd(session, fields.cwd)
             session.vars = fields.vars
     for fields in sessions:

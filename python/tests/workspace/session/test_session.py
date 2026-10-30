@@ -15,8 +15,7 @@
 import dataclasses
 import json
 
-from mirage.policy.match import Outcome
-from mirage.policy.types import AdmissionRules, CommandRule, Decision, Scope
+from mirage.policy.types import AdmissionRules, CommandRule
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
@@ -412,44 +411,6 @@ def test_session_command_tier_round_trips_through_the_record():
     )
     assert bare.to_dict()["commands"]["allow"] is None
     assert SessionState.from_dict(bare.to_dict()).commands == bare.commands
-
-
-def test_session_decisions_round_trip_through_the_record():
-    rule = CommandRule(reason="sign-off", commands=("git push",))
-    records = (
-        Decision(
-            id="d1",
-            session_id="s1",
-            command="git",
-            argv=("push",),
-            cwd="/repo",
-            paths=(),
-            reason="sign-off",
-            rule=rule,
-            outcome=Outcome.ALLOW,
-            scope=Scope.SESSION,
-        ),
-        Decision(
-            id="d2",
-            session_id="s1",
-            command="git",
-            argv=("push", "--force"),
-            cwd="/repo",
-            paths=(),
-            reason="sign-off",
-            rule=rule,
-            outcome=Outcome.DENY,
-        ),
-    )
-    s = SessionState(session_id="s1", decisions=records)
-    d = s.to_dict()
-    assert [r["id"] for r in d["decisions"]] == ["d1", "d2"]
-    assert [r["outcome"] for r in d["decisions"]] == ["allow", "deny"]
-    assert [r["scope"] for r in d["decisions"]] == ["session", "once"]
-    assert SessionState.from_dict(d).decisions == records
-    # Nothing held writes nothing, and a fork carries what is held.
-    assert "decisions" not in SessionState(session_id="s2").to_dict()
-    assert s.fork().decisions == records
 
 
 def test_vars_from_entries_literal_short_form_exports():

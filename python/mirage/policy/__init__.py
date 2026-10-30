@@ -30,8 +30,6 @@ if TYPE_CHECKING:
         AskHandler,
         Decisions,
         ask_rule,
-        covers,
-        decision_id,
     )
     from mirage.policy.errors import (
         PolicyDenied,
@@ -117,8 +115,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "AskHandler",
         "Decisions",
         "ask_rule",
-        "covers",
-        "decision_id",
     ),
     "mirage.policy.errors": (
         "PolicyDenied",
@@ -202,9 +198,7 @@ __all__ = [
     "CommandWord",
     "CommandsBlock",
     "CompiledProfile",
-    "covers",
     "Decision",
-    "decision_id",
     "Decisions",
     "DEFAULT_ASK_REASON",
     "DEFAULT_COMMAND_LIMITS",

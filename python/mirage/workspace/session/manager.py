@@ -21,7 +21,7 @@ from mirage.context.session_context import SessionOwner
 from mirage.io.async_line_iterator import release_inputs
 from mirage.policy.errors import ApprovalUnavailable
 from mirage.policy.profile import CompiledProfile
-from mirage.policy.types import AdmissionRules, Decision, ProfileScripts
+from mirage.policy.types import AdmissionRules, ProfileScripts
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
@@ -76,7 +76,6 @@ def _adopt_approval_fields(
     session.approval_state = stored.approval_state
     session.incarnation = stored.incarnation
     session.generation = stored.generation
-    session.decisions = ()
     session.commands = stored.commands
     session.scripts = stored.scripts
     session.profile = stored.profile
@@ -281,38 +280,6 @@ class SessionManager(SessionOwner):
                 else {}
             )
         return session.scripts
-
-    def decision_sessions(self) -> tuple[str, ...]:
-        """Every session id holding ledger records
-        (SessionDecisionsQuery)."""
-        return tuple(sid for sid, s in self._sessions.items() if s.decisions)
-
-    def decisions_of(self, session_id: str) -> tuple[Decision, ...]:
-        """The ledger records one session holds
-        (SessionDecisionsQuery).
-
-        Read off the registered session, never a fork, so a line
-        running in a background copy sees the same answers.
-
-        Args:
-            session_id (str): the session.
-        """
-        return self.get(session_id).decisions
-
-    def set_decisions(
-        self, session_id: str, records: tuple[Decision, ...]
-    ) -> None:
-        """Replace one session's ledger records
-        (SessionDecisionsQuery); durable at the next flush.
-
-        Args:
-            session_id (str): the session.
-            records (tuple[Decision, ...]): the new list.
-        """
-        session = self.get(session_id)
-        if session.approval_state is not None:
-            raise RuntimeError("approval records require a policy transition")
-        session.decisions = records
 
     def approval_state_of(self, session_id: str) -> RecordFields | None:
         """Read the registered session's cached Rust approval snapshot.
@@ -580,7 +547,6 @@ class SessionManager(SessionOwner):
                     # like cwd: dropped here, an approved line would
                     # ask again after a restart and the next flush
                     # would erase the record from the store.
-                    default.decisions = stored.decisions
                     default.approval_state = stored.approval_state
                     default.incarnation = stored.incarnation
                     if stored.incarnation is not None:

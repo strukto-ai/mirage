@@ -23,7 +23,6 @@ from mirage.io.async_line_iterator import SharedInput, release_inputs
 from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.policy.types import (
     AdmissionRules,
-    Decision,
     HideReason,
     ProfileScripts,
 )
@@ -74,8 +73,6 @@ from mirage.workspace.session.functions import (
 from mirage.workspace.session.serialize import (
     commands_from_dict,
     commands_to_dict,
-    decision_from_dict,
-    decision_to_dict,
     scripts_from_dict,
     scripts_to_dict,
 )
@@ -371,10 +368,6 @@ class SessionState:
     process_id: int | None = None
     shell_pid: int | None = None
     process_depth: int = 0
-    # The host's standing answers to asked lines (design 3.9): session
-    # state like functions and cwd, persisted, read and written through
-    # the manager by id so a fork shares them, never another session's.
-    decisions: tuple[Decision, ...] = ()
     incarnation: str | None = None
     approval_state: RecordFields | None = None
     generation: int = 0
@@ -657,8 +650,6 @@ class SessionState:
             data["processes"] = self.processes.model_dump()
         if self.profile is not None:
             data["profile"] = self.profile
-        if self.decisions:
-            data["decisions"] = [decision_to_dict(d) for d in self.decisions]
         if self.approval_state is not None:
             data["approval_state"] = self.approval_state
         if self.incarnation is not None:
@@ -715,7 +706,6 @@ class SessionState:
         vars_ = data.get("hidden_vars")
         commands = data.get("commands")
         scripts = data.get("scripts")
-        decisions = data.get("decisions")
         limits = data.get("command_limits")
         processes = data.get("processes")
         data = {
@@ -739,8 +729,6 @@ class SessionState:
             data["commands"] = commands_from_dict(commands)
         if scripts is not None:
             data["scripts"] = scripts_from_dict(scripts)
-        if decisions is not None:
-            data["decisions"] = tuple(decision_from_dict(d) for d in decisions)
         if limits is not None:
             data["command_limits"] = {
                 name: Limit.model_validate(limit)

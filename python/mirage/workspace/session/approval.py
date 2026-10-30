@@ -227,7 +227,6 @@ async def transact_approvals(
                         fields.pop(key, None)
                     else:
                         fields[key] = value
-            fields.pop("decisions", None)
             try:
                 placed = await store.cas_set(
                     session_id, fields, generation_of(current)
