@@ -146,8 +146,16 @@ export async function start(): Promise<{ server: Server; url: string; token: str
   const token = randomBytes(32).toString('base64url')
   const server = createServer((req, res) => {
     run(req, res, token).catch((e: unknown) => {
+      // The error stays in the service's log; the caller gets a fixed
+      // plain-text body, never the error's own text.
+      console.error('run failed:', e)
+      if (res.headersSent) {
+        res.destroy()
+        return
+      }
       res.statusCode = 500
-      res.end(String(e))
+      res.setHeader('content-type', 'text/plain; charset=utf-8')
+      res.end('run failed\n')
     })
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
