@@ -26,7 +26,7 @@ import { mountKey } from '../../../utils/key_prefix.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { ByteSpool, MEMORY_LIMIT } from '../../../io/spool.ts'
+import { ByteSpool } from '../../../io/spool.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { OutputStream, closeQuietly, rechunk } from '../../../io/stream.ts'
 import {
@@ -34,6 +34,7 @@ import {
   openStream,
   runStream,
   serveRequests,
+  type OpenStream,
   type Served,
 } from '../../../rs/stream.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
@@ -264,214 +265,89 @@ export function parseFlags(bag: Record<string, FlagValue>): ShufFlags | string {
   }
 }
 
-// How input past the memory budget is shuffled: scattered into this many
-// buckets, each scattered again while it is still too large, at most this
-// deep (one record larger than the budget stops anywhere). Mirrors Python.
-const SCATTER_FAN_OUT = 16
-const SCATTER_DEPTH = 4
-
 class ShufHost {
   readonly errors = new ByteSpool()
+  private closed = false
   constructor(
     readonly ids: IdSource,
-    readonly data?: ByteSpool,
-    readonly index?: ByteSpool,
-    readonly buckets: ByteSpool[] = [],
+    readonly stream: OpenStream,
+    readonly spools: Map<number, ByteSpool>,
   ) {}
 
   async serve(request: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Promise<Served> {
-    switch (request.op) {
-      case 'random': {
-        if (typeof request.limit !== 'string') throw new Error('shuf: invalid random bound')
-        const bound = BigInt(request.limit)
-        const count = Number(request.count)
-        const values = new Uint8Array(count * 8)
-        const view = new DataView(values.buffer)
-        for (let at = 0; at < count; at++) {
-          const limit = request.descending === true ? bound - BigInt(at) : bound
-          const draw =
-            limit <= 0xffffffffn
-              ? BigInt(randomBelow(this.ids, Number(limit)))
-              : randomBelowBig(this.ids, limit)
-          view.setBigUint64(at * 8, draw, true)
-        }
-        return { reply: {}, data: values }
+    if (request.op === 'random') {
+      if (typeof request.limit !== 'string') throw new Error('shuf: invalid random bound')
+      const bound = BigInt(request.limit)
+      const count = Number(request.count)
+      const values = new Uint8Array(count * 8)
+      const view = new DataView(values.buffer)
+      for (let at = 0; at < count; at++) {
+        const limit = request.descending === true ? bound - BigInt(at) : bound
+        const draw =
+          limit <= 0xffffffffn
+            ? BigInt(randomBelow(this.ids, Number(limit)))
+            : randomBelowBig(this.ids, limit)
+        view.setBigUint64(at * 8, draw, true)
       }
-      case 'read': {
-        const source = request.index === true ? this.index : this.data
-        if (source === undefined) throw new Error('shuf: missing spool')
-        return { reply: {}, data: await source.read(Number(request.offset), Number(request.size)) }
+      return { reply: {}, data: values }
+    }
+    const id = Number(request.spool ?? (request.op === 'swap' || request.index === true ? 1 : 0))
+    if (request.op === 'close') {
+      const store = this.spools.get(id)
+      this.spools.delete(id)
+      await store?.close()
+      return { reply: {} }
+    }
+    if (request.op === 'write') {
+      let store = this.spools.get(id)
+      if (store === undefined) {
+        store = new ByteSpool(0)
+        this.spools.set(id, store)
       }
-      case 'swap': {
-        if (this.index === undefined) throw new Error('shuf: missing index')
-        const left = Number(request.left) * 16
-        const right = Number(request.right) * 16
-        const first = await this.index.read(left, 16)
-        const second = await this.index.read(right, 16)
-        await this.index.write(left, second)
-        await this.index.write(right, first)
-        return { reply: {} }
-      }
-      case 'write': {
-        const bucket = this.buckets[Number(request.bucket)]
-        if (bucket === undefined) throw new Error('shuf: missing bucket')
-        await bucket.append(data)
-        return { reply: {} }
-      }
-      default:
-        throw new Error(`shuf: unknown request ${JSON.stringify(request.op)}`)
+      await store.append(data)
+      return { reply: {} }
+    }
+    const store = this.spools.get(id)
+    if (store === undefined) throw new Error('shuf: missing spool')
+    if (request.op === 'read')
+      return { reply: {}, data: await store.read(Number(request.offset), Number(request.size)) }
+    if (request.op === 'swap') {
+      const left = Number(request.left) * 16
+      const right = Number(request.right) * 16
+      const first = await store.read(left, 16)
+      const second = await store.read(right, 16)
+      await store.write(left, second)
+      await store.write(right, first)
+      return { reply: {} }
+    }
+    throw new Error(`shuf: unknown request ${JSON.stringify(request.op)}`)
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return
+    this.closed = true
+    try {
+      await closeStream(this.stream)
+    } finally {
+      await this.errors.close()
+      for (const spool of this.spools.values()) await spool.close()
+      this.spools.clear()
     }
   }
 }
 
-async function* engine(
+async function engine(
   ids: IdSource,
   config: Readonly<Record<string, util.JSONType>>,
-  data?: ByteSpool,
-  index?: ByteSpool,
+  spools = new Map<number, ByteSpool>(),
   signal?: AbortSignal,
-): AsyncGenerator<Uint8Array> {
+): Promise<ByteSource> {
   const stream = await openStream('shuf', config)
-  const host = new ShufHost(ids, data, index)
-  try {
-    yield* serveRequests(stream, host, signal)
-  } finally {
-    await closeStream(stream)
-    await host.errors.close()
-  }
-}
-
-function rangeLines(
-  ids: IdSource,
-  low: bigint,
-  high: bigint,
-  need: number,
-  repeat: boolean,
-  separator: number,
-  signal?: AbortSignal,
-): AsyncGenerator<Uint8Array> {
-  return engine(
-    ids,
-    { mode: 'range', separator, low: String(low), high: String(high), need, repeat },
-    undefined,
-    undefined,
-    signal,
+  const host = new ShufHost(ids, stream, spools)
+  return rechunk(
+    new OutputStream(serveRequests(stream, host, signal), () => host.close()),
+    CHUNK_SIZE,
   )
-}
-
-async function countRecords(
-  data: ByteSpool,
-  terminator: number,
-  signal?: AbortSignal,
-): Promise<number> {
-  let count = ''
-  for await (const chunk of runStream(
-    'shuf',
-    { mode: 'count', separator: terminator },
-    data.stream(),
-    signal,
-  ))
-    count += new TextDecoder().decode(chunk)
-  return Number(count)
-}
-
-async function* indexed(
-  ids: IdSource,
-  data: ByteSpool,
-  terminator: number,
-  available: number,
-  need: number,
-  repeat: boolean,
-  signal?: AbortSignal,
-): AsyncGenerator<Uint8Array> {
-  const index = new ByteSpool()
-  try {
-    await index.fill(
-      runStream('shuf', { mode: 'index', separator: terminator }, data.stream(), signal),
-    )
-    yield* engine(
-      ids,
-      { mode: 'indexed', separator: terminator, size: data.size, available, need, repeat },
-      data,
-      index,
-      signal,
-    )
-  } finally {
-    await index.close()
-  }
-}
-
-async function* shuffled(
-  ids: IdSource,
-  data: ByteSpool,
-  terminator: number,
-  available: number,
-  need: number,
-  depth = 0,
-  signal?: AbortSignal,
-): AsyncGenerator<Uint8Array> {
-  if (need === 0) return
-  if (data.size <= MEMORY_LIMIT) {
-    yield* engine(
-      ids,
-      { mode: 'shuffle', separator: terminator, size: data.size, available, need },
-      data,
-      undefined,
-      signal,
-    )
-    return
-  }
-  if (available === 1) {
-    yield* data.stream()
-    return
-  }
-  if (depth === SCATTER_DEPTH) {
-    yield* indexed(ids, data, terminator, available, need, false, signal)
-    return
-  }
-  const buckets = Array.from({ length: SCATTER_FAN_OUT }, () => new ByteSpool(0))
-  const host = new ShufHost(ids, data, undefined, buckets)
-  const stream = await openStream('shuf', {
-    mode: 'scatter',
-    separator: terminator,
-    size: data.size,
-  })
-  try {
-    for await (const chunk of serveRequests(stream, host, signal))
-      if (chunk.length > 0) throw new Error('scatter writes buckets, not stdout')
-    const counts = JSON.parse(new TextDecoder().decode(stream.metadata())) as number[]
-    for (const [at, bucket] of buckets.entries()) {
-      const count = counts[at] ?? 0
-      const take = Math.min(need, count)
-      yield* shuffled(ids, bucket, terminator, count, take, depth + 1, signal)
-      await bucket.close()
-      need -= take
-      if (need === 0) break
-    }
-  } finally {
-    await closeStream(stream)
-    await host.errors.close()
-    for (const bucket of buckets) await bucket.close()
-  }
-}
-
-async function* drawn(
-  ids: IdSource,
-  data: ByteSpool,
-  terminator: number,
-  available: number,
-  need: number,
-  signal?: AbortSignal,
-): AsyncGenerator<Uint8Array> {
-  if (data.size > MEMORY_LIMIT) yield* indexed(ids, data, terminator, available, need, true, signal)
-  else
-    yield* engine(
-      ids,
-      { mode: 'draw', separator: terminator, size: data.size, available, need, repeat: true },
-      data,
-      undefined,
-      signal,
-    )
 }
 
 async function sampleRecords(
@@ -482,28 +358,35 @@ async function sampleRecords(
   repeat: boolean,
   signal?: AbortSignal,
 ): Promise<ByteSource> {
-  const terminator = sep.charCodeAt(0)
+  const separator = sep.charCodeAt(0)
   const data = new ByteSpool()
-  let available: number
-  let need: number
   try {
     for (const source of sources) {
       await data.fill(chunks(source, signal))
-      if (data.size > 0 && (await data.read(data.size - 1, 1))[0] !== terminator)
-        await data.append(Uint8Array.of(terminator))
+      if (data.size > 0 && (await data.read(data.size - 1, 1))[0] !== separator)
+        await data.append(Uint8Array.of(separator))
     }
-    available = await countRecords(data, terminator, signal)
-    const required = emitCount(BigInt(available), count, repeat)
-    if (required > MAX_OUTPUT_LINES) throw new Error(MEMORY_EXHAUSTED)
-    need = Number(required)
+    let counted = ''
+    for await (const chunk of runStream(
+      'shuf',
+      { mode: 'count', separator },
+      data.stream(),
+      signal,
+    ))
+      counted += new TextDecoder().decode(chunk)
+    const available = Number(counted)
+    const need = emitCount(BigInt(available), count, repeat)
+    if (need > MAX_OUTPUT_LINES) throw new Error(MEMORY_EXHAUSTED)
+    return await engine(
+      ids,
+      { mode: 'records', separator, size: data.size, available, need: Number(need), repeat },
+      new Map([[0, data]]),
+      signal,
+    )
   } catch (error) {
     await data.close()
     throw error
   }
-  const picks = repeat
-    ? drawn(ids, data, terminator, available, need, signal)
-    : shuffled(ids, data, terminator, available, need, 0, signal)
-  return rechunk(new OutputStream(picks, () => data.close()), CHUNK_SIZE)
 }
 
 async function sampleItems(
@@ -518,13 +401,6 @@ async function sampleItems(
   if (need > MAX_OUTPUT_LINES) throw new Error(MEMORY_EXHAUSTED)
   const data = new ByteSpool()
   const index = new ByteSpool()
-  const close = async (): Promise<void> => {
-    try {
-      await data.close()
-    } finally {
-      await index.close()
-    }
-  }
   try {
     const budget = new YieldBudget(signal)
     for (const item of items) {
@@ -537,28 +413,25 @@ async function sampleItems(
       await index.append(entry)
       await data.append(raw)
     }
-    return rechunk(
-      new OutputStream(
-        engine(
-          ids,
-          {
-            mode: 'indexed',
-            separator,
-            size: data.size,
-            available: items.length,
-            need: Number(need),
-            repeat,
-          },
-          data,
-          index,
-          signal,
-        ),
-        close,
-      ),
-      CHUNK_SIZE,
+    return await engine(
+      ids,
+      {
+        mode: 'indexed',
+        separator,
+        size: data.size,
+        available: items.length,
+        need: Number(need),
+        repeat,
+      },
+      new Map([
+        [0, data],
+        [1, index],
+      ]),
+      signal,
     )
   } catch (error) {
-    await close()
+    await data.close()
+    await index.close()
     throw error
   }
 }
@@ -625,7 +498,19 @@ export async function shufGeneric(
     if (need > MAX_OUTPUT_LINES) {
       return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${MEMORY_EXHAUSTED}\n`) })]
     }
-    result = rangeLines(ids, low, high, Number(need), repeat, sep.charCodeAt(0), ctx.signal)
+    result = await engine(
+      ids,
+      {
+        mode: 'range',
+        separator: sep.charCodeAt(0),
+        low: String(low),
+        high: String(high),
+        need: Number(need),
+        repeat,
+      },
+      undefined,
+      ctx.signal,
+    )
   } else if (echoMode) {
     // An operand -e echoes is named below the mount the command runs on.
     const root = mountRoot(ctx)

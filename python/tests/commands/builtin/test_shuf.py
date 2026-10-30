@@ -141,6 +141,7 @@ def test_shuf_input_range_single_element_is_valid():
         shuf_generic([], [], read=_unused_read_bytes, input_range="2-2")
     )
     assert io.exit_code == 0
+    rendered = asyncio.run(materialize(rendered))
     assert rendered == b"2\n"
 
 
@@ -149,6 +150,7 @@ def test_shuf_input_range_stays_valid():
         shuf_generic([], [], read=_unused_read_bytes, input_range="1-3")
     )
     assert io.exit_code == 0
+    rendered = asyncio.run(materialize(rendered))
     assert sorted(rendered.decode().strip().split("\n")) == ["1", "2", "3"]
 
 
@@ -427,6 +429,7 @@ def test_shuf_input_range_emits_a_large_bound_exactly(low):
         )
     )
     assert io.exit_code == 0
+    rendered = asyncio.run(materialize(rendered))
     assert rendered == f"{low}\n".encode()
 
 
@@ -448,6 +451,7 @@ def test_shuf_samples_a_huge_range_without_enumerating_it(raw):
         shuf_generic([], [], read=_unused_read_bytes, input_range=raw, count=3)
     )
     assert io.exit_code == 0
+    rendered = asyncio.run(materialize(rendered))
     low, high = parse_input_range(raw)
     values = [int(line) for line in rendered.decode().split("\n")[:-1]]
     assert len(values) == 3
@@ -467,6 +471,7 @@ def test_shuf_head_count_zero_on_a_huge_range_emits_nothing():
         )
     )
     assert io.exit_code == 0
+    rendered = asyncio.run(materialize(rendered))
     assert rendered == b""
 
 
@@ -482,6 +487,7 @@ def test_shuf_repeat_draws_from_a_huge_range_without_enumerating_it():
         )
     )
     assert io.exit_code == 0
+    rendered = asyncio.run(materialize(rendered))
     assert len(rendered.decode().split("\n")[:-1]) == 4
 
 

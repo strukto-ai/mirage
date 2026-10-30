@@ -225,7 +225,7 @@ describe('background job at the line limit', () => {
     }
   })
 
-  it.each(['sleep 5', 'seq 1 1000000000 > /data/g', '{ sleep 5; echo x; }'])(
+  it.each(['sleep 5', 'seq 1 1000000000 > /dev/null', '{ sleep 5; echo x; }'])(
     '%s & runs under the limit from its own start',
     async (job) => {
       const ws = jobWs(0.2)
@@ -387,7 +387,7 @@ describe('large in-memory commands', () => {
     'wc /big',
     'grep -c line /big',
     'cat /big | wc',
-    'cat -s /blank',
+    `cat -s${' /blank'.repeat(100)}`,
     'head -n -2500000 /blank',
     'uniq /big',
   ])('honors a caller abort during %s', async (command) => {

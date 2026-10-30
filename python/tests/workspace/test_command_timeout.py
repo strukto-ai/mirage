@@ -189,7 +189,8 @@ async def test_foreground_timeout_leaves_a_background_job_alone():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "job", ["sleep 5", "seq 1 1000000000 > /data/g", "{ sleep 5; echo x; }"]
+    "job",
+    ["sleep 5", "seq 1 1000000000 > /dev/null", "{ sleep 5; echo x; }"],
 )
 async def test_a_job_runs_under_the_line_limit_from_its_own_start(job):
     ws = _ws(line=0.2)
@@ -445,7 +446,7 @@ async def test_python3_timeout_reclaims_monty_interpreter():
         "wc /big",
         "grep -c line /big",
         "cat /big | wc",
-        "cat -s /blank",
+        "cat -s" + " /blank" * 100,
         "head -n -1000000 /blank",
         "uniq /blank",
         "tail -n 1 /blank /blank /blank /blank /blank",

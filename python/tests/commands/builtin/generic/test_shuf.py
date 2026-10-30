@@ -143,6 +143,35 @@ async def test_shuf_replays_past_the_memory_limit(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "rows,expected,after",
+    [
+        (
+            1,
+            "0676561be74db478b3b56abfeb7da14cb94e9c535944518dc9c16eedc8919874",
+            2628924735,
+        ),
+        (
+            3,
+            "3e560f541a346a4611f39bc97cf4d8bc0c319f2212288ae8286b95fcfaab7326",
+            227733378,
+        ),
+    ],
+)
+async def test_shuf_replays_oversized_record_buckets(rows, expected, after):
+    data = b"".join(
+        bytes([97 + row]) * (1024 * 1024 + 32) + b"\n" for row in range(rows)
+    )
+    ids = SeededIdSource(5)
+    output, io = await shuf_generic(
+        [], [], read=_read_operand, stdin=_chunks(data, 4096), ids=ids
+    )
+    assert io.exit_code == 0
+    assert await _digest(output) == expected
+    assert ids.random_u32() == after
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "repeat,early", [(False, False), (True, False), (False, True)]
 )
 async def test_shuf_keeps_large_records_spilled_and_closes_spools(

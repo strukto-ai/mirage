@@ -203,7 +203,6 @@ pub(super) struct RecordSearch {
     rs: Vec<u8>,
     scanned: usize,
     regex: Option<crate::regex::RecordScan>,
-    growing: Option<usize>,
     paragraph_start: usize,
     paragraph_end: Option<usize>,
     initialized: bool,
@@ -211,15 +210,11 @@ pub(super) struct RecordSearch {
 impl RecordSearch {
     pub(super) fn shift(&mut self, count: usize) {
         self.scanned = self.scanned.saturating_sub(count);
-        if let Some(start) = &mut self.growing {
-            *start = start.saturating_sub(count);
-        }
         self.paragraph_start = self.paragraph_start.saturating_sub(count);
         if let Some(end) = &mut self.paragraph_end {
             *end = end.saturating_sub(count);
         }
         if count > 0 {
-            self.growing = None;
             if let Some(regex) = &mut self.regex {
                 regex.reset(0, false);
             }
@@ -227,7 +222,6 @@ impl RecordSearch {
     }
     pub(super) fn reset(&mut self, start: usize) {
         self.scanned = start;
-        self.growing = None;
         self.paragraph_start = start;
         self.paragraph_end = None;
         if let Some(regex) = &mut self.regex {
@@ -283,7 +277,7 @@ pub(super) fn take_record(
                 }
             }
             let regex = regexes.get(rs)?;
-            let mut pos = search.growing.unwrap_or(start);
+            let mut pos = start;
             while pos <= buf.len() {
                 let Some((from, to)) = unbounded(|budget| regex.find(buf, pos, budget)) else {
                     break;
@@ -293,11 +287,13 @@ pub(super) fn take_record(
                     continue;
                 }
                 if to == buf.len() && !last {
-                    search.growing = Some(from);
-                    if let Some(scanner) = &mut search.regex {
-                        scanner.reset(from, true);
-                        if scanner.scan(buf, false).is_err() {
-                            search.regex = None;
+                    // Anchoring later would discard earlier unfinished alternatives.
+                    if from == start {
+                        if let Some(scanner) = &mut search.regex {
+                            scanner.reset(start, true);
+                            if scanner.scan(buf, false).is_err() {
+                                search.regex = None;
+                            }
                         }
                     }
                     return Ok(None);
@@ -449,6 +445,7 @@ mod record_tests {
             b"END",
             b"x+",
             b"a.*z|END",
+            b"ab.*z|E+",
             b"a$",
             b"x*",
             b"[ab]+",
@@ -460,6 +457,7 @@ mod record_tests {
                 b"tailaaaa",
                 b"\n\n\nparagraph\n\n\nlast",
                 b"zzzzzzzz",
+                b"abXEEzT",
             ] {
                 for width in 1..=text.len() {
                     let mut regexes = Regexes::default();

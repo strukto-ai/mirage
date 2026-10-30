@@ -13,6 +13,7 @@ const MAX_LINES: u64 = 1_000_000;
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Mode {
+    Records,
     Count,
     Index,
     Shuffle,
@@ -102,6 +103,7 @@ struct Shuf {
     bucket: Option<usize>,
     parts: [Vec<u8>; 16],
     counts: [u64; 16],
+    sizes: [u64; 16],
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
@@ -115,6 +117,9 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     }
     if config.need > MAX_LINES || config.mode == Mode::Shuffle && config.size > MEMORY {
         return Err(StreamError::new("shuf: memory exhausted"));
+    }
+    if config.mode == Mode::Records {
+        return Ok(Box::new(Plan::new(config)));
     }
     Ok(Box::new(create(config)))
 }
@@ -147,6 +152,7 @@ fn create(config: Config) -> Shuf {
         bucket: None,
         parts: std::array::from_fn(|_| Vec::new()),
         counts: [0; 16],
+        sizes: [0; 16],
     }
 }
 
@@ -383,6 +389,7 @@ impl Shuf {
                     let cut = memchr::memchr(self.config.separator, remaining);
                     let len = cut.map_or(remaining.len(), |at| at + 1).min(work.max(1));
                     self.parts[bucket].extend_from_slice(&remaining[..len]);
+                    self.sizes[bucket] += len as u64;
                     self.at += len;
                     work = work.saturating_sub(len);
                     if cut == Some(len - 1) {
@@ -394,7 +401,9 @@ impl Shuf {
                         self.data.clear();
                         self.at = 0;
                         self.phase = Phase::Load;
-                    } else if self.parts[at].is_empty() {
+                    } else if self.parts[at].is_empty()
+                        || self.parts[at].len() < WORK && self.offset < self.config.size
+                    {
                         self.phase = Phase::Flush(at + 1);
                     } else {
                         self.ask(Request::Write(at));
@@ -474,7 +483,8 @@ impl Stream for Shuf {
             }
             Request::Swap { left, right } => json!({"op":"swap", "left":left, "right":right}),
             Request::Write(bucket) => {
-                data.append(&mut self.parts[bucket]);
+                let len = self.parts[bucket].len().min(WORK);
+                data.extend(self.parts[bucket].drain(..len));
                 json!({"op":"write", "bucket":bucket})
             }
         };
@@ -530,13 +540,315 @@ impl Stream for Shuf {
                     }
                 }
             }
-            Request::Write(bucket) => self.phase = Phase::Flush(bucket + 1),
+            Request::Write(bucket) => self.phase = Phase::Flush(bucket),
             Request::Swap { .. } => {}
         }
         self.step(out)
     }
     fn metadata(&self, out: &mut Vec<u8>) {
         serde_json::to_writer(out, &self.counts).expect("shuf counts serialize");
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Task {
+    spool: u64,
+    size: u64,
+    available: u64,
+    need: u64,
+    depth: u8,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Next,
+    Run,
+    Index,
+    Copy,
+    Done,
+}
+
+enum Storage {
+    Random(usize),
+    Read {
+        spool: u64,
+        offset: u64,
+        size: usize,
+    },
+    Write(u64),
+    Close(u64),
+}
+
+/// One shuffle plan owns every spill decision; hosts only serve storage and RNG.
+struct Plan {
+    separator: u8,
+    repeat: bool,
+    tasks: Vec<Task>,
+    task: Option<Task>,
+    stage: Stage,
+    active: Option<Shuf>,
+    next_spool: u64,
+    index: Option<u64>,
+    buckets: [u64; 16],
+    offset: u64,
+    indexed: bool,
+    close: Vec<u64>,
+    pending: Option<Storage>,
+    taken: bool,
+    payload: Vec<u8>,
+}
+
+impl Plan {
+    fn new(config: Config) -> Self {
+        Self {
+            separator: config.separator,
+            repeat: config.repeat,
+            tasks: vec![Task {
+                spool: 0,
+                size: config.size,
+                available: config.available,
+                need: config.need,
+                depth: 0,
+            }],
+            task: None,
+            stage: Stage::Next,
+            active: None,
+            next_spool: 2,
+            index: None,
+            buckets: [0; 16],
+            offset: 0,
+            indexed: false,
+            close: Vec::new(),
+            pending: None,
+            taken: false,
+            payload: Vec::new(),
+        }
+    }
+    fn spool(&mut self) -> u64 {
+        let id = self.next_spool;
+        self.next_spool += 1;
+        id
+    }
+    fn ask(&mut self, request: Storage) {
+        self.pending = Some(request);
+        self.taken = false;
+    }
+    fn engine(&mut self, mode: Mode) {
+        let task = self.task.unwrap();
+        self.active = Some(create(Config {
+            mode,
+            separator: self.separator,
+            size: task.size,
+            available: task.available,
+            need: task.need,
+            repeat: self.repeat,
+            low: 0,
+            high: 0,
+        }));
+    }
+    fn retire(&mut self) {
+        self.close.push(self.task.take().unwrap().spool);
+        if let Some(index) = self.index.take() {
+            self.close.push(index);
+        }
+        self.active = None;
+        self.stage = Stage::Next;
+    }
+    fn step(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if let Some(spool) = self.close.pop() {
+            self.ask(Storage::Close(spool));
+            return Ok(());
+        }
+        match self.stage {
+            Stage::Done => {}
+            Stage::Next => {
+                let Some(task) = self.tasks.pop() else {
+                    self.stage = Stage::Done;
+                    return Ok(());
+                };
+                self.task = Some(task);
+                self.offset = 0;
+                self.indexed = false;
+                if task.need == 0 {
+                    self.retire();
+                } else if task.size <= MEMORY {
+                    self.engine(if self.repeat {
+                        Mode::Draw
+                    } else {
+                        Mode::Shuffle
+                    });
+                    self.stage = Stage::Run;
+                } else if !self.repeat && task.available == 1 {
+                    self.stage = Stage::Copy;
+                    if task.depth < 4 {
+                        self.ask(Storage::Random(usize::from(4 - task.depth)));
+                    }
+                } else if self.repeat || task.depth == 4 {
+                    self.index = Some(self.spool());
+                    self.engine(Mode::Index);
+                    self.stage = Stage::Index;
+                } else {
+                    for at in 0..16 {
+                        self.buckets[at] = self.spool();
+                    }
+                    self.engine(Mode::Scatter);
+                    self.stage = Stage::Run;
+                }
+            }
+            Stage::Run => {
+                let engine = self.active.as_mut().unwrap();
+                if engine.busy() {
+                    return engine.drain(out);
+                }
+                if engine.config.mode == Mode::Scatter {
+                    let task = self.task.unwrap();
+                    let mut need = task.need;
+                    let mut children = Vec::new();
+                    for at in 0..16 {
+                        let count = engine.counts[at];
+                        let take = need.min(count);
+                        need -= take;
+                        if take == 0 {
+                            self.close.push(self.buckets[at]);
+                        } else {
+                            children.push(Task {
+                                spool: self.buckets[at],
+                                size: engine.sizes[at],
+                                available: count,
+                                need: take,
+                                depth: task.depth + 1,
+                            });
+                        }
+                    }
+                    self.tasks.extend(children.into_iter().rev());
+                }
+                self.retire();
+            }
+            Stage::Copy => {
+                let task = self.task.unwrap();
+                if self.offset == task.size {
+                    self.retire();
+                } else {
+                    self.ask(Storage::Read {
+                        spool: task.spool,
+                        offset: self.offset,
+                        size: (task.size - self.offset).min(WORK as u64) as usize,
+                    });
+                }
+            }
+            Stage::Index => {
+                let task = self.task.unwrap();
+                let engine = self.active.as_mut().unwrap();
+                if engine.busy() {
+                    engine.drain(&mut self.payload)?;
+                } else if self.offset < task.size {
+                    self.ask(Storage::Read {
+                        spool: task.spool,
+                        offset: self.offset,
+                        size: (task.size - self.offset).min(WORK as u64) as usize,
+                    });
+                } else if !self.indexed {
+                    engine.finish(&mut self.payload)?;
+                    self.indexed = true;
+                } else {
+                    self.engine(Mode::Indexed);
+                    self.stage = Stage::Run;
+                }
+                if !self.payload.is_empty() {
+                    self.ask(Storage::Write(self.index.unwrap()));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Stream for Plan {
+    fn feed(&mut self, _input: &[u8], _out: &mut Vec<u8>) -> Result<(), StreamError> {
+        Err(StreamError::new("shuf reads through requests"))
+    }
+    fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.step(out)
+    }
+    fn busy(&self) -> bool {
+        self.stage != Stage::Done
+            && self.pending.is_none()
+            && self
+                .active
+                .as_ref()
+                .is_none_or(|engine| engine.request.is_none())
+    }
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.step(out)
+    }
+    fn request(&mut self, data: &mut Vec<u8>) -> Option<Vec<u8>> {
+        if let Some(pending) = &self.pending {
+            if self.taken {
+                return None;
+            }
+            self.taken = true;
+            let header = match *pending {
+                Storage::Random(count) => {
+                    json!({"op":"random", "limit":"16", "count":count, "descending":false})
+                }
+                Storage::Read {
+                    spool,
+                    offset,
+                    size,
+                } => json!({"op":"read", "spool":spool, "offset":offset, "size":size}),
+                Storage::Write(spool) => {
+                    data.append(&mut self.payload);
+                    json!({"op":"write", "spool":spool})
+                }
+                Storage::Close(spool) => json!({"op":"close", "spool":spool}),
+            };
+            return Some(serde_json::to_vec(&header).expect("shuf storage request serializes"));
+        }
+        let mut header: serde_json::Value =
+            serde_json::from_slice(&self.active.as_mut()?.request(data)?)
+                .expect("shuf request is JSON");
+        let spool = match header["op"].as_str()? {
+            "read" => Some(if header["index"] == true {
+                self.index.unwrap()
+            } else {
+                self.task.unwrap().spool
+            }),
+            "write" => Some(self.buckets[header["bucket"].as_u64().unwrap() as usize]),
+            "swap" => self.index,
+            _ => None,
+        };
+        if let Some(spool) = spool {
+            header["spool"] = spool.into();
+        }
+        Some(serde_json::to_vec(&header).expect("shuf request serializes"))
+    }
+    fn respond(&mut self, reply: &[u8], data: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        match self.pending.take() {
+            Some(Storage::Read { size, .. }) => {
+                if data.len() != size {
+                    return Err(StreamError::new("shuf: unexpected end of spool"));
+                }
+                self.offset += size as u64;
+                if self.stage == Stage::Copy {
+                    out.extend_from_slice(data);
+                } else {
+                    self.active
+                        .as_mut()
+                        .unwrap()
+                        .feed(data, &mut self.payload)?;
+                    if !self.payload.is_empty() {
+                        self.ask(Storage::Write(self.index.unwrap()));
+                    }
+                }
+                Ok(())
+            }
+            Some(Storage::Random(_) | Storage::Write(_) | Storage::Close(_)) => Ok(()),
+            None => self
+                .active
+                .as_mut()
+                .ok_or_else(|| StreamError::new("shuf: no pending request"))?
+                .respond(reply, data, out),
+        }
     }
 }
 
@@ -554,6 +866,7 @@ mod tests {
         index: &[u8],
     ) -> (Vec<u8>, [Vec<u8>; 16]) {
         let mut index = index.to_vec();
+        let mut spools = std::collections::HashMap::from([(0, data.to_vec())]);
         let mut output = Vec::new();
         let mut buckets: [Vec<u8>; 16] = std::array::from_fn(|_| Vec::new());
         loop {
@@ -567,10 +880,13 @@ mod tests {
             let Some(header) = stream.request(&mut payload) else {
                 break;
             };
+            assert!(payload.len() <= WORK);
             let request: serde_json::Value = serde_json::from_slice(&header).unwrap();
             let response = match request["op"].as_str().unwrap() {
                 "read" => {
-                    let source = if request["index"] == true {
+                    let source = if let Some(id) = request["spool"].as_u64() {
+                        spools.get(&id).unwrap().as_slice()
+                    } else if request["index"] == true {
                         index.as_slice()
                     } else {
                         data
@@ -583,13 +899,26 @@ mod tests {
                 "swap" => {
                     let left = request["left"].as_u64().unwrap() as usize * 16;
                     let right = request["right"].as_u64().unwrap() as usize * 16;
+                    let stored = if let Some(id) = request["spool"].as_u64() {
+                        spools.get_mut(&id).unwrap()
+                    } else {
+                        &mut index
+                    };
                     for byte in 0..16 {
-                        index.swap(left + byte, right + byte);
+                        stored.swap(left + byte, right + byte);
                     }
                     Vec::new()
                 }
                 "write" => {
-                    buckets[request["bucket"].as_u64().unwrap() as usize].extend(payload);
+                    if let Some(id) = request["spool"].as_u64() {
+                        spools.entry(id).or_default().extend(payload);
+                    } else {
+                        buckets[request["bucket"].as_u64().unwrap() as usize].extend(payload);
+                    }
+                    Vec::new()
+                }
+                "close" => {
+                    spools.remove(&request["spool"].as_u64().unwrap());
                     Vec::new()
                 }
                 _ => unreachable!(),
@@ -600,6 +929,24 @@ mod tests {
             output.extend(out);
         }
         (output, buckets)
+    }
+
+    #[test]
+    fn record_plan_scattering_and_indexing_preserve_the_permutation() {
+        let mut data = Vec::new();
+        for byte in b"abc" {
+            data.extend(std::iter::repeat_n(*byte, MEMORY as usize + 7));
+            data.push(b'\n');
+        }
+        let config =
+            json!({"mode":"records", "separator":10, "size":data.len(), "available":3, "need":3});
+        let row = MEMORY as usize + 8;
+        let expected = [&data[row..], &data[..row]].concat();
+        assert_eq!(drive(config, &data, b"").0, expected);
+        let config = json!({"mode":"records", "separator":10, "size":data.len(), "available":3, "need":2, "repeat":true});
+        assert_eq!(drive(config, &data, b"").0, data[..row].repeat(2));
+        let config = json!({"mode":"records", "separator":10, "size":row, "available":1, "need":1});
+        assert_eq!(drive(config, &data[..row], b"").0, data[..row]);
     }
 
     #[test]

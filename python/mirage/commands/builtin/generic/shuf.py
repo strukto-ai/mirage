@@ -1,7 +1,5 @@
-import json
 import re
 from collections.abc import (
-    AsyncGenerator,
     Awaitable,
     Callable,
     Mapping,
@@ -20,11 +18,12 @@ from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.cooperative import CHUNK_SIZE
-from mirage.io.spool import MEMORY_LIMIT, ByteSpool
+from mirage.io.spool import ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import (
+    OpenStream,
     Served,
     close_stream,
     open_stream,
@@ -69,12 +68,6 @@ SIZE_MAX = UINTMAX
 # this limit bounds shuffle indexes and sampling state, not rendered bytes.
 # GNU has no fixed ceiling and may enumerate larger populations.
 MAX_OUTPUT_LINES = 1_000_000
-# How input past the memory budget is shuffled: scattered into this many
-# buckets, each scattered again while it is still too large, at most this
-# deep (one record larger than the budget stops anywhere).
-SCATTER_FAN_OUT = 16
-SCATTER_DEPTH = 4
-
 # One unsigned value as `strtoumax` reads it, which is both `-n`'s whole
 # argument and each `-i` bound.
 #
@@ -362,17 +355,13 @@ class ShufHost:
     """Async storage and injected randomness for the shared shuffle engine."""
 
     def __init__(
-        self,
-        ids: IdSource,
-        data: ByteSpool | None = None,
-        index: ByteSpool | None = None,
-        buckets: list[ByteSpool] | None = None,
+        self, ids: IdSource, stream: OpenStream, spools: dict[int, ByteSpool]
     ) -> None:
         self.ids = ids
-        self.data = data
-        self.index = index
-        self.buckets = buckets or []
+        self.stream = stream
+        self.spools = spools
         self.errors = ByteSpool()
+        self.closed = False
 
     async def serve(
         self, request: Mapping[str, JsonValue], data: bytes
@@ -391,212 +380,58 @@ class ShufHost:
                     ).to_bytes(8, "little")
                 )
             return Served({}, bytes(values))
-        if op == "read":
-            source = self.index if request["index"] else self.data
-            offset, size = request["offset"], request["size"]
-            assert (
-                source is not None
-                and isinstance(offset, int)
-                and isinstance(size, int)
-            )
-            return Served({}, await source.read(offset, size))
-        if op == "swap":
-            left, right = request["left"], request["right"]
-            assert (
-                self.index is not None
-                and isinstance(left, int)
-                and isinstance(right, int)
-            )
-            first = await self.index.read(left * 16, 16)
-            second = await self.index.read(right * 16, 16)
-            await self.index.write(left * 16, second)
-            await self.index.write(right * 16, first)
+        spool = request.get(
+            "spool", int(op == "swap" or request.get("index") is True)
+        )
+        assert isinstance(spool, int)
+        if op == "close":
+            store = self.spools.pop(spool, None)
+            if store is not None:
+                await store.close()
             return Served({})
         if op == "write":
-            bucket = request["bucket"]
-            assert isinstance(bucket, int)
-            await self.buckets[bucket].append(data)
+            if spool not in self.spools:
+                self.spools[spool] = ByteSpool(0)
+            await self.spools[spool].append(data)
+            return Served({})
+        store = self.spools[spool]
+        if op == "read":
+            offset, size = request["offset"], request["size"]
+            assert isinstance(offset, int) and isinstance(size, int)
+            return Served({}, await store.read(offset, size))
+        if op == "swap":
+            left, right = request["left"], request["right"]
+            assert isinstance(left, int) and isinstance(right, int)
+            first = await store.read(left * 16, 16)
+            second = await store.read(right * 16, 16)
+            await store.write(left * 16, second)
+            await store.write(right * 16, first)
             return Served({})
         raise ValueError(f"shuf: unknown request {op}")
 
+    async def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            await close_stream(self.stream)
+        finally:
+            await self.errors.close()
+            for spool in self.spools.values():
+                await spool.close()
+            self.spools.clear()
 
-async def _engine(
+
+def _engine(
     ids: IdSource,
     config: Mapping[str, JsonValue],
-    data: ByteSpool | None = None,
-    index: ByteSpool | None = None,
-) -> AsyncGenerator[bytes, None]:
+    spools: dict[int, ByteSpool] | None = None,
+) -> ByteSource:
     stream = open_stream("shuf", config)
-    host = ShufHost(ids, data, index)
-    try:
-        async with aclosing(serve_requests(stream, host)) as output:
-            async for chunk in output:
-                yield chunk
-    finally:
-        await close_stream(stream)
-        await host.errors.close()
-
-
-def _range_lines(
-    ids: IdSource,
-    low: int,
-    high: int,
-    need: int,
-    with_replacement: bool,
-    separator: int,
-) -> AsyncGenerator[bytes, None]:
-    return _engine(
-        ids,
-        {
-            "mode": "range",
-            "separator": separator,
-            "low": str(low),
-            "high": str(high),
-            "need": need,
-            "repeat": with_replacement,
-        },
+    host = ShufHost(ids, stream, spools or {})
+    return rechunk(
+        OutputStream(serve_requests(stream, host), host.close), CHUNK_SIZE
     )
-
-
-async def _count_records(data: ByteSpool, terminator: bytes) -> int:
-    async with aclosing(
-        run_stream(
-            "shuf",
-            {"mode": "count", "separator": terminator[0]},
-            data.stream(),
-        )
-    ) as output:
-        return int(b"".join([chunk async for chunk in output]))
-
-
-async def _indexed(
-    ids: IdSource,
-    data: ByteSpool,
-    terminator: bytes,
-    available: int,
-    need: int,
-    repeat: bool,
-) -> AsyncGenerator[bytes, None]:
-    async with ByteSpool() as index:
-        await index.fill(
-            run_stream(
-                "shuf",
-                {"mode": "index", "separator": terminator[0]},
-                data.stream(),
-            )
-        )
-        async with aclosing(
-            _engine(
-                ids,
-                {
-                    "mode": "indexed",
-                    "separator": terminator[0],
-                    "size": data.size,
-                    "available": available,
-                    "need": need,
-                    "repeat": repeat,
-                },
-                data,
-                index,
-            )
-        ) as output:
-            async for chunk in output:
-                yield chunk
-
-
-async def _shuffled(
-    ids: IdSource,
-    data: ByteSpool,
-    terminator: bytes,
-    available: int,
-    need: int,
-    depth: int = 0,
-) -> AsyncGenerator[bytes, None]:
-    if need == 0:
-        return
-    if data.size <= MEMORY_LIMIT:
-        async with aclosing(
-            _engine(
-                ids,
-                {
-                    "mode": "shuffle",
-                    "separator": terminator[0],
-                    "size": data.size,
-                    "available": available,
-                    "need": need,
-                },
-                data,
-            )
-        ) as output:
-            async for chunk in output:
-                yield chunk
-        return
-    if available == 1:
-        async for chunk in data.stream():
-            yield chunk
-        return
-    if depth == SCATTER_DEPTH:
-        async with aclosing(
-            _indexed(ids, data, terminator, available, need, False)
-        ) as output:
-            async for chunk in output:
-                yield chunk
-        return
-    buckets = [ByteSpool(0) for _ in range(SCATTER_FAN_OUT)]
-    host = ShufHost(ids, data, buckets=buckets)
-    stream = open_stream(
-        "shuf",
-        {"mode": "scatter", "separator": terminator[0], "size": data.size},
-    )
-    try:
-        async with aclosing(serve_requests(stream, host)) as output:
-            async for _ in output:
-                raise AssertionError("scatter writes buckets, not stdout")
-        counts: list[int] = json.loads(stream.metadata())
-        for bucket, count in zip(buckets, counts):
-            take = min(need, count)
-            async with aclosing(
-                _shuffled(ids, bucket, terminator, count, take, depth + 1)
-            ) as output:
-                async for chunk in output:
-                    yield chunk
-            await bucket.close()
-            need -= take
-            if need == 0:
-                break
-    finally:
-        await close_stream(stream)
-        await host.errors.close()
-        for bucket in buckets:
-            await bucket.close()
-
-
-async def _drawn(
-    ids: IdSource,
-    data: ByteSpool,
-    terminator: bytes,
-    available: int,
-    need: int,
-) -> AsyncGenerator[bytes, None]:
-    output = (
-        _indexed(ids, data, terminator, available, need, True)
-        if data.size > MEMORY_LIMIT
-        else _engine(
-            ids,
-            {
-                "mode": "draw",
-                "separator": terminator[0],
-                "size": data.size,
-                "available": available,
-                "need": need,
-                "repeat": True,
-            },
-            data,
-        )
-    )
-    async with aclosing(output):
-        async for chunk in output:
-            yield chunk
 
 
 async def _sample_records(
@@ -618,17 +453,30 @@ async def _sample_records(
             await data.fill(source)
             if data.size and await data.read(data.size - 1, 1) != terminator:
                 await data.append(terminator)
-        available = await _count_records(data, terminator)
+        async with aclosing(
+            run_stream(
+                "shuf",
+                {"mode": "count", "separator": terminator[0]},
+                data.stream(),
+            )
+        ) as output:
+            available = int(b"".join([chunk async for chunk in output]))
         need = _need(available, count, repeat)
+        return _engine(
+            ids,
+            {
+                "mode": "records",
+                "separator": terminator[0],
+                "size": data.size,
+                "available": available,
+                "need": need,
+                "repeat": repeat,
+            },
+            {0: data},
+        )
     except BaseException:
         await data.close()
         raise
-    picks = (
-        _drawn(ids, data, terminator, available, need)
-        if repeat
-        else _shuffled(ids, data, terminator, available, need)
-    )
-    return rechunk(OutputStream(picks, data.close), CHUNK_SIZE)
 
 
 async def _sample_items(
@@ -640,13 +488,6 @@ async def _sample_items(
 ) -> ByteSource:
     need = _need(len(items), count, repeat)
     data, index = ByteSpool(), ByteSpool()
-
-    async def close() -> None:
-        try:
-            await data.close()
-        finally:
-            await index.close()
-
     try:
         budget = YieldBudget()
         for item in items:
@@ -657,7 +498,7 @@ async def _sample_items(
                 + len(raw).to_bytes(8, "little")
             )
             await data.append(raw)
-        output = _engine(
+        return _engine(
             ids,
             {
                 "mode": "indexed",
@@ -667,12 +508,11 @@ async def _sample_items(
                 "need": need,
                 "repeat": repeat,
             },
-            data,
-            index,
+            {0: data, 1: index},
         )
-        return rechunk(OutputStream(output, close), CHUNK_SIZE)
     except BaseException:
-        await close()
+        await data.close()
+        await index.close()
         raise
 
 
@@ -709,8 +549,16 @@ async def shuf_generic(
             raise ValueError(range_error(input_range, bounds))
         low, high = bounds
         need = _need(high - low + 1, count, with_replacement)
-        rendered = _range_lines(
-            ids, low, high, need, with_replacement, ord(sep)
+        rendered = _engine(
+            ids,
+            {
+                "mode": "range",
+                "separator": ord(sep),
+                "low": str(low),
+                "high": str(high),
+                "need": need,
+                "repeat": with_replacement,
+            },
         )
     elif echo:
         # An operand -e echoes is named below the mount the command runs
@@ -729,6 +577,7 @@ async def shuf_generic(
         )
     if output is not None:
         if write_bytes is None:
+            await close_quietly(rendered)
             raise ValueError(NO_WRITE_OP)
         try:
             await write_bytes(output, rendered)

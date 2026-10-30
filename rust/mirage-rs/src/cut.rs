@@ -112,12 +112,14 @@ impl Options {
                 if selected && start.is_none() {
                     start = Some(position);
                 }
-                if !selected && let Some(from) = start.take() {
-                    if emitted {
-                        out.extend_from_slice(&self.output_delimiter);
+                if !selected {
+                    if let Some(from) = start.take() {
+                        if emitted {
+                            out.extend_from_slice(&self.output_delimiter);
+                        }
+                        out.extend_from_slice(&bytes[from..position]);
+                        emitted = true;
                     }
-                    out.extend_from_slice(&bytes[from..position]);
-                    emitted = true;
                 }
             }
         }

@@ -657,6 +657,31 @@ describe('shuf replays past the memory limit', () => {
 })
 
 it.each([
+  [1, '0676561be74db478b3b56abfeb7da14cb94e9c535944518dc9c16eedc8919874', 2628924735],
+  [3, '3e560f541a346a4611f39bc97cf4d8bc0c319f2212288ae8286b95fcfaab7326', 227733378],
+] as const)('replays %i oversized record buckets', async (rows, digest, after) => {
+  const data = ENC.encode(
+    Array.from(
+      { length: rows },
+      (_, row) => `${String.fromCharCode(97 + row).repeat(1024 * 1024 + 32)}\n`,
+    ).join(''),
+  )
+  const ids = new SeededIdSource(5)
+  const ctx = {
+    stdin: chunksOf(data, 4096),
+    flags: {},
+    ids,
+    cwd: PathSpec.fromStrPath('/'),
+    vfs: { kind: 'ram' } as never,
+  } as Context
+  const result = await shufGeneric([], [], ctx, stubStream, stubWrite)
+  if (result?.[0] == null) throw new Error('shuf declined')
+  expect(result[1].exitCode).toBe(0)
+  expect(await sha256Hex(await materialize(result[0]))).toBe(digest)
+  expect(ids.randomU32()).toBe(after)
+})
+
+it.each([
   [false, false],
   [true, false],
   [false, true],
