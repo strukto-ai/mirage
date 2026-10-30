@@ -221,9 +221,10 @@ export class DiskRecordClient {
 
   // Publish a complete owner before another local writer can observe the lock.
   private async acquireLock(lockPath: string): Promise<FileHandle | null> {
-    let candidate: string | null = `${lockPath}.${randomUUID()}.owner`
+    const candidate = `${lockPath}.${randomUUID()}.owner`
     const fh = await open(candidate, 'wx')
     let published = false
+    let removed = false
     try {
       await fh.writeFile(String(process.pid))
       await fh.sync()
@@ -235,10 +236,10 @@ export class DiskRecordClient {
       }
       published = true
       await unlink(candidate)
-      candidate = null
+      removed = true
       return fh
     } finally {
-      if (candidate !== null) {
+      if (!removed) {
         try {
           await unlink(candidate)
         } finally {

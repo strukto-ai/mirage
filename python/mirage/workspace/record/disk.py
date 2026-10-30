@@ -100,9 +100,10 @@ def prepare_directory(path: str) -> None:
 def _acquire_lock(lock_path: str) -> int | None:
     """Publish a complete owner with an exclusive hard link; fd on
     success, None when another local writer holds it."""
-    candidate: str | None = f"{lock_path}.{uuid4().hex}.owner"
+    candidate = f"{lock_path}.{uuid4().hex}.owner"
     fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
     published = False
+    removed = False
     try:
         owner = str(os.getpid()).encode()
         while owner:
@@ -117,10 +118,10 @@ def _acquire_lock(lock_path: str) -> int | None:
             return None
         published = True
         os.unlink(candidate)
-        candidate = None
+        removed = True
         return fd
     finally:
-        if candidate is not None:
+        if not removed:
             try:
                 os.unlink(candidate)
             finally:
