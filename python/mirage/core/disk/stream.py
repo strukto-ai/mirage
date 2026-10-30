@@ -26,7 +26,7 @@ from mirage.types import PathSpec
 async def read_stream(
     accessor: DiskAccessor,
     path_spec: PathSpec,
-    chunk_size: int = 65536,
+    chunk_size: int = 256 * 1024,
 ) -> AsyncIterator[bytes]:
     """A file's bytes as they are read. A short read is the file's end,
     as the kernel answers it, so a reader of a file its own pipeline

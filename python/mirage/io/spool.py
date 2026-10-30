@@ -152,7 +152,9 @@ class ByteSpool:
     ) -> AsyncIterator[bytes]:
         end = self.size if size is None else min(self.size, offset + size)
         while offset < end:
-            data = await self.read(offset, min(CHUNK_SIZE, end - offset))
+            # A spilled spool hands on a worker read's worth at a time.
+            step = CHUNK_SIZE if self._file is None else IO_BUFFER_SIZE
+            data = await self.read(offset, min(step, end - offset))
             if not data:
                 return
             offset += len(data)

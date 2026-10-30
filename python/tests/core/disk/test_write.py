@@ -12,11 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 import pytest
 
+import mirage.core.disk.write as disk_write
 from mirage.accessor.disk import DiskAccessor
+from mirage.core.disk.constants import STREAM_BATCH_BYTES, STREAM_FLUSH_SECONDS
 from mirage.core.disk.write import write
 from mirage.types import PathSpec
 
@@ -198,3 +201,60 @@ async def test_an_atomic_write_of_bytes_replaces_the_file_whole(tmp_path):
     assert target.read_bytes() == b"new"
     assert (tmp_path / "held").read_bytes() == b"old"
     assert target.stat().st_mode & 0o777 == 0o640
+
+
+@pytest.mark.asyncio
+async def test_a_stream_reaches_the_file_in_batches(tmp_path, monkeypatch):
+    opened = disk_write.aiofiles.open
+    writes = []
+
+    async def counting(*args, **kwargs):
+        f = await opened(*args, **kwargs)
+        original = f.write
+
+        async def write_one(data):
+            writes.append(len(data))
+            return await original(data)
+
+        f.write = write_one
+        return f
+
+    async def source():
+        for i in range(64):
+            yield bytes([65 + i % 26]) * (16 * 1024)
+
+    monkeypatch.setattr(disk_write.aiofiles, "open", counting)
+    await write(
+        DiskAccessor(tmp_path),
+        PathSpec.from_str_path("/file", vfs_path="file"),
+        source(),
+    )
+    assert (tmp_path / "file").read_bytes() == b"".join(
+        bytes([65 + i % 26]) * (16 * 1024) for i in range(64)
+    )
+    assert len(writes) <= 64 * 16 * 1024 // STREAM_BATCH_BYTES + 1
+
+
+@pytest.mark.asyncio
+async def test_a_slow_stream_still_shows_its_bytes_within_a_flush(tmp_path):
+    shown = asyncio.Event()
+    seen = []
+
+    async def source():
+        yield b"first\n"
+        for _ in range(50):
+            await asyncio.sleep(STREAM_FLUSH_SECONDS / 2)
+            if (tmp_path / "file").read_bytes():
+                seen.append((tmp_path / "file").read_bytes())
+                shown.set()
+                break
+        yield b"second\n"
+
+    await write(
+        DiskAccessor(tmp_path),
+        PathSpec.from_str_path("/file", vfs_path="file"),
+        source(),
+    )
+    assert shown.is_set()
+    assert seen[0] == b"first\n"
+    assert (tmp_path / "file").read_bytes() == b"first\nsecond\n"

@@ -20,3 +20,7 @@ RACY_WINDOW_NS = 2_000_000_000
 # slow writer's file grow while one reading the file it writes into
 # (`awk 1 f | tee -a f`) reaches its end first, as the kernel's would.
 STREAM_FLUSH_SECONDS = 0.1
+
+# How many bytes of a streamed write go to the file in one write: each is a
+# hop to a worker thread, so a 16 KiB chunk apiece costs more than the copy.
+STREAM_BATCH_BYTES = 256 * 1024
