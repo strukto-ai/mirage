@@ -108,11 +108,11 @@ against the session's working directory and retain `PathSpec` semantics.
 After an account CLI write, Mirage expires the caches of every mount the CLI's
 client may reach, including answers a mount's client keeps itself (a vector
 store's search results), so later reads can observe the change. Each built-in
-CLI reaches only its own service: `gh` the GitHub mounts on its API base, `hf`
-the model, dataset and space mounts on its Hub endpoint, `himalaya` every mail
-mount (IMAP or Gmail), `gws` every Google mount and every mail mount, and
-`slack`, `discord`, `ntn`, `linear`, `airtable` and `trello` every mount of
-their service. A script CLI reaches every mount.
+CLI reaches only the mounts its writes can change: `gh` the GitHub mounts on its
+API base, `hf` the model, dataset and space mounts on its Hub endpoint,
+`himalaya` every mail mount (IMAP or Gmail), `gws` every Google mount and every
+mail mount, and `slack`, `discord`, `ntn`, `linear`, `airtable` and `trello`
+every mount of their service. A script CLI reaches every mount.
 
 Mount modes and path policy govern workspace file operations. A read-only
 Slack mount does **not** disable `slack send-message`; use command policy to

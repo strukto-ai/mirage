@@ -288,7 +288,7 @@ describe('an account CLI write drops only the mounts it reaches', () => {
   const GITHUB = new InlineGitHub()
   const MOUNTS: Record<string, [string, Record<string, unknown>]> = {
     mail: ['email', MAIL],
-    mail_elsewhere: ['email', { ...MAIL, imap_host: 'imap.b' }],
+    mail_elsewhere: ['email', { ...MAIL, imap_host: 'imap.b', imap_port: 143, username: 'v' }],
     slack: ['slack', { token: 'u', base_url: PROXY }],
     discord: ['discord', { token: 'u', base_url: PROXY }],
     notion: ['notion', { api_key: 'u', base_url: PROXY }],

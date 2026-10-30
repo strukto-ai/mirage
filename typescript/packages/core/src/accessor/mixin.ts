@@ -29,6 +29,6 @@ export interface Mailbox {
 }
 
 /** Whether `peer` carries the mailbox brand. */
-export function isMailbox(peer: object): peer is Mailbox {
+export function isMailbox<T extends object>(peer: T): peer is T & Mailbox {
   return (peer as Partial<Mailbox>)[MAILBOX] === true
 }

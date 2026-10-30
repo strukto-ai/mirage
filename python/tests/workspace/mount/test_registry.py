@@ -935,7 +935,10 @@ _PROXY = "https://proxy.test"
 _REPO = {"repo_id": "o/r"}
 _MOUNTS: dict[str, tuple[str, dict[str, Any]]] = {
     "mail": ("email", _MAIL),
-    "mail_elsewhere": ("email", {**_MAIL, "imap_host": "imap.b"}),
+    "mail_elsewhere": (
+        "email",
+        {**_MAIL, "imap_host": "imap.b", "imap_port": 143, "username": "v"},
+    ),
     "slack": ("slack", {"token": "u", "base_url": _PROXY}),
     "discord": ("discord", {"token": "u", "base_url": _PROXY}),
     "notion": ("notion", {"api_key": "u", "base_url": _PROXY}),
