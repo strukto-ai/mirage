@@ -5,8 +5,10 @@ use std::collections::{BTreeMap, VecDeque};
 use serde::Deserialize;
 
 use super::meter::{self, Charge};
-use super::unicode::{BLOCK, Bytes, DecodeCursor, JsonString, WORK};
-use super::value::{Parsing, Text, Value};
+use super::unicode::{BLOCK, Bytes, DecodeCursor, JsonString, WORK, decode_slice};
+use super::value::{
+    Key, Keys, LITERAL, List, Number, NumberReading, Object, Retirement, Text, Value, number_token,
+};
 use crate::{Stream, StreamError};
 use std::sync::Arc;
 
@@ -50,9 +52,32 @@ enum Container {
     Key,
 }
 
+/// Under values, an array or object being read, and the key its next
+/// value goes under.
+enum Open {
+    Array(List),
+    Object(Object, Option<Key>),
+}
+
+impl Open {
+    fn close(self) -> Value {
+        match self {
+            Self::Array(items) => Value::Array(Arc::new(items)),
+            Self::Object(fields, _) => Value::object(fields),
+        }
+    }
+}
+
+/// An object key on a `--stream` path: its bytes as read, or under
+/// values the string they decode to.
+enum Name {
+    Bytes(Bytes),
+    Text(Arc<Text>),
+}
+
 enum Path {
     Index(u64),
-    Key(Option<Bytes>),
+    Key(Option<Name>),
 }
 
 #[derive(Default)]
@@ -101,17 +126,34 @@ enum Leaf {
     Bool(bool),
     Number(Bytes, usize),
     String(Bytes),
+    /// Under values: a string as it decodes.
+    Text(String),
+    /// Under values: a number, or an array or object read whole.
+    Value(Value),
     Array,
     Object,
 }
 
 impl Leaf {
     fn is_number(&self) -> bool {
-        matches!(self, Self::Number(..))
+        matches!(self, Self::Number(..) | Self::Value(Value::Number(_)))
     }
 
     fn is_string(&self) -> bool {
-        matches!(self, Self::String(_))
+        matches!(self, Self::String(_) | Self::Text(_))
+    }
+
+    /// The value a leaf read under values is.
+    fn into_value(self) -> Value {
+        match self {
+            Self::Null => Value::Null,
+            Self::Bool(b) => Value::bool(b),
+            Self::Text(text) => Value::string(text),
+            Self::Value(value) => value,
+            Self::Array => Value::array(Vec::new()),
+            Self::Object => Value::object(Object::default()),
+            Self::Number(..) | Self::String(_) => unreachable!("a leaf kept as text"),
+        }
     }
 }
 
@@ -190,14 +232,22 @@ enum TokenKind {
         valid: bool,
         decimal: Decimal,
         effective: Option<usize>,
+        /// Under values, a literal longer than a page: its text gathered a
+        /// budget at a time to the length read, charged while it is held,
+        /// and its reading.
+        reading: Option<(Vec<u8>, usize, Charge, NumberReading)>,
     },
     String {
-        decoded: Bytes,
+        decoded: Captured,
         capture: bool,
-        streaming: bool,
+        /// Whether its source must be valid UTF-8 to be written back as
+        /// it was read.
+        validate: bool,
         utf8: Utf8Check,
         phase: StringPhase,
         quoted: JsonString,
+        /// Under values, the string its malformed bytes decode to.
+        replaced: String,
     },
 }
 
@@ -207,6 +257,40 @@ enum StringPhase {
     Recapture,
     Source,
     Quoted,
+    Replace,
+}
+
+/// Where a string token's decoded bytes go: blocks the text is written
+/// back from, or under values the one buffer its string is made of.
+enum Captured {
+    Blocks(Bytes),
+    Buffer(Vec<u8>, Charge),
+}
+
+impl Captured {
+    fn extend(&mut self, bytes: &[u8]) {
+        match self {
+            Self::Blocks(blocks) => blocks.extend(bytes),
+            Self::Buffer(buffer, charge) => {
+                let capacity = buffer.capacity();
+                buffer.extend_from_slice(bytes);
+                if buffer.capacity() != capacity {
+                    charge.set(buffer.capacity());
+                }
+            }
+        }
+    }
+
+    fn push(&mut self, byte: u8) {
+        self.extend(&[byte]);
+    }
+
+    fn blocks(&mut self) -> &mut Bytes {
+        match self {
+            Self::Blocks(blocks) => blocks,
+            Self::Buffer(..) => unreachable!("a string read as a value"),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -258,10 +342,12 @@ struct Token {
     at: usize,
     kind: TokenKind,
     after: AfterToken,
+    /// Whether it is read as a value rather than written back as text.
+    values: bool,
 }
 
 impl Token {
-    fn literal(bytes: Bytes, after: AfterToken) -> Self {
+    fn literal(bytes: Bytes, after: AfterToken, values: bool) -> Self {
         let expected: Option<&'static [u8]> = match bytes.get(0) {
             Some(b't') => Some(b"true"),
             Some(b'f') => Some(b"false"),
@@ -276,24 +362,35 @@ impl Token {
                 valid: true,
                 decimal: Decimal::Start,
                 effective: None,
+                reading: None,
             },
             after,
+            values,
         }
     }
 
-    fn string(bytes: Bytes, streaming: bool) -> Self {
+    fn string(bytes: Bytes, streaming: bool, values: bool) -> Self {
+        let decoded = if values {
+            let buffer = Vec::with_capacity(bytes.len());
+            let charge = Charge::open(buffer.capacity());
+            Captured::Buffer(buffer, charge)
+        } else {
+            Captured::Blocks(Bytes::default())
+        };
         Self {
             bytes,
             at: 0,
             kind: TokenKind::String {
-                decoded: Bytes::default(),
-                capture: streaming,
-                streaming,
+                decoded,
+                capture: streaming || values,
+                validate: !streaming && !values,
                 utf8: Utf8Check::default(),
                 phase: StringPhase::Validate,
                 quoted: JsonString::default(),
+                replaced: String::new(),
             },
             after: AfterToken::String,
+            values,
         }
     }
 
@@ -308,7 +405,28 @@ impl Token {
                 valid,
                 decimal,
                 effective,
-            } => {
+                reading,
+            } => loop {
+                if let Some((text, length, _, number)) = reading {
+                    while text.len() < *length && *budget > 0 {
+                        let run = self.bytes.run_at(text.len());
+                        let taken = run.len().min(*length - text.len()).min(*budget);
+                        if taken == 0 {
+                            return Some(Err("Invalid numeric literal"));
+                        }
+                        text.extend_from_slice(&run[..taken]);
+                        *budget -= taken;
+                    }
+                    while text.len() == *length && *budget > 0 {
+                        *budget -= 1;
+                        match number.step(text) {
+                            Ok(Some(value)) => return Some(Ok(Leaf::Value(value))),
+                            Ok(None) => {}
+                            Err(_) => return Some(Err("Invalid numeric literal")),
+                        }
+                    }
+                    return None;
+                }
                 if self.bytes.get(0) == Some(b'\'') {
                     return Some(Err("Invalid string literal; expected \", but got '"));
                 }
@@ -343,16 +461,48 @@ impl Token {
                     return Some(Err("Invalid numeric literal"));
                 }
                 let length = effective.unwrap_or(self.bytes.len());
-                Some(Ok(Leaf::Number(std::mem::take(&mut self.bytes), length)))
-            }
+                if !self.values {
+                    return Some(Ok(Leaf::Number(std::mem::take(&mut self.bytes), length)));
+                }
+                let first = self.bytes.run_at(0);
+                if length <= LITERAL && first.len() >= length {
+                    return Some(
+                        std::str::from_utf8(&first[..length])
+                            .ok()
+                            .and_then(number_token)
+                            .map(Leaf::Value)
+                            .ok_or("Invalid numeric literal"),
+                    );
+                }
+                let text = Vec::with_capacity(length);
+                let charge = Charge::open(text.capacity());
+                *reading = Some((text, length, charge, NumberReading::begin(0, length)));
+            },
             TokenKind::String {
                 decoded,
                 capture,
-                streaming,
+                validate,
                 utf8,
                 phase,
                 quoted,
+                replaced,
             } => loop {
+                if *phase == StringPhase::Replace {
+                    let Captured::Buffer(bytes, charge) = decoded else {
+                        unreachable!("only a value is replaced")
+                    };
+                    while self.at < bytes.len() && *budget > 0 {
+                        let (point, taken) = decode_slice(bytes, self.at);
+                        replaced.push(point);
+                        self.at += taken;
+                        *budget = budget.saturating_sub(taken);
+                    }
+                    charge.set(bytes.capacity() + replaced.capacity());
+                    if self.at < bytes.len() {
+                        return None;
+                    }
+                    return Some(Ok(Leaf::Text(std::mem::take(replaced))));
+                }
                 if *phase == StringPhase::Source {
                     while self.at < self.bytes.len() && *budget > 0 {
                         let run = self.bytes.run_at(self.at);
@@ -375,7 +525,8 @@ impl Token {
                     let available = *budget / 2;
                     let mut render_budget = available;
                     let mut output = Vec::with_capacity(BLOCK);
-                    let finished = quoted.write(decoded, &mut output, BLOCK, &mut render_budget);
+                    let finished =
+                        quoted.write(decoded.blocks(), &mut output, BLOCK, &mut render_budget);
                     document.extend(&output);
                     *budget -= available - render_budget + output.len();
                     if finished {
@@ -395,7 +546,7 @@ impl Token {
                         .count();
                     if plain > 0 {
                         let run = &run[..plain];
-                        if !*streaming
+                        if *validate
                             && *phase == StringPhase::Validate
                             && !(utf8.remaining == 0 && run.is_ascii())
                         {
@@ -411,7 +562,7 @@ impl Token {
                         continue;
                     }
                     let ch = self.bytes.get(self.at).unwrap();
-                    if !*streaming && *phase == StringPhase::Validate {
+                    if *validate && *phase == StringPhase::Validate {
                         utf8.push(ch);
                     }
                     if ch < 0x20 {
@@ -485,8 +636,22 @@ impl Token {
                 }
                 if self.at < self.bytes.len() {
                     return None;
-                } else if *streaming {
-                    return Some(Ok(Leaf::String(std::mem::take(decoded))));
+                } else if self.values {
+                    let Captured::Buffer(bytes, _) = decoded else {
+                        unreachable!("a value is read into a buffer")
+                    };
+                    *budget = budget.saturating_sub(bytes.len() / 64);
+                    match String::from_utf8(std::mem::take(bytes)) {
+                        Ok(text) => return Some(Ok(Leaf::Text(text))),
+                        Err(error) => {
+                            *bytes = error.into_bytes();
+                            replaced.reserve(bytes.len());
+                            self.at = 0;
+                            *phase = StringPhase::Replace;
+                        }
+                    }
+                } else if !*validate {
+                    return Some(Ok(Leaf::String(std::mem::take(decoded.blocks()))));
                 } else if *phase == StringPhase::Validate {
                     self.at = 0;
                     if utf8.valid() {
@@ -582,13 +747,14 @@ impl Event {
                 1 => {
                     match path.get(self.path_at).unwrap() {
                         Path::Index(index) => self.small(index.to_string().as_bytes()),
-                        Path::Key(Some(bytes)) => {
+                        Path::Key(Some(Name::Bytes(bytes))) => {
                             let string = self.string.get_or_insert_with(JsonString::default);
                             if !string.write(bytes, out, max, budget) {
                                 return false;
                             }
                             self.string = None;
                         }
+                        Path::Key(Some(Name::Text(_))) => unreachable!("a name read as a value"),
                         Path::Key(None) => self.small(b"null"),
                     }
                     self.path_at += 1;
@@ -626,6 +792,7 @@ impl Event {
                                 return false;
                             }
                         }
+                        Leaf::Text(_) | Leaf::Value(_) => unreachable!("a leaf read as a value"),
                     }
                     self.phase = 6;
                 }
@@ -641,17 +808,32 @@ impl Event {
 }
 
 enum Emission {
-    Document { bytes: Bytes, cursor: DecodeCursor },
+    Document {
+        bytes: Bytes,
+        cursor: DecodeCursor,
+    },
     Event(Event),
+    /// Under values, a document read whole.
+    Value(Value),
+    Error(String),
+}
+
+/// What the scanner read under values: a document, or under `--stream`
+/// an event, or the parse error that stopped it.
+pub(crate) enum Scanned {
+    Value(Value),
     Error(String),
 }
 
 pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = crate::parse_config(config)?;
-    Ok(Box::new(Scanner::new(config)))
+    Ok(Box::new(Scanner::new(config, false)))
 }
 
-struct Scanner {
+/// jq's scanner, a document or event as it reads it: written back as
+/// literal-preserving text in frames, or under values built as the
+/// value it is, which `take` hands over after each step.
+pub(crate) struct Scanner {
     config: Config,
     lex: Lex,
     last: Last,
@@ -675,10 +857,25 @@ struct Scanner {
     ended: bool,
     trash: VecDeque<Bytes>,
     old_paths: VecDeque<Paths>,
+    values: bool,
+    /// Under values, the arrays and objects open around the next value.
+    opened: Vec<Open>,
+    keys: Keys,
+    /// Under values, what an abandoned document held, freed a node a
+    /// step.
+    retiring: Vec<Retirement>,
+    scanned: Option<Scanned>,
+    charge: Charge,
 }
 
 impl Scanner {
-    fn new(config: Config) -> Self {
+    /// The scanner jq reads its inputs and `fromjson` its text with, each
+    /// document or `--stream` event built as a value.
+    pub(crate) fn values(seq: bool, streaming: bool) -> Self {
+        Self::new(Config { seq, streaming }, true)
+    }
+
+    fn new(config: Config, values: bool) -> Self {
         let lex = if config.seq {
             Lex::Waiting
         } else {
@@ -707,12 +904,51 @@ impl Scanner {
             ended: false,
             trash: VecDeque::new(),
             old_paths: VecDeque::new(),
+            values,
+            opened: Vec::new(),
+            keys: Keys::default(),
+            retiring: Vec::new(),
+            scanned: None,
+            charge: Charge::open(0),
+        }
+    }
+
+    /// The document, event or error the last step read under values.
+    pub(crate) fn take(&mut self) -> Option<Scanned> {
+        self.scanned.take()
+    }
+
+    fn recharge(&mut self) {
+        self.charge
+            .set(self.opened.capacity() * std::mem::size_of::<Open>() + self.keys.bytes());
+    }
+
+    /// Leave a value given up to be freed a node a step.
+    pub(crate) fn retire(&mut self, value: Value) {
+        if matches!(value, Value::Array(_) | Value::Object(_)) {
+            self.retiring.push(Retirement::values(vec![value]));
+        }
+    }
+
+    fn drop_name(&mut self, name: Name) {
+        if let Name::Bytes(bytes) = name {
+            self.trash.push_back(bytes);
         }
     }
 
     fn discard(&mut self, bytes: Bytes) {
         if !bytes.is_empty() {
             self.trash.push_back(bytes);
+        }
+    }
+
+    /// A finished token's buffer: the spare the next token fills when it
+    /// holds one block, else trash.
+    fn recycle(&mut self, mut bytes: Bytes) {
+        if self.spare.is_none() && bytes.clear_one() {
+            self.spare = Some(bytes);
+        } else {
+            self.discard(bytes);
         }
     }
 
@@ -724,6 +960,7 @@ impl Scanner {
     fn discard_leaf(&mut self, leaf: Leaf) {
         match leaf {
             Leaf::String(bytes) | Leaf::Number(bytes, _) => self.discard(bytes),
+            Leaf::Value(value) => self.retire(value),
             _ => {}
         }
     }
@@ -739,6 +976,12 @@ impl Scanner {
         if !self.path.is_empty() {
             self.old_paths.push_back(std::mem::take(&mut self.path));
         }
+        if !self.opened.is_empty() {
+            let opened = self.opened.drain(..).map(Open::close).collect();
+            self.retiring.push(Retirement::values(opened));
+        }
+        self.keys.clear();
+        self.recharge();
         self.stack.clear();
         self.lex = Lex::Normal;
         self.last = Last::None;
@@ -752,10 +995,7 @@ impl Scanner {
         self.input_at = self.input.len();
         self.reset();
         if let Some(task) = self.task.take() {
-            self.discard(task.bytes);
-            if let TokenKind::String { decoded, .. } = task.kind {
-                self.discard(decoded);
-            }
+            self.discard_task(task);
         }
         match self.emission.take() {
             Some(Emission::Document { bytes, .. }) => self.discard(bytes),
@@ -764,7 +1004,22 @@ impl Scanner {
                     self.discard_leaf(leaf);
                 }
             }
+            Some(Emission::Value(value)) => self.retire(value),
             _ => {}
+        }
+        if let Some(Scanned::Value(value)) = self.scanned.take() {
+            self.retire(value);
+        }
+    }
+
+    fn discard_task(&mut self, task: Token) {
+        self.discard(task.bytes);
+        if let TokenKind::String {
+            decoded: Captured::Blocks(decoded),
+            ..
+        } = task.kind
+        {
+            self.discard(decoded);
         }
     }
 
@@ -823,6 +1078,10 @@ impl Scanner {
                 false,
                 Mutation::None,
             )));
+        } else if self.values {
+            self.keys.clear();
+            self.recharge();
+            self.emission = Some(Emission::Value(leaf.into_value()));
         } else {
             self.discard_leaf(leaf);
             let mut bytes = std::mem::take(&mut self.document);
@@ -885,6 +1144,14 @@ impl Scanner {
                 } else {
                     Container::Object(false)
                 });
+                if self.values {
+                    self.opened.push(if ch == b'[' {
+                        Open::Array(List::default())
+                    } else {
+                        Open::Object(Object::default(), None)
+                    });
+                    self.recharge();
+                }
             }
             b':' => {
                 let Some(leaf) = self.next.as_ref() else {
@@ -897,7 +1164,15 @@ impl Scanner {
                     return Err("Object keys must be strings");
                 }
                 let leaf = self.next.take().unwrap();
-                self.discard_leaf(leaf);
+                if let Leaf::Text(text) = leaf {
+                    let key = self.keys.key(text);
+                    if let Some(Open::Object(_, slot)) = self.opened.last_mut() {
+                        *slot = Some(key);
+                    }
+                    self.recharge();
+                } else {
+                    self.discard_leaf(leaf);
+                }
                 self.stack.push(Container::Key);
             }
             b',' => {
@@ -916,7 +1191,7 @@ impl Scanner {
                     _ => return Err("Objects must consist of key:value pairs"),
                 }
                 let leaf = self.next.take().unwrap();
-                self.discard_leaf(leaf);
+                self.element(leaf);
             }
             b']' => {
                 let Some(Container::Array(nonempty)) = self.stack.last() else {
@@ -926,10 +1201,10 @@ impl Scanner {
                     return Err("Expected another array element");
                 }
                 if let Some(leaf) = self.next.take() {
-                    self.discard_leaf(leaf);
+                    self.element(leaf);
                 }
                 self.stack.pop();
-                self.next = Some(Leaf::Array);
+                self.next = Some(self.closed(Leaf::Array));
             }
             b'}' => {
                 if self.stack.is_empty() {
@@ -940,7 +1215,7 @@ impl Scanner {
                         return Err("Objects must consist of key:value pairs");
                     }
                     let leaf = self.next.take().unwrap();
-                    self.discard_leaf(leaf);
+                    self.element(leaf);
                     self.stack.pop();
                 } else {
                     let Some(Container::Object(nonempty)) = self.stack.last() else {
@@ -951,11 +1226,38 @@ impl Scanner {
                     }
                 }
                 self.stack.pop();
-                self.next = Some(Leaf::Object);
+                self.next = Some(self.closed(Leaf::Object));
             }
             _ => {}
         }
         Ok(())
+    }
+
+    /// An array's element or an object's value read whole: under values
+    /// placed in the container it closes.
+    fn element(&mut self, leaf: Leaf) {
+        if !self.values {
+            self.discard_leaf(leaf);
+            return;
+        }
+        let value = leaf.into_value();
+        match self.opened.last_mut() {
+            Some(Open::Array(items)) => items.push(value),
+            Some(Open::Object(fields, key)) => {
+                fields.insert(key.take().expect("a key read before its value"), value);
+            }
+            None => unreachable!("an element outside a container"),
+        }
+    }
+
+    /// The array or object a bracket closed: under values the one built.
+    fn closed(&mut self, leaf: Leaf) -> Leaf {
+        if !self.values {
+            return leaf;
+        }
+        let value = self.opened.pop().expect("an open container").close();
+        self.recharge();
+        Leaf::Value(value)
     }
 
     fn stream_token(&mut self, ch: u8) -> Result<(), &'static str> {
@@ -1006,13 +1308,19 @@ impl Scanner {
                 if last != Last::Value {
                     return Err("':' should follow a key");
                 }
-                let Some(Leaf::String(key)) = self.next.take() else {
-                    unreachable!()
-                };
-                if let Some(Path::Key(old)) = self.path.last_mut() {
-                    if let Some(bytes) = old.replace(key) {
-                        self.trash.push_back(bytes);
+                let name = match self.next.take() {
+                    Some(Leaf::String(key)) => Name::Bytes(key),
+                    Some(Leaf::Text(text)) => {
+                        Name::Text(Arc::new(Text::new(text.into_boxed_str())))
                     }
+                    _ => unreachable!(),
+                };
+                let old = match self.path.last_mut() {
+                    Some(Path::Key(slot)) => slot.replace(name),
+                    _ => None,
+                };
+                if let Some(old) = old {
+                    self.drop_name(old);
                 }
                 self.last = Last::Colon;
             }
@@ -1112,18 +1420,22 @@ impl Scanner {
     fn mutate(&mut self, mutation: Mutation) {
         match mutation {
             Mutation::None => {}
-            Mutation::Advance => match self.path.last_mut() {
-                Some(Path::Index(index)) => *index = index.saturating_add(1),
-                Some(Path::Key(key)) => {
-                    if let Some(bytes) = key.take() {
-                        self.trash.push_back(bytes);
+            Mutation::Advance => {
+                let old = match self.path.last_mut() {
+                    Some(Path::Index(index)) => {
+                        *index = index.saturating_add(1);
+                        None
                     }
+                    Some(Path::Key(key)) => key.take(),
+                    None => None,
+                };
+                if let Some(old) = old {
+                    self.drop_name(old);
                 }
-                _ => {}
-            },
+            }
             Mutation::Pop => {
-                if let Some(Path::Key(Some(bytes))) = self.path.pop() {
-                    self.trash.push_back(bytes);
+                if let Some(Path::Key(Some(name))) = self.path.pop() {
+                    self.drop_name(name);
                 }
                 self.last = if self.path.is_empty() {
                     Last::None
@@ -1137,10 +1449,12 @@ impl Scanner {
     fn rs(&mut self) {
         let truncated = if self.config.streaming {
             !self.path.is_empty()
-                || self
-                    .next
-                    .as_ref()
-                    .is_some_and(|v| !matches!(v, Leaf::String(_) | Leaf::Array | Leaf::Object))
+                || self.next.as_ref().is_some_and(|v| {
+                    !matches!(
+                        v,
+                        Leaf::String(_) | Leaf::Text(_) | Leaf::Array | Leaf::Object
+                    )
+                })
         } else {
             !self.last_ws
                 && (!self.stack.is_empty()
@@ -1148,7 +1462,11 @@ impl Scanner {
                     || self.next.as_ref().is_some_and(Leaf::is_number))
         };
         if !self.token.is_empty() {
-            self.task = Some(Token::literal(self.take_token(), AfterToken::Rs(truncated)));
+            self.task = Some(Token::literal(
+                self.take_token(),
+                AfterToken::Rs(truncated),
+                self.values,
+            ));
         } else {
             self.after_rs(truncated, None);
         }
@@ -1217,7 +1535,11 @@ impl Scanner {
             return;
         }
         if !self.token.is_empty() {
-            self.task = Some(Token::literal(self.take_token(), AfterToken::Eof));
+            self.task = Some(Token::literal(
+                self.take_token(),
+                AfterToken::Eof,
+                self.values,
+            ));
             return;
         }
         let nested = if self.config.streaming {
@@ -1276,7 +1598,8 @@ impl Scanner {
             }
             return;
         }
-        if !self.config.streaming
+        if !self.values
+            && !self.config.streaming
             && self.lex == Lex::Normal
             && (!self.document.is_empty() || !separator(ch))
         {
@@ -1288,18 +1611,26 @@ impl Scanner {
         }
         match self.lex {
             Lex::Normal => {
-                if !whitespace(ch) && !structure(ch) && ch != b'"' {
+                if literal(ch) {
                     self.token.push(ch);
                     self.last_ws = false;
                 } else if !self.token.is_empty() {
-                    self.task = Some(Token::literal(self.take_token(), AfterToken::Delimiter(ch)));
+                    self.task = Some(Token::literal(
+                        self.take_token(),
+                        AfterToken::Delimiter(ch),
+                        self.values,
+                    ));
                 } else {
                     self.delimiter(ch);
                 }
             }
             Lex::String if ch == b'"' => {
                 self.last_ws = false;
-                self.task = Some(Token::string(self.take_token(), self.config.streaming));
+                self.task = Some(Token::string(
+                    self.take_token(),
+                    self.config.streaming,
+                    self.values,
+                ));
             }
             Lex::String | Lex::Escape => {
                 self.token.push(ch);
@@ -1319,7 +1650,25 @@ impl Scanner {
             return false;
         };
         if let Emission::Error(message) = emission {
-            frame(3, message.as_bytes(), out);
+            if self.values {
+                self.scanned = Some(Scanned::Error(message));
+            } else {
+                frame(3, message.as_bytes(), out);
+            }
+            self.restart_bom = self.config.seq && self.bom == 255;
+            return true;
+        }
+        if self.values {
+            let value = match emission {
+                Emission::Value(value) => value,
+                Emission::Event(mut event) => {
+                    let value = self.event(&mut event, budget);
+                    self.after_event(event);
+                    value
+                }
+                Emission::Document { .. } | Emission::Error(_) => unreachable!(),
+            };
+            self.scanned = Some(Scanned::Value(value));
             self.restart_bom = self.config.seq && self.bom == 255;
             return true;
         }
@@ -1330,7 +1679,7 @@ impl Scanner {
                 cursor.write_document(bytes, &mut payload, max, budget)
             }
             Emission::Event(event) => event.write(&self.path, &mut payload, max, budget),
-            Emission::Error(_) => unreachable!(),
+            Emission::Value(_) | Emission::Error(_) => unreachable!(),
         };
         if !payload.is_empty() {
             frame(1, &payload, out);
@@ -1345,18 +1694,43 @@ impl Scanner {
             if let Some(leaf) = event.leaf.take() {
                 self.discard_leaf(leaf);
             }
-            if event.close {
-                self.emission = Some(Emission::Event(Event::new(
-                    event.path_len,
-                    None,
-                    false,
-                    event.mutation,
-                )));
-            } else {
-                self.mutate(event.mutation);
-            }
+            self.after_event(event);
         }
         true
+    }
+
+    /// The `--stream` event as a value: its path, and its leaf unless it
+    /// closes a container.
+    fn event(&self, event: &mut Event, budget: &mut usize) -> Value {
+        *budget = budget.saturating_sub(event.path_len);
+        let path = (0..event.path_len)
+            .map(
+                |at| match self.path.get(at).expect("a path as long as its event") {
+                    Path::Index(index) => Value::Number(Number::literal(&index.to_string())),
+                    Path::Key(Some(Name::Text(text))) => Value::String(Arc::clone(text)),
+                    Path::Key(None) => Value::Null,
+                    Path::Key(Some(Name::Bytes(_))) => unreachable!("a name kept as text"),
+                },
+            )
+            .collect();
+        let path = Value::array(path);
+        Value::array(match event.leaf.take() {
+            Some(leaf) => vec![path, leaf.into_value()],
+            None => vec![path],
+        })
+    }
+
+    fn after_event(&mut self, event: Event) {
+        if event.close {
+            self.emission = Some(Emission::Event(Event::new(
+                event.path_len,
+                None,
+                false,
+                event.mutation,
+            )));
+        } else {
+            self.mutate(event.mutation);
+        }
     }
 
     /// Free the trash a block at a time, keeping a buffer of one block as
@@ -1373,8 +1747,20 @@ impl Scanner {
                     self.trash.pop_front();
                 }
                 *budget = budget.saturating_sub(FREE);
+            } else if let Some(chunk) = self.retiring.last_mut() {
+                match chunk.next() {
+                    Some(value) => {
+                        if let Some(children) = Retirement::split(value) {
+                            self.retiring.push(children);
+                        }
+                    }
+                    None => {
+                        self.retiring.pop();
+                    }
+                }
+                *budget -= 1;
             } else if let Some(path) = self.old_paths.front_mut() {
-                if let Some(Path::Key(Some(bytes))) = path.pop() {
+                if let Some(Path::Key(Some(Name::Bytes(bytes)))) = path.pop() {
                     self.trash.push_back(bytes);
                 }
                 *budget -= 1;
@@ -1402,10 +1788,9 @@ impl Scanner {
             if let Some(mut task) = self.task.take() {
                 if let Some(result) = task.step(&mut budget, &mut self.document) {
                     let after = task.after;
-                    self.discard(task.bytes);
-                    if let TokenKind::String { decoded, .. } = task.kind {
-                        self.discard(decoded);
-                    }
+                    let bytes = std::mem::take(&mut task.bytes);
+                    self.discard_task(task);
+                    self.recycle(bytes);
                     self.after_task(after, result);
                 } else {
                     self.task = Some(task);
@@ -1413,9 +1798,11 @@ impl Scanner {
                 }
                 continue;
             }
-            self.cleanup(&mut budget);
-            if budget == 0 {
-                return;
+            if !self.trash.is_empty() || !self.retiring.is_empty() || !self.old_paths.is_empty() {
+                self.cleanup(&mut budget);
+                if budget == 0 {
+                    return;
+                }
             }
             if self.ended {
                 return;
@@ -1429,6 +1816,25 @@ impl Scanner {
                 if plain > 0 {
                     self.token
                         .extend(&self.input[self.input_at..self.input_at + plain]);
+                    self.input_at += plain;
+                    self.column = self.column.saturating_add(plain as u64);
+                    self.last_ws = false;
+                    budget -= plain;
+                    continue;
+                }
+            }
+            if self.lex == Lex::Normal && self.bom >= 3 {
+                let plain = self.input[self.input_at..]
+                    .iter()
+                    .take(budget)
+                    .take_while(|b| literal(**b) && **b != RS)
+                    .count();
+                if plain > 0 {
+                    let run = &self.input[self.input_at..self.input_at + plain];
+                    self.token.extend(run);
+                    if !self.values && !self.config.streaming {
+                        self.document.extend(run);
+                    }
                     self.input_at += plain;
                     self.column = self.column.saturating_add(plain as u64);
                     self.last_ws = false;
@@ -1486,6 +1892,7 @@ impl Stream for Scanner {
         self.emission.is_some()
             || self.task.is_some()
             || !self.trash.is_empty()
+            || !self.retiring.is_empty()
             || !self.old_paths.is_empty()
             || (!self.ended && (self.input_at < self.input.len() || self.eof))
     }
@@ -1517,6 +1924,10 @@ fn separator(ch: u8) -> bool {
 }
 fn structure(ch: u8) -> bool {
     matches!(ch, b'[' | b',' | b']' | b'{' | b':' | b'}')
+}
+/// A byte of a literal token: not whitespace, structure or a quote.
+fn literal(ch: u8) -> bool {
+    !whitespace(ch) && !structure(ch) && ch != b'"'
 }
 
 fn frame(tag: u8, payload: &[u8], out: &mut Vec<u8>) {
@@ -1616,18 +2027,15 @@ impl DecodeText {
 }
 
 /// One `fromjson` in progress: jq's scanner over the text, a chunk per
-/// step, then the reader over the one document it found, so a long text
-/// is decoded a bounded slice at a time.
+/// step, building the one document it holds, so a long text is decoded
+/// a bounded slice at a time.
 pub(crate) struct Decoding {
     text: DecodeText,
     scanner: Scanner,
     fed: usize,
     finished: bool,
-    wire: Vec<u8>,
-    docs: Vec<Vec<u8>>,
-    doc: Vec<u8>,
+    values: Vec<Value>,
     error: Option<String>,
-    parsing: Option<Parsing>,
     charge: Charge,
     retiring: bool,
     wrapping: Option<Wrapping>,
@@ -1635,7 +2043,7 @@ pub(crate) struct Decoding {
 
 impl Decoding {
     pub(crate) fn retire(&mut self) -> Option<Value> {
-        if let Some(value) = self.parsing.as_mut().and_then(Parsing::retire) {
+        if let Some(value) = self.values.pop() {
             return Some(value);
         }
         if !self.retiring {
@@ -1644,7 +2052,7 @@ impl Decoding {
         }
         let mut budget = BLOCK;
         self.scanner.cleanup(&mut budget);
-        if !self.scanner.trash.is_empty() || !self.scanner.old_paths.is_empty() {
+        if self.scanner.busy() {
             return Some(Value::Null);
         }
         None
@@ -1666,26 +2074,22 @@ impl Decoding {
     fn open(text: DecodeText) -> Self {
         Self {
             text,
-            scanner: Scanner::new(Config::default()),
+            scanner: Scanner::values(false, false),
             fed: 0,
             finished: false,
-            wire: Vec::new(),
-            docs: Vec::new(),
-            doc: Vec::new(),
+            values: Vec::new(),
             error: None,
-            parsing: None,
             charge: Charge::open(0),
             retiring: false,
             wrapping: None,
         }
     }
 
-    /// Works on, a scanner chunk or a token per step plus one per 64
-    /// bytes it moved: the value or jq's message once the text is read,
-    /// None when `budget` ran out first.
+    /// Works on, a scanner chunk per step plus one per 64 bytes it
+    /// read: the value or jq's message once the text is read, None when
+    /// `budget` ran out first.
     pub(crate) fn run(&mut self, budget: &mut u64) -> Option<Result<Value, String>> {
         while *budget > 0 {
-            self.recharge();
             if let Some(wrapping) = &mut self.wrapping {
                 *budget -= 1;
                 let message = wrapping.step(self.text.as_bytes());
@@ -1698,23 +2102,10 @@ impl Decoding {
                 }
                 continue;
             }
-            if let Some(parsing) = &mut self.parsing {
-                match parsing.run(budget) {
-                    Some(Ok(value)) => return Some(Ok(value)),
-                    Some(Err(message)) => {
-                        self.wrapping = Some(Wrapping::begin(message));
-                        continue;
-                    }
-                    None => return None,
-                }
-            }
             let moved = match self.scan() {
                 Ok(Some(moved)) => moved,
                 Ok(None) => match self.decide() {
-                    Ok(parsing) => {
-                        self.parsing = Some(parsing);
-                        continue;
-                    }
+                    Ok(value) => return Some(Ok(value)),
                     Err(message) => {
                         self.wrapping = Some(Wrapping::begin(message));
                         continue;
@@ -1734,10 +2125,7 @@ impl Decoding {
 
     fn recharge(&mut self) {
         self.charge.set(
-            self.wire.capacity()
-                + self.doc.capacity()
-                + self.docs.capacity() * std::mem::size_of::<Vec<u8>>()
-                + self.docs.iter().map(Vec::capacity).sum::<usize>()
+            self.values.capacity() * std::mem::size_of::<Value>()
                 + self.scanner.input.capacity()
                 + self.scanner.stack.capacity() * std::mem::size_of::<Container>(),
         );
@@ -1745,55 +2133,47 @@ impl Decoding {
 
     fn scan(&mut self) -> Result<Option<usize>, String> {
         if self.scanner.busy() {
-            self.scanner.drain(&mut self.wire).map_err(|e| e.message)?;
-            return Ok(Some(self.fold()));
+            self.scanner.drain(&mut Vec::new()).map_err(|e| e.message)?;
+            self.take();
+            return Ok(Some(WORK));
         }
-        if self.docs.len() > 1 || self.error.is_some() {
+        if self.values.len() > 1 || self.error.is_some() {
             return Ok(None);
         }
         if self.fed < self.text.len() {
             let end = (self.fed + WORK).min(self.text.len());
             self.scanner
-                .feed(&self.text.as_bytes()[self.fed..end], &mut self.wire)
+                .feed(&self.text.as_bytes()[self.fed..end], &mut Vec::new())
                 .map_err(|e| e.message)?;
+            self.take();
             let chunk = end - self.fed;
             self.fed = end;
-            return Ok(Some(chunk + self.fold()));
+            return Ok(Some(chunk));
         }
         if !self.finished {
             self.finished = true;
-            self.scanner.finish(&mut self.wire).map_err(|e| e.message)?;
-            return Ok(Some(self.fold()));
+            self.scanner
+                .finish(&mut Vec::new())
+                .map_err(|e| e.message)?;
+            self.take();
+            return Ok(Some(WORK));
         }
         Ok(None)
     }
 
-    fn fold(&mut self) -> usize {
-        let mut at = 0;
-        while at + 5 <= self.wire.len() {
-            let size =
-                u32::from_le_bytes(self.wire[at + 1..at + 5].try_into().expect("4 bytes")) as usize;
-            let payload = &self.wire[at + 5..at + 5 + size];
-            match self.wire[at] {
-                1 => self.doc.extend_from_slice(payload),
-                2 => self.docs.push(std::mem::take(&mut self.doc)),
-                _ => self.error = Some(String::from_utf8_lossy(payload).into_owned()),
-            }
-            at += 5 + size;
+    fn take(&mut self) {
+        match self.scanner.take() {
+            Some(Scanned::Value(value)) => self.values.push(value),
+            Some(Scanned::Error(message)) => self.error = Some(message),
+            None => {}
         }
-        self.wire.clear();
-        at
     }
 
-    fn decide(&mut self) -> Result<Parsing, String> {
-        match (self.docs.len(), self.error.take()) {
+    fn decide(&mut self) -> Result<Value, String> {
+        match (self.values.len(), self.error.take()) {
             (0, Some(message)) | (1, Some(message)) => Err(message),
             (0, None) => Err("Expected JSON value".to_string()),
-            (1, None) => {
-                let document = self.docs.pop().expect("one document");
-                self.recharge();
-                Ok(Parsing::from_bytes(document))
-            }
+            (1, None) => Ok(self.values.pop().expect("one document")),
             _ => Err("Unexpected extra JSON values".to_string()),
         }
     }
@@ -2011,6 +2391,328 @@ mod tests {
         );
     }
 
+    /// What the scanner read last under values, as `collect` names a
+    /// frame: the document's or event's dump, or the error.
+    fn take_scanned(scanner: &mut Scanner, items: &mut Vec<(String, String)>) {
+        match scanner.take() {
+            Some(Scanned::Value(value)) => items.push(("text".into(), value.dump())),
+            Some(Scanned::Error(message)) => items.push(("error".into(), message)),
+            None => {}
+        }
+    }
+
+    /// The scanner under values, collected as `collect` collects its
+    /// frames: each document's or event's dump, or each error.
+    fn collect_values(
+        data: &[u8],
+        seq: bool,
+        streaming: bool,
+        chunk: usize,
+    ) -> Vec<(String, String)> {
+        let mut scanner = Scanner::values(seq, streaming);
+        let mut items = Vec::new();
+        for input in data.chunks(chunk.clamp(1, WORK)) {
+            if scanner.done() {
+                break;
+            }
+            scanner.feed(input, &mut Vec::new()).unwrap();
+            take_scanned(&mut scanner, &mut items);
+            while scanner.busy() {
+                scanner.drain(&mut Vec::new()).unwrap();
+                take_scanned(&mut scanner, &mut items);
+            }
+        }
+        scanner.finish(&mut Vec::new()).unwrap();
+        take_scanned(&mut scanner, &mut items);
+        while scanner.busy() {
+            scanner.drain(&mut Vec::new()).unwrap();
+            take_scanned(&mut scanner, &mut items);
+        }
+        items
+    }
+
+    /// What the scanner writes as text, each document read back as
+    /// jq_eval reads a document's text.
+    fn reparsed(data: &[u8], seq: bool, streaming: bool, chunk: usize) -> Vec<(String, String)> {
+        let config = serde_json::json!({"seq": seq, "streaming": streaming}).to_string();
+        collect(data, &config, chunk, false)
+            .into_iter()
+            .map(|(kind, text)| match kind.as_str() {
+                "text" => match super::super::value::parse_json(&text) {
+                    Ok(value) => (kind, value.dump()),
+                    Err(message) => ("reparse".into(), message),
+                },
+                _ => (kind, text),
+            })
+            .collect()
+    }
+
+    /// A small deterministic generator of JSON texts, valid and not.
+    struct Texts(u64);
+
+    impl Texts {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+
+        fn pick<'a>(&mut self, from: &[&'a [u8]]) -> &'a [u8] {
+            from[self.below(from.len())]
+        }
+
+        fn space(&mut self, out: &mut Vec<u8>) {
+            out.extend_from_slice(self.pick(&[b"", b"", b" ", b"\n", b"\t ", b"\r\n"]));
+        }
+
+        fn value(&mut self, depth: usize, out: &mut Vec<u8>) {
+            match self.below(if depth > 4 { 3 } else { 5 }) {
+                0 => out.extend_from_slice(self.pick(&[
+                    b"0",
+                    b"-0",
+                    b"1.000",
+                    b"100000000000000000001",
+                    b"1e1000",
+                    b"-1.5E-7",
+                    b"0.0000001",
+                    b"nan",
+                    b"-Infinity",
+                    b"1\x00x",
+                    b"12",
+                    b"3.25",
+                    b"1E+2",
+                    b"true",
+                    b"false",
+                    b"null",
+                    b"nul",
+                    b"01",
+                    b"+1",
+                    b".5",
+                    b"1.",
+                ])),
+                1 | 2 => {
+                    out.push(b'"');
+                    for _ in 0..self.below(5) {
+                        out.extend_from_slice(self.pick(&[
+                            b"a",
+                            b"key",
+                            b"\xc3\xa9",
+                            b"\\n",
+                            b"\\u00e9",
+                            b"\\u0000",
+                            b"\\ud83d\\ude00",
+                            b"\\udc00",
+                            b"\\\"",
+                            b"\\/",
+                            b"\xe2",
+                            b"\xff",
+                            b"\xe2\x82",
+                            b"\xf0\x80\x80\x80",
+                            b"\xed\xa0\x80",
+                        ]));
+                    }
+                    out.push(b'"');
+                }
+                3 => {
+                    out.push(b'[');
+                    for i in 0..self.below(4) {
+                        if i > 0 {
+                            out.push(b',');
+                        }
+                        self.space(out);
+                        self.value(depth + 1, out);
+                    }
+                    out.push(b']');
+                }
+                _ => {
+                    out.push(b'{');
+                    for i in 0..self.below(4) {
+                        if i > 0 {
+                            out.push(b',');
+                        }
+                        out.extend_from_slice(self.pick(&[
+                            b"\"a\"",
+                            b"\"b\"",
+                            b"\"a\"",
+                            b"\"\xe2\"",
+                        ]));
+                        out.push(b':');
+                        self.space(out);
+                        self.value(depth + 1, out);
+                    }
+                    out.push(b'}');
+                }
+            }
+        }
+
+        fn text(&mut self, seq: bool) -> Vec<u8> {
+            let mut out = Vec::new();
+            if self.below(8) == 0 {
+                out.extend_from_slice(b"\xef\xbb\xbf");
+            }
+            for _ in 0..1 + self.below(3) {
+                if seq {
+                    out.push(RS);
+                }
+                self.value(0, &mut out);
+                self.space(&mut out);
+            }
+            if self.below(4) == 0 {
+                let at = self.below(out.len() + 1);
+                let byte =
+                    self.pick(&[b",", b"]", b"}", b":", b"\"", b"x", b"\x1e", b"\x00", b" "]);
+                out.splice(at..at, byte.iter().copied());
+            }
+            out
+        }
+    }
+
+    #[test]
+    fn values_are_the_documents_the_text_reads_back_as() {
+        let fixtures: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(fixture_path()).unwrap()).unwrap();
+        let mut cases: Vec<(Vec<u8>, bool, bool)> = Vec::new();
+        for case in fixtures.as_array().unwrap() {
+            let hex = case["input"].as_str().unwrap();
+            let data = hex
+                .as_bytes()
+                .chunks_exact(2)
+                .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                .collect();
+            cases.push((data, case["seq"] == true, case["streaming"] == true));
+        }
+        let long = "1".repeat(5000);
+        for data in [
+            format!("{{\"b\":{long},\"1\":1.000}} [{long}.{long}e-9999]"),
+            format!("\"{}\" -{long}", "\\u0061\u{e9}".repeat(3000)),
+            format!("[{}1{}]", "[".repeat(300), "]".repeat(300)),
+            format!("{{\"{}\":[1,{{\"x\":[]}}]}}", "k".repeat(20_000)),
+            format!("nan{} {long}\u{0}x", "0".repeat(5000)),
+        ] {
+            for (seq, streaming) in [(false, false), (false, true), (true, false)] {
+                let mut data = data.clone().into_bytes();
+                if seq {
+                    data.insert(0, RS);
+                }
+                cases.push((data, seq, streaming));
+            }
+        }
+        let mut texts = Texts(0x9e37_79b9_7f4a_7c15);
+        for _ in 0..1500 {
+            let seq = texts.below(4) == 0;
+            let streaming = texts.below(3) == 0;
+            cases.push((texts.text(seq), seq, streaming));
+        }
+        for (data, seq, streaming) in &cases {
+            for chunk in [1, 7, WORK] {
+                assert_eq!(
+                    collect_values(data, *seq, *streaming, chunk),
+                    reparsed(data, *seq, *streaming, chunk),
+                    "input {:?}, seq {seq}, streaming {streaming}, chunk {chunk}",
+                    String::from_utf8_lossy(data)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_abandoned_document_is_freed_a_slice_at_a_time() {
+        let meter = Arc::new(meter::Meter::default());
+        let _installed = meter::install(&meter);
+        for streaming in [false, true] {
+            let mut scanner = Scanner::values(false, streaming);
+            let text = format!("[{}", "[1,{\"a\":\"b\"}],".repeat(20_000));
+            for input in text.as_bytes().chunks(4095) {
+                scanner.feed(input, &mut Vec::new()).unwrap();
+                while scanner.busy() {
+                    scanner.drain(&mut Vec::new()).unwrap();
+                    if streaming {
+                        assert!(matches!(scanner.take(), Some(Scanned::Value(_)) | None));
+                    }
+                }
+            }
+            assert!(scanner.take().is_none());
+            assert!(meter.live() > 0);
+            scanner.begin(br#"{"discard":true}"#).unwrap();
+            let mut drains = 0;
+            while scanner.busy() {
+                scanner.drain(&mut Vec::new()).unwrap();
+                assert!(scanner.take().is_none());
+                drains += 1;
+            }
+            assert!(streaming || drains > 1, "{drains} drains");
+            assert!(scanner.retiring.is_empty() && scanner.opened.is_empty());
+            drop(scanner);
+            assert_eq!(meter.live(), 0);
+        }
+    }
+
+    /// How much of a long literal's text the scanner has gathered.
+    fn gathered(scanner: &Scanner) -> Option<usize> {
+        match scanner.task.as_ref().map(|task| &task.kind) {
+            Some(TokenKind::Literal {
+                reading: Some((text, ..)),
+                ..
+            }) => Some(text.len()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_long_literal_is_gathered_a_slice_at_a_time() {
+        let mut scanner = Scanner::values(false, false);
+        let text = format!("{} ", "1".repeat(200_000));
+        let mut sizes = Vec::new();
+        let mut read = Vec::new();
+        for input in text.as_bytes().chunks(4095) {
+            scanner.feed(input, &mut Vec::new()).unwrap();
+            sizes.extend(gathered(&scanner));
+            read.extend(scanner.take());
+            while scanner.busy() {
+                scanner.drain(&mut Vec::new()).unwrap();
+                sizes.extend(gathered(&scanner));
+                read.extend(scanner.take());
+            }
+        }
+        assert!(
+            sizes.iter().any(|size| *size > 0 && *size < 200_000),
+            "{sizes:?}"
+        );
+        assert!(
+            sizes.windows(2).all(|pair| pair[1] - pair[0] <= WORK),
+            "{sizes:?}"
+        );
+        let [Scanned::Value(value)] = read.as_slice() else {
+            panic!("one number");
+        };
+        assert_eq!(value.dump(), "1".repeat(200_000));
+    }
+
+    #[test]
+    fn a_long_literal_is_charged_while_it_is_read() {
+        // Leading zeros read to a small number, but the reader holds the
+        // literal's text twice while it reads it.
+        let meter = Arc::new(meter::Meter::limited(150_000));
+        let _installed = meter::install(&meter);
+        let mut scanner = Scanner::values(false, false);
+        let mut read = Vec::new();
+        let text = format!("{}1 ", "0".repeat(100_000));
+        for input in text.as_bytes().chunks(4095) {
+            scanner.feed(input, &mut Vec::new()).unwrap();
+            read.extend(scanner.take());
+            while scanner.busy() {
+                scanner.drain(&mut Vec::new()).unwrap();
+                read.extend(scanner.take());
+            }
+        }
+        let [Scanned::Value(value)] = read.as_slice() else {
+            panic!("one number");
+        };
+        assert_eq!(value.dump(), "1");
+        assert!(meter.exceeded());
+    }
+
     #[test]
     fn configuration_refuses_unknown_fields() {
         assert!(open(br#"{"stream":true}"#).is_err());
@@ -2028,7 +2730,7 @@ mod tests {
         path.entries
             .values()
             .map(|part| match part {
-                Path::Key(Some(bytes)) => bytes.block_count(),
+                Path::Key(Some(Name::Bytes(bytes))) => bytes.block_count(),
                 _ => 0,
             })
             .sum()
@@ -2038,7 +2740,10 @@ mod tests {
         let task = scanner.task.as_ref().map_or(0, |task| {
             task.bytes.block_count()
                 + match &task.kind {
-                    TokenKind::String { decoded, .. } => decoded.block_count(),
+                    TokenKind::String {
+                        decoded: Captured::Blocks(decoded),
+                        ..
+                    } => decoded.block_count(),
                     _ => 0,
                 }
         });
@@ -2048,7 +2753,7 @@ mod tests {
             .map_or(0, |emission| match emission {
                 Emission::Document { bytes, .. } => bytes.block_count(),
                 Emission::Event(event) => event.leaf.as_ref().map_or(0, leaf_blocks),
-                Emission::Error(_) => 0,
+                Emission::Value(_) | Emission::Error(_) => 0,
             });
         scanner.token.block_count()
             + scanner.document.block_count()
@@ -2091,10 +2796,13 @@ mod tests {
     #[test]
     fn discard_retires_large_unfinished_tokens_and_validation() {
         for streaming in [false, true] {
-            let mut scanner = Scanner::new(Config {
-                streaming,
-                seq: false,
-            });
+            let mut scanner = Scanner::new(
+                Config {
+                    streaming,
+                    seq: false,
+                },
+                false,
+            );
             scanner.feed(b"\"", &mut Vec::new()).unwrap();
             for _ in 0..100 {
                 scanner.feed(&vec![b'a'; 4095], &mut Vec::new()).unwrap();
@@ -2118,10 +2826,13 @@ mod tests {
                 "k".repeat(200_000),
                 "v".repeat(200_000)
             );
-            let mut scanner = Scanner::new(Config {
-                streaming,
-                seq: false,
-            });
+            let mut scanner = Scanner::new(
+                Config {
+                    streaming,
+                    seq: false,
+                },
+                false,
+            );
             let mut started = false;
             for input in text.as_bytes().chunks(4095) {
                 let mut out = Vec::new();
@@ -2213,7 +2924,7 @@ mod tests {
             collect(&data, "{}", WORK, false),
             [("text".into(), format!("\"{}�\"", "a".repeat(40_000)))]
         );
-        let mut scanner = Scanner::new(Config::default());
+        let mut scanner = Scanner::new(Config::default(), false);
         scanner.feed(b"\"", &mut Vec::new()).unwrap();
         for _ in 0..100 {
             scanner.feed(&vec![b'a'; 4095], &mut Vec::new()).unwrap();

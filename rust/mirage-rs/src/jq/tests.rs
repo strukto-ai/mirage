@@ -735,6 +735,52 @@ const SLICED: &[&str] = &[
 ];
 
 #[test]
+fn numbers_kept_without_their_text_keep_jq_semantics() {
+    // A number its double prints back as written keeps no text of its own,
+    // yet compares as a decimal against a longer literal, negates a read
+    // zero to 0, and prints and sorts as before.
+    let cases: &[(&str, &str, &[&str])] = &[
+        (
+            "[.[0] == .[1], .[2] == .[3], .[4] == .[5], .[6] == .[7], (.[0] | . == 0.1), .[0] < .[1], .[1] > .[0], (.[0] | . == (0.3 - 0.2))]",
+            "[0.1, 0.10000000000000000555, 1, 1.000, -0, 0, 100000000000000000001, 100000000000000000000]",
+            &["[false,true,true,false,true,true,true,false]"],
+        ),
+        (
+            "map(-.), map(-(-.)), ((1 - 1) | -.), (.[0] | -. | -.)",
+            "[0, -0, 5, -5, 1.000, 0.1, 1E+2, 1600000000, 0.0001]",
+            &[
+                "[0,0,-5,5,-1.000,-0.1,-1E+2,-1600000000,-0.0001]",
+                "[0,0,5,-5,1.000,0.1,1E+2,1600000000,0.0001]",
+                "-0",
+                "0",
+            ],
+        ),
+        (
+            "., map(tojson)",
+            "[0, -0, 0.0001, 0.00001, 1.0, 1.5, 100000000000000000, 123456789012345, 1234567890123456, 3.14159, 1e2, 0.1000]",
+            &[
+                "[0,-0,0.0001,0.00001,1.0,1.5,100000000000000000,123456789012345,1234567890123456,3.14159,1E+2,0.1000]",
+                r#"["0","-0","0.0001","0.00001","1.0","1.5","100000000000000000","123456789012345","1234567890123456","3.14159","1E+2","0.1000"]"#,
+            ],
+        ),
+        (
+            "unique, (group_by(.) | map(length)), sort, (map({k: .}) | unique_by(.k) | length), index(1.000)",
+            "[0.1, 0.10000000000000000555, 0.1, 1, 1.000, 1.0, -0, 0]",
+            &[
+                "[-0,0.1,0.10000000000000000555,1]",
+                "[2,2,1,3]",
+                "[-0,0,0.1,0.1,0.10000000000000000555,1,1.000,1.0]",
+                "4",
+                "3",
+            ],
+        ),
+    ];
+    for (program, input, want) in cases {
+        assert_eq!(outputs(program, input), *want, "{program}");
+    }
+}
+
+#[test]
 fn every_budget_gives_the_same_frames() {
     let cases = CASES
         .iter()
@@ -1101,7 +1147,7 @@ fn numeric_conversion_buffers_cannot_bypass_the_memory_cap() {
     let mut stream = super::eval::open(config.to_string().as_bytes()).unwrap();
     let mut wire = Vec::new();
     stream
-        .feed(format!("\"{}\"", "1".repeat(60000)).as_bytes(), &mut wire)
+        .feed(format!("\"0{}\"", "1".repeat(59999)).as_bytes(), &mut wire)
         .unwrap();
     stream.finish(&mut wire).unwrap();
     settle(&mut *stream, &mut wire);
@@ -4459,7 +4505,7 @@ fn low_caps_during_compilation_become_terminal_frames_without_panicking() {
 fn compilation_limits_cannot_become_availability_refusals() {
     for (program, zone, memory) in [
         ("remainder(1;2)", "UTC", 0),
-        (r#""\n" | strflocaltime("%Z")"#, "Europe/Paris", 6000),
+        (r#""\n" | strflocaltime("%Z")"#, "Europe/Paris", 500),
         ("localtime", "/usr/share/zoneinfo/Europe/Paris", 0),
     ] {
         let config = serde_json::json!({"program":program,"zone":zone,"memory":memory});

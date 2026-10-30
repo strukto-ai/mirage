@@ -813,31 +813,83 @@ impl Drop for Eval {
 }
 
 impl Eval {
-    /// Take a whole document's text, as `feed` takes it, without copying
-    /// it: what the reader read of the document is the run's input.
-    pub(super) fn feed_owned(&mut self, mut text: Vec<u8>) -> Result<(), StreamError> {
-        if !self.pending.is_empty() {
-            return self.feed(&text, &mut Vec::new());
-        }
-        if !matches!(self.state, State::Feeding) {
-            return Err(StreamError::new("jq_eval: begin the next document first"));
+    fn compiled(&self) -> Arc<Program> {
+        Arc::clone(&self.program)
+    }
+
+    /// The meter its runs are charged to, which the documents jq's main
+    /// loop reads for them are charged to as they are read.
+    pub(super) fn meter(&self) -> Arc<Meter> {
+        Arc::clone(&self.meter)
+    }
+
+    /// Start a run on `input`, read with the reader at `place`. A run
+    /// whose input took the memory past its limit ends with jq's error
+    /// for it instead, and retires the input.
+    pub(super) fn start(
+        &mut self,
+        place: &[u8],
+        input: Value,
+        out: &mut Vec<u8>,
+    ) -> Result<(), StreamError> {
+        if matches!(
+            self.state,
+            State::Running(_) | State::Retiring(_) | State::Reading(_)
+        ) {
+            return Err(StreamError::new("jq_eval: the run has not ended"));
         }
         let _metered = meter::install(&self.meter);
-        text.shrink_to_fit();
-        if self.input_limited
-            || self.meter.live().saturating_add(text.capacity()) > self.limits.memory
-        {
-            self.input_limited = true;
+        self.position = crate::parse_config(place)?;
+        if self.compile_limited || self.meter.exceeded() {
+            memory_error_frame(self.limits, out);
+            let mut vm = Box::new(Vm::retiring(
+                self.compiled(),
+                self.limits,
+                Arc::clone(&self.meter),
+            ));
+            vm.retire_value(input);
+            self.state = State::Retiring(vm);
             return Ok(());
         }
-        self.pending = text;
-        self.pending_charge.set(self.pending.capacity());
-        self.input_limited |= self.meter.exceeded();
+        self.state = State::Running(self.start_vm(input));
         Ok(())
     }
 
-    fn compiled(&self) -> Arc<Program> {
-        Arc::clone(&self.program)
+    /// Answer the run's `input` with the next document as a value, and
+    /// where the reader stands after it.
+    pub(super) fn answer(
+        &mut self,
+        reply: &[u8],
+        input: Value,
+        out: &mut Vec<u8>,
+    ) -> Result<(), StreamError> {
+        let State::Running(vm) = &mut self.state else {
+            return Err(StreamError::new("jq_eval: the host answered no request"));
+        };
+        if self.asking != Asking::Taken || vm.host.asking.take() == Some(Request::Now) {
+            return Err(StreamError::new("jq_eval: the host answered no request"));
+        }
+        let _metered = meter::install(&self.meter);
+        let reply: InputReply = crate::parse_config(reply)?;
+        self.asking = Asking::No;
+        if self.meter.exceeded() {
+            memory_error_frame(self.limits, out);
+            let State::Running(mut vm) = std::mem::replace(&mut self.state, State::Ended) else {
+                unreachable!()
+            };
+            vm.retire_value(input);
+            self.state = State::Retiring(vm);
+            return Ok(());
+        }
+        vm.host.set_reply(Reply::Value(input));
+        place(
+            &mut vm.host,
+            Position {
+                filename: reply.filename,
+                line: reply.line,
+            },
+        );
+        Ok(())
     }
 
     fn start_vm(&mut self, input: Value) -> Box<Vm> {
