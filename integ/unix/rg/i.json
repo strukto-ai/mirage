@@ -100,14 +100,16 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\nA\\n' | rg -S 'ℂ|a'; printf 'a\\nA\\n' | rg -S '𝐀|a'; printf 'a\\nA\\n' | rg -S 'ǅ|a'",
+      "command": "printf 'a\\nA\\n' | rg -S 'ℂ|a'; printf 'a\\nA\\n' | rg -S '𝐀|a'; printf 'a\\nA\\n' | rg -S 'ǅ|a'; printf 'a\\nA\\n' | rg -S -P 'ℂ|a'; printf 'a\\nA\\n' | rg -S -P '𝐀|a'; printf 'a\\nA\\n' | rg -S -P 'ǅ|a'; printf 'a\\nA\\n' | rg -S --engine auto 'ℂ|a'; printf 'a\\nA\\n' | rg -S --engine auto '𝐀|a'; printf 'a\\nA\\n' | rg -S --engine auto 'ǅ|a'",
       "expect": {
         "exit": 0,
-        "stdout": "a\na\na\nA\n",
+        "stdout": "a\na\na\nA\na\na\na\nA\na\na\na\nA\n",
         "stderr": ""
       },
       "flags": [
-        "S"
+        "S",
+        "P",
+        "engine"
       ]
     }
   ]

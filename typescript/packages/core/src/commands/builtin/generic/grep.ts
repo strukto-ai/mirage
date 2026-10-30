@@ -123,6 +123,7 @@ export function recurses(fl: FlagView): boolean {
     return (scanned('grep', [last]) as unknown as GrepValues).directories === 'recurse'
   } catch (err) {
     if (!(err instanceof UsageError)) throw err
+    console.debug(`grep walks nothing past a refused -d: ${err.message}`)
     return false
   }
 }

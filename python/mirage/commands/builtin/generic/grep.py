@@ -1,3 +1,4 @@
+import logging
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
@@ -67,6 +68,8 @@ from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
 from mirage.view.namespace_view import followed_stat
+
+logger = logging.getLogger(__name__)
 
 # GNU grep with no pattern prints its synopsis and the help hint, exit 2
 # (grep 3.11; the same two lines follow `option requires an argument`).
@@ -155,7 +158,8 @@ def recurses(fl: FlagView) -> bool:
         return True
     try:
         return scanned("grep", typed[-1:])["directories"] == "recurse"
-    except UsageError:
+    except UsageError as exc:
+        logger.debug("grep walks nothing past a refused -d: %s", exc)
         return False
 
 
