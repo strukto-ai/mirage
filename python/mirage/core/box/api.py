@@ -79,15 +79,9 @@ async def refused(
         cond (WriteCondition | None): the write's condition.
         etag (str | None): the etag sent, None if the request went plain.
     """
-    if not etag:
+    if not etag or exc.status not in (LOST_STATUS, GONE_STATUS):
         return None
-    if exc.status == LOST_STATUS:
-        return await stale(
-            path, version=condition_version(cond) if cond else None
-        )
-    if exc.status == GONE_STATUS:
-        return await stale(path, gone=True)
-    return None
+    return await stale(path, version=condition_version(cond))
 
 
 def if_match(etag: str | None) -> dict[str, str] | None:

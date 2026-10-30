@@ -20,7 +20,6 @@ from mirage.cache.context import (
     settle_after,
     stale,
 )
-from mirage.cache.types import Measured
 from mirage.core.object_store.driver import (
     A,
     C,
@@ -128,13 +127,17 @@ def make_rename(
 
         def named(
             key: str, exc: ConditionLostError
-        ) -> tuple[PathSpec, Measured | None]:
+        ) -> tuple[PathSpec, str | None]:
             # The path the refusal names and the version its write sent.
             if key == kp.apply(kpfx, dst):
                 return dst_spec, condition_version(cond)
-            if key == src_key:
-                return src_spec, exc.versions.get(key, source)
-            return kp.key_path(src_spec, kpfx, key), exc.versions.get(key)
+            sent = exc.versions.get(key, source if key == src_key else None)
+            spec = (
+                src_spec
+                if key == src_key
+                else kp.key_path(src_spec, kpfx, key)
+            )
+            return spec, sent if isinstance(sent, str) else None
 
         upto = lost_count()
         async with driver.connect(accessor) as conn:
@@ -150,9 +153,7 @@ def make_rename(
                         await drop_cached(src_spec, source)
                 elif cond is not None and condition_version(cond):
                     await drop_cached(dst_spec, condition_version(cond))
-                refusal = await stale(
-                    lost, landed=exc.landed, gone=exc.gone, version=sent
-                )
+                refusal = await stale(lost, landed=exc.landed, version=sent)
                 refusal.recovered = exc.recovered
                 refusal.recovery_error = (
                     strerror_of(exc.recovery_error)

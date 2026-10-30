@@ -1277,6 +1277,11 @@
       "s3": "This capability-specific outcome is asserted by the paired shared_fd_readwrite_creates case. Both cases retain the full original target set together; one requires native missing-file creation and the other verifies explicit unsupported-operation refusal without mutation.",
       "s3-prefix": "This capability-specific outcome is asserted by the paired shared_fd_readwrite_creates case. Both cases retain the full original target set together; one requires native missing-file creation and the other verifies explicit unsupported-operation refusal without mutation.",
       "ssh": "This capability-specific outcome is asserted by the paired shared_fd_readwrite_creates case. Both cases retain the full original target set together; one requires native missing-file creation and the other verifies explicit unsupported-operation refusal without mutation."
+    },
+    "integ/unix/write/conditional.json :: write_conditional_live_session_create_race": {
+      "box": "box cannot send a create-only write, so a write after test -e finds nothing goes out as usual and replaces the peer's file; the case pins the refusal only backends with create-only writes give.",
+      "dropbox": "dropbox cannot send a create-only write, so a write after test -e finds nothing goes out as usual and replaces the peer's file; the case pins the refusal only backends with create-only writes give.",
+      "dropbox-root": "dropbox-root cannot send a create-only write, so a write after test -e finds nothing goes out as usual and replaces the peer's file; the case pins the refusal only backends with create-only writes give."
     }
   }
 }

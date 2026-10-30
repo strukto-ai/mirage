@@ -24,11 +24,10 @@ class ConditionLostError(Exception):
             the order they were met.
         landed (bool): a move's copy landed before its source delete
             lost; ``recovered`` says whether compensation removed it.
-        gone (bool): the object no longer exists, so no newer bytes are
-            there for a retry to overwrite.
+        gone (bool): the object no longer exists.
         versions (dict[str, Measured] | None): the version each lost key
             was measured on, where the op knew it; ABSENT for one found
-            gone, which keeps none.
+            gone, which keeps what the session last saw of it.
         error (Exception | None): a later failure that stopped a walk
             after these keys were lost; the caller keeps their versions
             and raises it.

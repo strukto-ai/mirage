@@ -26,6 +26,7 @@ vi.mock('./client.ts', async () => {
 import * as client from './client.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
 import { runWithWriteContext } from '../../cache/context.ts'
+import type { Measured } from '../../cache/types.ts'
 import { keptVersions } from '../../test-utils.ts'
 import { isStaleWrite } from '../../errors/fs.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
@@ -162,7 +163,7 @@ const LOST = JSON.parse(
 async function refuse(
   err: DropboxApiError,
   sent: string | null,
-): Promise<[string[], StaleWriteError | null]> {
+): Promise<[Measured[], StaleWriteError | null]> {
   const { context, kept } = keptVersions('dropbox')
   const path = new PathSpec({ virtual: '/dbx/f', directory: '/dbx/', vfsPath: '/f' })
   const got = await runWithWriteContext('/dbx/', context, () =>
@@ -180,7 +181,7 @@ describe('refused', () => {
       if (sent === null || c.outcome === 'other') expect([kept, got]).toEqual([[], null])
       else {
         expect(isStaleWrite(got)).toBe(true)
-        expect(kept).toEqual(c.outcome === 'lost' ? ['s1'] : [])
+        expect(kept).toEqual(['s1'])
       }
     },
   )

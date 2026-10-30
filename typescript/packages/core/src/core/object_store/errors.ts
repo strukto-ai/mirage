@@ -18,9 +18,9 @@ import type { Measured } from '../../cache/types.ts'
 export interface LostOptions {
   /** A move's copy landed before its source delete lost; recovered records compensation. */
   readonly landed?: boolean
-  /** The object no longer exists, so no newer bytes are there for a retry to overwrite. */
+  /** The object no longer exists. */
   readonly gone?: boolean
-  /** The version each lost key was measured on, where the op knew it; ABSENT keeps none. */
+  /** The version each lost key was measured on, where the op knew it; ABSENT, for one found gone, keeps what the session last saw. */
   readonly versions?: ReadonlyMap<string, Measured>
   /** A later failure that stopped a walk after these keys were lost; the caller keeps their versions and throws it. */
   readonly error?: unknown

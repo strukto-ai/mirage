@@ -807,7 +807,7 @@ async function movePrefixIf(
             if (loser[0] === key) untouched.set(dstKey, quoted(cond.version))
             else untouched.set(key, quoted(token))
           } else {
-            // A source gone (404) keeps no version: nothing newer to guard.
+            // A source gone (404) keeps what the session last saw of it.
             lost.push([key, isConditionLost(err) ? token : OwnRead.ABSENT])
           }
           continue
