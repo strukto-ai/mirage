@@ -717,11 +717,14 @@ export class Policies {
     rulesOnly = false,
     projection: 'answers' | 'fire' = 'fire',
   ): Promise<CompositionResult> {
+    const snapshot = [...this.policies]
+    const placement = this.placement
+    const policies = [...snapshot, ...(placement === null ? [] : [placement]), this.mode]
+    if (policies.every((policy) => policy[method] === undefined)) {
+      return { answers: [], action: null, route: null, limit: null }
+    }
     const composition = new Composition()
     try {
-      const snapshot = [...this.policies]
-      const placement = this.placement
-      const policies = [...snapshot, ...(placement === null ? [] : [placement]), this.mode]
       const hook = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
       const descriptors = policies.map((policy, slot) => {
         const role =

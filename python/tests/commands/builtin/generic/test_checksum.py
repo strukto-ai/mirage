@@ -17,6 +17,8 @@ import hashlib
 import pytest
 
 from mirage.commands.builtin.generic.checksum import checksum
+from mirage.io.memory import MemoryBudget, run_with_memory
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 _DIGEST = hashlib.md5(b"abc").hexdigest()
@@ -53,7 +55,7 @@ async def _run_check(
     out, io = await checksum(
         [_spec(p) for p in (paths or ["/sums.txt"])],
         algorithm="md5",
-        read_bytes=read_bytes,
+        read_list=read_bytes,
         read_stream=read_stream,
         check=True,
         cwd=cwd,
@@ -111,7 +113,7 @@ async def test_non_fs_read_failure_propagates():
         await checksum(
             [_spec("/sums.txt")],
             algorithm="md5",
-            read_bytes=read_bytes,
+            read_list=read_bytes,
             read_stream=read_stream,
             check=True,
         )
@@ -134,7 +136,7 @@ async def test_a_stored_digest_stands_in_for_the_read():
     out, io = await checksum(
         [_spec("/a"), _spec("/b")],
         algorithm="md5",
-        read_bytes=read_bytes,
+        read_list=read_bytes,
         read_stream=read_stream,
         stored=stored,
     )
@@ -160,7 +162,7 @@ async def test_check_reads_the_bytes_and_asks_no_stored_digest():
     out, io = await checksum(
         [_spec("/list")],
         algorithm="md5",
-        read_bytes=read_bytes,
+        read_list=read_bytes,
         read_stream=read_stream,
         check=True,
         stored=_never_stored,
@@ -174,7 +176,7 @@ async def test_a_failed_stored_digest_is_reported_and_the_rest_hash():
     out, io = await checksum(
         [_spec("/a"), _spec("/b"), _spec("/c")],
         algorithm="md5",
-        read_bytes=read_bytes,
+        read_list=read_bytes,
         read_stream=read_stream,
         stored=_stored_but_b,
     )
@@ -182,3 +184,29 @@ async def test_a_failed_stored_digest_is_reported_and_the_rest_hash():
     assert got == f"{'f' * 32}  /a\n{'f' * 32}  /c\n".encode()
     assert io.exit_code == 1
     assert io.stderr == b"md5sum: /b: No such file or directory\n"
+
+
+@pytest.mark.asyncio
+async def test_check_list_larger_than_the_memory_budget_is_streamed():
+    chunk = b" " * 16383 + b"\n"
+
+    async def read_list(path):
+        for _ in range(2176):
+            yield chunk
+        yield b"2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881  /f\n"
+
+    async def read_stream(path):
+        yield b"x"
+
+    async def run():
+        out, io = await checksum(
+            [PathSpec.from_str_path("/sums")],
+            algorithm="sha256",
+            read_list=read_list,
+            read_stream=read_stream,
+            check=True,
+        )
+        assert await materialize(out) == b"/f: OK\n"
+        assert io.exit_code == 0
+
+    await run_with_memory(MemoryBudget(32 << 20, lambda: 0), run())

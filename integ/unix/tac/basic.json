@@ -139,6 +139,45 @@
         "stdout": "c\nb\na\nba\n\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tac_regex_refuses_an_oversized_record_under_the_default_budget",
+      "seq": 17010006,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '%33554433s' x | tac -r -s z",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tac: memory exhausted\n"
+      },
+      "flags": [
+        "regex",
+        "separator"
+      ]
     }
   ]
 }

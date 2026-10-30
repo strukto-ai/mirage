@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import time
@@ -39,6 +40,7 @@ from mirage.commands.builtin.rg_search import (
 from mirage.commands.builtin.rg_stream import (
     RgProgram,
     encoding_for,
+    format_message,
     format_output,
     latin1,
     open_rg,
@@ -72,11 +74,18 @@ from mirage.errors.fs import walk_refusal
 from mirage.errors.types import WalkLimitError
 from mirage.io.stream import close_quietly, yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.rs.errors import StreamRefusal
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.join import shell_join
-from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
+from mirage.types import (
+    FileStat,
+    FileType,
+    JsonValue,
+    PathSpec,
+    PolymorphicReadFn,
+)
 from mirage.utils.compress import GzipDataError, gunzip_stream
 from mirage.view.types import MountView
 
@@ -104,51 +113,6 @@ SORT_KEYS = ("path", "modified", "accessed", "created", "none")
 COLOR_CHOICES = ("never", "auto", "always", "ansi")
 # --engine's values (ripgrep 14.1.1).
 ENGINES = ("default", "pcre2", "auto")
-SIZE = re.compile(r"([0-9]+)([KMG]?)")
-SIZE_UNIT = {"": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30}
-# The sizes ripgrep reads as digits and a unit, each named as it is refused.
-SIZE_SPELLINGS = {
-    "max_filesize": "--max-filesize",
-    "dfa_size_limit": "--dfa-size-limit",
-    "regex_size_limit": "--regex-size-limit",
-}
-# What --colors takes (ripgrep 14.1.1 and termcolor): OUT:SPEC[:VALUE].
-COLOR_OUTPUTS = ("path", "line", "column", "match")
-COLOR_SPECS = ("fg", "bg", "style", "none")
-COLOR_NAMES = (
-    "black",
-    "blue",
-    "green",
-    "red",
-    "cyan",
-    "magenta",
-    "yellow",
-    "white",
-)
-COLOR_STYLES = (
-    "nobold",
-    "bold",
-    "nointense",
-    "intense",
-    "nounderline",
-    "underline",
-)
-COLOR_NUMBER = re.compile(r"(0x\+?[0-9A-Fa-f]+|\+?[0-9]+)")
-# What --hyperlink-format takes: an alias or a URL with variables.
-HYPERLINK_ALIASES = (
-    "default",
-    "file",
-    "grep+",
-    "kitty",
-    "macvim",
-    "none",
-    "textmate",
-    "vscode",
-    "vscode-insiders",
-    "vscodium",
-)
-HYPERLINK_VARIABLES = ("path", "line", "column", "host", "wslprefix")
-URL_SCHEME = re.compile(r"[0-9A-Za-z+.-]+:")
 # The numeric options, each named as ripgrep names it in a refusal. The
 # bag keeps no record of which spelling the line typed, so a long one
 # is refused under its short name.
@@ -247,214 +211,40 @@ def encoding_flag(fl: FlagView) -> str:
 
 
 def size_flag(fl: FlagView, dest: str) -> int | None:
-    """A size option in bytes, refused in ripgrep's words. ripgrep parses
-    every occurrence as it reads it, so an earlier bad one is refused too.
-
-    Args:
-        fl (FlagView): the flag view.
-        dest (str): --max-filesize, --dfa-size-limit or --regex-size-limit.
-
-    Raises:
-        UsageError: the size is not digits and an optional K, M or G, or
-            does not fit in 64 bits.
-    """
-    sizes = [size_bytes(str(value), dest) for _, value in fl.occurrences(dest)]
-    return sizes[-1] if sizes else None
+    sizes: list[JsonValue] = [
+        [dest, str(value)] for _, value in fl.occurrences(dest)
+    ]
+    return _validated({"sizes": sizes}).get(dest)
 
 
-def size_bytes(value: str, dest: str) -> int:
-    """One size option's value in bytes, refused in ripgrep's words.
-
-    Args:
-        value (str): the value as typed.
-        dest (str): the option it was given to.
-
-    Raises:
-        UsageError: the size is not digits and an optional K, M or G, or
-            does not fit in 64 bits.
-    """
-    size = SIZE.fullmatch(value)
-    reason = None
-    if size is None:
-        reason = (
-            f"invalid format for size '{value}', which should be a "
-            "non-empty sequence of digits followed by an optional 'K', 'M' "
-            "or 'G' suffix"
-        )
-    elif int(size.group(1)) > UINTMAX:
-        reason = (
-            f"invalid integer found in size '{value}': number too large to "
-            "fit in target type"
-        )
-    elif int(size.group(1)) * SIZE_UNIT[size.group(2)] > UINTMAX:
-        reason = f"size too big in '{value}'"
-    if size is None or reason is not None:
-        raise _flag_error(SIZE_SPELLINGS[dest], f"invalid size: {reason}")
-    return int(size.group(1)) * SIZE_UNIT[size.group(2)]
-
-
-def color_refusal(spec: str) -> str | None:
-    """Why ripgrep refuses one --colors spec, or None.
-
-    Args:
-        spec (str): the spec as typed.
-    """
-    pieces = spec.split(":")
-    malformed = (
-        f"invalid color spec format: '{spec}'. Valid format is "
-        "'(path|line|column|match):(fg|bg|style):(value)'."
-    )
-    if not 2 <= len(pieces) <= 3:
-        return malformed
-    if pieces[0].lower() not in COLOR_OUTPUTS:
-        return (
-            f"unrecognized output type '{pieces[0]}'. Choose from: "
-            f"{', '.join(COLOR_OUTPUTS)}."
-        )
-    kind = pieces[1].lower()
-    if kind not in COLOR_SPECS:
-        return (
-            f"unrecognized spec type '{pieces[1]}'. Choose from: "
-            f"{', '.join(COLOR_SPECS)}."
-        )
-    if kind == "none":
-        return None
-    if len(pieces) < 3:
-        return malformed
-    value = pieces[2]
-    if kind == "style":
-        if value.lower() in COLOR_STYLES:
-            return None
-        return (
-            f"unrecognized style attribute '{value}'. Choose from: "
-            f"{', '.join(COLOR_STYLES)}."
-        )
-    return color_value_refusal(value)
-
-
-def color_number(code: str) -> bool:
-    """Whether termcolor reads ``code`` as a color number, decimal or 0x
-    hex, from 0 to 255.
-
-    Args:
-        code (str): one number as typed.
-    """
-    if COLOR_NUMBER.fullmatch(code) is None:
-        return False
-    hexed = code.startswith("0x")
-    return int(code[2:] if hexed else code, 16 if hexed else 10) <= 255
-
-
-def color_value_refusal(value: str) -> str | None:
-    """Why termcolor refuses a color: a name, 0-255 or an r,g,b triple.
-
-    Args:
-        value (str): the color as typed.
-    """
-    codes = value.split(",")
-    if value.lower() in COLOR_NAMES or (
-        len(codes) in (1, 3) and all(color_number(code) for code in codes)
-    ):
-        return None
-    if len(codes) == 1 and all(c in "0123456789abcdefABCDEF" for c in value):
-        return (
-            "unrecognized ansi256 color number, should be '[0-255]' (or a "
-            f"hex number), but is '{value}'"
-        )
-    if "," in value:
-        return (
-            "unrecognized RGB color triple, should be "
-            "'[0-255],[0-255],[0-255]' (or a hex triple), but is "
-            f"'{value}'"
-        )
-    return (
-        f"unrecognized color name '{value}'. Choose from: "
-        f"{', '.join(COLOR_NAMES)}"
-    )
-
-
-def hyperlink_refusal(fmt: str) -> str | None:
-    """Why ripgrep refuses a --hyperlink-format, or None.
-
-    Args:
-        fmt (str): the format as typed.
-    """
-    if not fmt or fmt in HYPERLINK_ALIASES:
-        return None
-    names: list[str] = []
-    head = ""
-    i = 0
-    while i < len(fmt):
-        if fmt.startswith(("{{", "}}"), i):
-            head += "" if names else fmt[i]
-            i += 2
-        elif fmt[i] == "{":
-            end = fmt.find("}", i)
-            if end < 0:
-                return (
-                    "unclosed variable: found '{' without a corresponding "
-                    "'}' following it"
-                )
-            name = fmt[i + 1 : end]
-            if name not in HYPERLINK_VARIABLES:
-                return (
-                    f"invalid hyperlink format variable: '{name}', choose "
-                    f"from: {', '.join(HYPERLINK_VARIABLES)}"
-                )
-            names.append(name)
-            i = end + 1
-        elif fmt[i] == "}":
-            return (
-                "unopened variable: found '}' without a corresponding '{' "
-                "preceding it"
-            )
-        else:
-            head += "" if names else fmt[i]
-            i += 1
-    if not names:
-        return (
-            "at least a {path} variable is required in a hyperlink format, "
-            "or otherwise use a valid alias: "
-            f"{', '.join(HYPERLINK_ALIASES)}"
-        )
-    if "path" not in names:
-        return "the {path} variable is required in a hyperlink format"
-    if "column" in names and "line" not in names:
-        return (
-            "the hyperlink format contains a {column} variable, but no "
-            "{line} variable is present"
-        )
-    if URL_SCHEME.match(head) is None:
-        return (
-            "the hyperlink format must start with a valid URL scheme, i.e., "
-            "[0-9A-Za-z+-.]+:"
-        )
-    return None
+def _validated(options: dict[str, JsonValue]) -> dict[str, int]:
+    if not any(options.values()):
+        return {}
+    try:
+        return {
+            name: int(value)
+            for name, value in json.loads(
+                format_message({"kind": "options", **options})
+            ).items()
+        }
+    except StreamRefusal as exc:
+        raise UsageError(exc.message) from exc
 
 
 def check_display_flags(fl: FlagView) -> None:
-    """Refuse what ripgrep refuses in the options mirage accepts and
-    otherwise ignores: --colors, --hyperlink-format and the DFA and regex
-    size limits.
-
-    Args:
-        fl (FlagView): the flag view.
-
-    Raises:
-        UsageError: a value ripgrep refuses, in its words.
-    """
-    for spec in fl.as_list("colors"):
-        refusal = color_refusal(spec)
-        if refusal is not None:
-            raise _flag_error("--colors", refusal)
-    for _, fmt in fl.occurrences("hyperlink_format"):
-        refusal = hyperlink_refusal(str(fmt))
-        if refusal is not None:
-            raise _flag_error(
-                "--hyperlink-format", f"invalid hyperlink format: {refusal}"
-            )
-    size_flag(fl, "dfa_size_limit")
-    size_flag(fl, "regex_size_limit")
+    _validated(
+        {
+            "colors": [spec for spec in fl.as_list("colors")],
+            "hyperlinks": [
+                str(value) for _, value in fl.occurrences("hyperlink_format")
+            ],
+            "sizes": [
+                [dest, str(value)]
+                for dest in ("dfa_size_limit", "regex_size_limit")
+                for _, value in fl.occurrences(dest)
+            ],
+        }
+    )
 
 
 def _choice(
@@ -1192,6 +982,7 @@ async def _search_single(
         io,
         p.raw_path,
         name,
+        pat,
     ), io
 
 
@@ -1215,6 +1006,7 @@ async def _settled(
     io: IOResult,
     shown: str,
     name: str,
+    program: RgProgram,
 ) -> AsyncIterator[bytes]:
     """One streamed haystack's output, headed when --heading names it,
     with the exit status settled however the output ends.
@@ -1233,7 +1025,7 @@ async def _settled(
     try:
         async for chunk in chunks:
             if not printed and (
-                heading := _lead(f, label, False, tally.binary)[1]
+                heading := _lead(f, label, False, tally.binary, program)[1]
             ):
                 yield heading
             printed = True
@@ -1332,41 +1124,41 @@ def walks_descendant_mounts(flags: Mapping[str, FlagValue]) -> bool:
 
 
 def between_files(f: RgFlags) -> bytes:
-    """What ripgrep prints between one file's output and the next's, for
-    output split over several runs that each labelled their files.
-
-    A blank line between --heading groups; otherwise the context
-    separator, when context is shown and a separator is set; otherwise
-    nothing. ripgrep 14.1.1 keeps this inter-file separator newline-
-    terminated even under --null-data; only intra-file context separators
-    use the record terminator.
-
-    Args:
-        f (RgFlags): the parsed flags.
-    """
-    if headed(f) and not f.no_filename:
-        return b"\n"
-    if prints_context(f) and f.context_separator is not None:
-        return encode_text(f.context_separator) + b"\n"
-    return b""
+    return _lead(f, None, True, False)[0]
 
 
 def _lead(
-    f: RgFlags, label: str | None, printed: bool, binary: bool
+    f: RgFlags,
+    label: str | None,
+    printed: bool,
+    binary: bool,
+    program: RgProgram | None = None,
 ) -> tuple[bytes, bytes]:
-    """What goes before a file's first output: the gap after the file
-    printed before it, and the --heading line naming it.
-
-    Args:
-        f (RgFlags): the parsed flags.
-        label (str | None): the file's label.
-        printed (bool): an earlier file printed.
-        binary (bool): a binary-file notice stands in for its lines.
-    """
-    gap = between_files(f) if printed else b""
-    if label is None or not headed(f) or binary:
-        return gap, b""
-    return gap, encode_text(label) + (b"\0" if f.null else record_end(f))
+    message: dict[str, JsonValue] = {
+        "kind": "lead",
+        "heading": f.heading,
+        "summary": f.count_only
+        or f.count_matches
+        or f.files_only
+        or f.files_without_match
+        or f.quiet,
+        "no_filename": f.no_filename,
+        "context": prints_context(f),
+        "separator": None
+        if f.context_separator is None
+        else latin1(f.context_separator),
+        "label": None if label is None else latin1(label),
+        "terminator": record_end(f).decode("latin-1"),
+        "null": f.null,
+        "printed": printed,
+        "binary": binary,
+    }
+    gap, heading = json.loads(
+        format_message(message)
+        if program is None
+        else format_output(program, message)
+    )
+    return bytes(gap), bytes(heading)
 
 
 async def haystacks(
@@ -1626,7 +1418,7 @@ async def _search_all(
                             continue
                         if not file_printed:
                             if lead := b"".join(
-                                _lead(f, label, printed, tally.binary)
+                                _lead(f, label, printed, tally.binary, pat)
                             ):
                                 yield lead
                             file_printed = printed = True
@@ -1693,7 +1485,7 @@ async def _search_all(
                 elif f.quiet and tally.selected and not damaged:
                     totals.add(tally, 0, elapsed)
             elif chunks:
-                gap, heading = _lead(f, label, printed, tally.binary)
+                gap, heading = _lead(f, label, printed, tally.binary, pat)
                 # -c and -l counts and names are not what --stats counts.
                 sent = len(heading) + (
                     0

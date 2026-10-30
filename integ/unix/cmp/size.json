@@ -39,6 +39,38 @@
         "n",
         "i"
       ]
+    },
+    {
+      "id": "cmp_verbose_known_sizes_skips_and_limits",
+      "seq": 17010001,
+      "command": "printf '0123456789abcdefghij' > /data/stream_cmp_a; printf '0123456789ABCDEFGH' > /data/stream_cmp_b; cmp -l -i 10 -n 4 /data/stream_cmp_a /data/stream_cmp_b; echo rc=$?; rm /data/stream_cmp_a /data/stream_cmp_b",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 141 101\n2 142 102\n3 143 103\n4 144 104\nrc=1\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
     }
   ]
 }

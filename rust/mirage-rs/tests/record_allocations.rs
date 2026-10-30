@@ -99,6 +99,10 @@ fn filter_memory(kind: &str, config: &[u8], begin: &[u8], chunk: &[u8], bytes: u
 
 #[test]
 fn short_records_bound_allocation_volume_and_live_input() {
+    diff_releases_finished_inputs();
+    comparison_rows_stay_bounded();
+    checksum_lists_stay_bounded();
+    giant_record_capacity_is_released();
     for (kind, config) in [
         ("wc", br#"{"lines":false,"words":true,"bytes":false,"chars":false,"max_line_length":false}"#.as_slice()),
         ("cut", br#"{"list":"2","mode":"fields","delimiter":[44],"complement":false,"only_delimited":false,"whitespace":null,"no_partial":false,"output_delimiter":null,"zero_terminated":false}"#),
@@ -441,5 +445,112 @@ fn shuffle_plan_memory() {
     assert!(
         peak < 1024 * 1024,
         "shuf plan: {peak} live bytes for two 17 MiB records"
+    );
+}
+
+fn comparison_rows_stay_bounded() {
+    let bytes = 34 * 1024 * 1024;
+    let config = serde_json::json!({"names":["a","b"],"piped":[false,false],"skip":[0,0],"limit":null,"verbose":true,"sizes":[bytes,bytes]});
+    let mut stream = mirage_rs::open("cmp", &serde_json::to_vec(&config).unwrap()).unwrap();
+    let chunks = [vec![b'a'; 16 * 1024], vec![b'b'; 16 * 1024]];
+    let mut read = [0; 2];
+    let mut out = Vec::new();
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    let mut rows = 0;
+    while let Some(side) = stream.wants() {
+        out.clear();
+        if read[side] < bytes {
+            stream.feed_input(side, &chunks[side], &mut out).unwrap();
+            read[side] += chunks[side].len();
+        } else {
+            stream.end_input(side, &mut out).unwrap();
+        }
+        rows += memchr::memchr_iter(b'\n', &out).count();
+        while stream.busy() {
+            out.clear();
+            stream.drain(&mut out).unwrap();
+            assert!(out.len() <= 64 * 1024 + 32);
+            rows += memchr::memchr_iter(b'\n', &out).count();
+        }
+        if read.iter().all(|n| *n >= 16 * 1024) {
+            assert!(rows > 0, "cmp must print before EOF");
+        }
+    }
+    assert_eq!(rows, bytes);
+    assert_eq!(stream.status(), 1);
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(peak < 1024 * 1024, "cmp retained {peak} bytes");
+}
+
+fn checksum_lists_stay_bounded() {
+    let row = format!("{}  file\n", "a".repeat(64));
+    let input = row.repeat(200).into_bytes();
+    let mut stream =
+        mirage_rs::open("digest", br#"{"algorithm":"sha256","check_lines":true}"#).unwrap();
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    let mut out = Vec::new();
+    let mut records = 0;
+    for _ in 0..2500 {
+        out.clear();
+        stream.feed(&input, &mut out).unwrap();
+        records += memchr::memchr_iter(b'\n', &out).count();
+        while stream.busy() {
+            out.clear();
+            stream.drain(&mut out).unwrap();
+            records += memchr::memchr_iter(b'\n', &out).count();
+        }
+    }
+    out.clear();
+    stream.finish(&mut out).unwrap();
+    records += memchr::memchr_iter(b'\n', &out).count();
+    assert_eq!(records, 500_000);
+    assert!(input.len() * 2500 > 32 * 1024 * 1024);
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(peak < 1024 * 1024, "checksum parser retained {peak} bytes");
+}
+
+fn giant_record_capacity_is_released() {
+    let mut stream = mirage_rs::open("uniq", br#"{"count":false,"repeated":false,"unique":false,"ignore_case":false,"zero_terminated":false}"#).unwrap();
+    let input = vec![b'x'; 16 * 1024];
+    let baseline = LIVE.load(Ordering::Relaxed);
+    let mut out = Vec::new();
+    for _ in 0..256 {
+        stream.feed(&input, &mut out).unwrap();
+    }
+    stream.feed(b"\na\nb\nc\n", &mut out).unwrap();
+    while stream.busy() {
+        out.clear();
+        stream.drain(&mut out).unwrap();
+    }
+    drop(out);
+    let retained = LIVE.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(
+        retained < 512 * 1024,
+        "uniq kept {retained} bytes after replacing its giant record"
+    );
+}
+
+fn diff_releases_finished_inputs() {
+    let mut stream = mirage_rs::open("diff", br#"{"brief":true}"#).unwrap();
+    let chunk = vec![b'x'; 16 * 1024];
+    let baseline = LIVE.load(Ordering::Relaxed);
+    let mut out = Vec::new();
+    for side in 0..2 {
+        for _ in 0..2176 {
+            stream.feed_input(side, &chunk, &mut out).unwrap();
+        }
+        stream.end_input(side, &mut out).unwrap();
+    }
+    stream.finish(&mut out).unwrap();
+    while stream.busy() {
+        stream.drain(&mut out).unwrap();
+    }
+    assert_eq!(stream.status(), 0);
+    let retained = LIVE.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(
+        retained < 1024 * 1024,
+        "diff kept {retained} bytes after completion"
     );
 }

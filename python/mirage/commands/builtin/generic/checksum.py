@@ -1,18 +1,23 @@
 import json
-import re
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+)
 from contextlib import aclosing
 from dataclasses import dataclass
 from functools import partial
+
+from pydantic import BaseModel, ConfigDict
 
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.constants import (
     STDIN_HEADER_NAME,
     STDIN_OPERAND,
 )
-from mirage.commands.builtin.utils.lines import split_lines
 from mirage.commands.builtin.utils.operands import (
-    materialized_read,
     merge_split_errors,
     normalized_read,
     split_readable,
@@ -32,6 +37,8 @@ from mirage.context.session_context import current_caller
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.render import fs_error_line
+from mirage.io.async_line_iterator import AsyncLineIterator
+from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs import StreamRefusal, open_stream, run_stream
 from mirage.rs.scan import refused
@@ -299,71 +306,28 @@ def _hash_line(
     return f"{digest} {marker}{label}{ending}".encode()
 
 
-_PLAIN_LINE = re.compile(r"^([0-9a-fA-F]+) [ *](.*)$")
-
-# GNU reads a check line as properly formatted only when its digest has
-# the algorithm's full length in hex; b2sum's length is the line's own.
-HEX_DIGITS = {
-    "md5": 32,
-    "sha1": 40,
-    "sha224": 56,
-    "sha256": 64,
-    "sha384": 96,
-    "sha512": 128,
-}
+class CheckLine(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+    line: int
+    parsed: tuple[str, str, str] | None
 
 
-def _split_line(line: str, tag: str) -> tuple[str, str] | None:
-    """A check line's ``(digest, filename)``, in the GNU default format
-    (``<hex>  NAME`` / ``<hex> *NAME``) or the BSD/``--tag`` one
-    (``TAG (NAME) = <hex>``), matching what GNU ``*sum --check``
-    auto-detects.
-
-    Args:
-        line (str): One non-blank line from the checksum file.
-        tag (str): The tag a BSD line opens with, a regex.
-    """
-    tagged = re.match(rf"^{tag} \((.*)\) = ([0-9a-fA-F]+)$", line)
-    if tagged is not None:
-        return tagged.group(2), tagged.group(1)
-    plain = _PLAIN_LINE.match(line)
-    return None if plain is None else (plain.group(1), plain.group(2))
-
-
-def _parse_check_line(
-    line: str, algorithm: str
-) -> tuple[str, str, str] | None:
-    """Split a checksum-file line into ``(expected_hash, filename,
-    algorithm)``.
-
-    A digest must have its algorithm's full length in hex. A BLAKE2b line
-    names its own length, in its tag (``BLAKE2b-256``) or by its digest's
-    width, a multiple of 8 bits up to 512.
-
-    Args:
-        line (str): One non-blank line from the checksum file.
-        algorithm (str): Digest name, e.g. ``"md5"`` or ``"blake2b"``.
-    """
-    if algorithm != BLAKE2B:
-        split = _split_line(line, re.escape(algorithm.upper()))
-        if split is None or len(split[0]) != HEX_DIGITS[algorithm]:
-            return None
-        return split[0].lower(), split[1], algorithm
-    split = _split_line(line, "BLAKE2b(?:-[0-9]+)?")
-    if split is None:
-        return None
-    digest, name = split
-    bits = len(digest) * 4
-    named = re.match(r"BLAKE2b(?:-([0-9]+))? \(", line)
-    if named is not None and bits != int(named.group(1) or 512):
-        return None
-    if bits % 8 or bits > 512:
-        return None
-    return (
-        digest.lower(),
-        name,
-        BLAKE2B if bits == 512 else f"{BLAKE2B}-{bits}",
+async def _check_lines(
+    source: ByteSource, algorithm: str
+) -> AsyncGenerator[CheckLine, None]:
+    parsed = run_stream(
+        "digest", {"algorithm": algorithm, "check_lines": True}, source
     )
+    lines = AsyncLineIterator(parsed)
+    try:
+        async for line in lines:
+            yield CheckLine.model_validate_json(line)
+    finally:
+        await lines.discard()
+
+
+async def _check_note(store: ByteSpool, line: str) -> None:
+    await store.append(encode_text(line + "\n"))
 
 
 def _check_target(filename: str, cwd: str, mount_prefix: str) -> PathSpec:
@@ -438,7 +402,7 @@ def _check_list_error(
 
 async def _hash_check(
     path: PathSpec,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_list: PolymorphicReadFn,
     read_stream: Callable[..., AsyncIterator[bytes]],
     algorithm: str,
     cwd: str,
@@ -448,9 +412,8 @@ async def _hash_check(
     status: bool,
     quiet: bool,
     warn: bool,
-) -> tuple[bytes, bytes | None, int]:
+) -> tuple[ByteSource, ByteSource, int]:
     prog = _prog(algorithm)
-    data = (await read_bytes(path)).decode(errors="replace")
     # A list read from stdin names files on the mount the command runs on.
     mount_prefix = (
         cwd_prefix
@@ -463,104 +426,120 @@ async def _hash_check(
         if path.raw_path == "-"
         else path.raw_path or path.virtual
     )
-    lines: list[str] = []
-    stderr_lines: list[str] = []
+    lines = ByteSpool()
+    stderr_lines = ByteSpool()
     parsed_lines = 0
     verified = 0
     mismatched = 0
     read_failures = 0
     malformed = 0
-    for lineno, line in enumerate(split_lines(data), start=1):
-        if not line.strip():
-            continue
-        parsed = _parse_check_line(line, algorithm)
-        if parsed is None:
-            malformed += 1
-            if warn:
-                stderr_lines.append(
-                    f"{prog}: {check_label}: {lineno}: improperly formatted "
-                    f"{_tag(algorithm)} checksum line"
-                )
-            continue
-        parsed_lines += 1
-        expected_hash, filename, named = parsed
-        target = _check_target(filename, cwd, mount_prefix)
-        try:
-            digest = await hash_source(read_stream(target), named)
-        except WALK_ERRORS as exc:
-            # GNU --ignore-missing skips only absence; a permission or
-            # transport-shaped failure still reports and fails the check.
-            if ignore_missing and isinstance(
-                exc, (FileNotFoundError, ValueError)
-            ):
+    records = _check_lines(normalized_read(read_list)(path), algorithm)
+    try:
+        async for record in records:
+            lineno, parsed = record.line, record.parsed
+            if parsed is None:
+                malformed += 1
+                if warn:
+                    await _check_note(
+                        stderr_lines,
+                        f"{prog}: {check_label}: {lineno}: improperly formatted "
+                        f"{_tag(algorithm)} checksum line",
+                    )
                 continue
-            strerror = fs_strerror(exc) or str(exc)
-            stderr_lines.append(f"{prog}: {filename}: {strerror}")
-            lines.append(f"{filename}: FAILED open or read")
-            read_failures += 1
-            continue
-        if digest == expected_hash:
-            verified += 1
-            if not quiet:
-                lines.append(f"{filename}: OK")
-        else:
-            lines.append(f"{filename}: FAILED")
-            mismatched += 1
-    # GNU's terminal diagnostics and WARNING block, in its order (pinned
-    # against coreutils 9.7): a file with no properly formatted line is
-    # fatal on its own, even under --status. "No file was verified" means
-    # --ignore-missing left zero OK lines — mismatches included — and
-    # follows the summaries; --status silences it (and the summaries, but
-    # not the per-file strerror lines) while its exit 1 stands.
-    if not parsed_lines:
-        stderr_lines.append(
-            f"{prog}: {check_label}: no properly formatted checksum lines "
-            "found"
-        )
-        return b"", ("\n".join(stderr_lines) + "\n").encode(), 1
-    nothing_verified = ignore_missing and not verified
-    if not status:
-        if malformed:
-            noun = _count_noun(malformed, "1 line is", "lines are")
-            stderr_lines.append(
-                f"{prog}: WARNING: {noun} improperly formatted"
+            parsed_lines += 1
+            expected_hash, filename, named = parsed
+            target = _check_target(filename, cwd, mount_prefix)
+            try:
+                digest = await hash_source(read_stream(target), named)
+            except WALK_ERRORS as exc:
+                # GNU --ignore-missing skips only absence; a permission or
+                # transport-shaped failure still reports and fails the check.
+                if ignore_missing and isinstance(
+                    exc, (FileNotFoundError, ValueError)
+                ):
+                    continue
+                strerror = fs_strerror(exc) or str(exc)
+                await _check_note(
+                    stderr_lines, f"{prog}: {filename}: {strerror}"
+                )
+                if not status:
+                    await _check_note(
+                        lines, f"{filename}: FAILED open or read"
+                    )
+                read_failures += 1
+                continue
+            if digest == expected_hash:
+                verified += 1
+                if not status and not quiet:
+                    await _check_note(lines, f"{filename}: OK")
+            else:
+                if not status:
+                    await _check_note(lines, f"{filename}: FAILED")
+                mismatched += 1
+        # GNU's terminal diagnostics and WARNING block, in its order (pinned
+        # against coreutils 9.7): a file with no properly formatted line is
+        # fatal on its own, even under --status. "No file was verified" means
+        # --ignore-missing left zero OK lines — mismatches included — and
+        # follows the summaries; --status silences it (and the summaries, but
+        # not the per-file strerror lines) while its exit 1 stands.
+        if not parsed_lines:
+            await _check_note(
+                stderr_lines,
+                f"{prog}: {check_label}: no properly formatted checksum lines "
+                "found",
             )
-        if read_failures:
-            noun = _count_noun(read_failures, "1 listed file", "listed files")
-            stderr_lines.append(f"{prog}: WARNING: {noun} could not be read")
-        if mismatched:
-            noun = _count_noun(
-                mismatched, "1 computed checksum", "computed checksums"
+            return await lines.output(), await stderr_lines.output(), 1
+        nothing_verified = ignore_missing and not verified
+        if not status:
+            if malformed:
+                noun = _count_noun(malformed, "1 line is", "lines are")
+                await _check_note(
+                    stderr_lines,
+                    f"{prog}: WARNING: {noun} improperly formatted",
+                )
+            if read_failures:
+                noun = _count_noun(
+                    read_failures, "1 listed file", "listed files"
+                )
+                await _check_note(
+                    stderr_lines, f"{prog}: WARNING: {noun} could not be read"
+                )
+            if mismatched:
+                noun = _count_noun(
+                    mismatched, "1 computed checksum", "computed checksums"
+                )
+                await _check_note(
+                    stderr_lines, f"{prog}: WARNING: {noun} did NOT match"
+                )
+            if nothing_verified:
+                await _check_note(
+                    stderr_lines,
+                    f"{prog}: {check_label}: no file was verified",
+                )
+        exit_code = (
+            1
+            if (
+                mismatched
+                or read_failures
+                or nothing_verified
+                or (strict and malformed)
             )
-            stderr_lines.append(f"{prog}: WARNING: {noun} did NOT match")
-        if nothing_verified:
-            stderr_lines.append(f"{prog}: {check_label}: no file was verified")
-    stderr = (
-        ("\n".join(stderr_lines) + "\n").encode() if stderr_lines else None
-    )
-    exit_code = (
-        1
-        if (
-            mismatched
-            or read_failures
-            or nothing_verified
-            or (strict and malformed)
+            else 0
         )
-        else 0
-    )
-    output = (
-        b""
-        if status
-        else (("\n".join(lines) + "\n").encode() if lines else b"")
-    )
-    return output, stderr, exit_code
+        return await lines.output(), await stderr_lines.output(), exit_code
+    except BaseException:
+        await lines.close()
+        await stderr_lines.close()
+        raise
+    finally:
+        await records.aclose()
 
 
 async def checksum(
     paths: list[PathSpec],
     *,
     algorithm: str,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    read_list: PolymorphicReadFn,
     read_stream: Callable[..., AsyncIterator[bytes]],
     check: bool = False,
     binary: bool = False,
@@ -583,7 +562,7 @@ async def checksum(
     Args:
         paths (list[PathSpec]): the operands, none for stdin.
         algorithm (str): the digest name, e.g. ``"md5"``.
-        read_bytes (Callable): bound whole reader.
+        read_list (PolymorphicReadFn): checksum-list bytes or chunks.
         read_stream (Callable): bound streamed reader, stdin for ``-``.
         check (bool): -c.
         binary (bool): -b.
@@ -603,38 +582,43 @@ async def checksum(
             cwd_prefix = mount_prefix_of(cwd.virtual, cwd.vfs_path)
         else:
             cwd_dir, cwd_prefix = cwd or "/", ""
-        outs: list[bytes] = []
-        errs: list[bytes] = []
+        outs = ByteSpool()
+        errs = ByteSpool()
         exit_code = 0
-        # Every operand is its own checksum list: GNU verifies each in
-        # turn and keeps going when one cannot be read (coreutils 9.7).
-        for p in paths:
-            try:
-                out, stderr, code = await _hash_check(
-                    p,
-                    read_bytes,
-                    read_stream,
-                    algorithm,
-                    cwd_dir,
-                    cwd_prefix,
-                    strict,
-                    ignore_missing,
-                    status,
-                    quiet,
-                    warn,
-                )
-            except WALK_ERRORS as exc:
-                errs.append(_check_list_error(algorithm, p, exc))
-                exit_code = 1
-                continue
-            outs.append(out)
-            if stderr is not None:
-                errs.append(stderr)
-            if code:
-                exit_code = 1
-        return b"".join(outs), IOResult(
-            exit_code=exit_code, stderr=b"".join(errs) or None
-        )
+        try:
+            # Every operand is its own checksum list: GNU verifies each in
+            # turn and keeps going when one cannot be read (coreutils 9.7).
+            for p in paths:
+                try:
+                    out, stderr, code = await _hash_check(
+                        p,
+                        read_list,
+                        read_stream,
+                        algorithm,
+                        cwd_dir,
+                        cwd_prefix,
+                        strict,
+                        ignore_missing,
+                        status,
+                        quiet,
+                        warn,
+                    )
+                except WALK_ERRORS as exc:
+                    await errs.append(_check_list_error(algorithm, p, exc))
+                    exit_code = 1
+                    continue
+                await outs.fill(out)
+                if stderr is not None:
+                    await errs.fill(stderr)
+                if code:
+                    exit_code = 1
+            return await outs.output(), IOResult(
+                exit_code=exit_code, stderr=await errs.output()
+            )
+        except BaseException:
+            await outs.close()
+            await errs.close()
+            raise
     return await hash_operands(
         paths or [STDIN_OPERAND],
         read_stream,
@@ -686,7 +670,7 @@ async def checksum_generic(
         return await checksum(
             paths or [STDIN_OPERAND],
             algorithm=parsed.algorithm.partition("-")[0],
-            read_bytes=materialized_read(stream),
+            read_list=normalized_read(stream),
             read_stream=(
                 dispatched_reader(ctx.vfs.dispatch, normalized_read(stream))
                 if ctx.vfs is not None
@@ -707,7 +691,7 @@ async def checksum_generic(
         await checksum(
             readable,
             algorithm=parsed.algorithm,
-            read_bytes=materialized_read(stream),
+            read_list=normalized_read(stream),
             read_stream=normalized_read(stream),
             binary=parsed.binary,
             tag=parsed.tag,

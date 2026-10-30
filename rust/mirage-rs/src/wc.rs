@@ -1,12 +1,16 @@
+use std::collections::VecDeque;
+
 use serde::Deserialize;
 
 use crate::utf8::{Decoder, INVALID, ascii_run};
 use crate::width::{advance_column, is_space};
 use crate::{Stream, StreamError, parse_config};
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 struct Config {
+    report: Option<Vec<Row>>,
+    width: Option<usize>,
     lines: bool,
     words: bool,
     bytes: bool,
@@ -16,6 +20,27 @@ struct Config {
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
+    if let Some(rows) = config.report {
+        let width = config.width.unwrap_or_else(|| {
+            if rows.len() == 1 && rows[0].values.len() == 1 {
+                1
+            } else if rows.len() == 1 && rows[0].label.is_none() {
+                7
+            } else {
+                rows.iter()
+                    .flat_map(|row| &row.values)
+                    .map(|n| n.to_string().len())
+                    .max()
+                    .unwrap_or(1)
+            }
+        });
+        return Ok(Box::new(Report {
+            rows: rows.into(),
+            width,
+            pending: Vec::new(),
+            at: 0,
+        }));
+    }
     let byte_counts_only =
         (config.lines || config.bytes) && !(config.words || config.chars || config.max_line_length);
     Ok(Box::new(Wc {
@@ -25,6 +50,129 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         decoder: Decoder::new(),
         counts: Counts::default(),
     }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Row {
+    values: Vec<u64>,
+    #[serde(deserialize_with = "crate::latin1_opt")]
+    label: Option<Vec<u8>>,
+}
+
+fn quoted_label(name: &[u8], out: &mut Vec<u8>) {
+    if !name.contains(&b'\n') {
+        out.extend_from_slice(name);
+        return;
+    }
+    out.push(b'\'');
+    let mut escaped = false;
+    let mut at = 0;
+    while at < name.len() {
+        let tail = &name[at..];
+        let width = if tail.starts_with(&[0xc2])
+            && tail.get(1).is_some_and(|b| (0x80..=0x9f).contains(b))
+        {
+            2
+        } else if tail.starts_with(&[0xe2, 0x80, 0xa8]) || tail.starts_with(&[0xe2, 0x80, 0xa9]) {
+            3
+        } else {
+            1
+        };
+        let control = width > 1 || tail[0] < 0x20 || tail[0] == 0x7f;
+        if control {
+            if !escaped {
+                out.extend_from_slice(b"'$'");
+                escaped = true;
+            }
+            let named = match tail[0] {
+                7 => Some(b'a'),
+                8 => Some(b'b'),
+                9 => Some(b't'),
+                10 => Some(b'n'),
+                11 => Some(b'v'),
+                12 => Some(b'f'),
+                13 => Some(b'r'),
+                _ => None,
+            };
+            if let Some(named) = named {
+                out.extend_from_slice(&[b'\\', named]);
+            } else {
+                for &byte in &tail[..width] {
+                    out.extend_from_slice(format!("\\{byte:03o}").as_bytes());
+                }
+            }
+        } else if tail[0] == b'\'' {
+            out.extend_from_slice(b"'\\''");
+            escaped = false;
+        } else {
+            if escaped {
+                out.extend_from_slice(b"''");
+                escaped = false;
+            }
+            out.push(tail[0]);
+        }
+        at += width;
+    }
+    out.push(b'\'');
+}
+
+struct Report {
+    rows: VecDeque<Row>,
+    width: usize,
+    pending: Vec<u8>,
+    at: usize,
+}
+impl Report {
+    fn render(&mut self, out: &mut Vec<u8>) {
+        let start = out.len();
+        while out.len() - start < 64 * 1024 {
+            if self.at == self.pending.len() {
+                self.pending.clear();
+                self.at = 0;
+                crate::release_capacity(&mut self.pending);
+                let Some(row) = self.rows.pop_front() else {
+                    break;
+                };
+                for (index, value) in row.values.iter().enumerate() {
+                    if index != 0 {
+                        self.pending.push(b' ');
+                    }
+                    let number = value.to_string();
+                    self.pending.resize(
+                        self.pending.len() + self.width.saturating_sub(number.len()),
+                        b' ',
+                    );
+                    self.pending.extend_from_slice(number.as_bytes());
+                }
+                if let Some(label) = row.label {
+                    self.pending.push(b' ');
+                    quoted_label(&label, &mut self.pending);
+                }
+                self.pending.push(b'\n');
+            }
+            let len = (64 * 1024 - (out.len() - start)).min(self.pending.len() - self.at);
+            out.extend_from_slice(&self.pending[self.at..self.at + len]);
+            self.at += len;
+        }
+    }
+}
+impl Stream for Report {
+    fn feed(&mut self, _: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.render(out);
+        Ok(())
+    }
+    fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.render(out);
+        Ok(())
+    }
+    fn busy(&self) -> bool {
+        self.at < self.pending.len() || !self.rows.is_empty()
+    }
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.render(out);
+        Ok(())
+    }
 }
 
 /// Words also end at the non-breaking spaces and the word joiner, as GNU

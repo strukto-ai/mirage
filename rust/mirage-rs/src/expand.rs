@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::width::TAB_WIDTH;
 use crate::{Stream, StreamError, parse_config};
@@ -9,7 +9,7 @@ const OUTPUT: usize = 64 * 1024;
 /// One resolved `-t` list: the explicit stops in typed order, `/N`'s
 /// multiple past them and `+N`'s step from the last of them. All empty is
 /// the default size 8.
-#[derive(Deserialize)]
+#[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Tabs {
     #[serde(deserialize_with = "stops")]
@@ -29,7 +29,148 @@ fn stops<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<u64>, 
         .collect())
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum TabInput {
+    Stops(Tabs),
+    Lists(#[serde(deserialize_with = "crate::latin1_list")] Vec<Vec<u8>>),
+}
+
+impl TabInput {
+    fn parse(self, prog: &str) -> Result<Tabs, StreamError> {
+        match self {
+            Self::Stops(tabs) => Ok(tabs),
+            Self::Lists(lists) => Tabs::parse(&lists, prog),
+        }
+    }
+}
+
 impl Tabs {
+    fn parse(lists: &[Vec<u8>], prog: &str) -> Result<Self, StreamError> {
+        let mut tabs = Self::default();
+        for raw in lists {
+            let mut at = 0;
+            let mut waiting = Vec::new();
+            let mut given = None;
+            let mut problems = Vec::new();
+            while at < raw.len() {
+                match raw[at] {
+                    b',' | b' ' | b'\t' => {
+                        at += 1;
+                        continue;
+                    }
+                    b'+' | b'/' => {
+                        waiting.push(raw[at]);
+                        at += 1;
+                        continue;
+                    }
+                    b'0'..=b'9' => {}
+                    _ => {
+                        problems.push(format!(
+                            "{prog}: tab size contains invalid character(s): '{}'",
+                            crate::quoted(&raw[at..])
+                        ));
+                        break;
+                    }
+                }
+                let mut value = 0u64;
+                let mut oversized = false;
+                let mut misplaced = Vec::new();
+                while at < raw.len() && !matches!(raw[at], b',' | b' ' | b'\t') {
+                    let byte = raw[at];
+                    if matches!(byte, b'+' | b'/') {
+                        problems.push(format!(
+                            "{prog}: '{}' specifier not at start of number: '{}'",
+                            char::from(byte),
+                            crate::quoted(&raw[at..])
+                        ));
+                        misplaced.push(byte);
+                        at += 1;
+                    } else if byte.is_ascii_digit() {
+                        let start = at;
+                        let mut run = 0u64;
+                        while at < raw.len() && raw[at].is_ascii_digit() {
+                            run = run
+                                .saturating_mul(10)
+                                .saturating_add(u64::from(raw[at] - b'0'));
+                            value = value
+                                .saturating_mul(10)
+                                .saturating_add(u64::from(raw[at] - b'0'));
+                            at += 1;
+                        }
+                        if run > i64::MAX as u64 {
+                            problems.push(format!(
+                                "{prog}: tab stop is too large '{}'",
+                                crate::quoted(&raw[start..at])
+                            ));
+                            oversized = true;
+                        }
+                    } else {
+                        problems.push(format!(
+                            "{prog}: tab size contains invalid character(s): '{}'",
+                            crate::quoted(&raw[at..])
+                        ));
+                        return Err(StreamError::new(problems.join("\n")));
+                    }
+                }
+                if !oversized {
+                    if waiting.is_empty() {
+                        if let Some(given) = given {
+                            problems.push(format!(
+                                "{prog}: '{}' specifier only allowed with the last value",
+                                char::from(given)
+                            ));
+                            break;
+                        }
+                        tabs.stops.push(value);
+                    } else {
+                        let size = if waiting.contains(&b'/') { b'/' } else { b'+' };
+                        let (own, other) = if size == b'/' {
+                            (&mut tabs.extend, tabs.increment)
+                        } else {
+                            (&mut tabs.increment, tabs.extend)
+                        };
+                        if *own != 0 {
+                            problems.push(format!(
+                                "{prog}: '{}' specifier only allowed with the last value",
+                                char::from(size)
+                            ));
+                            break;
+                        }
+                        if value != 0 {
+                            if other != 0 {
+                                problems.push(format!(
+                                    "{prog}: '/' specifier is mutually exclusive with '+'"
+                                ));
+                                break;
+                            }
+                            *own = value;
+                            given = waiting.last().copied();
+                            waiting.clear();
+                        }
+                    }
+                }
+                waiting.extend(misplaced);
+            }
+            if !problems.is_empty() {
+                return Err(StreamError::new(problems.join("\n")));
+            }
+        }
+        let mut previous = 0;
+        for &stop in &tabs.stops {
+            if stop == 0 {
+                return Err(StreamError::new(format!("{prog}: tab size cannot be 0")));
+            }
+            if stop <= previous {
+                return Err(StreamError::new(format!(
+                    "{prog}: tab sizes must be ascending"
+                )));
+            }
+            previous = stop;
+        }
+        Ok(tabs)
+    }
+
     /// The column a TAB in `column` pads to: the first stop past it, then
     /// `/N`'s next multiple, `+N`'s next step, one stop repeating as a
     /// size, several stops one blank at a time, none the default 8.
@@ -78,21 +219,21 @@ impl Tabs {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ExpandConfig {
-    tabs: Tabs,
+    tabs: TabInput,
     initial_only: bool,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UnexpandConfig {
-    tabs: Tabs,
+    tabs: TabInput,
     all: bool,
 }
 
 pub(crate) fn open_expand(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config = parse_config::<ExpandConfig>(config)?;
     Ok(Box::new(Expand {
-        tabs: config.tabs,
+        tabs: config.tabs.parse("expand")?,
         initial_only: config.initial_only,
         column: 0,
         leading: true,
@@ -105,7 +246,7 @@ pub(crate) fn open_expand(config: &[u8]) -> Result<Box<dyn Stream>, StreamError>
 pub(crate) fn open_unexpand(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config = parse_config::<UnexpandConfig>(config)?;
     Ok(Box::new(Unexpand {
-        tabs: config.tabs,
+        tabs: config.tabs.parse("unexpand")?,
         all: config.all,
         column: 0,
         converting: true,
@@ -179,6 +320,9 @@ impl Expand {
 }
 
 impl Stream for Expand {
+    fn metadata(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&serde_json::to_vec(&self.tabs).expect("tab configuration"));
+    }
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
         if self.busy() {
             return Err(StreamError::new("expand input must be drained"));
@@ -234,6 +378,9 @@ impl Tabs {
 }
 
 impl Stream for Unexpand {
+    fn metadata(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&serde_json::to_vec(&self.tabs).expect("tab configuration"));
+    }
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
         out.reserve(input.len());
         for &byte in input {

@@ -19,29 +19,55 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
-import { openStream, runStream } from '../../../../rs/stream.ts'
+import {
+  closeStream,
+  openStream,
+  runStream,
+  streamOutputChunks,
+  type OpenStream,
+} from '../../../../rs/stream.ts'
 import { byteView, fromByteView } from '../../../../shell/bytes.ts'
 import { stdinStream } from '../../utils/stream.ts'
 import { perOperand } from '../../utils/operands.ts'
+
+import { OutputStream } from '../../../../io/stream.ts'
 
 const strings: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const minLen = new FlagView(ctx.flags, specOf('strings')).asText('n')
   const config = { min_len: minLen === undefined ? null : byteView(minLen) }
   // The engine refuses -n before any operand is touched, as binutils does.
+  let engine: OpenStream
   try {
-    const probe = await openStream('strings', config)
-    probe.close()
+    engine = await openStream('strings', config)
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return [null, new IOResult({ exitCode: 1, stderr: fromByteView(`${err.message}\n`) })]
   }
-  const files = commandFiles(ctx, paths)
-  const resolved = await resolveOrEmpty(files, paths)
-  // binutils strings never reads `-` as stdin; only /dev/stdin is.
-  const stream = stdinStream(dirAwareStream(files, ctx), ctx.stdin, false, false)
-  const io = new IOResult()
-  const each = (source: ByteSource) => runStream('strings', config, source, ctx.signal)
-  return [perOperand(resolved, stream, ctx.stdin, io, 'strings', each), io]
+  try {
+    const files = commandFiles(ctx, paths)
+    const resolved = await resolveOrEmpty(files, paths)
+    const stream = stdinStream(dirAwareStream(files, ctx), ctx.stdin, false, false)
+    const io = new IOResult()
+    let used = false
+    const each = (source: ByteSource): AsyncIterable<Uint8Array> => {
+      if (used) return runStream('strings', config, source, ctx.signal)
+      used = true
+      return streamOutputChunks(engine, source, ctx.signal)
+    }
+    const produced = perOperand(resolved, stream, ctx.stdin, io, 'strings', each)[
+      Symbol.asyncIterator
+    ]()
+    return [
+      new OutputStream(produced, async () => {
+        await produced.return?.()
+        await closeStream(engine)
+      }),
+      io,
+    ]
+  } catch (error) {
+    await closeStream(engine)
+    throw error
+  }
 }
 
 export const BUILDER: GenericCommand = {

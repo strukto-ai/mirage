@@ -107,12 +107,36 @@ export function sedWrites(bag: Record<string, FlagValue>, texts: readonly string
   const expressions = fl.asList('e')
   const scripts = expressions.length > 0 ? expressions : texts.slice(0, 1)
   if (scripts.length === 0) return false
+  return scriptWrites(scripts, fl.asBool('E') || fl.asBool('r'))
+}
+
+const writeChecks = new Map<string, boolean>()
+function scriptWrites(scripts: readonly string[], extended: boolean): boolean {
+  const cacheable = scripts.reduce((size, script) => size + script.length + 1, 0) <= 4096
+  const key = cacheable ? JSON.stringify([scripts, extended]) : null
+  if (key !== null) {
+    const known = writeChecks.get(key)
+    if (known !== undefined) {
+      writeChecks.delete(key)
+      writeChecks.set(key, known)
+      return known
+    }
+  }
   const engine = openStreamSync('sed', {
     pieces: scripts.map((text) => ({ text: byteView(text) })),
-    extended: fl.asBool('E') || fl.asBool('r'),
+    extended,
   })
   try {
-    return (JSON.parse(new TextDecoder().decode(engine.metadata())) as { writes: boolean }).writes
+    const writes = (JSON.parse(new TextDecoder().decode(engine.metadata())) as { writes: boolean })
+      .writes
+    if (key !== null) {
+      if (writeChecks.size >= 64) {
+        const oldest = writeChecks.keys().next().value
+        if (oldest !== undefined) writeChecks.delete(oldest)
+      }
+      writeChecks.set(key, writes)
+    }
+    return writes
   } finally {
     engine.close()
   }
