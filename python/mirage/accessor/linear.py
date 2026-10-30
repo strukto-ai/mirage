@@ -14,7 +14,7 @@
 
 from collections.abc import Callable
 
-from mirage.accessor.base import SessionAccessor
+from mirage.accessor.base import Accessor, SessionAccessor
 from mirage.core.linear.config import LinearConfig
 
 
@@ -34,3 +34,13 @@ class LinearAccessor(SessionAccessor):
         super().__init__(config.timeout)
         self.config = config
         self.capped = capped
+
+    def reaches(self, peer: Accessor) -> bool:
+        """Whether a write through this client may change what ``peer``
+        reads: any Linear mount, whatever key or API root it reads through, since
+        a second key or a proxy reaches the same data.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return isinstance(peer, LinearAccessor)

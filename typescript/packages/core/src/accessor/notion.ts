@@ -24,4 +24,13 @@ export class NotionAccessor<T extends NotionTransport = NotionTransport> extends
   ) {
     super()
   }
+
+  /**
+   * Whether a write through this client may change what `peer` reads: any Notion mount,
+   * whatever key or API root it reads through, since a second key or a
+   * proxy reaches the same data. Mirrors Python's `NotionAccessor.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return peer instanceof NotionAccessor
+  }
 }

@@ -52,7 +52,7 @@ class FakeTransport implements NotionTransport {
 }
 
 function makeAccessor(transport: NotionTransport): NotionAccessor {
-  return { transport }
+  return new NotionAccessor(transport)
 }
 
 function spec(virtual: string, prefix = ''): PathSpec {

@@ -30,6 +30,15 @@ export class SlackAccessor extends Accessor {
     super()
     this.timeRange = new TimeRange(config.startTime, config.endTime)
   }
+
+  /**
+   * Whether a write through this client may change what `peer` reads: any Slack mount,
+   * whatever token or API root it reads through, since a second token or a
+   * proxy reaches the same data. Mirrors Python's `SlackAccessor.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return peer instanceof SlackAccessor
+  }
 }
 
 /**

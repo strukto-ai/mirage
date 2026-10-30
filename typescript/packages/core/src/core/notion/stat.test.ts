@@ -15,7 +15,7 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
-import type { NotionAccessor } from '../../accessor/notion.ts'
+import { NotionAccessor } from '../../accessor/notion.ts'
 import { NotionVFSBase } from '../../vfs/notion/notion.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
@@ -46,7 +46,7 @@ class FakeTransport implements NotionTransport {
 }
 
 function makeAccessor(transport: NotionTransport): NotionAccessor {
-  return { transport }
+  return new NotionAccessor(transport)
 }
 
 function spec(virtual: string, prefix = ''): PathSpec {

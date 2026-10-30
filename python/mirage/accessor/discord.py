@@ -15,7 +15,7 @@
 from collections.abc import Iterable
 from typing import Any
 
-from mirage.accessor.base import SessionAccessor
+from mirage.accessor.base import Accessor, SessionAccessor
 from mirage.accessor.responses import ResponseCache
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.core.discord.config import DiscordConfig
@@ -35,3 +35,13 @@ class DiscordAccessor(SessionAccessor):
 
     def caches(self) -> Iterable[ResponseCache[Any, Any]]:
         return (self.listed_day,)
+
+    def reaches(self, peer: Accessor) -> bool:
+        """Whether a write through this client may change what ``peer``
+        reads: any Discord mount, whatever token or API root it reads through, since
+        a second token or a proxy reaches the same data.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return isinstance(peer, DiscordAccessor)

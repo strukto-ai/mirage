@@ -37,6 +37,17 @@ export class HfAccountAccessor extends Accessor {
   get endpoint(): string {
     return hfEndpoint(this.config)
   }
+
+  /**
+   * Whether a write through this account may change what `peer` reads: a
+   * model, dataset or space repository on the same Hub, whatever token it
+   * reads with. The hf CLI writes no bucket. Mirrors Python's
+   * `HfAccountAccessor.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    const origin = (endpoint: string): string => endpoint.replace(/\/+$/, '')
+    return peer instanceof HfHubAccessor && origin(peer.endpoint) === origin(this.endpoint)
+  }
 }
 
 /** The account a repository or bucket mount builds and owns. */

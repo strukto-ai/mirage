@@ -58,4 +58,13 @@ export class AirtableAccessor extends Accessor {
   override releaseClock(owner: unknown): void {
     this.limiter.releaseClock(owner)
   }
+
+  /**
+   * Whether a write through this client may change what `peer` reads: any Airtable mount,
+   * whatever token or API root it reads through, since a second token or a
+   * proxy reaches the same data. Mirrors Python's `AirtableAccessor.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return peer instanceof AirtableAccessor
+  }
 }

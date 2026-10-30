@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import type { NotionTransport } from './client.ts'
 import { normalizeDatabase } from './normalize.ts'
-import type { NotionAccessor } from '../../accessor/notion.ts'
+import { NotionAccessor } from '../../accessor/notion.ts'
 import { readdir as rawOperation } from './readdir.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { NotionVFSBase } from '../../vfs/notion/notion.ts'
@@ -50,7 +50,7 @@ class FakeTransport implements NotionTransport {
 }
 
 function makeAccessor(transport: NotionTransport): NotionAccessor {
-  return { transport }
+  return new NotionAccessor(transport)
 }
 
 function spec(virtual: string, prefix = ''): PathSpec {

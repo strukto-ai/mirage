@@ -43,4 +43,13 @@ export class TrelloAccessor extends Accessor {
     this.boardIds = options.boardIds ?? null
     this.capped = options.capped ?? (() => true)
   }
+
+  /**
+   * Whether a write through this client may change what `peer` reads: any Trello mount,
+   * whatever token or API root it reads through, since a second token or a
+   * proxy reaches the same data. Mirrors Python's `TrelloAccessor.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return peer instanceof TrelloAccessor
+  }
 }

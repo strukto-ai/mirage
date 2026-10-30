@@ -14,7 +14,7 @@
 
 from collections.abc import Hashable
 
-from mirage.accessor.base import SessionAccessor
+from mirage.accessor.base import Accessor, SessionAccessor
 from mirage.core.airtable.config import AirtableConfig
 from mirage.core.api.rate_limit import RateLimiter
 from mirage.utils.clock import Clock
@@ -51,3 +51,13 @@ class AirtableAccessor(SessionAccessor):
             owner (Hashable): the key it was bound with.
         """
         self.limiter.release_clock(owner)
+
+    def reaches(self, peer: Accessor) -> bool:
+        """Whether a write through this client may change what ``peer``
+        reads: any Airtable mount, whatever token or API root it reads through, since
+        a second token or a proxy reaches the same data.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return isinstance(peer, AirtableAccessor)

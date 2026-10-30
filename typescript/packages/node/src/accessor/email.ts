@@ -85,4 +85,17 @@ export class EmailAccessor extends Accessor {
     }
     this.clientPromise = null
   }
+
+  /**
+   * Whether a write through this account may change what `peer` reads: a
+   * mailbox on the same IMAP server, whatever login reads it, since two logins
+   * can share a folder. Mirrors Python's `EmailAccessor.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return (
+      peer instanceof EmailAccessor &&
+      peer.config.imapHost === this.config.imapHost &&
+      peer.config.imapPort === this.config.imapPort
+    )
+  }
 }

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.base import SessionAccessor
+from mirage.accessor.base import Accessor, SessionAccessor
 from mirage.core.notion.config import NotionConfig
 
 
@@ -20,3 +20,13 @@ class NotionAccessor(SessionAccessor):
     def __init__(self, config: NotionConfig) -> None:
         super().__init__(config.timeout)
         self.config = config
+
+    def reaches(self, peer: Accessor) -> bool:
+        """Whether a write through this client may change what ``peer``
+        reads: any Notion mount, whatever key or API root it reads through, since
+        a second key or a proxy reaches the same data.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return isinstance(peer, NotionAccessor)

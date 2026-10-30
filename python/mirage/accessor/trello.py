@@ -14,7 +14,7 @@
 
 from collections.abc import Callable
 
-from mirage.accessor.base import SessionAccessor
+from mirage.accessor.base import Accessor, SessionAccessor
 from mirage.core.trello.config import TrelloConfig
 
 
@@ -34,3 +34,13 @@ class TrelloAccessor(SessionAccessor):
         super().__init__(config.timeout)
         self.config = config
         self.capped = capped
+
+    def reaches(self, peer: Accessor) -> bool:
+        """Whether a write through this client may change what ``peer``
+        reads: any Trello mount, whatever token or API root it reads through, since
+        a second token or a proxy reaches the same data.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return isinstance(peer, TrelloAccessor)

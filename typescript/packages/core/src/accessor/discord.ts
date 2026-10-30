@@ -35,6 +35,15 @@ export class DiscordAccessor extends Accessor {
   override caches(): readonly ResponseCache<unknown, unknown>[] {
     return [this.listedDay]
   }
+
+  /**
+   * Whether a write through this client may change what `peer` reads: any Discord mount,
+   * whatever token or API root it reads through, since a second token or a
+   * proxy reaches the same data. Mirrors Python's `DiscordAccessor.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return peer instanceof DiscordAccessor
+  }
 }
 
 /**

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { TokenAccessor } from './base.ts'
+import { type Accessor, TokenAccessor } from './base.ts'
 import { CalendarClient, type CalendarApi } from '../core/gcal/api.ts'
 import { DocsClient, type DocsApi } from '../core/gdocs/api.ts'
 import { DriveClient, type DriveApi } from '../core/gdrive/api.ts'
@@ -57,5 +57,15 @@ export class GoogleApiAccessor extends TokenAccessor {
   /** The one door every Calendar request goes through. */
   get calendar(): CalendarApi {
     return new CalendarClient(this.tokenManager)
+  }
+
+  /**
+   * Whether a write through this client may change what `peer` reads: any
+   * Google mount, whatever credential or API root it reads through, since a
+   * Drive write can change a Doc or a Sheet and a second credential or a proxy
+   * reaches the same data. Mirrors Python's `GoogleApiAccessor.reaches`.
+   */
+  override reaches(peer: Accessor): boolean {
+    return peer instanceof GoogleApiAccessor
   }
 }

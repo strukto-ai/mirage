@@ -70,3 +70,17 @@ class EmailAccessor(Accessor):
         if self._imap is not None and self._imap.alive:
             await self._imap.logout()
         self._imap = None
+
+    def reaches(self, peer: Accessor) -> bool:
+        """Whether a write through this account may change what ``peer``
+        reads: a mailbox on the same IMAP server, whatever login reads it,
+        since two logins can share a folder.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return (
+            isinstance(peer, EmailAccessor)
+            and peer.config.imap_host == self.config.imap_host
+            and peer.config.imap_port == self.config.imap_port
+        )

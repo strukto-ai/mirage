@@ -45,6 +45,18 @@ class HfAccountAccessor(SessionAccessor):
     def endpoint(self) -> str:
         return self.config.endpoint
 
+    def reaches(self, peer: Accessor) -> bool:
+        """Whether a write through this account may change what ``peer``
+        reads: a model, dataset or space repository on the same Hub,
+        whatever token it reads with. The hf CLI writes no bucket.
+
+        Args:
+            peer (Accessor): another of the workspace's accessors.
+        """
+        return isinstance(peer, HfHubAccessor) and peer.endpoint.rstrip(
+            "/"
+        ) == self.endpoint.rstrip("/")
+
 
 def account_of(config: HfRepoConfig | HfBucketsConfig) -> HfAccountAccessor:
     """The account a repository or bucket mount builds and owns.
