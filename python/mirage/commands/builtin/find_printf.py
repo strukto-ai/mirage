@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import math
 from datetime import datetime, timezone
 from stat import filemode
 
@@ -126,8 +125,9 @@ def _time_fields(ts: float) -> dict[str, str]:
     Args:
         ts (float): seconds since the epoch.
     """
-    dt = datetime.fromtimestamp(ts, timezone.utc)
-    frac = f"{ts - math.floor(ts):.10f}".split(".")[1]
+    whole, micros = divmod(round(ts * 1_000_000), 1_000_000)
+    dt = datetime.fromtimestamp(whole, timezone.utc)
+    frac = f"{micros:06d}0000"
     iso_year, iso_week, iso_day = dt.isocalendar()
     yday = dt.timetuple().tm_yday - 1
     wday = iso_day % 7
@@ -137,7 +137,7 @@ def _time_fields(ts: float) -> dict[str, str]:
     clock = f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}"
     date = f"{dt.month:02d}/{dt.day:02d}/{dt.year % 100:02d}"
     return {
-        "@": f"{math.floor(ts)}.{frac}",
+        "@": f"{whole}.{frac}",
         "+": f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}+{clock}.{frac}",
         "a": day[:3],
         "A": day,
@@ -165,7 +165,7 @@ def _time_fields(ts: float) -> dict[str, str]:
         "r": f"{hour12:02d}:{dt.minute:02d}:{dt.second:02d} "
         + ("AM" if dt.hour < 12 else "PM"),
         "R": f"{dt.hour:02d}:{dt.minute:02d}",
-        "s": f"{math.floor(ts)}",
+        "s": f"{whole}",
         "S": f"{dt.second:02d}.{frac}",
         "t": "\t",
         "T": f"{clock}.{frac}",

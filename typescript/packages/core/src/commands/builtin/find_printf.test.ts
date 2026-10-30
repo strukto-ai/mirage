@@ -121,6 +121,13 @@ describe('expandPrintf', () => {
     )
   })
 
+  it('keeps a fraction to its microseconds', () => {
+    const fractional = { ...stat, mtimeEpoch: Date.parse('2024-03-05T14:07:09.123Z') / 1000 }
+    expect(expandPrintf('%T@|%TS|%Ts\n', '/data/a.txt', '/data', fractional, [])).toBe(
+      '1709647629.1230000000|09.1230000000|1709647629\n',
+    )
+  })
+
   it('keeps a year below 100 in the ISO week and the day of the year', () => {
     const early = { ...stat, mtimeEpoch: -62008934400 }
     expect(expandPrintf('%TF|%TG|%TV|%Tj|%Tg\n', '/data/a.txt', '/data', early, [])).toBe(

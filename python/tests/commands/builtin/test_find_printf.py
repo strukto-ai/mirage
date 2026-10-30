@@ -164,6 +164,21 @@ def test_expand_time_directives():
     assert len(epoch.strip().split(".")[1]) == 10
 
 
+def test_expand_time_keeps_a_fraction_to_its_microseconds():
+    fractional = FileStat(
+        name="a",
+        size=6,
+        type=FileType.FILE,
+        modified="2024-03-05T14:07:09.123000+00:00",
+    )
+    assert (
+        expand_printf(
+            "%T@|%TS|%Ts\n", "/data/a.txt", _spec("/data"), fractional, []
+        )
+        == "1709647629.1230000000|09.1230000000|1709647629\n"
+    )
+
+
 def test_expand_time_takes_a_fraction_before_1970_from_the_calendar():
     before = FileStat(
         name="a",

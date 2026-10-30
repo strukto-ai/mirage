@@ -122,8 +122,10 @@ function isoWeek(dt: Date): [number, number] {
  * and `%TX` carry the fraction GNU appends. Mirrors Python's `_time_fields`.
  */
 function timeFields(ts: number): Record<string, string> {
-  const dt = new Date(ts * 1000)
-  const frac = (ts - Math.floor(ts)).toFixed(10).split('.')[1] ?? '0000000000'
+  const total = Math.round(ts * 1_000_000)
+  const whole = Math.floor(total / 1_000_000)
+  const dt = new Date(whole * 1000)
+  const frac = `${pad(total - whole * 1_000_000, 6)}0000`
   const [isoYear, isoWeekNo] = isoWeek(dt)
   const year = dt.getUTCFullYear()
   const month = dt.getUTCMonth()
@@ -140,7 +142,7 @@ function timeFields(ts: number): Record<string, string> {
   const date = `${pad(month + 1, 2)}/${pad(dt.getUTCDate(), 2)}/${pad(year % 100, 2)}`
   const meridiem = hour < 12 ? 'AM' : 'PM'
   return {
-    '@': `${String(Math.floor(ts))}.${frac}`,
+    '@': `${String(whole)}.${frac}`,
     '+': `${pad(year, 4)}-${pad(month + 1, 2)}-${pad(dt.getUTCDate(), 2)}+${clock}.${frac}`,
     a: day.slice(0, 3),
     A: day,
@@ -167,7 +169,7 @@ function timeFields(ts: number): Record<string, string> {
     P: meridiem.toLowerCase(),
     r: `${pad(hour12, 2)}:${pad(dt.getUTCMinutes(), 2)}:${pad(dt.getUTCSeconds(), 2)} ${meridiem}`,
     R: `${pad(hour, 2)}:${pad(dt.getUTCMinutes(), 2)}`,
-    s: String(Math.floor(ts)),
+    s: String(whole),
     S: `${pad(dt.getUTCSeconds(), 2)}.${frac}`,
     t: '\t',
     T: `${clock}.${frac}`,
