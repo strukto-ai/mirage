@@ -84,7 +84,7 @@ exclude = ["**/__pycache__/**"]
 # Pinned exactly: monty's API is still moving fast (0.0.19 replaced the whole
 # execution model, 0.0.20 split the distribution into client + runtime
 # packages), and upstream pins its own worker binary the same way.
-monty    = ["pydantic-monty==1.0.0"]
+monty    = ["pydantic-monty==1.4.0"]
 wasi     = ["wasmtime>=46"]
 quickjs  = ["wasmtime>=46"]
 

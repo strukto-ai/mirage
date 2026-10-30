@@ -13,11 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../../../errors/index.ts'
+import { isAborting } from '../../../errors/fs.ts'
+import { entryName } from '../../../utils/remnants.ts'
 import { normDir } from '../../../utils/slash.ts'
 import { parseMode } from '../../handles/mode.ts'
 import type { RuntimeFiles } from '../../files.ts'
+import type { VFSEntry } from '../../types.ts'
 import type { MontyFsBits } from './loader.ts'
-import { MAX_URANDOM_BYTES, NOT_A_LINK } from './constants.ts'
+import { MAX_URANDOM_BYTES, NOT_A_LINK, SCAN_LINK_DEPTH, SCAN_MAX_ENTRIES } from './constants.ts'
 import { asGuestError, guestError } from './errors.ts'
 import { childPaths } from './list.ts'
 import { isDirRow, isRegularRow, statResult } from './stat.ts'
@@ -140,7 +143,7 @@ const CONTENT = new Set([
 const PROBES = new Set(['Path.exists', 'Path.is_file', 'Path.is_dir', 'Path.is_symlink'])
 
 /** The other calls this adapter serves, which refuse where there is none. */
-const STRUCTURE = new Set(['Path.mkdir', 'Path.iterdir', 'Path.stat'])
+const STRUCTURE = new Set(['Path.mkdir', 'Path.iterdir', 'Path.scan', 'Path.stat'])
 
 /**
  * Monty's OS callbacks: every path a guest names is the workspace's.
@@ -288,6 +291,8 @@ export class MontyFs {
             entries.map((e) => e.path),
           ),
         )
+      case 'Path.scan':
+        return this.scan(path, kwargs, files)
       // The predicates read the row the view shows: the mount's own,
       // or a directory the workspace lists.
       case 'Path.is_dir':
@@ -305,6 +310,102 @@ export class MontyFs {
         })
       default:
         return this.notHandled
+    }
+  }
+
+  /**
+   * The subtree under `path` in one call, for walk, scandir and glob.
+   *
+   * One listing per directory, each entry kinded by the stat that
+   * listing already made, so a walk costs what `find` costs instead of
+   * the three probes per entry monty's default asks. The glob's pattern
+   * is only a hint, since monty filters the tree itself. A directory
+   * below `path` that will not list reads as empty, as it does on
+   * monty's own mounts; a tree past SCAN_MAX_ENTRIES raises
+   * RuntimeError, because a walk would swallow an OSError.
+   *
+   * Args:
+   *   path: the directory to scan, or a file to describe.
+   *   kwargs: `max_depth` (the deepest level to return, none for the
+   *     whole tree) and `follow_symlinks` (descend into linked
+   *     directories).
+   *   files: the execution's file adapter.
+   */
+  private async scan(
+    path: string,
+    kwargs: Record<string, unknown>,
+    files: RuntimeFiles,
+  ): Promise<[string, boolean, boolean, boolean][]> {
+    const root = await files.viewStat(path)
+    if (root === null) throw guestError('ENOENT', path)
+    const tree: [string, boolean, boolean, boolean][] = [
+      ['', isDirRow(root), isRegularRow(root), await this.isLink(path, files)],
+    ]
+    const follow = kwargs.follow_symlinks === true
+    const maxDepth =
+      typeof kwargs.max_depth === 'number' ? kwargs.max_depth : follow ? SCAN_LINK_DEPTH : null
+    const pending: [string, string, number][] = isDirRow(root) ? [[path, '', 0]] : []
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      const [directory, relative, depth] = next
+      if (maxDepth !== null && depth >= maxDepth) continue
+      let rows: VFSEntry[]
+      try {
+        rows = await files.readdir(normDir(directory))
+      } catch (err) {
+        if (depth === 0 || isAborting(err)) throw err
+        console.debug(`monty scan: ${directory} did not list: ${String(err)}`)
+        continue
+      }
+      for (const row of rows) {
+        const name = entryName(row.path)
+        const child = directory === '/' ? '/' + name : directory + '/' + name
+        const entry = relative === '' ? name : relative + '/' + name
+        const [isDir, isFile] = await this.kind(child, row, files)
+        const isLink = row.isLink === true
+        tree.push([entry, isDir, isFile, isLink])
+        if (tree.length > SCAN_MAX_ENTRIES) {
+          throw Object.assign(
+            new Error(`directory scan exceeded ${String(SCAN_MAX_ENTRIES)} entries`),
+            {
+              name: 'RuntimeError',
+              guestCondition: 'scan',
+            },
+          )
+        }
+        if (isDir && (follow || !isLink)) pending.push([child, entry, depth + 1])
+      }
+    }
+    return tree
+  }
+
+  /**
+   * Whether a listed entry is a directory and whether a regular file.
+   * The listing's own stat answers for a path in the view, except for a
+   * link, whose row is the link's and not what it reaches, and a row the
+   * listing could not stat. Those, and every path outside the view, ask
+   * the view as `Path.is_dir` would, so a file the view withholds (the
+   * history beside the mounts) is not offered as one. A stat that fails
+   * leaves the entry neither, CPython's rule inside `os.walk`.
+   */
+  private async kind(
+    path: string,
+    row: VFSEntry,
+    files: RuntimeFiles,
+  ): Promise<[boolean, boolean]> {
+    if (row.isLink !== true && files.serves(path)) {
+      if (row.mode !== undefined) {
+        const st = { size: row.size, isDir: row.isDir, mode: row.mode }
+        return [isDirRow(st), isRegularRow(st)]
+      }
+      if (row.isDir) return [true, false]
+    }
+    try {
+      const reached = await files.viewStat(path)
+      return reached === null ? [false, false] : [isDirRow(reached), isRegularRow(reached)]
+    } catch (err) {
+      if (isAborting(err)) throw err
+      console.debug(`monty scan: ${path} did not stat: ${String(err)}`)
+      return [false, false]
     }
   }
 

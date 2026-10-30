@@ -2,7 +2,7 @@
   "cases": [
     {
       "id": "symlink_roundtrip",
-      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "note": "monty has no link calls (symlink, readlink, lstat) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
       "runtimes": [
         "wasi",
         "pyodide",
@@ -55,7 +55,7 @@
     },
     {
       "id": "readlink_and_lstat_a_shell_link",
-      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "note": "monty has no link calls (symlink, readlink, lstat) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
       "runtimes": [
         "wasi",
         "pyodide",
@@ -175,7 +175,7 @@
     },
     {
       "id": "readlink_splits_its_two_misses",
-      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "note": "monty has no link calls (symlink, readlink, lstat) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
       "runtimes": [
         "wasi",
         "pyodide",
@@ -221,7 +221,7 @@
     },
     {
       "id": "symlink_refuses_an_occupied_name",
-      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "note": "monty has no link calls (symlink, readlink, lstat) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
       "runtimes": [
         "wasi",
         "pyodide",
@@ -281,8 +281,9 @@
     },
     {
       "id": "scandir_reports_a_link_as_a_link",
-      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "note": "quickjs has no link calls on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
       "runtimes": [
+        "monty",
         "wasi",
         "pyodide",
         "host"
@@ -336,7 +337,7 @@
     },
     {
       "id": "rename_a_link_moves_the_name",
-      "note": "monty has no link calls (symlink, readlink, lstat, scandir) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
+      "note": "monty has no link calls (symlink, readlink, lstat) and quickjs has none on either host: qjs-wasi builds without os.symlink, os.readlink and os.lstat, and the TypeScript shim matches it.",
       "runtimes": [
         "wasi",
         "pyodide",

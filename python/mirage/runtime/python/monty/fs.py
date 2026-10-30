@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Iterator
+from concurrent.futures import CancelledError
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 from stat import S_ISREG
@@ -24,6 +26,8 @@ from mirage.runtime.handles import parse_mode
 from mirage.runtime.python.monty.constants import (
     MAX_URANDOM_BYTES,
     NOT_A_LINK,
+    SCAN_LINK_DEPTH,
+    SCAN_MAX_ENTRIES,
 )
 from mirage.runtime.python.monty.errors import guest_error
 from mirage.runtime.python.monty.list import child_paths
@@ -33,7 +37,10 @@ from mirage.runtime.python.monty.loader import (
     path_from_arg,
 )
 from mirage.runtime.python.monty.stat import stat_result
-from mirage.runtime.types import VFSStat
+from mirage.runtime.types import VFSEntry, VFSStat
+from mirage.utils.remnants import entry_name
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -46,7 +53,9 @@ def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
     and a failure the vocabulary does not name is EIO, as a kernel
     reports a device that failed (the engine knows only builtin types,
     so a backend's own exception would reach the guest as
-    ``RuntimeError``).
+    ``RuntimeError``). A stopped run's refusal is no failed device: it
+    leaves as itself, so a callback making call after call (a scan)
+    ends with its run.
 
     Args:
         path (str): the path the operation names.
@@ -54,6 +63,8 @@ def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
     """
     try:
         yield
+    except CancelledError:
+        raise
     except Exception as exc:
         condition = classify(exc) or FsCondition.EIO
         raise guest_error(condition, path, target) from exc
@@ -186,6 +197,96 @@ class MontyFs(AbstractOS):
         with _as_guest(str(path)):
             entries = files.readdir(str(path), classify=False)
         return child_paths(path, [entry.path for entry in entries])
+
+    def path_scan(
+        self,
+        path: PurePosixPath,
+        *,
+        max_depth: int | None,
+        follow_symlinks: bool,
+        **_glob: Any,
+    ) -> list[tuple[str, bool, bool, bool]]:
+        """The subtree under `path` in one call, for walk, scandir and glob.
+
+        One listing per directory, each entry kinded by the stat that
+        listing already made, so a walk costs what `find` costs instead
+        of the three probes per entry monty's default asks. The glob's
+        pattern is only a hint, since monty filters the tree itself. A
+        directory below `path` that will not list reads as empty, as it
+        does on monty's own mounts; a tree past SCAN_MAX_ENTRIES raises
+        RuntimeError, because a walk would swallow an OSError.
+
+        Args:
+            path (PurePosixPath): the directory to scan, or a file to
+                describe.
+            max_depth (int | None): the deepest level to return, None
+                for the whole tree.
+            follow_symlinks (bool): descend into linked directories.
+        """
+        files = self._structure(path)
+        root = self._row(path)
+        if root is None:
+            raise guest_error(FsCondition.ENOENT, str(path))
+        tree = [
+            ("", root.is_dir, S_ISREG(root.mode), self.path_is_symlink(path))
+        ]
+        if max_depth is None and follow_symlinks:
+            max_depth = SCAN_LINK_DEPTH
+        pending = [(path, "", 0)] if root.is_dir else []
+        while pending:
+            directory, relative, depth = pending.pop()
+            if max_depth is not None and depth >= max_depth:
+                continue
+            try:
+                with _as_guest(str(directory)):
+                    rows = files.readdir(str(directory))
+            except OSError as exc:
+                if depth == 0:
+                    raise
+                logger.debug("monty scan: %s did not list: %s", directory, exc)
+                continue
+            for row in rows:
+                name = entry_name(row.path)
+                entry = f"{relative}/{name}" if relative else name
+                is_dir, is_file = self._kind(files, directory / name, row)
+                tree.append((entry, is_dir, is_file, row.is_link))
+                if len(tree) > SCAN_MAX_ENTRIES:
+                    raise RuntimeError(
+                        f"directory scan exceeded {SCAN_MAX_ENTRIES} entries"
+                    )
+                if is_dir and (follow_symlinks or not row.is_link):
+                    pending.append((directory / name, entry, depth + 1))
+        return tree
+
+    def _kind(
+        self, files: RuntimeFiles, path: PurePosixPath, row: VFSEntry
+    ) -> tuple[bool, bool]:
+        """Whether a listed entry is a directory and whether a regular file.
+
+        The listing's own stat answers for a path in the view, except
+        for a link, whose row is the link's and not what it reaches, and
+        a row the listing could not stat. Those, and every path outside
+        the view, ask the view as `path_is_dir` would, so a file the view
+        withholds (the history beside the mounts) is not offered as one.
+        A stat that fails leaves the entry neither, CPython's rule inside
+        `os.walk`.
+
+        Args:
+            files (RuntimeFiles): the execution's file API.
+            path (PurePosixPath): the entry's guest path.
+            row (VFSEntry): the entry as the listing classified it.
+        """
+        listed = row.is_dir or row.mode is not None
+        if not row.is_link and listed and files.serves(str(path)):
+            return row.is_dir, row.mode is not None and S_ISREG(row.mode)
+        try:
+            reached = self._row(path)
+        except OSError as exc:
+            logger.debug("monty scan: %s did not stat: %s", path, exc)
+            return False, False
+        if reached is None:
+            return False, False
+        return reached.is_dir, S_ISREG(reached.mode)
 
     def path_open(self, path: PurePosixPath, mode: str) -> MontyFileHandle:
         # Built first: a malformed mode must raise before any effect

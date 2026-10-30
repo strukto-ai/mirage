@@ -118,6 +118,7 @@ Modes and modifiers are listed separately; for example, `rb` combines `r` and `b
 | `f.seek()` | ✓ |
 | `f.tell()` | ✓ |
 | `f.write()` | ✓ |
+| `for line in f` | ✓ |
 
 <AccordionGroup>
   <Accordion title="Example: write and read lines" id="file-objects-example">
@@ -136,7 +137,6 @@ Modes and modifiers are listed separately; for example, `rb` combines `r` and `b
     | API or behavior | Limitation |
     | --- | --- |
     | Reads and seeks | The whole file is loaded into memory; reads and seeks use that copy. |
-    | `for line in f` | ✗ |
     | `f.truncate()` | ✗ |
     | `f.fileno()` | ✗ |
     | `f.write()` | Each call is written at once. |
@@ -161,6 +161,8 @@ The working directory and environment come from the Mirage session, not the host
 | API | Support |
 | --- | --- |
 | `os.listdir()` | ✓ |
+| `os.scandir()` | ✓ |
+| `os.walk()` | ✓ |
 | `os.mkdir()` | ✓ |
 | `os.makedirs()` | ✓ |
 | `os.rmdir()` | ✓ |
@@ -195,8 +197,6 @@ The working directory and environment come from the Mirage session, not the host
     | `os.open()` | ✗ |
     | File descriptors | ✗ |
     | `os.truncate()` | ✗ |
-    | `os.scandir()` | ✗ |
-    | `os.walk()` | ✗ |
     | `os.lstat()` | ✗ |
     | `os.fstat()` | ✗ |
     | `os.symlink()` | ✗ |
@@ -214,20 +214,31 @@ The working directory and environment come from the Mirage session, not the host
 
 ### `os.path`
 
-Use the supported `pathlib.Path` methods for workspace paths.
+| API | Support |
+| --- | --- |
+| `os.path.exists()` | ✓ |
+| `os.path.isfile()` | ✓ |
+| `os.path.isdir()` | ✓ |
+| `os.path.islink()` | ✓ |
+| `os.path.getsize()` | Python SDK only |
+| `os.path.getmtime()` | Python SDK only |
+| `os.path.realpath()` | ✓ |
+| `os.path.join()`, `os.path.basename()`, `os.path.dirname()`, `os.path.splitext()` | ✓ |
+| `os.path.abspath()`, `os.path.relpath()`, `os.path.normpath()` | ✓ |
 
 <AccordionGroup>
-  <Accordion title="Example: check a path with pathlib" id="os-path-example">
+  <Accordion title="Example: check a workspace path" id="os-path-example">
     ```python
-    from pathlib import Path
+    import os
 
-    print(Path("/data/input.txt").exists())
+    path = os.path.join("/data", "input.txt")
+    print(os.path.exists(path), os.path.splitext(path))
     ```
   </Accordion>
   <Accordion title="Limitations" id="os-path-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | `os.path` | Unavailable in the Monty version used by Mirage. Use `pathlib.Path` instead. |
+    | `os.path.getsize()`, `os.path.getmtime()` | Raise `RuntimeError` in TypeScript. Use `os.stat(path).st_size` and `.st_mtime`. |
   </Accordion>
 </AccordionGroup>
 
@@ -248,6 +259,9 @@ Use the supported `pathlib.Path` methods for workspace paths.
 | `Path.is_dir()` | ✓ |
 | `Path.is_symlink()` | ✓ |
 | `Path.iterdir()` | ✓ |
+| `Path.glob()` | ✓ |
+| `Path.rglob()` | ✓ |
+| `Path.walk()` | ✓ |
 | `Path.mkdir()` | ✓ |
 | `Path.rmdir()` | ✓ |
 | `Path.unlink()` | ✓ |
@@ -269,8 +283,6 @@ Use the supported `pathlib.Path` methods for workspace paths.
   <Accordion title="Limitations" id="pathlib-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | `Path.glob()` | ✗ |
-    | `Path.rglob()` | ✗ |
     | `Path.touch()` | ✗ |
     | `Path.stat()` | In TypeScript, use the named fields (`st.st_size`), not `st[6]`. |
     | `Path.rename()` | Raises `OSError` across mounts. |
@@ -301,26 +313,45 @@ Mirage passes command inputs through the [runtime globals](#runtime-globals).
 JSON parsing and serialization come from Monty; see its
 [`json` reference](https://pydantic.dev/docs/monty/limitations/json/).
 
-<AccordionGroup>
-  <Accordion title="Example: write and read workspace JSON" id="json-example">
-    ```python
-    import json
+| API | Support |
+| --- | --- |
+| `json.load()` | ✓ |
+| `json.dump()` | ✓ |
+| `json.loads()` | ✓ |
+| `json.dumps()` | ✓ |
 
-    with open("/data/result.json", "w") as f:
-        f.write(json.dumps({"status": "done"}))
+<Accordion title="Example: write and read workspace JSON" id="json-example">
+  ```python
+  import json
 
-    with open("/data/result.json", "r") as f:
-        result = json.loads(f.read())
-    print(result["status"])  # done
-    ```
-  </Accordion>
-  <Accordion title="Limitations" id="json-limitations">
-    Monty 1.0.0 does not provide `json.load()` or `json.dump()`. For workspace
-    files, use `json.loads(f.read())` and `f.write(json.dumps(value))`, as above.
-    See [Monty's JSON limitations](https://pydantic.dev/docs/monty/limitations/json/)
-    for supported options and other differences from CPython.
-  </Accordion>
-</AccordionGroup>
+  with open("/data/result.json", "w") as f:
+      json.dump({"status": "done"}, f)
+
+  with open("/data/result.json") as f:
+      print(json.load(f)["status"])
+  ```
+</Accordion>
+
+### `csv`, `tomllib` and `hashlib`
+
+These modules read and write workspace files through `open()`.
+
+| API | Support |
+| --- | --- |
+| `csv.reader()`, `csv.DictReader()` | ✓ |
+| `csv.writer()` | ✓ |
+| `tomllib.load()` | ✓ |
+| `hashlib` | ✓ |
+
+<Accordion title="Example: read a workspace CSV" id="csv-example">
+  ```python
+  import csv
+
+  with open("/data/orders.csv", newline="") as f:
+      for row in csv.DictReader(f):
+          print(row["id"], row["total"])
+  ```
+</Accordion>
 
 ### Runtime globals
 
@@ -354,7 +385,7 @@ JSON parsing and serialization come from Monty; see its
 
 ## Python subset
 
-Monty 1.0.0 implements a subset of Python, and Mirage never falls back to
+Monty 1.4.0 implements a subset of Python, and Mirage never falls back to
 another interpreter.
 
 Monty maintains the details of its
@@ -365,13 +396,13 @@ version used by Mirage. Third-party imports are unavailable.
 
 ## Unsupported modules
 
-Common modules unavailable in Monty 1.0.0:
+Common modules unavailable in Monty 1.4.0:
 
-- **Files:** `glob`, `io`, `os.path`, `shutil`, `tempfile`.
+- **Files:** `glob`, `io`, `shutil`, `tempfile`.
 - **Networking:** `http`, `socket`, `ssl`, `urllib`.
 - **Processes and concurrency:** `concurrent.futures`, `multiprocessing`, `queue`, `subprocess`, `threading`.
-- **Data formats and archives:** `array`, `csv`, `pickle`, `struct`, `tomllib`, `zipfile`, `zlib`.
-- **Numbers and hashing:** `decimal`, `fractions`, `hashlib`, `hmac`, `uuid`.
+- **Data formats and archives:** `array`, `pickle`, `struct`, `zipfile`, `zlib`.
+- **Numbers and hashing:** `fractions`, `hmac`, `uuid`.
 - **Language and introspection:** `abc`, `contextlib`, `ctypes`, `importlib`, `inspect`, `types`, `weakref`.
 - **CLI and diagnostics:** `argparse`, `logging`, `traceback`, `unittest`, `warnings`.
 - **Other utilities:** `enum`, `heapq`, `operator`, `string`.

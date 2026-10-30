@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify, type FsCondition } from '../../../errors/index.ts'
+import { isAborting } from '../../../errors/fs.ts'
 import { POSIX } from '../../../errors/posix.ts'
 
 export class MontyUnavailableError extends Error {
@@ -93,7 +94,9 @@ export function guestError(code: FsCondition, path: string, target?: string): Er
  * JS error), and a failure the vocabulary does not name is EIO, as a
  * kernel reports a device that failed (the engine knows only builtin
  * types, so a backend's own error would reach the guest as
- * RuntimeError).
+ * RuntimeError). A stopped run's refusal is no failed device: it leaves
+ * as itself, so a callback making call after call (a scan) ends with
+ * its run.
  *
  * Args:
  *   err: whatever the mount op rejected with.
@@ -107,5 +110,6 @@ export function asGuestError(err: unknown, path: string, target?: string): unkno
   // backend error that merely shares a CPython name is classified like
   // any other.
   if ((err as { guestCondition?: unknown }).guestCondition !== undefined) return err
+  if (isAborting(err)) return err
   return guestError(classify(err) ?? 'EIO', path, target)
 }

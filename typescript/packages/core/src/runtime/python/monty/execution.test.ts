@@ -14,7 +14,10 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
+import { PrefixResolver } from '../../resolver.ts'
+import type { BridgeDispatchFn } from '../../types.ts'
 import { POOL_WORKERS } from './constants.ts'
 import { MontyExecution } from './execution.ts'
 import type * as loader from './loader.ts'
@@ -168,6 +171,53 @@ describe('MontyExecution.run', () => {
       await execution.close()
     }
   })
+
+  // The kill ends the worker, not the host callback: a walk whose
+  // listing is in flight when the run stops must list nothing more. A
+  // deadline stops the run through the same interruption.
+  it('stops its file calls with the run, so a walk lists nothing more', async () => {
+    const execution = new MontyExecution()
+    const stop = new AbortController()
+    const listed: string[] = []
+    let release: (names: string[]) => void = () => undefined
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
+      if (op === 'stat') {
+        return Promise.resolve(new FileStat({ name: path, type: FileType.DIRECTORY }))
+      }
+      if (op === 'readdir') {
+        listed.push(path)
+        if (path === '/ram/') return Promise.resolve(['/ram/a/', '/ram/b/'])
+        if (path === '/ram/b/') {
+          return new Promise<string[]>((resolve) => {
+            release = resolve
+          })
+        }
+        return Promise.resolve([])
+      }
+      return Promise.reject(Object.assign(new Error(`EINVAL: ${path}`), { code: 'EINVAL' }))
+    })
+    const files = filesOver(dispatch, new PrefixResolver(() => ['/ram']))
+    try {
+      const run = execution.run(
+        { code: "import os\nlist(os.walk('/ram'))\n", args: [], stdin: null },
+        { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), signal: stop.signal },
+        files,
+      )
+      await vi.waitFor(
+        () => {
+          expect(listed).toContain('/ram/b/')
+        },
+        { timeout: 20_000 },
+      )
+      stop.abort()
+      expect((await run).exitCode).toBe(1)
+      release([])
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(listed).toEqual(['/ram/', '/ram/b/'])
+    } finally {
+      await execution.close()
+    }
+  }, 30_000)
 
   it('stops at an abort while its reader holds the prints back', async () => {
     const execution = new MontyExecution()

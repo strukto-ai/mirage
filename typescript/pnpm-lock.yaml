@@ -337,8 +337,8 @@ importers:
         specifier: ^6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@6.0.3))(typescript@6.0.3)
       '@pydantic/monty':
-        specifier: 1.0.0
-        version: 1.0.0
+        specifier: 1.4.0
+        version: 1.4.0
       '@qdrant/js-client-rest':
         specifier: ^1.18.0
         version: 1.18.0(typescript@6.0.3)
@@ -609,8 +609,8 @@ importers:
         specifier: ^2.3.0
         version: 2.3.0
       '@pydantic/monty':
-        specifier: 1.0.0
-        version: 1.0.0
+        specifier: 1.4.0
+        version: 1.4.0
       '@qdrant/js-client-rest':
         specifier: ^1.18.0
         version: 1.18.0(typescript@6.0.3)
@@ -3003,40 +3003,40 @@ packages:
   '@protobufjs/utf8@1.1.1':
     resolution: {integrity: sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==}
 
-  '@pydantic/monty-darwin-arm64@1.0.0':
-    resolution: {integrity: sha512-K+/lUiTXSfivieeO+oqmi/9c7y1ddoe38iCo481pnGOZUrpuK9PcVHif0uFnaWYcuxjeWUHEjuHSffakAY983g==}
+  '@pydantic/monty-darwin-arm64@1.4.0':
+    resolution: {integrity: sha512-dLfxiQbxVMGbxL1y+NzzJAwkyIUiQLd9rpsmWM0UQIaZqYkC9PK9X/+n818VOTW8+Nr4QUjXMRf21g0vZZpOiA==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [darwin]
 
-  '@pydantic/monty-darwin-x64@1.0.0':
-    resolution: {integrity: sha512-OLZCNb/jt3H30tai/FyOBLZT7k3LGshdcMsDkWmqX33O5BY0LePqRF2uH4gDtyCRrAdvb1A1ZPnWczsHLzVwBg==}
+  '@pydantic/monty-darwin-x64@1.4.0':
+    resolution: {integrity: sha512-LJEchCJn2d2v5cFHnd6zdxgmpzAWdn8wT1Hr6+JvfvmtECH7L8RbZ/XgLAnXA2azqDTAQ41GdDXFy/H9mfqOQg==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [darwin]
 
-  '@pydantic/monty-linux-arm64-gnu@1.0.0':
-    resolution: {integrity: sha512-dsil8hO1fIJGkjQdGklMQsMtwUtVn3SBjNUkbkJDNVTjvboHQ4tL2glNvMWzo2BmKqcPBQ7KRgLjWKuPXGLu2A==}
+  '@pydantic/monty-linux-arm64-gnu@1.4.0':
+    resolution: {integrity: sha512-2HErdP7t+RGE5gl8Cdli4ut2Vwc+Cw0Rkkg0s1XtIFs5vc37R+cXnWwgwB2snY7dk88yG6eAiJqtjPhbpRSITw==}
     engines: {node: '>= 20'}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@pydantic/monty-linux-x64-gnu@1.0.0':
-    resolution: {integrity: sha512-CoNfUTNI9Msgew3XfPOQVHrYpqL81mQ6x4COfJo2nYoZs72q4IWG7gTbEbWqAlN8rMcBJb81geuWbV0a/9kJuA==}
+  '@pydantic/monty-linux-x64-gnu@1.4.0':
+    resolution: {integrity: sha512-llKnH5w6kxa0t5dR/mbsWNj2i4fc6lLi/ateGXXQcOHLq5CfPFyJx4zyxQPXP5mMDBG2raJsfawn/mHoshXhcA==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@pydantic/monty-win32-x64-msvc@1.0.0':
-    resolution: {integrity: sha512-uLxwOdzBsU1O1rxk+ynNE1Mm2iS8fw6MJe3nITlxlV3Uqopa9RK5l8jNaoDSfhDwK/obX2G+xSCmvURtHE8sLQ==}
+  '@pydantic/monty-win32-x64-msvc@1.4.0':
+    resolution: {integrity: sha512-LtQ3WfdYBGWRJyCdoWITYfbviui0pCkq8/JAhqjQG1mgMF0r7qLMgDLBrcnhQ82GqE5s4ZS9DYl2uVZwdq2gbA==}
     engines: {node: '>= 20'}
     cpu: [x64]
     os: [win32]
 
-  '@pydantic/monty@1.0.0':
-    resolution: {integrity: sha512-lrBwLE6d8LPvMqb8qz7R1migkRDapcYP5UBqCuAAQ6TPJSHPsBJ4unBdh1KhFMBT3cx6QQUfWtFpGL9WbAHgjA==}
+  '@pydantic/monty@1.4.0':
+    resolution: {integrity: sha512-SUcPEKgRtOnlHea6QGYK8lYGkWqsgmeakwB+OfHcrINMWKMMWlje+yw/CTtTacr5ddPgTZFg+7lEvjsCCa/e+g==}
     engines: {node: '>= 20'}
 
   '@qdrant/js-client-rest@1.18.0':
@@ -9369,32 +9369,32 @@ snapshots:
 
   '@protobufjs/utf8@1.1.1': {}
 
-  '@pydantic/monty-darwin-arm64@1.0.0':
+  '@pydantic/monty-darwin-arm64@1.4.0':
     optional: true
 
-  '@pydantic/monty-darwin-x64@1.0.0':
+  '@pydantic/monty-darwin-x64@1.4.0':
     optional: true
 
-  '@pydantic/monty-linux-arm64-gnu@1.0.0':
+  '@pydantic/monty-linux-arm64-gnu@1.4.0':
     optional: true
 
-  '@pydantic/monty-linux-x64-gnu@1.0.0':
+  '@pydantic/monty-linux-x64-gnu@1.4.0':
     optional: true
 
-  '@pydantic/monty-win32-x64-msvc@1.0.0':
+  '@pydantic/monty-win32-x64-msvc@1.4.0':
     optional: true
 
-  '@pydantic/monty@1.0.0':
+  '@pydantic/monty@1.4.0':
     dependencies:
       '@bytecodealliance/preview2-shim': 0.19.0
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/api-logs': 0.222.0
     optionalDependencies:
-      '@pydantic/monty-darwin-arm64': 1.0.0
-      '@pydantic/monty-darwin-x64': 1.0.0
-      '@pydantic/monty-linux-arm64-gnu': 1.0.0
-      '@pydantic/monty-linux-x64-gnu': 1.0.0
-      '@pydantic/monty-win32-x64-msvc': 1.0.0
+      '@pydantic/monty-darwin-arm64': 1.4.0
+      '@pydantic/monty-darwin-x64': 1.4.0
+      '@pydantic/monty-linux-arm64-gnu': 1.4.0
+      '@pydantic/monty-linux-x64-gnu': 1.4.0
+      '@pydantic/monty-win32-x64-msvc': 1.4.0
 
   '@qdrant/js-client-rest@1.18.0(typescript@6.0.3)':
     dependencies:
