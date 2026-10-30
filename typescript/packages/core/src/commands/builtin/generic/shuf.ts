@@ -39,7 +39,7 @@ import {
 } from '../../../rs/stream.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { mountRoot } from '../utils/links.ts'
-import { type IdSource, SystemIdSource, randomBelow, randomBelowBig } from '../../../utils/ids.ts'
+import { type IdSource, SystemIdSource } from '../../../utils/ids.ts'
 
 const ENC = new TextEncoder()
 
@@ -275,22 +275,8 @@ class ShufHost {
   ) {}
 
   async serve(request: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Promise<Served> {
-    if (request.op === 'random') {
-      if (typeof request.limit !== 'string') throw new Error('shuf: invalid random bound')
-      const bound = BigInt(request.limit)
-      const count = Number(request.count)
-      const values = new Uint8Array(count * 8)
-      const view = new DataView(values.buffer)
-      for (let at = 0; at < count; at++) {
-        const limit = request.descending === true ? bound - BigInt(at) : bound
-        const draw =
-          limit <= 0xffffffffn
-            ? BigInt(randomBelow(this.ids, Number(limit)))
-            : randomBelowBig(this.ids, limit)
-        view.setBigUint64(at * 8, draw, true)
-      }
-      return { reply: {}, data: values }
-    }
+    if (request.op === 'words')
+      return { reply: {}, data: this.ids.randomWords(Number(request.count)) }
     const id = Number(request.spool ?? (request.op === 'swap' || request.index === true ? 1 : 0))
     if (request.op === 'close') {
       const store = this.spools.get(id)

@@ -1,6 +1,6 @@
 // Adapted from jq 1.8.2 (MIT), src/builtin.c: tm2jv, jv2tm, f_mktime, f_gmtime, f_localtime, f_strptime, f_strftime, f_strflocaltime, set_tm_wday and set_tm_yday. See licenses/third_party/jq.txt.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use super::builtin::{Cfunc, Fault};
 use super::meter::Charge;
@@ -62,9 +62,12 @@ pub(crate) struct Clock {
 }
 
 impl Default for Clock {
+    /// UTC, parsed once and shared: every run starts on it before the
+    /// host's zone replaces it.
     fn default() -> Self {
+        static UTC: OnceLock<Arc<Zone>> = OnceLock::new();
         Self {
-            zone: Arc::new(Zone::parse("UTC")),
+            zone: Arc::clone(UTC.get_or_init(|| Arc::new(Zone::parse("UTC")))),
         }
     }
 }

@@ -355,9 +355,9 @@ fn scatter_memory(bytes: usize) {
         let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
         let data = match request["op"].as_str().unwrap() {
             "read" => chunk.clone(),
-            "random" => (0..request["count"].as_u64().unwrap())
+            "words" => (0..request["count"].as_u64().unwrap())
                 .flat_map(|_| {
-                    let next = bucket.to_le_bytes();
+                    let next = ((bucket as u32) << 27).to_le_bytes();
                     bucket = (bucket + 1) % 16;
                     next
                 })
@@ -405,7 +405,7 @@ fn shuffle_plan_memory() {
         let request: serde_json::Value = serde_json::from_slice(&header).unwrap();
         let id = request["spool"].as_u64().unwrap_or(0);
         let response = match request["op"].as_str().unwrap() {
-            "random" => vec![0; request["count"].as_u64().unwrap() as usize * 8],
+            "words" => vec![0; request["count"].as_u64().unwrap() as usize * 4],
             "write" => {
                 let stored = spools.entry(id).or_default();
                 if payload.iter().any(|byte| !matches!(*byte, b'x' | b'\n')) {
