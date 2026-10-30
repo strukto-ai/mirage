@@ -81,24 +81,25 @@ class _Timeline:
                     (served.at, change)
                 )
 
-    def steady(self, key: str, start: float, end: float) -> State | None:
-        """The one state ``key`` held from ``start`` to ``end``.
+    def held(self, key: str, start: float, end: float, basis: State) -> bool:
+        """Whether ``key`` held ``basis`` from ``start`` to ``end``.
 
-        None when it changed in between, or when the trace never shows
-        its state.
+        A key no line ever commits held its first state throughout, the
+        one any basis on it was observed from.
 
         Args:
             key (str): the key.
             start (float): the window's start, exclusive.
             end (float): the window's end, inclusive.
+            basis (State): the state the actor last observed.
         """
         changes = self._changes.get(key, [])
         if any(start < at <= end for at, _ in changes):
-            return None
+            return False
         before = [change for at, change in changes if at <= start]
         if before:
-            return before[-1].after
-        return changes[0][1].before if changes else None
+            return before[-1].after == basis
+        return not changes or changes[0][1].before == basis
 
 
 def _judge(
@@ -172,7 +173,7 @@ def no_lost_update(trace: Trace) -> Verdict:
             line.exit_code != 0
             and slot in basis
             and not (line.intent is Intent.REMOVES and basis[slot] is ABSENT)
-            and timeline.steady(line.key, start, line.at) == basis[slot]
+            and timeline.held(line.key, start, line.at, basis[slot])
         ):
             verdict.false_refusals.append(line.step)
     verdict.unjudged = [

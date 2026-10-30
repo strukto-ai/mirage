@@ -118,9 +118,10 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                 await settle_after(op, settle)
             except ConditionLostError as exc:
                 key = await keep_walk(path_spec, kpfx, exc)
+                sent = exc.versions.get(key)
                 raise await stale(
                     kp.key_path(path_spec, kpfx, key),
-                    version=exc.versions.get(key),
+                    version=sent if isinstance(sent, str) else None,
                 ) from exc
         lift_lost(path_spec, upto, subtree=True)
 

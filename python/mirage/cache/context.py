@@ -140,6 +140,17 @@ def condition_version(condition: WriteCondition | None) -> str | None:
     return condition.version if isinstance(condition, MatchWrite) else None
 
 
+def condition_basis(condition: WriteCondition | None) -> Measured | None:
+    """What a write's condition asked for: a version, ABSENT for a create.
+
+    Args:
+        condition (WriteCondition | None): the condition the write sent.
+    """
+    if isinstance(condition, AbsentWrite):
+        return OwnRead.ABSENT
+    return condition_version(condition)
+
+
 def require_supported(
     support: ConditionSupport,
     vfs: str,
@@ -370,34 +381,41 @@ async def drop_cached(path: PathSpec, keep: Measured | None = None) -> None:
             await context.keep(path, keep)
 
 
+async def keep_sent(path: PathSpec, version: Measured | None = None) -> None:
+    """Drop ``path``'s cached copy, keeping what a refused write sent.
+
+    The condition stays, so a retry without a read sends it again and is
+    refused again. That holds for a file found gone too: a peer may
+    create it again before the retry.
+
+    Args:
+        path (PathSpec): the path whose write lost.
+        version (Measured | None): the version the write sent, ABSENT for
+            a create; None keeps what the session last saw.
+    """
+    context = current_caller().write_context
+    keep = version
+    if keep is None and context is not None:
+        keep = await context.read_version(path)
+    await drop_cached(path, keep)
+
+
 async def stale(
     path: PathSpec,
     landed: bool = False,
     version: Measured | None = None,
 ) -> StaleWriteError:
-    """The refusal for a lost condition, after dropping the cached copy.
-
-    The condition the write sent is kept, so a retry without a read sends
-    it again and is refused again. That holds for a file found gone too:
-    a peer may create it again before the retry.
+    """The refusal for a lost condition, after ``keep_sent``.
 
     Args:
         path (PathSpec): the path whose write lost.
         landed (bool): a move's copy landed before its source's delete
             lost.
-        version (Measured | None): the version the write sent, when the
-            line no longer names it (a move retracts both paths); ABSENT
-            when the op found the file gone.
+        version (Measured | None): the version the write sent, ABSENT for
+            a create, when the line no longer names it (a move retracts
+            both paths).
     """
-    context = current_caller().write_context
-    keep = None
-    if context is not None:
-        keep = (
-            version
-            if isinstance(version, str)
-            else await context.read_version(path)
-        )
-    await drop_cached(path, keep)
+    await keep_sent(path, version)
     return stale_write(path, landed=landed)
 
 

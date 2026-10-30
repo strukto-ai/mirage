@@ -19,14 +19,13 @@ from typing import Generic, Literal, NoReturn, Protocol, TypeVar
 
 from mirage.accessor.base import Accessor
 from mirage.cache.context import (
-    condition_version,
-    drop_cached,
+    condition_basis,
+    keep_sent,
     stale,
 )
 from mirage.cache.types import (
     ConditionSupport,
     KnownVersions,
-    OwnRead,
     WriteCondition,
 )
 from mirage.core.object_store.errors import ConditionLostError
@@ -180,7 +179,7 @@ async def refused(
         exc (ConditionLostError): the store's refusal.
         cond (WriteCondition | None): the condition the op sent.
     """
-    return await stale(path, version=condition_version(cond))
+    return await stale(path, version=condition_basis(cond))
 
 
 async def keep_all_lost(
@@ -229,6 +228,8 @@ async def keep_lost(
 ) -> None:
     """Keep the version of each key a walk lost on, except ``skip``.
 
+    A key found gone keeps what the session last saw of it.
+
     Args:
         root (PathSpec): the walk's operand, for addressing its keys.
         key_prefix (str): the mount's backend key prefix.
@@ -237,8 +238,8 @@ async def keep_lost(
     """
     for key, version in exc.versions.items():
         if key != skip:
-            kept = None if version is OwnRead.ABSENT else version
-            await drop_cached(kp.key_path(root, key_prefix, key), kept)
+            kept = version if isinstance(version, str) else None
+            await keep_sent(kp.key_path(root, key_prefix, key), kept)
 
 
 @dataclass(frozen=True, slots=True)

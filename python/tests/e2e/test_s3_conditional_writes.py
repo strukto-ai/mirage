@@ -385,6 +385,37 @@ async def test_an_op_finding_a_read_file_gone_refuses_before_writing(
 
 
 @pytest.mark.asyncio
+async def test_a_refused_create_keeps_asking_for_absence(fake, workspaces):
+    # The append saw no file; a peer's create beats it, and the retry too.
+    ws = workspaces()
+    fake.before(PUT, lambda: _theirs(fake, "new"))
+    code, _, err = await _run(ws, "echo x >> /s3/new")
+    assert (code, STALE in err) == (1, True), err
+    fake.ledger.clear()
+    code, _, err = await _run(ws, "echo y > /s3/new")
+    assert (code, STALE in err) == (1, True), err
+    assert _sent(fake, PUT) == [{"IfNoneMatch": "*"}]
+    assert fake.buckets["b"]["new"] == b"theirs\n"
+
+
+@pytest.mark.asyncio
+async def test_a_move_whose_copy_stayed_lets_its_destination_be_written(
+    fake, workspaces
+):
+    # e was not new, so the rollback leaves the session's own bytes there
+    # and it holds no version of e to refuse its next write on.
+    ws = workspaces()
+    fake.buckets["b"]["e"] = b"old-e\n"
+    await _run(ws, "cat /s3/f /s3/e")
+    fake.before("delete_object", lambda: _theirs(fake, "f"))
+    assert (await _run(ws, "mv /s3/f /s3/e"))[0] == 1
+    assert fake.buckets["b"]["e"] == SEED["f"]
+    code, _, err = await _run(ws, "echo z > /s3/e")
+    assert code == 0, err
+    assert fake.buckets["b"]["e"] == b"z\n"
+
+
+@pytest.mark.asyncio
 async def test_a_truncate_finding_a_read_file_gone_creates_it_only_if_absent(
     fake, workspaces
 ):
@@ -1352,10 +1383,7 @@ async def test_a_conditional_line_sends_the_same_requests(line):
                 ops[policy] = [e[0] for e in session._client.ledger]
             finally:
                 await ws.close()
-    expected = list(ops[WritePolicy.UNCONDITIONAL])
-    if line == "mv /s3/g /s3/i":
-        expected.insert(expected.index("copy_object"), "head_object")
-    assert ops[WritePolicy.CONDITIONAL] == expected
+    assert ops[WritePolicy.CONDITIONAL] == ops[WritePolicy.UNCONDITIONAL]
 
 
 @pytest.mark.asyncio

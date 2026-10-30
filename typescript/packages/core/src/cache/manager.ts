@@ -470,12 +470,10 @@ export class CacheManager {
   }
 
   /**
-   * Remember a refusal: the version it lost on stands until a read. A refusal
-   * without a version, a file found gone included, leaves the session's own
-   * observation as it was.
+   * Remember a refusal: the version it lost on stands until a read; null
+   * forgets it.
    */
   lose(path: PathSpec, version: string | null): void {
-    if (version === null) return
     this.sessionHistory(path)?.keep(
       this.versionScope,
       '/' + mountKey(path.virtual, this.prefix),

@@ -453,6 +453,51 @@ describe('conditional writes on an S3 mount', () => {
     },
   )
 
+  it('keeps asking for absence after a refused create', async () => {
+    // The append saw no file; a peer's create beats it, and the retry too.
+    const ws = workspace()
+    mock.before('PutObject', () => {
+      theirs('new')
+    })
+    let [code, , err] = await run(ws, 'echo x >> /s3/new')
+    expect([code, err.includes(STALE)], err).toEqual([1, true])
+    mock.ledger.length = 0
+    ;[code, , err] = await run(ws, 'echo y > /s3/new')
+    expect([code, err.includes(STALE)], err).toEqual([1, true])
+    expect(sent('PutObject')).toEqual([{ IfNoneMatch: '*' }])
+    expect(object('new')).toBe('theirs\n')
+  })
+
+  it('lets a move whose copy stayed write its destination', async () => {
+    // e was not new, so the rollback leaves the session's own bytes there
+    // and it holds no version of e to refuse its next write on.
+    const ws = workspace()
+    mock.store.set('b', 'e', ENC.encode('old-e\n'))
+    await run(ws, 'cat /s3/f /s3/e')
+    mock.before('DeleteObject', () => {
+      theirs('f')
+    })
+    expect((await run(ws, 'mv /s3/f /s3/e'))[0]).toBe(1)
+    expect(object('e')).toBe(SEED.f)
+    const [code, , err] = await run(ws, 'echo z > /s3/e')
+    expect(code, err).toBe(0)
+    expect(object('e')).toBe('z\n')
+  })
+
+  it.each(['cp', 'mv'])(
+    'refuses a %s onto a file seen missing that a peer created',
+    async (verb) => {
+      const ws = workspace()
+      await run(ws, 'test -e /s3/new')
+      theirs('new')
+      mock.ledger.length = 0
+      const [code, , err] = await run(ws, `${verb} /s3/f /s3/new`)
+      expect(code, err).toBe(1)
+      expect(sent('CopyObject')[0]).toMatchObject({ IfNoneMatch: '*' })
+      expect(object('new')).toBe('theirs\n')
+    },
+  )
+
   it('creates a file a truncate finds gone only if absent', async () => {
     // truncate looks first and sees no file; a restore beats its create.
     const ws = workspace()
@@ -1296,9 +1341,7 @@ describe('conditional writes on an S3 mount', () => {
       expect(code, `${policy}: ${err}`).toBe(0)
       ops[policy] = mock.ledger.map(([op]) => op)
     }
-    const expected = [...(ops[WritePolicy.UNCONDITIONAL] ?? [])]
-    if (line === 'mv /s3/g /s3/i') expected.splice(expected.indexOf('CopyObject'), 0, 'HeadObject')
-    expect(ops[WritePolicy.CONDITIONAL]).toEqual(expected)
+    expect(ops[WritePolicy.CONDITIONAL]).toEqual(ops[WritePolicy.UNCONDITIONAL])
   })
 
   it.each([

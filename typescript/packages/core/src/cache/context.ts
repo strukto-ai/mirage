@@ -194,6 +194,14 @@ export function conditionVersion(condition: WriteCondition | null): string | nul
   return condition?.kind === 'match' ? condition.version : null
 }
 
+/**
+ * What a write's condition asked for: a version, ABSENT for a create. Mirrors
+ * Python's `condition_basis`.
+ */
+export function conditionBasis(condition: WriteCondition | null): Measured | null {
+  return condition?.kind === 'absent' ? OwnRead.ABSENT : conditionVersion(condition)
+}
+
 export function requireSupported(
   support: ConditionSupport,
   vfs: string,
@@ -420,25 +428,32 @@ export async function dropCached(path: PathSpec, keep: Measured | null = null): 
 }
 
 /**
- * The refusal for a lost condition, after dropping the cached copy. The
- * condition the write sent is kept, so a retry without a read sends it again
- * and is refused again. That holds for a file found gone too: a peer may
- * create it again before the retry. `landed` marks a move whose copy landed
- * before its source's delete lost, which `mv` reports as a failed removal;
- * `version` is the one the write sent, when the line no longer names it (a
- * move retracts both paths), ABSENT when the op found the file gone.
- * Mirrors Python's `stale`.
+ * Drop `path`'s cached copy, keeping what a refused write sent. The condition
+ * stays, so a retry without a read sends it again and is refused again. That
+ * holds for a file found gone too: a peer may create it again before the
+ * retry. `version` is the version the write sent, ABSENT for a create; null
+ * keeps what the session last saw. Mirrors Python's `keep_sent`.
+ */
+export async function keepSent(path: PathSpec, version: Measured | null = null): Promise<void> {
+  const context = activeWriteContext(path)
+  let keep = version
+  if (keep === null && context !== null) keep = await context.readVersion(path)
+  await dropCached(path, keep)
+}
+
+/**
+ * The refusal for a lost condition, after `keepSent`. `landed` marks a move
+ * whose copy landed before its source's delete lost, which `mv` reports as a
+ * failed removal; `version` is the one the write sent, ABSENT for a create,
+ * when the line no longer names it (a move retracts both paths). Mirrors
+ * Python's `stale`.
  */
 export async function stale(
   path: PathSpec,
   options: { landed?: boolean; version?: Measured | null } = {},
 ): Promise<StaleWriteError> {
   const { landed = false, version = null } = options
-  const context = activeWriteContext(path)
-  let keep: Measured | null = null
-  if (context !== null)
-    keep = typeof version === 'string' ? version : await context.readVersion(path)
-  await dropCached(path, keep)
+  await keepSent(path, version)
   return staleWrite(path, landed)
 }
 

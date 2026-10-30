@@ -18,6 +18,9 @@ import os
 import pathlib
 import subprocess
 import sys
+from collections.abc import Awaitable, Callable
+
+import pytest
 
 from mirage import WritePolicy
 from tests.sim.model import Verdict, no_lost_update
@@ -142,6 +145,28 @@ def test_guards_432_i4_a_create_race_is_refused():
     assert exit_code == 1
     assert _puts(trace, StepRef("a", 1)) == [{"IfNoneMatch": "*"}]
     assert _lost(trace) == []
+
+
+def _copy_race(verb: str) -> Callable[[Sim], Awaitable[int]]:
+    async def race(sim: Sim) -> int:
+        a = await sim.workspace().actor("a", "sa")
+        p = await sim.workspace().actor("p", "sp")
+        await a.exists("new")
+        await p.write("new")
+        return (await a.sh(f"{verb} /s3/f /s3/new")).exit_code
+
+    return race
+
+
+@pytest.mark.parametrize("verb", ["cp", "mv"])
+def test_guards_432_a_copy_onto_a_file_seen_missing_is_refused(verb):
+    """#432 I4 for copies: A saw no file, a peer created it, and A's copy
+    asks that it still not exist, so the peer's file stays."""
+    exit_code, trace = simulate(_copy_race(verb), files=SEEDED)
+    (copy,) = (s for s in trace.served() if s.op == "copy_object")
+    assert exit_code == 1
+    assert dict(copy.sent)["IfNoneMatch"] == "*"
+    assert copy.changes == ()
 
 
 async def _i5(sim: Sim) -> tuple[int, int]:

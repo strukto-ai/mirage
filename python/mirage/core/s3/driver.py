@@ -915,7 +915,7 @@ async def _move_prefix_if(
                         else:
                             untouched[key] = _quoted(token)
                     else:
-                        # A source gone (404) keeps no version: nothing newer to guard.
+                        # A source gone (404) keeps what the session last saw of it.
                         lost.append(
                             (
                                 key,

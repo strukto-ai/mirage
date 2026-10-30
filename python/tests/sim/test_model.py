@@ -204,3 +204,7 @@ def test_a_refusal_after_a_peer_commit_is_not_false():
     _peer_commit(trace, 0.5, ABSENT, state_of(S0))
     _peer_commit(trace, 1.5, state_of(S0), state_of(S1))
     assert _read_then_refused(trace) == []
+
+
+def test_a_refusal_on_a_key_nobody_commits_is_false():
+    assert _read_then_refused(Trace()) == ["a.1"]

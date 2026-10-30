@@ -550,15 +550,12 @@ class CacheManager:
     def lose(self, path: PathSpec, version: str | None) -> None:
         """Remember a refusal: the version it lost on stands until a read.
 
-        A refusal without a version, a file found gone included, leaves
-        the session's own observation as it was.
-
         Args:
             path (PathSpec): the refused path.
-            version (str | None): the losing version, if any.
+            version (str | None): the losing version, None to forget it.
         """
         session = current_caller().session
-        if self._conditional and session is not None and version is not None:
+        if self._conditional and session is not None:
             session.versions.keep(
                 self.version_scope,
                 "/" + mount_key(path.virtual, self._prefix),
