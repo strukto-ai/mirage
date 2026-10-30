@@ -12,10 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.config import SandboxConfig
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.runtime.sandbox.base import RemoteSandbox
+    from mirage.runtime.sandbox.config import SandboxConfig
 
 # Providers are not re-exported here: the runtime table reaches them by
 # module path, so none loads until it is built. Import a provider from
 # its own package.
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.runtime.sandbox.base": ("RemoteSandbox",),
+    "mirage.runtime.sandbox.config": ("SandboxConfig",),
+}
+
 __all__ = ["RemoteSandbox", "SandboxConfig"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)
