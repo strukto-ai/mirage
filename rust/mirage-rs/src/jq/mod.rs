@@ -8,6 +8,7 @@ mod lalr;
 mod main;
 mod meter;
 mod onig;
+mod options;
 mod parse;
 mod regex;
 mod syntax;
@@ -20,8 +21,7 @@ mod vm;
 
 pub(crate) use eval::open as open_eval;
 pub(crate) use main::open as open_main;
-pub(crate) use parse::open as open_scan;
-pub(crate) use unicode::open_decode;
+pub(crate) use options::open as open_options;
 
 #[derive(Default, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]

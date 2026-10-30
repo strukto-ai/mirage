@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{Stream, StreamError};
 
@@ -44,40 +44,46 @@ const ERROR_SYSTEM: i32 = 2;
 /// was given, which the host reports as the workspace's own refusal.
 pub(crate) const EXHAUSTED: &str = "memory exhausted";
 
-#[derive(Deserialize)]
+/// One invocation as the hosts and the option loop (options.rs) give it.
+#[derive(Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
-struct Config {
-    program: String,
+pub(super) struct Config {
+    pub(super) program: String,
     /// The `--arg`, `--argjson`, `--rawfile` and `--slurpfile` bindings
     /// as name and JSON text, in the order they were bound, which
     /// `$ARGS.named` lists them in.
-    named: Vec<(String, String)>,
+    pub(super) named: Vec<(String, String)>,
     /// The JSON text of each `$ARGS.positional` value.
-    positional: Vec<String>,
-    env: Option<String>,
-    zone: Option<String>,
-    prog_origin: Option<String>,
+    pub(super) positional: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) env: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) zone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) prog_origin: Option<String>,
     /// The bytes jq may hold, the workspace's room; None for jq_eval's
     /// own limit, which a run reports as its error instead.
-    memory: Option<usize>,
-    steps: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) memory: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) steps: Option<u64>,
     /// The inputs' names as jq's reports and `input_filename` give them,
     /// in the order they are read.
-    inputs: Vec<String>,
-    null_input: bool,
-    raw_input: bool,
-    slurp: bool,
-    stream: bool,
-    seq: bool,
-    exit_status: bool,
-    raw_output: bool,
-    join_output: bool,
-    nul_output: bool,
-    ascii_output: bool,
-    sort_keys: bool,
-    compact: bool,
-    tab: bool,
-    indent: u8,
+    pub(super) inputs: Vec<String>,
+    pub(super) null_input: bool,
+    pub(super) raw_input: bool,
+    pub(super) slurp: bool,
+    pub(super) stream: bool,
+    pub(super) seq: bool,
+    pub(super) exit_status: bool,
+    pub(super) raw_output: bool,
+    pub(super) join_output: bool,
+    pub(super) nul_output: bool,
+    pub(super) ascii_output: bool,
+    pub(super) sort_keys: bool,
+    pub(super) compact: bool,
+    pub(super) tab: bool,
+    pub(super) indent: u8,
 }
 
 impl Default for Config {
