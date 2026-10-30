@@ -166,6 +166,8 @@ struct Ledger {
     #[serde(default)]
     claims: Vec<Claim>,
     #[serde(default)]
+    pending_claims: Vec<Claim>,
+    #[serde(default)]
     holders: Vec<HolderState>,
     #[serde(default)]
     receipts: Vec<Receipt>,
@@ -238,6 +240,10 @@ enum Event {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Inspection {
+    FactsEqual {
+        left: serde_json::Value,
+        right: serde_json::Value,
+    },
     Covers {
         record: Box<Record>,
         rule: Rule,
@@ -294,11 +300,11 @@ fn covers(record: &Record, rule: &Rule, question: &Record) -> bool {
 }
 
 fn available(ledger: &Ledger, record: &Record, claimant: Option<&Claimant>) -> bool {
-    let claims: Vec<_> = ledger
-        .claims
-        .iter()
-        .filter(|c| c.decision == record.id)
-        .collect();
+    available_to(&ledger.claims, record, claimant)
+}
+
+fn available_to(claims: &[Claim], record: &Record, claimant: Option<&Claimant>) -> bool {
+    let claims: Vec<_> = claims.iter().filter(|c| c.decision == record.id).collect();
     claims.is_empty()
         || claimant.is_some_and(|reader| {
             claims.iter().any(|c| {
@@ -362,6 +368,9 @@ fn retire(ledger: &mut Ledger, ids: &[Ticket]) {
         .map(|r| r.id.clone())
         .collect();
     ledger.records.retain(|r| !removed.contains(&r.id));
+    ledger
+        .pending_claims
+        .retain(|c| !removed.contains(&c.decision));
     ledger.retired.extend(removed);
 }
 
@@ -371,6 +380,7 @@ fn invalidate(ledger: &mut Ledger) {
         .extend(ledger.records.iter().map(|r| r.id.clone()));
     ledger.records.clear();
     ledger.claims.clear();
+    ledger.pending_claims.clear();
     for holder in &mut ledger.holders {
         holder.active = false;
     }
@@ -513,6 +523,7 @@ fn apply(
         Event::Validate { .. } => Ok(ResultValue::Allow),
         Event::Inspect { query } => Ok(ResultValue::Matches {
             matched: match query.as_ref() {
+                Inspection::FactsEqual { left, right } => left == right,
                 Inspection::Covers {
                     record,
                     rule,
@@ -563,9 +574,25 @@ fn apply(
                         && r.outcome.is_none()
                         && same_rule(&r.rule, rule)
                         && same_line(r, question)
+                        && available_to(&ledger.pending_claims, r, claimant.as_ref())
                 }) {
+                    let record = record.clone();
+                    if !explain
+                        && let Some(reader) = claimant
+                        && !ledger
+                            .pending_claims
+                            .iter()
+                            .any(|c| c.decision == record.id)
+                    {
+                        ledger.pending_claims.push(Claim {
+                            owner: reader.owner.clone(),
+                            holder: reader.holder.clone(),
+                            decision: record.id.clone(),
+                            occurrence: reader.occurrence.clone(),
+                        });
+                    }
                     return Ok(ResultValue::Pending {
-                        record: record.clone(),
+                        record,
                         fresh: false,
                     });
                 }
@@ -582,6 +609,14 @@ fn apply(
                         return Err(error("request ticket already exists"));
                     }
                     ledger.records.push(record.clone());
+                    if let Some(reader) = claimant {
+                        ledger.pending_claims.push(Claim {
+                            owner: reader.owner.clone(),
+                            holder: reader.holder.clone(),
+                            decision: record.id.clone(),
+                            occurrence: reader.occurrence.clone(),
+                        });
+                    }
                 }
                 return Ok(ResultValue::Pending {
                     record,
@@ -621,6 +656,23 @@ fn apply(
             else {
                 return Ok(ResultValue::Missing);
             };
+            if claimant.is_some()
+                && !available_to(
+                    &ledger.pending_claims,
+                    &ledger.records[index],
+                    claimant.as_ref(),
+                )
+            {
+                return Ok(ResultValue::Blocked {
+                    status: "stale_reply".into(),
+                });
+            }
+            let reservation = ledger
+                .pending_claims
+                .iter()
+                .find(|c| c.decision == *id)
+                .cloned();
+            ledger.pending_claims.retain(|c| c.decision != *id);
             let record = &mut ledger.records[index];
             record.outcome = Some(outcome.clone());
             record.scope = if *outcome == Outcome::Deny {
@@ -638,18 +690,30 @@ fn apply(
             if record.outcome == Some(Outcome::Allow) && record.scope == Scope::Once {
                 if let Some(reader) = claimant {
                     claim(ledger, reader, &record);
+                } else if let Some(reservation) = reservation {
+                    ledger.claims.push(reservation);
                 }
             }
             Ok(ResultValue::Answered { record })
         }
         Event::Release { owner, holder } | Event::Revoke { owner, holder } => {
             retire_holder(ledger, owner, holder);
-            let ids: Vec<_> = ledger
+            let mut ids: Vec<_> = ledger
                 .claims
                 .iter()
                 .filter(|c| c.owner == *owner && c.holder == *holder)
                 .map(|c| c.decision.clone())
                 .collect();
+            ids.extend(
+                ledger
+                    .pending_claims
+                    .iter()
+                    .filter(|c| c.owner == *owner && c.holder == *holder)
+                    .map(|c| c.decision.clone()),
+            );
+            ledger
+                .pending_claims
+                .retain(|c| c.owner != *owner || c.holder != *holder);
             ledger
                 .claims
                 .retain(|c| c.owner != *owner || c.holder != *holder);
@@ -676,6 +740,11 @@ fn apply(
             }
             activate_holder(ledger, owner, parent);
             retire_holder(ledger, owner, holder);
+            for item in &mut ledger.pending_claims {
+                if item.owner == *owner && item.holder == *holder {
+                    item.holder = parent.clone();
+                }
+            }
             let claims: Vec<_> = ledger
                 .claims
                 .iter()
@@ -735,13 +804,21 @@ fn apply(
                     holder.active = false;
                 }
             }
-            let ids: Vec<_> = ledger
+            let mut ids: Vec<_> = ledger
                 .claims
                 .iter()
                 .filter(|c| c.owner == *owner)
                 .map(|c| c.decision.clone())
                 .collect();
-            ledger.claims.retain(|c| !ids.contains(&c.decision));
+            ids.extend(
+                ledger
+                    .pending_claims
+                    .iter()
+                    .filter(|c| c.owner == *owner)
+                    .map(|c| c.decision.clone()),
+            );
+            ledger.claims.retain(|c| c.owner != *owner);
+            ledger.pending_claims.retain(|c| c.owner != *owner);
             retire(ledger, &ids);
             Ok(ResultValue::Applied)
         }
@@ -764,6 +841,7 @@ fn apply(
                 protected: ledger.protected,
                 records: Vec::new(),
                 claims: Vec::new(),
+                pending_claims: Vec::new(),
                 holders: Vec::new(),
                 receipts: Vec::new(),
                 retired: Vec::new(),
@@ -813,6 +891,7 @@ fn validate(ledger: &Ledger) -> Result<(), StreamError> {
     }
     if ledger.records.len() > ENTRY_LIMIT
         || ledger.claims.len() > ENTRY_LIMIT
+        || ledger.pending_claims.len() > ENTRY_LIMIT
         || ledger.holders.len() > ENTRY_LIMIT
         || ledger.receipts.len() >= ENTRY_LIMIT
         || ledger.retired.len() > ENTRY_LIMIT
@@ -841,6 +920,17 @@ fn validate(ledger: &Ledger) -> Result<(), StreamError> {
         !ids.contains(&c.decision) || !active.contains(&(c.owner.0.as_str(), c.holder.0.as_str()))
     }) {
         return Err(error("invalid claim reference"));
+    }
+    let mut pending = std::collections::HashSet::new();
+    if ledger.pending_claims.iter().any(|c| {
+        !pending.insert(&c.decision)
+            || !active.contains(&(c.owner.0.as_str(), c.holder.0.as_str()))
+            || !ledger
+                .records
+                .iter()
+                .any(|r| r.id == c.decision && r.outcome.is_none())
+    }) {
+        return Err(error("invalid pending claim reference"));
     }
     Ok(())
 }

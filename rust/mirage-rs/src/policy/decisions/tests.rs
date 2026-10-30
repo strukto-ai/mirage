@@ -51,7 +51,14 @@ fn shared_approval_lifecycle_transcripts() {
                     assert_eq!(result[field], step[field], "{} step {index}", case["name"]);
                 }
             }
-            for field in ["records", "claims"] {
+            if !step["record_id"].is_null() {
+                assert_eq!(
+                    result["record"]["id"], step["record_id"],
+                    "{} step {index}",
+                    case["name"]
+                );
+            }
+            for field in ["records", "claims", "pending_claims"] {
                 if !step[field].is_null() {
                     assert_eq!(
                         ledger[field].as_array().unwrap().len(),
