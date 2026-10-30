@@ -280,3 +280,50 @@ fn absent_and_empty_mount_anchors_are_the_same_approval_rule() {
     let (allowed, _) = commit(&input);
     assert_eq!(allowed["kind"], "allow");
 }
+
+#[test]
+fn session_grant_projections_require_and_register_a_live_caller() {
+    let (pending, ledger) = commit(&resolving());
+    let mut input = resolving();
+    input["ledger"] = ledger;
+    input["transition"] = json!("answer-session");
+    input["event"] = json!({"op":"answer","id":pending["record"]["id"],"outcome":"allow","scope":"session","note":[],"claimant":null});
+    let (_, ledger) = commit(&input);
+    input["ledger"] = ledger.clone();
+    input["transition"] = json!("unbound");
+    input["event"] = json!({"op":"session_grants","claimant":null});
+    let (blocked, _) = commit(&input);
+    assert_eq!(blocked, json!({"kind":"blocked","status":"missing_caller"}));
+    input["event"]["explain"] = json!(true);
+    let mut inspection = initialized(&input);
+    assert!(inspection.request(&mut Vec::new()).is_none());
+    let mut bytes = Vec::new();
+    inspection.finish(&mut bytes).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&bytes).unwrap()["rules"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    input["event"] = json!({"op":"session_grants","claimant":{
+        "owner":"process","holder":"walker","lineage":[],
+        "occurrence":{"parent":null,"source":[],"start":0,"end":0}
+    }});
+    input["transition"] = json!("walk");
+    let (granted, ledger) = commit(&input);
+    assert_eq!(granted["rules"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        ledger["holders"],
+        json!([{"owner":"process","holder":"walker","active":true}])
+    );
+    input["ledger"] = ledger;
+    input["transition"] = json!("revoke-policy");
+    input["event"] = json!({"op":"invalidate"});
+    let (_, ledger) = commit(&input);
+    input["ledger"] = ledger;
+    input["transition"] = json!("later-file-read");
+    input["event"] = json!({"op":"validate","owner":"process","holders":["walker"]});
+    let (blocked, _) = commit(&input);
+    assert_eq!(blocked, json!({"kind":"blocked","status":"stale_holder"}));
+}

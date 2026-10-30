@@ -137,6 +137,9 @@ enum ResultValue {
     Matches {
         matched: bool,
     },
+    Grants {
+        rules: Vec<Rule>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -173,6 +176,11 @@ struct Ledger {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 enum Event {
+    SessionGrants {
+        claimant: Option<Claimant>,
+        #[serde(default)]
+        explain: bool,
+    },
     Validate {
         owner: Owner,
         holders: Vec<Holder>,
@@ -398,7 +406,11 @@ fn retire_holder(ledger: &mut Ledger, owner: &Owner, holder: &Holder) {
 
 fn stale_holder(ledger: &Ledger, event: &Event) -> bool {
     match event {
-        Event::Resolve {
+        Event::SessionGrants {
+            claimant: Some(reader),
+            ..
+        }
+        | Event::Resolve {
             claimant: Some(reader),
             ..
         }
@@ -432,7 +444,11 @@ fn valid_reader(reader: &Claimant) -> bool {
 
 fn valid_identities(event: &Event) -> bool {
     match event {
-        Event::Resolve {
+        Event::SessionGrants {
+            claimant: Some(reader),
+            ..
+        }
+        | Event::Resolve {
             claimant: Some(reader),
             ..
         }
@@ -475,6 +491,25 @@ fn apply(
     current_facts: Option<&serde_json::Value>,
 ) -> Result<ResultValue, StreamError> {
     match event {
+        Event::SessionGrants { claimant, explain } => {
+            let rules: Vec<_> = ledger
+                .records
+                .iter()
+                .filter(|record| {
+                    record.outcome == Some(Outcome::Allow) && record.scope == Scope::Session
+                })
+                .map(|record| record.rule.clone())
+                .collect();
+            if !rules.is_empty() && !explain {
+                let Some(reader) = claimant else {
+                    return Ok(ResultValue::Blocked {
+                        status: "missing_caller".into(),
+                    });
+                };
+                activate_holder(ledger, &reader.owner, &reader.holder);
+            }
+            Ok(ResultValue::Grants { rules })
+        }
         Event::Validate { .. } => Ok(ResultValue::Allow),
         Event::Inspect { query } => Ok(ResultValue::Matches {
             matched: match query.as_ref() {
@@ -875,10 +910,12 @@ impl Decisions {
             });
             return Ok(());
         }
-        if matches!(event, Event::Resolve { .. } | Event::Validate { .. })
-            && facts
-                .as_ref()
-                .is_some_and(|facts| facts.expected != facts.current)
+        if matches!(
+            event,
+            Event::Resolve { .. } | Event::Validate { .. } | Event::SessionGrants { .. }
+        ) && facts
+            .as_ref()
+            .is_some_and(|facts| facts.expected != facts.current)
         {
             self.state = State::Complete(ResultValue::Blocked {
                 status: "stale_facts".into(),
@@ -953,8 +990,11 @@ impl Decisions {
             &event,
             facts.as_ref().map(|facts| &facts.current),
         )?;
-        if matches!(event, Event::Resolve { explain: true, .. })
-            || matches!(result, ResultValue::Blocked { .. })
+        if matches!(
+            event,
+            Event::Resolve { explain: true, .. } | Event::SessionGrants { explain: true, .. }
+        ) || matches!(result, ResultValue::Blocked { .. })
+            || matches!(&result, ResultValue::Grants { rules } if rules.is_empty())
         {
             self.state = State::Complete(result);
             return Ok(());
