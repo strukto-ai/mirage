@@ -80,7 +80,6 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         config,
         records: Records::default(),
         first: None,
-        key: Vec::new(),
         count: 0,
         groups: 0,
         repeated_groups: 0,
@@ -95,14 +94,13 @@ struct Uniq {
     terminator: u8,
     records: Records,
     first: Option<Vec<u8>>,
-    key: Vec<u8>,
     count: u64,
     groups: u64,
     repeated_groups: u64,
 }
 
 impl Uniq {
-    fn key(&self, line: &[u8]) -> Vec<u8> {
+    fn key<'a>(&self, line: &'a [u8]) -> &'a [u8] {
         let blank = |byte: &u8| *byte == b' ' || *byte == b'\t';
         let mut at = 0;
         for _ in 0..self.keys.skip_fields {
@@ -113,12 +111,7 @@ impl Uniq {
             at += line[at..].iter().take_while(|b| !blank(b)).count();
         }
         let rest = &line[at.saturating_add(self.keys.skip_chars).min(line.len())..];
-        let rest = &rest[..self.keys.check_chars.unwrap_or(usize::MAX).min(rest.len())];
-        if self.config.ignore_case {
-            rest.to_ascii_lowercase()
-        } else {
-            rest.to_vec()
-        }
+        &rest[..self.keys.check_chars.unwrap_or(usize::MAX).min(rest.len())]
     }
 
     fn record(&self, line: &[u8], count: u64, out: &mut Vec<u8>) {
@@ -141,12 +134,21 @@ impl Uniq {
         }
     }
 
-    fn line(&mut self, line: Vec<u8>, out: &mut Vec<u8>) {
-        let key = self.key(&line);
-        if self.first.is_none() || key != self.key {
+    fn line(&mut self, line: &[u8], out: &mut Vec<u8>) {
+        let key = self.key(line);
+        let same = self.first.as_ref().is_some_and(|first| {
+            let before = self.key(first);
+            if self.config.ignore_case {
+                key.eq_ignore_ascii_case(before)
+            } else {
+                key == before
+            }
+        });
+        if !same {
             self.close_group(out);
-            self.first = Some(line.clone());
-            self.key = key;
+            let first = self.first.get_or_insert_with(Vec::new);
+            first.clear();
+            first.extend_from_slice(line);
             self.count = 0;
             self.groups += 1;
         }
@@ -159,7 +161,7 @@ impl Uniq {
             if self.count == 1 && before {
                 out.push(self.terminator);
             }
-            self.record(&line, 1, out);
+            self.record(line, 1, out);
         } else if let Some(method) = config.all_repeated {
             if self.count == 2 {
                 if method == Method::Prepend || (method == Method::Separate && repeated_groups > 0)
@@ -169,7 +171,7 @@ impl Uniq {
                 self.record(first, 1, out);
             }
             if self.count >= 2 {
-                self.record(&line, 1, out);
+                self.record(line, 1, out);
             }
             if self.count == 2 {
                 self.repeated_groups += 1;
@@ -182,10 +184,11 @@ impl Uniq {
     }
 
     fn pump(&mut self, out: &mut Vec<u8>) {
+        let mut records = std::mem::take(&mut self.records);
         loop {
-            match self.records.next(self.terminator) {
+            match records.next_span(self.terminator) {
                 Take::Record(line) => self.line(line, out),
-                Take::Wait => return,
+                Take::Wait => break,
                 Take::End => {
                     self.close_group(out);
                     if self.first.is_some()
@@ -194,10 +197,11 @@ impl Uniq {
                         out.push(self.terminator);
                     }
                     self.first = None;
-                    return;
+                    break;
                 }
             }
         }
+        self.records = records;
     }
 }
 

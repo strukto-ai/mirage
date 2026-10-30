@@ -75,7 +75,6 @@ struct Line {
     text: Vec<u8>,
     fields: Vec<(usize, usize)>,
     key: (usize, usize),
-    rank: Vec<u8>,
 }
 
 impl Line {
@@ -110,7 +109,6 @@ enum Phase {
     /// Gathering each file's run of records with the key `rank`.
     Group {
         side: usize,
-        rank: Vec<u8>,
         groups: Vec<Vec<Line>>,
     },
     /// Printing the product of two groups, at pair `(i, j)`.
@@ -185,15 +183,16 @@ impl Join {
             .ok()
             .and_then(|k| fields.get(k).copied())
             .unwrap_or((0, 0));
-        let mut rank = text[key.0..key.1].to_vec();
+        Line { text, fields, key }
+    }
+
+    fn compare(&self, left: &[u8], right: &[u8]) -> std::cmp::Ordering {
         if self.config.fold_case {
-            rank.make_ascii_uppercase();
-        }
-        Line {
-            text,
-            fields,
-            key,
-            rank,
+            left.iter()
+                .map(u8::to_ascii_uppercase)
+                .cmp(right.iter().map(u8::to_ascii_uppercase))
+        } else {
+            left.cmp(right)
         }
     }
 
@@ -211,12 +210,14 @@ impl Join {
         let disordered = self.sides[side]
             .last
             .as_ref()
-            .is_some_and(|last| line.rank < *last);
+            .is_some_and(|last| self.compare(line.key(), last).is_lt());
         if disordered && self.config.order != Order::Off && self.out_of_order(side, &line) {
             return Advance::Halt;
         }
         let state = &mut self.sides[side];
-        state.last = Some(line.rank.clone());
+        let last = state.last.get_or_insert_with(Vec::new);
+        last.clear();
+        last.extend_from_slice(line.key());
         state.line = Some(line);
         Advance::Taken
     }
@@ -383,18 +384,16 @@ impl Join {
                         self.phase = Phase::Tail(0);
                         continue;
                     };
-                    if left.rank == right.rank {
-                        let rank = left.rank.clone();
+                    if self.compare(left.key(), right.key()).is_eq() {
                         self.phase = Phase::Group {
                             side: 0,
-                            rank,
                             groups: Vec::new(),
                         };
                         continue;
                     }
                     // The next line is read, and its order checked, before
                     // this one counts as unpaired (GNU 9.7).
-                    let side = usize::from(left.rank > right.rank);
+                    let side = usize::from(self.compare(left.key(), right.key()).is_gt());
                     if self.sides[side].shown {
                         self.print_current(side, out);
                     }
@@ -407,11 +406,7 @@ impl Join {
                     self.lone_seen = true;
                     self.phase = Phase::Compare;
                 }
-                Phase::Group {
-                    side,
-                    rank,
-                    mut groups,
-                } => {
+                Phase::Group { side, mut groups } => {
                     if groups.len() == side {
                         match self.sides[side].line.take() {
                             Some(head) => groups.push(vec![head]),
@@ -427,25 +422,21 @@ impl Join {
                     }
                     match self.advance(side) {
                         Advance::Wait => {
-                            self.phase = Phase::Group { side, rank, groups };
+                            self.phase = Phase::Group { side, groups };
                             return;
                         }
                         Advance::Halt => return,
                         Advance::Taken => {}
                     }
                     match self.sides[side].line.take() {
-                        Some(line) if line.rank == rank => {
+                        Some(line) if self.compare(line.key(), groups[0][0].key()).is_eq() => {
                             groups[side].push(line);
-                            self.phase = Phase::Group { side, rank, groups };
+                            self.phase = Phase::Group { side, groups };
                         }
                         next => {
                             self.sides[side].line = next;
                             self.phase = if side == 0 {
-                                Phase::Group {
-                                    side: 1,
-                                    rank,
-                                    groups,
-                                }
+                                Phase::Group { side: 1, groups }
                             } else {
                                 let second = groups.pop().unwrap_or_default();
                                 let first = groups.pop().unwrap_or_default();

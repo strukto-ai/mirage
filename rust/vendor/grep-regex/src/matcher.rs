@@ -28,6 +28,8 @@ pub struct CompiledNfa {
 /// Literal roles have different offset guarantees.
 #[derive(Default)]
 pub struct LiteralFilters {
+    /// A complete nonempty literal, with no assertions or capture groups.
+    pub exact: Option<Vec<u8>>,
     /// Every match starts with one of these literals.
     pub prefix: Option<Prefilter>,
     /// Every match contains one of these literals, at an unspecified offset.
@@ -84,7 +86,19 @@ impl LiteralFilters {
         };
         let required = Self::compile(required, &mut remaining);
         let prefix = Self::compile(&prefix, &mut remaining);
-        Self { prefix, required }
+        let exact = match hir.kind() {
+            regex_syntax::hir::HirKind::Literal(lit)
+                if !lit.0.is_empty() && lit.0.len() <= remaining.min(64) =>
+            {
+                Some(lit.0.to_vec())
+            }
+            _ => None,
+        };
+        Self {
+            prefix,
+            required,
+            exact,
+        }
     }
 }
 

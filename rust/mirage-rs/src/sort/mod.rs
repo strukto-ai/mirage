@@ -74,7 +74,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         } => Box::new(Checker {
             compare,
             separator: separator(zero_terminated),
-            partial: Vec::new(),
+            records: crate::records::Records::default(),
             previous: None,
             index: 0,
         }),
@@ -603,7 +603,7 @@ impl Stream for Merger {
 struct Checker {
     compare: Compare,
     separator: u8,
-    partial: Vec<u8>,
+    records: crate::records::Records,
     previous: Option<Vec<u8>>,
     index: u64,
 }
@@ -618,34 +618,35 @@ impl Checker {
                 return Err(StreamError::new(self.index.to_string()));
             }
         }
-        self.previous = Some(record.to_vec());
+        let previous = self.previous.get_or_insert_with(Vec::new);
+        previous.clear();
+        previous.extend_from_slice(record);
         Ok(())
     }
 }
 
+impl Checker {
+    fn pump(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let mut records = std::mem::take(&mut self.records);
+        let mut result = Ok(());
+        while let crate::records::Take::Record(line) = records.next_span(self.separator) {
+            result = self.record(line, out);
+            if result.is_err() {
+                break;
+            }
+        }
+        self.records = records;
+        result
+    }
+}
 impl Stream for Checker {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let mut rest = input;
-        while let Some(at) = memchr::memchr(self.separator, rest) {
-            if self.partial.is_empty() {
-                self.record(&rest[..at], out)?;
-            } else {
-                let mut record = std::mem::take(&mut self.partial);
-                record.extend_from_slice(&rest[..at]);
-                self.record(&record, out)?;
-            }
-            rest = &rest[at + 1..];
-        }
-        self.partial.extend_from_slice(rest);
-        Ok(())
+        self.records.push(input);
+        self.pump(out)
     }
-
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        if !self.partial.is_empty() {
-            let record = std::mem::take(&mut self.partial);
-            self.record(&record, out)?;
-        }
-        Ok(())
+        self.records.end();
+        self.pump(out)
     }
 }
 

@@ -186,6 +186,28 @@ impl Fold {
     fn consume(&mut self, input: &[u8], eof: bool, out: &mut Vec<u8>) {
         let mut at = 0;
         while at < input.len() {
+            if !self.spaces && (b' '..=b'~').contains(&input[at]) {
+                let end = at
+                    + input[at..]
+                        .iter()
+                        .take_while(|byte| (b' '..=b'~').contains(byte))
+                        .count();
+                while at < end {
+                    if self.started && self.column >= self.width {
+                        out.push(b'\n');
+                        self.column = 0;
+                        self.started = false;
+                    }
+                    let room = self.width.saturating_sub(self.column).max(1);
+                    let len = (end - at).min(usize::try_from(room).unwrap_or(usize::MAX));
+                    out.extend_from_slice(&input[at..at + len]);
+                    at += len;
+                    self.column += len as u64;
+                    self.last = 1;
+                    self.started = true;
+                }
+                continue;
+            }
             let (len, cp) = match char_at(&input[at..]) {
                 Char::Whole(len, cp) => (len, Some(cp)),
                 Char::Partial if !eof => {
@@ -216,14 +238,18 @@ fn is_blank(cp: u32) -> bool {
 }
 
 impl Stream for Fold {
-    fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        if self.held.is_empty() {
-            self.consume(input, false, out);
-        } else {
-            let mut joined = std::mem::take(&mut self.held);
-            joined.extend_from_slice(input);
-            self.consume(&joined, false, out);
+    fn feed(&mut self, mut input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        while !self.held.is_empty() && !input.is_empty() {
+            let mut joined = [0; 6];
+            let held = self.held.len();
+            joined[..held].copy_from_slice(&self.held);
+            self.held.clear();
+            let extra = input.len().min(joined.len() - held);
+            joined[held..held + extra].copy_from_slice(&input[..extra]);
+            self.consume(&joined[..held + extra], false, out);
+            input = &input[extra..];
         }
+        self.consume(input, false, out);
         Ok(())
     }
 
@@ -250,6 +276,23 @@ mod tests {
             assert_eq!(output, whole, "split {split}");
         }
         whole
+    }
+
+    #[test]
+    fn a_split_unicode_run_uses_bounded_stack() {
+        std::thread::Builder::new()
+            .stack_size(128 * 1024)
+            .spawn(|| {
+                let input = "🦀".repeat(16 * 1024).into_bytes();
+                let config = json!({"width":80,"spaces":false,"count":"columns"}).to_string();
+                let whole = run("fold", &config, &[&input]);
+                let split = run("fold", &config, &[&input[..2], &input[2..]]);
+                assert_eq!(split, whole);
+                assert_eq!(split.1, None);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
