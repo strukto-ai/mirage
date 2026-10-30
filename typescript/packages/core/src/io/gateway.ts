@@ -76,12 +76,17 @@ export function runWithEgress<T>(
  * stream opens each later connection, whoever pulls it and however late,
  * under the workspace's rule and policies, as `withCaller` keeps its caller.
  * Its close reaches the stream even before a first pull. Handed back as it
- * is where neither limits anything. Mirrors Python's `with_egress`.
+ * is where neither limits anything. `owner` names the egress outright where
+ * a browser's storage, which answers its newest frame, could hand another
+ * workspace's. Mirrors Python's `with_egress`.
  */
-export function withEgress(it: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
-  const bound = egress.getStore()
+export function withEgress(
+  it: AsyncIterable<Uint8Array>,
+  owner: Egress | null = egress.getStore() ?? null,
+): AsyncIterable<Uint8Array> {
+  const bound = owner
   if (
-    bound === undefined ||
+    bound === null ||
     (bound.rule === null && (bound.policies === null || bound.listening === false))
   ) {
     return it

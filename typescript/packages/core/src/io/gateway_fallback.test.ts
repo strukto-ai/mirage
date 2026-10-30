@@ -15,7 +15,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { Policies } from '../policy/policies.ts'
-import { liveEgress, runWithEgress } from './gateway.ts'
+import { liveEgress, runWithEgress, withEgress } from './gateway.ts'
+import type { NetworkRule } from './network.ts'
 
 // The browser-runtime branch under node's test runner: the real
 // FallbackStorage, no task isolation.
@@ -47,5 +48,31 @@ describe('liveEgress without task isolation', () => {
     release()
     expect(await waiting).toEqual([first])
     expect(liveEgress()).toEqual([])
+  })
+})
+
+describe('withEgress without task isolation', () => {
+  it('keeps the egress it is handed, not the newest frame', async () => {
+    const mine = new Policies()
+    const theirs = new Policies()
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const seen: (Policies | null)[] = []
+    async function* source(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      seen.push(liveEgress().at(-1)?.policies ?? null)
+      yield new Uint8Array([1])
+    }
+    const stream = await runWithEgress({ lets: () => true } as unknown as NetworkRule, mine, () => {
+      const owner = liveEgress().at(-1) ?? null
+      return Promise.resolve(withEgress(source(), owner))
+    })
+    const other = runWithEgress(null, theirs, () => held)
+    for await (const chunk of stream) expect(chunk).toEqual(new Uint8Array([1]))
+    release()
+    await other
+    expect(seen).toEqual([mine])
   })
 })

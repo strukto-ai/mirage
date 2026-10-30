@@ -746,7 +746,49 @@ class EagerFollow extends RAMVFS {
   }
 }
 
+// A follow whose iterable hands out a separate iterator, and whose pull waits
+// until the iterator is told to close, as a change stream waits for news.
+class WaitingFollow extends RAMVFS {
+  override follow(): Promise<AsyncIterable<Uint8Array> | null> {
+    let wake = (): void => undefined
+    const woken = new Promise<void>((resolve) => {
+      wake = resolve
+    })
+    return Promise.resolve({
+      [Symbol.asyncIterator]: () => ({
+        next: async (): Promise<IteratorResult<Uint8Array>> => {
+          await woken
+          return { value: undefined, done: true }
+        },
+        return: (): Promise<IteratorResult<Uint8Array>> => {
+          wake()
+          return Promise.resolve({ value: undefined, done: true })
+        },
+      }),
+    })
+  }
+}
+
 describe('MountEntry streamed op results', () => {
+  it('closes a stream whose pull waits inside a separate iterator', async () => {
+    const mount = new MountEntry({ prefix: '/', vfs: new WaitingFollow(), mode: MountMode.WRITE })
+    const stream = (await mount.call(
+      'follow',
+      '/a.txt',
+      [1, 1],
+    )) as AsyncIterableIterator<Uint8Array>
+    const pending = stream.next()
+    await Promise.race([
+      stream.return?.(),
+      new Promise((_, reject) =>
+        setTimeout(() => {
+          reject(new Error('the close waited behind the pull'))
+        }, 2000),
+      ),
+    ])
+    expect((await pending).done).toBe(true)
+  })
+
   it('closes the source of a stream closed before its first pull', async () => {
     const vfs = new EagerFollow()
     const mount = new MountEntry({ prefix: '/', vfs, mode: MountMode.WRITE })

@@ -58,7 +58,7 @@ import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
-import { withEgress } from '../../io/gateway.ts'
+import { type Egress, withEgress } from '../../io/gateway.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { OutputStream, closeQuietly, rechunk } from '../../io/stream.ts'
 import type { ByteSpool } from '../../io/spool.ts'
@@ -2419,17 +2419,24 @@ export class MountEntry {
  * Preserve a streaming operation's recording owner, caller and egress after
  * its dispatch frame exits.
  */
-export function wrapStream(result: unknown, mountId: string, activity: Activity): unknown {
+export function wrapStream(
+  result: unknown,
+  mountId: string,
+  activity: Activity,
+  owner?: Egress | null,
+): unknown {
   if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
+    // The backend's own iterator, which the close reaches first: a pull
+    // waiting inside it ends only once it is told.
+    const iterator = (result as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
     const kept = withCaller(
-      withMountContext(result as AsyncIterable<Uint8Array>, mountId),
+      withMountContext({ [Symbol.asyncIterator]: () => iterator }, mountId),
       currentCaller(),
     )
     return activity.hold(
       withEgress(
-        new OutputStream(kept[Symbol.asyncIterator](), () =>
-          closeQuietly(result as AsyncIterable<Uint8Array>),
-        ),
+        new OutputStream(kept[Symbol.asyncIterator](), () => closeQuietly(iterator)),
+        owner,
       ),
     )
   }
