@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import sys
+
 import pytest
 
 from mirage.cache.index import (
@@ -58,6 +60,14 @@ async def test_a_ram_store_expires_on_the_given_clock(config):
     assert (await store.list_dir("/listing")).status is None
     clock.advance(1)
     assert (await store.list_dir("/listing")).status == LookupStatus.EXPIRED
+
+
+def test_a_broken_redis_raises_its_own_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "redis.asyncio", None)
+    monkeypatch.delitem(sys.modules, "mirage.cache.index.redis", raising=False)
+    with pytest.raises(ModuleNotFoundError) as raised:
+        build_index(RedisIndexConfig(url="redis://127.0.0.1:1/0"), -1)
+    assert raised.value.name == "redis.asyncio"
 
 
 def test_a_redis_store_reads_the_given_clock():
