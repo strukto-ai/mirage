@@ -23,9 +23,10 @@ const NAMES: [&str; 13] = [
     "zero_terminated",
 ];
 
-/// One option as typed: its name and its text, one character per byte,
-/// or null when it was typed with no value (a switch, or
-/// `--whitespace-delimited` without `=`).
+/// One option as typed: its name and its text, one character per byte.
+/// A switch is the empty text; only `--whitespace-delimited` typed
+/// without `=` is null, since `--whitespace-delimited=` reads as a prefix
+/// of `trimmed`.
 #[derive(Deserialize)]
 pub(super) struct Typed(
     String,
@@ -37,6 +38,8 @@ pub(super) struct Selection {
     pub(super) list: Vec<u8>,
     pub(super) mode: Mode,
     /// `None` for a byte no UTF-8 character is, which no field ends at.
+    /// GNU splits on that byte; fields here are decoded characters, so a
+    /// raw byte never ends one.
     pub(super) delimiter: Option<char>,
     pub(super) complement: bool,
     pub(super) only_delimited: bool,
@@ -47,7 +50,7 @@ pub(super) struct Selection {
 }
 
 fn refusal(message: impl Into<String>) -> StreamError {
-    StreamError::new(message)
+    StreamError::refusal(message.into().as_bytes(), 1)
 }
 
 /// The one character `raw` spells: `Some(None)` for a single byte that is
@@ -73,11 +76,10 @@ fn one_character(raw: &[u8]) -> Option<Option<char>> {
 /// and an output delimiter of a space, `-O` outranks `--output-delimiter`
 /// wherever each was typed, and an empty delimiter is NUL.
 pub(super) fn read(options: &[Typed]) -> Result<Selection, StreamError> {
-    if let Some(Typed(name, _)) = options
-        .iter()
-        .find(|Typed(name, _)| !NAMES.contains(&name.as_str()))
-    {
-        return Err(refusal(format!("cut reads no option {name}")));
+    if let Some(Typed(name, _)) = options.iter().find(|Typed(name, text)| {
+        !NAMES.contains(&name.as_str()) || (text.is_none() && name != "whitespace_delimited")
+    }) {
+        return Err(crate::scan::unknown("cut", name));
     }
     let typed = |name: &str| options.iter().any(|Typed(typed, _)| typed == name);
     let last = |name: &str| {
@@ -177,7 +179,7 @@ mod tests {
                 "you must specify a list of bytes, characters, or fields",
             ),
             (
-                &[("complement", None)],
+                &[("complement", Some(b""))],
                 "you must specify a list of bytes, characters, or fields",
             ),
             (
@@ -201,7 +203,7 @@ mod tests {
                 "invalid argument 'x\\303\\251' for '--whitespace-delimited'",
             ),
             (
-                &[("bytes", Some(b"1")), ("w", None)],
+                &[("bytes", Some(b"1")), ("w", Some(b""))],
                 "'-w' is only meaningful with fields",
             ),
             (
@@ -234,7 +236,7 @@ mod tests {
         }
         assert_eq!(
             refusal(&[F1, ("width", Some(b"1"))]),
-            "cut reads no option width"
+            "scan: cut reads no option width"
         );
     }
 
@@ -264,9 +266,9 @@ mod tests {
         }
         let cases: [Line; 5] = [
             &[F1, ("whitespace_delimited", None)],
-            &[F1, ("w", None)],
-            &[F1, ("w", None), ("whitespace_delimited", Some(b"x"))],
-            &[F1, ("whitespace_delimited", Some(b"x")), ("w", None)],
+            &[F1, ("w", Some(b""))],
+            &[F1, ("w", Some(b"")), ("whitespace_delimited", Some(b"x"))],
+            &[F1, ("whitespace_delimited", Some(b"x")), ("w", Some(b""))],
             &[
                 F1,
                 ("whitespace_delimited", Some(b"x")),
@@ -325,6 +327,15 @@ mod tests {
     }
 
     #[test]
+    fn a_null_value_is_only_a_bare_whitespace_delimited() {
+        assert!(select(&[F1, ("whitespace_delimited", None)]).is_ok());
+        assert_eq!(
+            refusal(&[F1, ("complement", None)]),
+            "scan: cut reads no option complement"
+        );
+    }
+
+    #[test]
     fn reads_the_switches() {
         let selection = select(&[F1]).unwrap();
         assert!(
@@ -336,9 +347,9 @@ mod tests {
         let selection = select(&[
             F1,
             ("complement", Some(b"")),
-            ("only_delimited", None),
-            ("no_partial", None),
-            ("zero_terminated", None),
+            ("only_delimited", Some(b"")),
+            ("no_partial", Some(b"")),
+            ("zero_terminated", Some(b"")),
         ])
         .unwrap();
         assert!(

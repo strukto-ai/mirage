@@ -47,16 +47,20 @@ export const OPTIONS: readonly string[] = [
 
 /**
  * cut's engine config, refused by the engine before any operand is resolved:
- * every option as typed, in typed order, null for one typed without a value (a
- * switch, or `--whitespace-delimited` without `=`, which reads differently
- * from `--whitespace-delimited=`). Mirrors Python's `cut_config`.
+ * every option as typed, in typed order, a switch as the empty text. A
+ * `--whitespace-delimited` without `=` goes as null, since
+ * `--whitespace-delimited=` reads as a prefix of `trimmed`. Mirrors Python's
+ * `cut_config`.
  */
 export function cutConfig(bag: Record<string, FlagValue>): Record<string, JsonValue> | IOResult {
   const fl = new FlagView(bag, specOf('cut'))
   const options: JsonValue[] = fl
     .occurrences(...OPTIONS)
     .filter(([, value]) => value !== false)
-    .map(([name, value]) => [name, value === true ? null : byteView(String(value))])
+    .map(([name, value]) => [
+      name,
+      value !== true ? byteView(String(value)) : name === 'whitespace_delimited' ? null : '',
+    ])
   const config = { options }
   try {
     openStreamSync('cut', config).close()

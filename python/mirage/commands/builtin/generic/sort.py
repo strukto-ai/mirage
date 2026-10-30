@@ -212,7 +212,7 @@ def parse_flags(
     except StreamRefusal as refusal:
         return refused(refusal)
     config = engine_config(values)
-    check = values.get("check", "")
+    check = values["check"]
     if check not in (None, "c", "C"):
         raise ValueError(f"sort's scan read no check mode: {check!r}")
     outputs = fl.as_paths("output")

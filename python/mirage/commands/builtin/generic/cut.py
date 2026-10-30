@@ -47,9 +47,9 @@ def cut_config(
     """cut's engine config, refused by the engine before any operand is
     resolved.
 
-    Every option goes as typed, in typed order, with null for one typed
-    without a value: a switch, or ``--whitespace-delimited`` without
-    ``=``, which reads differently from ``--whitespace-delimited=``.
+    Every option goes as typed, in typed order, a switch as the empty
+    text. A ``--whitespace-delimited`` without ``=`` goes as null, since
+    ``--whitespace-delimited=`` reads as a prefix of ``trimmed``.
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flags.
@@ -59,9 +59,10 @@ def cut_config(
     """
     fl = FlagView(flags, spec=SPECS["cut"])
     options: list[JsonValue] = [
-        [name, None if value is True else byte_view(str(value))]
+        [name, byte_view(value) if isinstance(value, str) else bare]
         for name, value in fl.occurrences(*OPTIONS)
         if value is not False
+        for bare in [None if name == "whitespace_delimited" else ""]
     ]
     config: dict[str, JsonValue] = {"options": options}
     try:

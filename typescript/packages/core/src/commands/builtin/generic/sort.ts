@@ -143,11 +143,12 @@ function typedOptions(fl: FlagView, paths: readonly PathSpec[]): [string, string
   if (tape.filter(([name]) => name === 'output').length !== outputs.length) {
     throw new Error(`sort's tape holds other -o words than its ${String(outputs.length)} paths`)
   }
-  const words = outputs.map((path) => path.rawPath)[Symbol.iterator]()
+  const words = outputs.map((path) => path.rawPath).reverse()
   const typed: [string, string][] = []
   for (const [name, value] of tape) {
-    if (name === 'output') {
-      typed.push([name, words.next().value ?? ''])
+    const word = name === 'output' ? words.pop() : undefined
+    if (word !== undefined) {
+      typed.push([name, word])
     } else if (value === true) {
       typed.push([name === 'check' ? 'c' : name, ''])
     } else if (typeof value === 'string') {
