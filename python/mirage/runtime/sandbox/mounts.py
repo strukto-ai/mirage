@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import importlib
 import logging
 import re
 import uuid
@@ -50,13 +51,20 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-PipeServer: Any
-try:
-    from mirage.mount.sftp import PipeServer as _PipeServer
-except ImportError:
-    PipeServer = None
-else:
-    PipeServer = _PipeServer
+
+def pipe_server() -> Any:
+    """The SFTP pipe server class, imported on the first sandbox mount:
+    asyncssh costs about 40 MB, so a process that never mounts into a
+    sandbox does not load it, as the runtime table defers a provider.
+
+    Raises:
+        ImportError: the `ssh` extra (asyncssh) is not installed.
+    """
+    try:
+        return importlib.import_module("mirage.mount.sftp").PipeServer
+    except ImportError as exc:
+        raise ImportError(PIPE_SERVER_HINT) from exc
+
 
 OCTAL_ESCAPE = re.compile(r"\\([0-7]{3})")
 
@@ -388,14 +396,13 @@ class SandboxMounts:
             await self._drop(prefix)
         new = [p for p in wanted if p not in self._served]
         if new:
-            if PipeServer is None:
-                raise ImportError(PIPE_SERVER_HINT)
+            server = pipe_server()
             if (await self._run("command -v sshfs")).exit_code != 0:
                 raise RuntimeError(f"{self._runtime}: {SSHFS_HINT}")
             try:
                 for prefix in new:
                     await self._serve(
-                        PipeServer(files, session, self._lend),
+                        server(files, session, self._lend),
                         prefix,
                         present,
                     )

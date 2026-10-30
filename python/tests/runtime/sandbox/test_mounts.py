@@ -371,7 +371,7 @@ async def test_a_line_with_its_own_cwd_serves_the_live_session(monkeypatch):
             sessions.append(self.session)
             await super().serve(reader, writer)
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)
     await ws.session("agent", profile="agent")
@@ -393,7 +393,7 @@ async def test_a_server_runs_outside_the_line_that_started_it(monkeypatch):
             )
             await super().serve(reader, writer)
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
@@ -421,7 +421,7 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
             await self.files.write("/data/landed.txt", b"x")
             landed.append((line_running(), await self.run(lent_a_line())))
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(FakeSandbox("ssh"))
     agent = await ws.session("agent", profile="agent")
     line = asyncio.create_task(agent.shell("python3 job.py"))
@@ -455,7 +455,7 @@ async def test_a_line_that_times_out_still_lands_its_writes(monkeypatch):
         async def sync(self):
             synced.append(line_running())
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(
         FakeSandbox("ssh"),
         command_limits={"@line": Limit(timeout_seconds=0.05)},
@@ -524,7 +524,7 @@ async def test_a_server_that_fails_says_why(monkeypatch):
         async def serve(self, reader, writer):
             raise RuntimeError("no server here")
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     sandbox = FakeSandbox("ssh", sshfs_mounts=False)
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
