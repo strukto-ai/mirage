@@ -394,17 +394,34 @@ describe('large in-memory commands', () => {
     const ram = new RAMVFS()
     ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
     ram.store.files.set('/blank', new TextEncoder().encode('\n'.repeat(2_500_000)))
-    const ws = new Workspace({ '/': ram })
     const abort = new AbortController()
-    const timer = setTimeout(() => {
-      abort.abort()
-    }, 5)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let fired = false
+    let now = performance.now()
+    const clock = vi.spyOn(performance, 'now')
+    const read = ram.read.bind(ram)
+    // Arm cancellation at the first read and spend each yield budget,
+    // so a fast command cannot finish before a wall-clock timer is due.
+    const reads = vi.spyOn(ram, 'read').mockImplementation((...args) => {
+      if (timer === undefined) {
+        clock.mockImplementation(() => (now += 10))
+        timer = setTimeout(() => {
+          fired = true
+          abort.abort()
+        }, 0)
+      }
+      return read(...args)
+    })
+    const ws = new Workspace({ '/': ram })
     try {
       await expect(ws.shell(command, { signal: abort.signal })).rejects.toMatchObject({
         name: 'AbortError',
       })
+      expect(fired).toBe(true)
     } finally {
       clearTimeout(timer)
+      reads.mockRestore()
+      clock.mockRestore()
       await ws.close()
     }
   })
