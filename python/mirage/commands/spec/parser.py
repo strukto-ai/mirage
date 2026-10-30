@@ -970,6 +970,8 @@ def parse_command(
                 continue
             if cs.numeric_dest is not None and NUMERIC_SHORT.match(tok):
                 flags[cs.numeric_dest] = tok[1:]
+                if isinstance(flags, FlagBag):
+                    flags.occurrences.append((cs.numeric_dest, tok[1:]))
                 i += 1
                 continue
             matched_optional = False
@@ -1073,6 +1075,8 @@ def parse_command(
                     _set_bool_flag(flags, cs, name)
                 flags.pop(count_dest, None)
                 flags[count_dest] = digits
+                if isinstance(flags, FlagBag):
+                    flags.occurrences.append((count_dest, digits))
                 if rest is None:
                     i += 1
                     continue
