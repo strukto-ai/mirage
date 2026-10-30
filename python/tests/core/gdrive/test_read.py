@@ -20,18 +20,14 @@ import pytest
 
 import mirage.core.gdrive.read as gdrive_read
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.context import session_context as caller
 from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.read import read, read_file_versioned
 from mirage.core.gdrive.readdir import stat_from_item
 from mirage.core.gdrive.stat import stat
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.observe.context import (
-    RecordingScope,
-    active_recorder,
-    push_revisions,
-    reset_revisions,
-)
+from mirage.observe.context import RecordingScope, active_recorder
 from mirage.types import FileStat, FileType, JsonValue, MountMode, PathSpec
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
@@ -620,7 +616,9 @@ async def test_a_pinned_unrecorded_read_stamps_no_entry_token(
         monkeypatch,
         StubDrive(download_file=download, download_revision=revision),
     )
-    token = push_revisions({"/gd/a.txt": "r1"})
+    token = caller.bind_caller(
+        caller.current_caller().changed({"revisions": {"/gd/a.txt": "r1"}})
+    )
     try:
         await read(
             accessor,
@@ -628,7 +626,7 @@ async def test_a_pinned_unrecorded_read_stamps_no_entry_token(
             entry=unrecorded_row({"md5_checksum": BODY_MD5}),
         )
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
     assert records == [{"fingerprint": None, "revision": "r1"}]
     download.assert_not_awaited()
     assert revision.await_count == 1
@@ -775,11 +773,13 @@ async def test_a_pinned_path_reads_its_revision():
     pinned_read = AsyncMock(return_value=b"pinned")
     live_read = AsyncMock()
     drive = StubDrive(download_revision=pinned_read, download_file=live_read)
-    token = push_revisions({"/data/f.txt": "r1"})
+    token = caller.bind_caller(
+        caller.current_caller().changed({"revisions": {"/data/f.txt": "r1"}})
+    )
     try:
         data = await read_file_versioned(drive, "f1", "/data/f.txt", VERSIONED)
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
     assert data == b"pinned"
     pinned_read.assert_awaited_once_with("f1", "r1", None)
     live_read.assert_not_awaited()

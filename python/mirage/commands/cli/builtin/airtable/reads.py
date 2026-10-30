@@ -39,8 +39,8 @@ from mirage.core.airtable.normalize import (
     normalize_comment,
     normalize_table,
     records_jsonl,
-    to_json_bytes,
 )
+from mirage.core.render.json import json_bytes
 from mirage.io.types import IOResult
 
 
@@ -53,7 +53,7 @@ async def _base_list_body(
     no_operands(texts)
     bases = await list_bases(accessor)
     payload = [normalize_base_summary(base) for base in bases]
-    return to_json_bytes(payload), IOResult()
+    return json_bytes(payload), IOResult()
 
 
 async def _base_get_body(
@@ -66,7 +66,7 @@ async def _base_get_body(
     for base in await list_bases(accessor):
         if base.get("id") == base_id:
             tables = await list_tables(accessor, base_id)
-            data = to_json_bytes(normalize_base(base, tables))
+            data = json_bytes(normalize_base(base, tables))
             return data, IOResult()
     raise LookupError(f"{base_id}: no such base")
 
@@ -82,7 +82,7 @@ async def _table_get_body(
     table = find_table(await list_tables(accessor, base_id), ref)
     if table is None:
         raise LookupError(f"{ref}: no such table in {base_id}")
-    return to_json_bytes(normalize_table(table, base_id)), IOResult()
+    return json_bytes(normalize_table(table, base_id)), IOResult()
 
 
 async def _record_list_body(
@@ -140,7 +140,7 @@ async def _comment_list_body(
         accessor, base_id, fl.as_str("table") or "", record_id
     )
     payload = [normalize_comment(comment) for comment in comments]
-    return to_json_bytes(payload), IOResult()
+    return json_bytes(payload), IOResult()
 
 
 base_list = functools.partial(run, _base_list_body)

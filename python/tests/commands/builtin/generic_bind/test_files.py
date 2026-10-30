@@ -31,10 +31,10 @@ from mirage.commands.builtin.generic_bind.files import (
 )
 from mirage.commands.config import Context
 from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import session_context as caller
 from mirage.errors.types import GlobLimitError
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.observe.context import push_revisions, reset_revisions
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -245,11 +245,13 @@ async def test_file_size_answers_a_store_files_unmoved_unpinned_size(
     ctx = _ctx(_answering(st, now, warm))
     with _on_mount():
         bound = file_size(command_files(ctx), ctx)
-    token = push_revisions(pin)
+    token = caller.bind_caller(
+        caller.current_caller().changed({"revisions": pin})
+    )
     try:
         assert await bound(_path("/f")) == size
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
 
 
 @pytest.mark.asyncio

@@ -19,9 +19,10 @@ import pytest
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.core.linear.config import LinearConfig
-from mirage.core.linear.normalize import unsearched_text
+from mirage.core.linear.normalize import SEARCHED_FIELDS, normalize_issue
 from mirage.core.linear.search import SEARCH_LIMIT, files_containing
 from mirage.types import JsonValue, PathSpec
+from mirage.utils.record_search import unsearched_text
 
 TEAM = {"id": "T1", "key": "ENG", "name": "Engineering"}
 ISSUES_DIR = "teams/ENG__Engineering__T1/issues"
@@ -121,7 +122,7 @@ def _documents(out) -> list[str]:
 
 
 def test_unsearched_text_leaves_out_title_and_description():
-    kept = unsearched_text(ISSUES[0])
+    kept = unsearched_text(normalize_issue(ISSUES[0]).items(), SEARCHED_FIELDS)
     assert "todo" in kept and "engineering" in kept
     assert "login" not in kept
 

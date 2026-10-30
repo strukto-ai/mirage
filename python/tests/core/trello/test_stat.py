@@ -17,9 +17,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.accessor.trello import TrelloAccessor
+from mirage.core.render.json import json_bytes
 from mirage.core.trello import readdir as trello_readdir
 from mirage.core.trello.config import TrelloConfig
-from mirage.core.trello.normalize import normalize_card, to_json_bytes
+from mirage.core.trello.normalize import normalize_card
 from mirage.core.trello.stat import stat
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.vfs.trello import TrelloVFS
@@ -103,7 +104,7 @@ async def test_stat_board_entry(accessor):
 async def test_stat_card_json(accessor):
     result = await _stat_at(accessor, CARD_DIR + "/card.json")
     assert result.content == ContentType.JSON
-    assert result.size == len(to_json_bytes(normalize_card(CARD)))
+    assert result.size == len(json_bytes(normalize_card(CARD)))
     assert result.extra["card_id"] == "c1"
 
 

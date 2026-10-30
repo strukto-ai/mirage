@@ -12,14 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonBytes } from '../render/json.ts'
-import { nonPlainWords } from '../../utils/record_search.ts'
-
 type Json = Record<string, unknown>
-
-function pick(record: Json, key: string): unknown {
-  return record[key]
-}
 
 function pickString(record: Json, ...keys: readonly string[]): string | null {
   for (const key of keys) {
@@ -27,11 +20,6 @@ function pickString(record: Json, ...keys: readonly string[]): string | null {
     if (typeof value === 'string') return value
   }
   return null
-}
-
-function pickStringOrNull(record: Json, key: string): string | null {
-  const value = record[key]
-  return typeof value === 'string' ? value : null
 }
 
 function pickBoolOrNull(record: Json, key: string): boolean | null {
@@ -59,7 +47,7 @@ export interface NormalizedWorkspace {
 
 export function normalizeWorkspace(workspace: Json): NormalizedWorkspace {
   return {
-    workspace_id: pickStringOrNull(workspace, 'id'),
+    workspace_id: pickString(workspace, 'id'),
     workspace_name: pickString(workspace, 'displayName', 'name'),
   }
 }
@@ -74,11 +62,11 @@ export interface NormalizedBoard {
 
 export function normalizeBoard(board: Json): NormalizedBoard {
   return {
-    board_id: pickStringOrNull(board, 'id'),
-    board_name: pickStringOrNull(board, 'name'),
-    workspace_id: pickStringOrNull(board, 'idOrganization'),
+    board_id: pickString(board, 'id'),
+    board_name: pickString(board, 'name'),
+    workspace_id: pickString(board, 'idOrganization'),
     closed: pickBoolOrNull(board, 'closed'),
-    url: pickStringOrNull(board, 'url'),
+    url: pickString(board, 'url'),
   }
 }
 
@@ -92,9 +80,9 @@ export interface NormalizedList {
 
 export function normalizeList(lst: Json): NormalizedList {
   return {
-    list_id: pickStringOrNull(lst, 'id'),
-    list_name: pickStringOrNull(lst, 'name'),
-    board_id: pickStringOrNull(lst, 'idBoard'),
+    list_id: pickString(lst, 'id'),
+    list_name: pickString(lst, 'name'),
+    board_id: pickString(lst, 'idBoard'),
     closed: pickBoolOrNull(lst, 'closed'),
     pos: pickNumberOrNull(lst, 'pos'),
   }
@@ -108,9 +96,9 @@ export interface NormalizedMember {
 
 export function normalizeMember(member: Json): NormalizedMember {
   return {
-    member_id: pickStringOrNull(member, 'id'),
-    username: pickStringOrNull(member, 'username'),
-    full_name: pickStringOrNull(member, 'fullName'),
+    member_id: pickString(member, 'id'),
+    username: pickString(member, 'username'),
+    full_name: pickString(member, 'fullName'),
   }
 }
 
@@ -123,10 +111,10 @@ export interface NormalizedLabel {
 
 export function normalizeLabel(label: Json): NormalizedLabel {
   return {
-    label_id: pickStringOrNull(label, 'id'),
-    label_name: pickStringOrNull(label, 'name'),
-    color: pickStringOrNull(label, 'color'),
-    board_id: pickStringOrNull(label, 'idBoard'),
+    label_id: pickString(label, 'id'),
+    label_name: pickString(label, 'name'),
+    color: pickString(label, 'color'),
+    board_id: pickString(label, 'idBoard'),
   }
 }
 
@@ -146,26 +134,26 @@ export interface NormalizedCard {
 
 export function normalizeCard(card: Json): NormalizedCard {
   const labelIds: string[] = []
-  const labels = pick(card, 'labels')
+  const labels = card.labels
   if (Array.isArray(labels)) {
     for (const lbl of labels) {
       if (lbl !== null && typeof lbl === 'object') {
-        const id = pickStringOrNull(lbl as Json, 'id')
+        const id = pickString(lbl as Json, 'id')
         if (id !== null) labelIds.push(id)
       }
     }
   }
   return {
-    card_id: pickStringOrNull(card, 'id'),
-    card_name: pickStringOrNull(card, 'name'),
-    board_id: pickStringOrNull(card, 'idBoard'),
-    list_id: pickStringOrNull(card, 'idList'),
+    card_id: pickString(card, 'id'),
+    card_name: pickString(card, 'name'),
+    board_id: pickString(card, 'idBoard'),
+    list_id: pickString(card, 'idList'),
     member_ids: pickStringArray(card, 'idMembers'),
     label_ids: labelIds,
-    due: pickStringOrNull(card, 'due'),
+    due: pickString(card, 'due'),
     due_complete: pickBoolOrNull(card, 'dueComplete'),
     closed: pickBoolOrNull(card, 'closed'),
-    desc: pickStringOrNull(card, 'desc') ?? '',
+    desc: pickString(card, 'desc') ?? '',
     url: pickString(card, 'shortUrl', 'url'),
   }
 }
@@ -180,49 +168,26 @@ export interface NormalizedComment {
 }
 
 export function normalizeComment(comment: Json, cardId: string): NormalizedComment {
-  const memberRaw = pick(comment, 'memberCreator')
+  const memberRaw = comment.memberCreator
   const member: Json =
     memberRaw !== null && typeof memberRaw === 'object' && !Array.isArray(memberRaw)
       ? (memberRaw as Json)
       : {}
-  const dataRaw = pick(comment, 'data')
+  const dataRaw = comment.data
   const data: Json =
     dataRaw !== null && typeof dataRaw === 'object' && !Array.isArray(dataRaw)
       ? (dataRaw as Json)
       : {}
   return {
-    comment_id: pickStringOrNull(comment, 'id'),
+    comment_id: pickString(comment, 'id'),
     card_id: cardId,
-    member_id: pickStringOrNull(member, 'id'),
+    member_id: pickString(member, 'id'),
     member_name: pickString(member, 'fullName', 'username'),
-    text: pickStringOrNull(data, 'text') ?? '',
-    created_at: pickStringOrNull(comment, 'date'),
+    text: pickString(data, 'text') ?? '',
+    created_at: pickString(comment, 'date'),
   }
-}
-
-export function toJsonBytes(value: unknown): Uint8Array {
-  return jsonBytes(value)
 }
 
 // The fields of a card's JSON Trello's search reads; every other field is
 // checked against the listing instead (`unsearchedText`).
 export const SEARCHED_FIELDS: ReadonlySet<string> = new Set(['card_name', 'desc'])
-
-/**
- * What a card's `card.json` holds beyond the plain words Trello's search
- * reads, lowercased: every other field as the file renders it, then each word
- * of the name and description that is not plain (`nonPlainWords`), such as
- * one inside a link. Mirrors Python's `unsearched_text`.
- */
-export function unsearchedText(card: Json): string {
-  const normalized = normalizeCard(card)
-  const rest = Object.fromEntries(
-    Object.entries(normalized).filter(([key]) => !SEARCHED_FIELDS.has(key)),
-  )
-  const kept = [new TextDecoder().decode(toJsonBytes(rest))]
-  for (const [key, value] of Object.entries(normalized)) {
-    if (SEARCHED_FIELDS.has(key) && typeof value === 'string')
-      for (const item of nonPlainWords(value)) kept.push(item)
-  }
-  return kept.join(' ').toLowerCase()
-}

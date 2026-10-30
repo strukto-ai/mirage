@@ -16,7 +16,6 @@ import asyncio
 import dataclasses
 import errno
 import functools
-import genericpath
 import logging
 import os as _real_os
 import posixpath
@@ -271,7 +270,7 @@ class HostFs:
     """Every routed `os` verb, answered on a mount or left to the host.
 
     One method per name in ``ROUTED_CALLS``; the table, not this class,
-    decides which names exist, and ``make_os_module`` installs them by
+    decides which names exist, and ``os_routing`` maps them from
     that table so a verb classified as routed cannot be left pointing at
     the host by omission. A path no mount owns falls through to the real
     function: the host process still needs its own filesystem, and the
@@ -1351,43 +1350,6 @@ def _refusal(
     return refuse
 
 
-def _rebind(
-    module: types.ModuleType, replacements: dict[str, Any]
-) -> types.ModuleType:
-    """A copy of `module` whose functions read `replacements` as globals.
-
-    ``os.path`` is a module of functions that call ``os.stat`` and
-    ``os.lstat`` by global name, so a copy holding the patched os module
-    routes every one of them at once: exists, isdir, islink, getsize,
-    ismount, realpath, samefile. Naming them one by one instead means
-    the list drifts, and the ones nobody remembered keep answering from
-    the host about a path it has never had.
-
-    Args:
-        module (types.ModuleType): the module to copy.
-        replacements (dict[str, Any]): globals to override in the copy.
-    """
-    copy = types.ModuleType(module.__name__)
-    copy.__dict__.update(module.__dict__)
-    copy.__dict__.update(replacements)
-    for name, value in list(vars(module).items()):
-        if (
-            not isinstance(value, types.FunctionType)
-            or value.__globals__ is not module.__dict__
-        ):
-            continue
-        rebound = types.FunctionType(
-            value.__code__,
-            copy.__dict__,
-            name,
-            value.__defaults__,
-            value.__closure__,
-        )
-        rebound.__kwdefaults__ = value.__kwdefaults__
-        copy.__dict__[name] = rebound
-    return copy
-
-
 def os_routing(router: HostFs) -> dict[str, Callable[..., Any]]:
     """Every `os` name that must not answer from the host, and what does.
 
@@ -1429,34 +1391,3 @@ def os_routing(router: HostFs) -> dict[str, Callable[..., Any]]:
         if hasattr(_real_os, verb):
             table[verb] = syscall(_descriptor_refusal(router, verb, params))
     return table
-
-
-def make_os_module(
-    files: WorkspaceFiles, loop: asyncio.AbstractEventLoop | None = None
-) -> types.ModuleType:
-    """A standalone copy of `os` that routes mounted paths.
-
-    A copy, not a patch, for a caller that wants the routing without
-    changing the process: hand it to a script's globals, or hold it in
-    a test. ``patch_process`` uses ``os_routing`` on the real module
-    instead, because a module already imported holds its own reference
-    to that one and a copy would never reach it.
-
-    Its ``path`` is a copy too, since ``os.path`` is a module of
-    functions that read ``os`` from their own globals rather than from
-    this copy.
-
-    Args:
-        files (WorkspaceFiles): The facade with the mount table.
-        loop (asyncio.AbstractEventLoop | None): Shared event loop.
-
-    Returns:
-        types.ModuleType: A patched os module.
-    """
-    patched = types.ModuleType("os")
-    patched.__dict__.update(_real_os.__dict__)
-    patched.__dict__.update(os_routing(HostFs(files, loop)))
-    generic = _rebind(genericpath, {"os": patched})
-    shared = {name: generic.__dict__[name] for name in genericpath.__all__}
-    patched.__dict__["path"] = _rebind(posixpath, {"os": patched, **shared})
-    return patched

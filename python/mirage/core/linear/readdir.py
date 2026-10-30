@@ -28,6 +28,7 @@ from mirage.core.linear.client import (
     list_teams,
 )
 from mirage.core.linear.normalize import (
+    SEARCHED_FIELDS,
     normalize_comment,
     normalize_cycle,
     normalize_document,
@@ -36,8 +37,6 @@ from mirage.core.linear.normalize import (
     normalize_team,
     normalize_user,
     project_issue_rows,
-    to_json_bytes,
-    unsearched_text,
 )
 from mirage.core.linear.pathing import (
     cycle_filename,
@@ -48,9 +47,9 @@ from mirage.core.linear.pathing import (
     team_dirname,
 )
 from mirage.core.linear.scope import detect_scope
-from mirage.core.render.json import jsonl_bytes_by_created_at
+from mirage.core.render.json import json_bytes, jsonl_bytes_by_created_at
 from mirage.types import ContentType, FileStat, FileType
-from mirage.utils.record_search import kept_text
+from mirage.utils.record_search import kept_text, unsearched_text
 
 TEAM_DIRS = ("members", "issues", "projects", "cycles", "documents")
 
@@ -94,7 +93,7 @@ async def _list_teams_dir(
             extra={
                 "team_key": team.get("key"),
                 "team_name": team.get("name"),
-                "json_size": len(to_json_bytes(normalize_team(team))),
+                "json_size": len(json_bytes(normalize_team(team))),
             },
         )
         for team in await filtered_teams(accessor)
@@ -134,7 +133,7 @@ async def _list_members(
     )
     rows = []
     for user in users:
-        rendered = to_json_bytes(normalize_user(user))
+        rendered = json_bytes(normalize_user(user))
         rows.append(
             MEMBER(
                 member_filename(user),
@@ -157,10 +156,12 @@ async def _list_issues(
     for issue in issues:
         extra: dict[str, Any] = {
             "issue_key": issue.get("identifier"),
-            "json_size": len(to_json_bytes(normalize_issue(issue))),
+            "json_size": len(json_bytes(normalize_issue(issue))),
         }
         if accessor.capped():
-            extra["unsearched"] = unsearched_text(issue)
+            extra["unsearched"] = unsearched_text(
+                normalize_issue(issue).items(), SEARCHED_FIELDS
+            )
         rows.append(
             ISSUE(
                 issue_dirname(issue),
@@ -217,7 +218,7 @@ async def _list_projects(
     )
     rows = []
     for project in projects:
-        rendered = to_json_bytes(
+        rendered = json_bytes(
             normalize_project(
                 project,
                 team_id=team_id,
@@ -245,7 +246,7 @@ async def _list_cycles(
     cycles = await list_team_cycles(accessor, team_id, match.limit)
     rows = []
     for cycle in cycles:
-        rendered = to_json_bytes(normalize_cycle(cycle, team_id=team_id))
+        rendered = json_bytes(normalize_cycle(cycle, team_id=team_id))
         rows.append(
             CYCLE(
                 cycle_filename(cycle),
@@ -266,7 +267,7 @@ async def _list_documents(
     )
     rows = []
     for document in documents:
-        rendered = to_json_bytes(normalize_document(document))
+        rendered = json_bytes(normalize_document(document))
         rows.append(
             DOCUMENT(
                 document_filename(document),

@@ -34,11 +34,10 @@ from mirage.core.linear.normalize import (
     normalize_team,
     normalize_user,
     project_issue_rows,
-    to_json_bytes,
 )
 from mirage.core.linear.readdir import filtered_teams
 from mirage.core.linear.scope import detect_scope
-from mirage.core.render.json import jsonl_bytes_by_created_at
+from mirage.core.render.json import json_bytes, jsonl_bytes_by_created_at
 from mirage.errors.fs import enoent
 from mirage.types import FileStat, PathSpec
 
@@ -53,7 +52,7 @@ async def _read_team_json(
     team_id = match.slots["team_id"]
     for team in await filtered_teams(accessor):
         if team.get("id") == team_id:
-            return to_json_bytes(normalize_team(team))
+            return json_bytes(normalize_team(team))
     raise enoent(path.virtual)
 
 
@@ -68,7 +67,7 @@ async def _read_member(
     users = await list_team_members(accessor, match.slots["team_id"])
     for user in users:
         if user.get("id") == member_id:
-            return to_json_bytes(normalize_user(user))
+            return json_bytes(normalize_user(user))
     raise enoent(path.virtual)
 
 
@@ -80,7 +79,7 @@ async def _read_issue_json(
     parent: FileStat | None,
 ) -> bytes:
     issue = await get_issue(accessor, match.slots["issue_id"])
-    return to_json_bytes(normalize_issue(issue))
+    return json_bytes(normalize_issue(issue))
 
 
 async def _read_comments(
@@ -121,7 +120,7 @@ async def _read_project(
     for project in projects:
         if project.get("id") == project_id:
             project_issues = project_issue_rows(team_issues, project_id)
-            return to_json_bytes(
+            return json_bytes(
                 normalize_project(
                     project,
                     team_id=team_id,
@@ -144,7 +143,7 @@ async def _read_cycle(
     cycles = await list_team_cycles(accessor, team_id)
     for cycle in cycles:
         if cycle.get("id") == match.slots["cycle_id"]:
-            return to_json_bytes(normalize_cycle(cycle, team_id=team_id))
+            return json_bytes(normalize_cycle(cycle, team_id=team_id))
     raise enoent(path.virtual)
 
 
@@ -158,7 +157,7 @@ async def _read_document(
     documents = await list_team_documents(accessor, match.slots["team_id"])
     for document in documents:
         if document.get("id") == match.slots["document_id"]:
-            return to_json_bytes(normalize_document(document))
+            return json_bytes(normalize_document(document))
     raise enoent(path.virtual)
 
 

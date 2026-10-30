@@ -261,16 +261,6 @@ export function withInline(
 }
 
 /**
- * A profile's admission rules: its own, plus every mount section's, in one
- * list; null when the profile states none. Mount rules come first so the
- * section closest to the data speaks first when several rules match at
- * the same anchor depth and only the message differs.
- */
-export function compileCommands(profile: SessionProfile): AdmissionRules | null {
-  return rulesFrom(compilePlan(profile).commands)
-}
-
-/**
  * The profile's policy programs by method, compiled onto the session.
  * `name` is the profile's name, empty for a document passed without one;
  * what a program reads as `ctx.profile`.

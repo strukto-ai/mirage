@@ -13,15 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { googleRequest, sheetsBase, type TokenManager } from '../google/client.ts'
-import { ApiError } from '../api/errors.ts'
-
-class SheetsApiError extends ApiError {
-  declare readonly status: number
-  constructor(message: string, status: number) {
-    super(message, status)
-    this.name = 'SheetsApiError'
-  }
-}
 
 function parseValues(valuesJson: string): unknown {
   try {
@@ -30,13 +21,6 @@ function parseValues(valuesJson: string): unknown {
     const msg = err instanceof Error ? err.message : String(err)
     throw new Error(`Invalid JSON: ${msg}`)
   }
-}
-
-function sheetsError(verb: string, url: string, response: Response, text: string): SheetsApiError {
-  return new SheetsApiError(
-    `Sheets ${verb} ${url} → ${String(response.status)} ${text}`,
-    response.status,
-  )
 }
 
 export async function appendValues(
@@ -49,7 +33,6 @@ export async function appendValues(
   const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`
   return googleRequest(tm, 'POST', url, {
     json: { values },
-    errorOf: (response, text) => sheetsError('POST', url, response, text),
   })
 }
 
@@ -63,6 +46,5 @@ export async function updateValues(
   const url = `${sheetsBase(tm)}/spreadsheets/${spreadsheetId}/values/${range}?valueInputOption=USER_ENTERED`
   return googleRequest(tm, 'PUT', url, {
     json: { values },
-    errorOf: (response, text) => sheetsError('PUT', url, response, text),
   })
 }

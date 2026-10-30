@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
 import { jsonlBytesByCreatedAt } from '../render/json.ts'
+import { describe, expect, it } from 'vitest'
 import {
   normalizeBoard,
   normalizeCard,
@@ -22,7 +22,6 @@ import {
   normalizeList,
   normalizeMember,
   normalizeWorkspace,
-  toJsonBytes,
   type NormalizedComment,
 } from './normalize.ts'
 
@@ -137,11 +136,6 @@ describe('normalize', () => {
       text: 'hi',
       created_at: '2025-01-01T00:00:00Z',
     })
-  })
-
-  it('toJsonBytes pretty-prints', () => {
-    const bytes = toJsonBytes({ a: 1 })
-    expect(new TextDecoder().decode(bytes)).toBe('{\n  "a": 1\n}')
   })
 
   it('jsonlBytesByCreatedAt returns empty for empty input', () => {

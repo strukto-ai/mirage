@@ -64,11 +64,9 @@ describe('appendValues', () => {
     expect(JSON.parse(init?.body as string)).toEqual({ values: [['a', 'b']] })
   })
 
-  it('reports a failure with the verb, url, status, and body', async () => {
+  it('reports the response body through the shared Google error', async () => {
     vi.stubGlobal('fetch', respond(400, 'boom'))
-    await expect(appendValues(manager(), 'sid', 'Tab!A1', '[[1]]')).rejects.toThrow(
-      `Sheets POST ${APPEND_URL} → 400 boom`,
-    )
+    await expect(appendValues(manager(), 'sid', 'Tab!A1', '[[1]]')).rejects.toThrow('boom')
   })
 
   it('refuses malformed values before any request goes out', async () => {
@@ -96,11 +94,9 @@ describe('updateValues', () => {
     expect(JSON.parse(init?.body as string)).toEqual({ values: [['x']] })
   })
 
-  it('reports a failure with the verb, url, status, and body', async () => {
+  it('reports the response body through the shared Google error', async () => {
     vi.stubGlobal('fetch', respond(500, 'nope'))
-    await expect(updateValues(manager(), 'sid', 'Tab!A1', '[[1]]')).rejects.toThrow(
-      `Sheets PUT ${UPDATE_URL} → 500 nope`,
-    )
+    await expect(updateValues(manager(), 'sid', 'Tab!A1', '[[1]]')).rejects.toThrow('nope')
   })
 
   it('refuses malformed values before any request goes out', async () => {
