@@ -104,6 +104,25 @@
         "stdout": "%Q\n",
         "stderr": "find: warning: unrecognized format directive '%Q'\n"
       }
+    },
+    {
+      "id": "find_printf_time_letters_match_gnu",
+      "seq": 19990124,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "printf x > /data/fpT1; printf x > /data/fpT2; touch -d \"2024-03-05 14:07:09\" /data/fpT1; touch -d \"2023-01-01 00:00:00\" /data/fpT2; find /data/fpT1 /data/fpT2 -printf \"%Ta|%TA|%Tb|%TB|%Tc|%TC|%Td|%TD|%Te|%TF|%Tg|%TG|%Th|%TH|%TI|%Tj|%Tk|%Tl|%Tm|%TM|%Tp|%TP|%Tr|%TR|%Ts|%TS|%TT|%Tu|%TU|%TV|%Tw|%TW|%Tx|%TX|%Ty|%TY|%Tz|%TZ|%TE|%Tq|%T1\\n\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "Tue|Tuesday|Mar|March|Tue Mar  5 14:07:09 2024|20|05|03/05/24| 5|2024-03-05|24|2024|Mar|14|02|065|14| 2|03|07|PM|pm|02:07:09 PM|14:07|1709647629|09.0000000000|14:07:09.0000000000|2|09|10|2|10|03/05/24|14:07:09.0000000000|24|2024|+0000|UTC|%E|%q|%1\nSun|Sunday|Jan|January|Sun Jan  1 00:00:00 2023|20|01|01/01/23| 1|2023-01-01|22|2022|Jan|00|12|001| 0|12|01|00|AM|am|12:00:00 AM|00:00|1672531200|00.0000000000|00:00:00.0000000000|7|01|52|0|00|01/01/23|00:00:00.0000000000|23|2023|+0000|UTC|%E|%q|%1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "printf"
+      ]
     }
   ]
 }

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import math
 from datetime import datetime, timezone
 from stat import filemode
 
@@ -90,20 +91,110 @@ def _mtime_epoch(st: FileStat | None) -> float:
     return iso_timestamp(st.modified) or 0.0
 
 
+_DAY_NAMES = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+_MONTH_NAMES = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+
+
+def _time_fields(ts: float) -> dict[str, str]:
+    """Every ``%T<letter>`` GNU find renders, for one UTC timestamp.
+
+    Spelled out rather than handed to ``strftime``, whose letters and
+    their meaning (``%s`` in local time, ``%P``) differ by platform.
+    ``%TS``, ``%TT`` and ``%TX`` carry the fraction GNU appends.
+
+    Args:
+        ts (float): seconds since the epoch.
+    """
+    dt = datetime.fromtimestamp(ts, timezone.utc)
+    frac = f"{ts:.10f}".split(".")[1]
+    iso_year, iso_week, iso_day = dt.isocalendar()
+    yday = dt.timetuple().tm_yday - 1
+    wday = iso_day % 7
+    hour12 = dt.hour % 12 or 12
+    day = _DAY_NAMES[dt.weekday()]
+    month = _MONTH_NAMES[dt.month - 1]
+    clock = f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}"
+    date = f"{dt.month:02d}/{dt.day:02d}/{dt.year % 100:02d}"
+    return {
+        "@": f"{ts:.10f}",
+        "+": f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}+{clock}.{frac}",
+        "a": day[:3],
+        "A": day,
+        "b": month[:3],
+        "B": month,
+        "c": f"{day[:3]} {month[:3]} {dt.day:2d} {clock} {dt.year}",
+        "C": f"{dt.year // 100:02d}",
+        "d": f"{dt.day:02d}",
+        "D": date,
+        "e": f"{dt.day:2d}",
+        "F": f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}",
+        "g": f"{iso_year % 100:02d}",
+        "G": f"{iso_year}",
+        "h": month[:3],
+        "H": f"{dt.hour:02d}",
+        "I": f"{hour12:02d}",
+        "j": f"{yday + 1:03d}",
+        "k": f"{dt.hour:2d}",
+        "l": f"{hour12:2d}",
+        "m": f"{dt.month:02d}",
+        "M": f"{dt.minute:02d}",
+        "n": "\n",
+        "p": "AM" if dt.hour < 12 else "PM",
+        "P": "am" if dt.hour < 12 else "pm",
+        "r": f"{hour12:02d}:{dt.minute:02d}:{dt.second:02d} "
+        + ("AM" if dt.hour < 12 else "PM"),
+        "R": f"{dt.hour:02d}:{dt.minute:02d}",
+        "s": f"{math.floor(ts)}",
+        "S": f"{dt.second:02d}.{frac}",
+        "t": "\t",
+        "T": f"{clock}.{frac}",
+        "u": f"{iso_day}",
+        "U": f"{(yday + 7 - wday) // 7:02d}",
+        "V": f"{iso_week:02d}",
+        "w": f"{wday}",
+        "W": f"{(yday + 7 - (iso_day - 1)) // 7:02d}",
+        "x": date,
+        "X": f"{clock}.{frac}",
+        "y": f"{dt.year % 100:02d}",
+        "Y": f"{dt.year}",
+        "z": "+0000",
+        "Z": "UTC",
+    }
+
+
 def _expand_time(
     letter: str, ts: float, directive_src: str, warnings: list[str]
 ) -> str:
-    if letter == "@":
-        return f"{ts:.10f}"
-    dt = datetime.fromtimestamp(ts, timezone.utc)
-    if letter == "+":
-        frac = f"{ts:.10f}".split(".")[1]
-        return dt.strftime("%Y-%m-%d+%H:%M:%S") + "." + frac
-    try:
-        return dt.strftime(f"%{letter}")
-    except ValueError:
-        _warn_unrecognized(directive_src, warnings)
-        return directive_src
+    rendered = _time_fields(ts).get(letter)
+    if rendered is not None:
+        return rendered
+    # GNU prints a letter or digit it has no field for as `%<char>`,
+    # silently; anything else is an unrecognized directive.
+    if letter.isascii() and letter.isalnum():
+        return f"%{letter}"
+    _warn_unrecognized(directive_src, warnings)
+    return directive_src
 
 
 def _warn_unrecognized(src: str, warnings: list[str]) -> None:

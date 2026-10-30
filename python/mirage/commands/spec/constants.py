@@ -715,9 +715,9 @@ WORD_CHOICE_OPTIONS = frozenset(
 # inf, or nan, so both languages accept exactly the same strings).
 # [0-9] and not \d: python's \d also matches Unicode digits, which
 # JS /\d/ and GNU's C-locale parsers reject.
-INT_VALUE = re.compile(r"^[+-]?[0-9]+$")
+INT_VALUE = re.compile(r"^[+-]?[0-9]+\Z")
 FLOAT_VALUE = re.compile(
-    r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$"
+    r"^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?\Z"
 )
 
 # GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils

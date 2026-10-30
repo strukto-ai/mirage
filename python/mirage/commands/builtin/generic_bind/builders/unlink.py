@@ -39,6 +39,8 @@ async def unlink(
     if not paths:
         raise missing_operand_error("unlink", None)
     paths = await files.resolve_glob(paths)
+    if not paths:
+        raise missing_operand_error("unlink", None)
     if len(paths) > 1:
         raise extra_operand_error("unlink", paths[1].raw_path)
     p = paths[0]
