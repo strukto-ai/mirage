@@ -43,13 +43,8 @@ TS_WIDTH = 100
 UNQUOTABLE = frozenset("\\\"'")
 
 
-def quotable(glob: object) -> bool:
-    return (
-        isinstance(glob, str)
-        and glob.isprintable()
-        and bool(glob)
-        and not UNQUOTABLE & set(glob)
-    )
+def quotable(glob: str) -> bool:
+    return glob.isprintable() and bool(glob) and not UNQUOTABLE & set(glob)
 
 
 def load(text: str) -> dict[str, list[str]]:
@@ -62,7 +57,7 @@ def load(text: str) -> dict[str, list[str]]:
         if not (
             isinstance(globs, list)
             and globs
-            and all(quotable(glob) for glob in globs)
+            and all(isinstance(glob, str) and quotable(glob) for glob in globs)
             and len(set(globs)) == len(globs)
         ):
             raise SystemExit(f"{SOURCE.name}: {name}: want distinct globs")
