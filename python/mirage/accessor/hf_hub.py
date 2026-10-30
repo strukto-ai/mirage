@@ -181,7 +181,7 @@ def hub_for(
     rather than owning a second Hub client: the handle only names which
     repository is being addressed and rides the account's credential,
     origin and pool, so `hf` gets the mount's tree walk and commit
-    builder for free and one install keeps one pool. It reaches no
+    builder for free and one install keeps one pool. It is bound to no
     mount, which is what keeps `hf` an account CLI. A verb reads paths
     and sizes, never the per-file commit a mount's mtimes come from, so
     the walk lists bare.

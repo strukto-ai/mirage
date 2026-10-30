@@ -45,8 +45,9 @@ export class HfAccountAccessor extends Accessor {
    * `HfAccountAccessor.reaches`.
    */
   override reaches(peer: Accessor): boolean {
-    const origin = (endpoint: string): string => endpoint.replace(/\/+$/, '')
-    return peer instanceof HfHubAccessor && origin(peer.endpoint) === origin(this.endpoint)
+    return (
+      peer instanceof HfHubAccessor && rstripSlash(peer.endpoint) === rstripSlash(this.endpoint)
+    )
   }
 }
 
@@ -142,7 +143,7 @@ export class HfHubAccessor extends Accessor {
  * than owning a second Hub client: the handle only names which repository is
  * being addressed and rides the account's credential, origin and request
  * bound, so `hf` gets the mount's tree walk and commit builder for free. It
- * reaches no mount, which is what keeps `hf` an account CLI. A verb reads paths and
+ * is bound to no mount, which is what keeps `hf` an account CLI. A verb reads paths and
  * sizes, never the per-file commit a mount's mtimes come from, so the walk
  * lists bare.
  */

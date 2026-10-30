@@ -16,11 +16,12 @@ import asyncio
 
 from mirage.accessor.base import Accessor
 from mirage.accessor.imap import IMAPClient
+from mirage.accessor.mixin import MailboxMixin
 from mirage.core.email.config import EmailConfig
 from mirage.vfs.secrets import reveal_secret
 
 
-class EmailAccessor(Accessor):
+class EmailAccessor(Accessor, MailboxMixin):
     def __init__(self, config: EmailConfig) -> None:
         self.config = config
         self._imap: IMAPClient | None = None
@@ -73,14 +74,10 @@ class EmailAccessor(Accessor):
 
     def reaches(self, peer: Accessor) -> bool:
         """Whether a write through this account may change what ``peer``
-        reads: a mailbox on the same IMAP server, whatever login reads it,
-        since two logins can share a folder.
+        reads: any mailbox, over IMAP or the Gmail API, since a send can
+        land in any of them and one account can be read either way.
 
         Args:
             peer (Accessor): another of the workspace's accessors.
         """
-        return (
-            isinstance(peer, EmailAccessor)
-            and peer.config.imap_host == self.config.imap_host
-            and peer.config.imap_port == self.config.imap_port
-        )
+        return isinstance(peer, MailboxMixin)

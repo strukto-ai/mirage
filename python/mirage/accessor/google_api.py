@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor, TokenAccessor
+from mirage.accessor.mixin import MailboxMixin
 from mirage.core.gcal.api import CalendarApi, CalendarClient
 from mirage.core.gdocs.api import DocsApi, DocsClient
 from mirage.core.gdrive.api import DriveApi, DriveClient
@@ -66,9 +67,10 @@ class GoogleApiAccessor(TokenAccessor):
         """Whether a write through this client may change what ``peer``
         reads: any Google mount, whatever credential or API root it reads
         through, since a Drive write can change a Doc or a Sheet and a
-        second credential or a proxy reaches the same data.
+        second credential or a proxy reaches the same data; and any
+        mailbox, since a Gmail send can land in one read over IMAP.
 
         Args:
             peer (Accessor): another of the workspace's accessors.
         """
-        return isinstance(peer, GoogleApiAccessor)
+        return isinstance(peer, (GoogleApiAccessor, MailboxMixin))

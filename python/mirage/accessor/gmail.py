@@ -15,11 +15,12 @@
 from collections.abc import Callable
 
 from mirage.accessor.google_api import GoogleApiAccessor
+from mirage.accessor.mixin import MailboxMixin
 from mirage.core.google.client import TokenManager
 from mirage.vfs.gmail.config import GmailConfig
 
 
-class GmailAccessor(GoogleApiAccessor):
+class GmailAccessor(GoogleApiAccessor, MailboxMixin):
     config: GmailConfig
 
     def __init__(

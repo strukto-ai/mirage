@@ -14,9 +14,11 @@
 
 import type { TokenManager } from '../core/google/client.ts'
 import { GoogleApiAccessor } from './google_api.ts'
+import { MAILBOX, type Mailbox } from './mixin.ts'
 import type { GmailConfig } from '../vfs/gmail/config.ts'
 
-export class GmailAccessor extends GoogleApiAccessor {
+export class GmailAccessor extends GoogleApiAccessor implements Mailbox {
+  readonly [MAILBOX] = true as const
   readonly config: GmailConfig
   /**
    * Whether the mount walks under a `walkLimit`, asked when a listing runs,

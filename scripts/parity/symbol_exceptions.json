@@ -286,6 +286,16 @@
     "isPipeTransport": "Nominal TypeScript pipe transport corresponds to the Python PipeTransportMixin."
    }
   },
+  "accessor/mixin": {
+   "python_only": {
+    "MailboxMixin": "Python detects a mailbox client by mixin inheritance; TypeScript uses a nominal symbol, interface and type guard."
+   },
+   "typescript_only": {
+    "MAILBOX": "Nominal TypeScript mailbox brand corresponds to the Python MailboxMixin.",
+    "Mailbox": "Nominal TypeScript mailbox brand corresponds to the Python MailboxMixin.",
+    "isMailbox": "Nominal TypeScript mailbox brand corresponds to the Python MailboxMixin."
+   }
+  },
   "runtime/sandbox/program": {
    "python_only": {
     "STREAM_LIMIT": "Python's stream readers take a buffer size, the subprocess protocol's and the ssh channel's reads; Node's streams size their own.",

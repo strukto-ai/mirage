@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type Accessor, TokenAccessor } from './base.ts'
+import { isMailbox } from './mixin.ts'
 import { CalendarClient, type CalendarApi } from '../core/gcal/api.ts'
 import { DocsClient, type DocsApi } from '../core/gdocs/api.ts'
 import { DriveClient, type DriveApi } from '../core/gdrive/api.ts'
@@ -63,9 +64,10 @@ export class GoogleApiAccessor extends TokenAccessor {
    * Whether a write through this client may change what `peer` reads: any
    * Google mount, whatever credential or API root it reads through, since a
    * Drive write can change a Doc or a Sheet and a second credential or a proxy
-   * reaches the same data. Mirrors Python's `GoogleApiAccessor.reaches`.
+   * reaches the same data; and any mailbox, since a Gmail send can land in one
+   * read over IMAP. Mirrors Python's `GoogleApiAccessor.reaches`.
    */
   override reaches(peer: Accessor): boolean {
-    return peer instanceof GoogleApiAccessor
+    return peer instanceof GoogleApiAccessor || isMailbox(peer)
   }
 }

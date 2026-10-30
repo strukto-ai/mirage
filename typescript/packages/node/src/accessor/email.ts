@@ -13,12 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
+import { isMailbox, MAILBOX, type Mailbox } from '@struktoai/mirage-core/accessor/mixin'
 import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { ImapFlow } from 'imapflow'
 import type { EmailConfig } from '../core/email/config.ts'
 
-export class EmailAccessor extends Accessor {
+export class EmailAccessor extends Accessor implements Mailbox {
+  readonly [MAILBOX] = true as const
   readonly config: EmailConfig
   private clientPromise: Promise<ImapFlow> | null = null
 
@@ -87,15 +89,12 @@ export class EmailAccessor extends Accessor {
   }
 
   /**
-   * Whether a write through this account may change what `peer` reads: a
-   * mailbox on the same IMAP server, whatever login reads it, since two logins
-   * can share a folder. Mirrors Python's `EmailAccessor.reaches`.
+   * Whether a write through this account may change what `peer` reads: any
+   * mailbox, over IMAP or the Gmail API, since a send can land in any of them
+   * and one account can be read either way. Mirrors Python's
+   * `EmailAccessor.reaches`.
    */
   override reaches(peer: Accessor): boolean {
-    return (
-      peer instanceof EmailAccessor &&
-      peer.config.imapHost === this.config.imapHost &&
-      peer.config.imapPort === this.config.imapPort
-    )
+    return isMailbox(peer)
   }
 }
