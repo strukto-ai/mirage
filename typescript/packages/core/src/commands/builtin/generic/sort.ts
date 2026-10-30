@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../../io/cooperative.ts'
-import { ByteSpool } from '../../../io/spool.ts'
+import { ByteSpool, IO_BUFFER_SIZE } from '../../../io/spool.ts'
 import { drain } from '../../../io/stream.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { recordSeparator } from '../utils/lines.ts'
@@ -332,7 +332,7 @@ async function mergeSpools(
     await output.fill(
       chainOutput(
         engine,
-        runs.map((run) => run.stream()),
+        runs.map((run) => run.stream(0, undefined, IO_BUFFER_SIZE)),
         signal,
       ),
     )
@@ -573,7 +573,7 @@ export async function sortGeneric(
       walkError: parsed.output.walkError,
     })
     try {
-      await write(outputPath, ordered.stream())
+      await write(outputPath, ordered.stream(0, undefined, IO_BUFFER_SIZE))
     } catch (error) {
       if (!isFsError(error)) throw error
       const strerror = fsStrerror(error) ?? String(error)

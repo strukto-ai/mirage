@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import os
 
 import pytest
@@ -203,6 +204,11 @@ async def test_an_atomic_write_of_bytes_replaces_the_file_whole(tmp_path):
     assert target.stat().st_mode & 0o777 == 0o640
 
 
+async def _lettered_pieces():
+    for i in range(64):
+        yield bytes([65 + i % 26]) * (16 * 1024)
+
+
 @pytest.mark.asyncio
 async def test_a_stream_reaches_the_file_in_batches(tmp_path, monkeypatch):
     opened = disk_write.aiofiles.open
@@ -219,15 +225,11 @@ async def test_a_stream_reaches_the_file_in_batches(tmp_path, monkeypatch):
         f.write = write_one
         return f
 
-    async def source():
-        for i in range(64):
-            yield bytes([65 + i % 26]) * (16 * 1024)
-
     monkeypatch.setattr(disk_write.aiofiles, "open", counting)
     await write(
         DiskAccessor(tmp_path),
         PathSpec.from_str_path("/file", vfs_path="file"),
-        source(),
+        _lettered_pieces(),
     )
     assert (tmp_path / "file").read_bytes() == b"".join(
         bytes([65 + i % 26]) * (16 * 1024) for i in range(64)
@@ -258,3 +260,45 @@ async def test_a_slow_stream_still_shows_its_bytes_within_a_flush(tmp_path):
     assert shown.is_set()
     assert seen[0] == b"first\n"
     assert (tmp_path / "file").read_bytes() == b"first\nsecond\n"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_timed_write_stops_a_writer_waiting_on_input(
+    tmp_path, monkeypatch
+):
+    opened = disk_write.aiofiles.open
+    closed = []
+
+    async def full(*args, **kwargs):
+        f = await opened(*args, **kwargs)
+
+        async def refuse(data):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        f.write = refuse
+        return f
+
+    async def stalled():
+        try:
+            yield b"first\n"
+            await asyncio.Event().wait()
+        finally:
+            closed.append(True)
+
+    monkeypatch.setattr(disk_write.aiofiles, "open", full)
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(OSError) as caught:
+        await asyncio.wait_for(
+            write(
+                DiskAccessor(tmp_path),
+                PathSpec.from_str_path("/file", vfs_path="file"),
+                stalled(),
+            ),
+            timeout=20 * STREAM_FLUSH_SECONDS,
+        )
+    assert caught.value.errno == errno.ENOSPC
+    assert (
+        asyncio.get_running_loop().time() - started < 10 * STREAM_FLUSH_SECONDS
+    )
+    assert closed == [True]
+    assert asyncio.current_task().cancelling() == 0

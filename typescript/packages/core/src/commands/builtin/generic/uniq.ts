@@ -1,4 +1,4 @@
-import { ByteSpool } from '../../../io/spool.ts'
+import { ByteSpool, IO_BUFFER_SIZE } from '../../../io/spool.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -182,7 +182,7 @@ export async function uniqGeneric(
     const stored = new ByteSpool()
     try {
       await stored.fill(output)
-      await write(outputPath, stored.stream())
+      await write(outputPath, stored.stream(0, undefined, IO_BUFFER_SIZE))
     } finally {
       await stored.close()
     }

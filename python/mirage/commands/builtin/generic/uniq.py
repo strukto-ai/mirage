@@ -14,7 +14,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import IO_BUFFER_SIZE, ByteSpool
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
@@ -193,7 +193,7 @@ async def uniq_generic(
         # GNU truncates it when opening the output.
         async with ByteSpool() as stored:
             await stored.fill(output)
-            await write_bytes(paths[1], stored.stream())
+            await write_bytes(paths[1], stored.stream(piece=IO_BUFFER_SIZE))
         return b"", IOResult()
     return output, IOResult()
 
