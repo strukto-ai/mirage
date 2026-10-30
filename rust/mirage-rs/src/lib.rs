@@ -293,6 +293,33 @@ pub(crate) fn latin1_list<'de, D: serde::Deserializer<'de>>(
         .collect()
 }
 
+/// Bytes written as `latin1` reads them back.
+pub(crate) fn latin1_out<S: serde::Serializer>(
+    raw: &[u8],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&byte_text(raw))
+}
+
+/// `latin1_out` for an optional byte string.
+pub(crate) fn latin1_opt_out<S: serde::Serializer>(
+    raw: &Option<Vec<u8>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match raw {
+        Some(raw) => serializer.serialize_some(&byte_text(raw)),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// `latin1_out` for a list of byte strings.
+pub(crate) fn latin1_list_out<S: serde::Serializer>(
+    raws: &[Vec<u8>],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(raws.iter().map(|raw| byte_text(raw)))
+}
+
 /// A word as gnulib's `quote()` writes it in the C locale, the quotes
 /// left to the message: named C escapes, `\'` and `\\`, every other byte
 /// outside the printable ASCII range as three octal digits.

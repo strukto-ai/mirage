@@ -196,6 +196,11 @@ REFUSED = "?"
 # `-=`, so no dest is `=`.
 SPELLED = "="
 
+# The name the line's last word goes by on a scan tape, for a program
+# whose refusal names it: join's missing operand. No option's dest is
+# `last_word`.
+LAST_WORD = "last_word"
+
 # Numeric shorthand token like `-5` (head/tail count), never a flag
 # cluster or a path.
 NUMERIC_SHORT = re.compile(r"^-[0-9]+$")

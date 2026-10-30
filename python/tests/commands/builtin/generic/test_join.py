@@ -9,6 +9,8 @@ from mirage.commands.builtin.generic.join import (
     join,
     parse_flags,
 )
+from mirage.commands.spec.constants import OPERAND
+from mirage.commands.spec.flag_view import FlagBag
 from mirage.core.ram.write import write
 from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec
@@ -108,7 +110,7 @@ def test_parse_flags_files_operands_without_a_tape(
     flags, operands, argv, keys, files
 ):
     # A plain mapping places no operand on a tape; the operands given are
-    # read after every option, as plain files.
+    # read after every option and a ``--``, as plain files.
     parsed = parse_flags(flags, operands, argv)
     assert isinstance(parsed, JoinFlags)
     assert (parsed.engine["keys"], parsed.files) == (keys, files)
@@ -118,6 +120,7 @@ def test_parse_flags_files_operands_without_a_tape(
     "flags,operands,argv,message",
     [
         ({}, ("a", "b", "c"), (), "join: extra operand 'c'"),
+        ({"o": "1.1"}, ("a", "b", "c"), (), "join: extra operand 'c'"),
         ({"v": "2"}, ("x", "a", "b"), (), "join: extra operand 'b'"),
         ({}, ("a",), (), "join: missing operand after 'a'"),
         ({}, ("a",), ("-a1", "a"), "join: missing operand after 'a'"),
@@ -133,6 +136,29 @@ def test_parse_flags_refuses_operands_without_a_tape(
     assert parsed.stderr == (
         f"{message}\nTry 'join --help' for more information.\n".encode()
     )
+
+
+def test_parse_flags_refuses_a_tape_that_places_other_operands():
+    flags = FlagBag({"j": "1"})
+    flags.occurrences = [("j", "1"), (OPERAND, "a"), (OPERAND, "b")]
+    with pytest.raises(ValueError, match="places 2 operands, not its 3"):
+        parse_flags(flags, ("a", "b", "c"))
+
+
+@pytest.mark.asyncio
+async def test_join_refuses_files_past_its_operands():
+    flags = _flags({}, [PathSpec.from_str_path("/a")] * 2)
+    with pytest.raises(ValueError, match="are not among its operands"):
+        await join(
+            [PathSpec.from_str_path("/a")],
+            read_stream=_unused_read,
+            flags=flags,
+        )
+
+
+async def _unused_read(_path: PathSpec):
+    raise AssertionError("join read an operand")
+    yield b""
 
 
 @pytest.mark.asyncio

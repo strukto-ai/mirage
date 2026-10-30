@@ -311,13 +311,22 @@ const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 // GNU 9.7's `ls -v` lists names in the order `sort -zV` prints them, ties
 // broken by bytes as sort's last resort does (1,500 random directories
 // agreed), so the names go through mirage-rs's sort with one version key.
-// A run holds every name, so the sort writes one run and never merges.
-function versionSort(): Record<string, JsonValue> {
-  const typed: [string, string][] = [
-    ['version_sort', ''],
-    ['zero_terminated', ''],
-  ]
-  return { ...engineConfig(scan('sort', typed)), mode: 'sort', run_bytes: Number.MAX_SAFE_INTEGER }
+// A run holds every name, so the sort writes one run and never merges. Read
+// once, on the first `ls -v`. Mirrors _version_sort in ls.py.
+let versionSortConfig: Readonly<Record<string, JsonValue>> | null = null
+
+function versionSort(): Readonly<Record<string, JsonValue>> {
+  versionSortConfig ??= {
+    ...engineConfig(
+      scan('sort', [
+        ['version_sort', ''],
+        ['zero_terminated', ''],
+      ]),
+    ),
+    mode: 'sort',
+    run_bytes: Number.MAX_SAFE_INTEGER,
+  }
+  return versionSortConfig
 }
 
 /**

@@ -200,6 +200,10 @@ export const REFUSED = '?'
 // `-=`, so no dest is `=`.
 export const SPELLED = '='
 
+// The name the line's last word goes by on a scan tape, for a program whose
+// refusal names it: join's missing operand. No option's dest is `last_word`.
+export const LAST_WORD = 'last_word'
+
 const AMBIGUOUS_NAMES: Readonly<Record<string, string>> = Object.freeze({
   l: 'args_l',
   O: 'args_O',

@@ -15,7 +15,7 @@ from mirage.commands.builtin.utils.stream import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
-from mirage.commands.spec.constants import OPERAND, SPELLED
+from mirage.commands.spec.constants import LAST_WORD, OPERAND, SPELLED
 from mirage.commands.spec.flag_view import FlagView, spread_operands
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.errors.constants import FS_ERRORS
@@ -44,9 +44,6 @@ OPTION_DESTS = (
     "nocheck_order",
     "header",
 )
-# The name the line's last word goes by on join's scan tape: a missing
-# operand is named after it.
-LAST_WORD = "last_word"
 
 
 @dataclass(frozen=True)
@@ -74,20 +71,29 @@ def parse_flags(
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flags and their tape.
-        operands (Sequence[str]): the operands as typed, in order; when
-            the tape places none, they are read after every option.
+        operands (Sequence[str]): the operands, in order, a glob's
+            matches in its place; when the tape places none, they are
+            read after every option and a ``--``, so each is a file.
         argv (Sequence[str]): the line's words after ``join``, which the
             missing-operand line names the last of.
 
     Returns:
         JoinFlags | IOResult: the engine's config and the two files, or
             join's refusal.
+
+    Raises:
+        ValueError: the tape places other operands than ``operands``.
     """
     typed = FlagView(flags, SPECS[CommandName.JOIN]).texts(
         OPERAND, SPELLED, *OPTION_DESTS
     )
-    if all(name != OPERAND for name, _ in typed):
-        typed += [(OPERAND, word) for word in operands]
+    placed = sum(name == OPERAND for name, _ in typed)
+    if placed == 0 and operands:
+        typed += [(SPELLED, "--"), *((OPERAND, word) for word in operands)]
+    elif placed != len(operands):
+        raise ValueError(
+            f"join's tape places {placed} operands, not its {len(operands)}"
+        )
     if argv:
         typed.append((LAST_WORD, argv[-1]))
     try:
@@ -119,7 +125,14 @@ async def join(
         read_stream (PolymorphicReadFn): reads one operand's bytes.
         flags (JoinFlags): the options, from ``parse_flags``.
         stdin (ByteSource | None): the line's input.
+
+    Raises:
+        ValueError: ``flags.files`` names an operand ``paths`` lacks.
     """
+    if not all(0 <= index < len(paths) for index in flags.files):
+        raise ValueError(
+            f"join's files {flags.files} are not among its operands"
+        )
     file1, file2 = (paths[index] for index in flags.files)
     read = stdin_stream(read_stream, stdin)
     readers = (AsyncLineIterator(read(file1)), AsyncLineIterator(read(file2)))

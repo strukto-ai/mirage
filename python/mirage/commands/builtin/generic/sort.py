@@ -116,11 +116,13 @@ def _stage_verb(stage: InputStage, checking: bool) -> str:
 
 
 def _earliest(
-    refused: tuple[InputStage, bytes] | None, stage: InputStage, line: bytes
+    first_failure: tuple[InputStage, bytes] | None,
+    stage: InputStage,
+    line: bytes,
 ) -> tuple[InputStage, bytes]:
-    if refused is None or stage.value < refused[0].value:
+    if first_failure is None or stage.value < first_failure[0].value:
         return stage, line
-    return refused
+    return first_failure
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,18 +143,27 @@ def _typed_options(
     An output is the word typed, which GNU compares (STREQ), so
     ``-o ./out -o out`` names two outputs though they are one file, and
     a bare ``--check`` is ``-c``, apart from ``--check=``'s empty word.
+    The tape holds each ``-o`` resolved, so its word comes from the path
+    the line typed in the same place.
 
     Args:
         fl (FlagView): sort's flags.
         paths (list[PathSpec]): the operands.
+
+    Raises:
+        ValueError: the tape holds other ``-o`` words than the paths.
     """
-    outputs = iter(fl.as_paths("output"))
+    tape = fl.occurrences(*GRAMMAR)
+    outputs = fl.as_paths("output")
+    if sum(name == "output" for name, _ in tape) != len(outputs):
+        raise ValueError(
+            f"sort's tape holds other -o words than its {len(outputs)} paths"
+        )
+    words = iter(path.raw_path for path in outputs)
     typed: list[tuple[str, str]] = []
-    for name, value in fl.occurrences(*GRAMMAR):
+    for name, value in tape:
         if name == "output":
-            path = next(outputs, None)
-            if path is not None:
-                typed.append((name, path.raw_path))
+            typed.append((name, next(words)))
         elif value is True:
             typed.append(("c" if name == "check" else name, ""))
         elif isinstance(value, str):
@@ -166,34 +177,52 @@ def engine_config(values: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
 
     Args:
         values (Mapping[str, JsonValue]): what ``scan("sort", ...)`` read.
+
+    Raises:
+        ValueError: the scan read no configuration.
     """
     config = values.get("config")
-    return config if isinstance(config, dict) else {}
+    if isinstance(config, dict) and isinstance(
+        config.get("zero_terminated"), bool
+    ):
+        return config
+    raise ValueError(f"sort's scan read no config: {values!r}")
 
 
 def parse_flags(
     flags: Mapping[str, FlagValue], paths: list[PathSpec]
-) -> SortFlags:
+) -> SortFlags | IOResult:
     """Read sort's options and operands in mirage-rs, before any input.
 
     Args:
         flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
         paths (list[PathSpec]): the operands.
 
+    Returns:
+        SortFlags | IOResult: what the options decide, or what GNU sort
+            refuses first, exit 1 for a refused ``--check`` word and 2
+            for the rest.
+
     Raises:
-        StreamRefusal: what GNU sort refuses first, exit 1 for a refused
-            ``--check`` word and 2 for the rest.
+        ValueError: the scan read no configuration or check mode.
     """
     fl = FlagView(flags, spec=SPECS["sort"])
-    values = scan("sort", _typed_options(fl, paths))
+    try:
+        values = scan("sort", _typed_options(fl, paths))
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    config = engine_config(values)
+    check = values.get("check", "")
+    if check not in (None, "c", "C"):
+        raise ValueError(f"sort's scan read no check mode: {check!r}")
     outputs = fl.as_paths("output")
     return SortFlags(
-        config=engine_config(values),
-        check=values.get("check") is not None,
-        check_quiet=values.get("check") == "C",
+        config=config,
+        check=check is not None,
+        check_quiet=check == "C",
         merge=fl.as_bool("merge"),
         output=outputs[-1] if outputs else None,
-        zero_terminated=fl.as_bool("zero_terminated"),
+        zero_terminated=config["zero_terminated"] is True,
     )
 
 
@@ -266,7 +295,7 @@ async def _external_records(
     separator = record_separator(parsed.zero_terminated)
     config = parsed.config
     levels: list[list[ByteSpool]] = [[]]
-    refused: tuple[InputStage, bytes] | None = None
+    first_failure: tuple[InputStage, bytes] | None = None
     stream = stdin_stream(read, stdin)
     sorter = (
         None
@@ -335,8 +364,8 @@ async def _external_records(
             except FS_ERRORS as exc:
                 strerror = fs_strerror(exc) or str(exc)
                 stage = input_stage(strerror, not parsed.merge)
-                refused = _earliest(
-                    refused,
+                first_failure = _earliest(
+                    first_failure,
                     stage,
                     step_failure(
                         _stage_verb(stage, False), _label(path), strerror
@@ -347,8 +376,8 @@ async def _external_records(
             finally:
                 if run is not None:
                     await run.close()
-        if refused is not None:
-            return refused[1]
+        if first_failure is not None:
+            return first_failure[1]
         if sorter is not None:
             sorter.finish()
             await add_sorted(sorter)
@@ -441,10 +470,9 @@ async def sort_generic(
         stdin (ByteSource | None): standard input.
         flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
     """
-    try:
-        parsed = parse_flags(flags, paths)
-    except StreamRefusal as refusal:
-        return b"", refused(refusal)
+    parsed = parse_flags(flags, paths)
+    if isinstance(parsed, IOResult):
+        return b"", parsed
     if parsed.check:
         path = paths[0] if paths else None
         source = (

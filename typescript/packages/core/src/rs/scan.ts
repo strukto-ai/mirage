@@ -21,10 +21,15 @@ import type { JsonValue } from '../types.ts'
 const decoder = new TextDecoder()
 
 /**
- * A command's typed option values, read by mirage-rs before the host resolves
- * any operand, so a value the command refuses never reaches a mount. `options`
- * holds each option's name and its value as typed, in the order typed. Throws
- * StreamRefusal for the first value the command refuses, with the command's
+ * A command's typed words, read by mirage-rs before any input is read. The
+ * tape holds each option as `[dest, value]` in the order typed, a switch with
+ * an empty value. A grammar that reads more gets more: each operand as
+ * `[OPERAND, word]` where it was typed, a glob already expanded into its
+ * matches in its place; each word it reads by its spelling as
+ * `[SPELLED, word]` just before the occurrence it spells; and the line's last
+ * word as `[LAST_WORD, word]`. A value the command refuses never reaches an
+ * input. Returns the values keyed as the command's grammar answers; throws
+ * StreamRefusal for the first word the command refuses, with the command's
  * exit status. Mirrors Python's `scan`.
  */
 export function scan(

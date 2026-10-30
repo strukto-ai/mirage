@@ -4,16 +4,17 @@
 //! names the extra operand and `join -a 3 a b c` the file number.
 //!
 //! The host sends the tape: each option as `[dest, value]`, each operand as
-//! `["", word]` where it was typed, a glob's matches in its place, each
-//! `-j1`, `-j2` and `--` word as `["=", word]` just before the occurrence
-//! it spells, and the line's last word as `["last_word", word]`. The scan
-//! answers the `join` engine's whole config under `engine` and the operand
-//! positions of FILE1 and FILE2 under `files`.
+//! `[OPERAND, word]` where it was typed, each `-j1`, `-j2` and `--` word as
+//! `[SPELLED, word]` just before the occurrence it spells, and the line's
+//! last word as `[LAST_WORD, word]`. The scan answers the `join` engine's
+//! whole config under `engine` and the operand positions of FILE1 and
+//! FILE2 under `files`.
 
-use serde_json::{Value as Json, json};
+use serde_json::Value as Json;
 
-use crate::scan::{Typed, Values, unknown};
-use crate::{StreamError, byte_text, number, quoted};
+use super::{Config, Order};
+use crate::scan::{LAST_WORD, OPERAND, SPELLED, Typed, Values, unknown};
+use crate::{StreamError, number, quoted};
 
 /// The largest field number join keeps; GNU 9.7 reads any larger one as
 /// this one, so `-1 99999999999999999999 -1 1` is refused as
@@ -23,15 +24,6 @@ const LARGEST_FIELD: u128 = (1 << 63) - 1;
 /// The `-t` byte that keeps each record whole: both `-t ''` and
 /// `-t $'\n'` select it, under -z as well, and they never conflict.
 const WHOLE_RECORD: u8 = b'\n';
-
-/// The tape name of an operand.
-const OPERAND: &str = "";
-
-/// The tape name of a word the loop reads by its spelling.
-const SPELLED: &str = "=";
-
-/// The tape name of the line's last word, which a missing operand names.
-const LAST_WORD: &str = "last_word";
 
 const USAGE_HINT: &str = "Try 'join --help' for more information.";
 
@@ -104,13 +96,6 @@ struct Operand<'a> {
     /// It came straight after an -o list, or after an operand that did,
     /// so it may still be more of that list.
     listed: bool,
-}
-
-#[derive(Clone, Copy)]
-enum Order {
-    Warn,
-    Fail,
-    Off,
 }
 
 /// The options read so far, in the order the line typed them.
@@ -208,7 +193,9 @@ impl<'a> Reading<'a> {
         Ok(())
     }
 
-    fn option(&mut self, name: &str, raw: &'a [u8]) -> Result<(), StreamError> {
+    /// Read one option: true for an -o list, which the operands right
+    /// after it may continue.
+    fn option(&mut self, name: &str, raw: &'a [u8]) -> Result<bool, StreamError> {
         match name {
             "a" | "v" => {
                 self.unpaired[file_side(raw)?] = true;
@@ -229,7 +216,10 @@ impl<'a> Reading<'a> {
             }
             // Only the whole value `auto` is auto.
             "o" if raw == b"auto" => self.auto_columns = true,
-            "o" => self.add_items(raw)?,
+            "o" => {
+                self.add_items(raw)?;
+                return Ok(true);
+            }
             "t" => self.set_delimiter(raw)?,
             "ignore_case" => self.fold_case = true,
             "zero_terminated" => self.zero_terminated = true,
@@ -238,7 +228,7 @@ impl<'a> Reading<'a> {
             "header" => self.header = true,
             _ => return Err(unknown("join", name)),
         }
-        Ok(())
+        Ok(false)
     }
 
     /// One -o list: items parted by a single comma, space or tab. One
@@ -299,25 +289,23 @@ impl<'a> Reading<'a> {
         if one.1 == b"-" && two.1 == b"-" {
             return Err(refusal("both files cannot be standard input"));
         }
-        let engine = json!({
-            "keys": self.keys.map(|key| key.unwrap_or(0)),
-            "unpaired": self.unpaired,
-            "paired": self.paired,
-            "filler": self.filler.map(byte_text),
-            "columns": self.columns,
-            "auto_columns": self.auto_columns,
-            "delimiter": self.delimiter.map(|byte| byte_text(&[byte])),
-            "separator": byte_text(&[self.separator]),
-            "fold_case": self.fold_case,
-            "zero_terminated": self.zero_terminated,
-            "order": match self.order {
-                Order::Warn => "warn",
-                Order::Fail => "fail",
-                Order::Off => "off",
-            },
-            "header": self.header,
-            "names": [byte_text(one.1), byte_text(two.1)],
-        });
+        let engine = Config {
+            keys: self.keys.map(|key| key.unwrap_or(0)),
+            unpaired: self.unpaired,
+            paired: self.paired,
+            filler: self.filler.map(<[u8]>::to_vec),
+            columns: self.columns,
+            auto_columns: self.auto_columns,
+            delimiter: self.delimiter.map(|byte| vec![byte]),
+            separator: vec![self.separator],
+            fold_case: self.fold_case,
+            zero_terminated: self.zero_terminated,
+            order: self.order,
+            header: self.header,
+            names: vec![one.1.to_vec(), two.1.to_vec()],
+        };
+        let engine = serde_json::to_value(&engine)
+            .map_err(|e| StreamError::new(format!("join's engine config: {e}")))?;
         let mut values = Values::new();
         values.insert("engine".to_owned(), engine);
         values.insert("files".to_owned(), Json::from(vec![one.0, two.0]));
@@ -355,10 +343,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
                     claimed: false,
                 });
             }
-            _ => {
-                reading.option(name, raw)?;
-                listing = name == "o" && raw != b"auto";
-            }
+            _ => listing = reading.option(name, raw)?,
         }
     }
     reading.finish()

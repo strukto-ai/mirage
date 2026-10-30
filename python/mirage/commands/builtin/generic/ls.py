@@ -688,6 +688,7 @@ async def link_targets(
 # broken by bytes as sort's last resort does (1,500 random directories
 # agreed), so the names go through mirage-rs's sort with one version key.
 # A run holds every name, so the sort writes one run and never merges.
+@functools.cache
 def _version_sort() -> dict[str, JsonValue]:
     typed = (("version_sort", ""), ("zero_terminated", ""))
     config = engine_config(scan("sort", typed))

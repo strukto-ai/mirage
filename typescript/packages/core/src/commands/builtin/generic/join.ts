@@ -14,7 +14,7 @@
 
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { OPERAND, SPELLED } from '../../spec/constants.ts'
+import { LAST_WORD, OPERAND, SPELLED } from '../../spec/constants.ts'
 import { FlagView, spreadOperands } from '../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { JsonValue, PathSpec } from '../../../types.ts'
@@ -44,9 +44,6 @@ const OPTION_DESTS = [
   'nocheck_order',
   'header',
 ]
-// The name the line's last word goes by on join's scan tape: a missing
-// operand is named after it.
-const LAST_WORD = 'last_word'
 
 /** join's line as mirage-rs read it. Mirrors JoinFlags in join.py. */
 export interface JoinFlags {
@@ -60,9 +57,11 @@ export interface JoinFlags {
  * Read join's options and operands in the order the line typed them.
  * mirage-rs reads the tape in one pass, as GNU join's getopt loop does, so
  * the first problem left to right is the one reported. `operands` are the
- * operands as typed, read after every option when the tape places none, and
- * `argv` the line's words after `join`, which the missing-operand line names
- * the last of. The engine's config and the two files, or join's refusal.
+ * operands in order, a glob's matches in its place; when the tape places
+ * none, they are read after every option and a `--`, so each is a file.
+ * `argv` is the line's words after `join`, which the missing-operand line
+ * names the last of. The engine's config and the two files, or join's
+ * refusal; throws when the tape places other operands than `operands`.
  * Mirrors parse_flags in join.py.
  */
 export function parseFlags(
@@ -75,8 +74,13 @@ export function parseFlags(
     SPELLED,
     ...OPTION_DESTS,
   )
-  if (typed.every(([name]) => name !== OPERAND)) {
-    for (const word of operands) typed.push([OPERAND, word])
+  const placed = typed.filter(([name]) => name === OPERAND).length
+  if (placed === 0 && operands.length > 0) {
+    typed.push([SPELLED, '--'], ...operands.map((word): [string, string] => [OPERAND, word]))
+  } else if (placed !== operands.length) {
+    throw new Error(
+      `join's tape places ${String(placed)} operands, not its ${String(operands.length)}`,
+    )
   }
   const last = argv.at(-1)
   if (last !== undefined) typed.push([LAST_WORD, last])

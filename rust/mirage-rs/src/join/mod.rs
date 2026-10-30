@@ -1,6 +1,6 @@
 pub(crate) mod options;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::records::{Records, Take};
 use crate::{Stream, StreamError, parse_config};
@@ -9,7 +9,7 @@ use crate::{Stream, StreamError, parse_config};
 /// equal keys print their product.
 const CHUNK: usize = 1 << 16;
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Order {
     Warn,
@@ -17,7 +17,7 @@ enum Order {
     Off,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     /// Each file's join field, counted from 0.
@@ -26,7 +26,10 @@ struct Config {
     unpaired: [bool; 2],
     /// Whether joined lines print; any `-v` clears it.
     paired: bool,
-    #[serde(deserialize_with = "crate::latin1_opt")]
+    #[serde(
+        deserialize_with = "crate::latin1_opt",
+        serialize_with = "crate::latin1_opt_out"
+    )]
     filler: Option<Vec<u8>>,
     /// The `-o` list: a file number and a field counted from 0, file 0
     /// standing for the join field.
@@ -34,16 +37,25 @@ struct Config {
     auto_columns: bool,
     /// The `-t` byte; none parts fields at runs of blanks, and a newline
     /// keeps each record whole.
-    #[serde(deserialize_with = "crate::latin1_opt")]
+    #[serde(
+        deserialize_with = "crate::latin1_opt",
+        serialize_with = "crate::latin1_opt_out"
+    )]
     delimiter: Option<Vec<u8>>,
-    #[serde(deserialize_with = "crate::latin1")]
+    #[serde(
+        deserialize_with = "crate::latin1",
+        serialize_with = "crate::latin1_out"
+    )]
     separator: Vec<u8>,
     fold_case: bool,
     zero_terminated: bool,
     order: Order,
     header: bool,
     /// Each operand as typed, for the order diagnostics.
-    #[serde(deserialize_with = "crate::latin1_list")]
+    #[serde(
+        deserialize_with = "crate::latin1_list",
+        serialize_with = "crate::latin1_list_out"
+    )]
     names: Vec<Vec<u8>>,
 }
 

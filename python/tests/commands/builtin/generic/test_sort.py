@@ -4,11 +4,11 @@ import pytest
 
 import mirage.commands.builtin.generic.sort as sort_module
 from mirage.commands.builtin.generic.sort import (
+    SortFlags,
     parse_flags,
     sort_generic,
 )
 from mirage.io.types import IOResult, materialize
-from mirage.rs import StreamRefusal
 from mirage.shell.descriptors import unreadable_stdin
 from mirage.types import PathSpec
 
@@ -17,9 +17,22 @@ async def _unused_read_bytes(_path: PathSpec) -> bytes:
     raise AssertionError("read_bytes should not be called")
 
 
+def _parsed(flags: dict) -> SortFlags:
+    parsed = parse_flags(flags, [])
+    assert isinstance(parsed, SortFlags), parsed
+    return parsed
+
+
+def _refusal(flags: dict) -> tuple[str, int]:
+    parsed = parse_flags(flags, [])
+    assert isinstance(parsed, IOResult), parsed
+    assert isinstance(parsed.stderr, bytes)
+    return parsed.stderr.decode("latin-1"), parsed.exit_code
+
+
 # GNU's word-choice refusal names the refused word quoted, so a byte
 # outside 0x20-0x7e comes back escaped. Rows measured against
-# GNU coreutils 9.4 under `LC_ALL=C` with a raw `bytes` argv
+# GNU coreutils 9.7 under `LC_ALL=C` with a raw `bytes` argv
 # (`sort --check=<w>`). Mirrored in sort.test.ts.
 @pytest.mark.parametrize(
     "value,escaped",
@@ -30,35 +43,31 @@ async def _unused_read_bytes(_path: PathSpec) -> bytes:
     ],
 )
 def test_check_refusal_quotes_the_word(value, escaped):
-    with pytest.raises(StreamRefusal) as exc:
-        parse_flags({"check": value}, [])
-    assert exc.value.message.startswith(
+    stderr, status = _refusal({"check": value})
+    assert stderr.startswith(
         f"sort: invalid argument '{escaped}' for '--check'\n"
     )
-    assert exc.value.status == 1
+    assert status == 1
 
 
 # GNU resolves an unambiguous prefix of one candidate, so
-# `sort --check=q`, `=s` and `=d` all exit 0 (measured, coreutils 9.4).
+# `sort --check=q`, `=s` and `=d` all exit 0 (measured, coreutils 9.7).
 # `quiet` and `silent` are one value, so its canonical word decides
 # whether the check is quiet.
 def test_check_accepts_an_unambiguous_prefix():
-    assert parse_flags({"check": "q"}, []).check_quiet
-    assert not parse_flags({"check": "d"}, []).check_quiet
-    assert parse_flags({"check": "d"}, []).check
+    assert _parsed({"check": "q"}).check_quiet
+    assert not _parsed({"check": "d"}).check_quiet
+    assert _parsed({"check": "d"}).check
 
 
 # A bare --check is -c, and --check= names the empty word, which is a
 # prefix of both modes (coreutils 9.7: ambiguous, exit 1).
 def test_a_bare_check_is_c_and_an_empty_word_is_ambiguous():
-    parsed = parse_flags({"check": True}, [])
+    parsed = _parsed({"check": True})
     assert parsed.check and not parsed.check_quiet
-    with pytest.raises(StreamRefusal) as exc:
-        parse_flags({"check": ""}, [])
-    assert exc.value.message.startswith(
-        "sort: ambiguous argument '' for '--check'\n"
-    )
-    assert exc.value.status == 1
+    stderr, status = _refusal({"check": ""})
+    assert stderr.startswith("sort: ambiguous argument '' for '--check'\n")
+    assert status == 1
 
 
 def _spec(virtual: str, raw: str | None = None) -> PathSpec:
@@ -178,41 +187,33 @@ async def test_a_second_operand_outranks_the_output_and_names_the_mode():
     ],
 )
 def test_the_two_check_modes_refuse_to_mix(flags):
-    with pytest.raises(StreamRefusal) as exc:
-        parse_flags(flags, [])
-    assert exc.value.message == "sort: options '-cC' are incompatible"
-    assert exc.value.status == 2
+    assert _refusal(flags) == ("sort: options '-cC' are incompatible\n", 2)
 
 
 def test_one_mode_may_be_asked_for_twice():
-    assert parse_flags({"C": True, "check": "quiet"}, []).check_quiet
-    assert parse_flags({"c": True, "check": "diagnose-first"}, []).check
+    assert _parsed({"C": True, "check": "quiet"}).check_quiet
+    assert _parsed({"c": True, "check": "diagnose-first"}).check
 
 
 def test_two_outputs_are_refused_unless_typed_as_one_word():
-    with pytest.raises(StreamRefusal) as exc:
-        parse_flags({"output": [_spec("/data/p1"), _spec("/data/p2")]}, [])
-    assert exc.value.message == "sort: multiple output files specified"
-    assert exc.value.status == 2
-    with pytest.raises(StreamRefusal):
-        parse_flags(
-            {"output": [_spec("/data/o", "./o"), _spec("/data/o", "o")]}, []
-        )
-    parsed = parse_flags(
-        {"output": [_spec("/data/p1"), _spec("/data/p1")]}, []
-    )
+    two = {"output": [_spec("/data/p1"), _spec("/data/p2")]}
+    assert _refusal(two) == ("sort: multiple output files specified\n", 2)
+    typed = {"output": [_spec("/data/o", "./o"), _spec("/data/o", "o")]}
+    assert _refusal(typed) == ("sort: multiple output files specified\n", 2)
+    parsed = _parsed({"output": [_spec("/data/p1"), _spec("/data/p1")]})
     assert parsed.output is not None and parsed.output.virtual == "/data/p1"
 
 
 def test_the_first_bad_option_on_the_line_is_the_one_refused():
     outputs = [_spec("/data/p1"), _spec("/data/p2")]
-    with pytest.raises(StreamRefusal):
-        parse_flags({"output": outputs, "key": ["0"]}, [])
-    with pytest.raises(StreamRefusal):
-        parse_flags({"key": ["0"], "output": outputs}, [])
-    with pytest.raises(StreamRefusal) as exc:
-        parse_flags({"c": True, "C": True, "output": outputs}, [])
-    assert "'-cC'" in exc.value.message
+    assert _refusal({"output": outputs, "key": ["0"]}) == (
+        "sort: multiple output files specified\n",
+        2,
+    )
+    stderr, _ = _refusal({"key": ["0"], "output": outputs})
+    assert "invalid field specification" in stderr
+    stderr, _ = _refusal({"c": True, "C": True, "output": outputs})
+    assert "'-cC'" in stderr
 
 
 _MIXED = {"numeric_sort": True, "general_numeric_sort": True}

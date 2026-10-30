@@ -1128,6 +1128,11 @@
    "python_only": {
     "_network_text": "tomllib hands Python the network table parsed, so it writes it back as config.toml spells it; the TypeScript CLI reads the line by hand and shows it as written."
    }
+  },
+  "commands/builtin/generic/ls": {
+   "typescript_only": {
+    "versionSortConfig": "The version-sort configuration is read once: Python's _version_sort carries functools.cache, and TypeScript keeps the value in this binding."
+   }
   }
  }
 }

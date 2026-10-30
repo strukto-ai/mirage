@@ -19,6 +19,8 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PathSpec } from '../../../types.ts'
 import { eisdir, enoent } from '../../../errors/fs.ts'
 import { IOResult } from '../../../io/types.ts'
+import { OPERAND } from '../../spec/constants.ts'
+import { flagOccurrences } from '../../spec/flag_view.ts'
 import { join, parseFlags, type JoinFlags } from './join.ts'
 
 type Row = [string, string, string, string, string, number, string, string]
@@ -113,7 +115,7 @@ describe('join across mounts', () => {
 
 describe('parseFlags without a tape', () => {
   // A plain mapping places no operand on a tape; the operands given are read
-  // after every option, as plain files.
+  // after every option and a `--`, as plain files.
   it.each<[Record<string, string>, string[], string[], number[]]>([
     [{}, ['a', 'b'], ['a', 'b'], [0, 0]],
     [{ j: '2' }, ['a', 'b'], [], [1, 1]],
@@ -125,6 +127,7 @@ describe('parseFlags without a tape', () => {
 
   it.each<[Record<string, string>, string[], string[], string]>([
     [{}, ['a', 'b', 'c'], [], "join: extra operand 'c'"],
+    [{ o: '1.1' }, ['a', 'b', 'c'], [], "join: extra operand 'c'"],
     [{ v: '2' }, ['x', 'a', 'b'], [], "join: extra operand 'b'"],
     [{}, ['a'], [], "join: missing operand after 'a'"],
     [{}, ['a'], ['-a1', 'a'], "join: missing operand after 'a'"],
@@ -136,6 +139,27 @@ describe('parseFlags without a tape', () => {
       1,
       `${message}\nTry 'join --help' for more information.\n`,
     ])
+  })
+
+  it('throws on a tape that places other operands', () => {
+    const flags = { j: '1' }
+    flagOccurrences(flags).push(['j', '1'], [OPERAND, 'a'], [OPERAND, 'b'])
+    expect(() => parseFlags(flags, ['a', 'b', 'c'])).toThrow('places 2 operands, not its 3')
+  })
+})
+
+describe('join over operands it lacks', () => {
+  it('throws when its files are not among them', () => {
+    const flags = flagsFor({}, ['a', 'b'])
+    expect(() =>
+      join([PathSpec.fromStrPath('/a')], {
+        read: () => {
+          throw new Error('join read an operand')
+        },
+        stdin: null,
+        flags,
+      }),
+    ).toThrow('are not among its operands')
   })
 })
 

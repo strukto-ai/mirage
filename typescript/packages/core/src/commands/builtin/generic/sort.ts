@@ -117,25 +117,31 @@ function stageVerb(stage: InputStage, checking: boolean): string {
 }
 
 function earliest(
-  refused: [InputStage, Uint8Array] | null,
+  firstFailure: [InputStage, Uint8Array] | null,
   stage: InputStage,
   line: Uint8Array,
 ): [InputStage, Uint8Array] {
-  if (refused === null || stage < refused[0]) return [stage, line]
-  return refused
+  if (firstFailure === null || stage < firstFailure[0]) return [stage, line]
+  return firstFailure
 }
 
 // sort's options in the order typed, then its operands. An output is the word
 // typed, which GNU compares (STREQ), so `-o ./out -o out` names two outputs
 // though they are one file, and a bare `--check` is `-c`, apart from
-// `--check=`'s empty word. Mirrors _typed_options in sort.py.
+// `--check=`'s empty word. The tape holds each `-o` resolved, so its word
+// comes from the path the line typed in the same place; throws when the tape
+// holds other `-o` words than the paths. Mirrors _typed_options in sort.py.
 function typedOptions(fl: FlagView, paths: readonly PathSpec[]): [string, string][] {
-  const outputs = fl.asPaths('output')[Symbol.iterator]()
+  const tape = fl.occurrences(...GRAMMAR)
+  const outputs = fl.asPaths('output')
+  if (tape.filter(([name]) => name === 'output').length !== outputs.length) {
+    throw new Error(`sort's tape holds other -o words than its ${String(outputs.length)} paths`)
+  }
+  const words = outputs.map((path) => path.rawPath)[Symbol.iterator]()
   const typed: [string, string][] = []
-  for (const [name, value] of fl.occurrences(...GRAMMAR)) {
+  for (const [name, value] of tape) {
     if (name === 'output') {
-      const path = outputs.next()
-      if (path.done !== true) typed.push([name, path.value.rawPath])
+      typed.push([name, words.next().value ?? ''])
     } else if (value === true) {
       typed.push([name === 'check' ? 'c' : name, ''])
     } else if (typeof value === 'string') {
@@ -147,30 +153,53 @@ function typedOptions(fl: FlagView, paths: readonly PathSpec[]): [string, string
 }
 
 /**
- * The configuration a sort scan read, which every sort engine takes. Mirrors
- * engine_config in sort.py.
+ * The configuration a sort scan read, which every sort engine takes; throws
+ * when the scan read none. Mirrors engine_config in sort.py.
  */
 export function engineConfig(values: Record<string, JsonValue>): Record<string, JsonValue> {
   const config = values.config
-  return typeof config === 'object' && config !== null && !Array.isArray(config) ? config : {}
+  if (
+    typeof config === 'object' &&
+    config !== null &&
+    !Array.isArray(config) &&
+    typeof config.zero_terminated === 'boolean'
+  ) {
+    return config
+  }
+  throw new Error(`sort's scan read no config: ${JSON.stringify(values)}`)
 }
 
 /**
- * Read sort's options and operands in mirage-rs, before any input. Throws
- * StreamRefusal for what GNU sort refuses first, exit 1 for a refused
- * `--check` word and 2 for the rest. Mirrors parse_flags in sort.py.
+ * Read sort's options and operands in mirage-rs, before any input: what the
+ * options decide, or what GNU sort refuses first, exit 1 for a refused
+ * `--check` word and 2 for the rest. Throws when the scan read no
+ * configuration or check mode. Mirrors parse_flags in sort.py.
  */
-export function parseFlags(bag: Record<string, FlagValue>, paths: readonly PathSpec[]): SortFlags {
+export function parseFlags(
+  bag: Record<string, FlagValue>,
+  paths: readonly PathSpec[],
+): SortFlags | IOResult {
   const fl = new FlagView(bag, specOf('sort'))
-  const values = scan('sort', typedOptions(fl, paths))
+  let values: Record<string, JsonValue>
+  try {
+    values = scan('sort', typedOptions(fl, paths))
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    return refused(error)
+  }
+  const config = engineConfig(values)
+  const check = values.check
+  if (check !== null && check !== 'c' && check !== 'C') {
+    throw new Error(`sort's scan read no check mode: ${JSON.stringify(check)}`)
+  }
   const outputs = fl.asPaths('output')
   return {
-    config: engineConfig(values),
-    check: values.check !== null && values.check !== undefined,
-    checkQuiet: values.check === 'C',
+    config,
+    check: check !== null,
+    checkQuiet: check === 'C',
     merge: fl.asBool('merge'),
     output: outputs[outputs.length - 1] ?? null,
-    zeroTerminated: fl.asBool('zero_terminated'),
+    zeroTerminated: config.zero_terminated === true,
   }
 }
 
@@ -273,7 +302,7 @@ async function externalRecords(
   const separator = recordSeparator(parsed.zeroTerminated)
   const config = parsed.config
   const levels: ByteSpool[][] = [[]]
-  let refused: [InputStage, Uint8Array] | null = null
+  let firstFailure: [InputStage, Uint8Array] | null = null
   let merges = 0
   const budget = new YieldBudget(signal)
   const sorter = parsed.merge
@@ -339,8 +368,8 @@ async function externalRecords(
         if (!isFsError(error)) throw error
         const strerror = fsStrerror(error) ?? String(error)
         const stage = inputStage(strerror, !parsed.merge)
-        refused = earliest(
-          refused,
+        firstFailure = earliest(
+          firstFailure,
           stage,
           stepFailure(stageVerb(stage, false), label(path), strerror),
         )
@@ -349,7 +378,7 @@ async function externalRecords(
         if (run !== null) await run.close()
       }
     }
-    if (refused !== null) return refused[1]
+    if (firstFailure !== null) return firstFailure[1]
     if (sorter !== null) {
       sorter.finish()
       await addSorted(sorter)
@@ -393,13 +422,8 @@ export async function sortGeneric(
   write?: (path: PathSpec, data: ByteSource) => Promise<void>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
-  let parsed: SortFlags
-  try {
-    parsed = parseFlags(ctx.flags, paths)
-  } catch (error) {
-    if (error instanceof StreamRefusal) return [new Uint8Array(), refused(error)]
-    throw error
-  }
+  const parsed = parseFlags(ctx.flags, paths)
+  if (parsed instanceof IOResult) return [new Uint8Array(), parsed]
   if (parsed.check) {
     const path = paths[0] ?? null
     return [

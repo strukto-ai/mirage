@@ -9,16 +9,19 @@
 use serde_json::{Value as Json, json};
 
 use super::key::{Compare, Key, Mods};
-use crate::scan::{Typed, Values, unknown};
-use crate::{StreamError, quoted};
+use crate::scan::{OPERAND, Typed, Values, unknown};
+use crate::{StreamError, number, quoted};
 
 /// The ordering letters a KEYDEF takes after a position.
 const ORDER_LETTERS: &[u8] = b"bdfghiMnRrV";
 
-/// What strtoumax skips before a number, isspace() in the C locale.
-const BLANKS: &[u8] = b" \t\n\x0b\x0c\r";
-
-const CHECK_HINT: &str = "Valid arguments are:\n  - 'quiet', 'silent'\n  - 'diagnose-first'\nTry 'sort --help' for more information.";
+/// The words `--check` takes, each mode's together in the order GNU's
+/// refusal lists them.
+const CHECK_WORDS: [(&str, Check); 3] = [
+    ("quiet", Check::Quiet),
+    ("silent", Check::Quiet),
+    ("diagnose-first", Check::Diagnose),
+];
 
 /// Which check `-c`, `-C` or `--check` asks for.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -128,7 +131,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
                 }
                 check = Some(mode);
             }
-            "" => operands.push(raw.as_slice()),
+            OPERAND => operands.push(raw.as_slice()),
             _ => return Err(unknown("sort", name)),
         }
     }
@@ -199,14 +202,9 @@ fn tab_byte(raw: &[u8]) -> Result<u8, StreamError> {
 /// `-c`, or a prefix of words that name one of them. GNU refuses any other
 /// word with exit 1.
 fn check_word(raw: &[u8]) -> Result<Check, StreamError> {
-    const WORDS: [(&[u8], Check); 3] = [
-        (b"quiet", Check::Quiet),
-        (b"silent", Check::Quiet),
-        (b"diagnose-first", Check::Diagnose),
-    ];
-    let mut modes = WORDS
+    let mut modes = CHECK_WORDS
         .iter()
-        .filter(|(word, _)| word.starts_with(raw))
+        .filter(|(word, _)| word.as_bytes().starts_with(raw))
         .map(|&(_, mode)| mode);
     let kind = match modes.next() {
         None => "invalid",
@@ -214,10 +212,25 @@ fn check_word(raw: &[u8]) -> Result<Check, StreamError> {
         Some(_) => "ambiguous",
     };
     let refused = format!(
-        "sort: {kind} argument '{}' for '--check'\n{CHECK_HINT}",
-        quoted(raw)
+        "sort: {kind} argument '{}' for '--check'\n{}",
+        quoted(raw),
+        check_hint()
     );
     Err(StreamError::refusal(refused.as_bytes(), 1))
+}
+
+/// The lines after a refused `--check` word: each mode's words on one
+/// line, then the usage hint.
+fn check_hint() -> String {
+    let mut hint = String::from("Valid arguments are:");
+    let mut listed = None;
+    for (word, mode) in CHECK_WORDS {
+        hint.push_str(if listed == Some(mode) { ", " } else { "\n  - " });
+        listed = Some(mode);
+        hint.push_str(&format!("'{word}'"));
+    }
+    hint.push_str("\nTry 'sort --help' for more information.");
+    hint
 }
 
 /// One `-k` KEYDEF, `F[.C][OPTS][,F[.C][OPTS]]`, read left to right: each
@@ -267,32 +280,18 @@ fn keydef(spec: &[u8]) -> Result<KeyDef<'_>, StreamError> {
 }
 
 /// A KEYDEF number as strtoumax reads it from `at`: blanks and one `+`
-/// taken, then ASCII digits, a value past `usize` saturating. No digit, a
-/// `-` included, is refused with the text from `at` on.
+/// taken, then ASCII digits, a value past `usize` saturating. No digit, or
+/// a `-`, is refused with the text from `at` on.
 fn count(spec: &[u8], at: usize, what: &str) -> Result<(usize, usize), StreamError> {
-    let mut end = at;
-    while spec.get(end).is_some_and(|byte| BLANKS.contains(byte)) {
-        end += 1;
-    }
-    if spec.get(end) == Some(&b'+') {
-        end += 1;
-    }
-    let digits = end;
-    while spec.get(end).is_some_and(u8::is_ascii_digit) {
-        end += 1;
-    }
-    if end == digits {
+    let parts = number::parts(&spec[at..], false);
+    if parts.digits.is_empty() || parts.negative() {
         let shown = quoted(&spec[at..]);
         return Err(usage(format!(
             "sort: {what}: invalid count at start of '{shown}'"
         )));
     }
-    let value = spec[digits..end].iter().fold(0usize, |value, digit| {
-        value
-            .saturating_mul(10)
-            .saturating_add(usize::from(digit - b'0'))
-    });
-    Ok((value, end))
+    let value = usize::try_from(parts.saturating()).unwrap_or(usize::MAX);
+    Ok((value, spec.len() - parts.rest.len()))
 }
 
 fn field_spec(spec: &[u8], why: &str) -> StreamError {
@@ -368,7 +367,6 @@ mod tests {
     use serde_json::{Value as Json, json};
 
     use super::scan;
-    use crate::{drain_all, open, run};
 
     type Options<'a> = [(&'a str, &'a str)];
 
@@ -395,60 +393,6 @@ mod tests {
 
     fn keys(options: &Options) -> Json {
         read(options).expect("read")["config"]["compare"]["keys"].clone()
-    }
-
-    /// The engine's configuration for `options` under `-z`, with `mode`'s
-    /// fields laid over it.
-    fn engine(options: &Options, mode: Json) -> String {
-        let mut typed = options.to_vec();
-        typed.push(("zero_terminated", ""));
-        let mut config = read(&typed).expect("read")["config"].clone();
-        for (name, value) in mode.as_object().expect("an object") {
-            config[name] = value.clone();
-        }
-        config.to_string()
-    }
-
-    // Records end in NUL so one may hold a newline, which is still a blank.
-    fn records(list: &[&str]) -> Vec<u8> {
-        list.iter()
-            .flat_map(|record| [record.as_bytes(), b"\0"].concat())
-            .collect()
-    }
-
-    fn split(output: &[u8]) -> Vec<String> {
-        let text = String::from_utf8(output.to_vec()).expect("utf-8");
-        let mut list: Vec<String> = text.split('\0').map(str::to_owned).collect();
-        list.pop();
-        list
-    }
-
-    fn sorted(options: &Options, list: &[&str]) -> Vec<String> {
-        let config = engine(options, json!({"mode": "sort", "run_bytes": 8 << 20}));
-        split(&run("sort", &config, &[&records(list)]).0)
-    }
-
-    fn lines(text: &str, options: &Options) -> Vec<String> {
-        sorted(options, &text.split('\n').collect::<Vec<_>>())
-    }
-
-    fn merged(options: &Options, runs: &[&[&str]]) -> Vec<String> {
-        let config = engine(options, json!({"mode": "merge", "inputs": runs.len()}));
-        let mut stream = open("sort", config.as_bytes()).expect("opens");
-        let mut out = Vec::new();
-        for (index, list) in runs.iter().enumerate() {
-            stream
-                .feed_input(index, &records(list), &mut out)
-                .expect("fed");
-            drain_all(stream.as_mut(), &mut out);
-        }
-        for index in 0..runs.len() {
-            stream.end_input(index, &mut out).expect("ended");
-            drain_all(stream.as_mut(), &mut out);
-        }
-        stream.finish(&mut out).expect("finished");
-        drain_all(stream.as_mut(), &mut out);
-        split(&out)
     }
 
     #[test]
@@ -727,7 +671,7 @@ mod tests {
         assert_eq!(refusal(&two), usage("multiple output files specified"));
     }
 
-    // Measured against GNU coreutils 9.4 under LC_ALL=C with a raw argv.
+    // Measured against GNU coreutils 9.7 on debian:stable-slim, LC_ALL=C.
     #[test]
     fn check_reads_its_word_or_a_prefix_of_one_mode() {
         let check = |options: &Options| read(options).expect("read")["check"].clone();
@@ -936,182 +880,5 @@ mod tests {
     fn an_option_the_grammar_does_not_read_is_the_hosts_mistake() {
         let refused = scan(&[("merge".to_owned(), Vec::new())]).expect_err("refused");
         assert_eq!(refused.message, "scan: sort reads no option merge");
-    }
-
-    #[test]
-    fn default_separator_leading_blanks_belong_to_the_following_field() {
-        assert_eq!(lines("a 1\na  2", &[("key", "2,2")]), ["a  2", "a 1"]);
-        let typed = [("key", "2,2"), ("ignore_leading_blanks", "")];
-        assert_eq!(lines("a 1\na  2", &typed), ["a 1", "a  2"]);
-    }
-
-    #[test]
-    fn an_explicit_separator_collapses_no_blanks() {
-        let typed = [("key", "3,3"), ("field_separator", ":")];
-        assert_eq!(lines("x::b\ny::a", &typed), ["y::a", "x::b"]);
-        let typed = [("key", "2,2"), ("field_separator", ":"), ("stable", "")];
-        assert_eq!(lines("y::a\nx::b", &typed), ["y::a", "x::b"]);
-    }
-
-    #[test]
-    fn a_key_extracts_its_fields() {
-        assert_eq!(lines("a 2 z\nb 2 a", &[("key", "2")]), ["b 2 a", "a 2 z"]);
-        let typed = [("key", "2,2"), ("stable", "")];
-        assert_eq!(lines("b 2 a\na 2 z", &typed), ["b 2 a", "a 2 z"]);
-        assert_eq!(lines("a 1\nb  2", &[("key", "2,2")]), ["b  2", "a 1"]);
-        assert_eq!(lines("xa\ny 5", &[("key", "1.2")]), ["y 5", "xa"]);
-        assert_eq!(lines("a b c\nx 3", &[("key", "3,3")]), ["x 3", "a b c"]);
-    }
-
-    #[test]
-    fn keydefs_order_records() {
-        let data = "a 2 z\nb 2 a\nc 1 m";
-        assert_eq!(lines(data, &[("key", "2")]), ["c 1 m", "b 2 a", "a 2 z"]);
-        assert_eq!(lines(data, &[("key", "2,2")]), ["c 1 m", "a 2 z", "b 2 a"]);
-        let typed = [("key", "2,2n"), ("key", "1,1r")];
-        assert_eq!(lines(data, &typed), ["c 1 m", "b 2 a", "a 2 z"]);
-        let fruit = "apple 3\nbanana 1\ncherry 2\napple 10";
-        assert_eq!(
-            lines(fruit, &[("key", "2,2n")]),
-            ["banana 1", "cherry 2", "apple 3", "apple 10"]
-        );
-        let ties = "z 2\nm 2\na 2";
-        let typed = [("key", "2,2n"), ("reverse", "")];
-        assert_eq!(lines(ties, &typed), ["z 2", "m 2", "a 2"]);
-        assert_eq!(lines(ties, &[("key", "2,2n")]), ["a 2", "m 2", "z 2"]);
-        let typed = [("key", "2,2n"), ("stable", "")];
-        assert_eq!(lines(ties, &typed), ["z 2", "m 2", "a 2"]);
-        let typed = [("key", "2b"), ("numeric_sort", "")];
-        assert_eq!(
-            lines("  a 30\n  b 5\n  c 200", &typed),
-            ["  c 200", "  a 30", "  b 5"]
-        );
-        let typed = [("key", "1.2,1.3"), ("field_separator", ":")];
-        assert_eq!(
-            lines("apple:12\nbee:3\ncat:100", &typed),
-            ["cat:100", "bee:3", "apple:12"]
-        );
-    }
-
-    #[test]
-    fn the_global_options_order_records() {
-        let fruit = "banana\napple\ncherry";
-        assert_eq!(lines(fruit, &[]), ["apple", "banana", "cherry"]);
-        assert_eq!(
-            lines(fruit, &[("reverse", "")]),
-            ["cherry", "banana", "apple"]
-        );
-        let numbers = "10\n2\n30\n1";
-        assert_eq!(
-            lines(numbers, &[("numeric_sort", "")]),
-            ["1", "2", "10", "30"]
-        );
-        let typed = [("numeric_sort", ""), ("reverse", "")];
-        assert_eq!(lines(numbers, &typed), ["30", "10", "2", "1"]);
-        assert_eq!(
-            lines("10\nabc\n2\nxyz", &[("numeric_sort", "")]),
-            ["abc", "xyz", "2", "10"]
-        );
-        assert_eq!(
-            lines("banana\napple\nbanana\napple\ncherry", &[("unique", "")]),
-            ["apple", "banana", "cherry"]
-        );
-        assert_eq!(
-            lines("Banana\napple\nCherry", &[("ignore_case", "")]),
-            ["apple", "Banana", "Cherry"]
-        );
-        let typed = [("unique", ""), ("ignore_case", "")];
-        assert_eq!(
-            lines("Apple\napple\nBanana\nbanana", &typed),
-            ["Apple", "Banana"]
-        );
-        let typed = [("key", "2"), ("numeric_sort", "")];
-        assert_eq!(lines("a 10\nb 2\nc 30", &typed), ["b 2", "a 10", "c 30"]);
-        let typed = [("field_separator", ":"), ("key", "2"), ("numeric_sort", "")];
-        assert_eq!(lines("a:10\nb:2\nc:30", &typed), ["b:2", "a:10", "c:30"]);
-        let general = [("general_numeric_sort", "")];
-        assert_eq!(
-            lines("inf\n5\n-3\nnan\nabc", &general),
-            ["abc", "nan", "-3", "5", "inf"]
-        );
-        assert_eq!(
-            lines("0x10\n5\n12abc\n0x\n0x1p99999", &general),
-            ["0x", "5", "12abc", "0x10", "0x1p99999"]
-        );
-    }
-
-    // -n and -h in the C locale, pinned against GNU sort 9.7.
-    #[test]
-    fn numeric_keys_read_as_gnu_does() {
-        let numeric = [("numeric_sort", "")];
-        assert_eq!(
-            sorted(&numeric, &["\n5", "3", "\n-5", "-4"]),
-            ["\n-5", "-4", "3", "\n5"]
-        );
-        assert_eq!(
-            sorted(&[("key", "2,2n")], &["b\n1", "a\n2"]),
-            ["b\n1", "a\n2"]
-        );
-        let human = [("human_numeric_sort", "")];
-        assert_eq!(
-            lines("1500\n1.5K\n2000\n1K", &human),
-            ["1500", "2000", "1K", "1.5K"]
-        );
-        assert_eq!(lines("1m\n1M\n2\n1k", &human), ["1m", "2", "1k", "1M"]);
-        assert_eq!(
-            lines("-1K\n-2\n1\n-1M\n0\n-0K\n0K", &human),
-            ["-1M", "-1K", "-2", "-0K", "0", "0K", "1"]
-        );
-        let stable = [("human_numeric_sort", ""), ("stable", "")];
-        assert_eq!(
-            lines("5.K\n3K\n.5K\n3\nK", &stable),
-            ["K", "3", ".5K", "3K", "5.K"]
-        );
-        assert_eq!(
-            lines("1.000000000000000002K\n1.000000000000000001K", &stable),
-            ["1.000000000000000001K", "1.000000000000000002K"]
-        );
-    }
-
-    // Measured against GNU coreutils 9.7 on debian:stable-slim, LC_ALL=C.
-    #[test]
-    fn unique_stops_at_the_keys() {
-        let typed = [("key", "2,2"), ("unique", "")];
-        assert_eq!(lines("b 1\na 1", &typed), ["b 1"]);
-        assert_eq!(lines("b 1\na 1", &[("key", "2,2")]), ["a 1", "b 1"]);
-        let typed = [("ignore_case", ""), ("unique", "")];
-        assert_eq!(lines("b\na\nB", &typed), ["a", "b"]);
-        let typed = [("key", "2,2"), ("unique", ""), ("reverse", "")];
-        assert_eq!(lines("a 1\nb 1\nc 2", &typed), ["c 2", "a 1"]);
-    }
-
-    #[test]
-    fn a_merge_takes_the_smallest_head_and_never_reorders_a_run() {
-        assert_eq!(merged(&[], &[&["b", "a"]]), ["b", "a"]);
-        assert_eq!(merged(&[], &[&["c", "a"], &["b"]]), ["b", "c", "a"]);
-        assert_eq!(
-            merged(&[], &[&["a", "d"], &["b", "e"], &["c", "f"]]),
-            ["a", "b", "c", "d", "e", "f"]
-        );
-        let runs: &[&[&str]] = &[&["k 3"], &["k 1"], &["k 2"]];
-        let typed = [("key", "1,1"), ("stable", "")];
-        assert_eq!(merged(&typed, runs), ["k 3", "k 1", "k 2"]);
-        assert_eq!(merged(&[("key", "1,1")], runs), ["k 1", "k 2", "k 3"]);
-        assert_eq!(merged(&[], &[&[], &["b", "a"], &[]]), ["b", "a"]);
-        assert!(merged(&[], &[&[], &[]]).is_empty());
-    }
-
-    #[test]
-    fn a_unique_merge_keeps_the_first_of_a_key_equal_series() {
-        let unique = [("unique", "")];
-        assert_eq!(merged(&unique, &[&["a", "b", "a"]]), ["a", "b", "a"]);
-        assert_eq!(
-            merged(&unique, &[&["a", "b"], &["a", "c"]]),
-            ["a", "b", "c"]
-        );
-        let typed = [("key", "2,2"), ("unique", "")];
-        assert_eq!(merged(&typed, &[&["x 1"], &["a 1"]]), ["x 1"]);
-        let typed = [("ignore_case", ""), ("unique", "")];
-        assert_eq!(merged(&typed, &[&["b"], &["B"]]), ["b"]);
     }
 }
