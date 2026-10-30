@@ -276,8 +276,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await app.state.mcp.close()
             await app.state.jobs.close()
         finally:
-            await app.state.registry.close_all()
-            app.state.unregister_metrics()
+            try:
+                await app.state.registry.close_all()
+            finally:
+                app.state.unregister_metrics()
             if app.state.pid_file is not None:
                 await run_blocking(_remove_pid_file, app.state.pid_file)
 

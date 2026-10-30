@@ -221,8 +221,11 @@ export function buildApp(options: BuildAppOptions = {}) {
       await mcp.close()
       await jobs.close()
     } finally {
-      await registry.closeAll()
-      unregisterMetrics()
+      try {
+        await registry.closeAll()
+      } finally {
+        unregisterMetrics()
+      }
     }
   })
   return Object.assign(app, { registry, jobs, pidFile, ssh, mcp })

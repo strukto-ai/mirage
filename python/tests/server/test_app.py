@@ -259,3 +259,17 @@ async def test_metrics_report_the_work_a_shutdown_waits_for(monkeypatch):
         pass
     assert seen == [True]
     assert app.state.registry not in metrics_module._registries
+
+
+@pytest.mark.asyncio
+async def test_a_failed_close_still_stops_reporting_metrics(monkeypatch):
+    app = build_app(idle_grace_seconds=10.0)
+    monkeypatch.setattr(app.state.registry, "close_all", _failing_close)
+    with pytest.raises(RuntimeError, match="close failed"):
+        async with app.router.lifespan_context(app):
+            pass
+    assert app.state.registry not in metrics_module._registries
+
+
+async def _failing_close() -> None:
+    raise RuntimeError("close failed")
