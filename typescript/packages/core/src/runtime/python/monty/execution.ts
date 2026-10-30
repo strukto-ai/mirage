@@ -38,6 +38,8 @@ type Stream = 'stdout' | 'stderr'
 interface RunInterruption {
   promise: Promise<typeof INTERRUPTED>
   timedOut: { value: boolean }
+  // Aborted when the run is stopped, deadline or kill alike.
+  signal: AbortSignal
   dispose: () => void
 }
 
@@ -183,8 +185,11 @@ export class MontyExecution {
       const prints = new Prints(output, errors)
       try {
         // The prints are handed on inside the race, so a deadline or a kill
-        // still stops a run whose reader holds its last writes back.
-        const run = this.feedOne(session, program, ctx, files, prints, externalLookup).then(
+        // still stops a run whose reader holds its last writes back. The
+        // kill ends the worker, not a host callback still at work (a scan
+        // lists directory after directory), so the file calls stop too.
+        const guestFiles = files?.withSignal(interruption.signal) ?? null
+        const run = this.feedOne(session, program, ctx, guestFiles, prints, externalLookup).then(
           async (outcome) => {
             await prints.end()
             return outcome
@@ -227,20 +232,25 @@ export class MontyExecution {
     const timedOut = { value: false }
     let timer: ReturnType<typeof setTimeout> | null = null
     let removeAbort: (() => void) | null = null
+    const stop = new AbortController()
     const promise = new Promise<typeof INTERRUPTED>((resolve) => {
+      const interrupt = (): void => {
+        stop.abort()
+        resolve(INTERRUPTED)
+      }
       if (timeoutSeconds !== undefined && timeoutSeconds > 0) {
         timer = setTimeout(() => {
           timedOut.value = true
-          resolve(INTERRUPTED)
+          interrupt()
         }, timeoutSeconds * 1000)
       }
       if (signal !== undefined) {
         if (signal.aborted) {
-          resolve(INTERRUPTED)
+          interrupt()
           return
         }
         const onAbort = (): void => {
-          resolve(INTERRUPTED)
+          interrupt()
         }
         signal.addEventListener('abort', onAbort, { once: true })
         removeAbort = () => {
@@ -251,6 +261,7 @@ export class MontyExecution {
     return {
       promise,
       timedOut,
+      signal: stop.signal,
       dispose: () => {
         if (timer !== null) clearTimeout(timer)
         if (removeAbort !== null) removeAbort()

@@ -18,7 +18,7 @@ import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { MontyFs } from './index.ts'
 import type { GuestStat } from './stat.ts'
 import { PrefixResolver } from '../../resolver.ts'
-import { MAX_URANDOM_BYTES, SCAN_MAX_ENTRIES } from './constants.ts'
+import { MAX_URANDOM_BYTES, SCAN_LINK_DEPTH, SCAN_MAX_ENTRIES } from './constants.ts'
 import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
 
 const NOT_HANDLED = Symbol('NOT_HANDLED')
@@ -604,30 +604,35 @@ describe('MontyFs path operations', () => {
 
 // A bridge over a small tree: a listing names a directory's own
 // children, links included, and a stat answers what a path reaches, as
-// the dispatcher's stat follows a link.
+// the dispatcher's stat follows a link through every hop.
 function tree(
   entries: Record<string, 'file' | 'dir'>,
   links: Record<string, string> = {},
   refused: string[] = [],
 ): Mock<BridgeDispatchFn> {
   const reach = (p: string): string => {
-    for (const [link, target] of Object.entries(links)) {
-      if (p === link || p.startsWith(link + '/')) return target + p.slice(link.length)
+    let at = p
+    for (let hop = 0; hop < 100; hop += 1) {
+      const link = Object.keys(links).find((l) => at === l || at.startsWith(l + '/'))
+      if (link === undefined) return at
+      at = (links[link] ?? '') + at.slice(link.length)
     }
-    return p
+    return at
   }
   return vi.fn<BridgeDispatchFn>((op, path) => {
     const fail = (code: string): Promise<never> =>
       Promise.reject(Object.assign(new Error(`${code}: ${path}`), { code }))
-    const dir = path.replace(/\/$/, '')
+    const dir = path === '/' ? '/' : path.replace(/\/$/, '')
     if (op === 'readlink') return dir in links ? Promise.resolve(links[dir]) : fail('EINVAL')
     if (op === 'readdir') {
       if (refused.includes(dir)) return fail('EACCES')
       const real = reach(dir)
       if (entries[real] !== 'dir') return fail('ENOENT')
+      const under = real === '/' ? '/' : real + '/'
+      const base = dir === '/' ? '/' : dir + '/'
       const names = [...Object.keys(entries), ...Object.keys(links)]
-        .filter((p) => p.startsWith(real + '/') && !p.slice(real.length + 1).includes('/'))
-        .map((p) => dir + p.slice(real.length))
+        .filter((p) => p !== real && p.startsWith(under) && !p.slice(under.length).includes('/'))
+        .map((p) => base + p.slice(under.length))
       return Promise.resolve(names)
     }
     if (op === 'stat') {
@@ -710,6 +715,49 @@ describe('MontyFs scan', () => {
       ['', true, false, false],
       ['locked', true, false, false],
     ])
+  })
+
+  // A link back to an ancestor never ends on its own; a scan that
+  // follows links and names no depth stops SCAN_LINK_DEPTH levels down.
+  it('stops a link to an ancestor at SCAN_LINK_DEPTH', async () => {
+    const entries = { '/ram': 'dir', '/ram/sub': 'dir' } as const
+    const dispatch = tree(entries, { '/ram/sub/up': '/ram' })
+    const rows = (await accessOn(dispatch, {}, ['/ram'], ['up']).handle('Path.scan', ['/ram'], {
+      max_depth: null,
+      follow_symlinks: true,
+    })) as [string][]
+    expect(rows).toHaveLength(SCAN_LINK_DEPTH + 1)
+    expect(Math.max(...rows.map(([p]) => p.split('/').length))).toBe(SCAN_LINK_DEPTH)
+    const listings = dispatch.mock.calls.filter(([op]) => op === 'readdir')
+    expect(listings).toHaveLength(SCAN_LINK_DEPTH)
+  })
+
+  // The history beside the mounts lists, but the view withholds it, so
+  // Path.is_file() says no; the scan must not offer it as a file.
+  it('asks the view about an entry outside it', async () => {
+    const entries = { '/': 'dir', '/ram': 'dir', '/ram/a': 'file', '/hist': 'file' } as const
+    const rows = await accessOn(tree(entries)).handle('Path.scan', ['/'], { max_depth: 1 })
+    expect(sortedRows(rows)).toEqual([
+      ['', true, false, false],
+      ['hist', false, false, false],
+      ['ram', true, false, false],
+    ])
+  })
+
+  // A stopped run's refusal is not a directory that will not list: the
+  // scan ends there instead of listing the next one.
+  it('ends at an abort instead of reading it as an unlistable directory', async () => {
+    const entries = { '/ram': 'dir', '/ram/a': 'dir', '/ram/b': 'dir' } as const
+    const inner = tree(entries)
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path, ...rest) =>
+      op === 'readdir' && path === '/ram/b/'
+        ? Promise.reject(new DOMException('stopped', 'AbortError'))
+        : inner(op, path, ...rest),
+    )
+    const out = accessOn(dispatch).handle('Path.scan', ['/ram'], { follow_symlinks: false })
+    await expect(out).rejects.toMatchObject({ name: 'AbortError' })
+    const listed = dispatch.mock.calls.filter(([op]) => op === 'readdir').map(([, p]) => p)
+    expect(listed).toEqual(['/ram/', '/ram/b/'])
   })
 
   it('raises a missing root as FileNotFoundError', async () => {

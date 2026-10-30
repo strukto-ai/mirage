@@ -14,6 +14,7 @@
 
 import logging
 from collections.abc import Iterator
+from concurrent.futures import CancelledError
 from contextlib import contextmanager
 from pathlib import PurePosixPath
 from stat import S_ISREG
@@ -52,7 +53,9 @@ def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
     and a failure the vocabulary does not name is EIO, as a kernel
     reports a device that failed (the engine knows only builtin types,
     so a backend's own exception would reach the guest as
-    ``RuntimeError``).
+    ``RuntimeError``). A stopped run's refusal is no failed device: it
+    leaves as itself, so a callback making call after call (a scan)
+    ends with its run.
 
     Args:
         path (str): the path the operation names.
@@ -60,6 +63,8 @@ def _as_guest(path: str, target: str | None = None) -> Iterator[None]:
     """
     try:
         yield
+    except CancelledError:
+        raise
     except Exception as exc:
         condition = classify(exc) or FsCondition.EIO
         raise guest_error(condition, path, target) from exc
@@ -243,7 +248,7 @@ class MontyFs(AbstractOS):
             for row in rows:
                 name = entry_name(row.path)
                 entry = f"{relative}/{name}" if relative else name
-                is_dir, is_file = self._kind(directory / name, row)
+                is_dir, is_file = self._kind(files, directory / name, row)
                 tree.append((entry, is_dir, is_file, row.is_link))
                 if len(tree) > SCAN_MAX_ENTRIES:
                     raise RuntimeError(
@@ -253,19 +258,26 @@ class MontyFs(AbstractOS):
                     pending.append((directory / name, entry, depth + 1))
         return tree
 
-    def _kind(self, path: PurePosixPath, row: VFSEntry) -> tuple[bool, bool]:
+    def _kind(
+        self, files: RuntimeFiles, path: PurePosixPath, row: VFSEntry
+    ) -> tuple[bool, bool]:
         """Whether a listed entry is a directory and whether a regular file.
 
-        The listing's own stat answers, except for a link, whose row is
-        the link's and not what it reaches, and a row the listing could
-        not stat; those ask the view, as `path_is_dir` would. A stat that
-        fails leaves the entry neither, CPython's rule inside `os.walk`.
+        The listing's own stat answers for a path in the view, except
+        for a link, whose row is the link's and not what it reaches, and
+        a row the listing could not stat. Those, and every path outside
+        the view, ask the view as `path_is_dir` would, so a file the view
+        withholds (the history beside the mounts) is not offered as one.
+        A stat that fails leaves the entry neither, CPython's rule inside
+        `os.walk`.
 
         Args:
+            files (RuntimeFiles): the execution's file API.
             path (PurePosixPath): the entry's guest path.
             row (VFSEntry): the entry as the listing classified it.
         """
-        if not row.is_link and (row.is_dir or row.mode is not None):
+        listed = row.is_dir or row.mode is not None
+        if not row.is_link and listed and files.serves(str(path)):
             return row.is_dir, row.mode is not None and S_ISREG(row.mode)
         try:
             reached = self._row(path)

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../../../errors/index.ts'
+import { isAborting } from '../../../errors/fs.ts'
 import { entryName } from '../../../utils/remnants.ts'
 import { normDir } from '../../../utils/slash.ts'
 import { parseMode } from '../../handles/mode.ts'
@@ -351,7 +352,7 @@ export class MontyFs {
       try {
         rows = await files.readdir(normDir(directory))
       } catch (err) {
-        if (depth === 0) throw err
+        if (depth === 0 || isAborting(err)) throw err
         console.debug(`monty scan: ${directory} did not list: ${String(err)}`)
         continue
       }
@@ -379,9 +380,11 @@ export class MontyFs {
 
   /**
    * Whether a listed entry is a directory and whether a regular file.
-   * The listing's own stat answers, except for a link, whose row is the
-   * link's and not what it reaches, and a row the listing could not
-   * stat; those ask the view, as `Path.is_dir` would. A stat that fails
+   * The listing's own stat answers for a path in the view, except for a
+   * link, whose row is the link's and not what it reaches, and a row the
+   * listing could not stat. Those, and every path outside the view, ask
+   * the view as `Path.is_dir` would, so a file the view withholds (the
+   * history beside the mounts) is not offered as one. A stat that fails
    * leaves the entry neither, CPython's rule inside `os.walk`.
    */
   private async kind(
@@ -389,15 +392,18 @@ export class MontyFs {
     row: VFSEntry,
     files: RuntimeFiles,
   ): Promise<[boolean, boolean]> {
-    if (row.isLink !== true && row.mode !== undefined) {
-      const st = { size: row.size, isDir: row.isDir, mode: row.mode }
-      return [isDirRow(st), isRegularRow(st)]
+    if (row.isLink !== true && files.serves(path)) {
+      if (row.mode !== undefined) {
+        const st = { size: row.size, isDir: row.isDir, mode: row.mode }
+        return [isDirRow(st), isRegularRow(st)]
+      }
+      if (row.isDir) return [true, false]
     }
-    if (row.isLink !== true && row.isDir) return [true, false]
     try {
       const reached = await files.viewStat(path)
       return reached === null ? [false, false] : [isDirRow(reached), isRegularRow(reached)]
     } catch (err) {
+      if (isAborting(err)) throw err
       console.debug(`monty scan: ${path} did not stat: ${String(err)}`)
       return [false, false]
     }

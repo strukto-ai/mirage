@@ -17,6 +17,8 @@ import errno
 
 import pytest
 
+import mirage.runtime.python.monty.fs as monty_fs
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.binding import WorkspaceBinding
@@ -421,8 +423,6 @@ def test_monty_scan_of_a_missing_directory():
 def test_monty_a_scan_past_its_entry_cap_raises_runtime_error(monkeypatch):
     # An OSError would read as a directory that will not list, and the
     # walk would hand back a short tree as if it were the whole one.
-    import mirage.runtime.python.monty.fs as monty_fs
-
     monkeypatch.setattr(monty_fs, "SCAN_MAX_ENTRIES", 2)
     dispatch = FakeDispatch({"/s3/a": b"a", "/s3/b": b"b", "/s3/c": b"c"})
     dispatch.dirs.append("/s3")
@@ -433,3 +433,69 @@ def test_monty_a_scan_past_its_entry_cap_raises_runtime_error(monkeypatch):
     assert b"RuntimeError: directory scan exceeded 2 entries" in (
         result.stderr
     )
+
+
+def test_monty_scan_asks_the_view_about_an_entry_outside_it():
+    # A file beside the mounts lists, but the view withholds it, so
+    # `is_file` says no; the scan must not offer it as a regular file.
+    dispatch = FakeDispatch({"/s3/a": b"a", "/hist": b"h"})
+    dispatch.dirs.append("/s3")
+    runtime = MontyRuntime()
+    runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: ["/s3/"])))
+    code = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "print(sorted((e.name, e.is_dir(), e.is_file())"
+        " for e in os.scandir('/')))\n"
+        "print(Path('/hist').is_file())"
+    )
+    result = asyncio.run(_run(runtime, code))
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == (
+        b"[('hist', False, False), ('s3', True, False)]\nFalse\n"
+    )
+
+
+class StoppingDispatch(FakeDispatch):
+    """Refuses one listing the way a stopped run refuses every call."""
+
+    async def __call__(self, op, path, **kwargs):
+        stopped = op == "readdir" and not kwargs.get("admit_only")
+        if stopped and path.virtual.rstrip("/") == "/s3/b":
+            raise asyncio.CancelledError()
+        return await super().__call__(op, path, **kwargs)
+
+
+def test_monty_scan_ends_at_a_stopped_run_instead_of_reading_on():
+    # A stopped run's refusal is not a directory that will not list: the
+    # scan ends there instead of listing the next directory.
+    dispatch = StoppingDispatch({"/s3/a/x": b"x", "/s3/b/y": b"y"})
+    dispatch.dirs.extend(["/s3", "/s3/a", "/s3/b"])
+    runtime = MontyRuntime()
+    runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
+    result = asyncio.run(_run(runtime, "import os\nlist(os.walk('/s3'))"))
+    assert result.exit_code == 1
+    assert dispatch.ops.count("readdir") == 1
+
+
+def test_monty_a_link_to_an_ancestor_stops_at_scan_link_depth():
+    # Such a link never ends on its own; a walk that follows links and
+    # names no depth stops SCAN_LINK_DEPTH levels down.
+    async def walk() -> str:
+        ws = Workspace(
+            {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty"]
+        )
+        try:
+            await ws.shell("mkdir -p /data/sub && ln -s /data /data/sub/up")
+            code = (
+                "import os\n"
+                "d = [p for p, _, _ in os.walk('/data', followlinks=True)]\n"
+                "print(len(d), max(p.count('/') for p in d))"
+            )
+            result = await ws.shell('python3 -c "$CODE"', env={"CODE": code})
+            return await result.stdout_str()
+        finally:
+            await ws.close()
+
+    depth = monty_fs.SCAN_LINK_DEPTH
+    assert asyncio.run(walk()) == f"{depth + 1} {depth + 1}\n"
