@@ -20,6 +20,7 @@ import { buildApp } from './app.ts'
 import { ENV_ALLOWED_HOSTS } from './env.ts'
 import { DEFAULT_ALLOWED_HOSTS } from './host_validation_constants.ts'
 import {
+  isCrossOrigin,
   isHostAllowed,
   parseAllowedHosts,
   resolveAllowedHosts,
@@ -90,6 +91,40 @@ describe('isHostAllowed: malformed Host headers fail closed', () => {
     expect(isHostAllowed('[::1]', DEFAULT_ALLOWED_HOSTS)).toBe(true)
     expect(isHostAllowed('[::1]:8765', DEFAULT_ALLOWED_HOSTS)).toBe(true)
     expect(isHostAllowed('127.0.0.1:8765', DEFAULT_ALLOWED_HOSTS)).toBe(true)
+  })
+})
+
+describe('isCrossOrigin', () => {
+  it('refuses other fetch sites', () => {
+    expect(isCrossOrigin('127.0.0.1:8765', undefined, 'cross-site')).toBe(true)
+    expect(isCrossOrigin('localhost:8765', undefined, 'same-site')).toBe(true)
+  })
+
+  it('admits its own fetch sites', () => {
+    expect(isCrossOrigin('127.0.0.1:8765', undefined, 'same-origin')).toBe(false)
+    expect(isCrossOrigin('127.0.0.1:8765', undefined, 'none')).toBe(false)
+    expect(isCrossOrigin('127.0.0.1:8765', undefined, undefined)).toBe(false)
+  })
+
+  it('refuses another origin', () => {
+    for (const origin of [
+      'https://evil.example',
+      'http://localhost:3000',
+      'http://127.0.0.1',
+      'null',
+      '',
+    ]) {
+      expect(isCrossOrigin('127.0.0.1:8765', origin, undefined), origin).toBe(true)
+    }
+  })
+
+  it('admits its own origin', () => {
+    expect(isCrossOrigin('127.0.0.1:8765', 'http://127.0.0.1:8765', undefined)).toBe(false)
+    expect(isCrossOrigin('[::1]:8765', 'http://[::1]:8765', undefined)).toBe(false)
+    expect(isCrossOrigin('Localhost:8765', 'http://localhost:8765', undefined)).toBe(false)
+    expect(
+      isCrossOrigin('mirage.example.com', 'https://mirage.example.com', 'same-origin'),
+    ).toBe(false)
   })
 })
 
@@ -223,6 +258,67 @@ describe('buildApp host header enforcement', () => {
       expect(joined).toContain('attacker.example')
     } finally {
       warnSpy.mockRestore()
+      await app.close()
+    }
+  })
+})
+
+describe('buildApp cross-origin refusal', () => {
+  const originalEnv = process.env[ENV_ALLOWED_HOSTS]
+
+  beforeEach(() => {
+    Reflect.deleteProperty(process.env, ENV_ALLOWED_HOSTS)
+  })
+
+  afterEach(() => {
+    if (originalEnv === undefined) Reflect.deleteProperty(process.env, ENV_ALLOWED_HOSTS)
+    else process.env[ENV_ALLOWED_HOSTS] = originalEnv
+  })
+
+  it('refuses a page on another origin under the default allowlist', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const app = buildApp({})
+    try {
+      for (const headers of [
+        { origin: 'https://evil.example' },
+        { origin: 'http://localhost:3000' },
+        { 'sec-fetch-site': 'cross-site' },
+      ]) {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: { host: '127.0.0.1:8765', ...headers },
+        })
+        expect(res.statusCode, JSON.stringify(headers)).toBe(400)
+        expect(res.json()).toEqual({ detail: 'Cross-origin request refused' })
+      }
+      const ok = await app.inject({
+        method: 'GET',
+        url: '/v1/workspaces',
+        headers: {
+          host: '127.0.0.1:8765',
+          origin: 'http://127.0.0.1:8765',
+          'sec-fetch-site': 'same-origin',
+        },
+      })
+      expect(ok.statusCode).toBe(200)
+      expect(warnSpy.mock.calls.flat().join(' ')).toContain('evil.example')
+    } finally {
+      warnSpy.mockRestore()
+      await app.close()
+    }
+  })
+
+  it('still refuses a page on another origin when allowedHosts contains "*"', async () => {
+    const app = buildApp({ allowedHosts: ['*'] })
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/workspaces',
+        headers: { host: 'anything.example', origin: 'https://evil.example' },
+      })
+      expect(res.statusCode).toBe(400)
+    } finally {
       await app.close()
     }
   })
