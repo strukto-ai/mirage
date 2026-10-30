@@ -17,6 +17,7 @@ import errno
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import fields, replace
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
@@ -585,6 +586,35 @@ async def post_vfs_gate(
         None if caller.refusals is not None else decisions,
         caller,
     )
+
+
+# The policies of the workspace a line runs for, which judge each request
+# a command sends.
+_judges: ContextVar["Policies | None"] = ContextVar(
+    "mirage_line_policies", default=None
+)
+
+
+async def run_with_policies(policies: "Policies", call: Awaitable[_T]) -> _T:
+    """``call`` awaited as a line of the workspace ``policies`` judge,
+    whose requests a command sends answer to them. Mirrors TS's
+    ``runWithPolicies``.
+
+    Args:
+        policies (Policies): the workspace's policies.
+        call (Awaitable[_T]): the line.
+    """
+    token = _judges.set(policies)
+    try:
+        return await call
+    finally:
+        _judges.reset(token)
+
+
+def line_policies() -> "Policies | None":
+    """The policies of the running line, None outside one. Mirrors TS's
+    ``linePolicies``."""
+    return _judges.get()
 
 
 async def pre_network_gate(

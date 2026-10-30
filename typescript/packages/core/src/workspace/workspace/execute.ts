@@ -17,6 +17,7 @@ import { LINE_NAME, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
 import { runWithMemory } from '../../io/memory.ts'
 import { runWithNetwork } from '../../io/network.ts'
+import { runWithPolicies } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -1063,9 +1064,8 @@ async function runParsedLine(
         ? env.router.context(command, effectiveSession, await judged())
         : null
       const runLine = (): ReturnType<typeof runWholeLine> =>
-        runWithNetwork(
-          env.registry.network,
-          () =>
+        runWithNetwork(env.registry.networkOf(effectiveSession.network), () =>
+          runWithPolicies(env.registry.policies, () =>
             runWithMemory(env.registry.memory, () =>
               runWholeLine(
                 lineRuntime,
@@ -1081,7 +1081,7 @@ async function runParsedLine(
                 deadline?.start,
               ),
             ),
-          env.registry.policies,
+          ),
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1217,9 +1217,8 @@ async function runParsedLine(
         // Every object a line builds must fit in what the workspace's
         // max_memory has left, a nested line's too, and every connection it
         // opens must clear the workspace's network.
-        const running = runWithNetwork(
-          env.registry.network,
-          () =>
+        const running = runWithNetwork(env.registry.networkOf(context.session.network), () =>
+          runWithPolicies(env.registry.policies, () =>
             runWithMemory(env.registry.memory, async () =>
               runCommandTree(
                 deadline === null ? deps : { ...deps, signal: deadline.signal },
@@ -1233,7 +1232,7 @@ async function runParsedLine(
                   : null,
               ),
             ),
-          env.registry.policies,
+          ),
         ).finally(release)
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.

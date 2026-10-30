@@ -21,6 +21,7 @@ import type {
   NetworkContext,
   NetworkResultContext,
 } from '@struktoai/mirage-core/policy/types'
+import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -187,5 +188,47 @@ describe('a workspace network rule', () => {
       await ws.close()
     }
     expect(watch.ended.map((ctx) => [ctx.status, ctx.failed])).toEqual([[0, true]])
+  })
+
+  it('holds each session to its profile network besides the workspace one', async () => {
+    const held = { allowed_domains: [`127.0.0.1:${String(port)}`] }
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        network: { denied_domains: ['10.0.0.0/8'] },
+        profiles: {
+          agent: parseSessionProfile({ network: held }),
+          review: parseSessionProfile({ network: false }),
+          wide: parseSessionProfile({ network: true }),
+        },
+      },
+    )
+    ws.createSession('a', { profile: 'agent' })
+    ws.createSession('r', { profile: 'review' })
+    ws.createSession('w', { profile: 'wide' })
+    const line = `curl -sS http://127.0.0.1:${String(port)}/`
+    try {
+      for (const [sessionId, exitCode] of [
+        ['a', 0],
+        ['r', 7],
+        ['w', 0],
+      ] as const) {
+        expect((await ws.shell(line, { sessionId })).exitCode, sessionId).toBe(exitCode)
+      }
+      expect(ws.registry.networkOf(held)).toBe(ws.registry.networkOf(held))
+      expect(ws.registry.networkOf(null)).toBe(ws.registry.network)
+      expect(ws.registry.narrowedNetworks()).toHaveLength(2)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('refuses a profile network that is not a setting', () => {
+    expect(() => parseSessionProfile({ network: { allow: ['a.com'] } })).toThrow(
+      /network is true, false or/,
+    )
+    expect(() => parseSessionProfile({ network: { denied_domains: ['10.0.0.0/33'] } })).toThrow(
+      /is not an address, a range/,
+    )
   })
 })

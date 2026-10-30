@@ -33,12 +33,12 @@ from mirage.commands.builtin.utils.cookie import (
     same_origin,
 )
 from mirage.context.session_context import current_caller
-from mirage.io.network import network_policies
 from mirage.io.stream import prime_stream
 from mirage.io.types import ByteSource
 from mirage.policy.errors import PolicyDenied
 from mirage.policy.policies import (
     Policies,
+    line_policies,
     post_network_gate,
     pre_network_gate,
 )
@@ -195,7 +195,7 @@ async def http_request(
         raise ImportError(MISSING_HTTPX)
     # The policies of the line sending it judge the request before any
     # connection opens; a refusal reads as a port that would not open.
-    policies = network_policies()
+    policies = line_policies()
     host, port = _endpoint(url)
     caller = current_caller()
     asked = NetworkContext(

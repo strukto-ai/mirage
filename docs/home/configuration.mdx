@@ -132,7 +132,8 @@ in brackets, as in `[::1]:8080`. A name matches the host a connection was
 opened for, and an address or a range the address it reaches. A denied
 entry wins over an allowed one, and an empty `allowed_domains` lets nothing
 through. A mount connects under the same rule, so a list names the mount's
-endpoint too.
+endpoint too. A [profile](/home/profiles) can hold its sessions to a
+narrower `network` of its own.
 
 A refused connection fails as a closed port does: `curl` exits 7 with
 `Could not connect to server`. Write `false` rather than `off`, which only

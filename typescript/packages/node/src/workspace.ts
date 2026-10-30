@@ -155,6 +155,7 @@ export class Workspace extends CoreWorkspace {
     await this.kernelMounts.close()
     await super.close()
     if (this.registry.network !== null) await releaseNetwork(this.registry.network)
+    for (const rule of this.registry.narrowedNetworks()) await releaseNetwork(rule)
   }
 
   // The kernel mounts come down first here too: the core teardown never
@@ -164,5 +165,6 @@ export class Workspace extends CoreWorkspace {
     await this.kernelMounts.close()
     await super.delete()
     if (this.registry.network !== null) await releaseNetwork(this.registry.network)
+    for (const rule of this.registry.narrowedNetworks()) await releaseNetwork(rule)
   }
 }

@@ -22,13 +22,10 @@ import threading
 from collections import OrderedDict
 from collections.abc import Awaitable, Mapping, Sequence
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
+from typing import Any, TypeAlias, TypeVar
 
 from mirage._rs import Stream, StreamError
 from mirage.types import JsonValue
-
-if TYPE_CHECKING:
-    from mirage.policy.policies import Policies
 
 T = TypeVar("T")
 
@@ -74,6 +71,9 @@ class NetworkRule:
             self._stream = Stream("network", json.dumps(config).encode())
         except StreamError as exc:
             raise ValueError(str(exc)) from exc
+        # What it was built from, which a narrower rule builds on.
+        self.layers = tuple(dict(layer) for layer in layers)
+        self.metadata = metadata
         # The audit hook asks from any thread, and a test runs with the
         # GIL released: one test goes through the stream at a time.
         self._lock = threading.Lock()
@@ -198,43 +198,20 @@ _rule: ContextVar[NetworkRule | None] = ContextVar(
     "mirage_network_rule", default=None
 )
 
-# The policies of the workspace a line runs for, which judge each request
-# a command sends.
-_policies: ContextVar["Policies | None"] = ContextVar(
-    "mirage_network_policies", default=None
-)
 
-
-async def run_with_network(
-    rule: NetworkRule | None,
-    call: Awaitable[T],
-    policies: "Policies | None" = None,
-) -> T:
+async def run_with_network(rule: NetworkRule | None, call: Awaitable[T]) -> T:
     """``call`` awaited under a workspace's network rule, which every
-    connection it opens must clear, and, for a line, its policies, which
-    judge every request a command sends. Mirrors TS's ``runWithNetwork``.
+    connection it opens must clear. Mirrors TS's ``runWithNetwork``.
 
     Args:
         rule (NetworkRule | None): the workspace's rule, None for none.
         call (Awaitable[T]): the line or the op.
-        policies (Policies | None): the workspace's policies; None keeps
-            the ones already bound.
     """
     token = _rule.set(rule)
-    held = _policies.set(policies) if policies is not None else None
     try:
         return await call
     finally:
-        if held is not None:
-            _policies.reset(held)
         _rule.reset(token)
-
-
-def network_policies() -> "Policies | None":
-    """The policies bound to the running line, None outside one, which
-    judge each request a command sends. Mirrors TS's
-    ``networkPolicies``."""
-    return _policies.get()
 
 
 def network_lets(host: str, address: str, port: int | None = None) -> bool:

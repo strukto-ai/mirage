@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Policies } from '../policy/policies.ts'
 import { StreamRefusal } from '../rs/errors.ts'
 import { MovableStream } from '../rs/stream.ts'
 import type { JsonValue } from '../types.ts'
@@ -43,7 +42,11 @@ const LISTS: Record<string, string> = { allowed_domains: 'allow', denied_domains
 export class NetworkRule {
   private readonly stream: MovableStream
 
-  constructor(layers: readonly Record<string, JsonValue>[], metadata = false) {
+  constructor(
+    // What it was built from, which a narrower rule builds on.
+    readonly layers: readonly Record<string, JsonValue>[],
+    readonly metadata = false,
+  ) {
     try {
       this.stream = new MovableStream('network', { layers: [...layers], metadata })
     } catch (error) {
@@ -130,31 +133,12 @@ export function networkRule(
 // The rule of the workspace a line or an op runs for, null for no limit.
 const rule = createAsyncContext<NetworkRule | null>()
 
-// The policies of the workspace a line runs for, which judge each request a
-// command sends.
-const policies = createAsyncContext<Policies | null>()
-
 /**
  * `fn` run under a workspace's network rule, which every connection it opens
- * must clear, and, for a line, its policies, which judge every request a
- * command sends; none keeps the ones already bound. Mirrors Python's
- * `run_with_network`.
+ * must clear. Mirrors Python's `run_with_network`.
  */
-export function runWithNetwork<T>(
-  bound: NetworkRule | null,
-  fn: () => Promise<T>,
-  judges?: Policies,
-): Promise<T> {
-  if (judges === undefined) return Promise.resolve(rule.run(bound, fn))
-  return Promise.resolve(rule.run(bound, () => Promise.resolve(policies.run(judges, fn))))
-}
-
-/**
- * The policies bound to the running line, null outside one, which judge each
- * request a command sends. Mirrors Python's `network_policies`.
- */
-export function networkPolicies(): Policies | null {
-  return policies.getStore() ?? null
+export function runWithNetwork<T>(bound: NetworkRule | null, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(rule.run(bound, fn))
 }
 
 /**

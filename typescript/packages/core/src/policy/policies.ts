@@ -15,7 +15,7 @@
 import { FlagView, SPECS, parseCommand } from '../commands/spec/index.ts'
 import { parseToKwargs } from '../commands/spec/parser.ts'
 import { operandExitCode } from '../commands/spec/usage.ts'
-import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
+import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
 import {
   type Caller,
   callerSignal,
@@ -586,6 +586,23 @@ async function sessionRefused(
  * workspace's ledger (`Policies.decisions`), inside a line too. A write a
  * method makes while it decides (`ctx.session`) throws EACCES.
  */
+// The policies of the workspace a line runs for, which judge each request a
+// command sends.
+const judges = createAsyncContext<Policies>()
+
+/**
+ * `fn` run as a line of the workspace `policies` judge, whose requests a
+ * command sends answer to them. Mirrors Python's `run_with_policies`.
+ */
+export function runWithPolicies<T>(policies: Policies, fn: () => Promise<T>): Promise<T> {
+  return Promise.resolve(judges.run(policies, fn))
+}
+
+/** The policies of the running line, null outside one. Mirrors Python's `line_policies`. */
+export function linePolicies(): Policies | null {
+  return judges.getStore() ?? null
+}
+
 /**
  * Fire preNetwork where a command sends a request; a Deny, or an Ask,
  * refuses it with EACCES, the URL as the name refused. Requests are sent by

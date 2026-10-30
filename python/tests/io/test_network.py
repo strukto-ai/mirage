@@ -32,6 +32,7 @@ from mirage.policy import (
     NetworkResultContext,
     Policy,
 )
+from mirage.policy.profile import SessionProfile
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 
@@ -261,3 +262,37 @@ async def test_post_network_sees_a_refused_connection_fail(port):
     finally:
         await ws.close()
     assert [(e.status, e.failed) for e in watch.ended] == [(0, True)]
+
+
+@pytest.mark.asyncio
+async def test_a_profile_narrows_its_sessions_network(port):
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        network={"denied_domains": ["10.0.0.0/8"]},
+        profiles={
+            "agent": {"network": {"allowed_domains": [f"127.0.0.1:{port}"]}},
+            "review": {"network": False},
+            "wide": {"network": True},
+        },
+    )
+    ws.create_session("a", profile="agent")
+    ws.create_session("r", profile="review")
+    ws.create_session("w", profile="wide")
+    line = f"curl -sS http://127.0.0.1:{port}/"
+    try:
+        for session_id, exit_code in [("a", 0), ("r", 7), ("w", 0)]:
+            io = await ws.shell(line, session_id=session_id)
+            assert io.exit_code == exit_code, session_id
+        assert ws.registry.network_of(
+            {"allowed_domains": [f"127.0.0.1:{port}"]}
+        ) is ws.registry.network_of({"allowed_domains": [f"127.0.0.1:{port}"]})
+        assert ws.registry.network_of(None) is ws.registry.network
+    finally:
+        await ws.close()
+
+
+def test_a_profile_network_must_be_a_setting():
+    with pytest.raises(ValueError, match="network is true, false or"):
+        SessionProfile(network={"allow": ["a.com"]})
+    with pytest.raises(ValueError, match="is not an address, a range"):
+        SessionProfile(network={"denied_domains": ["10.0.0.0/33"]})

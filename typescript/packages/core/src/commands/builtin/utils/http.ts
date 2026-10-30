@@ -19,11 +19,15 @@
 // 4xx and leaked 'fetch failed' onto stderr for a refused connection.
 
 import { callerSignal, currentCaller } from '../../../context/session_context.ts'
-import { networkPolicies } from '../../../io/network.ts'
 import { primeStream } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { PolicyDenied } from '../../../policy/errors.ts'
-import { type Policies, postNetworkGate, preNetworkGate } from '../../../policy/policies.ts'
+import {
+  linePolicies,
+  type Policies,
+  postNetworkGate,
+  preNetworkGate,
+} from '../../../policy/policies.ts'
 import type { NetworkContext } from '../../../policy/types.ts'
 import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
@@ -218,7 +222,7 @@ async function* streamed(
 async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpResponse> {
   // The policies of the line sending it judge the request before any
   // connection opens; a refusal reads as a port that would not open.
-  const judges = networkPolicies()
+  const judges = linePolicies()
   const first = endpoint(url)
   const sender = currentCaller()
   const asked: NetworkContext = {

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
+import { NetworkRule, networkLayer, type NetworkSetting } from '../io/network.ts'
 import type { Limit } from '../types.ts'
 import {
   checkCommandLimits,
@@ -179,6 +180,12 @@ export interface SessionProfile {
   readonly commandLimits?: Readonly<Record<string, Limit>> | null
   /** A bare scope for both `list` and `kill`, or any of the fields. */
   readonly processes?: ProcessScope | Partial<ProcessPermissions> | null
+  /**
+   * Where the session's lines may connect, the workspace's `network`
+   * grammar, held besides the workspace's own; unset leaves the
+   * workspace's alone.
+   */
+  readonly network?: NetworkSetting | null
 }
 
 /**
@@ -230,6 +237,8 @@ export interface ProfilePolicies {
   readonly scripts: ProfileScripts
   readonly commandLimits: Readonly<Record<string, Limit>> | null
   readonly processes: ProcessPermissions
+  /** Where the session's lines may connect besides the workspace's `network`. */
+  readonly network: NetworkSetting | null
 }
 
 /**
@@ -265,6 +274,7 @@ const PROFILE_FIELDS = [
   'policy',
   'command_limits',
   'processes',
+  'network',
 ] as const
 const PROGRAM_FIELDS = ['script', 'runtime', 'env'] as const
 
@@ -732,7 +742,13 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     policy?: ProfilePolicy | null
     commandLimits?: Readonly<Record<string, Limit>> | null
     processes?: ProcessPermissions
+    network?: NetworkSetting
   } = {}
+  if (obj.network != null) {
+    const layer = networkLayer(obj.network)
+    new NetworkRule(layer === null ? [] : [layer])
+    out.network = obj.network as NetworkSetting
+  }
   if (obj.command_limits != null) {
     out.commandLimits = parseCommandLimits(obj.command_limits)
     checkCommandLimits(out.commandLimits, 'profile', true)
@@ -815,6 +831,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
   }
   if (profile.commandLimits != null) doc.command_limits = commandLimitsToJSON(profile.commandLimits)
   if (profile.processes != null) doc.processes = parseProcessPermissions(profile.processes)
+  if (profile.network != null) doc.network = profile.network
   if (profile.mounts != null) {
     doc.mounts = Object.fromEntries(
       [...profile.mounts].map(([prefix, entry]) => [prefix, mountDoc(entry)]),
