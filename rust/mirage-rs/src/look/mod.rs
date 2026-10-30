@@ -1,3 +1,5 @@
+mod options;
+
 use serde::Deserialize;
 
 use crate::{Stream, StreamError, parse_config};
@@ -5,15 +7,17 @@ use crate::{Stream, StreamError, parse_config};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
-    #[serde(deserialize_with = "crate::latin1")]
-    prefix: Vec<u8>,
+    /// The prefix and the files as typed, globs spread, each one character
+    /// per byte.
+    #[serde(deserialize_with = "crate::latin1_list")]
+    operands: Vec<Vec<u8>>,
     fold: bool,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let Config { prefix, fold } = parse_config(config)?;
+    let Config { operands, fold } = parse_config(config)?;
     Ok(Box::new(Look {
-        prefix,
+        prefix: options::prefix(&operands)?.to_vec(),
         fold,
         head: Vec::new(),
         line: Line::Head,

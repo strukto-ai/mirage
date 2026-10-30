@@ -248,6 +248,42 @@
       "flags": [
         "f"
       ]
+    },
+    {
+      "id": "look_more_than_one_file_is_bad_usage",
+      "seq": 19990145,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "look a x y; echo rc=$?; look -f a nosuch x y",
+      "expect": {
+        "exit": 1,
+        "stdout": "rc=1\n",
+        "stderr": "look: bad usage\nTry 'look --help' for more information.\nlook: bad usage\nTry 'look --help' for more information.\n"
+      },
+      "flags": []
     }
   ]
 }

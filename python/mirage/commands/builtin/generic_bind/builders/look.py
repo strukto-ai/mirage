@@ -27,13 +27,12 @@ from mirage.commands.builtin.utils.operands import (
 )
 from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandName
-from mirage.commands.spec.usage import extra_operand_error, usage_hint
 from mirage.io.types import ByteSource, IOResult
-from mirage.rs.stream import run_stream
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused
+from mirage.rs.stream import open_stream, run_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec
 
@@ -54,19 +53,17 @@ async def look(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        # util-linux 2.41 answers a missing prefix with its usage refusal.
-        raise UsageError(f"look: bad usage\n{usage_hint('look')}", 1)
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
-    if len(resolved) > 1:
-        raise extra_operand_error(
-            CommandName.LOOK, resolved[1].raw_path or resolved[1].virtual
-        )
+    words = [*texts, *(path.raw_path for path in resolved)]
     config: dict[str, JsonValue] = {
-        "prefix": byte_view(texts[0]),
+        "operands": [byte_view(word) for word in words],
         "fold": FlagView(ctx.flags, spec=SPECS["look"]).as_bool("f"),
     }
+    try:
+        open_stream("look", config)
+    except StreamRefusal as refusal:
+        return None, refused(refusal)
     io = IOResult(exit_code=1)
     if not resolved:
         return _matched(resolve_source(ctx.stdin), config, io), io

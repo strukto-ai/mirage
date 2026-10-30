@@ -17,12 +17,11 @@ import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { extraOperandError, usageHint } from '../../../spec/usage.ts'
-import { CommandName } from '../../../spec/types.ts'
-import { UsageError } from '../../../errors.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { JsonValue } from '../../../../types.ts'
-import { runStream } from '../../../../rs/stream.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
+import { refused } from '../../../../rs/scan.ts'
+import { openStreamSync, runStream } from '../../../../rs/stream.ts'
 import { byteView } from '../../../../shell/bytes.ts'
 import { reportedStream } from '../../utils/operands.ts'
 
@@ -43,12 +42,16 @@ async function* matched(
 const look: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  if (resolved.length > 1) throw extraOperandError(CommandName.LOOK, resolved[1]?.rawPath ?? '')
-  // util-linux 2.41 answers a missing prefix with its usage refusal.
-  if (texts.length === 0) throw new UsageError(`look: bad usage\n${usageHint('look')}`, 1)
+  const words = [...texts, ...resolved.map((path) => path.rawPath)]
   const config = {
-    prefix: byteView(texts[0] ?? ''),
+    operands: words.map((word) => byteView(word)),
     fold: new FlagView(ctx.flags, specOf('look')).asBool('f'),
+  }
+  try {
+    openStreamSync('look', config).close()
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return [null, refused(err)]
   }
   const io = new IOResult({ exitCode: 1 })
   const path = resolved[0]
