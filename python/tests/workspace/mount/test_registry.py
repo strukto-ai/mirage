@@ -981,7 +981,7 @@ _MOUNTS: dict[str, tuple[str, dict[str, Any]]] = {
             {"hf_models", "hf_datasets", "hf_spaces"},
         ),
     ],
-    ids=lambda v: v.spec.name if isinstance(v, CLI) else "-",
+    ids=lambda v: v.spec.name if isinstance(v, CLI) else None,
 )
 def test_an_account_cli_write_reaches_its_own_service_alone(
     cli: CLI, config: dict[str, Any], reached: set[str]
