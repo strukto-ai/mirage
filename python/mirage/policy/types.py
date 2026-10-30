@@ -392,20 +392,6 @@ class Occurrence:
     end: int
 
 
-@dataclass(frozen=True, slots=True)
-class Claim:
-    """One grant a reader of a line matched, and the occurrence it
-    matched it for.
-
-    Args:
-        occurrence (Occurrence): the command the grant answers.
-        decision (Decision): the settled ONCE record.
-    """
-
-    occurrence: Occurrence
-    decision: Decision
-
-
 class DecisionOwner:
     """The ledger owning a hand-off, compared only by identity."""
 
@@ -414,49 +400,19 @@ class DecisionOwner:
 
 @dataclass(eq=False, slots=True, weakref_slot=True)
 class HandOff:
-    """The ONCE grants a line's readers matched to its commands, for the
-    line's end to spend.
+    """The identity of one line, direct call, or background job.
 
-    One per line, made by the executor and filled by ``Decisions.resolve``
-    as a pass or a gate admits a command: every grant it matches, whether
-    the host gave it inline just now or out of band before the line, is
-    claimed here instead of spent, bound to the occurrence it was
-    judged for. A claimed grant is on offer to that occurrence alone,
-    so two spellings of one command on a line each need a nod of their
-    own, and invisible to every other line of the session while this
-    one lives, so two lines judged at once cannot both run on one nod.
-    Nothing spends a claim while the line runs: a gate the run reaches
-    again at the same place (a loop body) runs on the same nod, and
-    every claim, reached or not, is spent when the line ends
-    (``Decisions.revoke``). A background job the line launches holds a
-    copy of the claims made for the commands inside it on a hand-off
-    of its own (``Decisions.split``), since its gates run after the
-    line has returned and it ends on its own clock; a grant is spent
-    when the last hand-off holding it ends. Compared by identity,
-    because the hand-off is the line.
-
-    A line the executor evaluates from inside another (``$( )``,
-    ``eval``, ``source``, ``xargs``, the line an alias invocation
-    rewrites to) is a line of its own with a hand-off of its own,
-    linked to the outer line's through ``parent`` and standing under
-    the node that ran it through ``origin``: the outer pass reads into
-    the words it runs, so the grants it claimed for them are the inner
-    line's to run on, at the occurrences the outer pass computed for
-    them, and what the inner line's own gates claim is handed to the
-    outer line when it ends (``Decisions.hand_up``), for the next
-    evaluation from the same node to run on and the typed line's end
-    to spend.
+    The shared approval model owns the grants reserved for this scope.
+    Nested evaluations retain their parent and originating occurrence;
+    background jobs have an independent lifetime.
 
     Args:
-        claimed (list[Claim]): the grants matched so far, in the order
-            the commands were judged.
-        parent (HandOff | None): the hand-off of the line this one was
-            evaluated from, None for a typed line.
-        origin (Occurrence | None): the node this line's text was
-            evaluated from, None for a typed line.
+        parent (HandOff | None): the scope that evaluated this line,
+            None for a top-level call or independent job.
+        origin (Occurrence | None): the node this line was evaluated
+            from, None for a top-level call.
     """
 
-    claimed: list[Claim] = field(default_factory=list)
     parent: "HandOff | None" = None
     origin: Occurrence | None = None
 

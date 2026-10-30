@@ -460,10 +460,8 @@ async def test_a_revoked_hand_off_is_asked_again():
     handed = HandOff()
     assert await ledger.resolve(_ctx(), ask, None, _at(handed)) is None
     assert len(ledger.list("s")) == 1
-    assert [c.decision for c in handed.claimed] == list(ledger.list("s"))
     await ledger.revoke("s", handed)
     assert ledger.list("s") == ()
-    assert handed.claimed == []
     assert await ledger.resolve(_ctx(), ask) is None
     assert len(asked) == 2
 
@@ -487,7 +485,6 @@ async def test_a_hand_off_claims_a_grant_for_one_occurrence():
     assert await ledger.resolve(_ctx(), ask, None, _at(handed, 0)) is None
     assert await ledger.resolve(_ctx(), ask, None, _at(handed, 1)) is None
     assert len(asked) == 2
-    assert len(handed.claimed) == 2
     assert len(ledger.list("s")) == 2
     # The pass reading either spelling again finds it answered.
     assert await ledger.resolve(_ctx(), ask, None, _at(handed, 1)) is None
@@ -555,8 +552,6 @@ async def test_a_split_hands_a_jobs_claims_to_a_run_of_its_own():
             await ledger.resolve(_ctx(), ask, None, _at(handed, index)) is None
         )
     job = await ledger.split("s", handed, Occurrence(None, "line", 1, 2))
-    assert [c.occurrence.start for c in handed.claimed] == [0, 1]
-    assert [c.occurrence.start for c in job.claimed] == [1]
     await ledger.release("s", handed)
     # The line's grant is on offer again; the job's is not.
     assert await ledger.resolve(_ctx(), ask, None, _at(HandOff(), 0)) is None
@@ -583,10 +578,6 @@ async def test_a_split_shares_ancestor_claims_with_the_job():
     assert await ledger.resolve(_ctx(), ask, None, _at(nested, 1)) is None
     inner = HandOff(parent=nested)
     job = await ledger.split("s", inner, Occurrence(None, "line", 1, 2))
-    assert [c.occurrence.start for c in outer.claimed] == [0, 1]
-    assert nested.claimed == []
-    assert inner.claimed == []
-    assert [c.occurrence.start for c in job.claimed] == [1]
     for handed in (inner, nested, outer):
         await ledger.revoke("s", handed)
     assert len(ledger.list("s")) == 1
@@ -644,7 +635,6 @@ async def test_revoke_hands_back_a_grant_given_before_the_pass():
     await ledger.answer(waiting.id, Outcome.ALLOW)
     handed = HandOff()
     assert await ledger.resolve(_ctx(), ask, None, _at(handed)) is None
-    assert len(handed.claimed) == 1
     await ledger.revoke("s", handed)
     assert ledger.list("s") == ()
     assert isinstance(await ledger.resolve(_ctx(), ask), Pending)
@@ -861,7 +851,6 @@ async def test_a_claim_stands_for_every_visit_until_the_line_ends():
     for _ in range(2):
         assert await ledger.resolve(_ctx(), ask, None, _at(line)) is None
     assert len(asked) == 1
-    assert len(line.claimed) == 1
     assert len(ledger.list("s")) == 1
     await ledger.revoke("s", line)
     assert ledger.list("s") == ()
@@ -889,12 +878,10 @@ async def test_a_gates_own_answer_is_bound_to_its_place():
     line = HandOff()
     assert await ledger.resolve(_ctx(), ask, None, _at(line, 0)) is None
     assert len(asked) == 1
-    assert len(line.claimed) == 1
     assert await ledger.resolve(_ctx(), ask, None, _at(line, 0)) is None
     assert len(asked) == 1
     assert await ledger.resolve(_ctx(), ask, None, _at(line, 1)) is None
     assert len(asked) == 2
-    assert len(line.claimed) == 2
     assert isinstance(ledger.held(_ctx(), ask), Pending)
     await ledger.revoke("s", line)
     assert ledger.list("s") == ()
@@ -954,7 +941,6 @@ async def test_an_inline_grant_is_claimed_before_the_ledger_yields():
         assert len(asked) == 2
         store.confirm_answer.set()
         assert await running is None
-        assert len(first.claimed) == len(second.claimed) == 1
         assert len(ledger.list("s")) == 2
         await ledger.revoke("s", first)
         await other.revoke("s", second)
@@ -980,8 +966,6 @@ async def test_every_job_launched_from_one_place_runs_on_its_grant():
     scope = Occurrence(None, "line", 0, 1)
     first = await ledger.split("s", line, scope)
     second = await ledger.split("s", line, scope)
-    assert len(first.claimed) == 1
-    assert len(second.claimed) == 1
     await ledger.revoke("s", line)
     assert len(ledger.list("s")) == 1
     assert isinstance(ledger.held(_ctx(), ask), Pending)
@@ -1013,16 +997,12 @@ async def test_a_nested_lines_claims_are_handed_to_the_line_it_ran_from():
     first = HandOff(parent=outer)
     assert await ledger.resolve(_ctx(), ask, None, _at(first)) is None
     assert len(asked) == 1
-    assert len(first.claimed) == 1
     await ledger.hand_up("s", first)
-    assert first.claimed == []
-    assert len(outer.claimed) == 1
     assert isinstance(ledger.held(_ctx(), ask), Pending)
     second = HandOff(parent=outer)
     assert await ledger.resolve(_ctx(), ask, None, _at(second)) is None
     assert len(asked) == 1
     await ledger.hand_up("s", second)
-    assert len(outer.claimed) == 1
     await ledger.revoke("s", outer)
     assert ledger.list("s") == ()
     with pytest.raises(ValueError):

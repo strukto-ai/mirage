@@ -34,7 +34,6 @@ from mirage.policy.match import Outcome
 from mirage.policy.types import (
     Abandoned,
     Ask,
-    Claim,
     Claimant,
     CommandContext,
     CommandRule,
@@ -357,16 +356,6 @@ def occurrence_wire(occurrence: Occurrence) -> dict[str, Any]:
     }
 
 
-def occurrence_from_wire(occurrence: Mapping[str, Any]) -> Occurrence:
-    parent = occurrence["parent"]
-    return Occurrence(
-        None if parent is None else occurrence_from_wire(parent),
-        from_units(occurrence["source"]),
-        occurrence["start"],
-        occurrence["end"],
-    )
-
-
 def resolve_wire(
     ctx: CommandContext,
     rules: tuple[CommandRule, ...],
@@ -437,7 +426,6 @@ class Decisions(DecisionOwner):
         )
         self._terminal: WeakSet[HandOff] = WeakSet()
         self._pending_scopes: WeakSet[HandOff] = WeakSet()
-        self._readers: set[HandOff] = set()
 
     def _id(self, handed: HandOff) -> str:
         found = self._holders.get(handed)
@@ -480,7 +468,6 @@ class Decisions(DecisionOwner):
                 epoch = state["incarnation"]
             bound = (session_id, epoch, revision)
             self._bindings[lineage(handed)[-1]] = bound
-        self._readers.add(handed)
         self._id(handed)
         self._versions.setdefault(session_id, revision)
         return bound[1]
@@ -518,26 +505,6 @@ class Decisions(DecisionOwner):
             for record in self.list(session_id)
             if record.outcome is None
         )
-
-    def _project(self, session_id: str) -> None:
-        state = self._state(session_id)
-        records = {
-            record["id"]: decision_from_wire(record)
-            for record in state["records"]
-        }
-        for reader in self._readers:
-            bound = self._bindings.get(lineage(reader)[-1])
-            if bound is None or bound[0] != session_id:
-                continue
-            holder = self._id(reader)
-            reader.claimed[:] = [
-                Claim(
-                    occurrence_from_wire(claim["occurrence"]),
-                    records[claim["decision"]],
-                )
-                for claim in state["claims"]
-                if claim["owner"] == self._owner and claim["holder"] == holder
-            ]
 
     def _claimant(self, claimant: Claimant | None) -> dict[str, Any] | None:
         if claimant is None:
@@ -616,7 +583,6 @@ class Decisions(DecisionOwner):
             raise ApprovalUnavailable("policy_changed")
         if result["kind"] == "blocked":
             raise ApprovalUnavailable(result["status"])
-        self._project(session_id)
         return result
 
     async def _check_version(self, session_id: str, epoch: str) -> bool:
@@ -987,7 +953,6 @@ class Decisions(DecisionOwner):
             epoch,
             0 if self._version is None else self._version(),
         )
-        self._readers.add(job)
         try:
             await self._event(
                 session_id,
@@ -1016,8 +981,6 @@ class Decisions(DecisionOwner):
                 )
             except Exception:
                 logger.debug("unconfirmed job approval cleanup", exc_info=True)
-            finally:
-                self._readers.discard(job)
             raise
         return job
 
@@ -1027,7 +990,6 @@ class Decisions(DecisionOwner):
         bound = self._bindings.get(lineage(handed)[-1])
         if bound is None:
             return
-        self._readers.add(handed.parent)
         self._terminal.add(handed)
         try:
             await self._event(
@@ -1048,8 +1010,6 @@ class Decisions(DecisionOwner):
             }:
                 raise
             logger.debug("approval cleanup fenced: %s", exc.status)
-        finally:
-            self._readers.discard(handed)
 
     async def _end(self, op: str, session_id: str, handed: HandOff) -> None:
         bound = self._bindings.get(lineage(handed)[-1])
@@ -1070,8 +1030,6 @@ class Decisions(DecisionOwner):
             }:
                 raise
             logger.debug("approval cleanup fenced: %s", exc.status)
-        finally:
-            self._readers.discard(handed)
 
     async def revoke(self, session_id: str, handed: HandOff) -> None:
         await self._end("revoke", session_id, handed)
