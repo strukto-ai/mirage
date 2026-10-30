@@ -261,8 +261,12 @@ The existing three shards per host still run every eligible target once with
 four processes each. `ci/shard_seconds.json` uses successful target timings
 from main runs 40976378211 and 40983556220 to rebalance them. Replaying those
 median timings through the four-worker schedule estimates the longest Python
-battery at 1,078 seconds instead of 1,280; this is a scheduling estimate, not
-a measured end-to-end CI result.
+battery at 1,018 seconds. The scheduler compares balancing total work with
+balancing the worker pool's finish time, keeping the faster predicted split;
+both spread the shared fake launcher's load first. Replaying the observed
+target durations from run 40993380901 gives 1,227 → 1,000 seconds for Python
+and retains the TypeScript split. These are scheduling estimates, not measured
+end-to-end CI savings.
 
 `runtime/parallel.sh` overlaps the Python and TypeScript JSON drivers inside
 each existing runtime job. It waits for both even after a failure, then runs
@@ -271,6 +275,9 @@ and `sandbox/mounts`, which mounts fixed paths in their shared Docker container.
 The `integ/runtime/**` filter covers the driver; the gate selftest checks its
 overlap, exact suite coverage, database and mount serialization, duplicate
 launch detection and failure propagation.
+The eight runtime legs move `dir/readdir` from D to C and `write/write` from F
+to G to shorten the two longest JSON batteries; their CLI and in-process
+coverage moves together, and service requirements follow the suite list.
 Job matrices, timeout limits, strict checks and coverage floors are unchanged.
 
 The Nextcloud CI container also lowers its Argon2id memory cost from 8 MiB to

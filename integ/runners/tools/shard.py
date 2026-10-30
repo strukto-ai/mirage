@@ -26,6 +26,7 @@ Usage: shard.py --shard I --shards N --procs P --host python|typescript
 """
 
 import argparse
+import heapq
 import json
 import subprocess
 import sys
@@ -184,38 +185,72 @@ def launched(manifest: dict, fakes: dict, host: str) -> set[str]:
     }
 
 
+def parallel_seconds(items: list[tuple[list[str], int]], procs: int) -> int:
+    """Estimate when largest-first work on the worker pool finishes.
+
+    Args:
+        items (list[tuple[list[str], int]]): work items and weights.
+        procs (int): concurrent runner processes in one shard.
+    """
+    lanes = [0] * procs
+    for _, weight in sorted(items, key=lambda it: (-it[1], it[0])):
+        heapq.heapreplace(lanes, lanes[0] + weight)
+    return max(lanes)
+
+
 def split(
     items: list[tuple[list[str], int]],
     shards: int,
+    procs: int,
     shared: set[str] | None = None,
 ) -> list[list[tuple[list[str], int]]]:
-    """Largest first onto the lightest shard, so shards weigh the same.
+    """Balance the fake launcher and the worker pool in each shard.
 
     Items on the job's shared fake process go first, each onto the shard
     whose fake carries the least, and the rest fill in by weight: equal
     weights alone once put five of the heaviest fake targets on one shard,
-    whose single fake process then slowed all five.
+    whose single fake process then slowed all five. Compare that split with
+    one that fills by predicted finish time on `procs` workers: equal total
+    weights can put five long targets on four workers and leave a long tail.
+    Keep the split whose slowest shard finishes first, breaking ties by the
+    next slowest, so a new split never delays the predicted final shard.
 
     Args:
         items (list[tuple[list[str], int]]): work items and weights.
         shards (int): how many shard jobs there are.
+        procs (int): concurrent runner processes in each shard.
         shared (set[str] | None): target ids the job's fake launcher serves.
     """
     shared = shared or set()
-    out: list[list[tuple[list[str], int]]] = [[] for _ in range(shards)]
-    load = [0] * shards
-    fake = [0] * shards
-    for item in sorted(
-        items, key=lambda it: (not shared & set(it[0]), -it[1], it[0])
-    ):
-        if shared & set(item[0]):
-            pick = min(range(shards), key=lambda s: (fake[s], load[s]))
-            fake[pick] += item[1]
-        else:
-            pick = load.index(min(load))
-        out[pick].append(item)
-        load[pick] += item[1]
-    return [sorted(part, key=lambda it: (-it[1], it[0])) for part in out]
+
+    def assign(by_finish: bool) -> list[list[tuple[list[str], int]]]:
+        out: list[list[tuple[list[str], int]]] = [[] for _ in range(shards)]
+        load = [0] * shards
+        fake = [0] * shards
+        for item in sorted(
+            items, key=lambda it: (not shared & set(it[0]), -it[1], it[0])
+        ):
+            costs = [
+                (parallel_seconds(part + [item], procs), load[s])
+                if by_finish
+                else (load[s], load[s])
+                for s, part in enumerate(out)
+            ]
+            if shared & set(item[0]):
+                pick = min(range(shards), key=lambda s: (fake[s], costs[s]))
+                fake[pick] += item[1]
+            else:
+                pick = min(range(shards), key=costs.__getitem__)
+            out[pick].append(item)
+            load[pick] += item[1]
+        return [sorted(part, key=lambda it: (-it[1], it[0])) for part in out]
+
+    return min(
+        (assign(False), assign(True)),
+        key=lambda parts: sorted(
+            (parallel_seconds(part, procs) for part in parts), reverse=True
+        ),
+    )
 
 
 def run_item(
@@ -283,7 +318,7 @@ def main() -> None:
             f"{', '.join(idle)}"
         )
     shared = launched(manifest, json.loads(FAKES.read_text()), args.host)
-    mine = split(items, args.shards, shared)[args.shard]
+    mine = split(items, args.shards, args.procs, shared)[args.shard]
     if not mine:
         print(
             f"shard {args.shard} of {args.shards} got no targets",
