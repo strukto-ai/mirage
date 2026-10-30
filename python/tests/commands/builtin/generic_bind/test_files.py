@@ -304,6 +304,25 @@ async def test_opened_file_sizes_still_refuse_changed_and_pipe_sizes(
         )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opened", [False, True])
+async def test_unknown_sizes_do_not_refresh_backend_metadata(opened):
+    row = _st()
+
+    async def dispatch(name, path, /, **kwargs):
+        assert not kwargs.get("fresh")
+        return (None if name == "read" else row), IOResult()
+
+    ctx = _ctx(dispatch)
+    with _on_mount():
+        assert (
+            await file_size(command_files(ctx), ctx, opened=opened)(
+                _path("/f")
+            )
+            is None
+        )
+
+
 class TreeRAM(RAMVFS):
     """A RAM mount noting each folder its tree read is asked for."""
 

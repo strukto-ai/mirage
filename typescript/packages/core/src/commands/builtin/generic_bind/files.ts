@@ -423,7 +423,12 @@ export function fileSize(
     if (revisionFor(p.virtual) !== null) return null
     if (await files.isWarm(p)) return null
     const st = await statRefusingDirs(files, ctx, p)
-    if (st.type !== FileType.FILE || (st.mode !== null && (!opened || st.size === 0))) return null
+    if (
+      st.type !== FileType.FILE ||
+      st.size === null ||
+      (st.mode !== null && (!opened || st.size === 0))
+    )
+      return null
     if (ctx.vfs === undefined) return st.size
     const [now] = await ctx.vfs.dispatch('stat', p, [], { fresh: true })
     return now instanceof FileStat && now.size === st.size ? st.size : null

@@ -229,6 +229,18 @@ describe('the abort guard', () => {
 })
 
 describe('fileSize', () => {
+  it.each([false, true])('does not refresh unknown sizes, opened=%s', async (opened) => {
+    const row = stat()
+    const dispatch: DispatchFn = (name, _path, _args, kwargs = {}) => {
+      expect(kwargs.fresh).not.toBe(true)
+      return Promise.resolve([name === 'read' ? null : row, new IOResult()])
+    }
+    const ctx = contextFor(dispatch)
+    await runWithMountGate('/', MountMode.WRITE, async () => {
+      expect(await fileSize(commandFiles(ctx), ctx, opened)(at('/f'))).toBeNull()
+    })
+  })
+
   it('keeps custom reading bytes instead of raw sizes and ranges', async () => {
     const calls: string[] = []
     const ctx = contextFor(keyed({ stored: { '/f': 'raw' } }, calls), {

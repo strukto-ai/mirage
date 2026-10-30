@@ -555,8 +555,10 @@ def file_size(
         if await files.is_warm(path):
             return None
         st = await _stat_refusing_dirs(files, ctx, path)
-        if st.type != FileType.FILE or (
-            st.mode is not None and (not opened or st.size == 0)
+        if (
+            st.type != FileType.FILE
+            or st.size is None
+            or (st.mode is not None and (not opened or st.size == 0))
         ):
             return None
         if ctx.vfs is None:
