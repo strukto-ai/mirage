@@ -111,6 +111,41 @@
         "stdout": "patching file h.txt\nrc=0\nb\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "patch_refuses_a_blank_led_strip_before_the_patch",
+      "seq": 19990138,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "patch -p ' 1' -i /data/nope",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "patch: **** strip count ' 1' is not a number\n"
+      }
     }
   ]
 }

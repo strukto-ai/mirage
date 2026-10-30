@@ -38,6 +38,76 @@
         "x",
         "f"
       ]
+    },
+    {
+      "id": "tar_refuses_strip_components_before_the_archive",
+      "seq": 19990136,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar --strip-components=x -xf /data/nope",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: x: Invalid number of elements\nTry 'tar --help' or 'tar --usage' for more information.\n"
+      }
+    },
+    {
+      "id": "tar_refuses_a_strip_typed_before_a_mode_conflict",
+      "seq": 19990140,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tar --strip-components=x -t -c -f /data/nope",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "tar: x: Invalid number of elements\nTry 'tar --help' or 'tar --usage' for more information.\n"
+      }
     }
   ]
 }

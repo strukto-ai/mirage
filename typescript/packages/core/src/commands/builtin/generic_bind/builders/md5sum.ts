@@ -12,15 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { checksumGeneric } from '../../generic/checksum.ts'
+import { checksumGeneric, parseFlags } from '../../generic/checksum.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStat, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
 const md5sum: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const parsed = parseFlags(ctx.flags, 'md5sum')
+  if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   return checksumGeneric(
+    parsed,
     resolved,
     ctx,
     dirAwareStream(files, ctx),

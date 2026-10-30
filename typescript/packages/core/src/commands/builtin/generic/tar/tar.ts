@@ -26,14 +26,15 @@ import {
   MODE_CONFLICT,
   MULTIPLE_ARCHIVES,
   NO_MODE,
-  STRIP_COUNT,
   USAGE_HINT,
 } from './constants.ts'
-import { C_SPACE, UINTMAX } from '../../constants.ts'
 import { UsageError } from '../../../errors.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { checkDirectories, planCreate, type DirProbe, type StatFn, type WalkFn } from './create.ts'
 import { fsStrerror, walkRefusal } from '../../../../errors/fs.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
+import { refused } from '../../../../rs/scan.ts'
+import { openStreamSync } from '../../../../rs/stream.ts'
 import { extractDest } from '../archive/extract.ts'
 import { linksOf, mountView, mountRoot } from '../../utils/links.ts'
 import { formatOptionalRecords } from '../../utils/output.ts'
@@ -73,46 +74,42 @@ export interface TarFlags {
   toStdout: boolean
   archive: PathSpec | null
   directories: PathSpec[]
-  stripComponents: number
+  stripComponents: string[]
   exclude: string | null
   oneFileSystem: boolean
 }
 
 const MODES = ['create', 'extract', 'list'] as const
 const CODECS = ['gzip', 'bzip2', 'xz'] as const
-const STRIP_COUNT_PATTERN = new RegExp(`^${C_SPACE}\\+?([0-9]+)$`)
-
-/**
- * A --strip-components value as tar reads it, or tar's refusal: a decimal
- * count with no suffix, so leading blanks and one `+` pass, a sign, another
- * letter or a count past UINTMAX does not (tar 1.35). Mirrors Python's
- * strip_count.
- */
-export function stripCount(raw: string): number {
-  const digits = STRIP_COUNT_PATTERN.exec(raw)?.[1]
-  if (digits === undefined || BigInt(digits) > UINTMAX) {
-    throw new UsageError(`${STRIP_COUNT.replace('{}', raw)}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
-  }
-  return Number(digits)
-}
 
 /**
  * tar's flags as argp reads them, refusing what tar refuses. argp meets the
  * options in line order and stops at the first it refuses: a second main
  * operation where one is already set, or a --strip-components value that is
- * no count. After the scan, more than one archive is refused without -M,
- * which mirage does not have (tar 1.35). Mirrors Python's parse_flags.
+ * no count, which the tar engine reads, so only the values typed before a
+ * conflict reach it. After the scan, more than one archive is refused without
+ * -M, which mirage does not have (tar 1.35). The flags, or the engine's
+ * refusal, exit 2; tar's other refusals throw. Mirrors Python's parse_flags.
  */
-export function parseFlags(bag: Record<string, FlagValue>): TarFlags {
+export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult {
   const fl = new FlagView(bag, specOf('tar'))
   let mode: string | null = null
-  let stripComponents = 0
-  for (const [name, value] of fl.occurrences(...MODES, 'strip_components')) {
-    if (name === 'strip_components') stripComponents = stripCount(String(value))
+  const stripComponents: string[] = []
+  let conflict = false
+  for (const [name, text] of fl.texts(...MODES, 'strip_components')) {
+    if (name === 'strip_components') stripComponents.push(text)
     else if (mode !== null && name !== mode) {
-      throw new UsageError(`${MODE_CONFLICT}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
+      conflict = true
+      break
     } else mode = name
   }
+  try {
+    openStreamSync('tar', { strip: stripComponents.map((text) => byteView(text)) }).close()
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  if (conflict) throw new UsageError(`${MODE_CONFLICT}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
   if (fl.occurrences('file').length > 1) {
     throw new UsageError(`${MULTIPLE_ARCHIVES}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
   }
@@ -140,13 +137,13 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags {
  * mount owns it. Mirrors Python's tar.
  */
 export async function tarGeneric(
+  flags: TarFlags,
   paths: PathSpec[],
   texts: readonly string[],
   ctx: Context,
   deps: TarDeps,
   relay = false,
 ): Promise<CommandFnResult> {
-  const flags = parseFlags(ctx.flags)
   const prefix = relay ? '' : mountRoot(ctx)
   // With no -f the archive is standard input or output, which is GNU tar's
   // compiled-in default (no TAPE in the environment).
@@ -222,7 +219,7 @@ export async function tarGeneric(
       mode: flags.list ? 'list' : 'extract',
       probe: archive.walkError === null,
       selectors: texts.map((selector) => byteView(selector)),
-      strip: flags.stripComponents,
+      strip: flags.stripComponents.map((text) => byteView(text)),
       to_stdout: flags.toStdout,
       base: byteView(rstripSlash(extractDest(directories.at(-1) ?? null, ctx.cwd.virtual))),
       refusal: refusal.map((line) => byteView(line)),

@@ -165,7 +165,7 @@ fn byte_count(value: &[u8]) -> Result<u64, Vec<u8>> {
         .find_map(|len| {
             Some((
                 &value[..value.len() - len],
-                number::unit(&value[value.len() - len..])?,
+                number::unit(&value[value.len() - len..], number::SIZE_LETTERS)?,
             ))
         })
         .unwrap_or((value, 1));

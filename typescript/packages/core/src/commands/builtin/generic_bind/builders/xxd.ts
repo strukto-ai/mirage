@@ -12,15 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { xxdGeneric } from '../../generic/xxd.ts'
+import { parseFlags, xxdGeneric } from '../../generic/xxd.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
 
 const xxd: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const parsed = parseFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   return xxdGeneric(
+    parsed,
     resolved,
     ctx,
     files.read,

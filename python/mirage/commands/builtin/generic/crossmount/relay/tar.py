@@ -32,7 +32,7 @@ from mirage.commands.builtin.utils.links import (
     owed_names,
 )
 from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
@@ -68,6 +68,8 @@ async def run_tar(
         stdin (ByteSource | None): The archive input when ``-f -`` is used.
     """
     parsed = parse_flags(flag_kwargs)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     prim = transfer_primitives(dispatch)
     links = link_view(vfs)
     tree = (

@@ -1,0 +1,51 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { IOResult } from '../io/types.ts'
+import { byteView, fromByteView } from '../shell/bytes.ts'
+import type { StreamRefusal } from './errors.ts'
+import { openStreamSync } from './stream.ts'
+import type { JsonValue } from '../types.ts'
+
+const decoder = new TextDecoder()
+
+/**
+ * A command's typed option values, read by mirage-rs before the host resolves
+ * any operand, so a value the command refuses never reaches a mount. `options`
+ * holds each option's name and its value as typed, in the order typed. Throws
+ * StreamRefusal for the first value the command refuses, with the command's
+ * exit status. Mirrors Python's `scan`.
+ */
+export function scan(
+  command: string,
+  options: readonly (readonly [string, string])[],
+): Record<string, JsonValue> {
+  const stream = openStreamSync('scan', {
+    command,
+    options: options.map(([name, text]) => [name, byteView(text)]),
+  })
+  try {
+    return JSON.parse(decoder.decode(stream.finish())) as Record<string, JsonValue>
+  } finally {
+    stream.close()
+  }
+}
+
+/** A scan's refusal as the command's result. Mirrors Python's `refused`. */
+export function refused(refusal: StreamRefusal): IOResult {
+  return new IOResult({
+    exitCode: refusal.status,
+    stderr: fromByteView(`${refusal.message}\n`),
+  })
+}

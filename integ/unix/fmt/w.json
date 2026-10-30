@@ -94,6 +94,41 @@
         "w",
         "g"
       ]
+    },
+    {
+      "id": "fmt_bounds_the_goal_by_the_last_width_before_the_file",
+      "seq": 19990131,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "fmt -g 80 -w 70 /data/nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "fmt: invalid width: '80': Value too large for defined data type\n"
+      }
     }
   ]
 }

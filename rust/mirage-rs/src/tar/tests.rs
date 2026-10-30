@@ -138,7 +138,7 @@ fn a_member_that_does_not_open_is_left_out_and_a_shrunk_one_padded() {
 fn strip_components_counts_from_the_name_without_its_slashes() {
     let mut host = Host::default();
     let tar = [member("/x/y/z", (0, b"")), archive("./a/b", (0, b""))].concat();
-    let (status, _, _) = read(&mut host, &tar, json!({"mode": "extract", "strip": 1}));
+    let (status, _, _) = read(&mut host, &tar, json!({"mode": "extract", "strip": ["1"]}));
     assert_eq!(status, 0);
     assert_eq!(host.files["/out/y/z"], b"hello\n");
     assert_eq!(host.files["/out/a/b"], b"hello\n");
@@ -216,4 +216,21 @@ fn decoded_limit_accepts_its_exact_boundary() {
     );
     assert_eq!(status, 2);
     assert_eq!(err, "tar: decoded input exceeds size limit\n");
+}
+
+#[test]
+fn strip_components_is_refused_as_typed_with_exit_2() {
+    let hint = "\nTry 'tar --help' or 'tar --usage' for more information.";
+    for typed in ["x", "-1", "1 ", "0x1", "18446744073709551616"] {
+        let config = json!({"strip": ["2", typed]}).to_string();
+        let refused = crate::open("tar", config.as_bytes())
+            .err()
+            .map(|e| (e.message, e.status));
+        assert_eq!(
+            refused,
+            Some((format!("tar: {typed}: Invalid number of elements{hint}"), 2))
+        );
+    }
+    let config = json!({"strip": [" +3", "18446744073709551615"]}).to_string();
+    assert!(crate::open("tar", config.as_bytes()).is_ok());
 }

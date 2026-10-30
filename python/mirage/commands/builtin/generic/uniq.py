@@ -1,6 +1,5 @@
-import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import split_readable
 from mirage.commands.builtin.utils.stream import (
@@ -16,19 +15,15 @@ from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused
 from mirage.rs.stream import open_stream
-from mirage.shell.bytes import encode_text
-from mirage.types import PathSpec, StatFn
+from mirage.shell.bytes import byte_view, encode_text
+from mirage.types import JsonValue, PathSpec, StatFn
 
 # The --all-repeated and --group words, in the order GNU lists each
 # back. No aliases in either, so one candidate per line.
 ALL_REPEATED_ARGS = ("none", "prepend", "separate")
-# How GNU reads a -f, -s or -w count: leading C whitespace, a sign and
-# decimal digits, nothing after them.
-COUNT_WORD = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
-SKIP_FIELDS = "fields to skip"
-SKIP_CHARS = "bytes to skip"
-CHECK_CHARS = "bytes to compare"
 GROUP_ARGS = ("prepend", "append", "separate", "both")
 
 
@@ -37,28 +32,11 @@ class UniqFlags:
     count: bool = False
     repeated: bool = False
     unique: bool = False
-    skip_fields: int = 0
-    skip_chars: int = 0
+    counts: tuple[tuple[str, str], ...] = ()
     ignore_case: bool = False
-    check_chars: int | None = None
     all_repeated: str | None = None
     group: str | None = None
     zero_terminated: bool = False
-
-
-def _parse_count(value: str | None, what: str) -> int | None:
-    """A -f, -s or -w count: decimal, never negative, any size.
-
-    Args:
-        value (str | None): the option's value as typed.
-        what (str): what the count counts, for GNU's refusal
-            (``fields to skip``).
-    """
-    if value is None:
-        return None
-    if COUNT_WORD.fullmatch(value) is None or int(value) < 0:
-        raise ValueError(f"uniq: {value}: invalid number of {what}")
-    return int(value)
 
 
 def _method_word(option: str, value: str, allowed: tuple[str, ...]) -> str:
@@ -112,56 +90,82 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
         count=count,
         repeated=repeated,
         unique=unique,
-        skip_fields=_parse_count(fl.as_str("skip_fields"), SKIP_FIELDS) or 0,
-        skip_chars=_parse_count(fl.as_str("skip_chars"), SKIP_CHARS) or 0,
+        counts=tuple(fl.texts("skip_fields", "skip_chars", "check_chars")),
         ignore_case=fl.as_bool("ignore_case"),
-        check_chars=_parse_count(fl.as_str("check_chars"), CHECK_CHARS),
         all_repeated=all_repeated,
         group=group,
         zero_terminated=fl.as_bool("zero_terminated"),
     )
 
 
+def uniq_flags(flags: Mapping[str, FlagValue]) -> UniqFlags | IOResult:
+    """uniq's options, its counts refused by the engine before any operand
+    is resolved.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the parsed flags.
+
+    Returns:
+        UniqFlags | IOResult: the flags, or uniq's refusal.
+    """
+    try:
+        parsed = parse_flags(flags)
+    except UsageError as exc:
+        return IOResult(
+            exit_code=exc.exit_code, stderr=encode_text(str(exc) + "\n")
+        )
+    except ValueError as exc:
+        return IOResult(exit_code=1, stderr=encode_text(str(exc) + "\n"))
+    try:
+        open_stream("uniq", engine_config(parsed))
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    return parsed
+
+
+def engine_config(parsed: UniqFlags) -> dict[str, JsonValue]:
+    """The uniq engine's config, the counts as typed.
+
+    Args:
+        parsed (UniqFlags): the options.
+    """
+    config: dict[str, JsonValue] = {
+        "count": parsed.count,
+        "repeated": parsed.repeated,
+        "unique": parsed.unique,
+        "counts": [[name, byte_view(text)] for name, text in parsed.counts],
+        "ignore_case": parsed.ignore_case,
+        "all_repeated": parsed.all_repeated,
+        "group": parsed.group,
+        "zero_terminated": parsed.zero_terminated,
+    }
+    return config
+
+
 async def uniq_generic(
+    parsed: UniqFlags,
     paths: list[PathSpec],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
-    flags: Mapping[str, FlagValue] | None = None,
-    count: bool = False,
-    duplicates_only: bool = False,
-    unique_only: bool = False,
-    skip_fields: str | None = None,
-    skip_chars: str | None = None,
-    ignore_case: bool = False,
-    check_chars: str | None = None,
     stat: StatFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
+    """Run uniq over resolved operands, GNU semantics; mirrors uniqGeneric.
+
+    Args:
+        parsed (UniqFlags): the options, read before the operands were.
+        paths (list[PathSpec]): INPUT and OUTPUT, glob-resolved.
+        read_stream (Callable[..., AsyncIterator[bytes]]): bound reader.
+        write_bytes (Callable[..., Awaitable[None]] | None): bound writer
+            for OUTPUT.
+        stdin (ByteSource | None): the line's input.
+        stat (StatFn | None): bound stat.
+    """
     if len(paths) > 2:
         raise extra_operand_error(
             CommandName.UNIQ, paths[2].raw_path or paths[2].virtual
         )
-    try:
-        parsed = (
-            parse_flags(flags)
-            if flags is not None
-            else UniqFlags(
-                count=count,
-                repeated=duplicates_only,
-                unique=unique_only,
-                skip_fields=_parse_count(skip_fields, SKIP_FIELDS) or 0,
-                skip_chars=_parse_count(skip_chars, SKIP_CHARS) or 0,
-                ignore_case=ignore_case,
-                check_chars=_parse_count(check_chars, CHECK_CHARS),
-            )
-        )
-    except UsageError as exc:
-        return None, IOResult(
-            exit_code=exc.exit_code, stderr=encode_text(str(exc) + "\n")
-        )
-    except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=encode_text(str(exc) + "\n"))
     read_stream = stdin_stream(read_stream, stdin)
     if paths and stat is not None:
         # The input is stat'ed before the lazy stream starts, so a missing
@@ -175,7 +179,7 @@ async def uniq_generic(
     else:
         source = resolve_source(stdin)
     output: ByteSource = stream_output(
-        open_stream("uniq", asdict(parsed)), source
+        open_stream("uniq", engine_config(parsed)), source
     )
     if len(paths) == 2 and paths[1].raw_path != "-":
         if write_bytes is None:
@@ -188,4 +192,4 @@ async def uniq_generic(
     return output, IOResult()
 
 
-__all__ = ["uniq_generic"]
+__all__ = ["engine_config", "uniq_flags", "uniq_generic"]

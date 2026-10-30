@@ -56,7 +56,9 @@ fn count(raw: &[u8], label: &str, suffixes: bool) -> Result<u64, String> {
     }
     let multiplier = match parts.rest {
         [] => 1,
-        suffix if suffixes => number::unit(suffix).ok_or_else(|| suffixed(label, raw))?,
+        suffix if suffixes => {
+            number::unit(suffix, number::SIZE_LETTERS).ok_or_else(|| suffixed(label, raw))?
+        }
         _ => return Err(suffixed(label, raw)),
     };
     parts

@@ -33,6 +33,21 @@ T = TypeVar("T")
 _TAPE_ONLY = frozenset({OPERAND, REFUSED, SPELLED})
 
 
+def _typed_text(value: FlagValue) -> str:
+    """One occurrence as typed text: a switch empty, an integer as digits.
+
+    Args:
+        value (FlagValue): the occurrence's value.
+    """
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, int):
+        return str(Decimal(value))
+    if isinstance(value, PathSpec):
+        return value.virtual
+    return value if isinstance(value, str) else ""
+
+
 class FlagBag(dict[str, T], Generic[T]):
     """Flag values with a separate tape of occurrences in scan order.
 
@@ -167,6 +182,21 @@ class FlagView:
                 else:
                     result.append((name, value))
         return result
+
+    def texts(self, *names: str) -> list[tuple[str, str]]:
+        """Each typed occurrence as the text a line would have typed.
+
+        A string is as given, an integer as its digits (``as_text``) and
+        a switch as the empty text, in ``occurrences`` order: what a
+        program that reads its own options sees.
+
+        Args:
+            names (str): Spec-bound option names to read.
+        """
+        return [
+            (name, _typed_text(value))
+            for name, value in self.occurrences(*names)
+        ]
 
     def as_bool(self, name: str) -> bool:
         value = self._flags.get(self._key(name))

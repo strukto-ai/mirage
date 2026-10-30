@@ -186,6 +186,41 @@
         "stdout": "abc\ndef\nghi\nj\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "fold_checks_every_width_before_the_file",
+      "seq": 19990130,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "fold -w x -w 5 /data/nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "fold: invalid number of columns: 'x'\n"
+      }
     }
   ]
 }

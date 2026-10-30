@@ -17,7 +17,16 @@ import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import { checksumGeneric } from './checksum.ts'
+import { checksumGeneric, parseFlags } from './checksum.ts'
+
+type Rest = Parameters<typeof checksumGeneric> extends [unknown, ...infer R] ? R : never
+
+// What a `*sum` builder does: read the flags, then run.
+async function sums(...[paths, context, ...rest]: Rest): ReturnType<typeof checksumGeneric> {
+  const parsed = parseFlags(context.flags, rest[1])
+  if (parsed instanceof IOResult) return [null, parsed]
+  return checksumGeneric(parsed, paths, context, ...rest)
+}
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -61,7 +70,7 @@ async function runCheck(
   cwd = '/',
   paths: string[] = ['/sums.txt'],
 ): Promise<[string, string, number]> {
-  const result = await checksumGeneric(
+  const result = await sums(
     paths.map(spec),
     ctx({ check: true, ...flags }, cwd),
     makeStream(files),
@@ -109,9 +118,9 @@ describe('checksum --check', () => {
       }
       return gen()
     }
-    await expect(
-      checksumGeneric([spec('/sums.txt')], ctx({ check: true }), stream, 'md5sum'),
-    ).rejects.toThrow('403 Forbidden')
+    await expect(sums([spec('/sums.txt')], ctx({ check: true }), stream, 'md5sum')).rejects.toThrow(
+      '403 Forbidden',
+    )
   })
 })
 
@@ -128,7 +137,7 @@ describe('a stored digest', () => {
       asked.push([p.virtual, algorithm])
       return Promise.resolve(p.virtual === '/a' ? 'f'.repeat(32) : null)
     }
-    const result = await checksumGeneric(
+    const result = await sums(
       [spec('/a'), spec('/b')],
       ctx({}),
       read,
@@ -149,7 +158,7 @@ describe('a stored digest', () => {
   // Mirrors python's test_check_reads_the_bytes_and_asks_no_stored_digest.
   it('is never asked under -c', async () => {
     const stored = (): Promise<string | null> => Promise.reject(new Error('asked under -c'))
-    const result = await checksumGeneric(
+    const result = await sums(
       [spec('/list')],
       ctx({ check: true }),
       makeStream({ '/list': `${DIGEST}  /f\n`, '/f': 'abc' }),
@@ -167,7 +176,7 @@ it('reports a failed stored digest and hashes the rest', async () => {
     p.virtual === '/b'
       ? Promise.reject(Object.assign(new Error('/b'), { code: 'ENOENT' }))
       : Promise.resolve('f'.repeat(32))
-  const result = await checksumGeneric(
+  const result = await sums(
     [spec('/a'), spec('/b'), spec('/c')],
     ctx({}),
     makeStream({}),

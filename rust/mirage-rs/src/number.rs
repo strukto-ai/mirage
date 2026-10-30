@@ -14,7 +14,7 @@ pub(crate) const EOVERFLOW: &str = "Value too large for defined data type";
 
 /// The size letters GNU's byte counts take (coreutils 9.7): every power
 /// letter in upper case, `k` and `m` in lower case, and `b`.
-const SIZE_LETTERS: &[u8] = b"bkKmMEGPQRTYZ";
+pub(crate) const SIZE_LETTERS: &[u8] = b"bkKmMEGPQRTYZ";
 const POWERS: &[u8] = b"KMGTPEZYRQ";
 
 /// A typed number as `strtol` splits it: blanks skipped, at most one
@@ -89,10 +89,50 @@ pub(crate) fn decimal(raw: &[u8]) -> Option<(bool, u128)> {
         .then(|| (parts.negative(), parts.saturating()))
 }
 
+/// A whole decimal word with no minus, as GNU's unsigned counts read one.
+pub(crate) fn unsigned_decimal(raw: &[u8]) -> Option<u128> {
+    decimal(raw).and_then(|(negative, value)| (!negative).then_some(value))
+}
+
+/// A whole signed decimal word, its magnitude saturating past `i128`.
+pub(crate) fn signed_decimal(raw: &[u8]) -> Option<i128> {
+    let (negative, value) = decimal(raw)?;
+    let value = i128::try_from(value).unwrap_or(i128::MAX);
+    Some(if negative { -value } else { value })
+}
+
+/// `strtol(raw, &end, 0)` as glibc reads it: 0 and the whole word when no
+/// number leads it, a value past `long` saturating, and the word past the
+/// number.
+pub(crate) fn strtol(raw: &[u8]) -> (i64, &[u8]) {
+    long(parts(raw, true), raw)
+}
+
+/// C's `atoi`: the decimal number the word begins with, 0 when none does,
+/// saturated to `long` as glibc's `strtol` beneath it is.
+pub(crate) fn atoi(raw: &[u8]) -> i64 {
+    long(parts(raw, false), raw).0
+}
+
+fn long<'a>(parts: Parts<'a>, raw: &'a [u8]) -> (i64, &'a [u8]) {
+    if parts.digits.is_empty() {
+        return (0, raw);
+    }
+    let magnitude = i128::try_from(parts.saturating()).unwrap_or(i128::MAX);
+    let value = if parts.negative() {
+        -magnitude
+    } else {
+        magnitude
+    };
+    let value = value.clamp(i128::from(i64::MIN), i128::from(i64::MAX));
+    (value as i64, parts.rest)
+}
+
 /// The multiplier a byte count's size suffix stands for.
-pub(crate) fn unit(suffix: &[u8]) -> Option<u128> {
+/// `letters` is the command's own set, as `SIZE_LETTERS` is split's.
+pub(crate) fn unit(suffix: &[u8], letters: &[u8]) -> Option<u128> {
     let (&letter, tail) = suffix.split_first()?;
-    if !SIZE_LETTERS.contains(&letter) {
+    if !letters.contains(&letter) {
         return None;
     }
     if letter == b'b' {
@@ -112,7 +152,7 @@ pub(crate) fn unit(suffix: &[u8]) -> Option<u128> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decimal, parts, unit};
+    use super::{SIZE_LETTERS, atoi, decimal, parts, strtol, unit, unsigned_decimal};
 
     #[test]
     fn base_zero_reads_hex_octal_and_decimal() {
@@ -157,11 +197,32 @@ mod tests {
 
     #[test]
     fn size_units_take_iec_and_si_forms() {
-        assert_eq!(unit(b"b"), Some(512));
-        assert_eq!(unit(b"K"), Some(1024));
-        assert_eq!(unit(b"kB"), Some(1000));
-        assert_eq!(unit(b"MiB"), Some(1024 * 1024));
-        assert_eq!(unit(b"bB"), None);
-        assert_eq!(unit(b"x"), None);
+        assert_eq!(unit(b"b", SIZE_LETTERS), Some(512));
+        assert_eq!(unit(b"K", SIZE_LETTERS), Some(1024));
+        assert_eq!(unit(b"kB", SIZE_LETTERS), Some(1000));
+        assert_eq!(unit(b"MiB", SIZE_LETTERS), Some(1024 * 1024));
+        assert_eq!(unit(b"bB", SIZE_LETTERS), None);
+        assert_eq!(unit(b"x", SIZE_LETTERS), None);
+    }
+
+    #[test]
+    fn strtol_reads_a_leading_number_and_saturates() {
+        assert_eq!(strtol(b" 0x10z"), (16, &b"z"[..]));
+        assert_eq!(strtol(b"x"), (0, &b"x"[..]));
+        assert_eq!(strtol(&[b'9'; 30]).0, i64::MAX);
+        assert_eq!(strtol(b"-99999999999999999999").0, i64::MIN);
+    }
+
+    #[test]
+    fn atoi_reads_decimal_only() {
+        assert_eq!(atoi(b"012x"), 12);
+        assert_eq!(atoi(b"0x10"), 0);
+        assert_eq!(atoi(b"z"), 0);
+    }
+
+    #[test]
+    fn unsigned_decimal_refuses_a_minus() {
+        assert_eq!(unsigned_decimal(b"-0"), None);
+        assert_eq!(unsigned_decimal(b"+5"), Some(5));
     }
 }

@@ -82,6 +82,13 @@ export function specFlagNames(spec: CommandSpec): ReadonlySet<string> {
   return new Set(compileSpec(spec).options.map((option) => flagKwargName(argumentDest(option))))
 }
 
+/** One occurrence as typed text: a switch empty, an integer as digits. */
+function typedText(value: ParsedFlagValue): string {
+  if (typeof value === 'boolean') return ''
+  if (typeof value === 'number') return Number.isInteger(value) ? BigInt(value).toString() : ''
+  return typeof value === 'string' ? value : ''
+}
+
 /**
  * Typed read-only view over raw flag kwargs.
  *
@@ -153,6 +160,16 @@ export class FlagView {
       }
     }
     return result
+  }
+
+  /**
+   * Each typed occurrence as the text a line would have typed: a string as
+   * given, an integer as its digits (`asText`) and a switch as the empty
+   * text, in `occurrences` order: what a program that reads its own options
+   * sees. Mirrors Python's `texts`.
+   */
+  texts(...names: string[]): [string, string][] {
+    return this.occurrences(...names).map(([name, value]) => [name, typedText(value)])
   }
 
   asBool(name: string): boolean {
