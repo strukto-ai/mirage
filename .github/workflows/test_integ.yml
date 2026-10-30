@@ -76,8 +76,8 @@ jobs:
           # and typescript filters here and in runtime, as config itself does.
           predicate-quantifier: some-with-excludes
           filters: |
-            # Rust cat and rg_input, their host adapters and retired encoding
-            # tables use these whole-host filters on both languages.
+            # Rust cat, rg_input, shuf and the shared hot-loop helpers, plus
+            # their host adapters, use these whole-host filters on both languages.
             # Git's search and listing commands stay under these whole-host
             # filters, so their disk/RAM CLI corpus runs with either twin.
             # LanceDB's shared core/lancedb/types modules select the embedded

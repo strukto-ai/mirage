@@ -1,7 +1,10 @@
+use crate::records::{Records, Take};
 use crate::{Stream, StreamError};
 
 pub(crate) fn open(_config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    Ok(Box::new(Rev { held: Vec::new() }))
+    Ok(Box::new(Rev {
+        records: Records::default(),
+    }))
 }
 
 /// util-linux rev: each line's characters in reverse order, its newline
@@ -9,7 +12,7 @@ pub(crate) fn open(_config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 /// as U+FFFD, one per maximal invalid run, as the hosts always decoded it.
 struct Rev {
     /// The start of a line the input has not ended yet.
-    held: Vec<u8>,
+    records: Records,
 }
 
 fn reversed(line: &[u8], out: &mut Vec<u8>) {
@@ -23,27 +26,27 @@ fn reversed(line: &[u8], out: &mut Vec<u8>) {
     }
 }
 
+impl Rev {
+    fn pump(&mut self, out: &mut Vec<u8>) {
+        while let Take::Record((line, terminated)) = self.records.peek_span(b'\n') {
+            reversed(line, out);
+            if terminated {
+                out.push(b'\n');
+            }
+            self.records.advance();
+        }
+    }
+}
+
 impl Stream for Rev {
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let mut rest = input;
-        while let Some(at) = memchr::memchr(b'\n', rest) {
-            if self.held.is_empty() {
-                reversed(&rest[..at], out);
-            } else {
-                self.held.extend_from_slice(&rest[..at]);
-                reversed(&self.held, out);
-                self.held.clear();
-            }
-            out.push(b'\n');
-            rest = &rest[at + 1..];
-        }
-        self.held.extend_from_slice(rest);
+        self.records.push(input);
+        self.pump(out);
         Ok(())
     }
-
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        reversed(&self.held, out);
-        self.held.clear();
+        self.records.end();
+        self.pump(out);
         Ok(())
     }
 }

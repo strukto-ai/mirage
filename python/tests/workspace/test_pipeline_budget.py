@@ -102,6 +102,7 @@ async def test_early_finish_reports_downstream_code_not_sigpipe():
 @pytest.mark.parametrize(
     "line",
     [
+        "shuf -n 5",
         "cat -n | wc -c",
         "cat -A | wc -c",
         "zgrep -c theta",
@@ -150,4 +151,21 @@ async def test_rust_filters_yield_to_deadlines_and_stop_ready_input(line):
         assert reads == settled
     finally:
         await stdin.aclose()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_shuf_range_yields_while_building_the_permutation():
+    warm = _ws()
+    try:
+        await warm.shell("shuf -i 1-2")
+    finally:
+        await warm.close()
+    ws = _ws(0.01)
+    start = asyncio.get_running_loop().time()
+    try:
+        result = await ws.shell("shuf -i 1-1000000 -n 5")
+        assert result.exit_code == 124
+        assert asyncio.get_running_loop().time() - start < 2
+    finally:
         await ws.close()

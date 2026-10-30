@@ -12,8 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { specOf } from '../../spec/builtins.ts'
+import { ByteSpool } from '../../../io/spool.ts'
+import { CHUNK_SIZE } from '../../../io/cooperative.ts'
+import { closeQuietly } from '../../../io/stream.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -651,4 +654,62 @@ describe('shuf replays past the memory limit', () => {
     expect(await sha256Hex(out === null ? new Uint8Array() : await materialize(out))).toBe(digest)
     expect(ids.randomU32()).toBe(after)
   })
+})
+
+it.each([
+  [false, false],
+  [true, false],
+  [false, true],
+])('keeps large records spilled and closes spools (repeat %s, early %s)', async (repeat, early) => {
+  const stores = new Set<ByteSpool>()
+  // The spy calls the saved method with its original receiver.
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const read = ByteSpool.prototype.read
+  const spy = vi.spyOn(ByteSpool.prototype, 'read').mockImplementation(async function (
+    this: ByteSpool,
+    offset: number,
+    size: number,
+  ) {
+    stores.add(this)
+    expect(size).toBeLessThanOrEqual(CHUNK_SIZE)
+    return read.call(this, offset, size)
+  })
+  const piece = new Uint8Array(CHUNK_SIZE).fill(120)
+  const pieces = (17 * 1024 * 1024) / CHUNK_SIZE
+  async function* source(): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    for (let record = 0; record < 2; record++) {
+      for (let at = 0; at < pieces; at++) yield piece
+      yield Uint8Array.of(10)
+    }
+  }
+  const ctx = {
+    stdin: source(),
+    flags: { head_count: '2', repeat },
+    ids: new SeededIdSource(5),
+    cwd: PathSpec.fromStrPath('/'),
+    vfs: { kind: 'ram' } as never,
+  } as Context
+  try {
+    const result = await shufGeneric([], [], ctx, stubStream, stubWrite)
+    if (result === null) throw new Error('shuf declined')
+    const [output, io] = result
+    if (output === null || output instanceof Uint8Array) throw new Error('shuf must stream')
+    let total = 0
+    try {
+      for await (const chunk of output) {
+        total += chunk.length
+        expect(chunk.length).toBeLessThanOrEqual(CHUNK_SIZE)
+        if (early) break
+      }
+    } finally {
+      await closeQuietly(output)
+    }
+    expect(io.exitCode).toBe(0)
+    expect(total).toBe(early ? CHUNK_SIZE : 2 * (pieces * CHUNK_SIZE + 1))
+    expect(stores.size).toBeGreaterThan(0)
+    expect([...stores].every((store) => store.closed)).toBe(true)
+  } finally {
+    spy.mockRestore()
+  }
 })

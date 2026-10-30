@@ -65,6 +65,67 @@ struct Options {
     separator: u8,
 }
 
+impl Options {
+    fn fast_record(&self, bytes: &[u8], ranges: &[Interval], out: &mut Vec<u8>) -> bool {
+        let mut selection = Selection::default();
+        let mut emitted = false;
+        if self.mode == Mode::Fields {
+            let Some(delimiter) = self.delimiter.filter(char::is_ascii) else {
+                return false;
+            };
+            if self.whitespace.is_some() {
+                return false;
+            }
+            let delimiter = delimiter as u8;
+            if !bytes.contains(&delimiter) {
+                if !self.only_delimited {
+                    out.extend_from_slice(bytes);
+                    out.push(self.separator);
+                }
+                return true;
+            }
+            if std::str::from_utf8(bytes).is_err() {
+                return false;
+            }
+            let mut start = 0;
+            for (field, end) in memchr::memchr_iter(delimiter, bytes)
+                .chain(std::iter::once(bytes.len()))
+                .enumerate()
+            {
+                if selection.contains(field as u64 + 1, ranges, self.complement) {
+                    if emitted {
+                        out.extend_from_slice(&self.output_delimiter);
+                    }
+                    out.extend_from_slice(&bytes[start..end]);
+                    emitted = true;
+                }
+                start = end + 1;
+            }
+        } else {
+            if !(self.mode == Mode::Bytes && !self.no_partial || bytes.is_ascii()) {
+                return false;
+            }
+            let mut start = None;
+            for position in 0..=bytes.len() {
+                let selected = position < bytes.len()
+                    && selection.contains(position as u64 + 1, ranges, self.complement);
+                if selected && start.is_none() {
+                    start = Some(position);
+                }
+                if !selected && let Some(from) = start.take() {
+                    if emitted {
+                        out.extend_from_slice(&self.output_delimiter);
+                    }
+                    out.extend_from_slice(&bytes[from..position]);
+                    emitted = true;
+                }
+            }
+        }
+        out.push(self.separator);
+        true
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Interval {
     pub(crate) first: u64,
@@ -262,10 +323,7 @@ impl Record {
         for (index, byte) in bytes[..len].iter_mut().enumerate() {
             *byte = reader.block(self, at + index)[(at + index) % BLOCK];
         }
-        match std::str::from_utf8(&bytes[..len]) {
-            Ok(text) => (text.chars().next().expect("one character"), len),
-            Err(error) => ('\u{fffd}', error.error_len().unwrap_or(len)),
-        }
+        crate::utf8::scalar(&bytes[..len])
     }
 }
 
@@ -708,6 +766,17 @@ impl Cut {
                 let bytes = &self.input[self.cursor..end];
                 let separator = memchr(self.options.separator, bytes);
                 let len = separator.unwrap_or(bytes.len());
+                if separator.is_some() && self.record.len == 0 {
+                    let cost = (len + 1).saturating_mul(3 + self.options.output_delimiter.len());
+                    if cost <= work {
+                        self.check_output_encoding()?;
+                        if self.options.fast_record(&bytes[..len], &self.ranges, out) {
+                            self.cursor += len + 1;
+                            work -= cost;
+                            continue;
+                        }
+                    }
+                }
                 self.record.extend(&bytes[..len]);
                 self.cursor += len;
                 work -= len;

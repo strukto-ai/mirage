@@ -99,6 +99,14 @@ fn filter_memory(kind: &str, config: &[u8], begin: &[u8], chunk: &[u8], bytes: u
 
 #[test]
 fn short_records_bound_allocation_volume_and_live_input() {
+    for (kind, config) in [
+        ("wc", br#"{"lines":false,"words":true,"bytes":false,"chars":false,"max_line_length":false}"#.as_slice()),
+        ("cut", br#"{"list":"2","mode":"fields","delimiter":[44],"complement":false,"only_delimited":false,"whitespace":null,"no_partial":false,"output_delimiter":null,"zero_terminated":false}"#),
+        ("uniq", br#"{"count":true,"repeated":false,"unique":false,"skip_fields":0,"skip_chars":0,"check_chars":null,"ignore_case":true,"all_repeated":null,"group":null,"zero_terminated":false}"#),
+    ] { hot_loop_allocations(kind, config, b"alpha,theta,words\n"); }
+    for bytes in [4 * 1024 * 1024, 64 * 1024 * 1024] {
+        scatter_memory(bytes);
+    }
     let row = [b"theta,\x80,".as_slice(), &vec![b'x'; 1015], b"\n"].concat();
     let rows = row.repeat(16);
     let unended = vec![255; 16 * 1024];
@@ -288,5 +296,66 @@ fn short_records_bound_allocation_volume_and_live_input() {
     assert!(
         largest < RECORD,
         "CRLF record selection reallocated {largest} bytes for a {RECORD}-byte record",
+    );
+}
+
+fn hot_loop_allocations(kind: &str, config: &[u8], row: &[u8]) {
+    let input = row.repeat(4096);
+    let mut stream = mirage_rs::open(kind, config).unwrap();
+    let mut out = Vec::new();
+    stream
+        .feed(&input[..16384.min(input.len())], &mut out)
+        .unwrap();
+    while stream.busy() {
+        out.clear();
+        stream.drain(&mut out).unwrap();
+    }
+    ALLOCATION_CALLS.store(0, Ordering::Relaxed);
+    for chunk in input.chunks(16384) {
+        out.clear();
+        stream.feed(chunk, &mut out).unwrap();
+        while stream.busy() {
+            out.clear();
+            stream.drain(&mut out).unwrap();
+        }
+    }
+    let allocations = ALLOCATION_CALLS.load(Ordering::Relaxed);
+    assert!(
+        allocations < 100,
+        "{kind}: {allocations} allocations for 4096 records"
+    );
+}
+
+fn scatter_memory(bytes: usize) {
+    let config = format!(r#"{{"mode":"scatter","separator":10,"size":{bytes}}}"#);
+    let mut stream = mirage_rs::open("shuf", config.as_bytes()).unwrap();
+    let chunk = [b"x".repeat(4095), b"\n".to_vec()].concat().repeat(4);
+    let mut out = Vec::new();
+    let mut payload = Vec::new();
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    loop {
+        while stream.busy() {
+            out.clear();
+            stream.drain(&mut out).unwrap();
+            assert!(out.is_empty());
+        }
+        payload.clear();
+        let Some(request) = stream.request(&mut payload) else {
+            break;
+        };
+        let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
+        let data = match request["op"].as_str().unwrap() {
+            "read" => chunk.clone(),
+            "random" => vec![0; request["count"].as_u64().unwrap() as usize * 8],
+            "write" => Vec::new(),
+            _ => unreachable!(),
+        };
+        stream.respond(b"{}", &data, &mut out).unwrap();
+    }
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(
+        peak < 1024 * 1024,
+        "shuf: {peak} live bytes for {bytes} bytes of input"
     );
 }

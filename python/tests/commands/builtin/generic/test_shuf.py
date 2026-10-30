@@ -16,7 +16,11 @@ import hashlib
 
 import pytest
 
+import mirage.commands.builtin.generic.shuf as command
 from mirage.commands.builtin.generic.shuf import shuf_generic
+from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly
 from mirage.utils.ids import SeededIdSource
 
 # Pinned by shuf.test.ts too: one seed shuffles the same way on both
@@ -135,3 +139,54 @@ async def test_shuf_replays_past_the_memory_limit(
     assert io.exit_code == 0
     assert await _digest(out) == expected
     assert ids.random_u32() == after
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "repeat,early", [(False, False), (True, False), (False, True)]
+)
+async def test_shuf_keeps_large_records_spilled_and_closes_spools(
+    monkeypatch, repeat, early
+):
+    stores = []
+
+    class CheckedSpool(ByteSpool):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            stores.append(self)
+
+        async def read(self, offset, size):
+            assert size <= CHUNK_SIZE
+            return await super().read(offset, size)
+
+    monkeypatch.setattr(command, "ByteSpool", CheckedSpool)
+    piece = b"x" * CHUNK_SIZE
+    pieces = 17 * 1024 * 1024 // CHUNK_SIZE
+
+    async def source():
+        for _ in range(2):
+            for _ in range(pieces):
+                yield piece
+            yield b"\n"
+
+    output, io = await shuf_generic(
+        [],
+        [],
+        read=_read_operand,
+        stdin=source(),
+        ids=SeededIdSource(5),
+        count=2,
+        with_replacement=repeat,
+    )
+    total = 0
+    try:
+        async for chunk in output:
+            total += len(chunk)
+            assert len(chunk) <= CHUNK_SIZE
+            if early:
+                break
+    finally:
+        await close_quietly(output)
+    assert io.exit_code == 0
+    assert total == (CHUNK_SIZE if early else 2 * (pieces * CHUNK_SIZE + 1))
+    assert stores and all(store.closed for store in stores)

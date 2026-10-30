@@ -201,6 +201,102 @@
         "stderr": ""
       },
       "note": "A file that is one empty line holds one line, not none: GNU coreutils 9.7 prints it. Pinned in debian:stable-slim."
+    },
+    {
+      "id": "shuf_streamed_permutation",
+      "seq": 14102505,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq 1 10000 | shuf | sort -n | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "9999\n10000\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shuf_spilled_long_record_repeat",
+      "seq": 14102506,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "seq 1 300000 | tr -d '\\n' | shuf -r -n 2 | wc -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "3377792\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "shuf_zero_records_embedded_newlines",
+      "seq": 14102507,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'one\\ntwo\\0\\0three\\0' | shuf -z | sort -z | od -An -tx1",
+      "expect": {
+        "exit": 0,
+        "stdout": " 00 6f 6e 65 0a 74 77 6f 00 74 68 72 65 65 00\n",
+        "stderr": ""
+      }
     }
   ]
 }

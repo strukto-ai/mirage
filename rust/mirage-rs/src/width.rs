@@ -20,6 +20,9 @@ fn in_ranges(cp: u32, ranges: &[(u32, u32)]) -> bool {
 /// C.UTF-8: one that does not print takes none, and so does a form past
 /// U+10FFFF, which decodes but cannot print.
 pub(crate) fn char_width(cp: u32) -> u64 {
+    if cp < 0x80 {
+        return u64::from((0x20..0x7F).contains(&cp));
+    }
     if cp > 0x10_FFFF || in_ranges(cp, ZERO) {
         0
     } else if in_ranges(cp, WIDE) {
@@ -31,7 +34,11 @@ pub(crate) fn char_width(cp: u32) -> u64 {
 
 /// A character that separates words, as GNU `wc` 9.7 splits them in C.UTF-8.
 pub(crate) fn is_space(cp: u32) -> bool {
-    in_ranges(cp, SPACE)
+    if cp < 0x80 {
+        cp == 0x20 || (0x09..=0x0D).contains(&cp)
+    } else {
+        in_ranges(cp, SPACE)
+    }
 }
 
 /// The column after `cp`: a tab jumps to the next stop, carriage return and

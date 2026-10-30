@@ -7,6 +7,7 @@ use std::fmt::Write as _;
 use num_bigint::BigUint;
 use num_traits::One;
 
+use crate::integer::{decimal, digits};
 use crate::quoted;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -385,33 +386,6 @@ impl Column {
 fn right(text: &[u8], width: usize, out: &mut Vec<u8>) {
     out.resize(out.len() + width.saturating_sub(text.len()), b' ');
     out.extend_from_slice(text);
-}
-
-fn decimal(mut n: u64, negative: bool, width: usize, out: &mut Vec<u8>) {
-    let mut text = [0u8; 21];
-    let mut at = text.len();
-    loop {
-        at -= 1;
-        text[at] = b'0' + (n % 10) as u8;
-        n /= 10;
-        if n == 0 {
-            break;
-        }
-    }
-    if negative {
-        at -= 1;
-        text[at] = b'-';
-    }
-    right(&text[at..], width, out);
-}
-
-/// `count` digits of `n` in base 8 or 16, zero-filled.
-fn digits(n: u64, base: u64, count: usize, out: &mut Vec<u8>) {
-    let bits = base.trailing_zeros() as usize;
-    for place in (0..count).rev() {
-        let digit = n.checked_shr((place * bits) as u32).unwrap_or(0) & (base - 1);
-        out.push(b"0123456789abcdef"[digit as usize]);
-    }
 }
 
 /// A half-precision value as the float it widens to, exactly.

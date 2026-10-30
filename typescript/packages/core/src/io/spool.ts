@@ -74,6 +74,36 @@ export class ByteSpool {
     })
   }
 
+  /** Overwrite an existing window without changing the spool length. */
+  write(offset: number, data: Uint8Array): Promise<void> {
+    return this.locked(async () => {
+      this.usable()
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset + data.length > this.size)
+        throw new RangeError('spool write must stay within its size')
+      this.cache = new Uint8Array()
+      try {
+        if (this.store !== null) {
+          await this.flush()
+          await this.store.write(offset, data)
+        } else {
+          let written = 0
+          while (written < data.length) {
+            const position = offset + written
+            const part = this.memory[Math.floor(position / CHUNK_SIZE)]
+            if (part === undefined) throw new Error('spool lost a block')
+            const start = position % CHUNK_SIZE
+            const count = Math.min(part.length - start, data.length - written)
+            part.set(data.subarray(written, written + count), start)
+            written += count
+          }
+        }
+      } catch (error) {
+        this.lost = error
+        throw error
+      }
+    })
+  }
+
   private usable(): void {
     if (this.closed) throw new Error('spool is closed')
     if (this.lost !== undefined) {

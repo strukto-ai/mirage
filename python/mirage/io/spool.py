@@ -65,6 +65,28 @@ class ByteSpool:
                 self._lost = exc
                 raise
 
+    async def write(self, offset: int, data: bytes) -> None:
+        """Overwrite an existing window without changing the spool length.
+
+        Args:
+            offset (int): first byte to replace.
+            data (bytes): replacement bytes, entirely inside the spool.
+        """
+        async with self._lock:
+            self._usable()
+            if offset < 0 or offset + len(data) > self.size:
+                raise ValueError("spool write must stay within its size")
+            self._cache = b""
+            try:
+                if self._file is None:
+                    self._memory[offset : offset + len(data)] = data
+                else:
+                    await self._flush()
+                    await run_blocking(self._write, data, offset)
+            except Exception as exc:
+                self._lost = exc
+                raise
+
     async def _append(self, data: bytes) -> None:
         self._cache = b""
         if self._file is None and self.size + len(data) > self.memory_limit:

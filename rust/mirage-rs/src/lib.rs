@@ -17,6 +17,7 @@ mod grep;
 #[cfg(test)]
 mod host;
 mod iconv;
+mod integer;
 mod join;
 mod jq;
 mod look;
@@ -43,6 +44,7 @@ mod rg_matcher;
 mod sed;
 mod seq;
 pub mod shell;
+mod shuf;
 mod sort;
 mod split;
 mod strings;
@@ -371,6 +373,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "rg_format" => rg_format::open(config),
         "sed" => sed::open(config),
         "seq" => seq::open(config),
+        "shuf" => shuf::open(config),
         "sort" => sort::open(config),
         "split" => split::open(config),
         "strings" => strings::open(config),

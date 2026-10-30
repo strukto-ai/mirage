@@ -1,7 +1,7 @@
+import json
 import re
 from collections.abc import (
     AsyncGenerator,
-    AsyncIterator,
     Awaitable,
     Callable,
     Mapping,
@@ -20,12 +20,19 @@ from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io.cooperative import CHUNK_SIZE
-from mirage.io.record_spool import delimited
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn
-from mirage.utils.ids import IdSource, SystemIdSource, random_below, shuffle
+from mirage.io.yield_budget import YieldBudget
+from mirage.rs.stream import (
+    Served,
+    close_stream,
+    open_stream,
+    run_stream,
+    serve_requests,
+)
+from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
+from mirage.utils.ids import IdSource, SystemIdSource, random_below
 from mirage.utils.key_prefix import mount_key
 
 # A `-o` reached a backend wired without a write op, which is a wiring
@@ -58,16 +65,9 @@ ECHO_WITH_RANGE = "shuf: cannot combine -e and -i options" + _TRY_HELP
 
 SIZE_MAX = UINTMAX
 
-# How many lines shuf will render into one byte object before answering
-# `memory exhausted`. GNU has no such number: it streams, so a huge
-# range with no `-n` merely allocates until the allocator gives up
-# (which it did at 1e8 elements under a 512 MiB cap and not at all
-# without one, so the threshold is an allocator outcome and not a spec --
-# ground truth SH5). mirage cannot stream, because a command answers
-# with one rendered object, so the ceiling is stated here instead of
-# being whatever the host happens to survive. This is the deliberate
-# divergence: a range GNU would enumerate given enough memory is refused
-# above this, with GNU's own wording for the same situation.
+# Preserve the existing one-million-record output limit. Output now streams;
+# this limit bounds shuffle indexes and sampling state, not rendered bytes.
+# GNU has no fixed ceiling and may enumerate larger populations.
 MAX_OUTPUT_LINES = 1_000_000
 # How input past the memory budget is shuffled: scattered into this many
 # buckets, each scattered again while it is still too large, at most this
@@ -340,26 +340,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ShufFlags:
     )
 
 
-def _render(result: list[str], sep: str) -> bytes:
-    """Terminate every emitted line, and emit nothing for no lines.
-
-    ``shuf -n 0`` is valid and prints zero bytes, so the separator is
-    per line rather than appended to the join.
-
-    Args:
-        result (list[str]): the sampled lines, already in output order.
-        sep (str): the line terminator, NUL under ``-z``.
-
-    Returns:
-        bytes: the rendered output, empty when nothing was sampled.
-    """
-    if not result:
-        return b""
-    return (sep.join(result) + sep).encode()
-
-
 def _need(available: int, count: int | None, with_replacement: bool) -> int:
-    """`emit_count`, refusing an output too large to render.
+    """`emit_count`, enforcing the existing output-record ceiling.
 
     Args:
         available (int): how many values the source holds.
@@ -376,145 +358,245 @@ def _need(available: int, count: int | None, with_replacement: bool) -> int:
     return need
 
 
-def _sample(
+class ShufHost:
+    """Async storage and injected randomness for the shared shuffle engine."""
+
+    def __init__(
+        self,
+        ids: IdSource,
+        data: ByteSpool | None = None,
+        index: ByteSpool | None = None,
+        buckets: list[ByteSpool] | None = None,
+    ) -> None:
+        self.ids = ids
+        self.data = data
+        self.index = index
+        self.buckets = buckets or []
+        self.errors = ByteSpool()
+
+    async def serve(
+        self, request: Mapping[str, JsonValue], data: bytes
+    ) -> Served:
+        op = request["op"]
+        if op == "random":
+            limit, count = request["limit"], request["count"]
+            assert isinstance(limit, str) and isinstance(count, int)
+            bound = int(limit)
+            descending = request["descending"] is True
+            values = bytearray()
+            for at in range(count):
+                values.extend(
+                    random_below(
+                        self.ids, bound - at if descending else bound
+                    ).to_bytes(8, "little")
+                )
+            return Served({}, bytes(values))
+        if op == "read":
+            source = self.index if request["index"] else self.data
+            offset, size = request["offset"], request["size"]
+            assert (
+                source is not None
+                and isinstance(offset, int)
+                and isinstance(size, int)
+            )
+            return Served({}, await source.read(offset, size))
+        if op == "swap":
+            left, right = request["left"], request["right"]
+            assert (
+                self.index is not None
+                and isinstance(left, int)
+                and isinstance(right, int)
+            )
+            first = await self.index.read(left * 16, 16)
+            second = await self.index.read(right * 16, 16)
+            await self.index.write(left * 16, second)
+            await self.index.write(right * 16, first)
+            return Served({})
+        if op == "write":
+            bucket = request["bucket"]
+            assert isinstance(bucket, int)
+            await self.buckets[bucket].append(data)
+            return Served({})
+        raise ValueError(f"shuf: unknown request {op}")
+
+
+async def _engine(
     ids: IdSource,
-    items: list[str],
-    count: int | None,
-    with_replacement: bool,
-) -> list[str]:
-    need = _need(len(items), count, with_replacement)
-    if with_replacement:
-        if not items:
-            return []
-        return [items[random_below(ids, len(items))] for _ in range(need)]
-    out = list(items)
-    shuffle(ids, out)
-    return out[:need]
+    config: Mapping[str, JsonValue],
+    data: ByteSpool | None = None,
+    index: ByteSpool | None = None,
+) -> AsyncGenerator[bytes, None]:
+    stream = open_stream("shuf", config)
+    host = ShufHost(ids, data, index)
+    try:
+        async with aclosing(serve_requests(stream, host)) as output:
+            async for chunk in output:
+                yield chunk
+    finally:
+        await close_stream(stream)
+        await host.errors.close()
 
 
 def _range_lines(
-    ids: IdSource, low: int, high: int, need: int, with_replacement: bool
-) -> list[str]:
-    """Emit `need` values from the inclusive range, never enumerating it.
-
-    GNU is lazy exactly here: with a ``-n`` below the element count it
-    never builds the population, which is why
-    ``shuf -i 1-18446744073709551615 -n 3`` answers instantly (SH5). So
-    the range is materialized only when it is small enough to be, and
-    otherwise the sample is drawn value by value.
-
-    The draw loop terminates because `need` is at most
-    `MAX_OUTPUT_LINES`, which the first branch has already established
-    is below the element count, so there is always an undrawn value
-    left. Drawing in sequence, rejecting a repeat, is sampling without
-    replacement in order -- the same distribution as shuffling the whole
-    population and taking a prefix.
-
-    Args:
-        ids (IdSource): the source the values are drawn from.
-        low (int): the inclusive low bound, possibly past 2**53.
-        high (int): the inclusive high bound.
-        need (int): how many lines to emit, already capped.
-        with_replacement (bool): whether ``-r`` was given, which makes
-            every draw independent and needs no population at all.
-
-    Returns:
-        list[str]: the values as decimal strings, in output order.
-    """
-    size = high - low + 1
-    if with_replacement:
-        return [str(low + random_below(ids, size)) for _ in range(need)]
-    if size <= MAX_OUTPUT_LINES:
-        items = [str(value) for value in range(low, high + 1)]
-        shuffle(ids, items)
-        return items[:need]
-    drawn: set[int] = set()
-    out: list[str] = []
-    while len(out) < need:
-        value = low + random_below(ids, size)
-        if value in drawn:
-            continue
-        drawn.add(value)
-        out.append(str(value))
-    return out
+    ids: IdSource,
+    low: int,
+    high: int,
+    need: int,
+    with_replacement: bool,
+    separator: int,
+) -> AsyncGenerator[bytes, None]:
+    return _engine(
+        ids,
+        {
+            "mode": "range",
+            "separator": separator,
+            "low": str(low),
+            "high": str(high),
+            "need": need,
+            "repeat": with_replacement,
+        },
+    )
 
 
 async def _count_records(data: ByteSpool, terminator: bytes) -> int:
-    count = 0
-    last = b""
-    async for chunk in data.stream():
-        count += chunk.count(terminator)
-        last = chunk[-1:]
-    return count + (last not in (b"", terminator))
+    async with aclosing(
+        run_stream(
+            "shuf",
+            {"mode": "count", "separator": terminator[0]},
+            data.stream(),
+        )
+    ) as output:
+        return int(b"".join([chunk async for chunk in output]))
+
+
+async def _indexed(
+    ids: IdSource,
+    data: ByteSpool,
+    terminator: bytes,
+    available: int,
+    need: int,
+    repeat: bool,
+) -> AsyncGenerator[bytes, None]:
+    async with ByteSpool() as index:
+        await index.fill(
+            run_stream(
+                "shuf",
+                {"mode": "index", "separator": terminator[0]},
+                data.stream(),
+            )
+        )
+        async with aclosing(
+            _engine(
+                ids,
+                {
+                    "mode": "indexed",
+                    "separator": terminator[0],
+                    "size": data.size,
+                    "available": available,
+                    "need": need,
+                    "repeat": repeat,
+                },
+                data,
+                index,
+            )
+        ) as output:
+            async for chunk in output:
+                yield chunk
 
 
 async def _shuffled(
-    ids: IdSource, data: ByteSpool, terminator: bytes, depth: int = 0
+    ids: IdSource,
+    data: ByteSpool,
+    terminator: bytes,
+    available: int,
+    need: int,
+    depth: int = 0,
 ) -> AsyncGenerator[bytes, None]:
-    """Every record of ``data`` once, terminated, in uniformly random order.
-
-    Input past the memory budget is scattered into buckets by one
-    sequential pass, then each bucket is shuffled in turn, which is still
-    a uniform permutation and never reads at random.
-
-    Args:
-        ids (IdSource): the source the order is drawn from.
-        data (ByteSpool): the records.
-        terminator (bytes): what ends each one.
-        depth (int): how many scatters deep this bucket is.
-    """
-    if data.size <= MEMORY_LIMIT or depth == SCATTER_DEPTH:
-        records = (await data.read(0, data.size)).split(terminator)
-        if records[-1] == b"":
-            records.pop()
-        shuffle(ids, records)
-        for record in records:
-            yield record + terminator
+    if need == 0:
+        return
+    if data.size <= MEMORY_LIMIT:
+        async with aclosing(
+            _engine(
+                ids,
+                {
+                    "mode": "shuffle",
+                    "separator": terminator[0],
+                    "size": data.size,
+                    "available": available,
+                    "need": need,
+                },
+                data,
+            )
+        ) as output:
+            async for chunk in output:
+                yield chunk
+        return
+    if available == 1:
+        async for chunk in data.stream():
+            yield chunk
+        return
+    if depth == SCATTER_DEPTH:
+        async with aclosing(
+            _indexed(ids, data, terminator, available, need, False)
+        ) as output:
+            async for chunk in output:
+                yield chunk
         return
     buckets = [ByteSpool(0) for _ in range(SCATTER_FAN_OUT)]
+    host = ShufHost(ids, data, buckets=buckets)
+    stream = open_stream(
+        "shuf",
+        {"mode": "scatter", "separator": terminator[0], "size": data.size},
+    )
     try:
-        rest = b""
-        async for chunk in data.stream():
-            records = (rest + chunk).split(terminator)
-            rest = records.pop()
-            parts = [bytearray() for _ in buckets]
-            for record in records:
-                parts[random_below(ids, len(buckets))] += record + terminator
-            for bucket, part in zip(buckets, parts):
-                if part:
-                    await bucket.append(bytes(part))
-        if rest:
-            await buckets[random_below(ids, len(buckets))].append(
-                rest + terminator
-            )
-        for bucket in buckets:
-            async for record in _shuffled(ids, bucket, terminator, depth + 1):
-                yield record
+        async with aclosing(serve_requests(stream, host)) as output:
+            async for _ in output:
+                raise AssertionError("scatter writes buckets, not stdout")
+        counts: list[int] = json.loads(stream.metadata())
+        for bucket, count in zip(buckets, counts):
+            take = min(need, count)
+            async with aclosing(
+                _shuffled(ids, bucket, terminator, count, take, depth + 1)
+            ) as output:
+                async for chunk in output:
+                    yield chunk
             await bucket.close()
+            need -= take
+            if need == 0:
+                break
     finally:
+        await close_stream(stream)
+        await host.errors.close()
         for bucket in buckets:
             await bucket.close()
 
 
 async def _drawn(
-    ids: IdSource, data: ByteSpool, terminator: bytes, available: int
+    ids: IdSource,
+    data: ByteSpool,
+    terminator: bytes,
+    available: int,
+    need: int,
 ) -> AsyncGenerator[bytes, None]:
-    """Records of ``data`` drawn at random with replacement, terminated.
-
-    Args:
-        ids (IdSource): the source the picks are drawn from.
-        data (ByteSpool): the records.
-        terminator (bytes): what ends each one.
-        available (int): how many records it holds.
-    """
-    if data.size <= MEMORY_LIMIT:
-        held = (await data.read(0, data.size)).split(terminator)
-        while True:
-            yield held[random_below(ids, available)] + terminator
-    async with await delimited([data.stream()], terminator) as records:
-        while True:
-            record = await records.read(random_below(ids, available))
-            yield record.removesuffix(terminator) + terminator
+    output = (
+        _indexed(ids, data, terminator, available, need, True)
+        if data.size > MEMORY_LIMIT
+        else _engine(
+            ids,
+            {
+                "mode": "draw",
+                "separator": terminator[0],
+                "size": data.size,
+                "available": available,
+                "need": need,
+                "repeat": True,
+            },
+            data,
+        )
+    )
+    async with aclosing(output):
+        async for chunk in output:
+            yield chunk
 
 
 async def _sample_records(
@@ -542,17 +624,56 @@ async def _sample_records(
         await data.close()
         raise
     picks = (
-        _drawn(ids, data, terminator, available)
+        _drawn(ids, data, terminator, available, need)
         if repeat
-        else _shuffled(ids, data, terminator)
+        else _shuffled(ids, data, terminator, available, need)
     )
+    return rechunk(OutputStream(picks, data.close), CHUNK_SIZE)
 
-    async def output() -> AsyncIterator[bytes]:
-        async with aclosing(picks) as records:
-            for _ in range(need):
-                yield await anext(records)
 
-    return rechunk(OutputStream(output(), data.close), CHUNK_SIZE)
+async def _sample_items(
+    ids: IdSource,
+    items: list[str],
+    count: int | None,
+    repeat: bool,
+    separator: int,
+) -> ByteSource:
+    need = _need(len(items), count, repeat)
+    data, index = ByteSpool(), ByteSpool()
+
+    async def close() -> None:
+        try:
+            await data.close()
+        finally:
+            await index.close()
+
+    try:
+        budget = YieldBudget()
+        for item in items:
+            await budget.run()
+            raw = item.encode()
+            await index.append(
+                data.size.to_bytes(8, "little")
+                + len(raw).to_bytes(8, "little")
+            )
+            await data.append(raw)
+        output = _engine(
+            ids,
+            {
+                "mode": "indexed",
+                "separator": separator,
+                "size": data.size,
+                "available": len(items),
+                "need": need,
+                "repeat": repeat,
+            },
+            data,
+            index,
+        )
+        return rechunk(OutputStream(output, close), CHUNK_SIZE)
+    except BaseException:
+        await close()
+        raise
 
 
 async def shuf_generic(
@@ -588,8 +709,9 @@ async def shuf_generic(
             raise ValueError(range_error(input_range, bounds))
         low, high = bounds
         need = _need(high - low + 1, count, with_replacement)
-        result = _range_lines(ids, low, high, need, with_replacement)
-        rendered = _render(result, sep)
+        rendered = _range_lines(
+            ids, low, high, need, with_replacement, ord(sep)
+        )
     elif echo:
         # An operand -e echoes is named below the mount the command runs
         # on, ``root``.
@@ -598,8 +720,9 @@ async def shuf_generic(
             if paths
             else list(texts)
         )
-        result = _sample(ids, items, count, with_replacement)
-        rendered = _render(result, sep)
+        rendered = await _sample_items(
+            ids, items, count, with_replacement, ord(sep)
+        )
     else:
         rendered = await _sample_records(
             ids, paths, read, stdin, sep, count, with_replacement

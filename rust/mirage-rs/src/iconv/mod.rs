@@ -8,6 +8,7 @@ pub(crate) mod table;
 #[cfg(test)]
 mod tests;
 
+use crate::utf8::ascii_run;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
@@ -600,17 +601,6 @@ fn widen(ascii: &[u8], width: usize, little: bool, out: &mut Vec<u8>) {
     for (unit, &byte) in out[start..].chunks_exact_mut(width).zip(ascii) {
         unit[at] = byte;
     }
-}
-
-fn ascii_run(raw: &[u8]) -> usize {
-    let mut at = 0;
-    while let Some(word) = raw.get(at..at + 8) {
-        if u64::from_ne_bytes(word.try_into().unwrap_or_default()) & 0x8080_8080_8080_8080 != 0 {
-            break;
-        }
-        at += 8;
-    }
-    at + raw[at..].iter().take_while(|b| b.is_ascii()).count()
 }
 
 impl Iconv {

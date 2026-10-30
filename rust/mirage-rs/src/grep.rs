@@ -211,9 +211,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 }
 
 fn pad(out: &mut Vec<u8>, value: u64, width: usize) {
-    let digits = value.to_string();
-    out.resize(out.len() + width.saturating_sub(digits.len()), b' ');
-    out.extend_from_slice(digits.as_bytes());
+    crate::integer::decimal(value, false, width, out);
 }
 
 /// A buffer length as a 64-bit count.
