@@ -247,7 +247,7 @@ async def test_refused_reads_dropbox_answers_like_the_shared_table(case, sent):
     store, got = await _refuse(
         DropboxApiError("x", 409, case["summary"]), sent
     )
-    outcome = {"lost": ["s1"], "gone": []}.get(case["outcome"])
+    outcome = {"lost": ["s1"], "gone": ["s1"]}.get(case["outcome"])
     if sent is None or outcome is None:
         assert got is None and store.kept == []
     else:

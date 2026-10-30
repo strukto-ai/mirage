@@ -12,14 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { conditionVersion } from '../../cache/context.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
-import { dropCached, stale } from '../../cache/context.ts'
+import { conditionBasis, keepSent, stale } from '../../cache/context.ts'
 import {
   type ConditionSupport,
   type KnownVersions,
-  OwnRead,
   type WriteCondition,
 } from '../../cache/types.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
@@ -292,7 +290,7 @@ export function refused(
   err: ConditionLostError,
   cond: WriteCondition | null,
 ): Promise<StaleWriteError> {
-  return stale(path, { gone: err.gone, version: conditionVersion(cond) })
+  return stale(path, { version: conditionBasis(cond) })
 }
 
 /**
@@ -327,7 +325,8 @@ export async function keepWalk(
 
 /**
  * Keep the version of each key a walk lost on, except `skip`, which the
- * refusal itself names and keeps. Mirrors Python's `keep_lost`.
+ * refusal itself names and keeps. A key found gone keeps what the session
+ * last saw of it. Mirrors Python's `keep_lost`.
  */
 export async function keepLost(
   root: PathSpec,
@@ -336,8 +335,8 @@ export async function keepLost(
   skip: string | null,
 ): Promise<void> {
   for (const [key, version] of err.versions) {
-    const kept = version === OwnRead.ABSENT ? null : version
-    if (key !== skip) await dropCached(kp.keyPath(root, keyPrefix, key), kept)
+    const kept = typeof version === 'string' ? version : null
+    if (key !== skip) await keepSent(kp.keyPath(root, keyPrefix, key), kept)
   }
 }
 

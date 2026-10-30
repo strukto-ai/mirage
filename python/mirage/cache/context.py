@@ -26,6 +26,7 @@ from mirage.cache.types import (
     KnownVersions,
     LiveVersion,
     MatchWrite,
+    Measured,
     OwnRead,
     WriteCondition,
     WriteContext,
@@ -139,6 +140,17 @@ def condition_version(condition: WriteCondition | None) -> str | None:
     return condition.version if isinstance(condition, MatchWrite) else None
 
 
+def condition_basis(condition: WriteCondition | None) -> Measured | None:
+    """What a write's condition asked for: a version, ABSENT for a create.
+
+    Args:
+        condition (WriteCondition | None): the condition the write sent.
+    """
+    if isinstance(condition, AbsentWrite):
+        return OwnRead.ABSENT
+    return condition_version(condition)
+
+
 def require_supported(
     support: ConditionSupport,
     vfs: str,
@@ -199,12 +211,18 @@ async def delete_condition(
         looked_up (str | None): the version the delete's lookup found.
 
     Raises:
+        StaleWriteError: the session found no file there, and one has
+            appeared since.
         OperationNotSupportedError: the backend cannot condition a delete.
     """
     context = current_caller().write_context
     if context is None:
         return None
     cached = await context.read_version(path)
+    if cached is OwnRead.ABSENT:
+        if looked_up:
+            raise await stale(path)
+        cached = None
     return _condition(context, path, "delete", cached or looked_up)
 
 
@@ -242,16 +260,20 @@ async def _settle(
     path: PathSpec,
     kind: WriteKind,
     own: str | OwnRead | None,
-    cached: str | None,
+    cached: Measured | None,
 ) -> WriteCondition:
     if own is OwnRead.UNKNOWN:
         return _condition(context, path, kind, None)
     if own is OwnRead.ABSENT:
-        if cached:
-            raise await stale(path, gone=True)
+        if isinstance(cached, str):
+            raise await stale(path)
         if kind == "put":
             return ABSENT_WRITE
         own = None
+    if cached is OwnRead.ABSENT:
+        if own is None and kind in context.creates:
+            return ABSENT_WRITE
+        cached = None
     return _condition(context, path, kind, own or cached)
 
 
@@ -301,9 +323,7 @@ async def native_condition(
     held = condition_version(cond)
     if not held:
         return None
-    if live is None:
-        raise await stale(path, gone=True)
-    if live.content != held:
+    if live is None or live.content != held:
         raise await stale(path, version=held)
     if not live.native:
         context = current_caller().write_context
@@ -338,7 +358,7 @@ def conditioned(path: PathSpec, kind: Literal["copy", "delete"]) -> bool:
     return True
 
 
-async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
+async def drop_cached(path: PathSpec, keep: Measured | None = None) -> None:
     """Drop the write context's cached copy of ``path``, if there is one.
 
     The line marks it lost too, so nothing it read of the path earlier is
@@ -348,9 +368,10 @@ async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
 
     Args:
         path (PathSpec): the path to drop.
-        keep (str | None): the version to keep without bytes, if any.
+        keep (Measured | None): the version to keep without bytes, ABSENT
+            for a refused create, None for none.
     """
-    mark_lost(path, keep)
+    mark_lost(path, keep if isinstance(keep, str) else None)
     context = current_caller().write_context
     if context is not None:
         await context.drop(path)
@@ -358,32 +379,41 @@ async def drop_cached(path: PathSpec, keep: str | None = None) -> None:
             await context.keep(path, keep)
 
 
+async def keep_sent(path: PathSpec, version: Measured | None = None) -> None:
+    """Drop ``path``'s cached copy, keeping what a refused write sent.
+
+    The condition stays, so a retry without a read sends it again and is
+    refused again. That holds for a file found gone too: a peer may
+    create it again before the retry.
+
+    Args:
+        path (PathSpec): the path whose write lost.
+        version (Measured | None): the version the write sent, ABSENT for
+            a create; None keeps what the session last saw.
+    """
+    context = current_caller().write_context
+    keep = version
+    if keep is None and context is not None:
+        keep = await context.read_version(path)
+    await drop_cached(path, keep)
+
+
 async def stale(
     path: PathSpec,
     landed: bool = False,
-    gone: bool = False,
-    version: str | Literal[OwnRead.ABSENT] | None = None,
+    version: Measured | None = None,
 ) -> StaleWriteError:
-    """The refusal for a lost condition, after dropping the cached copy.
-
-    The version the write lost on is kept, so a retry without a read is
-    refused again; a file found gone keeps none, there being no newer
-    bytes for a retry to overwrite.
+    """The refusal for a lost condition, after ``keep_sent``.
 
     Args:
         path (PathSpec): the path whose write lost.
         landed (bool): a move's copy landed before its source's delete
             lost.
-        gone (bool): the file no longer exists.
-        version (str | Literal[OwnRead.ABSENT] | None): the version the write sent, when
-            the line no longer names it (a move retracts both paths);
-            ABSENT when the op found the file gone, which keeps none.
+        version (Measured | None): the version the write sent, ABSENT for
+            a create, when the line no longer names it (a move retracts
+            both paths).
     """
-    context = current_caller().write_context
-    keep = None
-    if not gone and version is not OwnRead.ABSENT and context is not None:
-        keep = version or await context.read_version(path)
-    await drop_cached(path, keep)
+    await keep_sent(path, version)
     return stale_write(path, landed=landed)
 
 
@@ -412,7 +442,10 @@ async def held_versions(paths: list[PathSpec]) -> list[str | None]:
     context = current_caller().write_context
     if context is None or not paths:
         return [None] * len(paths)
-    return await context.read_versions(paths)
+    return [
+        tok if isinstance(tok, str) else None
+        for tok in await context.read_versions(paths)
+    ]
 
 
 def known_versions(root: PathSpec, key_prefix: str) -> KnownVersions:
@@ -433,6 +466,8 @@ def known_versions(root: PathSpec, key_prefix: str) -> KnownVersions:
         tokens = await context.read_versions(
             [key_path(root, key_prefix, key) for key in keys]
         )
-        return {key: tok for key, tok in zip(keys, tokens) if tok}
+        return {
+            key: tok for key, tok in zip(keys, tokens) if isinstance(tok, str)
+        }
 
     return known

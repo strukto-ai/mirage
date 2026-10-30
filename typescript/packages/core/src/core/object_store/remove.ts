@@ -107,7 +107,10 @@ export function makeRemovePrefix<A extends Accessor, C>(
     } catch (err) {
       if (!(err instanceof ConditionLostError)) throw err
       const key = await keepWalk(path, kpfx, err)
-      throw await stale(kp.keyPath(path, kpfx, key), { version: err.versions.get(key) ?? null })
+      const sent = err.versions.get(key)
+      throw await stale(kp.keyPath(path, kpfx, key), {
+        version: typeof sent === 'string' ? sent : null,
+      })
     }
     liftLost(path, upto, true)
   }

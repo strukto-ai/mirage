@@ -18,6 +18,7 @@ import { PathSpec } from '../types.ts'
 import {
   activeCacheManager,
   captureRead,
+  deleteCondition,
   publishRead,
   nativeCondition,
   runWithCacheManager,
@@ -25,7 +26,14 @@ import {
   settleAfter,
   writeCondition,
 } from './context.ts'
-import { ABSENT_WRITE, ANY_WRITE, OwnRead, type WriteContext } from './types.ts'
+import {
+  ABSENT_WRITE,
+  ANY_WRITE,
+  type Measured,
+  OwnRead,
+  type WriteContext,
+  type WriteKind,
+} from './types.ts'
 
 class FakeManager {
   probedStat(): null {
@@ -115,7 +123,7 @@ it('capture preserves non-byte results', async () => {
 describe('nativeCondition', () => {
   const path = new PathSpec({ virtual: '/box/f', directory: '/box/', vfsPath: '/f' })
 
-  function context(kept: string[]): WriteContext {
+  function context(kept: Measured[]): WriteContext {
     return {
       vfs: 'box',
       conditions: ['put', 'copy', 'delete'],
@@ -128,6 +136,19 @@ describe('nativeCondition', () => {
       },
     }
   }
+
+  it.each([null, { content: 's2', native: 'n2' }])(
+    'keeps the version a refusal sent: %j',
+    async (live) => {
+      const kept: Measured[] = []
+      const unseen = { ...context(kept), readVersion: () => Promise.resolve(null) }
+      const call = runWithWriteContext('/box/', unseen, () =>
+        nativeCondition(path, { kind: 'match', version: 's1' }, live, 'put'),
+      )
+      await expect(call).rejects.toMatchObject({ code: 'STALE_WRITE' })
+      expect(kept).toEqual(['s1'])
+    },
+  )
 
   it.each(['put', 'copy', 'delete'] as const)(
     'names the op it cannot condition: %s',
@@ -183,4 +204,46 @@ it.each([
     writeCondition(PathSpec.fromStrPath('/m/f'), 'put', own),
   )
   expect(condition).toEqual(want)
+})
+
+function absentContext(conditions: WriteKind[], creates: WriteKind[]): WriteContext {
+  return {
+    vfs: 's3',
+    conditions,
+    creates,
+    readVersion: () => Promise.resolve(OwnRead.ABSENT),
+    readVersions: (paths) => Promise.resolve(paths.map(() => OwnRead.ABSENT)),
+    drop: () => Promise.resolve(),
+    keep: () => Promise.resolve(),
+  }
+}
+
+describe('a session that found no file', () => {
+  const path = new PathSpec({ virtual: '/s3/f', directory: '/s3/', vfsPath: '/f' })
+
+  it.each([
+    ['create-only', ['put'], ABSENT_WRITE],
+    ['plain', [], ANY_WRITE],
+  ] as const)('asks a write for absence where it can: %s', async (_name, creates, want) => {
+    const context = absentContext(['put'], [...creates])
+    await runWithWriteContext('/s3/', context, async () => {
+      expect(await writeCondition(path, 'put')).toBe(want)
+      expect(await writeCondition(path, 'put', 'v2')).toEqual({ kind: 'match', version: 'v2' })
+    })
+  })
+
+  it('still needs a conditional copy for a copy', async () => {
+    const context = absentContext(['put'], ['put'])
+    await expect(
+      runWithWriteContext('/s3/', context, () => writeCondition(path, 'copy')),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+  })
+
+  it('refuses a delete of a file that appeared', async () => {
+    const context = absentContext(['put', 'copy', 'delete'], ['put'])
+    await runWithWriteContext('/s3/', context, async () => {
+      expect(await deleteCondition(path, null)).toBe(ANY_WRITE)
+      await expect(deleteCondition(path, 'v1')).rejects.toMatchObject({ code: 'STALE_WRITE' })
+    })
+  })
 })

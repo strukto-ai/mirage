@@ -12,7 +12,7 @@ inputs:
     default: "true"
   typescript-build-artifact:
     description: >-
-      Download prebuilt TypeScript dist outputs from this artifact instead of
+      Download prebuilt TypeScript dist and generated sources instead of
       rebuilding them in the current job.
     default: ""
   start-services:
@@ -46,9 +46,18 @@ runs:
       with:
         node-version: '24'
     - name: Install dependencies
+      if: ${{ inputs.build-packages == 'true' && inputs.typescript-build-artifact == '' }}
       working-directory: typescript
       shell: bash
       run: pnpm install --frozen-lockfile=false
+    - name: Install dependencies without rebuilding mirage
+      if: ${{ inputs.build-packages != 'true' || inputs.typescript-build-artifact != '' }}
+      working-directory: typescript
+      shell: bash
+      run: |
+        pnpm install --frozen-lockfile=false --ignore-scripts
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
     # Built here rather than downloaded from a bootstrap job, which held
     # every typescript-host job back by a minute and a half before it could

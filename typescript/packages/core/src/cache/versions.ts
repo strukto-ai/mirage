@@ -15,11 +15,13 @@
 import { OpRecord } from '../observe/record.ts'
 import {
   CONTENT_CHANGING_OPS,
+  REMOVAL_OPS,
   RETRACT_FINGERPRINT_OPS,
   STAMP_FINGERPRINT_OPS,
   SUBTREE_RETRACT_OPS,
 } from '../observe/record.ts'
 import { underPath } from '../utils/key_prefix.ts'
+import { type Measured, OwnRead } from './types.ts'
 
 /** Identity of one live mount; never persisted. */
 export class VersionScope {
@@ -28,18 +30,21 @@ export class VersionScope {
 
 /** A live session's observations, independent of shared cache eviction. */
 export class VersionHistory {
-  private readonly scopes = new WeakMap<VersionScope, Map<string, OpRecord | string | null>>()
+  private readonly scopes = new WeakMap<VersionScope, Map<string, OpRecord | Measured | null>>()
 
-  /** Return the token observed for this mount-relative key. */
-  read(scope: VersionScope, key: string): string | null {
+  /**
+   * Return the token observed for this mount-relative key, ABSENT when the
+   * session last found no file there.
+   */
+  read(scope: VersionScope, key: string): Measured | null {
     const entries = this.scopes.get(scope)
     const held = entries?.has(key) === true ? entries.get(key) : scope.pins.get(key)
     return held instanceof OpRecord ? held.fingerprint : (held ?? null)
   }
 
-  /** Retain a refused condition until this session reads again. */
-  keep(scope: VersionScope, key: string, version: string | null): void {
-    const held = this.scopes.get(scope) ?? new Map<string, OpRecord | string | null>()
+  /** Retain a refused condition, or a miss, until this session reads again. */
+  keep(scope: VersionScope, key: string, version: Measured | null): void {
+    const held = this.scopes.get(scope) ?? new Map<string, OpRecord | Measured | null>()
     held.set(key, version)
     this.scopes.set(scope, held)
   }
@@ -53,13 +58,14 @@ export class VersionHistory {
       !CONTENT_CHANGING_OPS.has(rec.op)
     )
       return
-    const held = this.scopes.get(scope) ?? new Map<string, OpRecord | string | null>()
+    const held = this.scopes.get(scope) ?? new Map<string, OpRecord | Measured | null>()
+    const left = REMOVAL_OPS.has(rec.op) ? OwnRead.ABSENT : null
     if (SUBTREE_RETRACT_OPS.has(rec.op)) {
       for (const name of new Set([...held.keys(), ...scope.pins.keys()]))
-        if (underPath(name, key)) held.set(name, null)
+        if (underPath(name, key)) held.set(name, left)
     }
     if (STAMP_FINGERPRINT_OPS.has(rec.op)) held.set(key, rec)
-    else held.set(key, null)
+    else held.set(key, left)
     this.scopes.set(scope, held)
   }
 }

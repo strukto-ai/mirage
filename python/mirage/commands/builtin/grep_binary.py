@@ -71,16 +71,3 @@ def name_end(f: GrepFlags) -> bytes:
         f (GrepFlags): parsed flags.
     """
     return b"\0" if f.null else b"\n"
-
-
-def valid_utf8(data: bytes) -> bool:
-    """Whether every byte of ``data`` belongs to a UTF-8 character.
-
-    Args:
-        data (bytes): the output to check.
-    """
-    try:
-        data.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    return True

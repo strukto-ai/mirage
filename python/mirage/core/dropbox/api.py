@@ -73,15 +73,9 @@ async def refused(
         cond (WriteCondition | None): the write's condition.
         rev (str | None): the rev sent, None if the write went plain.
     """
-    if not rev:
+    if not rev or not exc.summary.startswith(LOST_SUMMARIES + GONE_SUMMARIES):
         return None
-    if exc.summary.startswith(LOST_SUMMARIES):
-        return await stale(
-            path, version=condition_version(cond) if cond else None
-        )
-    if exc.summary.startswith(GONE_SUMMARIES):
-        return await stale(path, gone=True)
-    return None
+    return await stale(path, version=condition_version(cond))
 
 
 async def create_folder(tm: DropboxTokenManager, path: str) -> None:

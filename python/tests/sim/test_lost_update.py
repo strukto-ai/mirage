@@ -18,16 +18,20 @@ import os
 import pathlib
 import subprocess
 import sys
+from collections.abc import Awaitable, Callable
+
+import pytest
 
 from mirage import WritePolicy
 from tests.sim.model import Verdict, no_lost_update
 from tests.sim.rand import stream
 from tests.sim.seam import Exponential
-from tests.sim.trace import ABSENT, StepRef, Trace
+from tests.sim.trace import StepRef, Trace
 from tests.sim.world import Actor, Sim, simulate
 
 KEYS = ("f", "g", "new")
 SEEDED = {"f": b"f0\n", "g": b"g0\n"}
+PADDING = {f"pad{i}": b"x" * 400 for i in range(3)}
 PYTHON_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
@@ -39,9 +43,14 @@ def _puts(trace: Trace, step: StepRef) -> list[dict[str, str]]:
     ]
 
 
+def _etag(content: bytes) -> str:
+    return '"' + hashlib.md5(content).hexdigest() + '"'
+
+
 def _judged(trace: Trace) -> Verdict:
     verdict = no_lost_update(trace)
     assert verdict.unjudged == [], trace.render()
+    assert verdict.false_refusals == [], trace.render()
     return verdict
 
 
@@ -100,6 +109,25 @@ def test_guards_1922_sessions_keep_their_own_etags():
     assert _lost(trace) == []
 
 
+async def _i3(sim: Sim) -> int:
+    a = await sim.workspace(cache_limit=1000).actor("a", "sa")
+    p = await sim.workspace().actor("p", "sp")
+    await a.read("f")
+    await p.read("f")
+    await p.write("f")
+    await a.sh("cat /s3/pad0 /s3/pad1 /s3/pad2 > /dev/null")
+    return (await a.write("f")).exit_code
+
+
+def test_guards_432_i3_a_basis_outlives_its_evicted_bytes():
+    """#432 I3: A's cached copy of f is evicted by later reads; the
+    version A read is not, so A's write after a peer's is refused."""
+    exit_code, trace = simulate(_i3, files={**SEEDED, **PADDING})
+    assert exit_code == 1
+    assert _puts(trace, StepRef("a", 2)) == [{"IfMatch": _etag(SEEDED["f"])}]
+    assert _lost(trace) == []
+
+
 async def _i4(sim: Sim) -> int:
     a = await sim.workspace().actor("a", "sa")
     p = await sim.workspace().actor("p", "sp")
@@ -109,14 +137,36 @@ async def _i4(sim: Sim) -> int:
     return (await a.write("new")).exit_code
 
 
-def test_detects_432_i4_a_create_race_overwrites_with_a_plain_put():
-    """#432 I4 on main: A saw no file, a peer created it, and A's write
-    goes out with no condition and replaces the peer's. The #432 fix
-    sends If-None-Match and flips this to A refused."""
+def test_guards_432_i4_a_create_race_is_refused():
+    """#432 I4: A saw no file and a peer created it; A's write asks that
+    the file still not exist, so it is refused instead of replacing the
+    peer's."""
     exit_code, trace = simulate(_i4)
-    assert exit_code == 0
-    assert _puts(trace, StepRef("a", 1)) == [{}]
-    assert _lost(trace) == ["a.1"]
+    assert exit_code == 1
+    assert _puts(trace, StepRef("a", 1)) == [{"IfNoneMatch": "*"}]
+    assert _lost(trace) == []
+
+
+def _copy_race(verb: str) -> Callable[[Sim], Awaitable[int]]:
+    async def race(sim: Sim) -> int:
+        a = await sim.workspace().actor("a", "sa")
+        p = await sim.workspace().actor("p", "sp")
+        await a.exists("new")
+        await p.write("new")
+        return (await a.sh(f"{verb} /s3/f /s3/new")).exit_code
+
+    return race
+
+
+@pytest.mark.parametrize("verb", ["cp", "mv"])
+def test_guards_432_a_copy_onto_a_file_seen_missing_is_refused(verb):
+    """#432 I4 for copies: A saw no file, a peer created it, and A's copy
+    asks that it still not exist, so the peer's file stays."""
+    exit_code, trace = simulate(_copy_race(verb), files=SEEDED)
+    (copy,) = (s for s in trace.served() if s.op == "copy_object")
+    assert exit_code == 1
+    assert dict(copy.sent)["IfNoneMatch"] == "*"
+    assert copy.changes == ()
 
 
 async def _i5(sim: Sim) -> tuple[int, int]:
@@ -130,18 +180,14 @@ async def _i5(sim: Sim) -> tuple[int, int]:
     return refused, (await a.write("g")).exit_code
 
 
-def test_detects_432_i5_a_refusal_loses_the_basis():
-    """#432 I5 on main: a refused write forgets what A read.
-
-    A reads g, a peer removes it, A's write is refused, the peer creates
-    g again, and A's next write on the same stale read lands plain over
-    it. The #432 fix keeps the basis and flips the last write to
-    refused.
-    """
+def test_guards_432_i5_a_refusal_keeps_the_basis():
+    """#432 I5: A reads g, a peer removes it, A's write is refused, the
+    peer creates g again, and A's next write on the same stale read is
+    refused again rather than landing plain over it."""
     exits, trace = simulate(_i5, files={"g": b"g0\n"})
-    assert exits == (1, 0)
-    assert _puts(trace, StepRef("a", 2)) == [{}]
-    assert _lost(trace) == ["a.2"]
+    assert exits == (1, 1)
+    assert _puts(trace, StepRef("a", 2)) == [{"IfMatch": _etag(b"g0\n")}]
+    assert _lost(trace) == []
 
 
 async def _rmw_agent(
@@ -199,17 +245,16 @@ def test_guards_1922_random_read_modify_write_of_existing_files():
         assert _judged(trace).lost == [], trace.render()
 
 
-def test_mixed_workload_retains_only_absence_and_unconditioned_losses():
-    """#432 create races and gone-file retries remain outside #1922."""
-    losing = []
+def test_guards_432_random_read_modify_write():
+    """#432: concurrent reads, existence checks, writes and removes on
+    ``write: conditional`` lose no update and refuse no write whose basis
+    held, on any seed, while writes still land."""
+    commits = 0
     for seed in range(100):
         trace = _rmw_trace(seed)
-        for lost in _judged(trace).lost:
-            assert lost.basis is ABSENT or _puts(trace, lost.step) == [{}], (
-                trace.render()
-            )
-            losing.append(seed)
-    assert losing
+        assert _judged(trace).lost == [], (seed, trace.render())
+        commits += sum(1 for served in trace.served() if served.changes)
+    assert commits >= 400
 
 
 def _digest(seeds: range) -> str:

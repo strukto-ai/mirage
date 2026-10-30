@@ -19,6 +19,7 @@ import pytest
 
 from mirage.cache.context import (
     capture_read,
+    delete_condition,
     native_condition,
     publish_read,
     settle_after,
@@ -31,13 +32,14 @@ from mirage.cache.types import (
     MatchWrite,
     OwnRead,
     WriteContext,
+    WriteKind,
 )
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
     reset_caller,
 )
-from mirage.errors.types import OperationNotSupportedError
+from mirage.errors.types import OperationNotSupportedError, StaleWriteError
 from mirage.types import PathSpec
 
 
@@ -149,6 +151,70 @@ async def test_explicit_own_version_takes_precedence(own, want):
     assert cond == want
 
 
+async def _gone(_path: PathSpec) -> OwnRead:
+    return OwnRead.ABSENT
+
+
+def _absent_context(
+    conditions: frozenset[WriteKind], creates: frozenset[WriteKind]
+) -> WriteContext:
+    return WriteContext(
+        vfs="s3",
+        conditions=conditions,
+        read_version=_gone,
+        read_versions=_held_all,
+        drop=_noop,
+        keep=_noop,
+        creates=creates,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "creates, want",
+    [(frozenset({"put"}), ABSENT_WRITE), (frozenset(), ANY_WRITE)],
+    ids=["create-only", "plain"],
+)
+async def test_a_write_after_a_miss_asks_for_absence_where_it_can(
+    creates, want
+):
+    path = PathSpec(virtual="/s3/f", directory="/s3/", vfs_path="/f")
+    context = _absent_context(frozenset({"put"}), creates)
+    prev = bind_caller(replace(current_caller(), write_context=context))
+    try:
+        assert await write_condition(path, "put") is want
+        assert await write_condition(path, "put", own="v2") == MatchWrite("v2")
+    finally:
+        reset_caller(prev)
+
+
+@pytest.mark.asyncio
+async def test_a_copy_after_a_miss_still_needs_a_conditional_copy():
+    path = PathSpec(virtual="/s3/f", directory="/s3/", vfs_path="/f")
+    context = _absent_context(frozenset({"put"}), frozenset({"put"}))
+    prev = bind_caller(replace(current_caller(), write_context=context))
+    try:
+        with pytest.raises(OperationNotSupportedError):
+            await write_condition(path, "copy")
+    finally:
+        reset_caller(prev)
+
+
+@pytest.mark.asyncio
+async def test_a_delete_after_a_miss_refuses_a_file_that_appeared():
+    path = PathSpec(virtual="/s3/f", directory="/s3/", vfs_path="/f")
+    context = _absent_context(
+        frozenset({"put", "copy", "delete"}), frozenset({"put"})
+    )
+    prev = bind_caller(replace(current_caller(), write_context=context))
+    try:
+        assert await delete_condition(path, None) is ANY_WRITE
+        with pytest.raises(StaleWriteError):
+            await delete_condition(path, "v1")
+    finally:
+        reset_caller(prev)
+
+
 @pytest.mark.asyncio
 async def test_missing_write_requires_absence_without_a_mount_context():
     path = PathSpec.from_str_path("/s3/f", "f")
@@ -166,6 +232,40 @@ async def test_match_without_a_native_token_refuses_without_mount_context():
         await native_condition(
             path, MatchWrite("same"), LiveVersion("same", None), "put"
         )
+
+
+async def _unseen(_path: PathSpec) -> str | None:
+    return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "live", [None, LiveVersion(content="s2", native="n2")]
+)
+async def test_native_refusal_keeps_the_version_it_sent(live):
+    # The session may not have seen the version the write sent, so the
+    # refusal keeps it whether the file changed or went.
+    path = PathSpec(virtual="/box/f", directory="/box/", vfs_path="/f")
+    kept: list[tuple[PathSpec, str]] = []
+
+    async def keep(spec: PathSpec, version: str) -> None:
+        kept.append((spec, version))
+
+    context = WriteContext(
+        vfs="box",
+        conditions=frozenset({"put"}),
+        read_version=_unseen,
+        read_versions=_held_all,
+        drop=_noop,
+        keep=keep,
+    )
+    prev = bind_caller(replace(current_caller(), write_context=context))
+    try:
+        with pytest.raises(StaleWriteError):
+            await native_condition(path, MatchWrite("s1"), live, "put")
+    finally:
+        reset_caller(prev)
+    assert kept == [(path, "s1")]
 
 
 @pytest.mark.asyncio

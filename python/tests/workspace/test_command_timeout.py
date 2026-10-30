@@ -189,7 +189,8 @@ async def test_foreground_timeout_leaves_a_background_job_alone():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "job", ["sleep 5", "seq 1 1000000000 > /data/g", "{ sleep 5; echo x; }"]
+    "job",
+    ["sleep 5", "seq 1 1000000000 > /dev/null", "{ sleep 5; echo x; }"],
 )
 async def test_a_job_runs_under_the_line_limit_from_its_own_start(job):
     ws = _ws(line=0.2)
@@ -445,21 +446,19 @@ async def test_python3_timeout_reclaims_monty_interpreter():
         "wc /big",
         "grep -c line /big",
         "cat /big | wc",
-        "cat -s /blank",
+        "cat -s" + " /blank" * 100,
         "head -n -1000000 /blank",
         "uniq /blank",
         "tail -n 1 /blank /blank /blank /blank /blank",
     ],
 )
-async def test_large_ram_command_honors_caller_cancel(command):
-    # Large enough that every command outlasts several yield slices: a
-    # line starts eagerly, so one done within its first slice ends before
-    # the cancel's timer can fire, and the cancel must land mid-run.
-
+async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
+    # Arm cancellation at the first read and spend each yield budget,
+    # so a fast command cannot finish before a wall-clock timer is due.
+    monkeypatch.setattr("mirage.io.yield_budget.YIELD_SWITCHES", 0)
     ram = RAMVFS()
     ram.accessor.store.files["/big"] = b"line\n" * 2_000_000
     ram.accessor.store.files["/blank"] = b"\n" * 10_000_000
-    ws = Workspace({"/": ram})
     cancel = asyncio.Event()
     loop = asyncio.get_running_loop()
     start = loop.time()
@@ -469,13 +468,25 @@ async def test_large_ram_command_honors_caller_cancel(command):
         fired.append(loop.time() - start)
         cancel.set()
 
-    timer = loop.call_later(0.005, stop)
+    timer = None
+    read = ram.read
+
+    def read_and_arm(path, offset=0, size=None):
+        nonlocal timer
+        if timer is None:
+            timer = loop.call_soon(stop)
+        return read(path, offset, size)
+
+    monkeypatch.setattr(ram, "read", read_and_arm)
+    ws = Workspace({"/": ram})
     try:
         with pytest.raises(MirageAbortError):
             await ws.shell(command, cancel=cancel)
     finally:
-        timer.cancel()
-    assert fired[0] < 1
+        if timer is not None:
+            timer.cancel()
+        await ws.close()
+    assert fired and fired[0] < 1
 
 
 _UNCAPPED = {"@all": Limit(walk_limit=-1)}

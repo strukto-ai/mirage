@@ -1559,6 +1559,36 @@ def selftest_shard() -> None:
     """The shard jobs run every target of their facets once, and nothing
     else: a facet that puts no target into the split, a target the host
     cannot run, or a service another job provisions must not ride it."""
+    items = [
+        ([str(i)], weight)
+        for i, weight in enumerate([9, 6, 4, 6, 6, 4, 1, 10, 8, 7, 6, 3])
+    ]
+    parts = shard.split(items, 3, 2)
+    check(
+        "shard: worker-aware placement avoids a fourteen-second tail",
+        max(shard.parallel_seconds(part, 2) for part in parts) == 12,
+        repr(parts),
+    )
+    items = [
+        ([str(i)], weight)
+        for i, weight in enumerate([2, 3, 3, 2, 4, 9, 8, 9, 4, 8, 6, 8])
+    ]
+    parts = shard.split(items, 3, 2, {"0", "1", "2", "3", "4"})
+    check(
+        "shard: retain the weight split when worker placement makes it slower",
+        max(shard.parallel_seconds(part, 2) for part in parts) == 12,
+        repr(parts),
+    )
+    check(
+        "shard: finish time honors the worker count and an empty shard",
+        [
+            shard.parallel_seconds([(["a"], 9), (["b"], 6), (["c"], 4)], p)
+            for p in (1, 2, 4)
+        ]
+        == [19, 10, 9]
+        and shard.parallel_seconds([], 4) == 0,
+        "unexpected worker-pool finish time",
+    )
     manifest = json.loads((ROOT / "targets.json").read_text())
     counts = shard.case_counts(ROOT)
     by_id = {target["id"]: target for target in manifest["targets"]}
@@ -1584,37 +1614,38 @@ def selftest_shard() -> None:
         shared = shard.launched(
             manifest, json.loads(shard.FAKES.read_text()), host
         )
-        for shards in (2, 3):
-            for fakes in (None, shared):
-                parts = shard.split(items, shards, fakes)
-                label = f"{shards} shards" + (
-                    "" if fakes is None else ", fakes first"
-                )
-                spread = [
-                    target_id
-                    for part in parts
-                    for ids, _ in part
-                    for target_id in ids
-                ]
-                check(
-                    f"shard ({host}): {label} partition the split",
-                    sorted(spread) == sorted(ran),
-                    f"{len(spread)} vs {len(ran)}",
-                )
-                check(
-                    f"shard ({host}): {label}, each shard gets a target",
-                    all(parts),
-                    f"{[len(part) for part in parts]}",
-                )
-                check(
-                    f"shard ({host}): {label}, each shard runs largest first",
-                    all(
-                        [w for _, w in part]
-                        == sorted((w for _, w in part), reverse=True)
+        for procs in (1, 4):
+            for shards in (2, 3):
+                for fakes in (None, shared):
+                    parts = shard.split(items, shards, procs, fakes)
+                    label = f"{shards} shards, {procs} workers" + (
+                        "" if fakes is None else ", fakes first"
+                    )
+                    spread = [
+                        target_id
                         for part in parts
-                    ),
-                    f"{[[w for _, w in part] for part in parts]}",
-                )
+                        for ids, _ in part
+                        for target_id in ids
+                    ]
+                    check(
+                        f"shard ({host}): {label} partition the split",
+                        sorted(spread) == sorted(ran),
+                        f"{len(spread)} vs {len(ran)}",
+                    )
+                    check(
+                        f"shard ({host}): {label}, each shard gets a target",
+                        all(parts),
+                        f"{[len(part) for part in parts]}",
+                    )
+                    check(
+                        f"shard ({host}): {label}, each shard runs largest first",
+                        all(
+                            [w for _, w in part]
+                            == sorted((w for _, w in part), reverse=True)
+                            for part in parts
+                        ),
+                        f"{[[w for _, w in part] for part in parts]}",
+                    )
         check(
             f"shard ({host}): the launcher serves box and sharepoint, not s3",
             {"box", "sharepoint"} <= shared and not {"ram", "s3"} & shared,
@@ -1638,7 +1669,7 @@ def selftest_shard() -> None:
         )
         fake_load = [
             sum(weight for ids, weight in part if shared & set(ids))
-            for part in shard.split(items, 3, shared)
+            for part in shard.split(items, 3, 4, shared)
         ]
         heaviest = max(w for ids, w in items if shared & set(ids))
         check(
@@ -1846,6 +1877,144 @@ def selftest_saved_skips() -> None:
             )
 
 
+RUNTIME_DRIVER_PROBE = r"""
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+root = Path(os.environ["RUNNER_TEMP"])
+host = "python" if Path(sys.argv[0]).name == "python" else "typescript"
+suites = sys.argv[2:] if host == "python" else sys.argv[4:]
+shared = set(suites) & {"backend/mongodb", "sandbox/mounts"}
+serial = host == "typescript" and bool(shared)
+name = suites[0].replace("/", "-") if serial and len(suites) == 1 else host
+(root / f"{name}-{os.getpid()}-{time.time_ns()}.json").write_text(
+    json.dumps([[host, suite] for suite in suites])
+)
+if serial:
+    assert (root / "python.done").exists(), f"{shared} raced Python"
+(root / f"{name}.started").touch()
+if not serial and os.environ["EXPECT_OVERLAP"] == "1":
+    peer = "typescript" if host == "python" else "python"
+    deadline = time.monotonic() + 3
+    while not (root / f"{peer}.started").exists():
+        assert time.monotonic() < deadline, "drivers did not overlap"
+        time.sleep(0.01)
+(root / f"{name}.done").touch()
+sys.exit(1 if os.environ["FAIL_DRIVER"] == name else 0)
+"""
+
+
+def selftest_runtime_parallel() -> None:
+    """Run the CI driver against barriers and deliberate host failures."""
+    driver = ROOT / "runtime" / "parallel.sh"
+    mixed = "write/append backend/mongodb sandbox/mounts path/stat"
+    shared = {"backend/mongodb", "sandbox/mounts"}
+    for suites, failing in (
+        (mixed, ""),
+        (mixed, "python"),
+        (mixed, "typescript"),
+        (mixed, "backend-mongodb"),
+        (mixed, "sandbox-mounts"),
+        ("backend/mongodb", ""),
+        ("sandbox/mounts", ""),
+        ("backend/mongodb sandbox/mounts", "backend-mongodb"),
+        ("write/append path/stat", ""),
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            scripts = base / "integ" / "scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "background.sh").symlink_to(
+                ROOT / "scripts" / "background.sh"
+            )
+            for relative in ("python/.venv/bin/python", "bin/pnpm"):
+                stub = base / relative
+                stub.parent.mkdir(parents=True, exist_ok=True)
+                stub.write_text(f"#!{sys.executable}\n" + RUNTIME_DRIVER_PROBE)
+                stub.chmod(0o755)
+            env = {
+                **os.environ,
+                "PATH": f"{base / 'bin'}{os.pathsep}{os.environ['PATH']}",
+                "RUNNER_TEMP": tmp,
+                "SUITES": suites,
+                "FAIL_DRIVER": failing,
+                "EXPECT_OVERLAP": "1" if set(suites.split()) - shared else "0",
+            }
+            started = subprocess.run(
+                ["bash", str(driver), "start"],
+                cwd=base,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            done = subprocess.run(
+                ["bash", str(driver), "wait"],
+                cwd=base,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            rows = [
+                row
+                for path in base.glob("*.json")
+                for row in json.loads(path.read_text())
+            ]
+            want = [
+                [host, suite]
+                for host in ("python", "typescript")
+                for suite in suites.split()
+            ]
+            label = f"{suites}, fail={failing or 'none'}"
+            check(
+                f"runtime drivers: overlap and failure propagation ({label})",
+                started.returncode == 0
+                and done.returncode == bool(failing)
+                and (base / "python.done").exists()
+                and all(
+                    (base / f"{suite.replace('/', '-')}.done").exists()
+                    for suite in set(suites.split()) & shared
+                )
+                and (
+                    not set(suites.split()) - shared
+                    or (base / "typescript.done").exists()
+                ),
+                started.stdout + started.stderr + done.stdout + done.stderr,
+            )
+            check(
+                f"runtime drivers: every host/suite runs exactly once ({label})",
+                sorted(rows) == sorted(want),
+                repr(rows),
+            )
+            if suites == mixed and not failing:
+                repeated = [
+                    subprocess.run(
+                        ["bash", str(driver), action],
+                        cwd=base,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    for action in ("start", "wait")
+                ]
+                duplicate_rows = [
+                    row
+                    for path in base.glob("*.json")
+                    for row in json.loads(path.read_text())
+                ]
+                check(
+                    "runtime drivers: duplicate launches remain visible",
+                    all(proc.returncode == 0 for proc in repeated)
+                    and sorted(duplicate_rows) == sorted(want * 2),
+                    repr(duplicate_rows),
+                )
+
+
 def main() -> None:
     selftest_services_table()
     selftest_case_validation()
@@ -1859,6 +2028,7 @@ def main() -> None:
     selftest_pool_runtime()
     selftest_case_targets()
     selftest_shard()
+    selftest_runtime_parallel()
     selftest_non_root_targets()
     selftest_saved_skips()
     selftest_typescript_gates("--require-ts" in sys.argv)

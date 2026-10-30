@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { nativeCondition, stale, writeCondition } from '../../cache/context.ts'
+import { conditionVersion, nativeCondition, stale, writeCondition } from '../../cache/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
@@ -34,8 +34,9 @@ import { liveOf } from './fingerprint.ts'
 import { checkPath, dropboxPathOf } from './paths.ts'
 
 /**
- * The refusal for a copy or move whose cleared destination came back. The held
- * version stays held; a folder there keeps none. Mirrors Python's `_retaken`.
+ * The refusal for a copy or move whose cleared destination came back. The
+ * condition the op sent stays held, whatever took the name. Mirrors Python's
+ * `_retaken`.
  */
 async function retaken(
   err: unknown,
@@ -45,10 +46,8 @@ async function retaken(
   if (cond === null || !(err instanceof DropboxApiError) || !err.summary.startsWith(TAKEN)) {
     return null
   }
-  if (cond.kind === 'match' && cond.version !== '' && !err.summary.startsWith(TAKEN_BY_FOLDER)) {
-    return stale(dst, { version: cond.version })
-  }
-  return stale(dst, { gone: true })
+  const held = conditionVersion(cond)
+  return stale(dst, { version: held === '' ? null : held })
 }
 
 /**
@@ -86,7 +85,7 @@ export async function replaceOnto<T>(
         !(emptyFolder && (await listFolder(tm, to, { limit: 1 })).length === 0)
       if (blocks) throw err
     } else if (err.summary.startsWith(TAKEN_BY_FOLDER)) {
-      throw await stale(dst, { gone: true })
+      throw await stale(dst)
     }
     try {
       await deletePath(tm, to, rev)

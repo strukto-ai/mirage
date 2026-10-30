@@ -96,12 +96,16 @@ async function* resumed(
   first: IteratorResult<Uint8Array>,
   rest: AsyncIterator<Uint8Array>,
 ): AsyncIterable<Uint8Array> {
-  if (first.done === true) return
-  yield first.value
-  for (;;) {
-    const next = await rest.next()
-    if (next.done === true) return
-    yield next.value
+  try {
+    if (first.done === true) return
+    yield first.value
+    for (;;) {
+      const next = await rest.next()
+      if (next.done === true) return
+      yield next.value
+    }
+  } finally {
+    await closeQuietly(rest)
   }
 }
 

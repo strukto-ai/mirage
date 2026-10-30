@@ -1,6 +1,7 @@
 mod awk;
 mod base64;
 mod bc;
+mod cat;
 mod cmp;
 mod column;
 mod comm;
@@ -16,6 +17,7 @@ mod grep;
 #[cfg(test)]
 mod host;
 mod iconv;
+mod integer;
 mod join;
 mod jq;
 mod look;
@@ -37,10 +39,12 @@ mod rev;
 mod rg;
 mod rg_format;
 mod rg_grapheme;
+mod rg_input;
 mod rg_matcher;
 mod sed;
 mod seq;
 pub mod shell;
+mod shuf;
 mod sort;
 mod split;
 mod strings;
@@ -354,6 +358,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "jq" => jq::open_main(config),
         "look" => look::open(config),
         "network" => network::open(config),
+        "cat" => cat::open(config),
         "nl" => nl::open(config),
         "numfmt" => numfmt::open(config),
         "od" => od::open(config),
@@ -369,6 +374,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "rg_format" => rg_format::open(config),
         "sed" => sed::open(config),
         "seq" => seq::open(config),
+        "shuf" => shuf::open(config),
         "sort" => sort::open(config),
         "split" => split::open(config),
         "strings" => strings::open(config),

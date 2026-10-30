@@ -225,7 +225,7 @@ describe('background job at the line limit', () => {
     }
   })
 
-  it.each(['sleep 5', 'seq 1 1000000000 > /data/g', '{ sleep 5; echo x; }'])(
+  it.each(['sleep 5', 'seq 1 1000000000 > /dev/null', '{ sleep 5; echo x; }'])(
     '%s & runs under the limit from its own start',
     async (job) => {
       const ws = jobWs(0.2)
@@ -387,24 +387,41 @@ describe('large in-memory commands', () => {
     'wc /big',
     'grep -c line /big',
     'cat /big | wc',
-    'cat -s /blank',
+    `cat -s${' /blank'.repeat(100)}`,
     'head -n -2500000 /blank',
     'uniq /big',
   ])('honors a caller abort during %s', async (command) => {
     const ram = new RAMVFS()
     ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
     ram.store.files.set('/blank', new TextEncoder().encode('\n'.repeat(2_500_000)))
-    const ws = new Workspace({ '/': ram })
     const abort = new AbortController()
-    const timer = setTimeout(() => {
-      abort.abort()
-    }, 5)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let fired = false
+    let now = performance.now()
+    const clock = vi.spyOn(performance, 'now')
+    const read = ram.read.bind(ram)
+    // Arm cancellation at the first read and spend each yield budget,
+    // so a fast command cannot finish before a wall-clock timer is due.
+    const reads = vi.spyOn(ram, 'read').mockImplementation((...args) => {
+      if (timer === undefined) {
+        clock.mockImplementation(() => (now += 10))
+        timer = setTimeout(() => {
+          fired = true
+          abort.abort()
+        }, 0)
+      }
+      return read(...args)
+    })
+    const ws = new Workspace({ '/': ram })
     try {
       await expect(ws.shell(command, { signal: abort.signal })).rejects.toMatchObject({
         name: 'AbortError',
       })
+      expect(fired).toBe(true)
     } finally {
       clearTimeout(timer)
+      reads.mockRestore()
+      clock.mockRestore()
       await ws.close()
     }
   })

@@ -286,6 +286,10 @@ impl Posix {
         Step::Done(Some(spans))
     }
 
+    pub(crate) fn record_scanner(&self) -> Option<super::RecordScan> {
+        self.automata.as_ref()?.record_scanner()
+    }
+
     /// Where the leftmost-longest match at or after `at` lies, its groups
     /// left unplaced.
     pub(crate) fn find(

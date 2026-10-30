@@ -6,12 +6,10 @@ from typing import Literal
 from pydantic import TypeAdapter
 
 from mirage.commands.builtin.rg_search import (
-    RgBinary,
     RgFlags,
     Tally,
     Totals,
     folds_case,
-    transcoded,
 )
 from mirage.commands.errors import UsageError
 from mirage.io.stream import close_quietly, discard_streams
@@ -165,12 +163,19 @@ async def drained(
         output = stream.drain()
 
 
-def binary_metadata(binary: RgBinary) -> dict[str, JsonValue]:
-    return {
-        "binary_offset": binary.offset,
-        "binary_converted": binary.converted,
-        "binary_skipped": binary.skipped,
-    }
+def encoding_for(label: str) -> str | None:
+    """Resolve a WHATWG label with the registry used by the rg decoder.
+
+    Args:
+        label (str): The encoding label from -E.
+    """
+    stream = open_stream("rg_format", {})
+    return (
+        stream.feed(
+            json.dumps({"kind": "encoding", "label": label}).encode()
+        ).decode()
+        or None
+    )
 
 
 async def stream_haystack(
@@ -184,7 +189,7 @@ async def stream_haystack(
     pipe: bool,
 ) -> AsyncIterator[bytes]:
     stream = program.stream
-    binary = RgBinary(
+    binary_mode = (
         "text"
         if f.text or f.null_data
         else "note"
@@ -197,21 +202,15 @@ async def stream_haystack(
         {
             "name": latin1(name),
             "label": None if label is None else latin1(label),
-            "binary_mode": binary.mode,
-            **binary_metadata(binary),
+            "binary_mode": binary_mode,
+            "encoding": f.encoding,
+            "pipe": pipe,
         }
-    )
-    reader = binary.read(
-        source if f.encoding == "none" else transcoded(source, f.encoding),
-        pipe,
     )
     budget = YieldBudget()
     try:
         if not stream.done():
-            async for chunk in reader:
-                stream.feed_input(
-                    1, json.dumps(binary_metadata(binary)).encode()
-                )
+            async for chunk in source:
                 for offset in range(0, len(chunk), BLOCK_BYTES):
                     if stream.done():
                         break
@@ -225,7 +224,6 @@ async def stream_haystack(
                         yield output
                 if stream.done():
                     break
-        stream.feed_input(1, json.dumps(binary_metadata(binary)).encode())
         async for output in drained(stream, stream.finish(), tally, budget):
             yield output
     except BaseException as exc:
@@ -234,7 +232,6 @@ async def stream_haystack(
         raise
     finally:
         settle(stream, tally)
-        await close_quietly(reader)
         await close_quietly(source)
 
 

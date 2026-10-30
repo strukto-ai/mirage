@@ -162,7 +162,7 @@ from S3. This reduces API calls for repeated directory traversals. A configured 
 
 ## Conditional writes
 
-Under `write: conditional` a write carries the version of the file mirage read, and S3 refuses it when the file has changed since. The endpoint decides which writes can be conditioned: AWS's conditions every write, copy and delete; any other `endpoint_url` (or `AWS_ENDPOINT_URL_S3`/`AWS_ENDPOINT_URL`) only a write, so mirage refuses what would copy or delete there. An endpoint set only in an AWS profile is not read: give a non-AWS server its `endpoint_url`.
+Under `write: conditional` a write carries the version of the file mirage read, and S3 refuses it when the file has changed since. The endpoint decides which writes can be conditioned: AWS's conditions every write, copy and delete; any other `endpoint_url` (or `AWS_ENDPOINT_URL_S3`/`AWS_ENDPOINT_URL`) only a write, so mirage refuses what would copy or delete there. An endpoint set only in an AWS profile is not read: give a non-AWS server its `endpoint_url`. If the session last saw no file at the path, the write sends `If-None-Match: *` and fails if someone created the file in the meantime.
 
 A conditional single-file move attempts rollback when source deletion is refused. The move still fails and warns if the destination may remain. Cleanup uses the copy's S3 version or, for a new destination, its ETag. Unversioned overwrites, same-ETag replacements, retried versioned copies, and uncertain delete outcomes limit recovery; inspect both paths after a failure.
 

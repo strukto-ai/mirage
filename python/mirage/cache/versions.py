@@ -14,8 +14,10 @@
 
 from weakref import WeakKeyDictionary
 
+from mirage.cache.types import Measured, OwnRead
 from mirage.observe.record import (
     CONTENT_CHANGING_OPS,
+    REMOVAL_OPS,
     RETRACT_FINGERPRINT_OPS,
     STAMP_FINGERPRINT_OPS,
     SUBTREE_RETRACT_OPS,
@@ -36,11 +38,12 @@ class VersionHistory:
 
     def __init__(self) -> None:
         self._scopes: WeakKeyDictionary[
-            VersionScope, dict[str, OpRecord | str | None]
+            VersionScope, dict[str, OpRecord | Measured | None]
         ] = WeakKeyDictionary()
 
-    def read(self, scope: VersionScope, key: str) -> str | None:
-        """Return the token observed for this mount-relative key.
+    def read(self, scope: VersionScope, key: str) -> Measured | None:
+        """Return the token observed for this mount-relative key, ABSENT
+        when the session last found no file there.
 
         Args:
             scope (VersionScope): live VFS identity.
@@ -49,13 +52,17 @@ class VersionHistory:
         held = self._scopes.get(scope, {}).get(key, scope.pins.get(key))
         return held.fingerprint if isinstance(held, OpRecord) else held
 
-    def keep(self, scope: VersionScope, key: str, version: str | None) -> None:
-        """Retain a refused condition until this session reads again.
+    def keep(
+        self, scope: VersionScope, key: str, version: Measured | None
+    ) -> None:
+        """Retain a refused condition, or a miss, until this session reads
+        again.
 
         Args:
             scope (VersionScope): live VFS identity.
             key (str): resolved mount-relative file name.
-            version (str | None): the refused token, or None when gone.
+            version (Measured | None): the refused token, ABSENT for a
+                file the session found missing, None to forget.
         """
         self._scopes.setdefault(scope, {})[key] = version
 
@@ -80,11 +87,14 @@ class VersionHistory:
         ):
             return
         held = self._scopes.setdefault(scope, {})
+        left: Measured | None = (
+            OwnRead.ABSENT if rec.op in REMOVAL_OPS else None
+        )
         if rec.op in SUBTREE_RETRACT_OPS:
             for name in set(held) | set(scope.pins):
                 if under_path(name, key):
-                    held[name] = None
+                    held[name] = left
         if rec.op in STAMP_FINGERPRINT_OPS:
             held[key] = rec
         else:
-            held[key] = None
+            held[key] = left

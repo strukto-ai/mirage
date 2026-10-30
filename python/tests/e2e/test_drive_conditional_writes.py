@@ -117,6 +117,13 @@ def _refusal(drive: Drive, verb: str) -> str:
     return f"mv: cannot move '{r}/f' to '{r}/g': '{r}/g' {STALE}\n"
 
 
+async def _refused_until_read(ws: Workspace, path: str) -> None:
+    code, _, err = await _run(ws, f"echo y > {path}")
+    assert (code, STALE in err) == (1, True), err
+    await _run(ws, f"cat {path}")
+    assert await _run(ws, f"echo y > {path}") == (0, "", "")
+
+
 def _fail() -> None:
     raise RuntimeError("injected server error")
 
@@ -309,7 +316,7 @@ async def test_a_destination_recreated_after_its_clear_stays_refused(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("verb", ["cp", "mv"])
-async def test_a_destination_a_folder_retook_after_its_clear_keeps_no_version(
+async def test_a_destination_a_folder_retook_after_its_clear_keeps_its_version(
     drive, workspace, verb
 ):
     ws = workspace()
@@ -327,24 +334,30 @@ async def test_a_destination_a_folder_retook_after_its_clear_keeps_no_version(
         _refusal(drive, verb),
     )
     drive.drop("g")
-    assert await _run(ws, f"echo y > {r}/g") == (0, "", "")
+    await _refused_until_read(ws, f"{r}/g")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("verb", ["cp", "mv"])
-async def test_a_destination_gone_since_its_read_is_refused_once(
+async def test_a_destination_gone_since_its_read_lands_once_seen_gone(
     drive, workspace, verb
 ):
+    # Box answers the copy's own look from its cached listing, which still
+    # names g, so only the refusal's fresh look sees it gone.
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/g")
     drive.drop("g")
-    assert await _run(ws, f"{verb} {r}/f {r}/g") == (
-        1,
-        "",
-        _refusal(drive, verb),
-    )
-    assert (drive.fake.read("f"), drive.fake.read("g")) == (b"one\n", None)
+    if isinstance(drive.fake, FakeBox):
+        assert await _run(ws, f"{verb} {r}/f {r}/g") == (
+            1,
+            "",
+            _refusal(drive, verb),
+        )
+        assert (drive.fake.read("f"), drive.fake.read("g")) == (
+            b"one\n",
+            None,
+        )
     assert await _run(ws, f"{verb} {r}/f {r}/g") == (0, "", "")
     assert drive.fake.read("g") == b"one\n"
 
@@ -520,7 +533,7 @@ async def test_box_rm_r_reports_a_web_link_it_may_not_delete(drive, workspace):
 @pytest.mark.asyncio
 @BOX
 @pytest.mark.parametrize("verb", ["cp", "mv"])
-async def test_a_box_destination_a_web_link_retook_keeps_no_version(
+async def test_a_box_destination_a_web_link_retook_keeps_its_version(
     drive, workspace, verb
 ):
     ws = workspace()
@@ -537,7 +550,7 @@ async def test_a_box_destination_a_web_link_retook_keeps_no_version(
         _refusal(drive, verb),
     )
     drive.drop("g")
-    assert await _run(ws, "echo y > /box/g") == (0, "", "")
+    await _refused_until_read(ws, "/box/g")
 
 
 @pytest.mark.asyncio
@@ -687,7 +700,7 @@ async def test_a_dropbox_destination_a_folder_took_is_refused_with_no_delete(
         b"x\n",
     )
     drive.drop("g")
-    assert await _run(ws, "echo y > /dbx/g") == (0, "", "")
+    await _refused_until_read(ws, "/dbx/g")
 
 
 @pytest.mark.asyncio

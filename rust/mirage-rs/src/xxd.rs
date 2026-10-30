@@ -88,12 +88,13 @@ struct Dump {
 
 impl Dump {
     fn row(&mut self, row: &[u8], out: &mut Vec<u8>) {
-        let address = if self.uppercase {
-            format!("{:08X}: ", self.offset)
-        } else {
-            format!("{:08x}: ", self.offset)
-        };
-        out.extend_from_slice(address.as_bytes());
+        let start = out.len();
+        let count = (u64::BITS - self.offset.leading_zeros()).div_ceil(4).max(8) as usize;
+        crate::integer::digits(self.offset, 16, count, out);
+        if self.uppercase {
+            out[start..].make_ascii_uppercase();
+        }
+        out.extend_from_slice(b": ");
         let width = self.cols * 2 + self.cols.div_ceil(self.group) - 1;
         let start = out.len();
         for (index, group) in row.chunks(self.group).enumerate() {
