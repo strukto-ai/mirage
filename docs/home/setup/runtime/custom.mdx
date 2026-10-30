@@ -1,0 +1,210 @@
+---
+title: Custom runtime
+description: Run a program Mirage does not ship by writing your own runtime in Python or TypeScript and naming it from YAML.
+icon: code
+---
+
+A runtime is a class that extends `Runtime`. It names the programs it
+captures and implements one entry point. You ship it as a file next to your
+workspace YAML and name it by file and class, with no host program to change:
+
+```yaml
+runtimes:
+  - name: ./sqlite_runtime.py:SqliteRuntime     # TypeScript: ./sqlite_runtime.mjs:SqliteRuntime
+    config:
+      binary: sqlite3
+  - workspace
+```
+
+The part before the colon is a file path, relative to the YAML file, or an
+importable module (`mypkg.runtimes:SqliteRuntime`). The part after it is the
+class. Mirage loads the file, checks that the class is a `Runtime` subclass and
+builds it with the entry's `captures` and `config`, like a runtime it ships.
+Loading runs the file's top-level code in the Mirage process, so name only
+code you trust.
+
+## Choose an entry point
+
+| Implement | Receives | For |
+| --- | --- | --- |
+| `run_process` / `runProcess`, with `ProcessExecutorMixin` / `[PROCESS_EXECUTOR]` | one program's argv, as words | wrapping a binary or a service that runs one program |
+| `run_line` / `runLine`, with `LineExecutorMixin` / `[LINE_EXECUTOR]` | a whole shell line in `ctx.flags["c"]` | a shell of its own: a container, a VM, an SSH machine |
+| `interpret`, on a `LanguageRuntime` subclass | the code of a `python3` or `node` program | an interpreter for a language Mirage routes |
+
+A runtime captures the program names you give it. `@external` captures any
+program Mirage cannot resolve itself, and `@line` takes every line; only a line
+executor can take `@line`, and only a line or process executor can take
+`@external`.
+
+## Reach files through `ctx.vfs`
+
+The program your runtime starts cannot see a mount. Read and write workspace
+files through `ctx.vfs`, the session's files. Each call goes through the
+workspace dispatcher, so mount modes, profiles, policy and the cache apply to
+it as they apply to `cat`. A runtime that opens host paths directly skips all of
+them.
+
+Read with `raw` when you copy a file out to write it back: it returns the
+stored bytes, not a form a `filetype` registration renders.
+
+## Example: sqlite3 on a workspace database
+
+This runtime runs the host's `sqlite3` on a database that lives in a mount. It
+copies the database out through `ctx.vfs`, runs `sqlite3` on the copy and writes
+it back when it changed.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python sqlite_runtime.py
+    import asyncio
+    import posixpath
+    import tempfile
+    from dataclasses import dataclass
+    from pathlib import Path
+
+    from mirage import Context, PathSpec, ProcessExecutorMixin, RunResult, Runtime, RuntimeConfig
+    from mirage.io.types import materialize
+
+
+    @dataclass(frozen=True, slots=True)
+    class SqliteConfig(RuntimeConfig):
+        binary: str = "sqlite3"
+        readonly: bool = False
+
+
+    class SqliteRuntime(Runtime[None], ProcessExecutorMixin[None]):
+        name = "sqlite"
+        captures = ("sqlite3",)
+        config_cls = SqliteConfig
+        config: SqliteConfig
+
+        async def run_process(self, engine, paths, texts, ctx: Context, output=None, errors=None) -> RunResult:
+            args = texts[1:]
+            options = ["-readonly"] if self.config.readonly else []
+            at = next((i for i, a in enumerate(args) if not a.startswith("-")), None)
+            stdin = await materialize(ctx.stdin) if ctx.stdin is not None else b""
+            if at is None:
+                return await self._sqlite(options + args, stdin)
+            database = posixpath.normpath(posixpath.join(ctx.cwd.virtual, args[at]))
+            try:
+                before = await ctx.vfs.read(database, raw=True)
+            except FileNotFoundError:
+                before = b""
+            with tempfile.TemporaryDirectory() as tmp:
+                local = Path(tmp) / "db.sqlite"
+                local.write_bytes(before)
+                result = await self._sqlite(options + args[:at] + [str(local)] + args[at + 1 :], stdin)
+                after = local.read_bytes()
+            if not self.config.readonly and after != before:
+                await ctx.vfs.write(database, after)
+            return result
+
+        async def _sqlite(self, argv: list[str], stdin: bytes) -> RunResult:
+            proc = await asyncio.create_subprocess_exec(
+                self.config.binary, *argv,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            out, err = await proc.communicate(stdin)
+            return RunResult(stdout=out, stderr=err or None, exit_code=proc.returncode or 0)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```javascript sqlite_runtime.mjs
+    import { spawn } from 'node:child_process'
+    import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+    import { tmpdir } from 'node:os'
+    import { join, posix } from 'node:path'
+    import { PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-node'
+
+    export class SqliteRuntime extends Runtime {
+      [PROCESS_EXECUTOR] = true
+      name = 'sqlite'
+
+      constructor(options = {}) {
+        super(options, ['sqlite3'], ['binary', 'readonly'])
+      }
+
+      async runProcess(_engine, _paths, texts, ctx) {
+        const binary = this.config.binary ?? 'sqlite3'
+        const readonly = this.config.readonly === true
+        const args = texts.slice(1)
+        const options = readonly ? ['-readonly'] : []
+        const at = args.findIndex((a) => !a.startsWith('-'))
+        const stdin = await collect(ctx.stdin)
+        if (at === -1) return sqlite(binary, [...options, ...args], stdin)
+        const database = posix.resolve(ctx.cwd.virtual, args[at])
+        let before = new Uint8Array()
+        try {
+          before = await ctx.vfs.read(database, { raw: true })
+        } catch (err) {
+          if (err?.code !== 'ENOENT') throw err
+        }
+        const tmp = await mkdtemp(join(tmpdir(), 'sqlite-runtime-'))
+        try {
+          const local = join(tmp, 'db.sqlite')
+          await writeFile(local, before)
+          const result = await sqlite(binary, [...options, ...args.slice(0, at), local, ...args.slice(at + 1)], stdin)
+          const after = new Uint8Array(await readFile(local))
+          if (!readonly && !Buffer.from(after).equals(Buffer.from(before))) {
+            await ctx.vfs.write(database, after)
+          }
+          return result
+        } finally {
+          await rm(tmp, { recursive: true, force: true })
+        }
+      }
+    }
+
+    // collect() reads stdin to bytes; sqlite() spawns the binary and
+    // resolves { stdout, stderr, exitCode }. Both are in the full example.
+    ```
+  </Tab>
+</Tabs>
+
+In TypeScript the third constructor argument lists the config keys the runtime
+accepts. In Python the config class's fields do. Either way, an unknown key in
+the YAML fails when the workspace loads.
+
+With `/data` a writable RAM mount and `/archive` a read-only disk folder, the
+agent types `sqlite3` and the YAML decides where it runs:
+
+```bash
+$ sqlite3 /data/shop.db 'select count(*) from orders'
+3
+$ sqlite3 -json /data/shop.db 'select * from orders' | jq -r '.[].item'
+desk
+chair
+shelf
+$ echo 'select sum(total) from orders;' | sqlite3 /data/shop.db
+245
+$ cd /data && sqlite3 shop.db "insert into orders values (4, 'lamp', 30)"
+$ sqlite3 /data/shop.db 'select count(*) from orders'
+4
+$ sqlite3 /archive/2025.db "insert into orders values (9, 'x', 1)"
+sqlite3: [Errno 30] Read-only file system: '/archive/2025.db'
+```
+
+The output pipes into workspace commands, stdin reaches the program, a relative
+path resolves against the session's directory, and the read-only mount refuses
+the write-back. The refusal's wording is the host's: TypeScript prints
+`sqlite3: mount /archive/ is read-only`.
+
+The complete examples, with the YAML and a script that runs these lines, are in
+[`examples/python/runtime/custom`](https://github.com/strukto-ai/mirage/tree/main/examples/python/runtime/custom)
+and
+[`examples/typescript/runtime/custom`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/runtime/custom).
+
+## Reach
+
+A runtime declares `reach`: `workspace` when `ctx.vfs` is its only way to
+files, `process` or `remote` when its code can act around that gate. The
+default is `process`, and that is the honest answer for this example: `sqlite3`
+runs on the host and could open any host file it is pointed at. Declare a
+narrower reach only when it is true. Embedders read it to decide whether
+"agent code cannot bypass mount modes and policy" holds for the workspace.
+
+## Next
+
+[Routing](/home/setup/runtime/overview#routing) orders your runtime among the
+others, and [Route Runtime](/home/policy/route-runtime) picks one per command
+line.

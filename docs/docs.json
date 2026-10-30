@@ -300,7 +300,8 @@
                   "home/setup/runtime/sandbox/e2b",
                   "home/setup/runtime/sandbox/ssh"
                 ]
-              }
+              },
+              "home/setup/runtime/custom"
             ]
           },
           {

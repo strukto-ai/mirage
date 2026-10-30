@@ -1,0 +1,22 @@
+# A runtime Mirage does not ship, named from yaml by file and class. The
+# path is relative to this file. sqlite3 goes to SqliteRuntime; everything
+# else (cat, ls, jq, ...) stays in the workspace.
+#
+#   pnpm -C examples/typescript exec tsx runtime/custom/custom_runtime.ts
+
+mode: WRITE
+
+mounts:
+  /data:
+    vfs: ram
+  /archive:
+    vfs: disk
+    mode: read
+    config:
+      root: ${ARCHIVE_DIR}
+
+runtimes:
+  - name: ./sqlite_runtime.mjs:SqliteRuntime
+    config:
+      binary: sqlite3
+  - workspace
