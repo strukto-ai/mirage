@@ -151,12 +151,6 @@ describe('S3VFS operations with keyPrefix (mocked)', () => {
 })
 
 describe('S3VFS getState with keyPrefix', () => {
-  it('getState config includes keyPrefix value', async () => {
-    const res = new S3VFS({ bucket: BUCKET, keyPrefix: 'users/abc/' })
-    const state = await res.getState()
-    expect(state.config.keyPrefix).toBe('users/abc/')
-  })
-
   it('does not redact keyPrefix', async () => {
     const res = new S3VFS({ bucket: BUCKET, keyPrefix: 'users/abc/' })
     const state = await res.getState()

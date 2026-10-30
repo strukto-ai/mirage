@@ -315,6 +315,7 @@ testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
 markers = [
     "network: tests that require network access",
+    "runtime_assets: tests requiring the downloaded CPython WASI or QuickJS build",
     "no_host_override: skip the tests/server/conftest autouse MIRAGE_ALLOWED_HOSTS=* override",
     "no_auth_override: skip the tests/server/conftest autouse MIRAGE_AUTH_MODE=local-with-no-token override",
 ]

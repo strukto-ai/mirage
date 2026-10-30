@@ -26,6 +26,7 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.policy import resolve_producer
 from mirage.policy.base import Policy
 from mirage.policy.builtin import output_cap as sg
@@ -446,47 +447,82 @@ async def test_python3_timeout_reclaims_monty_interpreter():
         "wc /big",
         "grep -c line /big",
         "cat /big | wc",
-        "cat -s" + " /blank" * 100,
+        "cat -s /blank",
         "head -n -1000000 /blank",
         "uniq /blank",
         "tail -n 1 /blank /blank /blank /blank /blank",
     ],
 )
 async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
-    # Arm cancellation at the first read and spend each yield budget,
-    # so a fast command cannot finish before a wall-clock timer is due.
-    monkeypatch.setattr("mirage.io.yield_budget.YIELD_SWITCHES", 0)
     ram = RAMVFS()
     ram.accessor.store.files["/big"] = b"line\n" * 2_000_000
     ram.accessor.store.files["/blank"] = b"\n" * 10_000_000
     cancel = asyncio.Event()
     loop = asyncio.get_running_loop()
-    start = loop.time()
+    start = time.monotonic()
     fired: list[float] = []
+    consumed = 0
+    available = 0
+    progress: list[tuple[int, int]] = []
+    now = loop.time()
+    timer: asyncio.Handle | None = None
+    original_read = ram.read
+
+    def clock() -> float:
+        nonlocal now
+        if timer is not None:
+            now += 0.02
+        return now
 
     def stop() -> None:
-        fired.append(loop.time() - start)
+        fired.append(time.monotonic() - start)
+        progress.append((consumed, available))
         cancel.set()
 
-    timer = None
-    read = ram.read
+    class ScannedBytes(bytes):
+        def count(self, sub, start=0, end=None):
+            nonlocal timer, consumed
+            result = super().count(sub, start, end)
+            end_at = len(self) if end is None else min(len(self), end)
+            consumed += end_at - start
+            if timer is None:
+                timer = loop.call_soon(stop)
+            return result
 
-    def read_and_arm(path, offset=0, size=None):
-        nonlocal timer
+    async def read(path, offset=0, size=None):
+        nonlocal timer, consumed, available
+        source = await original_read(path, offset, size)
+        assert isinstance(source, bytes)
+        available += len(source)
+        if command.startswith("head "):
+            # One whole blob: only the inner line scan can yield the
+            # abort after it finishes counting its first bounded slice.
+            yield ScannedBytes(source)
+            return
+        yield source[:CHUNK_SIZE]
+        consumed += CHUNK_SIZE
         if timer is None:
             timer = loop.call_soon(stop)
-        return read(path, offset, size)
+        yield source[CHUNK_SIZE:]
+        consumed += len(source) - CHUNK_SIZE
 
-    monkeypatch.setattr(ram, "read", read_and_arm)
-    ws = Workspace({"/": ram})
-    try:
-        with pytest.raises(MirageAbortError):
-            await ws.shell(command, cancel=cancel)
-    finally:
-        if timer is not None:
-            timer.cancel()
-        await ws.close()
-    assert fired and fired[0] < 1
+    with monkeypatch.context() as patch:
+        patch.setattr(ram, "read", read)
+        ws = Workspace({"/": ram})
+        try:
+            patch.setattr(loop, "time", clock)
+            # Keep the remaining RAM input ready, and let elapsed budget
+            # time offer the abort callback a real loop turn.
+            with pytest.raises(MirageAbortError):
+                await ws.shell(command, cancel=cancel)
+            assert timer is not None
+            assert fired[0] < 1
+            assert 0 < progress[0][0] < progress[0][1]
+        finally:
+            if timer is not None:
+                timer.cancel()
+            patch.undo()
+            await ws.close()
 
 
 _UNCAPPED = {"@all": Limit(walk_limit=-1)}

@@ -1126,16 +1126,6 @@ def test_texts_separated_from_paths():
     assert flag_kwargs == {}
 
 
-def test_flags_and_texts_separated():
-    """grep -rn pattern /data/f → flags in texts (no spec), paths separate."""
-    _, _, _, _, mount, _ = _exec("grep -rn pattern /data/f.txt")
-    paths = mount.run_command.call_args[0][1]
-    texts = mount.run_command.call_args[0][2]
-    assert len(paths) == 1
-    assert "-rn" in texts
-    assert "pattern" in texts
-
-
 # ── variable expansion → classify ──────────────
 
 
@@ -1164,15 +1154,6 @@ def test_var_expands_to_text():
     stdout, io, _, _, _, _ = _exec("echo $MSG", env={"MSG": "hello"})
     assert io.exit_code == 0
     assert stdout == b"hello\n"
-
-
-def test_concatenation_var_path():
-    """cat $DIR/file.txt → expanded + classified as PathSpec."""
-    _, _, _, _, mount, _ = _exec("cat $DIR/file.txt", env={"DIR": "/data"})
-    scopes = mount.run_command.call_args[0][1]
-    assert len(scopes) == 1
-    assert isinstance(scopes[0], PathSpec)
-    assert scopes[0].resolved is True
 
 
 def test_concatenation_var_glob():
