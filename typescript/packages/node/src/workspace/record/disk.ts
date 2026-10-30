@@ -12,7 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import {
+  link,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  stat,
+  unlink,
+} from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { generationOf } from '@struktoai/mirage-core/workspace/record/types'
@@ -89,7 +100,7 @@ function isMissing(e: unknown): boolean {
  * The disk twin of `S3RecordClient`: a record is one file at
  * `{root}/{prefix}{name}.json`, written atomically (tmp, synced, then
  * rename(2)) so readers never see a torn record. The conditional write serializes
- * on a `{record}.lock` created with O_CREAT|O_EXCL, so compare and
+ * on a `{record}.lock` published by an exclusive hard link, so compare and
  * write hit the same stored version. Record names are percent-encoded
  * into filenames, so any id is safe. Mirrors the Python
  * DiskRecordClient byte-for-byte on disk.
@@ -208,23 +219,33 @@ export class DiskRecordClient {
     await this.releaseLock(fh, `${this.path(name)}.lock`)
   }
 
-  // O_CREAT|O_EXCL ('wx'): filesystem-atomic mutex, the git protocol.
-  // Local filesystems only (O_EXCL is unreliable on ancient NFS, the
-  // same caveat git ships with).
+  // Publish a complete owner before another local writer can observe the lock.
   private async acquireLock(lockPath: string): Promise<FileHandle | null> {
-    let fh: FileHandle
+    let candidate: string | null = `${lockPath}.${randomUUID()}.owner`
+    const fh = await open(candidate, 'wx')
+    let published = false
     try {
-      fh = await open(lockPath, 'wx')
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'EEXIST') return null
-      throw e
-    }
-    try {
-      await fh.write(String(process.pid))
+      await fh.writeFile(String(process.pid))
+      await fh.sync()
+      try {
+        await link(candidate, lockPath)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return null
+        throw error
+      }
+      published = true
+      await unlink(candidate)
+      candidate = null
       return fh
-    } catch (error) {
-      await this.releaseLock(fh, lockPath)
-      throw error
+    } finally {
+      if (candidate !== null) {
+        try {
+          await unlink(candidate)
+        } finally {
+          if (published) await this.releaseLock(fh, lockPath)
+          else await fh.close()
+        }
+      }
     }
   }
 

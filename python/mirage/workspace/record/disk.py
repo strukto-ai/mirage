@@ -23,6 +23,7 @@ from collections.abc import Iterable
 from itertools import count
 from typing import Any
 from urllib.parse import quote, unquote
+from uuid import uuid4
 
 import aiofiles
 import aiofiles.os
@@ -97,20 +98,36 @@ def prepare_directory(path: str) -> None:
 
 
 def _acquire_lock(lock_path: str) -> int | None:
-    """Create the lockfile with O_CREAT|O_EXCL; fd on success, None when
-    another writer holds it (filesystem-atomic mutex, the git protocol).
-    Local filesystems only: O_EXCL is unreliable on ancient NFS, the
-    same caveat git ships with."""
+    """Publish a complete owner with an exclusive hard link; fd on
+    success, None when another local writer holds it."""
+    candidate: str | None = f"{lock_path}.{uuid4().hex}.owner"
+    fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+    published = False
     try:
-        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        return None
-    try:
-        os.write(fd, str(os.getpid()).encode())
-    except BaseException:
-        _release_lock(fd, lock_path)
-        raise
-    return fd
+        owner = str(os.getpid()).encode()
+        while owner:
+            written = os.write(fd, owner)
+            if written == 0:
+                raise OSError(errno.EIO, "lock owner write made no progress")
+            owner = owner[written:]
+        os.fsync(fd)
+        try:
+            os.link(candidate, lock_path)
+        except FileExistsError:
+            return None
+        published = True
+        os.unlink(candidate)
+        candidate = None
+        return fd
+    finally:
+        if candidate is not None:
+            try:
+                os.unlink(candidate)
+            finally:
+                if published:
+                    _release_lock(fd, lock_path)
+                else:
+                    os.close(fd)
 
 
 def _reclaim_stale_lock(lock_path: str) -> bool:
@@ -201,7 +218,7 @@ class DiskRecordClient:
     The disk twin of ``S3RecordClient``: a record is one file at
     ``{root}/{prefix}{name}.json``, written atomically (tmp, synced,
     then rename(2)) so readers never see a torn record. The conditional
-    write serializes on a ``{record}.lock`` created with O_CREAT|O_EXCL,
+    write serializes on a ``{record}.lock`` published by an exclusive hard link,
     so compare and write hit the same stored version. Record names are
     percent-encoded into filenames, so any id is safe.
     """
