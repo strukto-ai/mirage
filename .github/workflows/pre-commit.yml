@@ -203,8 +203,10 @@ jobs:
             typescript/packages/core/src/utils/generated integ/fixtures/wc
 
       # Both hosts' rg type tables come from scripts/rg_types.toml.
+      # --selftest first: its input checks keep the two hosts' copies equal.
       - name: rg type table drift
         run: |
+          ./python/.venv/bin/python scripts/gen_rg_types.py --selftest
           ./python/.venv/bin/python scripts/gen_rg_types.py
           git diff --exit-code python/mirage/utils/generated/rg_types.py \
             typescript/packages/core/src/utils/generated/rg_types.ts

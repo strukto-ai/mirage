@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import argparse
 import pathlib
 import tomllib
 
@@ -37,12 +38,22 @@ PY_WIDTH = 79
 TS_WIDTH = 100
 
 
-# Written between quotes as they are, so each host reads the same glob.
+# Written between quotes as they are, so each host reads the same glob:
+# no quote or backslash, and nothing unprintable such as a line break.
 UNQUOTABLE = frozenset("\\\"'")
 
 
-def load() -> dict[str, list[str]]:
-    table = tomllib.loads(SOURCE.read_text())
+def quotable(glob: object) -> bool:
+    return (
+        isinstance(glob, str)
+        and glob.isprintable()
+        and bool(glob)
+        and not UNQUOTABLE & set(glob)
+    )
+
+
+def load(text: str) -> dict[str, list[str]]:
+    table = tomllib.loads(text)
     for name, globs in table.items():
         if not name.isalnum() or name == "all":
             raise SystemExit(
@@ -51,14 +62,38 @@ def load() -> dict[str, list[str]]:
         if not (
             isinstance(globs, list)
             and globs
-            and all(
-                isinstance(glob, str) and glob and not UNQUOTABLE & set(glob)
-                for glob in globs
-            )
+            and all(quotable(glob) for glob in globs)
             and len(set(globs)) == len(globs)
         ):
             raise SystemExit(f"{SOURCE.name}: {name}: want distinct globs")
     return {name: sorted(table[name]) for name in sorted(table)}
+
+
+def selftest() -> None:
+    """Prove load() refuses every table that would generate a broken or
+    diverging host module, and keeps a good one."""
+    assert load('py = ["*.pyi", "*.py"]') == {"py": ["*.py", "*.pyi"]}
+    for broken in (
+        'all = ["*.x"]',
+        'c-x = ["*.x"]',
+        "x = []",
+        'x = [""]',
+        'x = ["*.x", "*.x"]',
+        'x = ["*.a\\n*.b"]',
+        'x = ["*.a\\u0000"]',
+        'x = ["*.a\\tb"]',
+        "x = ['*.\"a']",
+        'x = ["*.\'a"]',
+        'x = ["*.\\\\[a"]',
+        "x = [1]",
+        'x = "*.x"',
+    ):
+        try:
+            load(broken)
+        except SystemExit:
+            continue
+        raise AssertionError(f"accepted: {broken}")
+    print("gen_rg_types selftest: ok")
 
 
 def py_entry(name: str, globs: list[str]) -> str:
@@ -82,7 +117,16 @@ def ts_entry(name: str, globs: list[str]) -> str:
 
 
 def main() -> None:
-    table = load()
+    parser = argparse.ArgumentParser(
+        description="Generate both hosts' rg file-type tables"
+    )
+    parser.add_argument(
+        "--selftest", action="store_true", help="Test the input checks"
+    )
+    if parser.parse_args().selftest:
+        selftest()
+        return
+    table = load(SOURCE.read_text())
     py_head = "\n".join(LICENSE_PY)
     py_note = "\n".join(f"# {line}" for line in NOTE.split("\n"))
     py_rows = "\n".join(py_entry(name, globs) for name, globs in table.items())
