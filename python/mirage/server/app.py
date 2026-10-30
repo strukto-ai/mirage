@@ -270,7 +270,6 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             listener.close()
             await listener.wait_closed()
         app.state.registry.draining = True
-        app.state.unregister_metrics()
         if app.state.graceful_timeout > 0:
             await app.state.registry.drain(app.state.graceful_timeout)
         try:
@@ -278,6 +277,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await app.state.jobs.close()
         finally:
             await app.state.registry.close_all()
+            app.state.unregister_metrics()
             if app.state.pid_file is not None:
                 await run_blocking(_remove_pid_file, app.state.pid_file)
 

@@ -216,13 +216,13 @@ export function buildApp(options: BuildAppOptions = {}) {
     if (gracefulTimeout > 0) await registry.drain(gracefulTimeout)
   })
   app.addHook('onClose', async () => {
-    unregisterMetrics()
     if (ssh.listener !== null) await ssh.listener.close()
     try {
       await mcp.close()
       await jobs.close()
     } finally {
       await registry.closeAll()
+      unregisterMetrics()
     }
   })
   return Object.assign(app, { registry, jobs, pidFile, ssh, mcp })

@@ -242,3 +242,20 @@ async def test_every_close_marks_the_server_shutting_down():
         assert app.state.registry in metrics_module._registries
     assert app.state.registry.draining
     assert app.state.registry not in metrics_module._registries
+
+
+@pytest.mark.asyncio
+async def test_metrics_report_the_work_a_shutdown_waits_for(monkeypatch):
+    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
+    seen = []
+    drain = app.state.registry.drain
+
+    async def watched(seconds: float) -> None:
+        seen.append(app.state.registry in metrics_module._registries)
+        await drain(seconds)
+
+    monkeypatch.setattr(app.state.registry, "drain", watched)
+    async with app.router.lifespan_context(app):
+        pass
+    assert seen == [True]
+    assert app.state.registry not in metrics_module._registries
