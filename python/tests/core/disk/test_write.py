@@ -262,6 +262,15 @@ async def test_a_slow_stream_still_shows_its_bytes_within_a_flush(tmp_path):
     assert (tmp_path / "file").read_bytes() == b"first\nsecond\n"
 
 
+async def _refuse(data):
+    raise OSError(errno.ENOSPC, "No space left on device")
+
+
+async def _refuse_slowly(data):
+    await asyncio.sleep(3 * STREAM_FLUSH_SECONDS)
+    await _refuse(data)
+
+
 @pytest.mark.asyncio
 async def test_a_failed_timed_write_stops_a_writer_waiting_on_input(
     tmp_path, monkeypatch
@@ -271,11 +280,7 @@ async def test_a_failed_timed_write_stops_a_writer_waiting_on_input(
 
     async def full(*args, **kwargs):
         f = await opened(*args, **kwargs)
-
-        async def refuse(data):
-            raise OSError(errno.ENOSPC, "No space left on device")
-
-        f.write = refuse
+        f.write = _refuse
         return f
 
     async def stalled():
@@ -301,4 +306,30 @@ async def test_a_failed_timed_write_stops_a_writer_waiting_on_input(
         asyncio.get_running_loop().time() - started < 10 * STREAM_FLUSH_SECONDS
     )
     assert closed == [True]
+    assert asyncio.current_task().cancelling() == 0
+
+
+@pytest.mark.asyncio
+async def test_input_ending_during_a_failed_timed_write_reports_the_error(
+    tmp_path, monkeypatch
+):
+    opened = disk_write.aiofiles.open
+
+    async def slow_and_full(*args, **kwargs):
+        f = await opened(*args, **kwargs)
+        f.write = _refuse_slowly
+        return f
+
+    async def brief():
+        yield b"first\n"
+        await asyncio.sleep(1.5 * STREAM_FLUSH_SECONDS)
+
+    monkeypatch.setattr(disk_write.aiofiles, "open", slow_and_full)
+    with pytest.raises(OSError) as caught:
+        await write(
+            DiskAccessor(tmp_path),
+            PathSpec.from_str_path("/file", vfs_path="file"),
+            brief(),
+        )
+    assert caught.value.errno == errno.ENOSPC
     assert asyncio.current_task().cancelling() == 0

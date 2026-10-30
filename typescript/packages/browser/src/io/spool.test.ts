@@ -20,6 +20,10 @@ function bytes(length: number, seed: number): Uint8Array {
   return Uint8Array.from({ length }, (_, at) => (at * 31 + seed) % 251)
 }
 
+function same(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((byte, at) => byte === right[at])
+}
+
 async function collect(spool: ByteSpool): Promise<Uint8Array> {
   const parts: Uint8Array[] = []
   for await (const part of spool.stream()) parts.push(part)
@@ -35,29 +39,29 @@ async function collect(spool: ByteSpool): Promise<Uint8Array> {
 describe('browser spool store', () => {
   it('spills past the memory limit and reads back what it holds', async () => {
     const spool = new ByteSpool(1024)
-    const first = bytes(700_000, 1)
-    const second = bytes(123_457, 2)
+    const first = bytes(300_000, 1)
+    const second = bytes(23_457, 2)
     await spool.append(first)
     await spool.append(second)
     const whole = new Uint8Array(first.length + second.length)
     whole.set(first)
     whole.set(second, first.length)
-    expect(await collect(spool)).toEqual(whole)
-    expect(await spool.read(262_100, 300)).toEqual(whole.subarray(262_100, 262_400))
+    expect(same(await collect(spool), whole)).toBe(true)
+    expect(same(await spool.read(262_100, 300), whole.subarray(262_100, 262_400))).toBe(true)
     await spool.close()
   })
 
   it('rewrites a window across blocks in place', async () => {
     const spool = new ByteSpool(1024)
-    const data = bytes(600_000, 3)
+    const data = bytes(300_000, 3)
     await spool.append(data)
     const patch = bytes(5000, 9)
     await spool.write(260_000, patch)
     data.set(patch, 260_000)
-    expect(await collect(spool)).toEqual(data)
+    expect(same(await collect(spool), data)).toBe(true)
     const body = await spool.body('fetch')
     expect(body).toBeInstanceOf(Blob)
-    expect(new Uint8Array(await (body as Blob).arrayBuffer())).toEqual(data)
+    expect(same(new Uint8Array(await (body as Blob).arrayBuffer()), data)).toBe(true)
     await spool.close()
   })
 })
