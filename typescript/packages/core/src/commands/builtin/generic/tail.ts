@@ -238,7 +238,7 @@ async function* tailFile(
     }
     if (readRange !== null && revisionFor(path.virtual) === null) {
       const info = await stat(path)
-      if (info.type === FileType.FILE && info.size !== null) {
+      if (info.type === FileType.FILE && info.size !== null && info.size > 0) {
         const size = info.size
         if (counts.byteCount !== null) {
           const offset = Math.max(0, size - Math.abs(counts.byteCount))
@@ -247,10 +247,11 @@ async function* tailFile(
         }
         let end = size
         let wanted = Math.abs(n)
+        let window = CHUNK_SIZE
         const budget = new YieldBudget()
         while (end > 0) {
           await budget.run()
-          const start = Math.max(0, end - CHUNK_SIZE)
+          const start = Math.max(0, end - window)
           const data = await materialize(readRange(path, start, end - start))
           if (data.byteLength !== end - start) break
           if (end === size && data.at(-1) === 10) wanted++
@@ -262,11 +263,12 @@ async function* tailFile(
           }
           if (wanted === 0 || start === 0) {
             const piece = wanted === 0 ? data.subarray(at + 1) : data
-            if (piece.length > 0) yield piece
+            yield* chunks(piece)
             yield* tailRange(readRange, path, end, size)
             return
           }
           end = start
+          window = Math.min(window * 2, 1 << 20)
         }
       }
     }

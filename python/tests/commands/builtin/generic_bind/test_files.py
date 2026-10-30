@@ -278,17 +278,30 @@ async def test_custom_reading_keeps_its_bytes_instead_of_raw_size_and_ranges():
         with with_reading(ctx, Reading(split=True, stream=rendered)) as run:
             files = command_files(run)
             assert not files.answers("read_range")
-            assert await file_size(files, run, opened=True)(_path("/f")) is None
-            assert await materialize(files.read(_path("/f"))) == b"raw rendered"
+            assert (
+                await file_size(files, run, opened=True)(_path("/f")) is None
+            )
+            assert (
+                await materialize(files.read(_path("/f"))) == b"raw rendered"
+            )
     assert backend.calls == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("size,now,expected", [(7, 7, 7), (7, 9, None), (0, 0, None)])
-async def test_opened_file_sizes_still_refuse_changed_and_pipe_sizes(size, now, expected):
-    ctx = _ctx(_answering(_st(size=size, mode=0o644), _st(size=now, mode=0o644)))
+@pytest.mark.parametrize(
+    "size,now,expected", [(7, 7, 7), (7, 9, None), (0, 0, None)]
+)
+async def test_opened_file_sizes_still_refuse_changed_and_pipe_sizes(
+    size, now, expected
+):
+    ctx = _ctx(
+        _answering(_st(size=size, mode=0o644), _st(size=now, mode=0o644))
+    )
     with _on_mount():
-        assert await file_size(command_files(ctx), ctx, opened=True)(_path("/f")) == expected
+        assert (
+            await file_size(command_files(ctx), ctx, opened=True)(_path("/f"))
+            == expected
+        )
 
 
 class TreeRAM(RAMVFS):

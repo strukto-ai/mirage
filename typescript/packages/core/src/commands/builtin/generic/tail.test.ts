@@ -1008,15 +1008,8 @@ it.each([
     }
   }
   await runWithMemory(new MemoryBudget(32 << 20, () => 0), async () => {
-    const result = await tailGeneric(
-      [spec('/d/log')],
-      [],
-      ctx({ ...flags }),
-      read,
-      stat,
-      range,
-    )
-    if (result === null) throw new Error("missing command result")
+    const result = await tailGeneric([spec('/d/log')], [], ctx({ ...flags }), read, stat, range)
+    if (result === null) throw new Error('missing command result')
     const [source, io] = result
     let seen = 0
     for await (const part of source as AsyncIterable<Uint8Array>) {
@@ -1028,3 +1021,27 @@ it.each([
   })
   expect(requested).toBeLessThanOrEqual(maximum + expected)
 })
+
+it.each([{ n: '1' }, { c: '4' }])(
+  'reads streamed bytes when stat reports zero: %j',
+  async (flags) => {
+    const read = async function* (): AsyncGenerator<Uint8Array> {
+      await Promise.resolve()
+      yield ENC.encode('first\nlast')
+    }
+    const result = await tailGeneric(
+      [spec('/pipe')],
+      [],
+      ctx(flags),
+      read,
+      () =>
+        Promise.resolve(new FileStat({ name: 'pipe', type: FileType.FILE, size: 0, mode: 0o600 })),
+      () => {
+        throw new Error('a zero-size stat does not establish a seekable file')
+      },
+    )
+    if (result === null) throw new Error('missing command result')
+    expect(await materialize(result[0])).toEqual(ENC.encode('last'))
+    expect(result[1].exitCode).toBe(0)
+  },
+)

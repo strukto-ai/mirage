@@ -298,7 +298,7 @@ export async function cmpGeneric(
       }
     }
     const [first, second] = operands
-    if (first === undefined || second === undefined) throw new Error("cmp inputs were not opened")
+    if (first === undefined || second === undefined) throw new Error('cmp inputs were not opened')
     const result = await compare(
       [first, second],
       {

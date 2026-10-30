@@ -428,11 +428,13 @@ async def _whole(read: Callable[..., Any], path: PathSpec) -> bytes:
 
 async def _tail_range(
     read: ReadStreamFn, path: PathSpec, offset: int, end: int
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     # A range-capable backend may return bytes, so bound the request too.
     while offset < end:
         size = min(1 << 20, end - offset)
-        async with aclosing(chunks(read(path, offset=offset, size=size))) as source:
+        async with aclosing(
+            chunks(read(path, offset=offset, size=size))
+        ) as source:
             async for part in source:
                 yield part
         offset += size
@@ -458,7 +460,11 @@ async def _tail_file(
                 return
         if read_range is not None and revision_for(path.virtual) is None:
             info = await stat(path)
-            if info.type == FileType.FILE and info.size is not None:
+            if (
+                info.type == FileType.FILE
+                and info.size is not None
+                and info.size > 0
+            ):
                 size = info.size
                 if counts.byte_count is not None:
                     offset = max(0, size - abs(counts.byte_count))
@@ -472,10 +478,11 @@ async def _tail_file(
                     return
                 end = size
                 wanted = abs(n)
+                window = CHUNK_SIZE
                 budget = YieldBudget()
                 while end > 0:
                     await budget.run()
-                    start = max(0, end - CHUNK_SIZE)
+                    start = max(0, end - window)
                     data = await materialize(
                         read_range(path, offset=start, size=end - start)
                     )
@@ -491,7 +498,8 @@ async def _tail_file(
                         wanted -= 1
                     if not wanted or start == 0:
                         if piece := data[at + 1 :] if not wanted else data:
-                            yield piece
+                            async for part in chunks(piece):
+                                yield part
                         if end < size:
                             async with aclosing(
                                 _tail_range(read_range, path, end, size)
@@ -500,6 +508,7 @@ async def _tail_file(
                                     yield part
                         return
                     end = start
+                    window = min(window * 2, 1 << 20)
     raw = read(path)
     if inspect.isawaitable(raw):
         raw = await raw
@@ -925,8 +934,8 @@ async def tail_generic(
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
         read_range (ReadStreamFn | None): Bound byte-window reader
-            called as ``read_range(path, offset, size)``, for a follow
-            that only wants what the file gained; None reads whole.
+            called as ``read_range(path, offset, size)``, for a seekable
+            tail or a follow that only wants what the file gained.
         last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]
             | None): the mount's ``last_lines`` called as
             ``last_lines(path, n)``; None, or an answer of None, reads

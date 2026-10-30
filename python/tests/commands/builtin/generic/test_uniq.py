@@ -9,10 +9,10 @@ from mirage.commands.builtin.generic.uniq import (
     uniq_generic,
 )
 from mirage.commands.errors import UsageError
-from mirage.io.memory import MemoryBudget, run_with_memory
-from mirage.types import PathSpec
 from mirage.commands.spec.types import FlagValue
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import ByteSource, IOResult
+from mirage.types import PathSpec
 
 
 def _unused_read_stream(_accessor, _path):

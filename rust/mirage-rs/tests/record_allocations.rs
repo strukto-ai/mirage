@@ -512,7 +512,7 @@ fn checksum_lists_stay_bounded() {
 }
 
 fn giant_record_capacity_is_released() {
-    let mut stream = mirage_rs::open("uniq", br#"{"count":false,"repeated":false,"unique":false,"skip_fields":0,"skip_chars":0,"check_chars":null,"ignore_case":false,"all_repeated":null,"group":null,"zero_terminated":false}"#).unwrap();
+    let mut stream = mirage_rs::open("uniq", br#"{"count":false,"repeated":false,"unique":false,"ignore_case":false,"zero_terminated":false}"#).unwrap();
     let input = vec![b'x'; 16 * 1024];
     let baseline = LIVE.load(Ordering::Relaxed);
     let mut out = Vec::new();

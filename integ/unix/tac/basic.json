@@ -139,6 +139,24 @@
         "stdout": "c\nb\na\nba\n\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tac_regex_refuses_an_oversized_record_under_the_default_budget",
+      "seq": 17010006,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "printf '%33554433s' x | tac -r -s z",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "tac: memory exhausted\n"
+      },
+      "flags": [
+        "regex",
+        "separator"
+      ]
     }
   ]
 }

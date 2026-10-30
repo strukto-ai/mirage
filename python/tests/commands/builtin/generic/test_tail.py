@@ -1164,3 +1164,27 @@ async def test_seekable_tail_keeps_only_a_range_window(
 
     await run_with_memory(MemoryBudget(32 << 20, lambda: 0), run())
     assert requested <= maximum + expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flags", [{"n": "1"}, {"c": "4"}])
+async def test_a_zero_stat_size_does_not_hide_streamed_bytes(flags):
+    data = b"first\nlast"
+
+    async def stat(path):
+        return FileStat(name="pipe", type=FileType.FILE, size=0, mode=0o600)
+
+    async def read(path):
+        yield data
+
+    async def read_range(path, *, offset, size):
+        raise AssertionError(
+            f"a zero-size stat does not establish a seekable file: {data!r}"
+        )
+        yield b""
+
+    source, io = await tail_generic(
+        _paths("/pipe"), [], Context(flags=flags), stat, read, read_range
+    )
+    assert await _drain(source) == b"last"
+    assert io.exit_code == 0

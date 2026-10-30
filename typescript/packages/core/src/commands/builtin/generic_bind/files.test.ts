@@ -248,15 +248,16 @@ describe('fileSize', () => {
     expect(calls).toEqual([])
   })
 
-  it.each([[7, 7, 7], [7, 9, null], [0, 0, null]])(
-    'checks opened size %s against current size %s',
-    async (size, now, expected) => {
-      const ctx = contextFor(answering(stat({ size, mode: 0o644 }), stat({ size: now, mode: 0o644 })))
-      await runWithMountGate('/', MountMode.WRITE, async () => {
-        expect(await fileSize(commandFiles(ctx), ctx, true)(at('/f'))).toBe(expected)
-      })
-    },
-  )
+  it.each([
+    [7, 7, 7],
+    [7, 9, null],
+    [0, 0, null],
+  ])('checks opened size %s against current size %s', async (size, now, expected) => {
+    const ctx = contextFor(answering(stat({ size, mode: 0o644 }), stat({ size: now, mode: 0o644 })))
+    await runWithMountGate('/', MountMode.WRITE, async () => {
+      expect(await fileSize(commandFiles(ctx), ctx, true)(at('/f'))).toBe(expected)
+    })
+  })
 
   it.each([
     ['a store file', stat({ size: 7 }), undefined, false, false, 7],

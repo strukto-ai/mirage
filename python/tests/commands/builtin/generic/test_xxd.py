@@ -22,8 +22,8 @@ from mirage.commands.builtin.generic.xxd import (
     xxd_generic,
 )
 from mirage.commands.config import Context
-from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.commands.spec.types import FlagValue
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 
@@ -162,7 +162,12 @@ async def test_reverse_patches_a_file_larger_than_the_memory_budget():
 
     async def run():
         _, io = await xxd_generic(
-            _flags({"r": True}), [F, target], [], Context(flags={"r": True}), read, write
+            _flags({"r": True}),
+            [F, target],
+            [],
+            Context(flags={"r": True}),
+            read,
+            write,
         )
         assert io.exit_code == 0
 

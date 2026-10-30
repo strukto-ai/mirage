@@ -308,7 +308,12 @@ async def test_verbose_known_sizes_emit_before_eof_and_close_both_inputs():
         return 64 << 20
 
     out, io = await cmp_generic(
-        _flags({"verbose": True}), paths, [], Context(flags={"verbose": True}), stream, length_of=size
+        _flags({"verbose": True}),
+        paths,
+        [],
+        Context(flags={"verbose": True}),
+        stream,
+        length_of=size,
     )
     try:
         first = await anext(out)
