@@ -1117,3 +1117,50 @@ async def test_a_polled_follow_reads_its_first_print_whole():
     chunks = await _drain_for(stream, 0.15)
     await grower
     assert b"".join(chunks) == b"b\nc\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,expected,maximum",
+    [
+        ({"n": "2"}, 16, 16384),
+        ({"c": "1000"}, 1000, 1000),
+        ({"n": str(2 << 20)}, 16 << 20, 17 << 20),
+    ],
+)
+async def test_seekable_tail_keeps_only_a_range_window(
+    flags, expected, maximum
+):
+    size = 40 << 20
+    requested = 0
+    block = b"1234567\n" * 2048
+
+    async def stat(path):
+        return FileStat(name="log", type=FileType.FILE, size=size)
+
+    async def read(path):
+        raise AssertionError("a known-size range reader must not scan forward")
+        yield b""
+
+    async def read_range(path, *, offset, size):
+        nonlocal requested
+        assert size <= 1 << 20
+        requested += size
+        for at in range(offset, offset + size, len(block)):
+            count = min(len(block), offset + size - at)
+            shift = at % 8
+            yield (block + block[:8])[shift : shift + count]
+
+    async def run():
+        source, io = await tail_generic(
+            _paths("/d/log"), [], Context(flags=flags), stat, read, read_range
+        )
+        seen = 0
+        async for part in source:
+            assert len(part) <= 16384
+            seen += len(part)
+        assert seen == expected
+        assert io.exit_code == 0
+
+    await run_with_memory(MemoryBudget(32 << 20, lambda: 0), run())
+    assert requested <= maximum + expected

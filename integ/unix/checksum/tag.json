@@ -109,6 +109,20 @@
         "tag",
         "c"
       ]
+    },
+    {
+      "id": "checksum_check_tagged_names_and_unterminated_list",
+      "seq": 17010004,
+      "command": "printf x > '/data/stream check'; sha256sum --tag '/data/stream check' > /data/stream_sums; printf '\\n' >> /data/stream_sums; sha256sum -c /data/stream_sums; rm '/data/stream check' /data/stream_sums",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/stream check: OK\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk"
+      ]
     }
   ]
 }

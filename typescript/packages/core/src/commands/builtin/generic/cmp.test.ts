@@ -226,7 +226,7 @@ describe('the streamed compare', () => {
   it('stops the reads at a difference', async () => {
     const pulled: string[] = []
     const files = { [P1.virtual]: ['ab\nc', 'd', 'never'], [P2.virtual]: ['ab', '\ncX', 'never'] }
-    const ctx = { flags: {}, stdin: null } as unknown as Context
+    const ctx = { flags: {}, stdin: null, cwd: PathSpec.fromStrPath('/') } as unknown as Context
     const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, pulled))
     expect([DEC.decode(await materialize(src)), io.exitCode]).toEqual([
       '/F/one /F/two differ: char 5, line 2\n',
@@ -243,7 +243,7 @@ describe('the streamed compare', () => {
     [[], ['x'], 'which is empty'],
   ])('ends at the shorter file: %#', async (first, second, err) => {
     const files = { [P1.virtual]: first, [P2.virtual]: second }
-    const ctx = { flags: {}, stdin: null } as unknown as Context
+    const ctx = { flags: {}, stdin: null, cwd: PathSpec.fromStrPath('/') } as unknown as Context
     const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, []))
     expect(src).toBeNull()
     expect([DEC.decode(await materialize(io.stderr)), io.exitCode]).toEqual([
@@ -268,4 +268,39 @@ describe('the streamed compare', () => {
     const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, pulled), sizeOf)
     expect([src, io.exitCode, pulled.length > 0]).toEqual([null, code, read])
   })
+})
+
+it('prints verbose known-size differences before EOF and closes both inputs', async () => {
+  const reads = [0, 0]
+  const closed = [false, false]
+  async function* read(path: PathSpec): AsyncGenerator<Uint8Array> {
+    const side = path === P2 ? 1 : 0
+    try {
+      await Promise.resolve()
+      for (let i = 0; i < 4096; i++) {
+        reads[side] = (reads[side] ?? 0) + 1
+        yield new Uint8Array(16384).fill(65 + side)
+      }
+    } finally {
+      closed[side] = true
+    }
+  }
+  const [source, io] = await cmpGeneric(
+    [P1, P2],
+    [],
+    { flags: { verbose: true }, stdin: null, cwd: PathSpec.fromStrPath('/') } as Context,
+    read,
+    undefined,
+    () => Promise.resolve(64 << 20),
+  )
+  const iterator = (source as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+  try {
+    const first = await iterator.next()
+    expect(DEC.decode(first.value as Uint8Array).startsWith('       1 101 102\n')).toBe(true)
+    expect(Math.max(...reads)).toBeLessThan(10)
+  } finally {
+    await iterator.return?.()
+  }
+  expect(closed).toEqual([true, true])
+  expect(io.exitCode).toBe(1)
 })

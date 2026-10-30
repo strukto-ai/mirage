@@ -20,7 +20,13 @@ import { recordSeparator } from '../utils/lines.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
-import { openStream, runStream, type OpenStream } from '../../../rs/stream.ts'
+import {
+  chainOutput,
+  closeStream,
+  openStream,
+  runStream,
+  type OpenStream,
+} from '../../../rs/stream.ts'
 import { PathSpec, type JsonValue } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
@@ -321,38 +327,76 @@ async function mergeSpools(
   signal?: AbortSignal,
 ): Promise<ByteSpool> {
   const output = new ByteSpool()
-  const readers = runs.map((run) => chunks(run.stream(), signal))
-  const budget = new YieldBudget(signal)
+  const engine = await openStream('sort', { ...config, mode: 'merge', inputs: runs.length })
   try {
-    const stream = await openStream('sort', { ...config, mode: 'merge', inputs: runs.length })
-    // A call merges a bounded amount and leaves the stream busy with the
-    // rest, so the loop yields between steps.
-    const add = async (produced: Uint8Array): Promise<void> => {
-      if (produced.byteLength > 0) await output.append(produced)
-      while (stream.busy()) {
-        const piece = stream.drain()
-        if (piece.byteLength > 0) await output.append(piece)
-        await budget.run()
-      }
-      await budget.run()
-    }
-    try {
-      for (let index = stream.wants(); index !== null; index = stream.wants()) {
-        const reader = readers[index]
-        if (reader === undefined) throw new Error('missing merge input')
-        const next = await reader.next()
-        await add(next.done === true ? stream.endInput(index) : stream.feedInput(index, next.value))
-      }
-      await add(stream.finish())
-    } finally {
-      stream.close()
-    }
+    await output.fill(
+      chainOutput(
+        engine,
+        runs.map((run) => run.stream()),
+        signal,
+      ),
+    )
     return output
   } catch (error) {
     await output.close()
     throw error
   } finally {
-    for (const reader of readers) await reader.return?.(undefined)
+    await closeStream(engine)
+    for (const run of runs) await run.close()
+  }
+}
+
+async function mergeOperands(
+  paths: PathSpec[],
+  read: (path: PathSpec) => AsyncIterable<Uint8Array>,
+  stdin: ByteSource | null,
+  config: Readonly<Record<string, JsonValue>>,
+  signal?: AbortSignal,
+): Promise<ByteSpool | Uint8Array> {
+  const stream = stdinStream(read, stdin)
+  const state: { refused: [InputStage, Uint8Array] | null } = { refused: null }
+  const runs: ByteSpool[] = []
+  async function* source(path: PathSpec | null): AsyncGenerator<Uint8Array> {
+    try {
+      yield* chunks(path === null ? (stdin ?? new Uint8Array()) : stream(path), signal)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      const strerror = fsStrerror(err) ?? String(err)
+      const stage = inputStage(strerror, false)
+      state.refused = earliest(
+        state.refused,
+        stage,
+        stepFailure(stageVerb(stage, false), label(path), strerror),
+      )
+    }
+  }
+  try {
+    const operands = paths.length > 0 ? paths : [null]
+    for (let start = 0; start < operands.length; start += MERGE_FAN_IN) {
+      const group = operands.slice(start, start + MERGE_FAN_IN)
+      const engine = await openStream('sort', { ...config, mode: 'merge', inputs: group.length })
+      const output = new ByteSpool()
+      runs.push(output)
+      try {
+        await output.fill(
+          chainOutput(
+            engine,
+            group.map((path) => source(path)),
+            signal,
+          ),
+        )
+      } finally {
+        await closeStream(engine)
+      }
+    }
+    if (state.refused !== null) return state.refused[1]
+    while (runs.length > 1) {
+      const group = runs.slice(0, MERGE_FAN_IN)
+      const merged = await mergeSpools(group, config, signal)
+      runs.splice(0, group.length, merged)
+    }
+    return runs.pop() ?? new ByteSpool()
+  } finally {
     for (const run of runs) await run.close()
   }
 }
@@ -367,13 +411,11 @@ async function externalRecords(
 ): Promise<ByteSpool | Uint8Array> {
   const separator = recordSeparator(parsed.zeroTerminated)
   const config = streamConfig(cfg, parsed.zeroTerminated)
+  if (parsed.merge) return mergeOperands(paths, stream, stdin, config, signal)
   const levels: ByteSpool[][] = [[]]
   let refused: [InputStage, Uint8Array] | null = null
-  let merges = 0
   const budget = new YieldBudget(signal)
-  const sorter = parsed.merge
-    ? null
-    : await openStream('sort', { ...config, mode: 'sort', run_bytes: SORT_RUN_BYTES })
+  const sorter = await openStream('sort', { ...config, mode: 'sort', run_bytes: SORT_RUN_BYTES })
   async function addRun(initial: ByteSpool): Promise<void> {
     let run = initial
     for (let level = 0; ; level++) {
@@ -382,7 +424,6 @@ async function externalRecords(
       if (group.length < MERGE_FAN_IN) return
       levels[level] = []
       run = await mergeSpools(group, config, signal)
-      merges += 1
     }
   }
   // While the stream is busy each drain is one bounded step of a run and
@@ -409,66 +450,50 @@ async function externalRecords(
     const inputs: (PathSpec | null)[] = paths.length > 0 ? paths : [null]
     for (const path of inputs) {
       const source = path === null ? (stdin ?? new Uint8Array()) : stream(path)
-      let run: ByteSpool | null = parsed.merge ? new ByteSpool() : null
       let last = separator
       try {
         for await (const chunk of chunks(source, signal)) {
           if (chunk.byteLength === 0) continue
           last = chunk[chunk.byteLength - 1] ?? separator
-          if (run !== null) await run.append(chunk)
-          else if (sorter !== null) {
-            sorter.feed(chunk)
-            await addSorted(sorter)
-          }
-        }
-        // Each input's last record ends at its end, as GNU reads it.
-        if (sorter !== null && last !== separator) {
-          sorter.feed(Uint8Array.of(separator))
+          sorter.feed(chunk)
           await addSorted(sorter)
         }
-        if (run !== null) {
-          await addRun(run)
-          run = null
+        // Each input's last record ends at its end, as GNU reads it.
+        if (last !== separator) {
+          sorter.feed(Uint8Array.of(separator))
+          await addSorted(sorter)
         }
       } catch (error) {
         if (!isFsError(error)) throw error
         const strerror = fsStrerror(error) ?? String(error)
-        const stage = inputStage(strerror, !parsed.merge)
+        const stage = inputStage(strerror, true)
         refused = earliest(
           refused,
           stage,
           stepFailure(stageVerb(stage, false), label(path), strerror),
         )
         if (stage === InputStage.ACCESS) break
-      } finally {
-        if (run !== null) await run.close()
       }
     }
     if (refused !== null) return refused[1]
-    if (sorter !== null) {
-      sorter.finish()
-      await addSorted(sorter)
-    }
+    sorter.finish()
+    await addSorted(sorter)
     let runs = [...levels].reverse().flat()
     while (runs.length > 1) {
       const next: ByteSpool[] = []
       for (let start = 0; start < runs.length; start += MERGE_FAN_IN) {
         const mergedRun = await mergeSpools(runs.slice(start, start + MERGE_FAN_IN), config, signal)
-        merges += 1
         levels.push([mergedRun])
         next.push(mergedRun)
       }
       runs = next
     }
-    let output = runs[0] ?? new ByteSpool()
-    // A single -m input is still merged alone: -u's adjacent duplicates go
-    // and a last record gets its separator; merged inputs had both.
-    if (parsed.merge && merges === 0) output = await mergeSpools([output], config, signal)
+    const output = runs[0] ?? new ByteSpool()
     for (const level of levels) for (const run of level) if (run !== output) await run.close()
     levels.length = 0
     return output
   } finally {
-    sorter?.close()
+    await closeStream(sorter)
     for (const level of levels) for (const run of level) await run.close()
   }
 }

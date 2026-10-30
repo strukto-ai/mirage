@@ -91,6 +91,7 @@ impl Fold {
             out.extend_from_slice(&self.line);
             out.push(b'\n');
             self.line.clear();
+            crate::release_capacity(&mut self.line);
             self.started = false;
             self.column = 0;
             return;
@@ -112,11 +113,13 @@ impl Fold {
                     out.extend_from_slice(&self.line[..blank]);
                     out.push(b'\n');
                     self.line.drain(..blank);
+                    crate::release_capacity(&mut self.line);
                     self.started = !self.line.is_empty();
                     (self.column, self.last) = self.recount();
                     continue;
                 }
                 out.append(&mut self.line);
+                crate::release_capacity(&mut self.line);
             }
             out.push(b'\n');
             self.started = false;

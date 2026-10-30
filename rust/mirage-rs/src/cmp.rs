@@ -11,6 +11,8 @@ struct Config {
     #[serde(deserialize_with = "latin1_list")]
     names: Vec<Vec<u8>>,
     piped: [bool; 2],
+    #[serde(default)]
+    sizes: [Option<u64>; 2],
     skip: [u64; 2],
     limit: Option<u64>,
     #[serde(default)]
@@ -24,7 +26,8 @@ struct Config {
 /// GNU cmp over two inputs fed side by side: each is skipped, cut at -n,
 /// and compared in lock step, so without -l the reads stop at the first
 /// difference. -l lists every one, its offset column sized by what each
-/// file held, so its rows wait for both inputs to end.
+/// file held. Known sizes let rows drain immediately; unknown file sizes
+/// defer the width until both inputs end.
 struct Cmp {
     config: Config,
     skip: [u64; 2],
@@ -37,6 +40,7 @@ struct Cmp {
     rows: Vec<(u64, u8, u8)>,
     row: usize,
     width: usize,
+    known_width: bool,
     decided: bool,
     status: i32,
     output: Vec<u8>,
@@ -50,6 +54,11 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         return Err(StreamError::new("cmp compares two inputs"));
     }
     let skip = config.skip;
+    let known_width = (0..2).all(|i| config.piped[i] || config.sizes[i].is_some());
+    let most = (0..2)
+        .filter(|i| !config.piped[*i])
+        .filter_map(|i| config.sizes[i].map(|size| size.saturating_sub(skip[i])))
+        .fold(config.limit.unwrap_or(INTMAX), u64::min);
     let decided = config.limit == Some(0);
     Ok(Box::new(Cmp {
         config,
@@ -62,7 +71,8 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         last: None,
         rows: Vec::new(),
         row: 0,
-        width: 0,
+        width: most.to_string().len(),
+        known_width,
         decided,
         status: 0,
         output: Vec::new(),
@@ -171,7 +181,7 @@ impl Cmp {
             return;
         }
         let [first, second] = self.taken;
-        if self.rows.is_empty() && first == second {
+        if self.status == 0 && first == second {
             self.decide(0);
             return;
         }
@@ -179,7 +189,9 @@ impl Cmp {
             .filter(|index| !self.config.piped[*index])
             .map(|index| self.taken[index])
             .fold(self.config.limit.unwrap_or(INTMAX), u64::min);
-        self.width = most.to_string().len();
+        if !self.known_width {
+            self.width = most.to_string().len();
+        }
         if first != second {
             let shorter = usize::from(second < first);
             self.eof(shorter, first.min(second));
@@ -212,11 +224,12 @@ impl Cmp {
             if self.held[0].is_empty() || self.held[1].is_empty() {
                 return;
             }
-            let count = self.held[0].len().min(self.held[1].len());
+            let count = self.held[0].len().min(self.held[1].len()).min(WINDOW / 16);
             let (a, b) = (&self.held[0][..count], &self.held[1][..count]);
             if self.config.verbose {
                 for (at, (x, y)) in a.iter().zip(b).enumerate() {
                     if x != y {
+                        self.status = 1;
                         self.rows.push((self.compared + at as u64 + 1, *x, *y));
                     }
                 }
@@ -236,6 +249,9 @@ impl Cmp {
             self.compared += count as u64;
             self.held[0].drain(..count);
             self.held[1].drain(..count);
+            if self.known_width && !self.rows.is_empty() {
+                return;
+            }
         }
     }
 
@@ -261,6 +277,11 @@ impl Cmp {
             }
             out.push(b'\n');
             self.row += 1;
+        }
+        if self.row == self.rows.len() {
+            self.rows.clear();
+            self.rows.shrink_to(WINDOW / 16);
+            self.row = 0;
         }
     }
 }
@@ -310,15 +331,22 @@ impl Stream for Cmp {
     }
 
     fn busy(&self) -> bool {
-        self.cursor < self.output.len() || (self.decided && self.row < self.rows.len())
+        self.cursor < self.output.len()
+            || ((self.decided || self.known_width) && self.row < self.rows.len())
+            || (!self.decided && self.wants().is_none())
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         if self.cursor < self.output.len() {
             out.extend_from_slice(&self.output[self.cursor..]);
             self.cursor = self.output.len();
-        } else if self.decided {
-            self.render(out);
+        } else {
+            if self.rows.is_empty() && !self.decided {
+                self.process();
+            }
+            if self.decided || self.known_width {
+                self.render(out);
+            }
         }
         Ok(())
     }

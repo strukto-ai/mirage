@@ -154,6 +154,15 @@ async function* drained(
   }
 }
 
+export function formatMessage(message: Record<string, JsonValue>): Uint8Array {
+  const stream = openStreamSync('rg_format', {})
+  try {
+    return stream.feed(ENC.encode(JSON.stringify(message)))
+  } finally {
+    stream.close()
+  }
+}
+
 export function encodingFor(label: string): string | null {
   const stream = openStreamSync('rg_format', {})
   try {

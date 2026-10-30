@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { ByteSpool } from '../../../io/spool.ts'
 import { runStream } from '../../../rs/stream.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -247,138 +250,127 @@ async function checkFile(
   algorithm: string,
   ctx: Context,
   flags: ChecksumFlags,
-): Promise<[string, string, number]> {
+): Promise<[ByteSource, ByteSource, number]> {
   const name = prog(algorithm)
-  const data = DEC.decode(await materialize(stream(p)))
   const listed = ctx.vfs !== undefined ? dispatchedReader(ctx.vfs.dispatch, stream) : stream
   // A list read from stdin names files on the mount the command runs on.
   const mountPrefix = isStdin(p) ? mountRoot(ctx) : mountPrefixOf(p.virtual, p.vfsPath)
   // GNU quotes its stdin name, which holds a space.
   const checkLabel =
     p.rawPath === '-' ? `'${STDIN_HEADER_NAME}'` : p.rawPath !== '' ? p.rawPath : p.virtual
-  const output: string[] = []
-  const errors: string[] = []
+  const output = new ByteSpool()
+  const errors = new ByteSpool()
   let verified = 0
   let mismatched = 0
   let readFailures = 0
   let malformed = 0
-  let lineno = 0
   let parsedAny = false
-  for (const line of data.split('\n')) {
-    lineno += 1
-    if (line.trim() === '') continue
-    const parsed = parseCheckLine(line, algorithm)
-    if (parsed === null) {
-      malformed += 1
-      if (flags.warn) {
-        errors.push(
-          `${name}: ${checkLabel}: ${String(lineno)}: improperly formatted ` +
-            `${tag(algorithm)} checksum line`,
+  try {
+    for await (const { line: lineno, parsed } of checkLines(stream(p), algorithm)) {
+      if (parsed === null) {
+        malformed += 1
+        if (flags.warn) {
+          await checkNote(
+            errors,
+            `${name}: ${checkLabel}: ${String(lineno)}: improperly formatted ` +
+              `${tag(algorithm)} checksum line`,
+          )
+        }
+        continue
+      }
+      parsedAny = true
+      const [expected, filename, named] = parsed
+      let digest: string
+      try {
+        digest = await hashSource(
+          listed(checkTarget(filename, ctx.cwd.virtual, mountPrefix)),
+          named,
+        )
+      } catch (error) {
+        if (!isWalkError(error)) throw error
+        // GNU --ignore-missing skips only absence; a permission or
+        // transport-shaped failure still reports and fails the check.
+        if (flags.ignoreMissing && isMissingPath(error)) continue
+        const strerror =
+          fsStrerror(error) ?? (error instanceof Error ? error.message : String(error))
+        await checkNote(errors, `${name}: ${filename}: ${strerror}`)
+        if (!flags.status) await checkNote(output, `${filename}: FAILED open or read`)
+        readFailures += 1
+        continue
+      }
+      if (digest === expected) {
+        verified += 1
+        if (!flags.status && !flags.quiet) await checkNote(output, `${filename}: OK`)
+      } else {
+        if (!flags.status) await checkNote(output, `${filename}: FAILED`)
+        mismatched += 1
+      }
+    }
+    // GNU's terminal diagnostics and WARNING block, in its order (pinned
+    // against coreutils 9.7): a file with no properly formatted line is
+    // fatal on its own, even under --status. "No file was verified" means
+    // --ignore-missing left zero OK lines — mismatches included — and
+    // follows the summaries; --status silences it (and the summaries, but
+    // not the per-file strerror lines) while its exit 1 stands.
+    if (!parsedAny) {
+      await checkNote(errors, `${name}: ${checkLabel}: no properly formatted checksum lines found`)
+      return [await output.output(), await errors.output(), 1]
+    }
+    const nothingVerified = flags.ignoreMissing && verified === 0
+    if (!flags.status) {
+      if (malformed > 0) {
+        await checkNote(
+          errors,
+          `${name}: WARNING: ${countNoun(malformed, '1 line is', 'lines are')} improperly formatted`,
         )
       }
-      continue
+      if (readFailures > 0) {
+        await checkNote(
+          errors,
+          `${name}: WARNING: ${countNoun(readFailures, '1 listed file', 'listed files')} could not be read`,
+        )
+      }
+      if (mismatched > 0) {
+        await checkNote(
+          errors,
+          `${name}: WARNING: ${countNoun(mismatched, '1 computed checksum', 'computed checksums')} did NOT match`,
+        )
+      }
+      if (nothingVerified) {
+        await checkNote(errors, `${name}: ${checkLabel}: no file was verified`)
+      }
     }
-    parsedAny = true
-    const [expected, filename, named] = parsed
-    let digest: string
-    try {
-      digest = await hashSource(listed(checkTarget(filename, ctx.cwd.virtual, mountPrefix)), named)
-    } catch (error) {
-      if (!isWalkError(error)) throw error
-      // GNU --ignore-missing skips only absence; a permission or
-      // transport-shaped failure still reports and fails the check.
-      if (flags.ignoreMissing && isMissingPath(error)) continue
-      const strerror = fsStrerror(error) ?? (error instanceof Error ? error.message : String(error))
-      errors.push(`${name}: ${filename}: ${strerror}`)
-      if (!flags.status) output.push(`${filename}: FAILED open or read`)
-      readFailures += 1
-      continue
-    }
-    if (digest === expected) {
-      verified += 1
-      if (!flags.status && !flags.quiet) output.push(`${filename}: OK`)
-    } else {
-      if (!flags.status) output.push(`${filename}: FAILED`)
-      mismatched += 1
-    }
+    const failed =
+      mismatched > 0 || readFailures > 0 || nothingVerified || (flags.strict && malformed > 0)
+    return [await output.output(), await errors.output(), failed ? 1 : 0]
+  } catch (err) {
+    await output.close()
+    await errors.close()
+    throw err
   }
-  // GNU's terminal diagnostics and WARNING block, in its order (pinned
-  // against coreutils 9.7): a file with no properly formatted line is
-  // fatal on its own, even under --status. "No file was verified" means
-  // --ignore-missing left zero OK lines — mismatches included — and
-  // follows the summaries; --status silences it (and the summaries, but
-  // not the per-file strerror lines) while its exit 1 stands.
-  if (!parsedAny) {
-    errors.push(`${name}: ${checkLabel}: no properly formatted checksum lines found`)
-    return ['', `${errors.join('\n')}\n`, 1]
-  }
-  const nothingVerified = flags.ignoreMissing && verified === 0
-  if (!flags.status) {
-    if (malformed > 0) {
-      errors.push(
-        `${name}: WARNING: ${countNoun(malformed, '1 line is', 'lines are')} improperly formatted`,
-      )
-    }
-    if (readFailures > 0) {
-      errors.push(
-        `${name}: WARNING: ${countNoun(readFailures, '1 listed file', 'listed files')} could not be read`,
-      )
-    }
-    if (mismatched > 0) {
-      errors.push(
-        `${name}: WARNING: ${countNoun(mismatched, '1 computed checksum', 'computed checksums')} did NOT match`,
-      )
-    }
-    if (nothingVerified) {
-      errors.push(`${name}: ${checkLabel}: no file was verified`)
-    }
-  }
-  const failed =
-    mismatched > 0 || readFailures > 0 || nothingVerified || (flags.strict && malformed > 0)
-  const stdout = output.length > 0 ? `${output.join('\n')}\n` : ''
-  const stderr = errors.length > 0 ? `${errors.join('\n')}\n` : ''
-  return [stdout, stderr, failed ? 1 : 0]
 }
 
-// GNU reads a check line as properly formatted only when its digest has the
-// algorithm's full length in hex; b2sum's length is the line's own.
-const HEX_DIGITS: Readonly<Record<string, number>> = {
-  md5: 32,
-  sha1: 40,
-  sha224: 56,
-  sha256: 64,
-  sha384: 96,
-  sha512: 128,
-}
+const CheckLine = z
+  .object({
+    line: z.number().int(),
+    parsed: z.tuple([z.string(), z.string(), z.string()]).nullable(),
+  })
+  .strict()
 
-// A check line's [digest, filename], in the GNU default format (`<hex>  NAME`
-// / `<hex> *NAME`) or the BSD/--tag one (`TAG (NAME) = <hex>`), matching what
-// GNU `*sum --check` auto-detects. `tagPattern` is a regex.
-function splitLine(line: string, tagPattern: string): [string, string] | null {
-  const tagged = new RegExp(`^${tagPattern} \\((.*)\\) = ([0-9a-fA-F]+)$`).exec(line)
-  if (tagged !== null) return [tagged[2] ?? '', tagged[1] ?? '']
-  const plain = /^([0-9a-fA-F]+) [ *](.*)$/.exec(line)
-  return plain === null ? null : [plain[1] ?? '', plain[2] ?? '']
-}
-
-// Split a checksum-file line into [expected, filename, algorithm]. A digest
-// must have its algorithm's full length in hex. A BLAKE2b line names its own
-// length, in its tag (`BLAKE2b-256`) or by its digest's width, a multiple of
-// 8 bits up to 512. Mirrors Python's _parse_check_line.
-function parseCheckLine(line: string, algorithm: string): [string, string, string] | null {
-  if (algorithm !== BLAKE2B) {
-    const split = splitLine(line, algorithm.toUpperCase())
-    if (split === null || split[0].length !== HEX_DIGITS[algorithm]) return null
-    return [split[0].toLowerCase(), split[1], algorithm]
+async function* checkLines(
+  source: ByteSource,
+  algorithm: string,
+): AsyncGenerator<z.infer<typeof CheckLine>> {
+  const lines = new AsyncLineIterator(runStream('digest', { algorithm, check_lines: true }, source))
+  try {
+    for await (const line of lines) yield CheckLine.parse(JSON.parse(DEC.decode(line)))
+  } finally {
+    await lines.discard()
   }
-  const split = splitLine(line, 'BLAKE2b(?:-[0-9]+)?')
-  if (split === null) return null
-  const [digest, name] = split
-  const bits = digest.length * 4
-  const named = /^BLAKE2b(?:-([0-9]+))? \(/.exec(line)
-  if (named !== null && bits !== Number(named[1] ?? 512)) return null
-  if (bits % 8 !== 0 || bits > 512) return null
-  return [digest.toLowerCase(), name, bits === 512 ? BLAKE2B : `${BLAKE2B}-${String(bits)}`]
+}
+
+async function checkNote(store: ByteSpool, line: string): Promise<void> {
+  await store.append(ENC.encode(`${line}\n`))
 }
 
 /**
@@ -398,35 +390,38 @@ export async function checksumGeneric(
   const parsed = parseFlags(ctx.flags, name)
   const stream = stdinStream(read, ctx.stdin)
   if (parsed.check) {
-    let output = ''
-    let errors = ''
+    const output = new ByteSpool()
+    const errors = new ByteSpool()
     let exitCode = 0
-    // Every operand is its own checksum list: GNU verifies each in turn
-    // and keeps going when one cannot be read; a directory operand reads
-    // as the literal "read error" (pinned on coreutils 9.7). With no
-    // operand the checksum list is stdin.
-    for (const p of paths.length > 0 ? paths : [STDIN_OPERAND]) {
-      let checked: [string, string, number]
-      try {
-        checked = await checkFile(stream, p, parsed.algorithm.split('-')[0] ?? '', ctx, parsed)
-      } catch (error) {
-        if (!isWalkError(error)) throw error
-        const label = p.rawPath !== '' ? p.rawPath : p.virtual
-        const detail = isEisdir(error)
-          ? 'read error'
-          : (fsStrerror(error) ?? (error instanceof Error ? error.message : String(error)))
-        errors += `${name}: ${label}: ${detail}\n`
-        exitCode = 1
-        continue
+    try {
+      // Every operand is its own checksum list: GNU verifies each in turn
+      // and keeps going when one cannot be read; a directory operand reads
+      // as the literal "read error" (pinned on coreutils 9.7). With no
+      // operand the checksum list is stdin.
+      for (const p of paths.length > 0 ? paths : [STDIN_OPERAND]) {
+        let checked: [ByteSource, ByteSource, number]
+        try {
+          checked = await checkFile(stream, p, parsed.algorithm.split('-')[0] ?? '', ctx, parsed)
+        } catch (error) {
+          if (!isWalkError(error)) throw error
+          const label = p.rawPath !== '' ? p.rawPath : p.virtual
+          const detail = isEisdir(error)
+            ? 'read error'
+            : (fsStrerror(error) ?? (error instanceof Error ? error.message : String(error)))
+          await checkNote(errors, `${name}: ${label}: ${detail}`)
+          exitCode = 1
+          continue
+        }
+        await output.fill(checked[0])
+        await errors.fill(checked[1])
+        if (checked[2] !== 0) exitCode = 1
       }
-      output += checked[0]
-      errors += checked[1]
-      if (checked[2] !== 0) exitCode = 1
+      return [await output.output(), new IOResult({ stderr: await errors.output(), exitCode })]
+    } catch (err) {
+      await output.close()
+      await errors.close()
+      throw err
     }
-    return [
-      output === '' ? null : ENC.encode(output),
-      new IOResult({ stderr: errors === '' ? null : ENC.encode(errors), exitCode }),
-    ]
   }
   return hashOperands(
     paths.length > 0 ? paths : [STDIN_OPERAND],

@@ -17,11 +17,14 @@ from contextlib import aclosing
 
 from pydantic import BaseModel, ConfigDict
 
-from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.io.stream import close_quietly
-from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.stream import OpenStream, open_stream
+from mirage.rs.stream import (
+    OpenStream,
+    close_stream,
+    open_stream,
+    stream_output_chunks,
+)
 from mirage.types import JsonValue
 
 
@@ -114,35 +117,27 @@ async def _codec_stream(
     source: AsyncIterator[bytes], config: Mapping[str, JsonValue]
 ) -> AsyncGenerator[bytes, None]:
     stream = open_stream("compress", config)
-    budget = YieldBudget()
-    async for data in source:
-        await budget.run()
-        for offset in range(0, len(data), CHUNK_SIZE):
-            await budget.run()
-            try:
-                output = stream.feed(data[offset : offset + CHUNK_SIZE])
-                for part in _output(stream, output):
-                    yield part
-                while stream.busy():
-                    await budget.run()
-                    for part in _output(stream, stream.drain()):
-                        yield part
-            except StreamRefusal as exc:
-                if exc.output:
-                    yield exc.output
-                raise ValueError(exc.message) from exc
-    await budget.run()
-    try:
-        for part in _output(stream, stream.finish()):
+
+    async def input_chunks() -> AsyncGenerator[bytes, None]:
+        async for part in source:
             yield part
-        while stream.busy():
-            await budget.run()
-            for part in _output(stream, stream.drain()):
-                yield part
+
+    try:
+        async with aclosing(
+            stream_output_chunks(stream, input_chunks(), owns_stream=False)
+        ) as parts:
+            async for data in parts:
+                for part in _output(stream, data):
+                    yield part
+        if failure := _failure(stream):
+            raise failure
     except StreamRefusal as exc:
         if exc.output:
             yield exc.output
         raise ValueError(exc.message) from exc
+    finally:
+        await close_stream(stream)
+        await close_quietly(source)
 
 
 async def gzip_compress_stream(
@@ -155,19 +150,18 @@ async def gzip_compress_stream(
         level (int): compression level.
         name (str): original basename.
     """
-    async with aclosing(chunks(source)) as bounded:
-        result = _codec_stream(
-            bounded,
-            {
-                "operation": "encode",
-                "format": "gzip",
-                "level": level,
-                "name": name,
-            },
-        )
-        async with aclosing(result):
-            async for part in result:
-                yield part
+    result = _codec_stream(
+        source,
+        {
+            "operation": "encode",
+            "format": "gzip",
+            "level": level,
+            "name": name,
+        },
+    )
+    async with aclosing(result):
+        async for part in result:
+            yield part
 
 
 async def gunzip_stream(
@@ -189,9 +183,6 @@ async def gunzip_stream(
             "passthrough": passthrough,
         },
     )
-    try:
-        async with aclosing(result):
-            async for part in result:
-                yield part
-    finally:
-        await close_quietly(source)
+    async with aclosing(result):
+        async for part in result:
+            yield part

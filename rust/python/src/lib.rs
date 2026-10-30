@@ -31,6 +31,7 @@ impl Stream {
         let result = py.detach(|| work(inner.as_mut(), out));
         let output = PyBytes::new(py, out);
         out.clear();
+        streams::release_capacity(out);
         match result {
             Ok(()) => Ok(output),
             Err(err) => Err(StreamError::new_err((err.message, output.unbind()))),

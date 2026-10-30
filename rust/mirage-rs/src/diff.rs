@@ -1,3 +1,7 @@
+use std::borrow::Cow;
+use std::collections::VecDeque;
+use std::ops::Range;
+
 use crate::{Stream, StreamError};
 use serde::Deserialize;
 use similar::{
@@ -54,9 +58,11 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         config,
         inputs: [Vec::new(), Vec::new()],
         ended: [false; 2],
-        output: Vec::new(),
+        pieces: VecDeque::new(),
+        records: [Vec::new(), Vec::new()],
+        groups: VecDeque::new(),
+        ops: VecDeque::new(),
         stderr: Vec::new(),
-        cursor: 0,
         status: 0,
         equal: true,
     }))
@@ -65,14 +71,38 @@ struct Diff {
     config: Config,
     inputs: [Vec<u8>; 2],
     ended: [bool; 2],
-    output: Vec<u8>,
+    pieces: VecDeque<Piece>,
+    records: [Vec<usize>; 2],
+    groups: VecDeque<Vec<DiffOp>>,
+    ops: VecDeque<DiffOp>,
     stderr: Vec<u8>,
-    cursor: usize,
     status: i32,
     equal: bool,
 }
 
-fn key(line: &&[u8], config: &Config) -> Vec<u8> {
+enum Piece {
+    Text(Cow<'static, [u8]>, usize),
+    Range {
+        input: usize,
+        bytes: Range<usize>,
+    },
+    Rows {
+        input: usize,
+        lines: Range<usize>,
+        prefix: &'static [u8],
+        hint: bool,
+        ed: bool,
+    },
+}
+
+fn key<'a>(line: &&'a [u8], config: &Config) -> Cow<'a, [u8]> {
+    if !config.ignore_case && !config.ignore_all_space && !config.ignore_space_change {
+        return Cow::Borrowed(if config.mode == Mode::Ed {
+            line.strip_suffix(b"\n").unwrap_or(line)
+        } else {
+            line
+        });
+    }
     let mut line = *line;
     let newline = line.ends_with(b"\n");
     if newline {
@@ -112,7 +142,7 @@ fn key(line: &&[u8], config: &Config) -> Vec<u8> {
     {
         out.push(b'\n');
     }
-    out
+    Cow::Owned(out)
 }
 fn address(range: std::ops::Range<usize>) -> String {
     if range.is_empty() {
@@ -121,133 +151,6 @@ fn address(range: std::ops::Range<usize>) -> String {
         (range.start + 1).to_string()
     } else {
         format!("{},{}", range.start + 1, range.end)
-    }
-}
-fn line(out: &mut Vec<u8>, prefix: &[u8], value: &[u8], hint: bool) {
-    out.extend_from_slice(prefix);
-    out.extend_from_slice(value);
-    if !value.ends_with(b"\n") {
-        out.push(b'\n');
-        if hint {
-            out.extend_from_slice(b"\\ No newline at end of file\n");
-        }
-    }
-}
-fn render_normal(out: &mut Vec<u8>, ops: &[DiffOp], old: &[&[u8]], new: &[&[u8]]) {
-    for op in ops {
-        if op.tag() == DiffTag::Equal {
-            continue;
-        }
-        let a = op.old_range();
-        let b = op.new_range();
-        let action = if a.is_empty() {
-            'a'
-        } else if b.is_empty() {
-            'd'
-        } else {
-            'c'
-        };
-        out.extend_from_slice(
-            format!("{}{}{}\n", address(a.clone()), action, address(b.clone())).as_bytes(),
-        );
-        for record in &old[a.clone()] {
-            line(out, b"< ", record, true);
-        }
-        if !a.is_empty() && !b.is_empty() {
-            out.extend_from_slice(b"---\n");
-        }
-        for record in &new[b] {
-            line(out, b"> ", record, true);
-        }
-    }
-}
-fn render_unified(
-    out: &mut Vec<u8>,
-    ops: &[DiffOp],
-    old: &[&[u8]],
-    new: &[&[u8]],
-    config: &Config,
-) {
-    let context = config
-        .context
-        .min(old.len().max(new.len()))
-        .min(usize::MAX / 2);
-    let groups = group_diff_ops(ops.to_vec(), context);
-    if groups.is_empty() {
-        return;
-    }
-    out.extend_from_slice(
-        format!(
-            "--- {}\n+++ {}\n",
-            if config.old_header.is_empty() {
-                &config.old_label
-            } else {
-                &config.old_header
-            },
-            if config.new_header.is_empty() {
-                &config.new_label
-            } else {
-                &config.new_header
-            }
-        )
-        .as_bytes(),
-    );
-    for group in groups {
-        if group.is_empty() {
-            continue;
-        }
-        out.extend_from_slice(format!("{}\n", UnifiedHunkHeader::new(&group)).as_bytes());
-        for op in group {
-            if op.tag() == DiffTag::Equal {
-                for record in &old[op.old_range()] {
-                    line(out, b" ", record, true);
-                }
-            } else {
-                for record in &old[op.old_range()] {
-                    line(out, b"-", record, true);
-                }
-                for record in &new[op.new_range()] {
-                    line(out, b"+", record, true);
-                }
-            }
-        }
-    }
-}
-fn render_ed(out: &mut Vec<u8>, ops: &[DiffOp], new: &[&[u8]]) {
-    for op in ops.iter().rev() {
-        if op.tag() == DiffTag::Equal {
-            continue;
-        }
-        let a = op.old_range();
-        let b = op.new_range();
-        let action = if a.is_empty() {
-            'a'
-        } else if b.is_empty() {
-            'd'
-        } else {
-            'c'
-        };
-        out.extend_from_slice(format!("{}{}\n", address(a), action).as_bytes());
-        if b.is_empty() {
-            continue;
-        }
-        let records = &new[b];
-        let mut ended = false;
-        for (i, record) in records.iter().enumerate() {
-            if *record == b".\n" || *record == b"." {
-                out.extend_from_slice(b"..\n.\ns/.//\n");
-                ended = true;
-                if i + 1 < records.len() {
-                    out.extend_from_slice(b"a\n");
-                    ended = false;
-                }
-            } else {
-                line(out, b"", record, false);
-            }
-        }
-        if !ended {
-            out.extend_from_slice(b".\n");
-        }
     }
 }
 impl Diff {
@@ -261,14 +164,15 @@ impl Diff {
             self.equal = self.inputs[0] == self.inputs[1];
             self.status = if self.equal { 0 } else { 1 };
             if !self.equal && !self.config.brief {
-                self.output.extend_from_slice(
+                self.text(
                     format!(
                         "Binary files {} and {} differ\n",
                         self.config.old_label, self.config.new_label
                     )
-                    .as_bytes(),
+                    .into_bytes(),
                 );
             }
+            self.release_inputs();
             return;
         }
         let old: Vec<&[u8]> = self.inputs[0].split_inclusive(|b| *b == b'\n').collect();
@@ -288,6 +192,7 @@ impl Diff {
                 old == new
             };
             self.status = if self.equal { 0 } else { 1 };
+            self.release_inputs();
             return;
         }
         let ops = if normalize {
@@ -313,12 +218,204 @@ impl Diff {
             }
         }
         if self.equal {
+            self.release_inputs();
             return;
         }
+        for (index, lines) in [&old, &new].into_iter().enumerate() {
+            let mut offset = 0;
+            self.records[index].push(0);
+            for line in lines {
+                offset += line.len();
+                self.records[index].push(offset);
+            }
+        }
         match self.config.mode {
-            Mode::Normal => render_normal(&mut self.output, &ops, &old, &new),
-            Mode::Unified => render_unified(&mut self.output, &ops, &old, &new, &self.config),
-            Mode::Ed => render_ed(&mut self.output, &ops, &new),
+            Mode::Unified => {
+                let context = self
+                    .config
+                    .context
+                    .min(old.len().max(new.len()))
+                    .min(usize::MAX / 2);
+                self.groups = group_diff_ops(ops, context).into();
+                if !self.groups.is_empty() {
+                    self.text(
+                        format!(
+                            "--- {}\n+++ {}\n",
+                            if self.config.old_header.is_empty() {
+                                &self.config.old_label
+                            } else {
+                                &self.config.old_header
+                            },
+                            if self.config.new_header.is_empty() {
+                                &self.config.new_label
+                            } else {
+                                &self.config.new_header
+                            },
+                        )
+                        .into_bytes(),
+                    );
+                }
+            }
+            Mode::Normal => self.ops = ops.into(),
+            Mode::Ed => self.ops = ops.into_iter().rev().collect(),
+        }
+    }
+
+    fn release_inputs(&mut self) {
+        self.inputs = [Vec::new(), Vec::new()];
+        self.records = [Vec::new(), Vec::new()];
+    }
+
+    fn text(&mut self, bytes: impl Into<Cow<'static, [u8]>>) {
+        self.pieces.push_back(Piece::Text(bytes.into(), 0));
+    }
+
+    fn rows(
+        &mut self,
+        input: usize,
+        lines: Range<usize>,
+        prefix: &'static [u8],
+        hint: bool,
+        ed: bool,
+    ) {
+        if !lines.is_empty() {
+            self.pieces.push_back(Piece::Rows {
+                input,
+                lines,
+                prefix,
+                hint,
+                ed,
+            });
+        }
+    }
+
+    fn prepare(&mut self) {
+        if self.ops.is_empty() {
+            if let Some(group) = self.groups.pop_front() {
+                self.text(format!("{}\n", UnifiedHunkHeader::new(&group)).into_bytes());
+                self.ops = group.into();
+                return;
+            }
+        }
+        let Some(op) = self.ops.pop_front() else {
+            return;
+        };
+        let a = op.old_range();
+        let b = op.new_range();
+        if self.config.mode == Mode::Unified {
+            if op.tag() == DiffTag::Equal {
+                self.rows(0, a, b" ", true, false);
+            } else {
+                self.rows(0, a, b"-", true, false);
+                self.rows(1, b, b"+", true, false);
+            }
+            return;
+        }
+        if op.tag() == DiffTag::Equal {
+            return;
+        }
+        let action = if a.is_empty() {
+            'a'
+        } else if b.is_empty() {
+            'd'
+        } else {
+            'c'
+        };
+        if self.config.mode == Mode::Normal {
+            self.text(
+                format!("{}{}{}\n", address(a.clone()), action, address(b.clone())).into_bytes(),
+            );
+            let both = !a.is_empty() && !b.is_empty();
+            self.rows(0, a, b"< ", true, false);
+            if both {
+                self.text(b"---\n".as_slice());
+            }
+            self.rows(1, b, b"> ", true, false);
+        } else {
+            self.text(format!("{}{}\n", address(a), action).into_bytes());
+            if !b.is_empty() {
+                let last = &self.inputs[1][self.records[1][b.end - 1]..self.records[1][b.end]];
+                let dot = last == b".\n" || last == b".";
+                self.rows(1, b, b"", false, true);
+                if !dot {
+                    self.text(b".\n".as_slice());
+                }
+            }
+        }
+    }
+
+    fn render(&mut self, out: &mut Vec<u8>) {
+        let end = out.len() + 65536;
+        let mut steps = 0;
+        while out.len() < end && self.busy() && steps < 4096 {
+            steps += 1;
+            let Some(piece) = self.pieces.pop_front() else {
+                self.prepare();
+                continue;
+            };
+            match piece {
+                Piece::Text(bytes, at) => {
+                    let to = bytes.len().min(at + end - out.len());
+                    out.extend_from_slice(&bytes[at..to]);
+                    if to < bytes.len() {
+                        self.pieces.push_front(Piece::Text(bytes, to));
+                    }
+                }
+                Piece::Range { input, mut bytes } => {
+                    let to = bytes.end.min(bytes.start + end - out.len());
+                    out.extend_from_slice(&self.inputs[input][bytes.start..to]);
+                    bytes.start = to;
+                    if !bytes.is_empty() {
+                        self.pieces.push_front(Piece::Range { input, bytes });
+                    }
+                }
+                Piece::Rows {
+                    input,
+                    mut lines,
+                    prefix,
+                    hint,
+                    ed,
+                } => {
+                    let bytes =
+                        self.records[input][lines.start]..self.records[input][lines.start + 1];
+                    let value = &self.inputs[input][bytes.clone()];
+                    lines.start += 1;
+                    let more = !lines.is_empty();
+                    if more {
+                        self.pieces.push_front(Piece::Rows {
+                            input,
+                            lines,
+                            prefix,
+                            hint,
+                            ed,
+                        });
+                    }
+                    if ed && (value == b".\n" || value == b".") {
+                        let text = if more {
+                            b"..\n.\ns/.//\na\n".as_slice()
+                        } else {
+                            b"..\n.\ns/.//\n".as_slice()
+                        };
+                        self.pieces.push_front(Piece::Text(text.into(), 0));
+                    } else {
+                        if !value.ends_with(b"\n") {
+                            let text = if hint {
+                                b"\n\\ No newline at end of file\n".as_slice()
+                            } else {
+                                b"\n".as_slice()
+                            };
+                            self.pieces.push_front(Piece::Text(text.into(), 0));
+                        }
+                        self.pieces.push_front(Piece::Range { input, bytes });
+                        if !prefix.is_empty() {
+                            self.pieces.push_front(Piece::Text(prefix.into(), 0));
+                        }
+                    }
+                }
+            }
+        }
+        if !self.busy() {
+            self.release_inputs();
         }
     }
 }
@@ -355,12 +452,10 @@ impl Stream for Diff {
         Ok(())
     }
     fn busy(&self) -> bool {
-        self.cursor < self.output.len()
+        !self.pieces.is_empty() || !self.ops.is_empty() || !self.groups.is_empty()
     }
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let end = self.cursor.saturating_add(65536).min(self.output.len());
-        out.extend_from_slice(&self.output[self.cursor..end]);
-        self.cursor = end;
+        self.render(out);
         Ok(())
     }
     fn status(&self) -> i32 {

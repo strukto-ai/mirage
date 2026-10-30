@@ -703,6 +703,7 @@ impl Grep {
             return;
         }
         input.pending.drain(..=scan.to);
+        crate::release_capacity(&mut input.pending);
         if input.finishing {
             self.summary(out);
         }
@@ -801,6 +802,7 @@ impl Stream for Grep {
             input.nul = true;
             if without_match {
                 input.pending.clear();
+                crate::release_capacity(&mut input.pending);
                 input.stop = Stop::Break;
                 return Ok(());
             }

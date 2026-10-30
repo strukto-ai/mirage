@@ -13,16 +13,41 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import json
+from dataclasses import dataclass
+from types import SimpleNamespace
+
 import pytest
 
-from mirage.commands.builtin.generic.expand import (
-    TabStops,
-    parse_flags,
-    read_tab_stops,
-)
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import open_stream
 from tests.commands.builtin.conftest import output_bytes as _bytes
 from tests.commands.builtin.conftest import ram_workspace as _ws
 from tests.commands.builtin.conftest import run_raw as _run_raw
+
+
+@dataclass(frozen=True)
+class TabStops:
+    stops: tuple[int, ...] = ()
+    extend: int = 0
+    increment: int = 0
+
+
+def read_tab_stops(occurrences: list[str], prog: str = "expand") -> TabStops:
+    try:
+        engine = open_stream(
+            "expand", {"tabs": occurrences, "initial_only": False}
+        )
+    except StreamRefusal as exc:
+        raise ValueError(exc.message) from exc
+    fields = json.loads(engine.metadata())
+    return TabStops(
+        tuple(fields["stops"]), fields["extend"], fields["increment"]
+    )
+
+
+def parse_flags(flags):
+    return SimpleNamespace(tabs=read_tab_stops([flags["tabs"]]))
 
 
 def test_expand_default_tab():

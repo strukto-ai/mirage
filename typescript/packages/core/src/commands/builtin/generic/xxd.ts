@@ -17,12 +17,13 @@ import { closeQuietly, primeStream } from '../../../io/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
-import { concat } from '../../../utils/bytes.ts'
-import { chunks } from '../../../io/cooperative.ts'
+import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
+import { ByteSpool } from '../../../io/spool.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { cInt, strtol } from '../utils/strtol.ts'
 import { singleChunk } from '../utils/operands.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
@@ -92,27 +93,17 @@ async function* xxdReverseStream(
   }
 }
 
-/**
- * Revert a hexdump into the stretches xxd writes into OUTFILE, each framed run
- * decoded as its bytes arrive. Each run lands at its offset, or where the last
- * one ended; runs that meet join one stretch, so a whole dump is one write at
- * 0. Mirrors Python's _reverse_segments.
- */
-async function reverseSegments(
-  source: AsyncIterable<Uint8Array>,
-  plain: boolean,
-): Promise<[number, Uint8Array][]> {
-  const segments: { start: number; end: number; parts: Uint8Array[] }[] = []
+/** Decode Rust's offset/length frames one bounded write at a time. */
+async function* reverseSegments(source: ByteSource): AsyncGenerator<[number, Uint8Array]> {
   const header = new Uint8Array(16)
   const view = new DataView(header.buffer)
   let held = 0
   let left = 0
-  let current: { start: number; end: number; parts: Uint8Array[] } = {
-    start: -1,
-    end: -1,
-    parts: [],
-  }
-  for await (const part of runStream('xxd', { mode: 'reverse', plain, segments: true }, source)) {
+  let start = 0
+  const pending = new Uint8Array(CHUNK_SIZE)
+  let pendingSize = 0
+  let pendingStart = 0
+  for await (const part of chunks(source)) {
     let at = 0
     while (at < part.byteLength) {
       if (left === 0) {
@@ -122,41 +113,55 @@ async function reverseSegments(
         at += taken
         if (held < header.byteLength) break
         held = 0
-        const start = Number(view.getBigUint64(0, true))
+        start = Number(view.getBigUint64(0, true))
         left = Number(view.getBigUint64(8, true))
-        if (current.end !== start) {
-          current = { start, end: start, parts: [] }
-          segments.push(current)
-        }
         continue
       }
-      const taken = Math.min(left, part.byteLength - at)
-      current.parts.push(part.slice(at, at + taken))
-      current.end += taken
+      if (pendingSize > 0 && start !== pendingStart + pendingSize) {
+        yield [pendingStart, pending.slice(0, pendingSize)]
+        pendingSize = 0
+      }
+      if (pendingSize === 0) pendingStart = start
+      const taken = Math.min(left, part.byteLength - at, CHUNK_SIZE - pendingSize)
+      pending.set(part.subarray(at, at + taken), pendingSize)
+      pendingSize += taken
+      start += taken
       at += taken
       left -= taken
+      if (pendingSize === CHUNK_SIZE) {
+        yield [pendingStart, pending.slice()]
+        pendingSize = 0
+      }
     }
   }
-  return segments.map(({ start, parts }): [number, Uint8Array] => [start, concat(parts)])
+  if (pendingSize > 0) yield [pendingStart, pending.slice(0, pendingSize)]
 }
 
-/**
- * A file's bytes with the stretches written into it, as pwrite does: the
- * bytes around each stretch stay, and the file grows only where one reaches
- * past its end, padded with NUL. Mirrors Python's _patched.
- */
-function patched(existing: Uint8Array, segments: [number, Uint8Array][]): Uint8Array {
-  let buf = existing.slice()
-  for (const [start, data] of segments) {
-    const end = start + data.byteLength
-    if (end > buf.byteLength) {
-      const grown = new Uint8Array(end)
-      grown.set(buf, 0)
-      buf = grown
+/** Patch a spillable copy so writes never truncate an input still read. */
+async function patched(existing: ByteSource, segments: ByteSource): Promise<ByteSource> {
+  let stored = new ByteSpool()
+  const budget = new YieldBudget()
+  try {
+    try {
+      await stored.fill(existing)
+    } catch (err) {
+      if (!isEnoent(err)) throw err
+      await stored.close()
+      stored = new ByteSpool()
     }
-    buf.set(data, start)
+    for await (const [start, data] of reverseSegments(segments)) {
+      const end = start + data.byteLength
+      while (stored.size < end) {
+        await budget.run()
+        await stored.append(new Uint8Array(Math.min(CHUNK_SIZE, end - stored.size)))
+      }
+      await stored.write(start, data)
+    }
+    return await stored.output()
+  } catch (err) {
+    await stored.close()
+    throw err
   }
-  return buf
 }
 
 /** `-s` as xxd reads it: `[+][-]offset`. `relative` (`+`) seeks from where
@@ -290,12 +295,20 @@ async function writeOutput(
     new IOResult({ stderr: ENC.encode(fsErrorLine('xxd', p, err)), exitCode }),
   ]
   const dump = await render()
-  let segments: [number, Uint8Array][] = []
+  let segments: ByteSource = new Uint8Array()
   let data: ByteSource = new Uint8Array(0)
   const reading = { failed: false }
   try {
-    if (dump === null) segments = await reverseSegments(source, plain)
-    else
+    if (dump === null) {
+      const stored = new ByteSpool()
+      try {
+        await stored.fill(runStream('xxd', { mode: 'reverse', plain, segments: true }, source))
+        segments = await stored.output()
+      } catch (err) {
+        await stored.close()
+        throw err
+      }
+    } else
       data = await primeStream(dump, () => {
         reading.failed = true
       })
@@ -310,26 +323,29 @@ async function writeOutput(
   }
   if (dump === null && pwriteBytes !== null) {
     try {
-      const stretches: [number, Uint8Array][] =
-        segments.length > 0 ? segments : [[0, new Uint8Array()]]
-      for (const [start, chunk] of stretches) {
+      let wrote = false
+      for await (const [start, chunk] of reverseSegments(segments)) {
         await pwriteBytes(target, chunk, start)
+        wrote = true
       }
+      if (!wrote) await pwriteBytes(target, new Uint8Array(), 0)
     } catch (err) {
       if (!isFsError(err)) throw err
       return failed(target, err, OPEN_OUTPUT_EXIT)
+    } finally {
+      await closeQuietly(segments)
     }
     return [null, new IOResult()]
   }
   if (dump === null) {
-    let existing: Uint8Array = new Uint8Array(0)
     try {
-      existing = await materialize(stream(target))
+      data = await patched(stream(target), segments)
     } catch (err) {
       if (!isFsError(err)) throw err
-      if (!isEnoent(err)) return failed(target, err, OPEN_OUTPUT_EXIT)
+      return failed(target, err, OPEN_OUTPUT_EXIT)
+    } finally {
+      await closeQuietly(segments)
     }
-    data = patched(existing, segments)
   }
   if (writeBytes === null) {
     await closeQuietly(data)

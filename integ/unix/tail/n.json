@@ -151,6 +151,20 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "tail_backwards_window_unterminated_suffix",
+      "seq": 17010002,
+      "command": "printf '%17000s' x > /data/stream_tail; printf '\\nlast' >> /data/stream_tail; tail -n 1 /data/stream_tail; echo; tail -n 2 /data/stream_tail | wc -c; tail -c 4 /data/stream_tail; echo; rm /data/stream_tail",
+      "expect": {
+        "exit": 0,
+        "stdout": "last\n17005\nlast\n",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk"
+      ]
     }
   ]
 }

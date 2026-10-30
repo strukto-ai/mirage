@@ -102,14 +102,34 @@ def sed_writes(flags: Mapping[str, FlagValue], texts: Sequence[str]) -> bool:
     scripts = fl.as_list("e") or list(texts[:1])
     if not scripts:
         return False
+    extended = fl.as_bool("E") or fl.as_bool("r")
+    options = tuple(scripts)
+    return _script_writes(options, extended)
+
+
+_write_checks: dict[tuple[tuple[str, ...], bool], bool] = {}
+
+
+def _script_writes(scripts: tuple[str, ...], extended: bool) -> bool:
+    cacheable = sum(len(script) for script in scripts) <= 4096
+    key = (scripts, extended)
+    if cacheable and (known := _write_checks.get(key)) is not None:
+        del _write_checks[key]
+        _write_checks[key] = known
+        return known
     engine = open_stream(
         "sed",
         {
             "pieces": [{"text": byte_view(script)} for script in scripts],
-            "extended": fl.as_bool("E") or fl.as_bool("r"),
+            "extended": extended,
         },
     )
-    return bool(json.loads(engine.metadata())["writes"])
+    writes = bool(json.loads(engine.metadata())["writes"])
+    if cacheable:
+        if len(_write_checks) >= 64:
+            del _write_checks[next(iter(_write_checks))]
+        _write_checks[key] = writes
+    return writes
 
 
 def _script_origins(

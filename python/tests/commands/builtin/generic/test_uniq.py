@@ -9,7 +9,9 @@ from mirage.commands.builtin.generic.uniq import (
     uniq_generic,
 )
 from mirage.commands.errors import UsageError
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import ByteSource
+from mirage.types import PathSpec
 
 
 def _unused_read_stream(_accessor, _path):
@@ -197,3 +199,34 @@ async def _one_byte_chunks(data: bytes) -> AsyncIterator[bytes]:
 async def test_uniq_groups_survive_one_byte_chunks(flags, expected):
     source = _one_byte_chunks(b"A\na\nA\nb\nC\nc")
     assert await _collect(source, flags=flags) == expected
+
+
+@pytest.mark.asyncio
+async def test_output_operand_spills_past_the_default_memory_budget():
+    chunk = b"a" * 8191 + b"\n" + b"b" * 8191 + b"\n"
+    source_done = False
+    written = 0
+
+    async def read(path):
+        nonlocal source_done
+        for _ in range(2176):
+            yield chunk
+        source_done = True
+
+    async def write(path, source):
+        nonlocal written
+        assert source_done
+        assert not isinstance(source, bytes)
+        async for part in source:
+            written += len(part)
+
+    async def run():
+        path = PathSpec.from_str_path("/same")
+        out, io = await uniq_generic(
+            [path, path], read_stream=read, write_bytes=write
+        )
+        assert out == b""
+        assert io.exit_code == 0
+
+    await run_with_memory(MemoryBudget(32 << 20, lambda: 0), run())
+    assert written == 34 << 20

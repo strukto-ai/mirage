@@ -47,6 +47,7 @@ fn call(
             return 1;
         };
         slot.out.clear();
+        mirage_rs::release_capacity(&mut slot.out);
         let input = &state.input[..len.min(state.input.len())];
         match f(slot.stream.as_mut(), input, &mut slot.out) {
             Ok(()) => 0,
@@ -187,6 +188,7 @@ pub extern "C" fn mirage_rs_test(handle: u32, len: usize) -> i32 {
             return -1;
         };
         slot.out.clear();
+        mirage_rs::release_capacity(&mut slot.out);
         match slot.stream.test(&state.input[..len.min(state.input.len())]) {
             Ok(answer) => i32::from(answer),
             Err(err) => {
@@ -235,6 +237,7 @@ pub extern "C" fn mirage_rs_take_stderr(handle: u32) -> i32 {
 pub extern "C" fn mirage_rs_request(handle: u32) -> i32 {
     with_slot(handle, -1, |slot| {
         slot.out.clear();
+        mirage_rs::release_capacity(&mut slot.out);
         let mut data = Vec::new();
         match slot.stream.request(&mut data) {
             Some(header) => {
@@ -267,6 +270,7 @@ pub extern "C" fn mirage_rs_stage(handle: u32, len: usize) -> i32 {
 pub extern "C" fn mirage_rs_respond(handle: u32, reply_len: usize) -> i32 {
     with_slot(handle, 1, |slot| {
         slot.out.clear();
+        mirage_rs::release_capacity(&mut slot.out);
         let staged = std::mem::take(&mut slot.staged);
         let (reply, data) = staged.split_at(reply_len.min(staged.len()));
         match slot.stream.respond(reply, data, &mut slot.out) {

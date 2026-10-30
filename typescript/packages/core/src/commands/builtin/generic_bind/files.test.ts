@@ -229,6 +229,35 @@ describe('the abort guard', () => {
 })
 
 describe('fileSize', () => {
+  it('keeps custom reading bytes instead of raw sizes and ranges', async () => {
+    const calls: string[] = []
+    const ctx = contextFor(keyed({ stored: { '/f': 'raw' } }, calls), {
+      row: { prefix: '/', kind: 'ram', mode: MountMode.WRITE, calls: new Set(['read_range']) },
+    })
+    await runWithMountGate('/', MountMode.WRITE, async () => {
+      expect(commandFiles(ctx).answers('read_range')).toBe(true)
+      const run = withReading(ctx, {
+        split: true,
+        stream: () => singleChunk(ENC.encode('raw rendered')),
+      })
+      const files = commandFiles(run)
+      expect(files.answers('read_range')).toBe(false)
+      expect(await fileSize(files, run, true)(at('/f'))).toBeNull()
+      expect(await materialize(files.read(at('/f')))).toEqual(ENC.encode('raw rendered'))
+    })
+    expect(calls).toEqual([])
+  })
+
+  it.each([[7, 7, 7], [7, 9, null], [0, 0, null]])(
+    'checks opened size %s against current size %s',
+    async (size, now, expected) => {
+      const ctx = contextFor(answering(stat({ size, mode: 0o644 }), stat({ size: now, mode: 0o644 })))
+      await runWithMountGate('/', MountMode.WRITE, async () => {
+        expect(await fileSize(commandFiles(ctx), ctx, true)(at('/f'))).toBe(expected)
+      })
+    },
+  )
+
   it.each([
     ['a store file', stat({ size: 7 }), undefined, false, false, 7],
     ['a file whose size moved', stat({ size: 7 }), stat({ size: 9 }), false, false, null],

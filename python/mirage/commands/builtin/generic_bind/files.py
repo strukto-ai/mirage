@@ -515,7 +515,7 @@ def dir_aware_stat(files: CommandFiles, ctx: Context) -> StatFn:
 
 
 def file_size(
-    files: CommandFiles, ctx: Context
+    files: CommandFiles, ctx: Context, *, opened: bool = False
 ) -> Callable[[PathSpec], Awaitable[int | None]]:
     """A regular file's size from its stat, ``size(path)``, for a command
     whose answer is the size alone (``wc -c``), as GNU takes it from
@@ -539,15 +539,25 @@ def file_size(
     Args:
         files (CommandFiles): the command's files.
         ctx (Context): the invocation's context.
+        opened (bool): the caller has opened the input, so permission bits
+            do not preclude using a nonzero regular-file size.
     """
 
+    reading = _READINGS.get()
+
     async def size(path: PathSpec) -> int | None:
+        if reading is not None and reading.stream is not None:
+            return None
+        if opened and crosses_mounts(ctx):
+            return None
         if revision_for(path.virtual) is not None:
             return None
-        if await files.is_warm(path):
+        if not opened and await files.is_warm(path):
             return None
         st = await _stat_refusing_dirs(files, ctx, path)
-        if st.type != FileType.FILE or st.mode is not None:
+        if st.type != FileType.FILE or (
+            st.mode is not None and (not opened or st.size == 0)
+        ):
             return None
         if ctx.vfs is None:
             return st.size
@@ -835,6 +845,12 @@ def command_files(
         )
 
     def answers(name: str) -> bool:
+        if (
+            name == "read_range"
+            and reading is not None
+            and reading.stream is not None
+        ):
+            return False
         if crossing:
             return name in _CROSSING_CALLS or name == "read_tree"
         return (

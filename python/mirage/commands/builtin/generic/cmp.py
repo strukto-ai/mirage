@@ -6,6 +6,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from contextlib import aclosing
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import (
@@ -29,9 +30,9 @@ from mirage.commands.spec.usage import (
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import format_fs_error
 from mirage.io.cooperative import chunks
+from mirage.io.stream import OutputStream
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.io.yield_budget import YieldBudget
-from mirage.rs.stream import close_stream, open_stream
+from mirage.rs.stream import close_stream, merge_output, open_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 
@@ -182,6 +183,7 @@ async def cmp_cmd(
     *,
     stream: PolymorphicReadFn,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+    length_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     stdin: ByteSource | None = None,
     silent: bool = False,
     verbose: bool = False,
@@ -263,7 +265,18 @@ async def cmp_cmd(
             return None, IOResult(
                 exit_code=2, stderr=format_fs_error("cmp", unread, paths)
             )
-        return await _compare(
+        sizes: list[JsonValue] = [None, None]
+        length_of = length_of or size_of
+        if verbose and length_of is not None:
+            for index, path in enumerate((p0, p1)):
+                if not is_stdin(path):
+                    try:
+                        sizes[index] = await length_of(path)
+                    except FS_ERRORS as exc:
+                        logger.debug(
+                            "cmp: no size for %s: %s", path.virtual, exc
+                        )
+        result = await _compare(
             (operands[0], operands[1]),
             {
                 **options,
@@ -272,8 +285,11 @@ async def cmp_cmd(
                 ],
                 "piped": [is_stdin(p0), is_stdin(p1)],
                 "skip": list(skip),
+                "sizes": sizes,
             },
         )
+        operands.clear()
+        return result
     finally:
         for operand in operands:
             await operand.close()
@@ -291,28 +307,31 @@ async def _compare(
         config (Mapping[str, JsonValue]): the stream's configuration.
     """
     stream = open_stream("cmp", config)
-    budget = YieldBudget()
-    out: list[bytes] = []
-    try:
-        while (index := stream.wants()) is not None:
-            chunk = await operands[index].next()
-            out.append(
-                stream.end_input(index)
-                if chunk is None
-                else stream.feed_input(index, chunk)
-            )
-            while stream.busy():
-                await budget.run()
-                out.append(stream.drain())
-        out.append(stream.finish())
-        while stream.busy():
-            await budget.run()
-            out.append(stream.drain())
-    finally:
-        await close_stream(stream)
-    return b"".join(out) or None, IOResult(
-        exit_code=stream.status(), stderr=stream.take_stderr() or None
-    )
+    io = IOResult()
+
+    async def read(index: int) -> bytes | None:
+        return await operands[index].next()
+
+    async def output() -> AsyncIterator[bytes]:
+        try:
+            async with aclosing(merge_output(stream, read)) as produced:
+                async for chunk in produced:
+                    yield chunk
+        finally:
+            io.exit_code = stream.status()
+            io.stderr = stream.take_stderr() or None
+
+    async def close() -> None:
+        try:
+            await close_stream(stream)
+        finally:
+            for operand in operands:
+                await operand.close()
+
+    result = OutputStream(output(), close)
+    if not config.get("verbose"):
+        return await materialize(result) or None, io
+    return result, io
 
 
 async def _one_stdin_twice(
@@ -358,6 +377,7 @@ async def _one_stdin_twice(
             "skip": [0, 0],
         },
     )
+    stdout = await materialize(stdout)
     held = await materialize(io.stderr)
     io.stderr = held + b"cmp: -: Bad file descriptor\n"
     io.exit_code = 2
@@ -401,6 +421,7 @@ async def cmp_generic(
     ctx: Context,
     stream: PolymorphicReadFn,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+    length_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
     return await cmp_cmd(
@@ -408,6 +429,7 @@ async def cmp_generic(
         texts,
         stream=stream,
         size_of=size_of,
+        length_of=length_of,
         stdin=ctx.stdin,
         silent=parsed.silent,
         verbose=parsed.verbose,

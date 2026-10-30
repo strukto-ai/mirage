@@ -69,6 +69,20 @@
         "stdout": "1,5c1,3\n< hello\n< world\n< foo\n< bar\n< baz\n---\n> 1\n> 2\n> 3\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "diff_ed_dot_payload_after_missing_newline",
+      "seq": 17010005,
+      "command": "printf 'old\\n' > /data/stream_diff_a; printf '.\\nnext' > /data/stream_diff_b; diff -e /data/stream_diff_a /data/stream_diff_b; echo rc=$?; rm /data/stream_diff_a /data/stream_diff_b",
+      "expect": {
+        "exit": 0,
+        "stdout": "1c\n..\n.\ns/.//\na\nnext\n.\nrc=2\n",
+        "stderr": "diff: /data/stream_diff_b: No newline at end of file\n\n"
+      },
+      "targets": [
+        "ram",
+        "disk"
+      ]
     }
   ]
 }

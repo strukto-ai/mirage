@@ -1,3 +1,7 @@
+import { uniqGeneric } from '@struktoai/mirage-core/commands/builtin/generic/uniq'
+import { xxdGeneric } from '@struktoai/mirage-core/commands/builtin/generic/xxd'
+import { checksumGeneric } from '@struktoai/mirage-core/commands/builtin/generic/checksum'
+import { MemoryBudget, runWithMemory } from '@struktoai/mirage-core/io/memory'
 import { expect, it, vi } from 'vitest'
 import { ByteSpool } from '@struktoai/mirage-core/io/spool'
 import { materialize } from '@struktoai/mirage-core/io/types'
@@ -75,4 +79,92 @@ it('streams repeated shuf records larger than the memory budget from disk', asyn
   } finally {
     spy.mockRestore()
   }
+})
+
+it('spills uniq OUTPUT before overwriting its own input under the default budget', async () => {
+  const chunk = new TextEncoder().encode('a'.repeat(8191) + '\n' + 'b'.repeat(8191) + '\n')
+  let complete = false
+  let written = 0
+  async function* read(): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    for (let i = 0; i < 2176; i++) yield chunk
+    complete = true
+  }
+  const path = PathSpec.fromStrPath('/same')
+  await runWithMemory(new MemoryBudget(32 << 20, () => 0), async () => {
+    const result = await uniqGeneric(
+      [path, path],
+      { flags: {}, stdin: null, cwd: PathSpec.fromStrPath('/') } as Context,
+      read,
+      async (_path, source) => {
+        expect(complete).toBe(true)
+        expect(source).not.toBeInstanceOf(Uint8Array)
+        for await (const part of source as AsyncIterable<Uint8Array>) written += part.length
+      },
+    )
+    if (result === null) throw new Error("missing command result")
+    const [out, io] = result
+    expect(await materialize(out)).toEqual(new Uint8Array())
+    expect(io.exitCode).toBe(0)
+  })
+  expect(written).toBe(34 << 20)
+})
+
+it('patches an existing xxd output larger than the default memory budget', async () => {
+  const size = 34 << 20
+  const input = PathSpec.fromStrPath('/dump')
+  const target = PathSpec.fromStrPath('/large')
+  const encoder = new TextEncoder()
+  let written = 0
+  let last = 0
+  async function* read(path: PathSpec): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    if (path === input) yield encoder.encode(`00000000: 6162\n${(size - 1).toString(16)}: 7a\n`)
+    else {
+      const chunk = new Uint8Array(16384).fill(120)
+      for (let i = 0; i < size / chunk.length; i++) yield chunk
+    }
+  }
+  await runWithMemory(new MemoryBudget(32 << 20, () => 0), async () => {
+    const [, io] = await xxdGeneric(
+      [input, target],
+      { flags: { r: true }, stdin: null, cwd: PathSpec.fromStrPath('/') } as Context,
+      read,
+      async (_path, source) => {
+        expect(source).not.toBeInstanceOf(Uint8Array)
+        for await (const part of source as AsyncIterable<Uint8Array>) {
+          if (written === 0) expect(part.subarray(0, 4)).toEqual(encoder.encode('abxx'))
+          written += part.length
+          last = part.at(-1) ?? 0
+        }
+      },
+    )
+    expect(io.exitCode).toBe(0)
+  })
+  expect(written).toBe(size)
+  expect(last).toBe(122)
+})
+
+it('streams a checksum list larger than the default memory budget', async () => {
+  const encoder = new TextEncoder()
+  const chunk = encoder.encode(' '.repeat(16383) + '\n')
+  async function* read(path: PathSpec): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    if (path.virtual === '/sums') {
+      for (let i = 0; i < 2176; i++) yield chunk
+      yield encoder.encode('2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881  /f\n')
+    } else yield encoder.encode('x')
+  }
+  await runWithMemory(new MemoryBudget(32 << 20, () => 0), async () => {
+    const result = await checksumGeneric(
+      [PathSpec.fromStrPath('/sums')],
+      { flags: { check: true }, stdin: null, cwd: PathSpec.fromStrPath('/') } as Context,
+      read,
+      'sha256sum',
+    )
+    if (result === null) throw new Error("missing command result")
+    const [out, io] = result
+    expect(new TextDecoder().decode(await materialize(out))).toBe('/f: OK\n')
+    expect(io.exitCode).toBe(0)
+  })
 })
