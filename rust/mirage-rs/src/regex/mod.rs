@@ -79,6 +79,77 @@ pub(crate) struct Automata {
     longest: Option<(hybrid::dfa::DFA, hybrid::dfa::Cache)>,
 }
 
+/// Incremental separator detection; exact POSIX extent selection remains with Posix.
+pub(crate) struct RecordScan {
+    dfa: hybrid::dfa::DFA,
+    cache: hybrid::dfa::Cache,
+    state: Option<hybrid::LazyStateID>,
+    at: usize,
+    anchored: bool,
+}
+
+impl RecordScan {
+    pub(crate) fn reset(&mut self, at: usize, anchored: bool) {
+        self.state = None;
+        self.at = at;
+        self.anchored = anchored;
+    }
+    pub(crate) fn scan(&mut self, bytes: &[u8], last: bool) -> Result<bool, ()> {
+        let mut state = match self.state {
+            Some(state) => state,
+            None => self
+                .dfa
+                .start_state_forward(
+                    &mut self.cache,
+                    &Input::new(bytes)
+                        .span(self.at..bytes.len())
+                        .anchored(if self.anchored {
+                            Anchored::Yes
+                        } else {
+                            Anchored::No
+                        }),
+                )
+                .map_err(|_| ())?,
+        };
+        while self.at < bytes.len() {
+            state = self
+                .dfa
+                .next_state(&mut self.cache, state, bytes[self.at])
+                .map_err(|_| ())?;
+            self.at += 1;
+            if state.is_quit() {
+                return Err(());
+            }
+            let settled = if self.anchored && state.is_match() {
+                let clears = self.cache.clear_count();
+                let eoi = self
+                    .dfa
+                    .next_eoi_state(&mut self.cache, state)
+                    .map_err(|_| ())?;
+                if self.cache.clear_count() != clears {
+                    return Err(());
+                }
+                !eoi.is_match()
+            } else {
+                false
+            };
+            if if self.anchored {
+                state.is_dead() || settled
+            } else {
+                state.is_match()
+            } {
+                self.state = Some(state);
+                return Ok(true);
+            }
+        }
+        self.state = Some(state);
+        if last {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+}
+
 /// The automata for the patterns they run and the backtracker for the
 /// rest.
 struct Engine {
@@ -185,6 +256,21 @@ impl Automata {
             first,
             cache,
             longest,
+        })
+    }
+
+    pub(crate) fn record_scanner(&self) -> Option<RecordScan> {
+        if self.first.is_match(b"") {
+            return None;
+        }
+        let dfa = self.longest.as_ref()?.0.clone();
+        let cache = dfa.create_cache();
+        Some(RecordScan {
+            dfa,
+            cache,
+            state: None,
+            at: 0,
+            anchored: false,
         })
     }
 

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::rg_matcher::{CaptureRequirement, Matches, Options, Program, Search};
+use crate::utf8::Validator as Utf8;
 use crate::{Stream, StreamError, parse_config};
 
 const WORK: usize = 16 * 1024;
@@ -272,46 +273,6 @@ struct Region {
     last: usize,
     from: usize,
     to: usize,
-}
-
-#[derive(Default)]
-struct Utf8 {
-    left: u8,
-    low: u8,
-    high: u8,
-    invalid: bool,
-}
-
-impl Utf8 {
-    fn push(&mut self, byte: u8) {
-        if self.invalid {
-            return;
-        }
-        if self.left > 0 {
-            if byte < self.low || byte > self.high {
-                self.invalid = true;
-                return;
-            }
-            self.left -= 1;
-            self.low = 0x80;
-            self.high = 0xbf;
-            return;
-        }
-        (self.left, self.low, self.high) = match byte {
-            0..=0x7f => (0, 0x80, 0xbf),
-            0xc2..=0xdf => (1, 0x80, 0xbf),
-            0xe0 => (2, 0xa0, 0xbf),
-            0xe1..=0xec | 0xee..=0xef => (2, 0x80, 0xbf),
-            0xed => (2, 0x80, 0x9f),
-            0xf0 => (3, 0x90, 0xbf),
-            0xf1..=0xf3 => (3, 0x80, 0xbf),
-            0xf4 => (3, 0x80, 0x8f),
-            _ => {
-                self.invalid = true;
-                (0, 0x80, 0xbf)
-            }
-        };
-    }
 }
 
 enum Piece {
@@ -2054,7 +2015,13 @@ impl Input {
         }
         let _ = config;
     }
-    fn accept(&mut self, record: OwnedRecord, config: &Config) -> Option<OwnedRecord> {
+    fn accept(
+        &mut self,
+        record: OwnedRecord,
+        config: &Config,
+        out: &mut Vec<u8>,
+        budget: &mut usize,
+    ) -> Option<OwnedRecord> {
         let hit = record.hit(config.invert);
         if config.quiet || config.files_only || config.files_without_match {
             if hit {
@@ -2127,6 +2094,41 @@ impl Input {
                 self.tally.binary = true;
                 self.pieces.push_back(Piece::bytes(self.notice()));
                 self.done = true;
+                Some(record)
+            } else if !config.context()
+                && !config.granular()
+                && !config.json
+                && !config.trim
+                && config.max_columns.is_none()
+                && !config.crlf
+                && record
+                    .data
+                    .len()
+                    .saturating_add(self.label.as_ref().map_or(0, Vec::len))
+                    .saturating_add(config.field_match_separator.len().saturating_mul(3))
+                    .saturating_add(64)
+                    <= *budget
+            {
+                let before = out.len();
+                let sep = &config.field_match_separator;
+                if let Some(label) = &self.label {
+                    out.extend_from_slice(label);
+                    out.extend_from_slice(if config.null { b"\0" } else { sep });
+                }
+                if config.line_numbers {
+                    crate::integer::decimal(record.number, false, 0, out);
+                    out.extend_from_slice(sep);
+                }
+                if config.byte_offsets {
+                    crate::integer::decimal(record.offset, false, 0, out);
+                    out.extend_from_slice(sep);
+                }
+                out.extend_from_slice(&record.data);
+                if !record.terminated {
+                    out.extend_from_slice(config.end());
+                }
+                *budget -= out.len() - before;
+                self.last_printed = Some(record.number);
                 Some(record)
             } else if config.context() {
                 let first = self.before.front().map_or(record.number, |r| r.number);
@@ -2312,7 +2314,6 @@ impl Rg {
             .ok_or_else(|| StreamError::new("rg stream fed before begin"))
     }
     fn step(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let initial_output = out.len();
         let config = &self.config;
         let program = &self.program;
         let input = self
@@ -2370,9 +2371,6 @@ impl Rg {
                 if input.finishing {
                     input.finalize(config);
                 }
-                break;
-            }
-            if out.len() > initial_output {
                 break;
             }
             if let Some(search) = input.search.as_mut() {
@@ -2441,7 +2439,7 @@ impl Rg {
                     };
                     if let Some(Record {
                         mut data, matches, ..
-                    }) = input.accept(record, config)
+                    }) = input.accept(record, config, out, &mut budget)
                     {
                         debug_assert!(input.record.is_empty());
                         data.clear();
@@ -2690,12 +2688,7 @@ impl Rg {
             input.tally.searched = input.offset;
             input.scan = 0;
             input.record_end = None;
-            let all = if config.pcre {
-                config.needs_every_match()
-            } else {
-                !(config.quiet || config.files_only || config.files_without_match)
-                    || config.counts()
-            };
+            let all = config.needs_every_match();
             input.search = Some(if let Some(mut scratch) = input.scratch.take() {
                 scratch.reset(data, all);
                 scratch
@@ -2847,6 +2840,19 @@ mod tests {
         let mut metadata = Vec::new();
         stream.metadata(&mut metadata);
         (out, serde_json::from_slice(&metadata).unwrap(), calls)
+    }
+
+    #[test]
+    fn long_field_separators_use_the_bounded_renderer() {
+        let separator = ":".repeat(3 * WORK);
+        let (out, _, _) = run(
+            b"hit\n",
+            json!({"pattern":"hit", "line_numbers":true, "field_match_separator":separator}),
+        );
+        let mut expected = b"1".to_vec();
+        expected.extend_from_slice(separator.as_bytes());
+        expected.extend_from_slice(b"hit\n");
+        assert_eq!(out, expected);
     }
 
     #[test]

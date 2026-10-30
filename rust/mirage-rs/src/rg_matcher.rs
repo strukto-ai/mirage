@@ -761,6 +761,38 @@ impl Search {
         if let Some(pcre) = &program.pcre {
             return self.step_pcre(pcre, budget);
         }
+        if let Some(literal) = &program.filters.exact {
+            while *budget > 0 && !matches!(self.phase, Phase::Done) {
+                if matches!(self.phase, Phase::Emit { .. }) {
+                    *budget -= 1;
+                    self.one(program);
+                    continue;
+                }
+                let end = self.haystack.len().min(
+                    self.from
+                        .saturating_add(*budget)
+                        .saturating_add(literal.len() - 1),
+                );
+                if let Some(at) = memchr::memmem::find(&self.haystack[self.from..end], literal) {
+                    let start = self.from + at;
+                    let end = start + literal.len();
+                    *budget = budget.saturating_sub(at + literal.len());
+                    self.candidate.resize(2, None);
+                    self.candidate[0] = Some(start);
+                    self.candidate[1] = Some(end);
+                    self.has_candidate = true;
+                    self.finish_match();
+                } else if end == self.haystack.len() {
+                    *budget = budget.saturating_sub(end - self.from);
+                    self.phase = Phase::Done;
+                } else {
+                    let next = end - (literal.len() - 1);
+                    *budget = budget.saturating_sub(next - self.from);
+                    self.from = next;
+                }
+            }
+            return matches!(self.phase, Phase::Done);
+        }
         while *budget > 0 && !matches!(self.phase, Phase::Done) {
             *budget -= 1;
             if let Phase::Reject { cursor } = self.phase {
@@ -1305,6 +1337,19 @@ mod tests {
     }
 
     #[test]
+    fn exact_literals_keep_overlapping_poll_boundaries_and_match_offsets() {
+        for pattern in ["needle", "é界", "abab", "xxxxxxxx"] {
+            let mut hay = vec![b'x'; 133];
+            hay.extend_from_slice(pattern.as_bytes());
+            hay.extend_from_slice(pattern.as_bytes());
+            hay.extend_from_slice(b"tail");
+            for budget in 1..=17 {
+                compare(&[pattern], &hay, rg_matcher::Options::default(), budget);
+            }
+        }
+    }
+
+    #[test]
     fn prefix_scan_defers_hits_in_the_overlap_fringe() {
         let filter = regex_automata::util::prefilter::Prefilter::new(
             regex_automata::MatchKind::LeftmostFirst,
@@ -1330,11 +1375,12 @@ mod tests {
 
     #[test]
     fn short_poll_keeps_prefix_scanning_available_to_later_polls() {
-        let program = rg_matcher::Program::with_options(
+        let mut program = rg_matcher::Program::with_options(
             &["needle".to_owned()],
             rg_matcher::Options::default(),
         )
         .unwrap();
+        program.filters.exact = None;
         let mut haystack = vec![b'x'; 2 * 1024 * 1024];
         let start = haystack.len();
         haystack.extend_from_slice(b"needle");

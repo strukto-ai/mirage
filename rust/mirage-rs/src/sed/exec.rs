@@ -739,7 +739,11 @@ impl Machine {
                     Poll::Pending => {}
                     Poll::Ready(None) => self.end_of_input(),
                     Poll::Ready(Some((text, newline))) => {
-                        (self.ps, self.newline) = (text, newline);
+                        let old = std::mem::replace(&mut self.ps, text);
+                        if let Some(reader) = &mut self.feed.reader {
+                            reader.recycle(old);
+                        }
+                        self.newline = newline;
                         (self.pc, self.stage, self.applied) = (0, 0, false);
                         self.phase = Phase::Cycle;
                     }
@@ -1445,10 +1449,18 @@ impl Machine {
                 if let Ok(Poll::Pending) = rewritten {
                     return Ok(Poll::Pending);
                 }
-                self.rewrite = Rewrite::default();
+                let spare = std::mem::take(&mut self.rewrite.out);
+                self.rewrite = Rewrite {
+                    out: spare,
+                    ..Rewrite::default()
+                };
                 if let Poll::Ready(Some(result)) = rewritten? {
                     let (print, wfile) = (subst.print, subst.wfile);
-                    self.ps = result;
+                    let mut old = std::mem::replace(&mut self.ps, result);
+                    old.clear();
+                    if old.capacity() <= 64 * 1024 {
+                        self.rewrite.out = old;
+                    }
                     self.replaced = true;
                     let ps = std::mem::take(&mut self.ps);
                     if print {
@@ -1665,7 +1677,10 @@ impl Machine {
             self.ps.push(b'\n');
             self.ps.extend_from_slice(&text);
         } else {
-            self.ps = text;
+            let old = std::mem::replace(&mut self.ps, text);
+            if let Some(reader) = &mut self.feed.reader {
+                reader.recycle(old);
+            }
         }
         self.newline = newline;
         Ok(Poll::Ready(true))

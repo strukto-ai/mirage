@@ -41,6 +41,7 @@ function buildWs(line: number | null = null): Workspace {
 
 describe('line deadline', () => {
   it.each([
+    'shuf -n 5',
     'cat -n | wc -c',
     'cat -A | wc -c',
     'zgrep -c theta',
@@ -139,4 +140,22 @@ describe('line deadline', () => {
       await ws.close()
     }
   })
+})
+
+it('yields during shuf range permutation construction', async () => {
+  const warm = buildWs()
+  try {
+    await warm.shell('shuf -i 1-2')
+  } finally {
+    await warm.close()
+  }
+  const ws = buildWs(0.01)
+  const start = performance.now()
+  try {
+    const result = await ws.shell('shuf -i 1-1000000 -n 5')
+    expect(result.exitCode).toBe(124)
+    expect(performance.now() - start).toBeLessThan(2000)
+  } finally {
+    await ws.close()
+  }
 })
