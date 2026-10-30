@@ -121,6 +121,6 @@ async def test_display_lines_closes_its_source_when_its_reader_stops():
     # it leaves unfinished releases its mount at once.
     src = _Tracked(b"a\nb\n", b"c\n")
     out = display_lines(src, CatFlags(number_lines=True))
-    assert await out.__anext__() == b"     1\ta\n"
+    assert await out.__anext__() == b"     1\ta\n     2\tb\n"
     await out.aclose()
     assert src.closed

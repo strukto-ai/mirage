@@ -96,34 +96,41 @@ it('preserves byte offsets across chunks and settles counts', async () => {
   }
 })
 
-it('closes a quiet match source without reading the next chunk', async () => {
-  const f = flagsOf({ quiet: true, text: true })
-  const program = await openRg('needle', false, f)
-  const tally: Tally = { selected: false }
-  let closed = false
-  let reads = 0
-  async function* source(): AsyncIterable<Uint8Array> {
-    try {
-      reads += 1
-      yield await Promise.resolve(ENC.encode('needle\n'))
-      reads += 1
-      throw new Error('read beyond the selected record')
-    } finally {
-      closed = true
+it.each([false, true])(
+  'closes a stopped source without reading the next chunk (binary=%s)',
+  async (binary) => {
+    const f = flagsOf(binary ? {} : { quiet: true, text: true })
+    const program = await openRg('needle', false, f)
+    const tally: Tally = { selected: false }
+    let closed = false
+    let reads = 0
+    async function* source(): AsyncIterable<Uint8Array> {
+      try {
+        reads += 1
+        yield await Promise.resolve(ENC.encode(binary ? 'x'.repeat(10000) + '\0' : 'needle\n'))
+        reads += 1
+        throw new Error('read beyond the stopped search')
+      } finally {
+        closed = true
+      }
     }
-  }
-  try {
-    const output = await materialize(
-      streamHaystack(source(), program, f, 'f', null, tally, undefined, true, false),
-    )
-    expect(output.byteLength).toBe(0)
-    expect(tally.selected).toBe(true)
-    expect(reads).toBe(1)
-    expect(closed).toBe(true)
-  } finally {
-    program.stream.close()
-  }
-})
+    try {
+      const output = await materialize(
+        streamHaystack(source(), program, f, 'f', null, tally, undefined, !binary, false),
+      )
+      expect(output.byteLength).toBe(0)
+      expect(tally.selected).toBe(!binary)
+      if (binary) {
+        expect(tally.skipped).toBe(true)
+        expect(tally.nul).toBe(10000)
+      }
+      expect(reads).toBe(1)
+      expect(closed).toBe(true)
+    } finally {
+      program.stream.close()
+    }
+  },
+)
 
 it.each([false, true])('searches without retaining unused captures (quiet=%s)', async (quiet) => {
   const f = flagsOf({ line_regexp: true, quiet, text: true })

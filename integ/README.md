@@ -61,6 +61,12 @@ implementations cannot drift apart.
 - `prisma/`: one schema per kit fake.
 - `fixtures/`: the seed data cases assume.
 
+The Rust `cat` and `rg_input` streams and their mirrored host adapters use
+the existing whole-host core and TypeScript filters. `unix/cat/{A,E.upper}.json`
+pins high bytes and CRLF display; `unix/zgrep/error.json` pins corrupt trailers
+after count, listing, matching and early selection, against GNU coreutils 9.7
+and gzip 1.13 in `debian:stable-slim`.
+
 Streaming writes are covered by the shared lifecycle corpus and mirrored
 writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate
 tee destinations, split's unterminated final record, sed's buffered

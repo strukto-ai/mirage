@@ -13,15 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stdinStream, stdinStat } from '../utils/stream.ts'
-import { concat } from '../../../utils/bytes.ts'
 import { asyncChain, ensureStream } from '../../../io/stream.ts'
-import { chunks } from '../../../io/cooperative.ts'
-import { YieldBudget } from '../../../io/yield_budget.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { reportedStream, splitReadable } from '../utils/operands.ts'
-import { resolveSource } from '../utils/stream.ts'
+import { resolveSource, streamOutput } from '../utils/stream.ts'
+import { openStream } from '../../../rs/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -29,14 +27,8 @@ import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { truncateStream } from '../utils/limit.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
-const NL = 0x0a
-
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-
-function formatLineNo(n: number): string {
-  return String(n).padStart(6, ' ')
-}
 
 interface CatFlags {
   readonly numberLines: boolean
@@ -60,94 +52,23 @@ function parseFlags(bag: Record<string, FlagValue>): CatFlags {
   }
 }
 
-// Render a line GNU cat -T / -v style: tabs become ^I under -T; under -v
-// control bytes become ^X, DEL becomes ^?, and high bytes get the M- prefix
-// with the same rules applied to the low seven bits.
-function visible(
-  line: Uint8Array,
-  showTabs: boolean,
-  showNonprinting: boolean,
-): Uint8Array<ArrayBuffer> {
-  const out: number[] = []
-  for (const byte of line) {
-    if (byte === 9) {
-      if (showTabs) out.push(94, 73)
-      else out.push(byte)
-    } else if (!showNonprinting) {
-      out.push(byte)
-    } else if (byte < 32) {
-      out.push(94, byte + 64)
-    } else if (byte === 127) {
-      out.push(94, 63)
-    } else if (byte >= 128) {
-      out.push(77, 45)
-      const low = byte - 128
-      if (low < 32) out.push(94, low + 64)
-      else if (low === 127) out.push(94, 63)
-      else out.push(low)
-    } else {
-      out.push(byte)
-    }
-  }
-  return Uint8Array.from(out)
-}
-
-/**
- * Line-process a stream for GNU cat's display flags (-n -E -T -v -s), one
- * write per line, as Python's. cat takes its input whole and may be called
- * outside the factory's guard, so each pull races the abort, and every 64
- * lines checks it and yields to timers: -s can squeeze a whole RAM read, and a ready input need never end a
- * line, without writing anything. A line split across chunks is joined once
- * it ends.
- */
-async function* displayLines(
+async function displayLines(
   source: AsyncIterable<Uint8Array>,
   display: CatFlags,
   signal?: AbortSignal,
-): AsyncIterable<Uint8Array> {
-  let lineNo = 0
-  let scanned = 0
-  let pending: Uint8Array[] = []
-  let prevBlank = false
-  const budget = new YieldBudget(signal)
-  const transform = display.showTabs || display.showNonprinting
-  const suffix = encodeText(display.showEnds ? '$\n' : '\n')
-  for await (const chunk of chunks(source, signal, false)) {
-    let start = 0
-    let nl = chunk.indexOf(NL)
-    while (nl >= 0) {
-      const tail = chunk.subarray(start, nl)
-      let line = pending.length === 0 ? tail : concat([...pending, tail])
-      pending = []
-      start = nl + 1
-      nl = chunk.indexOf(NL, start)
-      if (++scanned % 64 === 0) {
-        const paused = budget.run()
-        if (paused !== undefined) await paused
-      }
-      if (display.squeezeBlank && line.byteLength === 0 && prevBlank) {
-        prevBlank = true
-        continue
-      }
-      prevBlank = line.byteLength === 0
-      const shouldNumber =
-        (!display.numberNonblank && display.numberLines) ||
-        (display.numberNonblank && line.byteLength > 0)
-      if (shouldNumber) lineNo += 1
-      if (transform) line = visible(line, display.showTabs, display.showNonprinting)
-      yield concat(
-        shouldNumber ? [encodeText(`${formatLineNo(lineNo)}\t`), line, suffix] : [line, suffix],
-      )
-    }
-    if (start < chunk.byteLength) pending.push(chunk.subarray(start))
-  }
-  if (pending.length > 0) {
-    const buf = concat(pending)
-    const shouldNumber = display.numberLines || display.numberNonblank
-    if (shouldNumber) lineNo += 1
-    const last = transform ? visible(buf, display.showTabs, display.showNonprinting) : buf
-    yield shouldNumber ? concat([encodeText(`${formatLineNo(lineNo)}\t`), last]) : last
-  }
+): Promise<AsyncIterable<Uint8Array>> {
+  return streamOutput(
+    await openStream('cat', {
+      number_lines: display.numberLines,
+      number_nonblank: display.numberNonblank,
+      show_ends: display.showEnds,
+      show_tabs: display.showTabs,
+      show_nonprinting: display.showNonprinting,
+      squeeze_blank: display.squeezeBlank,
+    }),
+    source,
+    signal,
+  )
 }
 
 export async function catGeneric(
@@ -185,10 +106,10 @@ export async function catGeneric(
     }
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)
     if (merged === undefined) throw new Error('cat: missing readable stream')
-    const out: ByteSource = wantsDisplay ? displayLines(merged, display, ctx.signal) : merged
+    const out: ByteSource = wantsDisplay ? await displayLines(merged, display, ctx.signal) : merged
     return [out, io]
   }
   const source = resolveSource(ctx.stdin)
-  const out: ByteSource = wantsDisplay ? displayLines(source, display, ctx.signal) : source
+  const out: ByteSource = wantsDisplay ? await displayLines(source, display, ctx.signal) : source
   return [out, new IOResult()]
 }

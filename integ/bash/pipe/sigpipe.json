@@ -137,9 +137,10 @@
       "command": "head -n 1 /dev/zero | head -c 1 >/dev/null; echo \"${PIPESTATUS[*]}\"; head -c 200000 /dev/zero | cat -n | head -c 1 >/dev/null; echo \"${PIPESTATUS[1]} ${PIPESTATUS[2]}\"; head -c 40000 /dev/zero | cat -n | head -c 1 >/dev/null; echo \"${PIPESTATUS[1]} ${PIPESTATUS[2]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "141 0\n141 0\n0 0\n",
+        "stdout": "141 0\n0 0\n0 0\n",
         "stderr": ""
-      }
+      },
+      "note": "Divergence: GNU coreutils 9.7 in debian:stable-slim (sha256:a717a33469731894e77e912ea7d714e27c2dc38ee6554fd1a3102e92999cfc66) prints \"141 0\\n141 0\\n0 0\\n\". Mirage's cat display stream now writes bounded 16 KiB pieces instead of holding an entire unterminated line. Like tr in pipe_scanner_writer_stopped_between_pieces_keeps_its_status, it stops between writes with its own status once the reader exits. The line-oriented head still has a write cut short and receives SIGPIPE."
     },
     {
       "id": "pipe_scanner_writer_stopped_between_pieces_keeps_its_status",

@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   compilePattern,
-  lineSelected,
   matcherSyntax,
   mergePatternList,
   NEVER_MATCH,
@@ -33,49 +32,49 @@ const ENC = new TextEncoder()
 describe('compilePattern', () => {
   it('single pattern keeps regex semantics', async () => {
     const pat = compilePattern('fo+')
-    expect(await lineSelected(pat, 'foo')).toBe(true)
-    expect(await lineSelected(pat, 'f')).toBe(false)
+    expect(await pat.matches('foo')).toBe(true)
+    expect(await pat.matches('f')).toBe(false)
   })
 
   it('single fixed string escapes regex chars', async () => {
     const pat = compilePattern('a.b', false, true)
-    expect(await lineSelected(pat, 'xa.by')).toBe(true)
-    expect(await lineSelected(pat, 'axb')).toBe(false)
+    expect(await pat.matches('xa.by')).toBe(true)
+    expect(await pat.matches('axb')).toBe(false)
   })
 
   it('newline-separated patterns match any', async () => {
     const pat = compilePattern('foo\nbar')
-    expect(await lineSelected(pat, 'a foo b')).toBe(true)
-    expect(await lineSelected(pat, 'a bar b')).toBe(true)
-    expect(await lineSelected(pat, 'baz')).toBe(false)
+    expect(await pat.matches('a foo b')).toBe(true)
+    expect(await pat.matches('a bar b')).toBe(true)
+    expect(await pat.matches('baz')).toBe(false)
   })
 
   it('newline-separated regex alternation grouping', async () => {
     const pat = compilePattern('ab+\ncd')
-    expect(await lineSelected(pat, 'abb')).toBe(true)
-    expect(await lineSelected(pat, 'xcdy')).toBe(true)
-    expect(await lineSelected(pat, 'ax')).toBe(false)
+    expect(await pat.matches('abb')).toBe(true)
+    expect(await pat.matches('xcdy')).toBe(true)
+    expect(await pat.matches('ax')).toBe(false)
   })
 
   it('newline-separated fixed strings escape each', async () => {
     const pat = compilePattern('a.b\nc+', false, true)
-    expect(await lineSelected(pat, 'xa.by')).toBe(true)
-    expect(await lineSelected(pat, 'c+')).toBe(true)
-    expect(await lineSelected(pat, 'axb')).toBe(false)
-    expect(await lineSelected(pat, 'cc')).toBe(false)
+    expect(await pat.matches('xa.by')).toBe(true)
+    expect(await pat.matches('c+')).toBe(true)
+    expect(await pat.matches('axb')).toBe(false)
+    expect(await pat.matches('cc')).toBe(false)
   })
 
   it('newline-separated whole word applies per pattern', async () => {
     const pat = compilePattern('foo\nbar', false, false, true)
-    expect(await lineSelected(pat, 'a foo b')).toBe(true)
-    expect(await lineSelected(pat, 'bar.')).toBe(true)
-    expect(await lineSelected(pat, 'foobar')).toBe(false)
+    expect(await pat.matches('a foo b')).toBe(true)
+    expect(await pat.matches('bar.')).toBe(true)
+    expect(await pat.matches('foobar')).toBe(false)
   })
 
   it('newline-separated ignore case', async () => {
     const pat = compilePattern('foo\nbar', true)
-    expect(await lineSelected(pat, 'FOO')).toBe(true)
-    expect(await lineSelected(pat, 'Bar')).toBe(true)
+    expect(await pat.matches('FOO')).toBe(true)
+    expect(await pat.matches('Bar')).toBe(true)
   })
 })
 
@@ -104,8 +103,8 @@ describe('mergePatternList', () => {
 describe('NEVER_MATCH', () => {
   it('matches nothing', async () => {
     const pat = compilePattern(NEVER_MATCH)
-    expect(await lineSelected(pat, '')).toBe(false)
-    expect(await lineSelected(pat, 'anything')).toBe(false)
+    expect(await pat.matches('')).toBe(false)
+    expect(await pat.matches('anything')).toBe(false)
   })
 })
 
@@ -123,15 +122,15 @@ describe('ASCII semantics for word boundaries and case folding', () => {
     ['k', 'K', true, false, true],
   ])('%j on %j', async (pattern, subject, ignoreCase, wholeWord, selected) => {
     const pat = compilePattern(pattern, ignoreCase, false, wholeWord, RegexSyntax.BASIC)
-    expect(await lineSelected(pat, byteView(subject))).toBe(selected)
+    expect(await pat.matches(byteView(subject))).toBe(selected)
   })
 
   it('keeps the word class ASCII in an extended expression', async () => {
     // -E takes the same compile, so `\w` must not grow a Unicode meaning
     // there either.
     const pat = compilePattern('\\w', false, false, false, RegexSyntax.EXTENDED)
-    expect(await lineSelected(pat, byteView('é'))).toBe(false)
-    expect(await lineSelected(pat, 'a')).toBe(true)
+    expect(await pat.matches(byteView('é'))).toBe(false)
+    expect(await pat.matches('a')).toBe(true)
   })
 })
 
@@ -173,12 +172,12 @@ describe('the other dialects', () => {
     expect(() => compilePattern('a\nb', false, false, false, RegexSyntax.PERL)).toThrow(
       new UsageError('grep: the -P option only supports a single pattern'),
     )
-    expect(
-      await lineSelected(compilePattern('\\d+', false, false, false, RegexSyntax.PERL), 'x45'),
-    ).toBe(true)
+    expect(await compilePattern('\\d+', false, false, false, RegexSyntax.PERL).matches('x45')).toBe(
+      true,
+    )
     const word = compilePattern('a', false, false, true, RegexSyntax.PERL)
-    expect(await lineSelected(word, 'ab')).toBe(false)
-    expect(await lineSelected(word, 'a b')).toBe(true)
+    expect(await word.matches('ab')).toBe(false)
+    expect(await word.matches('a b')).toBe(true)
   })
 
   it("refuses in PCRE2's words", () => {

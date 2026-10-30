@@ -4,7 +4,6 @@ from mirage.commands.builtin.generic.grep import parse_flags
 from mirage.commands.builtin.grep_binary import (
     group_line,
     name_end,
-    valid_utf8,
 )
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -32,8 +31,3 @@ def test_groups_are_separated_only_where_lines_print_with_context(flags, line):
 def test_a_listed_name_ends_in_nul_under_z():
     assert name_end(_flags()) == b"\n"
     assert name_end(_flags(null=True)) == b"\0"
-
-
-def test_a_stray_byte_is_not_utf8():
-    assert valid_utf8("é".encode())
-    assert not valid_utf8(b"a\xffb")

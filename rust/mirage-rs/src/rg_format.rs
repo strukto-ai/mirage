@@ -16,6 +16,9 @@ pub(crate) struct Totals {
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Message {
+    Encoding {
+        label: String,
+    },
     Begin {
         #[serde(deserialize_with = "latin1")]
         name: Vec<u8>,
@@ -171,6 +174,12 @@ fn line<T: Serialize>(message: &T, out: &mut Vec<u8>) -> Result<(), StreamError>
 
 pub(crate) fn format(input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
     match parse_config(input)? {
+        Message::Encoding { label } => {
+            if let Some(encoding) = crate::rg_input::encoding(&label) {
+                out.extend_from_slice(encoding.name().as_bytes());
+            }
+            Ok(())
+        }
         Message::Begin { name } => line(
             &Event {
                 r#type: "begin",

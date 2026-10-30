@@ -75,6 +75,8 @@ struct Begin {
     /// The name output lines and the binary-file notice carry.
     #[serde(deserialize_with = "crate::latin1")]
     label: Vec<u8>,
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    list_label: Option<Vec<u8>>,
     #[serde(default)]
     show_filename: bool,
     /// The input's size, which -T sizes its fields to; none for a pipe.
@@ -137,6 +139,7 @@ struct Scan {
 
 struct Input {
     label: Vec<u8>,
+    list_label: Vec<u8>,
     show: bool,
     width: usize,
     after_output: bool,
@@ -329,7 +332,7 @@ impl Grep {
                 return None;
             }
             if config.files_with_matches {
-                out.extend_from_slice(&input.label);
+                out.extend_from_slice(&input.list_label);
                 out.push(if config.null { 0 } else { b'\n' });
                 input.stop = Stop::Return;
                 return None;
@@ -718,7 +721,7 @@ impl Grep {
         let listed = config.files_without_match && !config.quiet;
         if config.max_count == Some(0) {
             if listed {
-                out.extend_from_slice(&input.label);
+                out.extend_from_slice(&input.list_label);
                 out.push(name_end);
             }
             input.count = 0;
@@ -729,7 +732,7 @@ impl Grep {
         }
         if input.stop != Stop::Return {
             if listed {
-                out.extend_from_slice(&input.label);
+                out.extend_from_slice(&input.list_label);
                 out.push(name_end);
             } else if config.count && !(config.quiet || config.files_with_matches) {
                 if input.show {
@@ -763,6 +766,7 @@ impl Stream for Grep {
             Stop::Reading
         };
         self.input = Some(Input {
+            list_label: begin.list_label.unwrap_or_else(|| begin.label.clone()),
             label: begin.label,
             show: begin.show_filename,
             width,
