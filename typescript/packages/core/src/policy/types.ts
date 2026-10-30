@@ -376,12 +376,9 @@ export interface Pending {
  * The question was abandoned: the run that raised it was killed while
  * the host was still deciding, so the ledger stopped waiting.
  *
- * The record is left waiting, and whatever the host eventually answers
- * is dropped rather than recorded — an answer banked against a run that
- * no longer exists would be taken by the next identical line with
- * nobody asked. The entry point turns this into the same abort every other
- * killed wait raises; the ledger states the fact in its own vocabulary
- * because execution is not its to know about.
+ * The execution scope retires its pending ticket when it ends. A late
+ * host reply is dropped, so a retry needs a fresh answer. The entry point
+ * turns this into the same abort every other killed wait raises.
  */
 export interface Abandoned {
   kind: 'abandoned'

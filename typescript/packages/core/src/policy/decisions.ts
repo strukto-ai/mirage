@@ -701,13 +701,7 @@ export class Decisions extends DecisionOwner {
     note = '',
   ): Promise<void> {
     if (outcome === Outcome.ASK) throw new Error('ASK is not an answer')
-    if (this.sessions !== null) {
-      await this.sessions.ensureLoaded()
-      for (const sid of this.keys()) {
-        const epoch = this.sessions.incarnationOf(sid)
-        if (epoch !== null) await this.sessions.refreshApproval(sid, epoch)
-      }
-    }
+    if (this.sessions !== null) await this.sessions.ensureLoaded()
     const record = this.pending().find((item) => item.id === decisionId)
     if (record === undefined) throw new Error(`no decision waiting with id ${decisionId}`)
     const epoch =
@@ -715,6 +709,10 @@ export class Decisions extends DecisionOwner {
         ? ledgerSchema.parse(this.state(record.sessionId)).incarnation
         : this.sessions.incarnationOf(record.sessionId)
     if (epoch === null) throw new ApprovalUnavailable('session_invalid')
+    if (this.sessions !== null) await this.sessions.refreshApproval(record.sessionId, epoch)
+    await this.checkVersion(record.sessionId, epoch)
+    if (!this.pending(record.sessionId).some((item) => item.id === decisionId))
+      throw new Error(`no decision waiting with id ${decisionId}`)
     const result = await this.event(
       record.sessionId,
       { op: 'answer', id: decisionId, outcome, scope, note: units(note), claimant: null },

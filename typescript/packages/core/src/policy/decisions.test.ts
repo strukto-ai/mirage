@@ -188,6 +188,21 @@ function record(over: Partial<Decision> = {}): Decision {
 }
 
 describe('decisions', () => {
+  it('answers the requested session even when another cached session was closed elsewhere', async () => {
+    const store = new RAMNamespaceStore()
+    const manager = new SessionManager('s', store)
+    manager.create('other')
+    await manager.activate('other')
+    const ledger = new Decisions(manager)
+    const pending = await ledger.resolve(ctx(), ASK)
+    if (pending?.kind !== 'pending') throw new Error('Expected a pending ticket')
+    const sibling = new SessionManager('s', store)
+    await sibling.ensureLoaded()
+    await sibling.close('other')
+    await expect(ledger.answer(pending.id, Outcome.ALLOW, Scope.SESSION)).resolves.toBeUndefined()
+    expect(await ledger.resolve(ctx(), ASK)).toBeNull()
+  })
+
   it('registers a lifetime when admission reads a standing session grant', async () => {
     const ledger = new Decisions()
     const pending = await ledger.resolve(ctx(), ASK)
