@@ -32,14 +32,10 @@ fn min_length(text: &[u8]) -> Result<u64, String> {
     if (parts.digits.is_empty() && !text.is_empty()) || !parts.rest.is_empty() {
         return Err(format!("strings: invalid integer argument {shown}"));
     }
-    let value = parts
-        .value()
-        .and_then(|value| u64::try_from(value).ok())
-        .unwrap_or(u64::MAX);
-    let value = if parts.negative() {
-        value.wrapping_neg()
-    } else {
-        value
+    let value = match parts.value().and_then(|value| u64::try_from(value).ok()) {
+        Some(value) if parts.negative() => value.wrapping_neg(),
+        Some(value) => value,
+        None => u64::MAX,
     };
     match value {
         0 => Err(format!(
@@ -110,5 +106,21 @@ impl Stream for Strings {
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.end_run(out);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::min_length;
+
+    #[test]
+    fn an_overflow_stays_too_big_whatever_its_sign() {
+        for raw in ["18446744073709551616", "-18446744073709551616"] {
+            assert_eq!(
+                min_length(raw.as_bytes()),
+                Err(format!("strings: minimum string length is too big: {raw}"))
+            );
+        }
+        assert_eq!(min_length(b"-18446744073709551615"), Ok(1));
     }
 }

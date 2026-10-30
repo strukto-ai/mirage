@@ -164,12 +164,15 @@ export class FlagView {
 
   /**
    * Each typed occurrence as the text a line would have typed: a string as
-   * given, an integer as its digits (`asText`) and a switch as the empty
-   * text, in `occurrences` order: what a program that reads its own options
-   * sees. Mirrors Python's `texts`.
+   * given, an integer as its digits (`asText`) and a switch that is on as
+   * the empty text, in `occurrences` order: what a program that reads its
+   * own options sees. A switch that is off was never typed, so it is left
+   * out. Mirrors Python's `texts`.
    */
   texts(...names: string[]): [string, string][] {
-    return this.occurrences(...names).map(([name, value]) => [name, typedText(value)])
+    return this.occurrences(...names)
+      .filter(([, value]) => value !== false)
+      .map(([name, value]) => [name, typedText(value)])
   }
 
   asBool(name: string): boolean {

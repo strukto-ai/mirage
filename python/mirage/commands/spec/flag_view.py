@@ -187,8 +187,9 @@ class FlagView:
         """Each typed occurrence as the text a line would have typed.
 
         A string is as given, an integer as its digits (``as_text``) and
-        a switch as the empty text, in ``occurrences`` order: what a
-        program that reads its own options sees.
+        a switch that is on as the empty text, in ``occurrences`` order:
+        what a program that reads its own options sees. A switch that is
+        off was never typed, so it is left out.
 
         Args:
             names (str): Spec-bound option names to read.
@@ -196,6 +197,7 @@ class FlagView:
         return [
             (name, _typed_text(value))
             for name, value in self.occurrences(*names)
+            if value is not False
         ]
 
     def as_bool(self, name: str) -> bool:

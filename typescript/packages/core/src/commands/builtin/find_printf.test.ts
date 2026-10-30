@@ -114,6 +114,22 @@ describe('expandPrintf', () => {
     )
   })
 
+  it('takes a fraction before 1970 from the calendar second', () => {
+    const before = { ...stat, mtimeEpoch: -0.25 }
+    expect(expandPrintf('%T@|%TS|%T+\n', '/data/a.txt', '/data', before, [])).toBe(
+      '-1.7500000000|59.7500000000|1969-12-31+23:59:59.7500000000\n',
+    )
+  })
+
+  it('keeps a year below 100 in the ISO week and the day of the year', () => {
+    const early = { ...stat, mtimeEpoch: -62008934400 }
+    expect(expandPrintf('%TF|%TG|%TV|%Tj|%Tg\n', '/data/a.txt', '/data', early, [])).toBe(
+      '0005-01-06|5|01|006|05\n',
+    )
+    const first = { ...stat, mtimeEpoch: -62009366400 }
+    expect(expandPrintf('%TG|%TV\n', '/data/a.txt', '/data', first, [])).toBe('4|53\n')
+  })
+
   it('handles escapes and warns once per unknown directive', () => {
     const warnings: string[] = []
     expect(expandPrintf('A\\tB\\n', '/data/a.txt', '/data', null, warnings)).toBe('A\tB\n')

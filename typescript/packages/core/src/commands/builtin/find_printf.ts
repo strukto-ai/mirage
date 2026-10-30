@@ -99,12 +99,21 @@ const MONTH_NAMES = [
   'December',
 ]
 
+// Midnight UTC of a calendar day, its year as given: `Date.UTC` reads 0-99
+// as 1900-1999.
+function utcDay(year: number, month: number, day: number): Date {
+  const date = new Date(0)
+  date.setUTCFullYear(year, month, day)
+  return date
+}
+
 // The ISO 8601 week-numbering year and week of a UTC date.
 function isoWeek(dt: Date): [number, number] {
-  const thursday = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()))
+  const thursday = utcDay(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate())
   thursday.setUTCDate(thursday.getUTCDate() + 3 - ((dt.getUTCDay() + 6) % 7))
   const year = thursday.getUTCFullYear()
-  const week = 1 + Math.floor((thursday.getTime() - Date.UTC(year, 0, 1)) / (7 * 86_400_000))
+  const week =
+    1 + Math.floor((thursday.getTime() - utcDay(year, 0, 1).getTime()) / (7 * 86_400_000))
   return [year, week]
 }
 
@@ -114,7 +123,7 @@ function isoWeek(dt: Date): [number, number] {
  */
 function timeFields(ts: number): Record<string, string> {
   const dt = new Date(ts * 1000)
-  const frac = ts.toFixed(10).split('.')[1] ?? '0000000000'
+  const frac = (ts - Math.floor(ts)).toFixed(10).split('.')[1] ?? '0000000000'
   const [isoYear, isoWeekNo] = isoWeek(dt)
   const year = dt.getUTCFullYear()
   const month = dt.getUTCMonth()
@@ -122,7 +131,7 @@ function timeFields(ts: number): Record<string, string> {
   const wday = dt.getUTCDay()
   const isoDay = wday === 0 ? 7 : wday
   const yday = Math.floor(
-    (Date.UTC(year, month, dt.getUTCDate()) - Date.UTC(year, 0, 1)) / 86_400_000,
+    (utcDay(year, month, dt.getUTCDate()).getTime() - utcDay(year, 0, 1).getTime()) / 86_400_000,
   )
   const hour12 = hour % 12 === 0 ? 12 : hour % 12
   const day = DAY_NAMES[wday] ?? ''
@@ -131,7 +140,7 @@ function timeFields(ts: number): Record<string, string> {
   const date = `${pad(month + 1, 2)}/${pad(dt.getUTCDate(), 2)}/${pad(year % 100, 2)}`
   const meridiem = hour < 12 ? 'AM' : 'PM'
   return {
-    '@': ts.toFixed(10),
+    '@': `${String(Math.floor(ts))}.${frac}`,
     '+': `${pad(year, 4)}-${pad(month + 1, 2)}-${pad(dt.getUTCDate(), 2)}+${clock}.${frac}`,
     a: day.slice(0, 3),
     A: day,

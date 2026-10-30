@@ -164,6 +164,21 @@ def test_expand_time_directives():
     assert len(epoch.strip().split(".")[1]) == 10
 
 
+def test_expand_time_takes_a_fraction_before_1970_from_the_calendar():
+    before = FileStat(
+        name="a",
+        size=6,
+        type=FileType.FILE,
+        modified="1969-12-31T23:59:59.750000+00:00",
+    )
+    assert (
+        expand_printf(
+            "%T@|%TS|%T+\n", "/data/a.txt", _spec("/data"), before, []
+        )
+        == "-1.7500000000|59.7500000000|1969-12-31+23:59:59.7500000000\n"
+    )
+
+
 def test_expand_escapes_and_unknown():
     warnings: list[str] = []
     search = _spec("/data")

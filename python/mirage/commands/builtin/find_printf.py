@@ -127,7 +127,7 @@ def _time_fields(ts: float) -> dict[str, str]:
         ts (float): seconds since the epoch.
     """
     dt = datetime.fromtimestamp(ts, timezone.utc)
-    frac = f"{ts:.10f}".split(".")[1]
+    frac = f"{ts - math.floor(ts):.10f}".split(".")[1]
     iso_year, iso_week, iso_day = dt.isocalendar()
     yday = dt.timetuple().tm_yday - 1
     wday = iso_day % 7
@@ -137,7 +137,7 @@ def _time_fields(ts: float) -> dict[str, str]:
     clock = f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}"
     date = f"{dt.month:02d}/{dt.day:02d}/{dt.year % 100:02d}"
     return {
-        "@": f"{ts:.10f}",
+        "@": f"{math.floor(ts)}.{frac}",
         "+": f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}+{clock}.{frac}",
         "a": day[:3],
         "A": day,
