@@ -319,6 +319,23 @@
       "check": {
         "read_paths": true
       }
+    },
+    {
+      "id": "search_word_leaves_dotless_i_to_the_scan",
+      "seq": 540300,
+      "targets": [
+        "box",
+        "dropbox",
+        "gdrive",
+        "onedrive",
+        "sharepoint"
+      ],
+      "command": "mkdir -p /search/dotless && printf 't\\xc4\\xb1e here\\nnone\\n' > /search/dotless/a.txt && LC_ALL=C.UTF-8 grep -rliw tie /search/dotless; LC_ALL=C.UTF-8 grep -riw tie /search/dotless; rm -r /search/dotless",
+      "expect": {
+        "exit": 0,
+        "stdout": "/search/dotless/a.txt\n/search/dotless/a.txt:tıe here\n",
+        "stderr": ""
+      }
     }
   ]
 }

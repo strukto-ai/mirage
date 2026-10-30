@@ -41,7 +41,7 @@ def classify_pattern(
 
 _MIN_SEARCH_LITERAL = 3
 # The ASCII letters a non-ASCII character matches under Unicode case
-# folding (`ı` and `İ` for i, the Kelvin sign for k, `ſ` for s): a
+# folding (`ı` for i, the Kelvin sign for k, `ſ` for s): a
 # lowercased search for a word holding one could miss a line.
 UNICODE_FOLDED = frozenset("iks")
 

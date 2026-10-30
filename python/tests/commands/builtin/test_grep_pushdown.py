@@ -77,6 +77,8 @@ def test_whole_word_literals_union_only_complete_alternatives(
         ("ada", re.I, True, True, (("ada",), True)),
         ("sun", re.I, True, True, None),
         ("sun", re.I | re.ASCII, True, True, (("sun",), True)),
+        ("tie", re.I, True, True, None),
+        ("tie", re.I | re.ASCII, True, True, (("tie",), True)),
     ],
 )
 def test_search_terms_ask_words_or_the_text_every_match_holds(

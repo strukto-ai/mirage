@@ -226,8 +226,10 @@ function* regexLiterals(pattern: string): Generator<string> {
   }
 }
 
+// Unicode's Uppercase property, which ripgrep's -S asks of a literal: a
+// letter like `ℂ` has no lowercase and still counts.
 function isUpper(ch: string): boolean {
-  return ch.toLowerCase() !== ch && ch.toUpperCase() === ch
+  return /^\p{Uppercase}$/u.test(ch)
 }
 
 /**
