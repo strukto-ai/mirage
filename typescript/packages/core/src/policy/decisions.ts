@@ -19,7 +19,6 @@ import { hasAborted } from '../utils/abort.ts'
 import { openStreamSync } from '../rs/stream.ts'
 import { units, fromUnits, ruleWire } from '../rs/policy.ts'
 import type { RecordFields } from '../workspace/record/types.ts'
-import { concat } from '../utils/bytes.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
   type Caller,
@@ -28,7 +27,6 @@ import {
   liveCallers,
   runWithCaller,
 } from '../context/session_context.ts'
-import { sha256Hex } from '../utils/hash.ts'
 import type { Refusal } from '../types.ts'
 import { ApprovalUnavailable } from './errors.ts'
 import { DecisionOwner, Outcome } from './types.ts'
@@ -109,18 +107,6 @@ async function answered(
  */
 export type AskHandler = (record: Decision, signal?: AbortSignal) => Promise<Decision | null>
 
-/** A stable display digest. Approval authority uses fresh opaque tickets. */
-export async function decisionId(
-  sessionId: string,
-  cwd: string,
-  argv: readonly string[],
-): Promise<string> {
-  const enc = new TextEncoder()
-  const parts = [sessionId, cwd, ...argv].map((part) => enc.encode(part + '\0'))
-  const bytes = concat(parts)
-  return (await sha256Hex(bytes)).slice(0, 12)
-}
-
 /**
  * The rule an Ask is keyed on: the document's, or for a coded Ask one
  * synthesized over what was asked about (the program, the path, the
@@ -150,38 +136,6 @@ export function sameRule(a: CommandRule, b: CommandRule): boolean {
     sameList(a.commands, b.commands) &&
     sameList(a.paths, b.paths)
   )
-}
-
-/**
- * Whether an answered record answers this rule of this line.
- *
- * A ONCE answer covers the exact line it was given for, compared field
- * by field. A SESSION answer covers every line the same rule asks
- * about. Both are keyed on the rule as well as the words: an answer
- * that outlives a rule change (a persisted store reopened under an
- * edited profile) must not answer the new rule's ask, and a stale
- * refusal must not speak in its voice.
- */
-export function covers(
-  record: Decision,
-  rule: CommandRule,
-  argv: readonly string[],
-  cwd: string,
-): boolean {
-  const command = argv[0]
-  if (command === undefined) throw new Error('approval question needs a command')
-  const question = { ...record, command, argv: argv.slice(1), cwd }
-  const result = inspectApproval(emptyLedger('inspection'), {
-    op: 'inspect',
-    query: {
-      kind: 'covers',
-      record: decisionWire(record),
-      rule: ruleWire(rule),
-      question: decisionWire(question),
-    },
-  })
-  if (result.kind !== 'matches') throw new Error('invalid approval comparison')
-  return result.matched
 }
 
 /**
@@ -250,26 +204,6 @@ export function opQuestion(
     sessionId: ctx.sessionId ?? '',
   }
   return [asked, keyed]
-}
-
-/**
- * Whether a command stands inside a scope: within the scope's span of
- * the same text, or on a line evaluated from a node that does.
- *
- * @param scope the enclosing node, a background job's.
- * @param occurrence the command's place.
- */
-export function encloses(scope: Occurrence, occurrence: Occurrence): boolean {
-  const result = inspectApproval(emptyLedger('inspection'), {
-    op: 'inspect',
-    query: {
-      kind: 'encloses',
-      scope: occurrenceWire(scope),
-      occurrence: occurrenceWire(occurrence),
-    },
-  })
-  if (result.kind !== 'matches') throw new Error('invalid approval comparison')
-  return result.matched
 }
 
 const unitSchema = z.array(z.number().int().min(0).max(0x10ffff))

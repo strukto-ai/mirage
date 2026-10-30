@@ -20,7 +20,7 @@ import { SessionManager } from '../workspace/session/manager.ts'
 import type { RecordFields } from '../workspace/record/types.ts'
 import { openStream } from '../rs/stream.ts'
 
-import { Decisions, askRule, covers, decisionId, encloses } from './decisions.ts'
+import { Decisions, askRule } from './decisions.ts'
 import { Outcome, Scope } from './types.ts'
 import type {
   Ask,
@@ -170,23 +170,6 @@ function ctx(sessionId = 's', argv: readonly string[] = ['push']): CommandContex
   } as unknown as CommandContext
 }
 
-function record(over: Partial<Decision> = {}): Decision {
-  return {
-    id: 'd1',
-    sessionId: 's',
-    command: 'git',
-    argv: ['push'],
-    cwd: '/repo',
-    paths: [],
-    reason: 'sign-off',
-    rule: RULE,
-    outcome: null,
-    scope: Scope.ONCE,
-    note: '',
-    ...over,
-  }
-}
-
 describe('decisions', () => {
   it('answers the requested session even when another cached session was closed elsewhere', async () => {
     const store = new RAMNamespaceStore()
@@ -327,38 +310,11 @@ describe('decisions', () => {
     await ledger.revoke('s', line)
   })
 
-  it('names a record stably for the same line and session', async () => {
-    const same = await decisionId('s', '/repo', ['git', 'push'])
-    expect(same).toBe(await decisionId('s', '/repo', ['git', 'push']))
-    expect(same).not.toBe(await decisionId('other', '/repo', ['git', 'push']))
-    expect(same).not.toBe(await decisionId('s', '/elsewhere', ['git', 'push']))
-    expect(same).toHaveLength(12)
-  })
-
   it('synthesizes a rule over the program for a coded ask', () => {
     expect(askRule(ctx(), ASK)).toBe(RULE)
     const coded = askRule(ctx(), { kind: 'ask', reason: 'sign-off' })
     expect(coded.commands).toEqual(['git'])
     expect(coded.reason).toBe('sign-off')
-  })
-
-  it('reads scope in covers and never answers a waiting record', () => {
-    const argv = ['git', 'push']
-    expect(covers(record(), RULE, argv, '/repo')).toBe(false)
-    const once = record({ outcome: Outcome.ALLOW, scope: Scope.ONCE })
-    expect(covers(once, RULE, argv, '/repo')).toBe(true)
-    // A ONCE answer is for the exact line, so a different line or a
-    // different directory is not it.
-    expect(covers(once, RULE, ['git', 'push', '-f'], '/repo')).toBe(false)
-    expect(covers(once, RULE, argv, '/elsewhere')).toBe(false)
-    // A SESSION answer covers any line the same rule asks about.
-    const forever = record({ outcome: Outcome.ALLOW, scope: Scope.SESSION })
-    expect(covers(forever, RULE, ['git', 'push', '-f'], '/elsewhere')).toBe(true)
-    // An answer never answers a rule it was not given for: a persisted
-    // record reopened under an edited profile must not speak for the
-    // new rule.
-    const other: CommandRule = { ...RULE, reason: 'different' }
-    expect(covers(forever, other, argv, '/repo')).toBe(false)
   })
 
   it('records a question once and answers it once', async () => {
@@ -631,16 +587,6 @@ describe('decisions', () => {
     expect(ledger.list('s')).toHaveLength(2)
     await ledger.answer(ledger.pending('s')[0]?.id ?? '', Outcome.ALLOW)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
-  })
-
-  it('reads a span and the lines evaluated inside it as enclosed', () => {
-    const line = 'sleep 1 && cat s & ls'
-    const scope: Occurrence = { parent: null, source: line, start: 0, end: 18 }
-    const inside: Occurrence = { parent: null, source: line, start: 11, end: 16 }
-    expect(encloses(scope, inside)).toBe(true)
-    expect(encloses(scope, { parent: inside, source: 'cat s', start: 0, end: 5 })).toBe(true)
-    expect(encloses(scope, { parent: null, source: line, start: 19, end: 21 })).toBe(false)
-    expect(encloses(scope, { parent: null, source: 'cat s', start: 0, end: 5 })).toBe(false)
   })
 
   it("hands a job's claims to a run of its own", async () => {
