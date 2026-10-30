@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::{Stream, StreamError};
 
-use super::eval::{self, DEBUG, ERROR, Eval, Formatting, HALT, PRINT, STDERR};
+use super::eval::{self, DEBUG, ERROR, Eval, Formatting, HALT, PRINT, Position, STDERR};
 use super::format;
 use super::meter::{self, Meter};
 use super::parse::{Scanned, Scanner};
@@ -308,8 +308,11 @@ impl Reader {
 
     /// Where the reader stands as jq_eval takes it: the input it reads
     /// and the lines read of it.
-    fn place(&self) -> serde_json::Value {
-        serde_json::json!({ "filename": self.name, "line": self.line })
+    fn place(&self) -> Position {
+        Position {
+            filename: self.name.clone(),
+            line: self.line as f64,
+        }
     }
 
     fn check(&self, size: usize) -> Result<(), StreamError> {
@@ -744,8 +747,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 impl Main {
     /// Start a run on one document, from where the reader stands.
     fn start(&mut self, input: Value, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let place = self.reader.place().to_string();
-        self.eval.start(place.as_bytes(), input, &mut self.wire)?;
+        self.eval
+            .start(self.reader.place(), input, &mut self.wire)?;
         self.task = Task::Run;
         self.frames(out)
     }
@@ -964,25 +967,23 @@ impl Main {
     /// of the stream, or its parse error, and where the reader stands
     /// after it.
     fn answer(&mut self, read: Read, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let mut reply = self.reader.place();
+        let reply = |kind: &str| {
+            serde_json::json!({ "kind": kind, "filename": self.reader.name, "line": self.reader.line })
+                .to_string()
+        };
         match read {
             Read::Value(value) => {
-                reply["kind"] = "value".into();
                 self.eval
-                    .answer(reply.to_string().as_bytes(), value, &mut self.wire)?;
+                    .answer(self.reader.place(), value, &mut self.wire)?;
             }
             Read::Error(message) => {
-                reply["kind"] = "error".into();
-                self.eval.respond(
-                    reply.to_string().as_bytes(),
-                    message.as_bytes(),
-                    &mut self.wire,
-                )?;
+                let reply = reply("error");
+                self.eval
+                    .respond(reply.as_bytes(), message.as_bytes(), &mut self.wire)?;
             }
             Read::End => {
-                reply["kind"] = "end".into();
-                self.eval
-                    .respond(reply.to_string().as_bytes(), b"", &mut self.wire)?;
+                let reply = reply("end");
+                self.eval.respond(reply.as_bytes(), b"", &mut self.wire)?;
             }
             Read::Wait(_) | Read::Working => unreachable!("an answer the reader has"),
         }
