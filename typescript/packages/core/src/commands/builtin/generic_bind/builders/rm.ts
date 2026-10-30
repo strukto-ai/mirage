@@ -22,11 +22,11 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { isSlashedLink, rmLinkRefusal } from '../../utils/slash_links.ts'
 import {
-  fsStrerror,
   innerSuffix,
   isEnoent,
   isEnotdir,
   isFsError,
+  strerrorOf,
   withInner,
 } from '../../../../errors/fs.ts'
 import { operandSpelling } from '../../../../errors/render.ts'
@@ -68,7 +68,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
       // failure is reported, -f or not. GNU rm reports the
       // operand and keeps removing the rest.
       if (force && (isEnoent(err) || isEnotdir(err))) continue
-      errors.push(`rm: cannot remove '${p.rawPath}': ${fsStrerror(err) ?? String(err)}`)
+      errors.push(`rm: cannot remove '${p.rawPath}': ${strerrorOf(err)}`)
       continue
     }
     let entryLines: string[] = []
@@ -119,7 +119,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
               force,
             }))
             for (const [entry, why] of failures) {
-              errors.push(`rm: cannot remove '${entry.rawPath}': ${fsStrerror(why) ?? String(why)}`)
+              errors.push(`rm: cannot remove '${entry.rawPath}': ${strerrorOf(why)}`)
             }
           }
           entryLines = verbose ? removalLines(listed, p) : []
@@ -155,7 +155,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
       // operand as typed for a refusal that names no path below it (a
       // store's refused key), and keeps removing the rest.
       errors.push(
-        `rm: cannot remove '${withInner(p.rawPath, innerSuffix(p, err))}': ${fsStrerror(err) ?? String(err)}`,
+        `rm: cannot remove '${withInner(p.rawPath, innerSuffix(p, err))}': ${strerrorOf(err)}`,
       )
       continue
     }

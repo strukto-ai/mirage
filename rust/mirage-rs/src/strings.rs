@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, number, parse_config};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,33 +27,13 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 /// refused in its words in the order it tests them; a refusal names the
 /// value one character per byte, which the host writes back as bytes.
 fn min_length(text: &[u8]) -> Result<u64, String> {
-    let shown: String = text.iter().copied().map(char::from).collect();
-    let start = text
-        .iter()
-        .position(|&b| !matches!(b, b' ' | b'\t'..=b'\r'))
-        .unwrap_or(text.len());
-    let (negative, digits) = match &text[start..] {
-        [sign @ (b'+' | b'-'), rest @ ..] => (*sign == b'-', rest),
-        rest => (false, rest),
-    };
-    let (radix, digits) = match digits {
-        [b'0', b'x' | b'X', next, ..] if next.is_ascii_hexdigit() => (16, &digits[2..]),
-        [b'0', ..] => (8, digits),
-        _ => (10, digits),
-    };
-    let len = digits
-        .iter()
-        .position(|&b| !char::from(b).is_digit(radix))
-        .unwrap_or(digits.len());
-    if (len == 0 && !text.is_empty()) || len < digits.len() {
+    let shown = crate::byte_text(text);
+    let parts = number::parts(text, true);
+    if (parts.digits.is_empty() && !text.is_empty()) || !parts.rest.is_empty() {
         return Err(format!("strings: invalid integer argument {shown}"));
     }
-    let value = digits[..len].iter().try_fold(0u64, |value, &b| {
-        let digit = u64::from(char::from(b).to_digit(radix).unwrap_or(0));
-        value.checked_mul(u64::from(radix))?.checked_add(digit)
-    });
-    let value = match value {
-        Some(value) if negative => value.wrapping_neg(),
+    let value = match parts.value().and_then(|value| u64::try_from(value).ok()) {
+        Some(value) if parts.negative() => value.wrapping_neg(),
         Some(value) => value,
         None => u64::MAX,
     };
@@ -126,5 +106,21 @@ impl Stream for Strings {
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.end_run(out);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::min_length;
+
+    #[test]
+    fn an_overflow_stays_too_big_whatever_its_sign() {
+        for raw in ["18446744073709551616", "-18446744073709551616"] {
+            assert_eq!(
+                min_length(raw.as_bytes()),
+                Err(format!("strings: minimum string length is too big: {raw}"))
+            );
+        }
+        assert_eq!(min_length(b"-18446744073709551615"), Ok(1));
     }
 }

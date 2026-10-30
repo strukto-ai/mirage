@@ -17,6 +17,9 @@ import { PipeClosed } from '../../../io/errors.ts'
 import { DiffPool } from '../../../rs/diff_pool.ts'
 import type { DiffComputer, PairResult } from '../../../rs/diff_types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
+import { byteView } from '../../../shell/bytes.ts'
+import { refused } from '../../../rs/scan.ts'
+import { openStreamSync } from '../../../rs/stream.ts'
 import type { Argument } from '../../spec/types.ts'
 import { compileSpec } from '../../spec/compile.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -34,7 +37,7 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { followedStat } from '../../../view/namespace_view.ts'
-import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
+import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
 import { UsageError } from '../../errors.ts'
 import { beforeFullWalk } from '../utils/tree.ts'
@@ -53,7 +56,7 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
 
-interface DiffFlags {
+export interface DiffFlags {
   readonly ignoreCase: boolean
   readonly ignoreAllSpace: boolean
   readonly ignoreSpaceChange: boolean
@@ -72,30 +75,46 @@ interface DiffFlags {
   readonly excludeFrom: readonly PathSpec[]
 }
 
-function parseFlags(bag: Record<string, FlagValue>): DiffFlags {
-  const fl = new FlagView(bag, specOf('diff'))
-  let context = -1
-  let unified = fl.asBool('u')
-  for (const [, value] of fl.occurrences('U', 'unified')) {
-    unified = true
-    if (value === true) context = Math.max(context, 3)
-    else if (
-      typeof value === 'string' &&
-      (value === '' || /^[ \t\n\r\v\f]*[+-]?[0-9]+$/.test(value)) &&
-      Number(value) >= 0
-    )
-      context = Math.max(context, Math.min(Number(value), Number.MAX_SAFE_INTEGER))
-    else
-      throw new UsageError(`diff: invalid context length '${String(value)}'\n${usageHint('diff')}`)
+// The context -U and --unified give, read by the diff engine: each value as
+// typed, null for a bare --unified. Mirrors Python's `_unified_context`.
+function unifiedContext(typed: readonly (string | null)[]): number | IOResult {
+  if (typed.length === 0) return 3
+  let engine
+  try {
+    engine = openStreamSync('diff', {
+      unified: typed.map((text) => (text === null ? null : byteView(text))),
+    })
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
   }
+  try {
+    const { context } = JSON.parse(DEC.decode(engine.metadata())) as { context: number }
+    return context
+  } finally {
+    engine.close()
+  }
+}
+
+/**
+ * diff's options, -U refused by the diff engine before any operand: the
+ * flags, or diff's refusal of a -U, exit 2. Mirrors Python's `parse_flags`.
+ */
+export function parseFlags(bag: Record<string, FlagValue>): DiffFlags | IOResult {
+  const fl = new FlagView(bag, specOf('diff'))
+  const typed = fl
+    .occurrences('U', 'unified')
+    .map(([, value]) => (value === true ? null : String(value)))
+  const context = unifiedContext(typed)
+  if (context instanceof IOResult) return context
   const newFile = fl.asBool('new_file')
   return {
     ignoreCase: fl.asBool('i'),
     ignoreAllSpace: fl.asBool('w'),
     ignoreSpaceChange: fl.asBool('b'),
     ed: fl.asBool('e'),
-    unified,
-    context: context === -1 ? 3 : context,
+    unified: fl.asBool('u') || typed.length > 0,
+    context,
     brief: fl.asBool('brief'),
     recursive: fl.asBool('recursive'),
     newFile,
@@ -445,13 +464,13 @@ async function excludedPatterns(
 }
 
 export async function diffGeneric(
+  flags: DiffFlags,
   paths: PathSpec[],
   ctx: Context,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
   readdir: Readdir,
   backendStat: Stat,
 ): Promise<[ByteSource | null, IOResult]> {
-  const flags = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.DIFF, paths[2]?.rawPath ?? '')
   if (paths.length < 2)
     throw missingOperandError(CommandName.DIFF, paths[0]?.rawPath ?? null, ctx.argv ?? [])

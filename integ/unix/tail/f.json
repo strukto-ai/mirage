@@ -258,7 +258,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "tail --follow='x\u00e9' /data/a.txt",
+      "command": "tail --follow='xé' /data/a.txt",
       "expect": {
         "exit": 1,
         "stdout": "",
@@ -574,6 +574,45 @@
         "exit": 0,
         "stdout": "x\nrc=1\n",
         "stderr": "tail: /data/fcD_V: No such file or directory\ntail: no files remaining\n"
+      },
+      "flags": [
+        "follow",
+        "s"
+      ]
+    },
+    {
+      "id": "tail_follow_bad_word_exits_1",
+      "seq": 19990122,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail --follow=bad /data/a.txt; echo rc=$?; tail -s x /data/a.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "tail: invalid argument 'bad' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.\ntail: invalid number of seconds: 'x'\n"
       },
       "flags": [
         "follow",

@@ -75,6 +75,41 @@
       "flags": [
         "w"
       ]
+    },
+    {
+      "id": "base64_refuses_a_negative_wrap_before_the_file",
+      "seq": 19990132,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "base64 -w -1 /data/nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "base64: invalid wrap size: '-1'\n"
+      }
     }
   ]
 }

@@ -126,6 +126,26 @@ describe('treeGeneric operand that is not a directory', () => {
     expect(io.exitCode).toBe(2)
     expect(DEC.decode(out)).toBe('/locked  [error opening dir]\n\n0 directories, 0 files\n')
   })
+
+  // tree 2.2.1 on a readable directory without search permission lists its
+  // names, stats none, and draws the root plainly with exit 0. Mirrors
+  // test_tree.py.
+  it('draws a root whose entries all fail to stat plainly', async () => {
+    const dirStat = new FileStat({ name: 'r', type: FileType.DIRECTORY })
+    const denied = (): Promise<never> => {
+      const err = new Error('/r/x') as Error & { code: string }
+      err.code = 'EACCES'
+      return Promise.reject(err)
+    }
+    const [out, io] = (await treeGeneric(
+      [spec('/r')],
+      optsWith(dirStat),
+      () => Promise.resolve(['/r/x', '/r/y']),
+      denied,
+    )) as [Uint8Array, { exitCode: number }]
+    expect(io.exitCode).toBe(0)
+    expect(DEC.decode(out)).toBe('/r\n\n0 directories, 0 files\n')
+  })
 })
 
 describe('treeGeneric across a nested mount', () => {

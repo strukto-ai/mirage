@@ -1,8 +1,6 @@
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
-from mirage.commands.builtin.constants import C_SPACE, UINTMAX
 from mirage.commands.builtin.generic.archive.extract import extract_dest
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
 from mirage.commands.builtin.generic.tar.constants import (
@@ -10,7 +8,6 @@ from mirage.commands.builtin.generic.tar.constants import (
     MODE_CONFLICT,
     MULTIPLE_ARCHIVES,
     NO_MODE,
-    STRIP_COUNT,
     USAGE_HINT,
 )
 from mirage.commands.builtin.generic.tar.create import (
@@ -35,6 +32,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused
+from mirage.rs.stream import open_stream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec, ReadStreamFn, StatFn
@@ -52,63 +52,53 @@ class TarFlags:
     to_stdout: bool = False
     archive: PathSpec | None = None
     directories: tuple[PathSpec, ...] = ()
-    strip_components: int = 0
+    strip_components: tuple[str, ...] = ()
     exclude: str | None = None
     one_file_system: bool = False
 
 
 _MODES = ("create", "extract", "list")
 _CODECS = ("gzip", "bzip2", "xz")
-_STRIP_COUNT_PATTERN = re.compile(rf"^{C_SPACE}\+?([0-9]+)$")
 
 
-def strip_count(raw: str) -> int:
-    """A --strip-components value as tar reads it, or tar's refusal.
-
-    A decimal count with no suffix: leading blanks and one ``+`` pass,
-    a sign, another letter or a count past UINTMAX does not (tar 1.35).
-
-    Args:
-        raw (str): the value as typed.
-
-    Raises:
-        UsageError: the value is no count.
-    """
-    match = _STRIP_COUNT_PATTERN.match(raw)
-    if match is None or int(match.group(1)) > UINTMAX:
-        raise UsageError(
-            f"{STRIP_COUNT.format(raw)}\n{USAGE_HINT}", CREATE_ERROR_EXIT
-        )
-    return int(match.group(1))
-
-
-def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags | IOResult:
     """tar's flags as argp reads them, refusing what tar refuses.
 
     argp meets the options in line order and stops at the first it
     refuses: a second main operation where one is already set, or a
-    --strip-components value that is no count. After the scan, more than
-    one archive is refused without -M, which mirage does not have (tar
-    1.35).
+    --strip-components value that is no count, which the tar engine
+    reads, so only the values typed before a conflict reach it. After the
+    scan, more than one archive is refused without -M, which mirage does
+    not have (tar 1.35).
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flag bag.
 
+    Returns:
+        TarFlags | IOResult: the flags, or the engine's refusal of a
+        --strip-components, exit 2.
+
     Raises:
-        UsageError: tar's refusal, exit 2.
+        UsageError: tar's other refusals, exit 2.
     """
     fl = FlagView(flags, spec=SPECS["tar"])
     mode: str | None = None
-    strip = 0
-    for name, value in fl.occurrences(*_MODES, "strip_components"):
+    strip: list[str] = []
+    conflict = False
+    for name, text in fl.texts(*_MODES, "strip_components"):
         if name == "strip_components":
-            strip = strip_count(str(value))
+            strip.append(text)
         elif mode is not None and name != mode:
-            raise UsageError(
-                f"{MODE_CONFLICT}\n{USAGE_HINT}", CREATE_ERROR_EXIT
-            )
+            conflict = True
+            break
         else:
             mode = name
+    try:
+        open_stream("tar", {"strip": [byte_view(text) for text in strip]})
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    if conflict:
+        raise UsageError(f"{MODE_CONFLICT}\n{USAGE_HINT}", CREATE_ERROR_EXIT)
     if len(fl.occurrences("file")) > 1:
         raise UsageError(
             f"{MULTIPLE_ARCHIVES}\n{USAGE_HINT}", CREATE_ERROR_EXIT
@@ -124,7 +114,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TarFlags:
         to_stdout=fl.as_bool("to_stdout"),
         archive=archive if isinstance(archive, PathSpec) else None,
         directories=tuple(fl.as_paths("directory")),
-        strip_components=strip,
+        strip_components=tuple(strip),
         exclude=fl.as_str("exclude"),
         one_file_system=fl.as_bool("one_file_system"),
     )
@@ -233,7 +223,7 @@ async def tar(
             "mode": "list" if flags.list_only else "extract",
             "probe": archive.walk_error is None,
             "selectors": [byte_view(selector) for selector in selectors],
-            "strip": flags.strip_components,
+            "strip": [byte_view(text) for text in flags.strip_components],
             "to_stdout": flags.to_stdout,
             "base": byte_view(extract_dest(dest, cwd).rstrip("/")),
             "refusal": [byte_view(line) for line in refusal],
@@ -246,6 +236,7 @@ async def tar(
 
 
 async def tar_generic(
+    parsed: TarFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -258,7 +249,7 @@ async def tar_generic(
     return await tar(
         paths,
         list(texts),
-        parse_flags(ctx.flags),
+        parsed,
         stream=stream,
         stat=stat,
         walk=walk,

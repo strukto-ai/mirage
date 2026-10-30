@@ -70,6 +70,41 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "sed_l_reads_as_atoi_and_refuses_nothing",
+      "seq": 19990133,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "sed -l x p /data/nope",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "sed: can't read /data/nope: No such file or directory\n"
+      }
     }
   ]
 }

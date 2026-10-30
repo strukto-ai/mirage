@@ -25,8 +25,6 @@ export const MODE_CONFLICT =
 export const NO_MODE =
   "tar: You must specify one of the '-Acdtrux', '--delete' or '--test-label' options"
 export const MULTIPLE_ARCHIVES = "tar: Multiple archive files require '-M' option"
-// A --strip-components value that is no count, named first.
-export const STRIP_COUNT = 'tar: {}: Invalid number of elements'
 // GNU normalizes an empty operand to `.` before it stats it, says so, and
 // then still names the operand as typed when the stat fails (tar 1.35).
 export const EMPTY_MEMBER = "tar: Substituting `.' for empty member name"

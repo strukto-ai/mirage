@@ -48,6 +48,7 @@ interface Exports {
   mirage_rs_output_len(handle: number): number
   mirage_rs_error(handle: number): number
   mirage_rs_error_len(handle: number): number
+  mirage_rs_error_status(handle: number): number
   mirage_rs_close(handle: number): void
   mirage_rs_open_count(): number
 }
@@ -322,7 +323,11 @@ export class OpenStream {
     const message = decoder.decode(
       bytesAt(exports, exports.mirage_rs_error(handle), exports.mirage_rs_error_len(handle)),
     )
-    throw new StreamRefusal(message, concat([...before, output]))
+    throw new StreamRefusal(
+      message,
+      concat([...before, output]),
+      exports.mirage_rs_error_status(handle),
+    )
   }
 }
 
@@ -459,7 +464,7 @@ function open(
     const message = decoder.decode(
       bytesAt(exports, exports.mirage_rs_error(0), exports.mirage_rs_error_len(0)),
     )
-    throw new StreamRefusal(message, new Uint8Array())
+    throw new StreamRefusal(message, new Uint8Array(), exports.mirage_rs_error_status(0))
   }
   return new OpenStream(exports, handle, movable)
 }

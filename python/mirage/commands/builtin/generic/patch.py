@@ -1,16 +1,13 @@
 import logging
-import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
-from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.utils.links import (
     link_location,
     links_of,
     mount_root,
     name_location,
 )
-from mirage.commands.builtin.utils.size_suffix import decimal_value
 from mirage.commands.builtin.utils.stream import read_stdin_async
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -22,6 +19,8 @@ from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import fs_strerror, strerror_of
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused
 from mirage.rs.stream import Served, open_stream, serve_requests
 from mirage.shell.bytes import byte_view, text_view
 from mirage.types import FileStat, FileType, JsonValue, PathSpec
@@ -267,37 +266,9 @@ class _PatchFiles:
             return Served({"errno": "ENOENT"})
 
 
-# A -p value is one optional sign, then digits to the end of the word:
-# GNU patch 2.8 refuses `3x` and ` 1`, and takes `+0`.
-STRIP_COUNT = re.compile(r"[+-]?[0-9]+")
-
-
-def _strip_count(text: str) -> int | None:
-    """``-p`` as GNU patch scans it, None for no number.
-
-    Args:
-        text (str): the value as typed.
-    """
-    if STRIP_COUNT.fullmatch(text) is None:
-        return None
-    value = decimal_value(text.lstrip("+-"))
-    return -value if text.startswith("-") else value
-
-
-def _strip_refusal(text: str, value: int | None) -> str:
-    """GNU patch's fatal line for a -p value that is no number or negative.
-
-    Args:
-        text (str): the value as typed.
-        value (int | None): what it scanned to, None for no number.
-    """
-    problem = "is not a number" if value is None else "is negative"
-    return f"patch: **** strip count {shell_quote(text)} {problem}"
-
-
 @dataclass(frozen=True, slots=True)
 class PatchFlags:
-    strip: int | None = None
+    strip: str | None = None
     reverse: bool = False
     input_path: PathSpec | None = None
     forward: bool = False
@@ -305,14 +276,26 @@ class PatchFlags:
     dry_run: bool = False
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> PatchFlags | IOResult:
+    """patch's options, -p refused by the patch engine before any file.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the parsed flags.
+
+    Returns:
+        PatchFlags | IOResult: the flags, or patch's fatal -p line, exit 2.
+    """
     fl = FlagView(flags, spec=SPECS["patch"])
     input_flag = fl.raw("i")
-    strip = fl.as_number("p", _strip_count, _strip_refusal, low=0, exit_code=2)
-    # A count past a name's slashes strips them all, as any larger one
-    # does, so UINTMAX stands in for one JSON cannot carry to mirage-rs.
+    strip = fl.as_text("p")
+    try:
+        open_stream(
+            "patch", {"strip": None if strip is None else byte_view(strip)}
+        )
+    except StreamRefusal as refusal:
+        return refused(refusal)
     return PatchFlags(
-        strip=None if strip is None else min(strip, UINTMAX),
+        strip=strip,
         reverse=fl.as_bool("R"),
         input_path=input_flag if isinstance(input_flag, PathSpec) else None,
         forward=fl.as_bool("N"),
@@ -398,6 +381,8 @@ async def patch_generic(
     chmod: PatchChmod,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     if len(paths) > 2:
         raise extra_operand_error(
             CommandName.PATCH, paths[2].raw_path or paths[2].virtual
@@ -434,7 +419,7 @@ async def patch_generic(
     engine = open_stream(
         "patch",
         {
-            "strip": parsed.strip,
+            "strip": None if parsed.strip is None else byte_view(parsed.strip),
             "reverse": parsed.reverse,
             "forward": parsed.forward,
             "dry_run": parsed.dry_run,

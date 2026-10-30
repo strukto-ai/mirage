@@ -6,19 +6,40 @@ use serde::Deserialize;
 use sha1::Sha1;
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512};
 
-use crate::{Stream, StreamError, parse_config};
+use crate::number;
+use crate::{Stream, StreamError, parse_config, quoted};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     algorithm: String,
-    /// BLAKE2b's digest length in bits, a multiple of 8 up to 512.
-    #[serde(default = "full_length")]
-    length: usize,
+    /// BLAKE2b's digest length in bits as b2sum's -l was typed, one
+    /// character per byte; none is 512.
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    length: Option<Vec<u8>>,
 }
 
-fn full_length() -> usize {
-    512
+/// The most bits BLAKE2b gives.
+const FULL_LENGTH: u128 = 512;
+
+/// b2sum's -l as GNU reads it in its option loop (coreutils 9.7): a whole
+/// decimal past blanks and one `+`, 0 or 512 and past it the whole 512,
+/// one under 512 a multiple of 8.
+fn length(raw: Option<&[u8]>) -> Result<usize, StreamError> {
+    let Some(raw) = raw else {
+        return Ok(FULL_LENGTH as usize);
+    };
+    let refused = format!("b2sum: invalid length: '{}'", quoted(raw));
+    let bits =
+        number::unsigned_decimal(raw).ok_or_else(|| StreamError::refusal(refused.as_bytes(), 1))?;
+    if bits == 0 || bits >= FULL_LENGTH {
+        return Ok(FULL_LENGTH as usize);
+    }
+    if bits % 8 != 0 {
+        let refused = format!("{refused}\nb2sum: length is not a multiple of 8");
+        return Err(StreamError::refusal(refused.as_bytes(), 1));
+    }
+    Ok(bits as usize)
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
@@ -30,10 +51,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "sha256" => Hasher::Sha256(Sha256::new()),
         "sha384" => Hasher::Sha384(Sha384::new()),
         "sha512" => Hasher::Sha512(Sha512::new()),
-        "blake2b" if config.length % 8 == 0 => {
-            let bytes = config.length / 8;
+        "blake2b" => {
+            let bits = length(config.length.as_deref())?;
+            let bytes = bits / 8;
             let core = Blake2bVarCore::new(bytes)
-                .map_err(|_| StreamError::new(format!("bad digest length: {}", config.length)))?;
+                .map_err(|_| StreamError::new(format!("bad digest length: {bits}")))?;
             Hasher::Blake2b(Box::new((core, Buffer::<Blake2bVarCore>::default(), bytes)))
         }
         other => return Err(StreamError::new(format!("unknown digest: {other}"))),
@@ -96,6 +118,20 @@ impl Stream for Hasher {
         }
         Ok(())
     }
+
+    /// `{"bits": N}`, the digest's length.
+    fn metadata(&self, out: &mut Vec<u8>) {
+        let bits = match self {
+            Self::Md5(_) => 128,
+            Self::Sha1(_) => 160,
+            Self::Sha224(_) => 224,
+            Self::Sha256(_) => 256,
+            Self::Sha384(_) => 384,
+            Self::Sha512(_) => 512,
+            Self::Blake2b(state) => state.2 * 8,
+        };
+        out.extend_from_slice(serde_json::json!({ "bits": bits }).to_string().as_bytes());
+    }
 }
 
 #[cfg(test)]
@@ -139,9 +175,44 @@ mod tests {
             (8, "6b"),
         ];
         for (length, expected) in cases {
-            let config = format!(r#"{{"algorithm":"blake2b","length":{length}}}"#);
+            let config = format!(r#"{{"algorithm":"blake2b","length":"{length}"}}"#);
             let chunks: [&[u8]; 3] = [b"a", &[b'b'; 0], b"bc"];
             assert_eq!(run("digest", &config, &chunks).0, expected.as_bytes());
         }
+    }
+
+    #[test]
+    fn b2sum_reads_its_length_as_gnu_does() {
+        let open = |length: &str| {
+            let config = serde_json::json!({"algorithm": "blake2b", "length": length}).to_string();
+            crate::open("digest", config.as_bytes()).map(|stream| {
+                let mut out = Vec::new();
+                stream.metadata(&mut out);
+                String::from_utf8(out).expect("json")
+            })
+        };
+        for (typed, bits) in [
+            (" +256", 256),
+            ("0", 512),
+            ("1024", 512),
+            ("99999999999999999999999", 512),
+        ] {
+            assert_eq!(
+                open(typed).ok(),
+                Some(format!(r#"{{"bits":{bits}}}"#)),
+                "{typed}"
+            );
+        }
+        let refused = |typed: &str| open(typed).err().map(|e| (e.message, e.status));
+        assert_eq!(
+            refused("x"),
+            Some(("b2sum: invalid length: 'x'".to_owned(), 1))
+        );
+        assert_eq!(
+            refused("-8"),
+            Some(("b2sum: invalid length: '-8'".to_owned(), 1))
+        );
+        let odd = "b2sum: invalid length: '12'\nb2sum: length is not a multiple of 8".to_owned();
+        assert_eq!(refused("12"), Some((odd, 1)));
     }
 }

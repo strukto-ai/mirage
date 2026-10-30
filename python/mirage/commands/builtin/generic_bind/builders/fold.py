@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.fold import fold_generic
+from mirage.commands.builtin.generic.fold import fold_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -31,9 +31,13 @@ async def fold(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
     return await fold_generic(
+        parsed,
         resolved,
         list(texts),
         ctx,

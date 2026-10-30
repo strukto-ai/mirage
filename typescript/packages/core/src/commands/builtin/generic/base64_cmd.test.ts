@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest'
 import { PathSpec } from '../../../types.ts'
 import { ensureStream } from '../../../io/stream.ts'
-import { materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeBase64 } from '../../../utils/base64.ts'
-import { base64Generic } from './base64_cmd.ts'
+import { base64Generic, parseFlags } from './base64_cmd.ts'
 import type { Context } from '../../config.ts'
 
 const ENC = new TextEncoder()
@@ -14,7 +14,10 @@ function unused(): never {
 }
 
 async function run(stdin: ByteSource, flags: Context['flags'] = {}) {
+  const parsed = parseFlags(flags)
+  if (parsed instanceof IOResult) throw new Error('base64 refused its flags')
   const result = await base64Generic(
+    parsed,
     [],
     { stdin, flags, cwd: PathSpec.fromStrPath('/') },
     unused,

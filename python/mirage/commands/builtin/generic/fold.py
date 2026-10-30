@@ -9,38 +9,20 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
-from mirage.commands.builtin.utils.strtol import (
-    ERANGE_REASON,
-    ULONG_MAX,
-    unsigned_decimal,
-)
 from mirage.commands.config import Context
-from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused, scan
 from mirage.rs.stream import run_stream
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
 
 # GNU fold's line width when -w names none.
 WIDTH = 80
-# GNU 9.7 takes -w as a decimal from 1 to 2**64 - 10, so 0 and anything
-# past this are out of range.
-WIDTH_MAX = ULONG_MAX - 9
 
 Count = Literal["columns", "characters", "bytes"]
-
-
-def _width_refusal(text: str, value: int | None) -> str:
-    """fold's refusal of a -w value, the range clause only for a number.
-
-    Args:
-        text (str): the value as typed.
-        value (int | None): what it scanned to, None for no number.
-    """
-    reason = "" if value is None else f": {ERANGE_REASON}"
-    return f"fold: invalid number of columns: '{quote_text(text)}'{reason}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,23 +32,33 @@ class FoldFlags:
     count: Count = "columns"
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> FoldFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> FoldFlags | IOResult:
+    """fold's options, -w read by mirage-rs before any operand is resolved.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the parsed flags.
+
+    Returns:
+        FoldFlags | IOResult: the flags, or fold's refusal of a -w.
+    """
     fl = FlagView(flags, spec=SPECS["fold"])
-    width = fl.as_number(
-        "width", unsigned_decimal, _width_refusal, low=1, high=WIDTH_MAX
-    )
+    try:
+        width = scan("fold", fl.texts("width")).get("width")
+    except StreamRefusal as refusal:
+        return refused(refusal)
     # The later of -b and -c wins, as in GNU 9.10.
     count: Count = "columns"
     for name in fl.typed_order("bytes", "characters"):
         count = "bytes" if name == "bytes" else "characters"
     return FoldFlags(
-        width=WIDTH if width is None else width,
+        width=width if isinstance(width, int) else WIDTH,
         break_spaces=fl.as_bool("spaces"),
         count=count,
     )
 
 
 async def fold_generic(
+    parsed: FoldFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -78,6 +70,7 @@ async def fold_generic(
     Each operand is folded on its own, from column 0.
 
     Args:
+        parsed (FoldFlags): the options, read before the operands were.
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by fold.
         ctx (Context): Flags and stdin from the dispatcher.
@@ -86,7 +79,6 @@ async def fold_generic(
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    parsed = parse_flags(ctx.flags)
     readable, err = await split_readable(paths, stat, "fold")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
@@ -102,4 +94,4 @@ async def fold_generic(
     return await merge_split_errors((output, io), err)
 
 
-__all__ = ["fold_generic"]
+__all__ = ["fold_generic", "parse_flags"]

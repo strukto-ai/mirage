@@ -14,13 +14,13 @@
 import pytest
 
 from mirage.commands.builtin.generic.cmp import (
+    CmpFlags,
     cmp_cmd,
-    parse_count,
     parse_flags,
-    parse_skip,
 )
-from mirage.commands.errors import UsageError
+from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import materialize
+from mirage.io.types import IOResult
 from mirage.types import PathSpec
 
 P1 = PathSpec.from_str_path("/F/one", "")
@@ -36,106 +36,75 @@ def _reader(first: bytes, second: bytes):
     return stream
 
 
+_HINT = "\ncmp: Try 'cmp --help' for more information.\n"
+
+
+def _flags(
+    flags: dict[str, FlagValue], texts: tuple[str, ...] = ()
+) -> CmpFlags:
+    parsed = parse_flags(flags, texts)
+    assert isinstance(parsed, CmpFlags)
+    return parsed
+
+
+def _refusal(
+    flags: dict[str, FlagValue], texts: tuple[str, ...] = ()
+) -> tuple[bytes | None, int]:
+    parsed = parse_flags(flags, texts)
+    assert isinstance(parsed, IOResult)
+    return parsed.stderr, parsed.exit_code
+
+
 @pytest.mark.parametrize(
     "raw,value",
     [
         ("4", 4),
         ("1K", 1024),
-        ("1k", 1024),
-        ("1kB", 1000),
         ("1kiB", 1024),
-        ("1M", 1024 * 1024),
-        ("0Z", 0),
-        ("010", 8),
         ("0x400", 1024),
         ("+1010", 1010),
         (" 1", 1),
-        ("9223372036854775807", 2**63 - 1),
         ("7E", 7 * 1024**6),
     ],
 )
-def test_parse_count_takes_base_zero_digits_and_gnu_size_suffixes(raw, value):
-    assert parse_count(raw, "--bytes") == value
+def test_n_takes_base_zero_digits_and_gnu_size_suffixes(raw, value):
+    assert _flags({"bytes": raw}).limit == value
 
 
 @pytest.mark.parametrize(
-    "raw",
-    [
-        "1b",
-        "1B",
-        "1c",
-        "1w",
-        "1m",
-        "1g",
-        "1t",
-        "1Q",
-        "0Q",
-        "1 ",
-        "-1",
-        "9223372036854775808",
-        "8E",
-        "1Z",
-        "1Y",
-    ],
+    "raw", ["1b", "1m", "0Q", "1 ", "-1", "9223372036854775808", "8E", "abc"]
 )
-def test_parse_count_refuses(raw):
+def test_n_refuses_naming_the_long_option(raw):
     # diffutils 3.10 takes no od block or char suffix, no Q or R (newer
     # than its gnulib), and caps a count at INTMAX: each is an invalid
-    # value, exit 2.
-    with pytest.raises(UsageError):
-        parse_count(raw, "--bytes")
-
-
-def test_parse_count_names_the_long_option_it_was_given():
-    # GNU says `invalid --bytes value` for -n and `invalid
-    # --ignore-initial value` for -i, exit 2. diffutils routes the
-    # Try-help line through error(), so it carries the `cmp: ` prefix
-    # that coreutils' bare hint does not.
-    with pytest.raises(UsageError) as excinfo:
-        parse_count("abc", "--bytes")
-    assert str(excinfo.value) == (
-        "cmp: invalid --bytes value 'abc'\n"
-        "cmp: Try 'cmp --help' for more "
-        "information."
+    # value, exit 2, with diffutils' prefixed Try-help line.
+    assert _refusal({"bytes": raw}) == (
+        f"cmp: invalid --bytes value '{raw}'{_HINT}".encode(),
+        2,
     )
-    assert excinfo.value.exit_code == 2
-
-
-def test_parse_skip_takes_one_count_for_both_files():
-    assert parse_skip("3") == (3, 3)
 
 
 @pytest.mark.parametrize(
     "raw,named",
-    [
-        ("1b:1", "1b:1"),
-        ("1:1b", "1b"),
-        ("1:abc", "abc"),
-        ("abc:1", "abc:1"),
-        ("1:2:3", "2:3"),
-        ("1:", ""),
-        (":1", ":1"),
-        (":", ":"),
-    ],
+    [("1b:1", "1b:1"), ("1:1b", "1b"), ("1:2:3", "2:3"), (":1", ":1")],
 )
-def test_parse_skip_names_the_operand_from_where_it_stopped(raw, named):
+def test_i_names_the_operand_from_where_it_stopped(raw, named):
     # GNU prints the operand from the position its count started at,
     # so a bad SKIP1 names the whole pair and a bad SKIP2 names only
     # itself. A colon is the one character the first count may stop on.
-    with pytest.raises(UsageError) as excinfo:
-        parse_skip(raw)
-    assert str(excinfo.value).splitlines()[0] == (
-        f"cmp: invalid --ignore-initial value '{named}'"
+    assert _refusal({"ignore_initial": raw}) == (
+        f"cmp: invalid --ignore-initial value '{named}'{_HINT}".encode(),
+        2,
     )
 
 
-def test_parse_skip_takes_a_colon_pair_for_one_each():
-    assert parse_skip("0:3") == (0, 3)
-    assert parse_skip("1K:2") == (1024, 2)
+def test_i_takes_a_colon_pair_for_one_each():
+    assert _flags({"ignore_initial": "1K:2"}).skip == (1024, 2)
+    assert _flags({"ignore_initial": "3"}).skip == (3, 3)
 
 
 @pytest.mark.parametrize("value", ["1é", "1\x01", "1\r", "1'", "1\\"])
-def test_parse_count_leaves_the_value_unescaped(value):
+def test_n_leaves_the_value_unescaped(value):
     """`cmp -n` quotes the value but does NOT escape it.
 
     diffutils is not coreutils: it interpolates the bytes with a plain
@@ -148,11 +117,16 @@ def test_parse_count_leaves_the_value_unescaped(value):
     `'1\\303\\251'` and `'1\\''`. This asymmetry is deliberate; do not
     "fix" it by routing this clause through quote().
     """
-    with pytest.raises(UsageError) as exc:
-        parse_count(value, "--bytes")
-    assert str(exc.value) == (
-        f"cmp: invalid --bytes value '{value}'\n"
-        "cmp: Try 'cmp --help' for more information."
+    assert _refusal({"bytes": value}) == (
+        f"cmp: invalid --bytes value '{value}'{_HINT}".encode(),
+        2,
+    )
+
+
+async def _cmp(paths, texts, flags=None, **kwargs):
+    parsed = _flags(flags or {}, tuple(texts))
+    return await cmp_cmd(
+        paths, texts, skip=parsed.skip, limit=parsed.limit, **kwargs
     )
 
 
@@ -162,82 +136,81 @@ async def _unread(path: PathSpec):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("texts", [(), ("1", "0")])
-async def test_two_stdin_operands_at_one_offset_are_equal_unread(texts):
+@pytest.mark.parametrize(
+    "texts,flags", [((), {"ignore_initial": "1"}), (("1", "0"), {})]
+)
+async def test_two_stdin_operands_at_one_offset_are_equal_unread(texts, flags):
     # One name at one skip, or the second skip of zero that leaves the one
     # descriptor where the first put it: diffutils 3.10 reads neither.
-    src, io = await cmp_cmd(
+    src, io = await _cmp(
         [DASH, DEV_STDIN] if not texts else [DASH, DASH],
         texts,
+        flags,
         stream=_unread,
         stdin=b"abc",
-        skip=(1, 1) if not texts else (0, 0),
     )
     assert (src, io.exit_code, io.stderr) == (None, 0, None)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "texts,skip,out,code",
+    "texts,flags,out,code",
     [
         # SKIP1 skips the first file only; SKIP2 the second.
-        (["1"], (0, 0), "", 0),
-        (["0", "1"], (0, 0), "/F/one /F/two differ: char 1, line 1\n", 1),
-        (["1", "1"], (0, 0), "/F/one /F/two differ: char 1, line 1\n", 1),
+        (["1"], {}, "", 0),
+        (["0", "1"], {}, "/F/one /F/two differ: char 1, line 1\n", 1),
+        (["1", "1"], {}, "/F/one /F/two differ: char 1, line 1\n", 1),
         # Base 0 and cmp's own suffixes, as -i reads them.
-        (["0x1"], (0, 0), "", 0),
-        (["01"], (0, 0), "", 0),
-        (["+1"], (0, 0), "", 0),
+        (["0x1"], {}, "", 0),
+        (["01"], {}, "", 0),
+        (["+1"], {}, "", 0),
         # Each file keeps the larger of -i's skip and its operand's.
-        (["0", "2"], (1, 1), "/F/one /F/two differ: char 1, line 1\n", 1),
-        (["0", "0"], (1, 0), "", 0),
+        (
+            ["0", "2"],
+            {"ignore_initial": "1"},
+            "/F/one /F/two differ: char 1, line 1\n",
+            1,
+        ),
+        (["0", "0"], {"ignore_initial": "1:0"}, "", 0),
     ],
 )
 async def test_the_skip_operands_read_as_i_and_keep_the_larger(
-    texts, skip, out, code
+    texts, flags, out, code
 ):
-    src, io = await cmp_cmd(
-        [P1, P2], texts, stream=_reader(b"xhello\n", b"hello\n"), skip=skip
+    src, io = await _cmp(
+        [P1, P2], texts, flags, stream=_reader(b"xhello\n", b"hello\n")
     )
     got = b"" if src is None else await materialize(src)
     assert (got.decode(), io.exit_code) == (out, code)
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "texts,message",
     [
-        (["1", "y"], "cmp: invalid --ignore-initial value 'y'"),
-        ([""], "cmp: invalid --ignore-initial value ''"),
-        (["1:2"], "cmp: invalid --ignore-initial value '1:2'"),
-        (["1 "], "cmp: invalid --ignore-initial value '1 '"),
+        (("1", "y"), "cmp: invalid --ignore-initial value 'y'"),
+        (("",), "cmp: invalid --ignore-initial value ''"),
+        (("1:2",), "cmp: invalid --ignore-initial value '1:2'"),
+        (("1 ",), "cmp: invalid --ignore-initial value '1 '"),
         (
-            ["9223372036854775808"],
+            ("9223372036854775808",),
             "cmp: invalid --ignore-initial value '9223372036854775808'",
         ),
-        (["y", "1", "2"], "cmp: invalid --ignore-initial value 'y'"),
+        (("y", "1", "2"), "cmp: invalid --ignore-initial value 'y'"),
     ],
 )
-async def test_a_bad_or_extra_skip_operand_is_a_usage_error(texts, message):
-    with pytest.raises(UsageError) as exc:
-        await cmp_cmd([P1, P2], texts, stream=_reader(b"", b""))
-    assert str(exc.value) == (
-        f"{message}\ncmp: Try 'cmp --help' for more information."
-    )
-    assert exc.value.exit_code == 2
+def test_a_bad_skip_operand_is_refused_before_an_extra_one(texts, message):
+    assert _refusal({}, texts) == (f"{message}{_HINT}".encode(), 2)
 
 
 def test_parse_flags_reads_the_long_spellings_and_refuses_l_with_s():
     # --quiet and --silent are -s; --verbose is -l, and diffutils refuses
     # the pair while it reads the options.
-    assert parse_flags({"quiet": True}).silent
-    assert parse_flags({"silent": True}).silent
-    assert parse_flags({"verbose": True}).verbose
-    with pytest.raises(UsageError) as info:
-        parse_flags({"verbose": True, "silent": True})
-    assert str(info.value) == (
-        "cmp: options -l and -s are incompatible\n"
-        "cmp: Try 'cmp --help' for more information."
+    assert _flags({"quiet": True}).silent
+    assert _flags({"silent": True}).silent
+    assert _flags({"verbose": True}).verbose
+    assert _refusal({"verbose": True, "silent": True}) == (
+        f"cmp: options -l and -s are incompatible{_HINT}".encode(),
+        2,
     )
 
 

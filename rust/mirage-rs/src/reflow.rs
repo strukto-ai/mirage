@@ -1,7 +1,11 @@
 use serde::Deserialize;
 
+use serde_json::Value as Json;
+
+use crate::number::{self, EOVERFLOW, ERANGE};
+use crate::scan::{Typed, Values, last, unknown};
 use crate::width::TAB_WIDTH;
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, parse_config, quoted};
 
 const TAB: i64 = TAB_WIDTH as i64;
 const DEFAULT_WIDTH: i64 = 75;
@@ -57,6 +61,46 @@ struct Config {
     tagged: bool,
     crown: bool,
     uniform: bool,
+}
+
+/// The widest `-w` GNU fmt 9.7 takes.
+const WIDEST: u128 = 2500;
+
+/// `-w` and `-g` as GNU fmt 9.7 reads them once its options are read, the
+/// last of each: a width from 0 to 2500, then a goal from 0 to that width
+/// (75 when none is given). A width past its range takes the range
+/// clause, a goal past the width the overflow one.
+pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
+    if let Some((name, _)) = options
+        .iter()
+        .find(|(name, _)| name != "width" && name != "goal")
+    {
+        return Err(unknown("fmt", name));
+    }
+    let mut values = Values::new();
+    let width = match last(options, "width") {
+        Some(raw) => Some(bounded(raw, WIDEST, ERANGE)?),
+        None => None,
+    };
+    if let Some(width) = width {
+        values.insert("width".to_owned(), Json::from(width as u64));
+    }
+    if let Some(raw) = last(options, "goal") {
+        let goal = bounded(raw, width.unwrap_or(DEFAULT_WIDTH as u128), EOVERFLOW)?;
+        values.insert("goal".to_owned(), Json::from(goal as u64));
+    }
+    Ok(values)
+}
+
+/// One fmt width from 0 to `high`, refused with `reason` when it is a
+/// number past it.
+fn bounded(raw: &[u8], high: u128, reason: &str) -> Result<u128, StreamError> {
+    let value = number::unsigned_decimal(raw);
+    value.filter(|&value| value <= high).ok_or_else(|| {
+        let reason = value.map_or(String::new(), |_| format!(": {reason}"));
+        let refused = format!("fmt: invalid width: '{}'{reason}", quoted(raw));
+        StreamError::refusal(refused.as_bytes(), 1)
+    })
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {

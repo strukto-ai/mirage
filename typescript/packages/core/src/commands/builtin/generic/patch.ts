@@ -27,12 +27,13 @@ import { READ_FAILURES } from '../../../errors/constants.ts'
 import { classify } from '../../../errors/classify.ts'
 import { fsStrerror, isEisdir, isEnoent, isFsError, strerrorOf } from '../../../errors/fs.ts'
 import { shellQuote } from '../../../utils/quote.ts'
-import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused } from '../../../rs/scan.ts'
+import { openStream, openStreamSync, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
 import { linkLocation, linksOf, mountRoot, nameLocation } from '../utils/links.ts'
 import { CycleError, resolvePath } from '../../../utils/path.ts'
 import type { LinkView } from '../../../view/types.ts'
-import { UINTMAX } from '../constants.ts'
 
 function companion(spec: PathSpec, suffix: string): PathSpec {
   return PathSpec.fromStrPath(spec.virtual + suffix, spec.vfsPath + suffix)
@@ -212,25 +213,8 @@ class PatchFiles {
   }
 }
 
-// A -p value is one optional sign, then digits to the end of the word:
-// GNU patch 2.8 refuses `3x` and ` 1`, and takes `+0`.
-const STRIP_COUNT = /^[+-]?[0-9]+$/
-
-// `-p` as GNU patch scans it, null for no number. Mirrors Python's
-// `_strip_count`.
-function stripCount(text: string): bigint | null {
-  return STRIP_COUNT.test(text) ? BigInt(text) : null
-}
-
-// GNU patch's fatal line for a -p value that is no number or negative.
-// Mirrors Python's `_strip_refusal`.
-function stripRefusal(text: string, value: bigint | null): string {
-  const problem = value === null ? 'is not a number' : 'is negative'
-  return `patch: **** strip count ${shellQuote(text)} ${problem}`
-}
-
 interface PatchFlags {
-  readonly strip: number | null
+  readonly strip: string | null
   readonly reverse: boolean
   // -i as the parser classified it: a path keeps its typed spelling.
   readonly inputPath: PathSpec | string | null
@@ -239,14 +223,20 @@ interface PatchFlags {
   readonly dryRun: boolean
 }
 
-function parseFlags(bag: Record<string, FlagValue>): PatchFlags {
+// patch's options, -p refused by the patch engine before any file: the flags,
+// or patch's fatal -p line, exit 2. Mirrors Python's `parse_flags`.
+function parseFlags(bag: Record<string, FlagValue>): PatchFlags | IOResult {
   const fl = new FlagView(bag, specOf('patch'))
   const input = fl.raw('i')
-  const strip = fl.asNumber('p', stripCount, stripRefusal, { low: 0n, exitCode: 2 }) ?? null
-  // A count past a name's slashes strips them all, as any larger one does,
-  // so UINTMAX stands in for one JSON cannot carry to mirage-rs.
+  const strip = fl.asText('p') ?? null
+  try {
+    openStreamSync('patch', { strip: strip === null ? null : byteView(strip) }).close()
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
   return {
-    strip: strip === null ? null : Number(strip > UINTMAX ? UINTMAX : strip),
+    strip,
     reverse: fl.asBool('R'),
     inputPath: input instanceof PathSpec ? input : (fl.asStr('i') ?? null),
     forward: fl.asBool('N'),
@@ -314,6 +304,7 @@ export async function patchGeneric(
   chmod: PatchChmod,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
   if (paths.length > 2) throw extraOperandError(CommandName.PATCH, paths[2]?.rawPath ?? '')
   const root = mountRoot(ctx)
   let cwd = ctx.cwd.virtual
@@ -354,7 +345,7 @@ export async function patchGeneric(
     chmod,
   )
   const engine = await openStream('patch', {
-    strip: parsed.strip,
+    strip: parsed.strip === null ? null : byteView(parsed.strip),
     reverse: parsed.reverse,
     forward: parsed.forward,
     dry_run: parsed.dryRun,
