@@ -1,6 +1,14 @@
 {
  "baseline": 2653,
  "modules": {
+  "server/app": {
+   "python_only": {
+    "_drain_on_signals": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
+    "_on_signal": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
+    "_start_drain": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
+    "_drain_then_stop": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal."
+   }
+  },
   "server/metrics": {
    "python_only": {
     "MetricsMiddleware": "Starlette counts the responses in an ASGI middleware; Fastify counts them in an onResponse hook buildApp adds.",
