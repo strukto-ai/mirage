@@ -37,6 +37,41 @@
       "flags": [
         "A"
       ]
+    },
+    {
+      "id": "cat_A_high_bytes",
+      "seq": 19990101,
+      "command": "printf '\\000\\001\\011\\012\\015\\177\\200\\211\\237\\240\\377' | cat -A",
+      "expect": {
+        "exit": 0,
+        "stdout": "^@^A^I$\n^M^?M-^@M-^IM-^_M- M-^?",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
     }
   ]
 }

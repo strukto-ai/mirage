@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from mirage.commands.builtin.utils.constants import CHAR_DEVICE_MAX_BYTES
 from mirage.commands.builtin.utils.limit import truncate_stream
@@ -13,15 +13,15 @@ from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stat,
     stdin_stream,
+    stream_output,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.stream import async_chain, close_quietly, ensure_stream
+from mirage.io.stream import OutputStream, async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.io.yield_budget import YieldBudget
-from mirage.shell.bytes import encode_text
+from mirage.rs.stream import open_stream
 from mirage.types import (
     FileStat,
     FileType,
@@ -140,109 +140,11 @@ async def cat_generic(
     return source, IOResult()
 
 
-def _visible(line: bytes, show_tabs: bool, show_nonprinting: bool) -> bytes:
-    """Render a line GNU cat -T / -v style.
-
-    Tabs become ^I under -T; under -v control bytes become ^X, DEL
-    becomes ^?, and high bytes get the M- prefix with the same rules
-    applied to the low seven bits. Newlines never appear here (the
-    caller splits on them).
+def display_lines(source: ByteSource, parsed: CatFlags) -> OutputStream:
+    """Render cat's display flags in the shared byte stream.
 
     Args:
-        line (bytes): one line without its trailing newline.
-        show_tabs (bool): -T, render tab as ^I.
-        show_nonprinting (bool): -v, render control and high bytes.
+        source (ByteSource): The concatenated input operands.
+        parsed (CatFlags): The display flags.
     """
-    out = bytearray()
-    for byte in line:
-        if byte == 9:
-            out += b"^I" if show_tabs else b"\t"
-        elif not show_nonprinting:
-            out.append(byte)
-        elif byte < 32:
-            out += bytes((94, byte + 64))
-        elif byte == 127:
-            out += b"^?"
-        elif byte >= 128:
-            out += b"M-"
-            low = byte - 128
-            if low < 32:
-                out += bytes((94, low + 64))
-            elif low == 127:
-                out += b"^?"
-            else:
-                out.append(low)
-        else:
-            out.append(byte)
-    return bytes(out)
-
-
-async def display_lines(
-    source: ByteSource, parsed: CatFlags
-) -> AsyncIterator[bytes]:
-    """Line-process a stream for GNU cat's display flags (-n -E -T -v -s).
-
-    One write per line. The scan yields to the loop on every pull and
-    every 64 lines, so a squeeze over a whole RAM read, or a ready input
-    that never ends a line, stays cancellable, and a line split across
-    chunks is joined once it ends. Closes ``source`` when it stops, at the
-    end or when its reader stops.
-
-    Args:
-        source (ByteSource): the bytes to render.
-        parsed (CatFlags): the display flags.
-    """
-    stream = ensure_stream(source)
-    budget = YieldBudget()
-    try:
-        number_lines = parsed.number_lines and not parsed.number_nonblank
-        transform = parsed.show_tabs or parsed.show_nonprinting
-        line_no = 0
-        scanned = 0
-        pending: list[bytes] = []
-        prev_blank = False
-        async for chunk in stream:
-            await budget.run()
-            start = 0
-            end = chunk.find(b"\n")
-            while end >= 0:
-                line = chunk[start:end]
-                if pending:
-                    line = b"".join([*pending, line])
-                    pending = []
-                start = end + 1
-                end = chunk.find(b"\n", start)
-                scanned += 1
-                if scanned % 64 == 0:
-                    await budget.run()
-                if parsed.squeeze_blank and not line and prev_blank:
-                    prev_blank = True
-                    continue
-                should_number = number_lines or (
-                    parsed.number_nonblank and bool(line)
-                )
-                if should_number:
-                    line_no += 1
-                prefix = (
-                    encode_text(f"{line_no:6d}\t") if should_number else b""
-                )
-                suffix = b"$\n" if parsed.show_ends else b"\n"
-                if transform:
-                    line = _visible(
-                        line, parsed.show_tabs, parsed.show_nonprinting
-                    )
-                yield prefix + line + suffix
-                prev_blank = not line
-            if start < len(chunk):
-                pending.append(chunk[start:])
-        if pending:
-            buf = b"".join(pending)
-            should_number = parsed.number_lines or parsed.number_nonblank
-            if should_number:
-                line_no += 1
-            prefix = encode_text(f"{line_no:6d}\t") if should_number else b""
-            if transform:
-                buf = _visible(buf, parsed.show_tabs, parsed.show_nonprinting)
-            yield prefix + buf
-    finally:
-        await close_quietly(stream)
+    return stream_output(open_stream("cat", asdict(parsed)), source)

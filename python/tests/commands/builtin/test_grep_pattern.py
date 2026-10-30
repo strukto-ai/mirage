@@ -5,7 +5,6 @@ import pytest
 from mirage.commands.builtin.grep_pattern import (
     NEVER_MATCH,
     compile_pattern,
-    line_selected,
     matcher_syntax,
     merge_pattern_list,
     pattern_warnings,
@@ -19,7 +18,7 @@ from mirage.shell.bytes import byte_view
 
 
 def _selected(matcher: LineRegex, line: str) -> bool:
-    return asyncio.run(line_selected(matcher, line))
+    return asyncio.run(matcher.matches(line))
 
 
 def test_single_pattern_keeps_regex_semantics():

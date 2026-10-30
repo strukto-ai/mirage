@@ -4,18 +4,11 @@ import { closeQuietly, discardStreams } from '../../io/stream.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { StreamRefusal } from '../../rs/errors.ts'
 import type { OpenStream } from '../../rs/stream.ts'
-import { openStream } from '../../rs/stream.ts'
-import { encodeText } from '../../shell/bytes.ts'
+import { openStream, openStreamSync } from '../../rs/stream.ts'
+import { decodeText, encodeText } from '../../shell/bytes.ts'
 import type { JsonValue } from '../../types.ts'
 import { UsageError } from '../errors.ts'
-import {
-  RgBinary,
-  foldsCase,
-  transcoded,
-  type RgFlags,
-  type Tally,
-  type Totals,
-} from './rg_search.ts'
+import { foldsCase, type RgFlags, type Tally, type Totals } from './rg_search.ts'
 
 const COMPILED = z.object({
   terms: z
@@ -161,11 +154,12 @@ async function* drained(
   }
 }
 
-export function binaryMetadata(binary: RgBinary): Record<string, JsonValue> {
-  return {
-    binary_offset: binary.offset,
-    binary_converted: binary.converted,
-    binary_skipped: binary.skipped,
+export function encodingFor(label: string): string | null {
+  const stream = openStreamSync('rg_format', {})
+  try {
+    return decodeText(stream.feed(ENC.encode(JSON.stringify({ kind: 'encoding', label })))) || null
+  } finally {
+    stream.close()
   }
 }
 
@@ -181,28 +175,25 @@ export async function* streamHaystack(
   pipe: boolean,
 ): AsyncGenerator<Uint8Array> {
   const stream = program.stream
-  const binary = new RgBinary(
+  const binaryMode =
     f.text || f.nullData
       ? 'text'
       : f.json === true && (named || f.binary)
         ? 'note'
         : named || f.binary
           ? 'convert'
-          : 'quit',
-  )
+          : 'quit'
   stream.begin({
     name: latin1(name),
     label: label === null ? null : latin1(label),
-    binary_mode: binary.mode,
-    ...binaryMetadata(binary),
+    binary_mode: binaryMode,
+    encoding: f.encoding ?? 'auto',
+    pipe,
   })
-  const encoding = f.encoding ?? 'auto'
-  const reader = binary.read(encoding === 'none' ? source : transcoded(source, encoding), pipe)
   const budget = new YieldBudget(signal)
   try {
     if (!stream.done()) {
-      for await (const chunk of reader) {
-        stream.feedInput(1, ENC.encode(JSON.stringify(binaryMetadata(binary))))
+      for await (const chunk of source) {
         for (let offset = 0; offset < chunk.byteLength; offset += BLOCK_BYTES) {
           if (stream.done()) break
           await budget.run()
@@ -216,14 +207,12 @@ export async function* streamHaystack(
         if (stream.done()) break
       }
     }
-    stream.feedInput(1, ENC.encode(JSON.stringify(binaryMetadata(binary))))
     yield* drained(stream, stream.finish(), tally, budget)
   } catch (error) {
     await discardStreams(source)
     throw error
   } finally {
     settle(stream, tally)
-    await closeQuietly(reader)
     await closeQuietly(source)
   }
 }

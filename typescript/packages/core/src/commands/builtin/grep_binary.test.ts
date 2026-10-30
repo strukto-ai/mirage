@@ -17,7 +17,7 @@ import { specOf } from '../spec/builtins.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
 import { parseFlags } from './generic/grep.ts'
-import { groupLine, nameEnd, validUtf8 } from './grep_binary.ts'
+import { groupLine, nameEnd } from './grep_binary.ts'
 
 function flagsOf(flags: Record<string, FlagValue>) {
   return parseFlags(new FlagView(flags, specOf('grep')))
@@ -39,10 +39,5 @@ describe('grep output framing', () => {
   it('ends a listed name in NUL under -Z', () => {
     expect(nameEnd(flagsOf({}))).toBe('\n')
     expect(nameEnd(flagsOf({ null: true }))).toBe('\0')
-  })
-
-  it('reads a stray byte as not UTF-8', () => {
-    expect(validUtf8(new TextEncoder().encode('é'))).toBe(true)
-    expect(validUtf8(new Uint8Array([0x61, 0xff, 0x62]))).toBe(false)
   })
 })

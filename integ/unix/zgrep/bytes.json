@@ -44,6 +44,16 @@
         "stdout": " ff 0a\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "zgrep_binary_notice",
+      "seq": 19990120,
+      "command": "printf 'a\\000b\\na2\\n' | gzip > /data/binary.gz; zgrep a /data/binary.gz",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "grep: /data/binary.gz: binary file matches\n"
+      }
     }
   ]
 }

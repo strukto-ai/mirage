@@ -114,6 +114,8 @@ async def stream_input(
     io: IOResult,
     after_output: bool = False,
     size: int | None = None,
+    consume_all: bool = False,
+    list_label: str | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Run one input through the grep stream, yielding grep's output for it.
 
@@ -131,12 +133,17 @@ async def stream_input(
         io (IOResult): receives the exit status and any notice.
         after_output (bool): an earlier input already printed lines.
         size (int | None): the input's size for -T, None for a pipe.
+        consume_all (bool): Drain input after selection stops to validate a trailer.
+        list_label (str | None): A separate name for -l/-L output.
     """
     budget = YieldBudget()
     stream.begin(
         {
             "label": latin1(encode_text(path)),
             "show_filename": show_filename,
+            "list_label": None
+            if list_label is None
+            else latin1(encode_text(list_label)),
             "size": size,
             "after_output": after_output,
         }
@@ -144,8 +151,9 @@ async def stream_input(
     io.exit_code = 1
     try:
         # -m0 reads nothing.
-        if not stream.done():
+        if not stream.done() or consume_all:
             async for chunk in source:
+                await budget.run()
                 for offset in range(0, len(chunk), PROBE_BLOCK_BYTES):
                     if stream.done():
                         break
@@ -155,7 +163,7 @@ async def stream_input(
                         stream, stream.feed(block), io, budget
                     ):
                         yield output
-                if stream.done():
+                if stream.done() and not consume_all:
                     break
     finally:
         await close_quietly(source)

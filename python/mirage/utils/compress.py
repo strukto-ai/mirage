@@ -172,7 +172,7 @@ async def gzip_compress_stream(
 
 async def gunzip_stream(
     source: AsyncIterator[bytes], test: bool = False, passthrough: bool = False
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     """Decode concatenated members and close the source before reporting failure.
 
     Args:

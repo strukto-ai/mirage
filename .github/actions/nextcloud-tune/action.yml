@@ -79,7 +79,11 @@ runs:
         # exec` twice is how the handle and the --user drift apart.
         occ() { docker exec --user www-data -e OC_PASS "$NC" php occ "$@"; }
 
-        occ config:system:set hashingMemoryCost --value=8192 --type=integer
+        # Lower the cost only for these public fixture credentials. Keep
+        # Argon2id and Basic authentication, with a CI-only 256 KiB
+        # cost: alternating local PROPFIND runs measured 17.5 ms vs 20.3 ms
+        # at 8 MiB, with wrong passwords still returning 401.
+        occ config:system:set hashingMemoryCost --value=256  --type=integer
         occ config:system:set hashingTimeCost   --value=1    --type=integer
         occ config:system:set hashingThreads    --value=1    --type=integer
 
