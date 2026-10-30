@@ -824,3 +824,51 @@ it('restores an imported session into a missing destination with a fresh root', 
   expect(current?.incarnation).not.toBe(importedEpoch)
   expect(current?.generation).toBe(1)
 })
+
+it.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])(
+  'restores the newly requested snapshot after an uncertain earlier reset (stored=%s, shared=%s)',
+  async (stored, shared) => {
+    const store = new RAMNamespaceStore()
+    const manager = new SessionManager('s', store)
+    await manager.activate('s')
+    const first = manager.get('s').fork({ cwd: '/snapshot-a' })
+    seedVar(first, 'SNAPSHOT', 'a')
+    first.commands = { allow: ['cat'], ask: [], deny: [] }
+    const second = shared ? manager.get('s') : manager.get('s').fork()
+    second.cwd = '/snapshot-b'
+    seedVar(second, 'SNAPSHOT', 'b')
+    second.commands = { allow: ['ls'], ask: [], deny: [] }
+    const casSet = store.casSet.bind(store)
+    let uncertain = true
+    const spy = vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+      if (uncertain) {
+        if (stored) await casSet(...args)
+        throw new Error('reset acknowledgement unavailable')
+      }
+      return casSet(...args)
+    })
+    try {
+      await expect(manager.replaceFromSnapshot([first])).rejects.toThrow('storage_unconfirmed')
+      const earlier = await store.get('s')
+      uncertain = false
+      await manager.replaceFromSnapshot([second])
+      expect(manager.get('s').cwd).toBe('/snapshot-b')
+      expect(manager.get('s').env.SNAPSHOT).toBe('b')
+      expect(manager.commandsOf('s')?.allow).toEqual(['ls'])
+      const restored = await store.get('s')
+      expect(restored).toMatchObject({
+        cwd: '/snapshot-b',
+        env: { SNAPSHOT: 'b' },
+        commands: { allow: ['ls'] },
+      })
+      expect(restored?.incarnation).not.toBe(earlier?.incarnation)
+    } finally {
+      spy.mockRestore()
+    }
+  },
+)

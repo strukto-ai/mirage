@@ -603,12 +603,14 @@ export class SessionManager extends SessionOwner {
     }
     for (const [sid, session] of entries) {
       await this.persistLock.withLock(sid, async () => {
+        const requested = structuredClone(session.toDict())
         const reset = this.resets.get(sid)
-        if (reset === undefined) {
-          this.resets.set(sid, planReset(session.toDict(), await this.sessionStore.get(sid), false))
-        } else if (reset.event.closed != null) {
-          throw new ApprovalUnavailable('session_transition_pending')
+        if (reset !== undefined) {
+          if (reset.event.closed != null)
+            throw new ApprovalUnavailable('session_transition_pending')
+          await this.commitReset(this.sessions.get(sid) ?? session)
         }
+        this.resets.set(sid, planReset(requested, await this.sessionStore.get(sid), false))
         await this.commitReset(session)
         this.sessions.set(sid, session)
       })
