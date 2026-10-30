@@ -41,8 +41,8 @@ import { resolveSource } from '../utils/stream.ts'
 import { UsageError } from '../../errors.ts'
 import { WalkLimitError } from '../../../errors/types.ts'
 import { SYNOPSES } from '../../spec/synopsis.ts'
-import { wordRefusalLine, validWordsBlock, usageHint } from '../../spec/usage.ts'
-import { matchWord } from '../../spec/word_choice.ts'
+import { usageHint } from '../../spec/usage.ts'
+import { scanned } from '../../../rs/scan.ts'
 import { GREP_STDIN_LABEL } from '../utils/constants.ts'
 import { linksOf, mountsOf, mountRoot } from '../utils/links.ts'
 
@@ -50,9 +50,6 @@ const ENC = new TextEncoder()
 // GNU grep with no pattern prints its synopsis and the help hint, exit 2
 // (grep 3.11; the same two lines follow `option requires an argument`).
 const GREP_NO_PATTERN = `Usage: ${SYNOPSES.grep ?? ''}\n${usageHint('grep')}`
-// What --directories takes; an unambiguous prefix names one too.
-const DIRECTORIES = ['read', 'recurse', 'skip']
-const DEVICES = ['read', 'skip']
 // The types -D skip passes over; stdin is read whatever it is.
 const DEVICE_TYPES: ReadonlySet<FileType> = new Set([
   FileType.CHAR_DEVICE,
@@ -61,67 +58,73 @@ const DEVICE_TYPES: ReadonlySet<FileType> = new Set([
   FileType.SOCKET,
 ])
 const UNIX_BYTE_OFFSETS = 'grep: warning: --unix-byte-offsets (-u) is obsolete\n'
-// What GNU takes as -m's count: blanks, a sign, then digits.
-const MAX_COUNT = /^[ \t\n\v\f\r]*[+-]?[0-9]+$/
+// The options whose values mirage-rs reads, with the switches that decide
+// among them.
+const SCANNED = [
+  'text',
+  'args_I',
+  'binary_files',
+  'after_context',
+  'before_context',
+  'context',
+  'recursive',
+  'dereference_recursive',
+  'directories',
+  'devices',
+]
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
-function binaryMode(fl: FlagView): string {
-  let mode = 'binary'
-  for (const name of fl.typedOrder('text', 'args_I', 'binary_files')) {
-    if (name === 'text' && fl.asBool('text')) mode = 'text'
-    else if (name === 'args_I' && fl.asBool('args_I')) mode = 'without-match'
-    else if (name === 'binary_files') {
-      mode = fl.asStr('binary_files') ?? 'binary'
-      if (!['binary', 'text', 'without-match'].includes(mode))
-        throw new UsageError('grep: unknown binary-files type')
-    }
-  }
-  return mode
+/**
+ * What grep's scan reads: the binary-files mode, the context lengths (-C
+ * filling a side -A or -B left unset), the directory action, whether -D skips
+ * devices, and the max count (null for no limit, filled only by `maxCount`).
+ * Mirrors Python's `GrepValues`.
+ */
+export interface GrepValues {
+  readonly binary_mode: string
+  readonly after_context: number | null
+  readonly before_context: number | null
+  readonly directories: string
+  readonly skip_devices: boolean
+  readonly max_count: number | null
 }
 
 /**
- * What grep does with a directory: read, recurse or skip. -r and -R are
- * --directories=recurse, so the last of the three on the line wins (grep
- * 3.11: `grep -r -d skip` skips, `-d skip -r` recurses). A word that names
- * none of the three, whole or as a prefix, comes back as typed;
- * `checkActions` refuses it.
+ * grep's option values but -m, read by mirage-rs in a fixed order; throws
+ * UsageError for the first value grep refuses, in its words. Mirrors
+ * Python's `scan_values`.
  */
-export function directoriesAction(fl: FlagView): string {
-  let action = 'read'
-  for (const name of fl.typedOrder('recursive', 'dereference_recursive', 'directories')) {
-    if (name !== 'directories') {
-      if (fl.asBool(name)) action = 'recurse'
-      continue
-    }
-    const word = fl.asStr(name) ?? ''
-    const match = matchWord(word, DIRECTORIES)
-    action = match.matched ? match.word : word
-  }
-  return action
+export function scanValues(fl: FlagView): GrepValues {
+  return scanned('grep', fl.texts(...SCANNED)) as unknown as GrepValues
 }
 
 /**
- * Refuse a -d or -D word as GNU does, each one typed and not only the last:
- * its option loop stops at the first bad one. A -d word that names no action,
- * whole or as a prefix, gets GNU's invalid or ambiguous argument message, the
- * valid words and grep's usage, exit 1; -D takes only the exact words, exit 2.
+ * -m as mirage-rs reads it, null for no limit; grep checks it after the
+ * matchers, so a bad count yields to conflicting ones. Throws UsageError
+ * with grep's refusal. Mirrors Python's `max_count`.
  */
-function checkActions(fl: FlagView): void {
-  for (const [name, value] of fl.occurrences('directories', 'devices')) {
-    const word = String(value)
-    if (name === 'devices') {
-      if (!DEVICES.includes(word)) throw new UsageError('grep: unknown devices method')
-      continue
-    }
-    const match = matchWord(word, DIRECTORIES)
-    if (!match.matched)
-      throw new UsageError(
-        `${wordRefusalLine('grep', '--directories', word, match.kind)}\n` +
-          `${validWordsBlock(DIRECTORIES)}\n${GREP_NO_PATTERN}`,
-        1,
-      )
+export function maxCount(fl: FlagView): number | null {
+  return (scanned('grep', fl.texts('max_count')) as unknown as GrepValues).max_count
+}
+
+/**
+ * Whether grep walks the directories it meets: -r, -R or a -d naming
+ * recurse, the last of the three on the line winning (grep 3.11). A line
+ * whose last of the three is a -d word grep refuses at run time walks
+ * nothing. Mirrors Python's `recurses`.
+ */
+export function recurses(fl: FlagView): boolean {
+  const last = fl.texts('recursive', 'dereference_recursive', 'directories').at(-1)
+  if (last === undefined) return false
+  if (last[0] !== 'directories') return true
+  try {
+    return (scanned('grep', [last]) as unknown as GrepValues).directories === 'recurse'
+  } catch (err) {
+    if (!(err instanceof UsageError)) throw err
+    console.debug(`grep walks nothing past a refused -d: ${err.message}`)
+    return false
   }
 }
 
@@ -155,32 +158,6 @@ export function lineWarnings(fl: FlagView, matcher: LineRegex | null): string {
   )
 }
 
-/** One -A/-B/-C value, refused the way GNU refuses it. */
-function contextLength(fl: FlagView, name: string): number | undefined {
-  const raw = fl.asStr(name)
-  let value: number | undefined
-  try {
-    value = fl.asInt(name)
-  } catch {
-    throw new UsageError(`grep: ${raw ?? ''}: invalid context length argument`)
-  }
-  if (value !== undefined && value < 0) {
-    throw new UsageError(`grep: ${raw ?? String(value)}: invalid context length argument`)
-  }
-  return value
-}
-
-/**
- * -m as GNU 3.11 reads it: leading blanks and a sign are allowed, a negative
- * count is no limit, and anything else is refused.
- */
-export function maxCount(fl: FlagView): number | null {
-  const raw = fl.asStr('max_count')
-  if (raw !== undefined && !MAX_COUNT.test(raw)) throw new UsageError('grep: invalid max count')
-  const count = raw === undefined ? fl.asInt('max_count') : Number(raw.trim())
-  return count === undefined || count < 0 ? null : count
-}
-
 /** The winning filename flag: true for -H, false for -h, null for neither. */
 // [-l, -L]: which file-listing mode wins, the later one on the line. GNU's
 // -l and -L set one variable (`list_files`) so the last typed wins: `grep -l
@@ -207,19 +184,11 @@ function reason(error: unknown): string {
 }
 
 export function parseFlags(fl: FlagView): FlagSet {
-  const mode = binaryMode(fl)
+  const values = scanValues(fl)
+  const mode = values.binary_mode
   const filename = filenameMode(fl)
   const [filesOnly, filesWithoutMatch] = listingMode(fl)
-  // GNU checks each context option as it is read, so the first bad one on
-  // the line is the one named.
-  const contexts = new Map<string, number | undefined>()
-  for (const name of fl.typedOrder('after_context', 'before_context', 'context'))
-    contexts.set(name, contextLength(fl, name))
-  const aCtx = contexts.get('after_context')
-  const bCtx = contexts.get('before_context')
-  const cCtx = contexts.get('context')
-  checkActions(fl)
-  const directories = directoriesAction(fl)
+  const directories = values.directories
   return {
     binaryMode: mode,
     recursive: directories === 'recurse',
@@ -227,7 +196,7 @@ export function parseFlags(fl: FlagView): FlagSet {
     // included (grep 3.11).
     dereference: fl.asBool('dereference_recursive'),
     skipDirectories: directories === 'skip',
-    skipDevices: fl.asStr('devices') === 'skip',
+    skipDevices: values.skip_devices,
     filters: {
       fileGlobs: parseFileGlobs(fl),
       excludeDir: fl.asList('exclude_dir'),
@@ -252,8 +221,8 @@ export function parseFlags(fl: FlagView): FlagSet {
     noMessages: fl.asBool('no_messages'),
     withFilename: filename === true,
     noFilename: filename === false,
-    afterContext: aCtx ?? cCtx ?? null,
-    beforeContext: bCtx ?? cCtx ?? null,
+    afterContext: values.after_context,
+    beforeContext: values.before_context,
     nullData: fl.asBool('null_data'),
     null: fl.asBool('null'),
     initialTab: fl.asBool('initial_tab'),

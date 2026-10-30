@@ -73,6 +73,9 @@ describe('smartCaseFolds', () => {
     ['a{2}', false, true],
     ['\\x41', false, false],
     ['H.llo', true, false],
+    ['\u2102|a', false, false],
+    ['\u{1d400}', true, false],
+    ['\u01c5', true, true],
   ])('%s (fixed %s) folds: %s', (pattern, fixed, folds) => {
     expect(smartCaseFolds(pattern, fixed)).toBe(folds)
   })

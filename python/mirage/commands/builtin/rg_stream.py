@@ -167,21 +167,6 @@ def format_message(message: dict[str, JsonValue]) -> bytes:
     return open_stream("rg_format", {}).feed(json.dumps(message).encode())
 
 
-def encoding_for(label: str) -> str | None:
-    """Resolve a WHATWG label with the registry used by the rg decoder.
-
-    Args:
-        label (str): The encoding label from -E.
-    """
-    stream = open_stream("rg_format", {})
-    return (
-        stream.feed(
-            json.dumps({"kind": "encoding", "label": label}).encode()
-        ).decode()
-        or None
-    )
-
-
 async def stream_haystack(
     source: AsyncIterator[bytes],
     program: RgProgram,

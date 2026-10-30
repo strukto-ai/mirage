@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../io/types.ts'
-import { byteView, fromByteView } from '../shell/bytes.ts'
-import type { StreamRefusal } from './errors.ts'
+import { UsageError } from '../commands/errors.ts'
+import { byteView, fromByteView, textView } from '../shell/bytes.ts'
+import { StreamRefusal } from './errors.ts'
 import { openStreamSync } from './stream.ts'
 import type { JsonValue } from '../types.ts'
 
@@ -42,6 +43,23 @@ export function scan(
     return JSON.parse(decoder.decode(stream.finish())) as Record<string, JsonValue>
   } finally {
     stream.close()
+  }
+}
+
+/**
+ * `scan` for a command whose refusals travel as usage errors: throws
+ * UsageError for the first value the command refuses, in its words and with
+ * its exit status. Mirrors Python's `scanned`.
+ */
+export function scanned(
+  command: string,
+  options: readonly (readonly [string, string])[],
+): Record<string, JsonValue> {
+  try {
+    return scan(command, options)
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    throw new UsageError(textView(err.message), err.status)
   }
 }
 

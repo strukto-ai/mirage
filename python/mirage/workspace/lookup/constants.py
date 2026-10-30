@@ -14,7 +14,7 @@
 
 from collections.abc import Mapping, Sequence
 
-from mirage.commands.builtin.generic.grep import directories_action
+from mirage.commands.builtin.generic.grep import recurses
 from mirage.commands.builtin.generic.ls import link_mode
 from mirage.commands.builtin.generic.rg import walks_descendant_mounts
 from mirage.commands.builtin.generic.sed import sed_writes
@@ -449,7 +449,7 @@ def walks_mounts(name: str, flags: Mapping[str, FlagValue]) -> bool:
         return not fl.as_bool("x")
     if runs == "ls":
         return fl.as_bool("recursive")
-    return directories_action(fl) == "recurse"
+    return recurses(fl)
 
 
 def reads_subtrees(name: str, flags: Mapping[str, FlagValue]) -> bool:
