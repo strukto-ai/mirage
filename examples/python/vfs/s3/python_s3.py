@@ -41,7 +41,6 @@ ws = Workspace(
     mode=MountMode.EXEC,
 )
 
-# Monty file handles are not iterable; readlines() works.
 SCRIPT = r"""
 import json
 

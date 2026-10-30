@@ -28,7 +28,7 @@
           "command": "python3 -c 'import json; print([n for n in ('\"'\"'load'\"'\"','\"'\"'loads'\"'\"','\"'\"'dump'\"'\"','\"'\"'dumps'\"'\"') if hasattr(json,n)])'",
           "expect": {
             "exit": 0,
-            "stdout": "['loads', 'dumps']\n"
+            "stdout": "['load', 'loads', 'dump', 'dumps']\n"
           }
         },
         {
@@ -48,15 +48,22 @@
         {
           "command": "python3 -c 'import json; print(json.load(open('\"'\"'/data/in.json'\"'\"')))'",
           "expect": {
-            "exit": 1,
-            "stderr_contains": "module 'json' has no attribute 'load'"
+            "exit": 0,
+            "stdout": "{'a': 1}\n"
           }
         },
         {
           "command": "python3 -c 'import json; json.dump({'\"'\"'a'\"'\"': 1}, open('\"'\"'/data/out.json'\"'\"', '\"'\"'w'\"'\"'))'",
           "expect": {
-            "exit": 1,
-            "stderr_contains": "module 'json' has no attribute 'dump'"
+            "exit": 0,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /data/out.json",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\"a\": 1}"
           }
         },
         {
@@ -137,6 +144,43 @@
           "expect": {
             "exit": 1,
             "stderr_contains": "TypeError"
+          }
+        }
+      ]
+    },
+    {
+      "id": "file_modules_reach_the_mount",
+      "note": "csv, tomllib, hashlib and os.path read and write workspace files through the same calls open() makes.",
+      "world": {
+        "runtimes": [
+          "monty",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "in.csv": "x,y\n1,2\n",
+              "c.toml": "name = \"m\"\n[t]\nn = 3\n",
+              "mods.py": "import csv, hashlib, os, tomllib\nwith open('/data/in.csv', newline='') as f:\n    print(list(csv.reader(f)))\nwith open('/data/out.csv', 'w', newline='') as f:\n    csv.writer(f).writerows([['a', 'b'], [1, 2]])\nwith open('/data/c.toml', 'rb') as f:\n    print(tomllib.load(f))\nwith open('/data/in.csv', 'rb') as f:\n    print(hashlib.sha256(f.read()).hexdigest()[:12])\nprint(os.path.exists('/data/in.csv'), os.path.isdir('/data'), os.path.splitext('/data/c.toml'))\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "python3 /data/mods.py",
+          "expect": {
+            "exit": 0,
+            "stdout": "[['x', 'y'], ['1', '2']]\n{'name': 'm', 't': {'n': 3}}\n81bf9fa83c6f\nTrue True ('/data/c', '.toml')\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /data/out.csv",
+          "expect": {
+            "exit": 0,
+            "stdout": "a,b\r\n1,2\r\n"
           }
         }
       ]

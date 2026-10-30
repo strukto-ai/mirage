@@ -73,13 +73,6 @@
           "expect": {
             "exit": 0,
             "stdout": "one\ntwo\n"
-          },
-          "expect_on": {
-            "monty": {
-              "exit": 1,
-              "stdout": "",
-              "stderr_contains": "'_io.TextIOWrapper' object is not iterable"
-            }
           }
         },
         {
@@ -377,13 +370,6 @@
           "expect": {
             "exit": 0,
             "stdout": "1688890 1048580 150000 line 149999\n"
-          },
-          "expect_on": {
-            "monty": {
-              "exit": 1,
-              "stdout": "",
-              "stderr_contains": "'_io.TextIOWrapper' object is not iterable"
-            }
           }
         },
         {

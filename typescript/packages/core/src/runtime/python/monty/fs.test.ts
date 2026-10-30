@@ -18,7 +18,7 @@ import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { MontyFs } from './index.ts'
 import type { GuestStat } from './stat.ts'
 import { PrefixResolver } from '../../resolver.ts'
-import { MAX_URANDOM_BYTES } from './constants.ts'
+import { MAX_URANDOM_BYTES, SCAN_MAX_ENTRIES } from './constants.ts'
 import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
 
 const NOT_HANDLED = Symbol('NOT_HANDLED')
@@ -599,5 +599,141 @@ describe('MontyFs path operations', () => {
     const access = accessOn(dispatch, {}, ['/ram'], ['dangling'])
     expect(await access.handle('Path.exists', ['/ram/d/dangling'])).toBe(false)
     expect(await access.handle('Path.is_symlink', ['/ram/d/dangling'])).toBe(true)
+  })
+})
+
+// A bridge over a small tree: a listing names a directory's own
+// children, links included, and a stat answers what a path reaches, as
+// the dispatcher's stat follows a link.
+function tree(
+  entries: Record<string, 'file' | 'dir'>,
+  links: Record<string, string> = {},
+  refused: string[] = [],
+): Mock<BridgeDispatchFn> {
+  const reach = (p: string): string => {
+    for (const [link, target] of Object.entries(links)) {
+      if (p === link || p.startsWith(link + '/')) return target + p.slice(link.length)
+    }
+    return p
+  }
+  return vi.fn<BridgeDispatchFn>((op, path) => {
+    const fail = (code: string): Promise<never> =>
+      Promise.reject(Object.assign(new Error(`${code}: ${path}`), { code }))
+    const dir = path.replace(/\/$/, '')
+    if (op === 'readlink') return dir in links ? Promise.resolve(links[dir]) : fail('EINVAL')
+    if (op === 'readdir') {
+      if (refused.includes(dir)) return fail('EACCES')
+      const real = reach(dir)
+      if (entries[real] !== 'dir') return fail('ENOENT')
+      const names = [...Object.keys(entries), ...Object.keys(links)]
+        .filter((p) => p.startsWith(real + '/') && !p.slice(real.length + 1).includes('/'))
+        .map((p) => dir + p.slice(real.length))
+      return Promise.resolve(names)
+    }
+    if (op === 'stat') {
+      const kind = entries[reach(dir)]
+      if (kind === undefined) return fail('ENOENT')
+      const type = kind === 'dir' ? FileType.DIRECTORY : FileType.FILE
+      return Promise.resolve(new FileStat({ name: path, size: 1, type }))
+    }
+    return fail('ENOENT')
+  })
+}
+
+function sortedRows(rows: unknown): unknown[] {
+  return [...(rows as [string][])].sort((a, b) => a[0].localeCompare(b[0]))
+}
+
+describe('MontyFs scan', () => {
+  const nested = {
+    '/ram': 'dir',
+    '/ram/a.txt': 'file',
+    '/ram/sub': 'dir',
+    '/ram/sub/b.txt': 'file',
+    '/ram/sub/deep': 'dir',
+    '/ram/sub/deep/c.txt': 'file',
+  } as const
+
+  // Monty's default scan probes every entry three times (is_dir,
+  // is_file, is_symlink); the listing already stat'd each one.
+  it('lists each directory once and asks readlink only of the root', async () => {
+    const dispatch = tree(nested)
+    const rows = await accessOn(dispatch).handle('Path.scan', ['/ram'], {
+      max_depth: null,
+      follow_symlinks: false,
+    })
+    expect(sortedRows(rows)).toEqual([
+      ['', true, false, false],
+      ['a.txt', false, true, false],
+      ['sub', true, false, false],
+      ['sub/b.txt', false, true, false],
+      ['sub/deep', true, false, false],
+      ['sub/deep/c.txt', false, true, false],
+    ])
+    const ops = dispatch.mock.calls.map(([op]) => op)
+    expect(ops.filter((op) => op === 'readdir')).toHaveLength(3)
+    expect(ops.filter((op) => op === 'readlink')).toHaveLength(1)
+  })
+
+  it('stops at max_depth, as scandir asks', async () => {
+    const rows = await accessOn(tree(nested)).handle('Path.scan', ['/ram'], {
+      max_depth: 1,
+      follow_symlinks: false,
+    })
+    expect(sortedRows(rows)).toEqual([
+      ['', true, false, false],
+      ['a.txt', false, true, false],
+      ['sub', true, false, false],
+    ])
+  })
+
+  it('reports a link as what it reaches and descends it only when asked', async () => {
+    const entries = { '/ram': 'dir', '/ram/sub': 'dir', '/ram/sub/x.txt': 'file' } as const
+    const access = accessOn(tree(entries, { '/ram/ln': '/ram/sub' }), {}, ['/ram'], ['ln'])
+    const kept = await access.handle('Path.scan', ['/ram'], { follow_symlinks: false })
+    expect(sortedRows(kept)).toEqual([
+      ['', true, false, false],
+      ['ln', true, false, true],
+      ['sub', true, false, false],
+      ['sub/x.txt', false, true, false],
+    ])
+    const followed = await access.handle('Path.scan', ['/ram'], { follow_symlinks: true })
+    expect(sortedRows(followed)).toContainEqual(['ln/x.txt', false, true, false])
+  })
+
+  it('reads a directory below the root that will not list as empty', async () => {
+    const entries = { '/ram': 'dir', '/ram/locked': 'dir', '/ram/locked/x': 'file' } as const
+    const rows = await accessOn(tree(entries, {}, ['/ram/locked'])).handle('Path.scan', ['/ram'], {
+      follow_symlinks: false,
+    })
+    expect(sortedRows(rows)).toEqual([
+      ['', true, false, false],
+      ['locked', true, false, false],
+    ])
+  })
+
+  it('raises a missing root as FileNotFoundError', async () => {
+    const out = accessOn(tree(nested)).handle('Path.scan', ['/ram/nope'], {
+      follow_symlinks: false,
+    })
+    await expect(out).rejects.toMatchObject({ name: 'FileNotFoundError' })
+  })
+
+  // An OSError would read as a directory that will not list, and the
+  // walk would hand back a short tree as if it were the whole one.
+  it('raises RuntimeError past SCAN_MAX_ENTRIES', async () => {
+    const wide = Array.from({ length: SCAN_MAX_ENTRIES }, (_, i) => `/ram/d${String(i)}/`)
+    const dispatch = vi.fn<BridgeDispatchFn>((op, path) => {
+      if (op === 'readdir' && path === '/ram/') return Promise.resolve(wide)
+      if (op === 'stat' && path === '/ram') {
+        return Promise.resolve(new FileStat({ name: path, type: FileType.DIRECTORY }))
+      }
+      return Promise.reject(Object.assign(new Error(`EINVAL: ${path}`), { code: 'EINVAL' }))
+    })
+    const out = accessOn(dispatch).handle('Path.scan', ['/ram'], { follow_symlinks: false })
+    await expect(out).rejects.toMatchObject({
+      name: 'RuntimeError',
+      message: `directory scan exceeded ${String(SCAN_MAX_ENTRIES)} entries`,
+    })
   })
 })

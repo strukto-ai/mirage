@@ -42,7 +42,7 @@
             "monty": {
               "exit": 1,
               "stdout": "",
-              "stderr_contains": "'module' object has no attribute 'O_RDONLY'"
+              "stderr_contains": "module 'os' has no attribute 'O_RDONLY'"
             },
             "wasi": {
               "exit": 1,
@@ -64,7 +64,7 @@
             "monty": {
               "exit": 1,
               "stdout": "",
-              "stderr_contains": "'module' object has no attribute 'O_RDONLY'"
+              "stderr_contains": "module 'os' has no attribute 'O_RDONLY'"
             },
             "pyodide": {
               "exit": 1,

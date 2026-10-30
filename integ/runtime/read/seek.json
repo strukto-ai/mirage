@@ -56,8 +56,8 @@
     },
     {
       "id": "a_file_iterates_its_lines",
-      "note": "Monty's file is not iterable.",
       "runtimes": [
+        "monty",
         "wasi",
         "pyodide",
         "host"

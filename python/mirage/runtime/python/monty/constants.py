@@ -34,6 +34,14 @@ LIMITS = {"max_suspensions": 2**31 - 1}
 # waits for one to come back.
 POOL_WORKERS = 4
 
+# A walk or glob reads its whole tree in one `Path.scan`, so these bound
+# what one call builds on the host: the entries a reply may hold, and how
+# deep a scan that follows links goes when it names no depth, since a
+# link to an ancestor would otherwise never end. Monty's own default scan
+# stops at the same two numbers.
+SCAN_MAX_ENTRIES = 100_000
+SCAN_LINK_DEPTH = 64
+
 # What a refused readlink may mean "no link here". EINVAL is the backend
 # saying the path is not one, and the other three are CPython's own
 # `_ignore_error` list, which is what `Path.is_symlink` swallows around

@@ -43,7 +43,7 @@
     },
     {
       "id": "os_path_answers_what_is_there",
-      "note": "Monty has no os.path.",
+      "note": "Monty has no os.access.",
       "runtimes": [
         "wasi",
         "pyodide",

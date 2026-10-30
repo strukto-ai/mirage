@@ -71,7 +71,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "^2.3.0",
-    "@pydantic/monty": "1.0.0",
+    "@pydantic/monty": "1.4.0",
     "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "esbuild": "^0.28.2",
@@ -95,7 +95,7 @@
     "zod": "^4.6.6"
   },
   "peerDependencies": {
-    "@pydantic/monty": "^1.0.0",
+    "@pydantic/monty": "^1.4.0",
     "@qdrant/js-client-rest": "^1.18.0",
     "chromadb": "^3.4.3",
     "pyodide": "^0.29.0 || ^314.0.0",

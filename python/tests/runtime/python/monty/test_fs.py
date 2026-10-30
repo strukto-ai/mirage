@@ -53,10 +53,12 @@ class FakeDispatch:
         self.writes: list[tuple[str, bytes]] = []
         self.appends: list[tuple[str, bytes]] = []
         self.dirs: list[str] = []
+        self.ops: list[str] = []
 
     async def __call__(self, op, path, **kwargs):
         if kwargs.get("admit_only"):
             return None, None
+        self.ops.append(op)
         virtual = path.virtual
         if op == "read":
             if virtual in self.devices:
@@ -342,5 +344,92 @@ def test_monty_a_refused_readlink_is_not_read_as_not_a_link():
     result = asyncio.run(_run(runtime, code))
     assert result.exit_code == 1
     assert b"PermissionError: [Errno 13] Permission denied: '/s3/x'" in (
+        result.stderr
+    )
+
+
+def test_monty_walk_lists_each_directory_once():
+    # Monty's default scan probes every entry three times (is_dir,
+    # is_file, is_symlink); the listing already stat'd each one, so a
+    # walk costs one readdir per directory and a readlink for its root.
+    dispatch = FakeDispatch(
+        {
+            "/s3/a.txt": b"a",
+            "/s3/sub/b.txt": b"b",
+            "/s3/sub/deep/c.txt": b"c",
+        }
+    )
+    dispatch.dirs.extend(["/s3", "/s3/sub", "/s3/sub/deep"])
+    runtime = MontyRuntime()
+    runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
+    code = (
+        "import os\n"
+        "print([(d, sorted(ds), sorted(fs)) for d, ds, fs in os.walk('/s3')])"
+    )
+    result = asyncio.run(_run(runtime, code))
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == (
+        b"[('/s3', ['sub'], ['a.txt']), ('/s3/sub', ['deep'], ['b.txt']),"
+        b" ('/s3/sub/deep', [], ['c.txt'])]\n"
+    )
+    assert dispatch.ops.count("readdir") == 3
+    assert dispatch.ops.count("readlink") == 1
+
+
+def test_monty_scan_kinds_an_entry_the_listing_could_not_stat():
+    # A directory the mount only implies has no row of its own, so its
+    # listing stat fails; the scan asks the view, as `is_dir` would.
+    dispatch = FakeDispatch({"/s3/a.txt": b"a", "/s3/sub/b.txt": b"b"})
+    dispatch.dirs.append("/s3")
+    runtime = MontyRuntime()
+    runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
+    code = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "print(sorted((e.name, e.is_dir(), e.is_file())"
+        " for e in os.scandir('/s3')))\n"
+        "print(sorted(str(p) for p in Path('/s3').rglob('*.txt')))"
+    )
+    result = asyncio.run(_run(runtime, code))
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == (
+        b"[('a.txt', False, True), ('sub', True, False)]\n"
+        b"['/s3/a.txt', '/s3/sub/b.txt']\n"
+    )
+
+
+def test_monty_scan_of_a_missing_directory():
+    # scandir raises the miss; walk and glob absorb it, as CPython's do.
+    runtime = MontyRuntime()
+    runtime.bind(
+        WorkspaceBinding(FakeDispatch({}), PrefixResolver(lambda: []))
+    )
+    code = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "print(list(os.walk('/s3/nope')), list(Path('/s3/nope').glob('*')))\n"
+        "os.scandir('/s3/nope')"
+    )
+    result = asyncio.run(_run(runtime, code))
+    assert result.exit_code == 1
+    assert result.stdout == b"[] []\n"
+    assert b"FileNotFoundError: [Errno 2] No such file or directory: " in (
+        result.stderr
+    )
+
+
+def test_monty_a_scan_past_its_entry_cap_raises_runtime_error(monkeypatch):
+    # An OSError would read as a directory that will not list, and the
+    # walk would hand back a short tree as if it were the whole one.
+    import mirage.runtime.python.monty.fs as monty_fs
+
+    monkeypatch.setattr(monty_fs, "SCAN_MAX_ENTRIES", 2)
+    dispatch = FakeDispatch({"/s3/a": b"a", "/s3/b": b"b", "/s3/c": b"c"})
+    dispatch.dirs.append("/s3")
+    runtime = MontyRuntime()
+    runtime.bind(WorkspaceBinding(dispatch, PrefixResolver(lambda: [])))
+    result = asyncio.run(_run(runtime, "import os\nlist(os.walk('/s3'))"))
+    assert result.exit_code == 1
+    assert b"RuntimeError: directory scan exceeded 2 entries" in (
         result.stderr
     )

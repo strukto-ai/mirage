@@ -249,8 +249,6 @@ A program reads the workspace as the session it judges for:
   hidden path does not exist, path rules apply, and a write is refused
   (`EROFS`).
 - Its own reads are not judged again by its profile's `pre_vfs` or `post_vfs`.
-- Monty has no `os.path`, `os.walk` or `Path.glob`; use `Path.exists()`,
-  `Path.is_dir()` and `Path.iterdir()`, which run on every runtime.
 
 So a program can judge a file by what is in it. This one disables `rm`, and
 a Python script whose code deletes files:

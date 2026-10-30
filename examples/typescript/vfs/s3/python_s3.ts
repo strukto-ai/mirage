@@ -37,7 +37,6 @@ function baseConfig(): S3Config {
   }
 }
 
-// Monty file handles are not iterable; readlines() works.
 const SCRIPT = `
 import json
 

@@ -65,8 +65,8 @@
     },
     {
       "id": "pathlib_unlink_takes_missing_ok",
-      "note": "Monty's Path.unlink takes no missing_ok.",
       "runtimes": [
+        "monty",
         "wasi",
         "pyodide",
         "host"

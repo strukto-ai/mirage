@@ -125,13 +125,6 @@
           "expect": {
             "exit": 0,
             "stdout": "['/data/a.txt', '/data/sub/b.txt', '/data/sub/deep/c.txt']\n"
-          },
-          "expect_on": {
-            "monty": {
-              "exit": 1,
-              "stdout": "",
-              "stderr_contains": "'PosixPath' object has no attribute 'rglob'"
-            }
           }
         },
         {
@@ -141,13 +134,6 @@
           "expect": {
             "exit": 0,
             "stdout": "[('/data', ['sub'], ['a.txt']), ('/data/sub', ['deep'], ['b.txt']), ('/data/sub/deep', [], ['c.txt'])]\n"
-          },
-          "expect_on": {
-            "monty": {
-              "exit": 1,
-              "stdout": "",
-              "stderr_contains": "module 'os' has no attribute 'walk'"
-            }
           }
         },
         {
@@ -157,13 +143,6 @@
           "expect": {
             "exit": 0,
             "stdout": "[('a.txt', False), ('sub', True)]\n"
-          },
-          "expect_on": {
-            "monty": {
-              "exit": 1,
-              "stdout": "",
-              "stderr_contains": "module 'os' has no attribute 'scandir'"
-            }
           }
         }
       ]
