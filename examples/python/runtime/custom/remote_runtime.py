@@ -26,7 +26,6 @@ from mirage import (
     Runtime,
     RuntimeConfig,
 )
-from mirage.io.types import materialize
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.types import OutputFn
 
@@ -49,7 +48,8 @@ class RemoteConfig(RuntimeConfig):
 
     Args:
         url (str): the execution service's run endpoint.
-        max_bytes (int): the most working-directory bytes one run sends.
+        max_bytes (int): the most bytes one run sends, for the working
+            directory and for stdin each.
     """
 
     url: str = ""
@@ -105,7 +105,7 @@ class RemoteRuntime(
         """
         cwd = ctx.cwd.virtual
         files = await self._snapshot(ctx, cwd)
-        stdin = await materialize(ctx.stdin) if ctx.stdin is not None else b""
+        stdin = await self._stdin(ctx)
         request = {
             "argv": texts,
             "stdin": _b64(stdin),
@@ -131,13 +131,36 @@ class RemoteRuntime(
             exit_code=answer["exit_code"],
         )
 
+    async def _stdin(self, ctx: Context) -> bytes:
+        # The service takes a run's input whole, so stop reading at the
+        # budget: an endless producer fails the run instead of hanging it.
+        if ctx.stdin is None:
+            return b""
+        data = bytearray()
+        source = ctx.stdin if not isinstance(ctx.stdin, bytes) else None
+        if source is None:
+            data += ctx.stdin
+        else:
+            async for chunk in source:
+                data += chunk
+                if len(data) > self.config.max_bytes:
+                    break
+        if len(data) > self.config.max_bytes:
+            raise ValueError(f"stdin is over {self.config.max_bytes} bytes")
+        return bytes(data)
+
     async def _snapshot(self, ctx: Context, cwd: str) -> dict[str, bytes]:
         files: dict[str, bytes] = {}
         total = 0
+        mount = ctx.vfs.mount_of(cwd)
         pending = [cwd]
         while pending:
             folder = pending.pop()
             for entry in await ctx.vfs.readdir(folder):
+                # Copy the working directory's own mount only: another
+                # mount below it (or /dev under the root) stays behind.
+                if ctx.vfs.mount_of(entry) != mount:
+                    continue
                 if await ctx.vfs.is_dir(entry):
                     pending.append(entry)
                     continue

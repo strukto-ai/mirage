@@ -25,7 +25,7 @@ import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-
 // working directory and writes back the files the program changed. Both go
 // through ctx.vfs, so mount modes, policy and the cache apply to them.
 
-const CONFIG_KEYS = ['url', 'max_bytes']
+const CONFIG_KEYS = ['url', 'maxBytes']
 const MAX_BYTES = 16 * 1024 * 1024
 
 export class RemoteRuntime extends Runtime {
@@ -50,10 +50,11 @@ export class RemoteRuntime extends Runtime {
    */
   async runProcess(_engine, _paths, texts, ctx) {
     const cwd = ctx.cwd.virtual
-    const files = await snapshot(ctx, cwd, this.config.max_bytes ?? MAX_BYTES)
+    const maxBytes = this.config.maxBytes ?? MAX_BYTES
+    const files = await snapshot(ctx, cwd, maxBytes)
     const request = {
       argv: texts,
-      stdin: b64(await collect(ctx.stdin)),
+      stdin: b64(await collect(ctx.stdin, maxBytes)),
       files: Object.fromEntries(Object.entries(files).map(([rel, data]) => [rel, b64(data)])),
     }
     const resp = await fetch(this.config.url, {
@@ -84,10 +85,14 @@ export class RemoteRuntime extends Runtime {
 async function snapshot(ctx, cwd, maxBytes) {
   const files = {}
   let total = 0
+  const mount = ctx.vfs.mountOf(cwd)
   const pending = [cwd]
   while (pending.length > 0) {
     const folder = pending.pop()
     for (const entry of await ctx.vfs.readdir(folder)) {
+      // Copy the working directory's own mount only: another mount below
+      // it (or /dev under the root) stays behind.
+      if (ctx.vfs.mountOf(entry) !== mount) continue
       if (await ctx.vfs.isDir(entry)) {
         pending.push(entry)
         continue
@@ -101,11 +106,17 @@ async function snapshot(ctx, cwd, maxBytes) {
   return files
 }
 
-async function collect(source) {
+// The service takes a run's input whole, so stop reading at the budget: an
+// endless producer fails the run instead of hanging it.
+async function collect(source, maxBytes) {
   if (source === null || source === undefined) return new Uint8Array()
-  if (source instanceof Uint8Array) return source
   const chunks = []
-  for await (const chunk of source) chunks.push(chunk)
+  let total = 0
+  for await (const chunk of source instanceof Uint8Array ? [source] : source) {
+    chunks.push(chunk)
+    total += chunk.length
+    if (total > maxBytes) throw new Error(`stdin is over ${maxBytes} bytes`)
+  }
   return new Uint8Array(Buffer.concat(chunks))
 }
 

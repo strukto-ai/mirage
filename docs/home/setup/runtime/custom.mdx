@@ -78,7 +78,6 @@ stand-in service, so it runs on one machine.
     import aiohttp
 
     from mirage import Context, ProcessExecutorMixin, RunResult, Runtime, RuntimeConfig
-    from mirage.io.types import materialize
     from mirage.runtime.constants import EXTERNAL_COMMANDS
 
 
@@ -104,7 +103,7 @@ stand-in service, so it runs on one machine.
         async def run_process(self, engine, paths, texts, ctx: Context, output=None, errors=None) -> RunResult:
             cwd = ctx.cwd.virtual
             files = await self._snapshot(ctx, cwd)
-            stdin = await materialize(ctx.stdin) if ctx.stdin is not None else b""
+            stdin = await self._stdin(ctx)  # read up to max_bytes; the full example shows it
             request = {
                 "argv": texts,
                 "stdin": base64.b64encode(stdin).decode(),
@@ -124,8 +123,11 @@ stand-in service, so it runs on one machine.
 
         async def _snapshot(self, ctx: Context, cwd: str) -> dict[str, bytes]:
             files, total, pending = {}, 0, [cwd]
+            mount = ctx.vfs.mount_of(cwd)
             while pending:
                 for entry in await ctx.vfs.readdir(pending.pop()):
+                    if ctx.vfs.mount_of(entry) != mount:
+                        continue
                     if await ctx.vfs.is_dir(entry):
                         pending.append(entry)
                         continue
@@ -148,17 +150,18 @@ stand-in service, so it runs on one machine.
       reach = 'remote'
 
       constructor(options = {}) {
-        super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], ['url', 'max_bytes'])
+        super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], ['url', 'maxBytes'])
       }
 
       /** @param {import('@struktoai/mirage-node').Context} ctx */
       async runProcess(_engine, _paths, texts, ctx) {
         const cwd = ctx.cwd.virtual
-        const files = await snapshot(ctx, cwd, this.config.max_bytes ?? 16 * 1024 * 1024)
+        const maxBytes = this.config.maxBytes ?? 16 * 1024 * 1024
+        const files = await snapshot(ctx, cwd, maxBytes)
         const resp = await fetch(this.config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ argv: texts, stdin: b64(await collect(ctx.stdin)), files }),
+          body: JSON.stringify({ argv: texts, stdin: b64(await collect(ctx.stdin, maxBytes)), files }),
           signal: ctx.signal,
         })
         if (!resp.ok) throw new Error(`execution service answered ${resp.status}`)
@@ -172,8 +175,9 @@ stand-in service, so it runs on one machine.
       }
     }
 
-    // snapshot() walks ctx.vfs.readdir from cwd and reads each file with
-    // { raw: true } into base64; collect() reads stdin to bytes; b64() and
+    // snapshot() walks ctx.vfs.readdir from cwd within its mount and reads
+    // each file with { raw: true } into base64; collect() reads stdin up to
+    // maxBytes; b64() and
     // unb64() convert. All four are in the full example.
     ```
   </Tab>
@@ -182,9 +186,10 @@ stand-in service, so it runs on one machine.
 The Python runtime opens one `aiohttp` session as its engine: `open_engine` runs
 once, at the first program, and `close_engine` when the workspace closes. The
 TypeScript one needs no engine, because `fetch` is global. In TypeScript the
-third constructor argument lists the config keys the runtime accepts; in Python
-the config class's fields do. Either way, an unknown key in the YAML fails when
-the workspace loads.
+third constructor argument lists the config keys the runtime accepts, and they
+arrive in camelCase (`max_bytes` in the YAML is `maxBytes`); in Python the config
+class's fields do. Either way, an unknown key in the YAML fails when the
+workspace loads.
 
 With `/work` a writable RAM mount and `/archive` a read-only disk folder, each
 holding `report.py` and `orders.csv`:
@@ -231,7 +236,14 @@ the program, and make sure that stops it:
   the child's `stdin` an `error` listener that treats `EPIPE` as that, not as a
   failure; without one, the stream error stops the host.
 
-## Copies are last-writer-wins
+## What the copy holds
+
+The example sends the working directory's own mount, never a mount below it,
+so a run from `/` does not try to copy `/dev` or every other mount. It sends
+stdin whole too, because the service takes a run's input up front; it stops
+reading at `max_bytes`, so an endless producer fails the run with
+`stdin is over ... bytes` instead of hanging it. A service that streams input
+would feed stdin as it arrives instead.
 
 The example copies files out and writes them back whole. Two runs that change
 the same file at the same time each write back their own copy, and the later
