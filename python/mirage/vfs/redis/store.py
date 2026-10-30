@@ -21,7 +21,9 @@ from mirage.vfs.redis.constants import TRUNCATE_SCRIPT
 
 try:
     from redis.asyncio import Redis
-except ImportError as _err:
+except ModuleNotFoundError as _err:
+    if _err.name != "redis":
+        raise
     raise ImportError(
         "RedisStore requires the 'redis' extra. "
         "Install with: pip install mirage-ai[redis]"

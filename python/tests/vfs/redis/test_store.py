@@ -14,21 +14,45 @@
 
 
 import importlib
+import importlib.abc
+import importlib.machinery
 import sys
+from collections.abc import Sequence
+from types import ModuleType
 
 import pytest
+
+
+class Uninstalled(importlib.abc.MetaPathFinder):
+    def __init__(self, package: str) -> None:
+        self.package = package
+
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None,
+        target: ModuleType | None = None,
+    ) -> importlib.machinery.ModuleSpec | None:
+        if fullname == self.package:
+            raise ModuleNotFoundError(
+                f"No module named {fullname!r}", name=fullname
+            )
+        return None
 
 
 @pytest.mark.parametrize(
     "missing, hinted", [("redis", True), ("redis.asyncio", False)]
 )
 def test_only_a_missing_redis_names_the_extra(monkeypatch, missing, hinted):
-    for loaded in [name for name in sys.modules if name.startswith("redis.")]:
+    for loaded in [m for m in sys.modules if m.split(".")[0] == "redis"]:
         monkeypatch.delitem(sys.modules, loaded)
-    monkeypatch.setitem(sys.modules, missing, None)
     monkeypatch.delitem(sys.modules, "mirage.vfs.redis.store", raising=False)
+    monkeypatch.setattr(
+        sys, "meta_path", [Uninstalled(missing), *sys.meta_path]
+    )
     with pytest.raises(ImportError) as raised:
         importlib.import_module("mirage.vfs.redis.store")
-    assert str(raised.value).startswith(
-        "RedisStore requires the 'redis' extra."
-    ) is hinted
+    assert (
+        str(raised.value).startswith("RedisStore requires the 'redis' extra.")
+        is hinted
+    )

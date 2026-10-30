@@ -23,7 +23,9 @@ try:
     from redis.asyncio import Redis
     from redis.asyncio.client import Pipeline
     from redis.exceptions import ResponseError
-except ImportError as _err:
+except ModuleNotFoundError as _err:
+    if _err.name != "redis":
+        raise
     raise ImportError(
         "RedisIndexCacheStore requires the 'redis' extra. "
         "Install with: pip install mirage-ai[redis]"
