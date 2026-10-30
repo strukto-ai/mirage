@@ -324,6 +324,54 @@ async function invalidatedCachedRead(restore: boolean): Promise<void> {
   }
 }
 
+async function mediaCallerIsolation(): Promise<void> {
+  equal(asyncContextIsolatesTasks, false)
+  const entered = deferred()
+  const release = deferred()
+  let paused = false
+  let prompts = 0
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          async postVfs(ctx) {
+            if (paused || ctx.call.name !== 'read' || ctx.path.virtual !== '/data/protected/item')
+              return null
+            paused = true
+            entered.resolve()
+            await release.promise
+            return null
+          },
+        },
+      ],
+      onAsk: async (record) => {
+        prompts++
+        return { ...record, outcome: Outcome.ALLOW }
+      },
+    },
+  )
+  let slow: ReturnType<Workspace['tools']['read']> | undefined
+  try {
+    await ws.vfs.mkdir('/data/protected')
+    await ws.vfs.write('/data/protected/item', 'private payload')
+    const agent = await ws.session('agent', { profile: FILE_APPROVAL })
+    slow = agent.tools.read('/data/protected/item')
+    await within(entered.promise)
+    const media = await agent.tools.readMedia('/data/protected/item')
+    if (!('content' in media)) throw new Error('expected a text media fallback')
+    equal(media.isError, undefined)
+    equal(prompts, 2)
+    release.resolve()
+    equal((await slow).isError, undefined)
+  } finally {
+    release.resolve()
+    if (slow !== undefined) await Promise.allSettled([slow])
+    await ws.close()
+  }
+}
+
 async function allHooks(): Promise<void> {
   const seen = new Set<string>()
   const record = (hook: string): null => {
@@ -541,4 +589,5 @@ export const POLICY_CHECKS: [string, () => Promise<void>][] = [
     'a snapshot restore revokes a suspended caller before cached data returns',
     () => invalidatedCachedRead(true),
   ],
+  ['media reads keep once approvals separate from suspended tool calls', mediaCallerIsolation],
 ]
