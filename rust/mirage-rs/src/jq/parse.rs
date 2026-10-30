@@ -2386,6 +2386,16 @@ mod tests {
         );
     }
 
+    /// What the scanner read last under values, as `collect` names a
+    /// frame: the document's or event's dump, or the error.
+    fn take_scanned(scanner: &mut Scanner, items: &mut Vec<(String, String)>) {
+        match scanner.take() {
+            Some(Scanned::Value(value)) => items.push(("text".into(), value.dump())),
+            Some(Scanned::Error(message)) => items.push(("error".into(), message)),
+            None => {}
+        }
+    }
+
     /// The scanner under values, collected as `collect` collects its
     /// frames: each document's or event's dump, or each error.
     fn collect_values(
@@ -2394,13 +2404,6 @@ mod tests {
         streaming: bool,
         chunk: usize,
     ) -> Vec<(String, String)> {
-        fn take(scanner: &mut Scanner, items: &mut Vec<(String, String)>) {
-            match scanner.take() {
-                Some(Scanned::Value(value)) => items.push(("text".into(), value.dump())),
-                Some(Scanned::Error(message)) => items.push(("error".into(), message)),
-                None => {}
-            }
-        }
         let mut scanner = Scanner::values(seq, streaming);
         let mut items = Vec::new();
         for input in data.chunks(chunk.clamp(1, WORK)) {
@@ -2408,17 +2411,17 @@ mod tests {
                 break;
             }
             scanner.feed(input, &mut Vec::new()).unwrap();
-            take(&mut scanner, &mut items);
+            take_scanned(&mut scanner, &mut items);
             while scanner.busy() {
                 scanner.drain(&mut Vec::new()).unwrap();
-                take(&mut scanner, &mut items);
+                take_scanned(&mut scanner, &mut items);
             }
         }
         scanner.finish(&mut Vec::new()).unwrap();
-        take(&mut scanner, &mut items);
+        take_scanned(&mut scanner, &mut items);
         while scanner.busy() {
             scanner.drain(&mut Vec::new()).unwrap();
-            take(&mut scanner, &mut items);
+            take_scanned(&mut scanner, &mut items);
         }
         items
     }
