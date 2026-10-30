@@ -19,6 +19,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
+import { debuglog } from 'node:util'
 
 // A stand-in for the execution service, so the example runs on one machine.
 // POST /run takes {argv, stdin, files} with base64 bytes, runs argv in a
@@ -46,7 +47,7 @@ async function run(req: IncomingMessage, res: ServerResponse, token: string): Pr
   res.on('close', () => {
     if (res.writableFinished) return
     run.gone = true
-    if (run.proc?.pid !== undefined) stopGroup(run.proc.pid)
+    if (run.proc !== undefined) stopGroup(run.proc)
   })
   if (!sameToken(req.headers.authorization ?? '', `Bearer ${token}`)) {
     res.statusCode = 401
@@ -113,7 +114,7 @@ function execute(
     proc.on('exit', () => {
       // Anything the program left running in its group goes with it, so
       // no stray child holds the output pipes open.
-      if (proc.pid !== undefined) stopGroup(proc.pid)
+      stopGroup(proc)
     })
     proc.on('close', (code) => {
       resolve({ stdout: Buffer.concat(out), stderr: Buffer.concat(err), code: code ?? 1 })
@@ -122,13 +123,21 @@ function execute(
   })
 }
 
-function stopGroup(pid: number): void {
-  // The program and anything it started share the group, so one kill
-  // stops them all; a group that already exited has nothing to stop.
+// The program and anything it started share the group, so one kill stops
+// them all, as Mirage's own killTree does. Windows has no group to signal,
+// so only the program is killed there. A group whose members all exited
+// answers ESRCH, or EPERM on macOS before they are reaped: nothing is left.
+function stopGroup(proc: ChildProcess): void {
+  if (proc.pid === undefined || process.platform === 'win32') {
+    proc.kill('SIGKILL')
+    return
+  }
   try {
-    process.kill(-pid, 'SIGKILL')
+    process.kill(-proc.pid, 'SIGKILL')
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e
+    const code = (e as NodeJS.ErrnoException).code
+    if (code !== 'ESRCH' && code !== 'EPERM') throw e
+    debuglog('exec')('process group %d has already exited', proc.pid)
   }
 }
 

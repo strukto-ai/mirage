@@ -15,13 +15,13 @@
 import asyncio
 import base64
 import hmac
-import os
 import secrets
-import signal
 import tempfile
 from pathlib import Path
 
 from aiohttp import web
+
+from mirage.runtime.sandbox.program import kill_tree
 
 # A stand-in for the execution service, so the example runs on one machine.
 # POST /run takes {argv, stdin, files} with base64 bytes, runs argv in a
@@ -67,7 +67,7 @@ async def run(request: web.Request) -> web.Response:
         try:
             out, err = await proc.communicate(base64.b64decode(body["stdin"]))
         finally:
-            _stop_group(proc.pid)
+            kill_tree(proc)
             await proc.wait()
         changed = {
             str(p.relative_to(root)): p.read_bytes()
@@ -76,15 +76,6 @@ async def run(request: web.Request) -> web.Response:
             and sent.get(str(p.relative_to(root))) != p.read_bytes()
         }
     return _answer(out, err, proc.returncode or 0, changed)
-
-
-def _stop_group(pid: int) -> None:
-    # The program and anything it started share the group, so one kill
-    # stops them all; a group that already exited has nothing to stop.
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
 
 
 def _answer(
