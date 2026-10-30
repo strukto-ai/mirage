@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import inspect
 import os
 import shutil
 import stat as stat_mod
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 import pytest
@@ -32,11 +34,12 @@ from mirage.runtime.python.host.constants import (
     REFUSED_DESCRIPTOR_CALLS,
     ROUTED_CALLS,
 )
-from mirage.runtime.python.host.fs import HostFs, make_os_module, os_routing
+from mirage.runtime.python.host.fs import HostFs, os_routing
 from mirage.types import HiddenPaths, PathSpec, Visibility
 from mirage.utils.stat_view import DIR_SIZE
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.workspace.lifecycle import patch_process, unpatch_process
 from tests.fixtures.driver_ops import ops as driver_ops
 from tests.fixtures.vfs_io import render
 
@@ -106,46 +109,66 @@ class _NoReads(Policy):
         return Deny("no read") if ctx.call.name == "read" else None
 
 
-def seeded():
-    """An ops facade over /data with one file and one subdirectory."""
-    ops, _ = make_ops_with_dir()
-    run(ops.write("/data/dir/a.txt", b"hello"))
-    run(ops.mkdir("/data/dir/sub"))
-    run(ops.write("/data/dir/sub/c.txt", b"c"))
-    return ops, make_os_module(ops)
+@pytest.fixture
+def route_os():
+    with asyncio.Runner() as runner, ExitStack() as cleanup:
+
+        def route(files):
+            cleanup.callback(
+                unpatch_process, patch_process(files, runner.get_loop())
+            )
+            return os
+
+        yield route
+
+
+@pytest.fixture
+def seeded(route_os):
+    def seed():
+        ops, _ = make_ops_with_dir()
+        run(ops.write("/data/dir/a.txt", b"hello"))
+        run(ops.mkdir("/data/dir/sub"))
+        run(ops.write("/data/dir/sub/c.txt", b"c"))
+        return ops, route_os(ops)
+
+    return seed
 
 
 class TestTableInstall:
-    def test_every_routed_verb_the_host_has_is_installed(self):
+    def test_every_routed_verb_the_host_has_is_installed(self, seeded):
+        original = vars(os).copy()
         ops, patched = seeded()
         for verb in (*ROUTED_CALLS, *DESCRIPTOR_CALLS):
-            if not hasattr(os, verb):
+            if verb not in original:
                 continue
-            assert getattr(patched, verb) is not getattr(os, verb), verb
+            assert getattr(patched, verb) is not original[verb], verb
 
-    def test_every_refused_verb_the_host_has_is_installed(self):
+    def test_every_refused_verb_the_host_has_is_installed(self, seeded):
+        original = vars(os).copy()
         ops, patched = seeded()
         for verb in REFUSED_CALLS:
-            if not hasattr(os, verb):
+            if verb not in original:
                 continue
-            assert getattr(patched, verb) is not getattr(os, verb), verb
+            assert getattr(patched, verb) is not original[verb], verb
 
-    def test_every_other_name_keeps_the_host_function(self):
+    def test_every_other_name_keeps_the_host_function(self, seeded):
+        original = vars(os).copy()
         ops, patched = seeded()
         installed = {*INSTALLED_CALLS, "path"}
-        for name, value in vars(os).items():
+        for name, value in original.items():
             if name not in installed:
                 assert getattr(patched, name) is value, name
 
-    def test_a_name_this_platform_lacks_is_not_invented(self):
+    def test_a_name_this_platform_lacks_is_not_invented(self, seeded):
         # hasattr(os, ...) has to keep answering what it did, or code
         # that probes for a platform feature gets an OSError instead.
+        original = vars(os).copy()
         ops, patched = seeded()
         for verb in INSTALLED_CALLS:
-            assert hasattr(patched, verb) is hasattr(os, verb), verb
+            assert hasattr(patched, verb) is (verb in original), verb
 
     def test_routing_covers_the_tables(self):
-        ops, _ = seeded()
+        ops, _ = make_ops_with_dir()
         routed = os_routing(HostFs(ops, None))
         expected = {verb for verb in INSTALLED_CALLS if hasattr(os, verb)}
         assert set(routed) == expected
@@ -184,7 +207,7 @@ class TestTableInstall:
 
 
 class TestStatShape:
-    def test_stat_is_a_real_stat_result(self):
+    def test_stat_is_a_real_stat_result(self, seeded):
         _, patched = seeded()
         st = patched.stat("/data/dir/a.txt")
         assert isinstance(st, os.stat_result)
@@ -192,13 +215,13 @@ class TestStatShape:
         assert st.st_size == 5
         assert st.st_nlink == 1
 
-    def test_a_directory_stats_as_one(self):
+    def test_a_directory_stats_as_one(self, seeded):
         _, patched = seeded()
         st = patched.stat("/data/dir")
         assert stat_mod.S_ISDIR(st.st_mode)
         assert st.st_size == DIR_SIZE
 
-    def test_optional_fields_are_filled_not_none(self):
+    def test_optional_fields_are_filled_not_none(self, seeded):
         # shutil.copystat reads st_flags when the platform has it, and
         # a None there is handed straight to the host's chflags.
         _, patched = seeded()
@@ -210,7 +233,7 @@ class TestStatShape:
             if hasattr(os.stat("/tmp"), field):
                 assert getattr(st, field) is not None, field
 
-    def test_an_unlinked_descriptor_keeps_every_field(self):
+    def test_an_unlinked_descriptor_keeps_every_field(self, seeded):
         _, patched = seeded()
         fd = patched.open("/data/dir/a.txt", os.O_RDONLY)
         patched.unlink("/data/dir/a.txt")
@@ -219,17 +242,17 @@ class TestStatShape:
         assert (st.st_nlink, st.st_size, st.st_blksize) == (0, 5, 4096)
         assert st.st_mtime_ns == int(st.st_mtime * 1_000_000_000)
 
-    def test_two_paths_are_not_the_same_file(self):
+    def test_two_paths_are_not_the_same_file(self, seeded):
         _, patched = seeded()
         assert patched.path.samefile("/data/dir/a.txt", "/data/dir/a.txt")
         assert not patched.path.samefile("/data/dir/a.txt", "/data/dir/sub")
 
-    def test_a_mount_root_is_a_mount_point(self):
+    def test_a_mount_root_is_a_mount_point(self, seeded):
         _, patched = seeded()
         assert patched.path.ismount("/data") is True
         assert patched.path.ismount("/data/dir") is False
 
-    def test_the_same_path_stats_the_same_twice(self):
+    def test_the_same_path_stats_the_same_twice(self, seeded):
         # A synthesized mtime that moved per call fires every "did it
         # change?" heuristic there is.
         _, patched = seeded()
@@ -238,11 +261,11 @@ class TestStatShape:
 
 
 class TestReads:
-    def test_listdir(self):
+    def test_listdir(self, seeded):
         _, patched = seeded()
         assert sorted(patched.listdir("/data/dir")) == ["a.txt", "sub"]
 
-    def test_scandir_entries_classify_by_stat(self):
+    def test_scandir_entries_classify_by_stat(self, seeded):
         _, patched = seeded()
         with patched.scandir("/data/dir") as it:
             kinds = {
@@ -253,7 +276,7 @@ class TestReads:
             "sub": (True, False, False),
         }
 
-    def test_scandir_entry_carries_path_and_stat(self):
+    def test_scandir_entry_carries_path_and_stat(self, seeded):
         _, patched = seeded()
         entry = next(
             e for e in patched.scandir("/data/dir") if e.name == "a.txt"
@@ -263,7 +286,7 @@ class TestReads:
         assert entry.stat().st_size == 5
         assert entry.inode() == patched.stat("/data/dir/a.txt").st_ino
 
-    def test_walk_is_post_order_when_asked(self):
+    def test_walk_is_post_order_when_asked(self, seeded):
         _, patched = seeded()
         seen = [
             (top, sorted(dirs), sorted(files))
@@ -274,7 +297,7 @@ class TestReads:
             ("/data/dir", ["sub"], ["a.txt"]),
         ]
 
-    def test_walk_lets_a_topdown_caller_prune(self):
+    def test_walk_lets_a_topdown_caller_prune(self, seeded):
         _, patched = seeded()
         tops = []
         for top, dirs, _ in patched.walk("/data/dir"):
@@ -282,14 +305,14 @@ class TestReads:
             dirs[:] = []
         assert tops == ["/data/dir"]
 
-    def test_walk_reports_a_listing_error_and_prunes(self):
+    def test_walk_reports_a_listing_error_and_prunes(self, seeded):
         _, patched = seeded()
         errors = []
         seen = list(patched.walk("/data/dir/nope", onerror=errors.append))
         assert seen == []
         assert [type(exc) for exc in errors] == [FileNotFoundError]
 
-    def test_path_predicates_route(self):
+    def test_path_predicates_route(self, seeded):
         _, patched = seeded()
         assert patched.path.exists("/data/dir/a.txt") is True
         assert patched.path.exists("/data/dir/nope") is False
@@ -298,7 +321,7 @@ class TestReads:
         assert patched.path.getsize("/data/dir/a.txt") == 5
         assert patched.path.getmtime("/data/dir/a.txt") > 0
 
-    def test_access_reads_existence_mount_mode_and_bits(self):
+    def test_access_reads_existence_mount_mode_and_bits(self, seeded):
         ops, patched = seeded()
         assert patched.access("/data/dir/a.txt", os.F_OK) is True
         assert patched.access("/data/dir/nope", os.F_OK) is False
@@ -307,15 +330,15 @@ class TestReads:
         assert patched.access("/data/dir/a.txt", os.X_OK) is False
         assert patched.access("/data/dir", os.X_OK) is True
 
-    def test_access_refuses_write_on_a_read_only_mount(self):
+    def test_access_refuses_write_on_a_read_only_mount(self, route_os):
         vfs = RAMVFS()
         run(driver_ops(vfs).write(PathSpec.from_str_path("/fixed.txt"), b"ro"))
         ws = Workspace({"/ro/": (vfs, MountMode.READ)}, mode=MountMode.WRITE)
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         assert patched.access("/ro/fixed.txt", os.R_OK) is True
         assert patched.access("/ro/fixed.txt", os.W_OK) is False
 
-    def test_access_answers_write_from_the_sessions_mode(self):
+    def test_access_answers_write_from_the_sessions_mode(self, route_os):
         # W_OK answers what the write itself meets, for the session the
         # files run as (here the default one, bound by no one): a cap to
         # read is refused, a writable show entry below it is not, and a
@@ -325,7 +348,7 @@ class TestReads:
         run(ws.vfs.mkdir("/data/out"))
         run(ws.vfs.write("/data/out/g.txt", b"g"))
         run(ws.vfs.symlink("/data/link", "/data/out/g.txt"))
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         assert patched.access("/data/f.txt", os.W_OK) is True
         run(
             ws.set_session_profile(
@@ -347,37 +370,37 @@ class TestReads:
 
 
 class TestWrites:
-    def test_mkdir_and_rmdir(self):
+    def test_mkdir_and_rmdir(self, seeded):
         ops, patched = seeded()
         patched.mkdir("/data/dir/fresh")
         assert patched.path.isdir("/data/dir/fresh") is True
         patched.rmdir("/data/dir/fresh")
         assert patched.path.isdir("/data/dir/fresh") is False
 
-    def test_mkdir_narrows_to_its_mode_as_tempfile_asks(self):
+    def test_mkdir_narrows_to_its_mode_as_tempfile_asks(self, seeded):
         _, patched = seeded()
         patched.mkdir("/data/dir/private", 0o700)
         mode = patched.stat("/data/dir/private").st_mode
         assert mode & 0o777 == 0o700
 
-    def test_mkdir_does_not_fail_a_create_on_a_refused_lookup(self):
+    def test_mkdir_does_not_fail_a_create_on_a_refused_lookup(self, route_os):
         # A plain mkdir looks nothing up, and a refused lookup leaves a
         # narrowed one as made: neither fails a create that happened.
         ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
         ws.policies.add(_NoStats())
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         patched.mkdir("/data/plain")
         patched.mkdir("/data/narrow", 0o700)
         assert sorted(patched.listdir("/data")) == ["narrow", "plain"]
 
-    def test_makedirs_creates_every_missing_ancestor(self):
+    def test_makedirs_creates_every_missing_ancestor(self, seeded):
         _, patched = seeded()
         patched.makedirs("/data/deep/x/y")
         assert patched.path.isdir("/data/deep") is True
         assert patched.path.isdir("/data/deep/x") is True
         assert patched.path.isdir("/data/deep/x/y") is True
 
-    def test_makedirs_honors_exist_ok(self):
+    def test_makedirs_honors_exist_ok(self, seeded):
         _, patched = seeded()
         patched.makedirs("/data/deep/x")
         with pytest.raises(FileExistsError) as caught:
@@ -385,39 +408,39 @@ class TestWrites:
         assert caught.value.errno == errno.EEXIST
         patched.makedirs("/data/deep/x", exist_ok=True)
 
-    def test_makedirs_still_refuses_a_file_in_the_way(self):
+    def test_makedirs_still_refuses_a_file_in_the_way(self, seeded):
         _, patched = seeded()
         with pytest.raises(FileExistsError):
             patched.makedirs("/data/dir/a.txt", exist_ok=True)
 
-    def test_makedirs_raises_what_a_stat_refused(self):
+    def test_makedirs_raises_what_a_stat_refused(self, route_os):
         # A refused stat is not a missing directory: makedirs used to walk
         # past it and answer EEXIST from a mkdir it should never have tried.
         ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
         run(ws.vfs.mkdir("/data/dir"))
         ws.policies.add(_NoStats())
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         with pytest.raises(PermissionError):
             patched.makedirs("/data/dir/x/y")
 
-    def test_removedirs_prunes_the_parents_that_empty(self):
+    def test_removedirs_prunes_the_parents_that_empty(self, seeded):
         _, patched = seeded()
         patched.makedirs("/data/deep/x/y")
         patched.removedirs("/data/deep/x/y")
         assert patched.path.isdir("/data/deep") is False
 
-    def test_rmdir_refuses_a_mount_root_as_busy(self):
+    def test_rmdir_refuses_a_mount_root_as_busy(self, route_os):
         ws = Workspace(
             {"/data/": RAMVFS(), "/data/m/": RAMVFS()}, mode=MountMode.WRITE
         )
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         for root in ("/data/m", "/data"):
             with pytest.raises(OSError) as caught:
                 patched.rmdir(root)
             assert caught.value.errno == errno.EBUSY
         assert patched.path.isdir("/data/m") is True
 
-    def test_remove_and_unlink_are_one_op(self):
+    def test_remove_and_unlink_are_one_op(self, seeded):
         ops, patched = seeded()
         patched.remove("/data/dir/a.txt")
         assert patched.path.exists("/data/dir/a.txt") is False
@@ -425,37 +448,39 @@ class TestWrites:
         patched.unlink("/data/dir/a.txt")
         assert patched.path.exists("/data/dir/a.txt") is False
 
-    def test_rename_within_the_mount(self):
+    def test_rename_within_the_mount(self, seeded):
         _, patched = seeded()
         patched.rename("/data/dir/a.txt", "/data/dir/b.txt")
         assert sorted(patched.listdir("/data/dir")) == ["b.txt", "sub"]
 
-    def test_replace_reaches_the_same_op(self):
+    def test_replace_reaches_the_same_op(self, seeded):
         _, patched = seeded()
         patched.replace("/data/dir/a.txt", "/data/dir/b.txt")
         assert patched.path.exists("/data/dir/b.txt") is True
 
-    def test_renames_creates_the_destination_parents(self):
+    def test_renames_creates_the_destination_parents(self, seeded):
         _, patched = seeded()
         patched.renames("/data/dir/sub/c.txt", "/data/other/deep/c.txt")
         assert patched.path.exists("/data/other/deep/c.txt") is True
         assert patched.path.isdir("/data/dir/sub") is False
 
-    def test_renames_keeps_a_source_parent_that_still_holds_entries(self):
+    def test_renames_keeps_a_source_parent_that_still_holds_entries(
+        self, seeded
+    ):
         # CPython's renames leaves a parent that will not prune.
         _, patched = seeded()
         patched.renames("/data/dir/a.txt", "/data/b.txt")
         assert patched.path.exists("/data/b.txt") is True
         assert sorted(patched.listdir("/data/dir")) == ["sub"]
 
-    def test_a_rename_off_the_mount_is_exdev(self, tmp_path):
+    def test_a_rename_off_the_mount_is_exdev(self, seeded, tmp_path):
         _, patched = seeded()
         with pytest.raises(OSError) as caught:
             patched.rename("/data/dir/a.txt", str(tmp_path / "a.txt"))
         assert caught.value.errno == errno.EXDEV
         assert patched.path.exists("/data/dir/a.txt") is True
 
-    def test_a_rename_onto_the_mount_is_exdev(self, tmp_path):
+    def test_a_rename_onto_the_mount_is_exdev(self, seeded, tmp_path):
         _, patched = seeded()
         source = tmp_path / "host.txt"
         source.write_text("host")
@@ -464,43 +489,43 @@ class TestWrites:
         assert caught.value.errno == errno.EXDEV
         assert source.exists() is True
 
-    def test_truncate(self):
+    def test_truncate(self, seeded):
         _, patched = seeded()
         patched.truncate("/data/dir/a.txt", 2)
         assert patched.path.getsize("/data/dir/a.txt") == 2
 
-    def test_chmod_is_visible_to_stat(self):
+    def test_chmod_is_visible_to_stat(self, seeded):
         _, patched = seeded()
         patched.chmod("/data/dir/a.txt", 0o600)
         assert (
             stat_mod.S_IMODE(patched.stat("/data/dir/a.txt").st_mode) == 0o600
         )
 
-    def test_chown_leaves_minus_one_alone(self):
+    def test_chown_leaves_minus_one_alone(self, seeded):
         _, patched = seeded()
         patched.chown("/data/dir/a.txt", 4242, -1)
         assert patched.stat("/data/dir/a.txt").st_uid == 4242
 
-    def test_utime_takes_seconds_and_nanoseconds(self):
+    def test_utime_takes_seconds_and_nanoseconds(self, seeded):
         _, patched = seeded()
         patched.utime("/data/dir/a.txt", (1_700_000_000, 1_700_000_123))
         assert patched.stat("/data/dir/a.txt").st_mtime == 1_700_000_123
         patched.utime("/data/dir/a.txt", ns=(0, 1_700_000_456_000_000_000))
         assert patched.stat("/data/dir/a.txt").st_mtime == 1_700_000_456
 
-    def test_utime_refuses_both_spellings_at_once(self):
+    def test_utime_refuses_both_spellings_at_once(self, seeded):
         _, patched = seeded()
         with pytest.raises(ValueError):
             patched.utime("/data/dir/a.txt", (1, 2), ns=(3, 4))
 
 
 class TestLinks:
-    def test_symlink_stores_the_target_verbatim(self):
+    def test_symlink_stores_the_target_verbatim(self, seeded):
         _, patched = seeded()
         patched.symlink("a.txt", "/data/dir/link")
         assert patched.readlink("/data/dir/link") == "a.txt"
 
-    def test_lstat_reports_the_link_itself(self):
+    def test_lstat_reports_the_link_itself(self, seeded):
         _, patched = seeded()
         patched.symlink("a.txt", "/data/dir/link")
         st = patched.lstat("/data/dir/link")
@@ -509,7 +534,7 @@ class TestLinks:
         assert patched.path.islink("/data/dir/link") is True
         assert patched.path.islink("/data/dir/a.txt") is False
 
-    def test_lstat_reports_what_chown_h_wrote_on_the_link(self):
+    def test_lstat_reports_what_chown_h_wrote_on_the_link(self, seeded):
         _, patched = seeded()
         patched.symlink("a.txt", "/data/dir/link")
         patched.lchown("/data/dir/link", 4242, 4343)
@@ -520,7 +545,7 @@ class TestLinks:
         assert stat_mod.S_ISLNK(st.st_mode)
         assert st.st_size == len("a.txt")
 
-    def test_utime_on_a_link_leaves_its_target(self):
+    def test_utime_on_a_link_leaves_its_target(self, seeded):
         _, patched = seeded()
         before = patched.stat("/data/dir/a.txt").st_mtime
         patched.symlink("a.txt", "/data/dir/link")
@@ -528,7 +553,7 @@ class TestLinks:
         assert patched.lstat("/data/dir/link").st_mtime == 200
         assert patched.stat("/data/dir/a.txt").st_mtime == before
 
-    def test_a_descriptor_changes_the_mode_and_owner_of_its_file(self):
+    def test_a_descriptor_changes_the_mode_and_owner_of_its_file(self, seeded):
         _, patched = seeded()
         fd = patched.open("/data/dir/a.txt", os.O_RDWR)
         try:
@@ -543,7 +568,7 @@ class TestLinks:
             4343,
         )
 
-    def test_a_link_stays_lrwxrwxrwx_after_chmod_h(self):
+    def test_a_link_stays_lrwxrwxrwx_after_chmod_h(self, seeded):
         _, patched = seeded()
         patched.symlink("a.txt", "/data/dir/link")
         patched.chmod("/data/dir/link", 0o600, follow_symlinks=False)
@@ -553,26 +578,26 @@ class TestLinks:
         assert stat_mod.S_IMODE(st.st_mode) == 0o777
         assert stat_mod.S_ISLNK(st.st_mode)
 
-    def test_stat_follows_the_link(self):
+    def test_stat_follows_the_link(self, seeded):
         _, patched = seeded()
         patched.symlink("a.txt", "/data/dir/link")
         assert patched.stat("/data/dir/link").st_size == 5
         assert patched.path.realpath("/data/dir/link") == "/data/dir/a.txt"
 
-    def test_a_broken_link_lstats_and_does_not_exist(self):
+    def test_a_broken_link_lstats_and_does_not_exist(self, seeded):
         _, patched = seeded()
         patched.symlink("gone.txt", "/data/dir/broken")
         assert stat_mod.S_ISLNK(patched.lstat("/data/dir/broken").st_mode)
         assert patched.path.exists("/data/dir/broken") is False
         assert patched.path.lexists("/data/dir/broken") is True
 
-    def test_readlink_of_a_plain_file_is_einval(self):
+    def test_readlink_of_a_plain_file_is_einval(self, seeded):
         _, patched = seeded()
         with pytest.raises(OSError) as caught:
             patched.readlink("/data/dir/a.txt")
         assert caught.value.errno == errno.EINVAL
 
-    def test_readlink_of_a_missing_path_is_enoent(self):
+    def test_readlink_of_a_missing_path_is_enoent(self, seeded):
         # The other half of readlink(2)'s split, and the half a caller's
         # `except FileNotFoundError` is written against: EINVAL for both
         # meant that clause never fired.
@@ -581,7 +606,7 @@ class TestLinks:
             patched.readlink("/data/dir/gone.txt")
         assert caught.value.errno == errno.ENOENT
 
-    def test_lstat_of_a_missing_path_stays_enoent(self):
+    def test_lstat_of_a_missing_path_stays_enoent(self, seeded):
         # lstat probes readlink first, so the ENOENT above has to reach
         # the caller rather than being read as "not a link".
         _, patched = seeded()
@@ -591,7 +616,7 @@ class TestLinks:
         assert patched.path.lexists("/data/dir/gone.txt") is False
 
     def test_readlink_off_the_mount_answers_as_the_caller_spelled_it(
-        self, tmp_path
+        self, seeded, tmp_path
     ):
         _, patched = seeded()
         target = tmp_path / "target.txt"
@@ -604,7 +629,7 @@ class TestLinks:
         assert patched.readlink(str(link)) == str(target)
         assert patched.readlink(os.fsencode(link)) == os.fsencode(target)
 
-    def test_walk_survives_a_broken_link(self):
+    def test_walk_survives_a_broken_link(self, seeded):
         # Classifying it means following it, which raises; os.walk reads
         # that as "not a directory" rather than ending the walk.
         _, patched = seeded()
@@ -617,7 +642,9 @@ class TestLinks:
             ("/data/dir/sub", ["c.txt"]),
         ]
 
-    def test_walk_lists_a_link_to_a_directory_without_entering_it(self):
+    def test_walk_lists_a_link_to_a_directory_without_entering_it(
+        self, seeded
+    ):
         _, patched = seeded()
         patched.symlink("/data/dir/sub", "/data/dir/subs")
         tops = [top for top, _, _ in patched.walk("/data/dir")]
@@ -632,7 +659,7 @@ class TestLinks:
     not hasattr(os, "setxattr"), reason="the xattr family is linux only"
 )
 class TestXattrs:
-    def test_the_family_routes_through_the_node_table(self):
+    def test_the_family_routes_through_the_node_table(self, seeded):
         _, patched = seeded()
         patched.setxattr("/data/dir/a.txt", "user.b", b"two")
         patched.setxattr("/data/dir/a.txt", b"user.a", b"one")
@@ -641,7 +668,7 @@ class TestXattrs:
         patched.removexattr("/data/dir/a.txt", "user.b")
         assert patched.listxattr("/data/dir/a.txt") == ["user.a"]
 
-    def test_flags_and_a_missing_name_answer_linux_errnos(self):
+    def test_flags_and_a_missing_name_answer_linux_errnos(self, seeded):
         _, patched = seeded()
         patched.setxattr("/data/dir/a.txt", "user.a", b"one")
         with pytest.raises(FileExistsError):
@@ -660,7 +687,7 @@ class TestXattrs:
 
 class TestRefusals:
     @pytest.mark.parametrize("verb", sorted(REFUSED_CALLS))
-    def test_a_refused_verb_answers_its_condition(self, verb):
+    def test_a_refused_verb_answers_its_condition(self, seeded, verb):
         if not hasattr(os, verb):
             pytest.skip(f"{verb} is not a name this platform has")
         _, patched = seeded()
@@ -668,13 +695,13 @@ class TestRefusals:
             getattr(patched, verb)("/data/dir/a.txt", *_extra_args(verb))
         assert caught.value.errno == posix_errno(REFUSED_CALLS[verb])
 
-    def test_a_refused_verb_still_serves_a_host_path(self, tmp_path):
+    def test_a_refused_verb_still_serves_a_host_path(self, seeded, tmp_path):
         _, patched = seeded()
         target = tmp_path / "a.txt"
         target.write_text("host")
         assert patched.statvfs(str(tmp_path)).f_bsize > 0
 
-    def test_link_refuses_when_either_end_is_mounted(self, tmp_path):
+    def test_link_refuses_when_either_end_is_mounted(self, seeded, tmp_path):
         _, patched = seeded()
         host = tmp_path / "host.txt"
         host.write_text("host")
@@ -695,22 +722,26 @@ def _extra_args(verb):
 
 
 class TestDescriptors:
-    def test_a_policy_that_refuses_reads_still_lets_an_open_file_go(self):
+    def test_a_policy_that_refuses_reads_still_lets_an_open_file_go(
+        self, route_os
+    ):
         ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
         run(ws.vfs.write("/data/f.txt", b"body"))
         ws.policies.add(_NoReads())
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         fd = patched.open("/data/f.txt", os.O_WRONLY)
         patched.unlink("/data/f.txt")
         patched.close(fd)
         assert not patched.path.exists("/data/f.txt")
 
-    def test_a_read_refused_as_its_name_goes_fails_the_reads_after(self):
+    def test_a_read_refused_as_its_name_goes_fails_the_reads_after(
+        self, route_os
+    ):
         # The removal goes ahead, but the bytes it could not keep are not
         # an empty file: the reads after it report the refusal.
         ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
         run(ws.vfs.write("/data/f.txt", b"body"))
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         fd = patched.open("/data/f.txt", os.O_RDONLY)
         ws.policies.add(_NoReads())
         patched.unlink("/data/f.txt")
@@ -719,7 +750,7 @@ class TestDescriptors:
         patched.close(fd)
         assert not patched.path.exists("/data/f.txt")
 
-    def test_a_reader_keeps_the_rendering_of_a_removed_file(self):
+    def test_a_reader_keeps_the_rendering_of_a_removed_file(self, route_os):
         # A writable open beside it reads the stored bytes, and the reader
         # still sees what the mount renders, as it did before the removal.
         ws = Workspace(
@@ -727,7 +758,7 @@ class TestDescriptors:
             mode=MountMode.WRITE,
         )
         run(ws.vfs.write("/data/b.tally", b"STORED"))
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         reader = patched.open("/data/b.tally", os.O_RDONLY)
         writer = patched.open("/data/b.tally", os.O_RDWR)
         patched.unlink("/data/b.tally")
@@ -736,14 +767,16 @@ class TestDescriptors:
         patched.close(reader)
         patched.close(writer)
 
-    def test_a_failed_rendering_leaves_a_writer_its_stored_bytes(self):
+    def test_a_failed_rendering_leaves_a_writer_its_stored_bytes(
+        self, route_os
+    ):
         # Only the reader of the rendering reports it could not be read.
         ws = Workspace(
             {"/data/": render(RAMVFS(), ".tally", _refuse_tally)},
             mode=MountMode.WRITE,
         )
         run(ws.vfs.write("/data/b.tally", b"STORED"))
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         reader = patched.open("/data/b.tally", os.O_RDONLY)
         writer = patched.open("/data/b.tally", os.O_RDWR)
         patched.unlink("/data/b.tally")
@@ -753,7 +786,7 @@ class TestDescriptors:
         patched.close(reader)
         patched.close(writer)
 
-    def test_a_write_only_handle_leaves_a_reader_its_rendering(self):
+    def test_a_write_only_handle_leaves_a_reader_its_rendering(self, route_os):
         # The writer lands on the stored bytes, not on the rendering the
         # reader keeps.
         ws = Workspace(
@@ -761,7 +794,7 @@ class TestDescriptors:
             mode=MountMode.WRITE,
         )
         run(ws.vfs.write("/data/b.tally", b"STORED"))
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         reader = patched.open("/data/b.tally", os.O_RDONLY)
         writer = patched.open("/data/b.tally", os.O_WRONLY)
         patched.unlink("/data/b.tally")
@@ -771,7 +804,7 @@ class TestDescriptors:
         patched.close(reader)
         patched.close(writer)
 
-    def test_a_rename_onto_its_own_name_keeps_the_descriptor(self):
+    def test_a_rename_onto_its_own_name_keeps_the_descriptor(self, seeded):
         ops, patched = seeded()
         fd = patched.open("/data/dir/a.txt", os.O_RDWR)
         patched.write(fd, b"J")
@@ -779,7 +812,7 @@ class TestDescriptors:
         patched.close(fd)
         assert run(ops.read("/data/dir/a.txt")) == b"Jello"
 
-    def test_fdopen_opens_a_descriptor_as_io_open_does(self):
+    def test_fdopen_opens_a_descriptor_as_io_open_does(self, seeded):
         ops, patched = seeded()
         fd = patched.open("/data/dir/a.txt", os.O_RDWR | os.O_APPEND)
         with patched.fdopen(fd, "a+b", 0) as f:
@@ -789,7 +822,7 @@ class TestDescriptors:
             assert f.read() == b"hello"
         assert run(ops.read("/data/dir/a.txt")) == b"hello"
 
-    def test_an_appending_write_leaves_the_position_past_it(self):
+    def test_an_appending_write_leaves_the_position_past_it(self, seeded):
         ops, patched = seeded()
         fd = patched.open("/data/dir/a.txt", os.O_RDWR | os.O_APPEND)
         patched.lseek(fd, 0, os.SEEK_SET)
@@ -799,10 +832,10 @@ class TestDescriptors:
         patched.close(fd)
         assert run(ops.read("/data/dir/a.txt")) == b"hello!"
 
-    def test_an_append_that_cannot_find_its_end_writes_nothing(self):
+    def test_an_append_that_cannot_find_its_end_writes_nothing(self, route_os):
         ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
         run(ws.vfs.write("/data/log", b"abc"))
-        patched = make_os_module(ws.vfs)
+        patched = route_os(ws.vfs)
         fd = patched.open("/data/log", os.O_WRONLY | os.O_APPEND)
         ws.policies.add(_NoStats())
         with pytest.raises(PermissionError):
@@ -810,7 +843,7 @@ class TestDescriptors:
         patched.close(fd)
         assert run(ws.vfs.read("/data/log")) == b"abc"
 
-    def test_a_host_path_keeps_a_host_descriptor(self, tmp_path):
+    def test_a_host_path_keeps_a_host_descriptor(self, seeded, tmp_path):
         _, patched = seeded()
         target = tmp_path / "a.txt"
         fd = patched.open(str(target), os.O_WRONLY | os.O_CREAT)

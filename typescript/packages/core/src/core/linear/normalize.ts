@@ -12,15 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonBytes } from '../render/json.ts'
-import { nonPlainWords } from '../../utils/record_search.ts'
-
 type Json = Record<string, unknown>
-
-function pickStringOrNull(record: Json, key: string): string | null {
-  const value = record[key]
-  return typeof value === 'string' ? value : null
-}
 
 function pickString(record: Json, ...keys: readonly string[]): string | null {
   for (const key of keys) {
@@ -71,19 +63,19 @@ export function normalizeTeam(team: Json): NormalizedTeam {
   const states: NormalizedTeamState[] = []
   for (const state of nodesOf(team.states)) {
     states.push({
-      state_id: pickStringOrNull(state, 'id'),
-      state_name: pickStringOrNull(state, 'name'),
-      type: pickStringOrNull(state, 'type'),
+      state_id: pickString(state, 'id'),
+      state_name: pickString(state, 'name'),
+      type: pickString(state, 'type'),
     })
   }
   return {
-    team_id: pickStringOrNull(team, 'id'),
-    team_key: pickStringOrNull(team, 'key'),
-    team_name: pickStringOrNull(team, 'name'),
-    name: pickStringOrNull(team, 'name'),
-    description: pickStringOrNull(team, 'description'),
-    timezone: pickStringOrNull(team, 'timezone'),
-    updated_at: pickStringOrNull(team, 'updatedAt'),
+    team_id: pickString(team, 'id'),
+    team_key: pickString(team, 'key'),
+    team_name: pickString(team, 'name'),
+    name: pickString(team, 'name'),
+    description: pickString(team, 'description'),
+    timezone: pickString(team, 'timezone'),
+    updated_at: pickString(team, 'updatedAt'),
     states,
   }
 }
@@ -101,14 +93,14 @@ export interface NormalizedUser {
 
 export function normalizeUser(user: Json): NormalizedUser {
   return {
-    user_id: pickStringOrNull(user, 'id'),
-    name: pickStringOrNull(user, 'name'),
+    user_id: pickString(user, 'id'),
+    name: pickString(user, 'name'),
     display_name: pickString(user, 'displayName', 'name'),
-    email: pickStringOrNull(user, 'email'),
+    email: pickString(user, 'email'),
     is_active: pickBoolOrNull(user, 'active'),
     is_admin: pickBoolOrNull(user, 'admin'),
-    updated_at: pickStringOrNull(user, 'updatedAt'),
-    url: pickStringOrNull(user, 'url'),
+    updated_at: pickString(user, 'updatedAt'),
+    url: pickString(user, 'url'),
   }
 }
 
@@ -150,32 +142,32 @@ export function normalizeIssue(issue: Json): NormalizedIssue {
   const creator = asObject(issue.creator)
   const labels = nodesOf(issue.labels)
   return {
-    issue_id: pickStringOrNull(issue, 'id'),
-    issue_key: pickStringOrNull(issue, 'identifier'),
-    title: pickStringOrNull(issue, 'title'),
-    description: pickStringOrNull(issue, 'description') ?? '',
-    team_id: pickStringOrNull(team, 'id'),
-    team_key: pickStringOrNull(team, 'key'),
-    team_name: pickStringOrNull(team, 'name'),
-    project_id: pickStringOrNull(project, 'id'),
-    project_name: pickStringOrNull(project, 'name'),
-    cycle_id: pickStringOrNull(cycle, 'id'),
-    cycle_name: pickStringOrNull(cycle, 'name'),
+    issue_id: pickString(issue, 'id'),
+    issue_key: pickString(issue, 'identifier'),
+    title: pickString(issue, 'title'),
+    description: pickString(issue, 'description') ?? '',
+    team_id: pickString(team, 'id'),
+    team_key: pickString(team, 'key'),
+    team_name: pickString(team, 'name'),
+    project_id: pickString(project, 'id'),
+    project_name: pickString(project, 'name'),
+    cycle_id: pickString(cycle, 'id'),
+    cycle_name: pickString(cycle, 'name'),
     cycle_number: pickNumberOrNull(cycle, 'number'),
-    state_id: pickStringOrNull(state, 'id'),
-    state_name: pickStringOrNull(state, 'name'),
-    assignee_id: pickStringOrNull(assignee, 'id'),
-    assignee_email: pickStringOrNull(assignee, 'email'),
-    assignee_name: pickStringOrNull(assignee, 'name'),
-    creator_id: pickStringOrNull(creator, 'id'),
-    creator_email: pickStringOrNull(creator, 'email'),
-    creator_name: pickStringOrNull(creator, 'name'),
+    state_id: pickString(state, 'id'),
+    state_name: pickString(state, 'name'),
+    assignee_id: pickString(assignee, 'id'),
+    assignee_email: pickString(assignee, 'email'),
+    assignee_name: pickString(assignee, 'name'),
+    creator_id: pickString(creator, 'id'),
+    creator_email: pickString(creator, 'email'),
+    creator_name: pickString(creator, 'name'),
     priority: pickNumberOrNull(issue, 'priority'),
-    label_ids: labels.map((label) => pickStringOrNull(label, 'id')),
-    label_names: labels.map((label) => pickStringOrNull(label, 'name')),
-    created_at: pickStringOrNull(issue, 'createdAt'),
-    updated_at: pickStringOrNull(issue, 'updatedAt'),
-    url: pickStringOrNull(issue, 'url'),
+    label_ids: labels.map((label) => pickString(label, 'id')),
+    label_names: labels.map((label) => pickString(label, 'name')),
+    created_at: pickString(issue, 'createdAt'),
+    updated_at: pickString(issue, 'updatedAt'),
+    url: pickString(issue, 'url'),
   }
 }
 
@@ -199,16 +191,16 @@ export function normalizeComment(
 ): NormalizedComment {
   const user = asObject(comment.user)
   return {
-    comment_id: pickStringOrNull(comment, 'id'),
+    comment_id: pickString(comment, 'id'),
     issue_id: issueId,
     issue_key: issueKey,
-    user_id: pickStringOrNull(user, 'id'),
-    user_email: pickStringOrNull(user, 'email'),
+    user_id: pickString(user, 'id'),
+    user_email: pickString(user, 'email'),
     user_name: pickString(user, 'displayName', 'name'),
-    body: pickStringOrNull(comment, 'body') ?? '',
-    created_at: pickStringOrNull(comment, 'createdAt'),
-    updated_at: pickStringOrNull(comment, 'updatedAt'),
-    url: pickStringOrNull(comment, 'url'),
+    body: pickString(comment, 'body') ?? '',
+    created_at: pickString(comment, 'createdAt'),
+    updated_at: pickString(comment, 'updatedAt'),
+    url: pickString(comment, 'url'),
   }
 }
 
@@ -246,16 +238,16 @@ export interface NormalizeProjectContext {
 export function normalizeProject(project: Json, ctx: NormalizeProjectContext): NormalizedProject {
   const lead = asObject(project.lead)
   return {
-    project_id: pickStringOrNull(project, 'id'),
+    project_id: pickString(project, 'id'),
     team_id: ctx.teamId,
     team_key: ctx.teamKey,
     team_name: ctx.teamName,
-    name: pickStringOrNull(project, 'name'),
-    description: pickStringOrNull(project, 'description'),
-    state: pickStringOrNull(asObject(project.status), 'type'),
-    lead_id: pickStringOrNull(lead, 'id'),
-    updated_at: pickStringOrNull(project, 'updatedAt'),
-    url: pickStringOrNull(project, 'url'),
+    name: pickString(project, 'name'),
+    description: pickString(project, 'description'),
+    state: pickString(asObject(project.status), 'type'),
+    lead_id: pickString(lead, 'id'),
+    updated_at: pickString(project, 'updatedAt'),
+    url: pickString(project, 'url'),
     issue_count: ctx.issues.length,
     issues: ctx.issues,
   }
@@ -274,14 +266,14 @@ export interface NormalizedCycle {
 
 export function normalizeCycle(cycle: Json, teamId: string): NormalizedCycle {
   return {
-    cycle_id: pickStringOrNull(cycle, 'id'),
+    cycle_id: pickString(cycle, 'id'),
     team_id: teamId,
-    name: pickStringOrNull(cycle, 'name'),
+    name: pickString(cycle, 'name'),
     number: pickNumberOrNull(cycle, 'number'),
-    starts_at: pickStringOrNull(cycle, 'startsAt'),
-    ends_at: pickStringOrNull(cycle, 'endsAt'),
-    updated_at: pickStringOrNull(cycle, 'updatedAt'),
-    url: pickStringOrNull(cycle, 'url'),
+    starts_at: pickString(cycle, 'startsAt'),
+    ends_at: pickString(cycle, 'endsAt'),
+    updated_at: pickString(cycle, 'updatedAt'),
+    url: pickString(cycle, 'url'),
   }
 }
 
@@ -293,9 +285,9 @@ export interface NormalizedLabel {
 
 export function normalizeLabel(label: Json): NormalizedLabel {
   return {
-    label_id: pickStringOrNull(label, 'id'),
-    name: pickStringOrNull(label, 'name'),
-    color: pickStringOrNull(label, 'color'),
+    label_id: pickString(label, 'id'),
+    name: pickString(label, 'name'),
+    color: pickString(label, 'color'),
   }
 }
 
@@ -317,55 +309,32 @@ export function normalizeDocument(document: Json): NormalizedDocument {
   const project = asObject(document.project)
   const creator = asObject(document.creator)
   return {
-    document_id: pickStringOrNull(document, 'id'),
-    title: pickStringOrNull(document, 'title'),
-    content: pickStringOrNull(document, 'content') ?? '',
-    project_id: pickStringOrNull(project, 'id'),
-    project_name: pickStringOrNull(project, 'name'),
-    creator_id: pickStringOrNull(creator, 'id'),
-    creator_name: pickStringOrNull(creator, 'name'),
-    creator_email: pickStringOrNull(creator, 'email'),
-    created_at: pickStringOrNull(document, 'createdAt'),
-    updated_at: pickStringOrNull(document, 'updatedAt'),
-    url: pickStringOrNull(document, 'url'),
+    document_id: pickString(document, 'id'),
+    title: pickString(document, 'title'),
+    content: pickString(document, 'content') ?? '',
+    project_id: pickString(project, 'id'),
+    project_name: pickString(project, 'name'),
+    creator_id: pickString(creator, 'id'),
+    creator_name: pickString(creator, 'name'),
+    creator_email: pickString(creator, 'email'),
+    created_at: pickString(document, 'createdAt'),
+    updated_at: pickString(document, 'updatedAt'),
+    url: pickString(document, 'url'),
   }
 }
 
 export function buildProjectIssue(issue: Json): NormalizedProjectIssue {
   const state = asObject(issue.state)
   return {
-    issue_id: pickStringOrNull(issue, 'id'),
-    issue_key: pickStringOrNull(issue, 'identifier'),
-    title: pickStringOrNull(issue, 'title'),
-    state_id: pickStringOrNull(state, 'id'),
-    state_name: pickStringOrNull(state, 'name'),
-    url: pickStringOrNull(issue, 'url'),
+    issue_id: pickString(issue, 'id'),
+    issue_key: pickString(issue, 'identifier'),
+    title: pickString(issue, 'title'),
+    state_id: pickString(state, 'id'),
+    state_name: pickString(state, 'name'),
+    url: pickString(issue, 'url'),
   }
-}
-
-export function toJsonBytes(value: unknown): Uint8Array {
-  return jsonBytes(value)
 }
 
 // The fields of an issue's JSON Linear's issue search reads; every other field
 // is checked against the listing instead (`unsearchedText`).
 export const SEARCHED_FIELDS: ReadonlySet<string> = new Set(['title', 'description'])
-
-/**
- * What an issue's `issue.json` holds beyond the plain words Linear's search
- * reads, lowercased: every other field as the file renders it, then each word
- * of the title and description that is not plain (`nonPlainWords`), such as
- * one inside a link. Mirrors Python's `unsearched_text`.
- */
-export function unsearchedText(issue: Json): string {
-  const normalized = normalizeIssue(issue)
-  const rest = Object.fromEntries(
-    Object.entries(normalized).filter(([key]) => !SEARCHED_FIELDS.has(key)),
-  )
-  const kept = [new TextDecoder().decode(toJsonBytes(rest))]
-  for (const [key, value] of Object.entries(normalized)) {
-    if (SEARCHED_FIELDS.has(key) && typeof value === 'string')
-      for (const item of nonPlainWords(value)) kept.push(item)
-  }
-  return kept.join(' ').toLowerCase()
-}

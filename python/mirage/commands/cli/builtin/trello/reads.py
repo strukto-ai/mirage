@@ -19,6 +19,7 @@ from mirage.commands.cli.builtin.trello.scope import (
     require_list,
 )
 from mirage.commands.config import Context
+from mirage.core.render.json import json_bytes
 from mirage.core.trello.client import (
     get_board,
     get_card,
@@ -35,7 +36,6 @@ from mirage.core.trello.normalize import (
     normalize_label,
     normalize_list,
     normalize_member,
-    to_json_bytes,
 )
 from mirage.core.trello.readdir import filtered_boards, filtered_workspaces
 from mirage.io.types import ByteSource, IOResult
@@ -58,7 +58,7 @@ async def board_list(
     for workspace in await filtered_workspaces(accessor):
         for board in await filtered_boards(accessor, workspace["id"]):
             boards.append(normalize_board(board))
-    return to_json_bytes(boards), IOResult()
+    return json_bytes(boards), IOResult()
 
 
 async def board_show(
@@ -70,7 +70,7 @@ async def board_show(
     board_id = _first(texts, "board id")
     await require_board(accessor, board_id)
     board = await get_board(accessor, board_id)
-    return to_json_bytes(normalize_board(board)), IOResult()
+    return json_bytes(normalize_board(board)), IOResult()
 
 
 async def board_members(
@@ -82,7 +82,7 @@ async def board_members(
     board_id = _first(texts, "board id")
     await require_board(accessor, board_id)
     members = await list_board_members(accessor, board_id)
-    return to_json_bytes(
+    return json_bytes(
         [normalize_member(member) for member in members]
     ), IOResult()
 
@@ -96,7 +96,7 @@ async def list_list(
     board_id = _first(texts, "board id")
     await require_board(accessor, board_id)
     lists = await list_board_lists(accessor, board_id)
-    return to_json_bytes([normalize_list(lst) for lst in lists]), IOResult()
+    return json_bytes([normalize_list(lst) for lst in lists]), IOResult()
 
 
 async def label_list(
@@ -108,9 +108,7 @@ async def label_list(
     board_id = _first(texts, "board id")
     await require_board(accessor, board_id)
     labels = await list_board_labels(accessor, board_id)
-    return to_json_bytes(
-        [normalize_label(label) for label in labels]
-    ), IOResult()
+    return json_bytes([normalize_label(label) for label in labels]), IOResult()
 
 
 async def card_list(
@@ -122,7 +120,7 @@ async def card_list(
     list_id = _first(texts, "list id")
     await require_list(accessor, list_id)
     cards = await list_list_cards(accessor, list_id)
-    return to_json_bytes([normalize_card(card) for card in cards]), IOResult()
+    return json_bytes([normalize_card(card) for card in cards]), IOResult()
 
 
 async def card_show(
@@ -134,7 +132,7 @@ async def card_show(
     card_id = _first(texts, "card id")
     await require_card(accessor, card_id)
     card = await get_card(accessor, card_id)
-    return to_json_bytes(normalize_card(card)), IOResult()
+    return json_bytes(normalize_card(card)), IOResult()
 
 
 async def card_comments(
@@ -146,6 +144,6 @@ async def card_comments(
     card_id = _first(texts, "card id")
     await require_card(accessor, card_id)
     comments = await list_card_comments(accessor, card_id)
-    return to_json_bytes(
+    return json_bytes(
         [normalize_comment(comment, card_id=card_id) for comment in comments]
     ), IOResult()

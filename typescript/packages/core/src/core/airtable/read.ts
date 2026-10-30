@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../render/json.ts'
 import type { AirtableAccessor } from '../../accessor/airtable.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { efbig, enoent, isEnoent } from '../../errors/fs.ts'
@@ -19,7 +20,7 @@ import { makeRead, perKind, type ReadWindow } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listBases, listRecords, listTables, recordPages } from './client.ts'
 import { AirtableApiError } from './errors.ts'
-import { normalizeBase, normalizeTable, recordsJsonl, toJsonBytes } from './normalize.ts'
+import { normalizeBase, normalizeTable, recordsJsonl } from './normalize.ts'
 import { schemaTable } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
@@ -43,7 +44,7 @@ async function readBaseJson(
   const baseId = match.slots.base_id ?? ''
   for (const base of await listBases(accessor)) {
     if (base.id === baseId) {
-      return toJsonBytes(normalizeBase(base, await listTables(accessor, baseId)))
+      return jsonBytes(normalizeBase(base, await listTables(accessor, baseId)))
     }
   }
   throw enoent(path)
@@ -61,7 +62,7 @@ async function readTableJson(
     if (isEnoent(err)) throw enoent(path)
     throw err
   }
-  return toJsonBytes(normalizeTable(table, match.slots.base_id ?? ''))
+  return jsonBytes(normalizeTable(table, match.slots.base_id ?? ''))
 }
 
 async function renderRecords(

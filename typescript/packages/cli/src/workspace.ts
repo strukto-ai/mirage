@@ -18,11 +18,6 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
-import { loadDaemonSettings } from './settings.ts'
-
-function buildClient() {
-  return makeClient(loadDaemonSettings())
-}
 
 // A config handed to `load` or `clone`: env-interpolated, and with its
 // relative script paths and code refs rebased onto the file's directory
@@ -209,7 +204,7 @@ export function registerWorkspaceCommands(program: Command): void {
       .action(async (wsId: string, opts: { path?: string; session?: string; profile?: string }) => {
         if (opts.profile !== undefined && (opts.path !== undefined || opts.session !== undefined))
           fail('--profile requires no --path or --session', 2)
-        const c = buildClient()
+        const c = makeClient()
         await c.ensureRunning({ allowSpawn: false })
         let route = `/v1/workspaces/${encodeURIComponent(wsId)}`
         if (opts.session !== undefined) route += `/sessions/${encodeURIComponent(opts.session)}`
@@ -243,7 +238,7 @@ export function registerWorkspaceCommands(program: Command): void {
       }
       const body: { config: unknown; id?: string } = { config: cfg }
       if (opts.id !== undefined) body.id = opts.id
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: true })
       const explain = opts.explain === true
       const r = await c.request(
@@ -266,7 +261,7 @@ export function registerWorkspaceCommands(program: Command): void {
   ws.command('list')
     .description('List active workspaces.')
     .action(async () => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         (await handleResponse(await c.request('GET', '/v1/workspaces'))) as WorkspaceBrief[],
@@ -279,7 +274,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .argument('<id>')
     .option('--verbose', 'Include cache/dirty/history internals')
     .action(async (id: string, opts: { verbose?: boolean }) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const path =
         `/v1/workspaces/${encodeURIComponent(id)}` + (opts.verbose === true ? '?verbose=true' : '')
@@ -293,7 +288,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .description('Stop and remove a workspace.')
     .argument('<id>')
     .action(async (id: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         (await handleResponse(
@@ -309,7 +304,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .description('Stop a workspace and keep its state for the same id.')
     .argument('<id>')
     .action(async (id: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         (await handleResponse(
@@ -325,7 +320,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .description('Cancel the running and queued commands of every session.')
     .argument('<id>')
     .action(async (id: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         await handleResponse(
@@ -338,7 +333,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .description('Kill the background jobs of every session.')
     .argument('<id>')
     .action(async (id: string) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         await handleResponse(
@@ -358,7 +353,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .argument('<file>', 'YAML/JSON profile document.')
     .action(async (id: string, name: string, file: string) => {
       const body = await loadProfileArgument(file)
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       emit(
         await handleResponse(
@@ -378,7 +373,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .action(async (srcId: string, opts: { id?: string }) => {
       const body: Record<string, unknown> = {}
       if (opts.id !== undefined) body.id = opts.id
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const r = await c.request('POST', `/v1/workspaces/${encodeURIComponent(srcId)}/clone`, {
         body: JSON.stringify(body),
@@ -395,7 +390,7 @@ export function registerWorkspaceCommands(program: Command): void {
       const params = new URLSearchParams()
       if (opts.session !== undefined) params.set('session_id', opts.session)
       if (opts.all === true) params.set('all', 'true')
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const qs = params.toString()
       const r = await c.request(
@@ -416,7 +411,7 @@ export function registerWorkspaceCommands(program: Command): void {
     )
     .option('--note <note>', 'What to record alongside the answer', '')
     .action(async (id: string, askId: string, opts: { scope: string; note: string }) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const r = await c.request(
         'POST',
@@ -434,7 +429,7 @@ export function registerWorkspaceCommands(program: Command): void {
     .argument('<askId>', 'Ask id, as quoted in the refusal')
     .option('--note <note>', 'What to record alongside the answer', '')
     .action(async (id: string, askId: string, opts: { note: string }) => {
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const r = await c.request(
         'POST',
@@ -457,7 +452,7 @@ export function registerWorkspaceCommands(program: Command): void {
       if (output !== undefined && opts.key !== undefined) {
         fail('snapshot takes an output file or --key', 2)
       }
-      const c = buildClient()
+      const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       const path = `/v1/workspaces/${encodeURIComponent(id)}/snapshot`
       const human = (d: { id: string; size: number }, target: string): string =>
@@ -510,7 +505,7 @@ export function registerWorkspaceCommands(program: Command): void {
         const body: Record<string, JsonValue> = {}
         if (opts.id !== undefined) body.id = opts.id
         if (configPath !== undefined) body.override = await loadConfigArgument(configPath)
-        const c = buildClient()
+        const c = makeClient()
         await c.ensureRunning({ allowSpawn: true })
         const r =
           tarPath === undefined

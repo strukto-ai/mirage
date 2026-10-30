@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { unsearchedText } from '../../utils/record_search.ts'
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../accessor/trello.ts'
 import { PathSpec } from '../../types.ts'
 import type { TrelloTransport } from './client.ts'
-import { unsearchedText } from './normalize.ts'
+import { normalizeCard, SEARCHED_FIELDS } from './normalize.ts'
 import { SEARCH_LIMIT, filesContaining } from './search.ts'
 
 const CARDS: Record<string, unknown>[] = [
@@ -88,7 +89,7 @@ async function ask(
 // Twin of python/tests/core/trello/test_search.py.
 describe('trello filesContaining', () => {
   it('leaves the name and description out of the unsearched text', () => {
-    const kept = unsearchedText(CARDS[1] ?? {})
+    const kept = unsearchedText(Object.entries(normalizeCard(CARDS[1] ?? {})), SEARCHED_FIELDS)
     expect(kept).toContain('ship')
     expect(kept).toContain('c2')
     expect(kept).not.toContain('notes')

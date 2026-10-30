@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../render/json.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { TrelloAccessor } from '../../accessor/trello.ts'
@@ -19,7 +20,7 @@ import { PathSpec, type FileStat } from '../../types.ts'
 import { TrelloVFS } from '../../vfs/trello/trello.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { TrelloTransport } from './client.ts'
-import { normalizeWorkspace, toJsonBytes } from './normalize.ts'
+import { normalizeWorkspace } from './normalize.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { boardInScope, filteredBoards, filteredWorkspaces, readdir } from './readdir.ts'
 
@@ -92,7 +93,7 @@ describe('trello readdir /workspaces', () => {
       'stat',
       '/mnt/trello/workspaces/Acme__w1/workspace.json',
     )) as FileStat
-    expect(row.size).toBe(toJsonBytes(normalizeWorkspace(ws)).byteLength)
+    expect(row.size).toBe(jsonBytes(normalizeWorkspace(ws)).byteLength)
   })
 
   it('filters by workspaceId', async () => {

@@ -19,9 +19,10 @@ import pytest
 
 from mirage.accessor.trello import TrelloAccessor
 from mirage.core.trello.config import TrelloConfig
-from mirage.core.trello.normalize import unsearched_text
+from mirage.core.trello.normalize import SEARCHED_FIELDS, normalize_card
 from mirage.core.trello.search import SEARCH_LIMIT, files_containing
 from mirage.types import JsonValue, PathSpec
+from mirage.utils.record_search import unsearched_text
 
 CARDS = [
     {
@@ -109,7 +110,7 @@ async def _ask(
 
 
 def test_unsearched_text_leaves_out_name_and_description():
-    kept = unsearched_text(CARDS[1])
+    kept = unsearched_text(normalize_card(CARDS[1]).items(), SEARCHED_FIELDS)
     assert "ship" in kept and "c2" in kept
     assert "notes" not in kept and "write" not in kept
 

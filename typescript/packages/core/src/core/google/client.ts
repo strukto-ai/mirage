@@ -39,6 +39,38 @@ import { type ByteWindow } from '../../utils/ranges.ts'
 import type { Clock } from '../../utils/clock.ts'
 import { ApiError } from '../api/errors.ts'
 
+/** Extract Google's API or OAuth error message, with a plain-response fallback. */
+export function googleErrorMessage(body: string, status: number, reason?: string | null): string {
+  const reasonText = reason ?? ''
+  const fallback = body.trim() || reasonText || `HTTP ${String(status)}`
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return fallback
+  }
+  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+    const { error, error_description: description } = parsed as Record<string, unknown>
+    if (typeof error === 'object' && error !== null && !Array.isArray(error)) {
+      const { message } = error as Record<string, unknown>
+      if (typeof message === 'string') return message
+    }
+    if (typeof error === 'string') {
+      return typeof description === 'string' && description !== ''
+        ? `${error}: ${description}`
+        : error
+    }
+  }
+  return fallback
+}
+
+function errorOf(response: Response, text: string): GoogleApiError {
+  return new GoogleApiError(
+    googleErrorMessage(text, response.status, response.statusText),
+    response.status,
+  )
+}
+
 export function tokenUrl(config: GoogleConfig): string {
   return config.apiBase !== undefined ? `${config.apiBase}/token` : TOKEN_URL
 }
@@ -163,8 +195,7 @@ export async function refreshAccessToken(
   }
   const data = (await apiRequest('POST', tokenUrl(config), {
     timeout: config.timeout,
-    errorOf: (r, text) =>
-      new GoogleApiError(`Google token refresh → ${String(r.status)} ${text}`, r.status),
+    errorOf,
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
     retry: READ_RETRY,
@@ -238,10 +269,7 @@ export async function googleRequest(
     timeout: tm.timeout,
     ...options,
     headers: { ...headers, ...options.headers },
-    errorOf:
-      options.errorOf ??
-      ((r, text) =>
-        new GoogleApiError(`Google ${verb} ${url} → ${String(r.status)} ${text}`, r.status)),
+    errorOf: options.errorOf ?? errorOf,
     retry: options.retry ?? (verb === 'GET' || verb === 'HEAD' ? READ_RETRY : WRITE_RETRY),
     sleep: (seconds) => tm.clock.sleep(seconds),
   })
@@ -303,8 +331,7 @@ export async function* googleGetStream(
 ): AsyncGenerator<Uint8Array, void> {
   yield* apiStream(url, {
     timeout: tm.timeout,
-    errorOf: (r, text) =>
-      new GoogleApiError(`Google GET ${url} → ${String(r.status)} ${text}`, r.status),
+    errorOf,
     headers: await googleHeaders(tm),
     retry: READ_RETRY,
     sleep: (seconds) => tm.clock.sleep(seconds),
@@ -320,10 +347,7 @@ export async function googleResumable(
   mimeType: string,
   params: Record<string, string>,
 ): Promise<unknown> {
-  const errorOf = (r: Response, text: string) =>
-    new GoogleApiError(`Google upload → ${String(r.status)} ${text}`, r.status)
   const location = await googleRequest(tm, method, url, {
-    errorOf,
     headers: {
       'X-Upload-Content-Type': mimeType,
       'X-Upload-Content-Length': String(spool.size),
@@ -339,7 +363,6 @@ export async function googleResumable(
   while (offset < spool.size) {
     const data = await spool.read(offset, 8 * 1024 * 1024)
     const response = (await googleRequest(tm, 'PUT', location, {
-      errorOf,
       headers: {
         'Content-Type': mimeType,
         'Content-Range': `bytes ${String(offset)}-${String(offset + data.length - 1)}/${String(spool.size)}`,

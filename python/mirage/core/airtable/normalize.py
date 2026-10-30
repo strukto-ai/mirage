@@ -14,7 +14,7 @@
 
 from typing import Any
 
-from mirage.core.render.json import json_bytes, jsonl_bytes
+from mirage.core.render.json import jsonl_bytes
 
 
 def as_row(value: Any) -> dict[str, Any]:
@@ -161,15 +161,6 @@ def normalize_deletion(row: dict[str, Any]) -> dict[str, Any]:
         row (dict[str, Any]): an ``{id, deleted}`` answer row.
     """
     return {"record_id": row.get("id"), "deleted": row.get("deleted")}
-
-
-def to_json_bytes(value: Any) -> bytes:
-    """Render a .json leaf.
-
-    Args:
-        value (Any): the normalized payload.
-    """
-    return json_bytes(value)
 
 
 def records_jsonl(records: list[dict[str, Any]]) -> bytes:

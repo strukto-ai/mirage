@@ -15,7 +15,6 @@
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { fail } from './output.ts'
-import { loadDaemonSettings } from './settings.ts'
 
 /**
  * Carry SSH to a workspace over the server's HTTPS port, on stdio: for
@@ -28,7 +27,7 @@ export function registerSshProxyCommand(program: Command): void {
     .argument('<workspace>', 'The workspace to log in to')
     .description("Carry SSH to a workspace over the server's HTTPS port, on stdio.")
     .action(async (workspace: string) => {
-      const client = makeClient(loadDaemonSettings())
+      const client = makeClient()
       try {
         await client.ensureRunning({ allowSpawn: true })
       } catch (error) {
@@ -66,7 +65,7 @@ export function registerCodexExecCommand(program: Command): void {
       const host = opts.listen.slice(0, at)
       const port = opts.listen.slice(at + 1)
       if (at <= 0 || !/^\d+$/.test(port)) fail('codex-exec: --listen takes HOST:PORT')
-      const client = makeClient(loadDaemonSettings())
+      const client = makeClient()
       try {
         await client.ensureRunning({ allowSpawn: true })
       } catch (error) {

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { unsearchedText } from '../../utils/record_search.ts'
+import { jsonBytes } from '../render/json.ts'
 import type { TrelloAccessor } from '../../accessor/trello.ts'
 import { ContentType, FileStat, FileType } from '../../types.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
@@ -33,8 +35,7 @@ import {
   normalizeList,
   normalizeMember,
   normalizeWorkspace,
-  toJsonBytes,
-  unsearchedText,
+  SEARCHED_FIELDS,
 } from './normalize.ts'
 import {
   boardDirname,
@@ -132,7 +133,7 @@ async function listWorkspacesDir(
   // listing to read back without another call.
   return (await filteredWorkspaces(accessor)).map((workspace) =>
     WORKSPACE(workspaceDirname(workspace), pickString(workspace, 'id'), {
-      extra: { json_size: toJsonBytes(normalizeWorkspace(workspace)).byteLength },
+      extra: { json_size: jsonBytes(normalizeWorkspace(workspace)).byteLength },
     }),
   )
 }
@@ -158,7 +159,7 @@ async function listBoards(
   return (await filteredBoards(accessor, match.slots.workspace_id ?? '')).map((board) =>
     BOARD(boardDirname(board), pickString(board, 'id'), {
       modified: pickString(board, 'dateLastActivity'),
-      extra: { json_size: toJsonBytes(normalizeBoard(board)).byteLength },
+      extra: { json_size: jsonBytes(normalizeBoard(board)).byteLength },
     }),
   )
 }
@@ -187,7 +188,7 @@ async function listMembers(
   const members = await listBoardMembers(accessor.transport, match.slots.board_id ?? '')
   return members.map((member) =>
     MEMBER(memberFilename(member), pickString(member, 'id'), {
-      size: toJsonBytes(normalizeMember(member)).byteLength,
+      size: jsonBytes(normalizeMember(member)).byteLength,
     }),
   )
 }
@@ -200,7 +201,7 @@ async function listLabels(
   const labels = await listBoardLabels(accessor.transport, match.slots.board_id ?? '')
   return labels.map((label) =>
     LABEL(labelFilename(label), pickString(label, 'id'), {
-      size: toJsonBytes(normalizeLabel(label)).byteLength,
+      size: jsonBytes(normalizeLabel(label)).byteLength,
     }),
   )
 }
@@ -215,7 +216,7 @@ async function listLists(
   // carries, so its exact size is free here.
   return lists.map((lst) =>
     LIST(listDirname(lst), pickString(lst, 'id'), {
-      extra: { json_size: toJsonBytes(normalizeList(lst)).byteLength },
+      extra: { json_size: jsonBytes(normalizeList(lst)).byteLength },
     }),
   )
 }
@@ -243,8 +244,10 @@ async function listCards(
     CARD(cardDirname(card), pickString(card, 'id'), {
       modified: pickString(card, 'dateLastActivity'),
       extra: {
-        json_size: toJsonBytes(normalizeCard(card)).byteLength,
-        ...(accessor.capped() ? { unsearched: unsearchedText(card) } : {}),
+        json_size: jsonBytes(normalizeCard(card)).byteLength,
+        ...(accessor.capped()
+          ? { unsearched: unsearchedText(Object.entries(normalizeCard(card)), SEARCHED_FIELDS) }
+          : {}),
       },
     }),
   )

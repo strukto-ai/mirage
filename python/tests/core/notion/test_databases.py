@@ -23,7 +23,8 @@ from mirage.core.notion import readdir as notion_readdir
 from mirage.core.notion import resolve as notion_resolve
 from mirage.core.notion.client import NotionAPIError
 from mirage.core.notion.config import NotionConfig
-from mirage.core.notion.normalize import normalize_database, to_json_bytes
+from mirage.core.notion.normalize import normalize_database
+from mirage.core.render.json import json_bytes
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.vfs.notion import NotionVFS
 from tests.fixtures.mounted import Mounted
@@ -151,7 +152,7 @@ async def test_readdir_database_dir_sizes_database_json_from_the_database(
     mounted = Mounted(NotionVFS, accessor)
     await mounted.readdir("/databases")
     await mounted.readdir(DB_DIR)
-    expected = to_json_bytes(normalize_database(DATABASE))
+    expected = json_bytes(normalize_database(DATABASE))
     result = await mounted.stat(f"{DB_DIR}/database.json")
     assert result.size == len(expected)
 

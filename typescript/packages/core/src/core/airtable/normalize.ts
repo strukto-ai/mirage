@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonBytes, jsonlBytes } from '../render/json.ts'
+import { jsonlBytes } from '../render/json.ts'
 
 export type Row = Record<string, unknown>
 
@@ -120,11 +120,6 @@ export function normalizeComment(comment: Row): Row {
 /** One deleted record, as the delete answer names it. */
 export function normalizeDeletion(row: Row): Row {
   return { record_id: field(row, 'id'), deleted: field(row, 'deleted') }
-}
-
-/** Render a .json leaf. */
-export function toJsonBytes(value: unknown): Uint8Array {
-  return jsonBytes(value)
 }
 
 /** Render records one per line, in the order they were listed. */

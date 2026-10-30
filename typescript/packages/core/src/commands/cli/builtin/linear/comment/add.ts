@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../../../../../core/render/json.ts'
 import type { LinearAccessor } from '../../../../../accessor/linear.ts'
 import { commentCreate } from '../../../../../core/linear/client.ts'
-import { normalizeComment, toJsonBytes } from '../../../../../core/linear/normalize.ts'
+import { normalizeComment } from '../../../../../core/linear/normalize.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../config.ts'
@@ -31,5 +32,5 @@ export async function add(
   const issueId = await resolveIssue(accessor, firstText(texts, 'issue key'))
   const body = await textOrStdin(fl.asStr('body'), ctx.stdin, 'comment body is required')
   const comment = await commentCreate(accessor.transport, issueId, body)
-  return [toJsonBytes(normalizeComment(comment, issueId, null)), new IOResult()]
+  return [jsonBytes(normalizeComment(comment, issueId, null)), new IOResult()]
 }

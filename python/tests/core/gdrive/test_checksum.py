@@ -17,14 +17,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.context import session_context as caller
 from mirage.core.gdrive.checksum import checksum
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
-from mirage.observe.context import (
-    RecordingScope,
-    push_revisions,
-    reset_revisions,
-)
+from mirage.observe.context import RecordingScope
 from mirage.types import FileStat, FileType, PathSpec
 from tests.fixtures.gdrive_api import StubDrive, install_drive
 
@@ -96,10 +93,12 @@ async def test_a_native_file_or_another_algorithm_reads(accessor, monkeypatch):
 async def test_a_pinned_revision_reads(accessor, monkeypatch):
     get = AsyncMock()
     install_drive(monkeypatch, StubDrive(get_file=get))
-    token = push_revisions({SCOPE.virtual: "r7"})
+    token = caller.bind_caller(
+        caller.current_caller().changed({"revisions": {SCOPE.virtual: "r7"}})
+    )
     try:
         row = _row("gdrive/file")
         assert await checksum(accessor, SCOPE, "md5", row) is None
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
     get.assert_not_awaited()

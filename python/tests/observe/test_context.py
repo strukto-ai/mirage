@@ -19,16 +19,15 @@ from typing import Any
 import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
+from mirage.context import session_context as caller
 from mirage.observe import context as observe_context
 from mirage.observe.context import (
     RecordingScope,
     active_recorder,
     push_mount_context,
-    push_revisions,
     record,
     record_stream,
     reset_active_recorder,
-    reset_revisions,
     revision_for,
     start_op,
     with_mount_context,
@@ -318,22 +317,28 @@ def test_revision_for_no_context():
 
 
 def test_revision_for_with_context():
-    token = push_revisions({"/s3/a": "v1", "/s3/b": "v2"})
+    token = caller.bind_caller(
+        caller.current_caller().changed(
+            {"revisions": {"/s3/a": "v1", "/s3/b": "v2"}}
+        )
+    )
     try:
         assert revision_for("/s3/a") == "v1"
         assert revision_for("/s3/b") == "v2"
         assert revision_for("/s3/c") is None
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
     assert revision_for("/s3/a") is None
 
 
 def test_revision_for_with_none_context():
-    token = push_revisions(None)
+    token = caller.bind_caller(
+        caller.current_caller().changed({"revisions": None})
+    )
     try:
         assert revision_for("/s3/a") is None
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
 
 
 def test_nested_scope_close_restores_outer():

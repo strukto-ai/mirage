@@ -16,6 +16,7 @@ import { z } from 'zod'
 import { Accessor } from './base.ts'
 import {
   MSGRAPH_CONFIG_SHAPE,
+  optionalText,
   resolveMsGraphConfig,
   type MsGraphConfig,
   type MsGraphConfigResolved,
@@ -93,15 +94,6 @@ export interface OneDriveConfigResolved extends MsGraphConfigResolved {
   keyPrefix: string
 }
 
-function normalizePrefix(value: string | undefined): string {
-  return stripSlash(value ?? '')
-}
-
-function optionalText(value: string | undefined): string | null {
-  const normalized = value?.trim()
-  return normalized === undefined || normalized === '' ? null : normalized
-}
-
 function resolveOneDriveConfig(config: OneDriveConfig): OneDriveConfigResolved {
   const graph = resolveMsGraphConfig(config)
   const resolved = {
@@ -110,7 +102,7 @@ function resolveOneDriveConfig(config: OneDriveConfig): OneDriveConfigResolved {
     siteId: optionalText(config.siteId),
     groupId: optionalText(config.groupId),
     userId: optionalText(config.userId),
-    keyPrefix: normalizePrefix(config.keyPrefix),
+    keyPrefix: stripSlash(config.keyPrefix ?? ''),
   }
   // Checked here and not only in the schema: a config built in code never
   // goes through the schema, and that is the path the accessor takes.
