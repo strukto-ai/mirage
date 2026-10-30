@@ -36,7 +36,7 @@ const FACTORIES: Record<string, FileCacheFactory> = {}
  * node, so `@struktoai/mirage-node` registers it on import — the same
  * seam `registerRuntime` uses for the runtimes it owns. Python needs no
  * equivalent: there, redis is an optional extra of one package, so
- * `build_file_cache` imports it directly behind a try/except.
+ * `build_file_cache` imports it when a redis cache is built.
  */
 export function registerFileCacheStore(type: CacheType, factory: FileCacheFactory): void {
   FACTORIES[type] = factory

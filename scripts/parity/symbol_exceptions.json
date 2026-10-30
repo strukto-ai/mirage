@@ -1,5 +1,5 @@
 {
- "baseline": 2651,
+ "baseline": 2650,
  "modules": {
   "commands/builtin/rg_glob": {
    "typescript_only": {
@@ -83,7 +83,8 @@
   },
   "utils/loader": {
    "python_only": {
-    "lazy_exports": "The PEP 562 __getattr__ every Python package barrel binds; TypeScript barrels re-export statically and load nothing lazily."
+    "lazy_exports": "The PEP 562 __getattr__ every Python package barrel binds; TypeScript barrels re-export statically and load nothing lazily.",
+    "optional_attr": "Python checks an optional extra with find_spec before importing the module that needs it; TypeScript imports an optional peer dynamically through loadOptionalPeer at first use."
    }
   },
   "utils/ids": {
@@ -642,7 +643,6 @@
   },
   "config": {
    "python_only": {
-    "RedisWorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker.",
     "S3WorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker."
    },
    "typescript_only": {

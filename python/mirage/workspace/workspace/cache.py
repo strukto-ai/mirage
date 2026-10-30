@@ -19,19 +19,10 @@ from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.utils.clock import Clock
+from mirage.utils.loader import optional_attr
 
 if TYPE_CHECKING:
-    from mirage.cache.file.redis import RedisFileCacheStore as RedisStore
-
-RedisFileCacheStore: "type[RedisStore] | None"
-try:
-    from mirage.cache.file.redis import (
-        RedisFileCacheStore as _RedisFileCacheStore,
-    )
-except ImportError:
-    RedisFileCacheStore = None
-else:
-    RedisFileCacheStore = _RedisFileCacheStore
+    from mirage.cache.file.redis import RedisFileCacheStore
 
 
 def build_file_cache(
@@ -58,12 +49,12 @@ def build_file_cache(
         ImportError: a Redis cache was asked for without the extra.
     """
     if isinstance(cache, RedisCacheConfig):
-        if RedisFileCacheStore is None:
-            raise ImportError(
-                "RedisCacheConfig requires the 'redis' extra. "
-                "Install with: pip install mirage-ai[redis]"
-            )
-        return RedisFileCacheStore(
+        redis_store: type[RedisFileCacheStore] = optional_attr(
+            "mirage.cache.file.redis:RedisFileCacheStore",
+            "redis",
+            "RedisCacheConfig",
+        )
+        return redis_store(
             cache_limit=cache.limit,
             url=cache.url,
             key_prefix=(
