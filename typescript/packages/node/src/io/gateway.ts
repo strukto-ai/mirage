@@ -291,6 +291,7 @@ class Gateway {
         passed = await ticket.run(() => preNetworkGate(policies, ctx))
       } catch (err) {
         if (!(err instanceof PolicyDenied)) throw err
+        console.debug(`gateway: ${address} refused:`, err.message)
         continue
       }
       if (await this.attempt(ticket, policies, ctx, passed[0], passed[1], client)) return

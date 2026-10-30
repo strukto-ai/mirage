@@ -58,6 +58,7 @@ import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
+import { withEgress } from '../../io/gateway.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { closeQuietly, rechunk } from '../../io/stream.ts'
 import type { ByteSpool } from '../../io/spool.ts'
@@ -1775,7 +1776,7 @@ export class MountEntry {
         ? this.streamed(vfs, scope, this.index, signal)
         : asStream(runWithCaller(caller, async () => vfs.read(scope, {}, 0, null, signal)))
     return this.activity.hold(
-      withCaller(this.observeStream(scope, this.index, stream), caller),
+      withEgress(withCaller(this.observeStream(scope, this.index, stream), caller)),
     ) as AsyncIterable<Uint8Array>
   }
 

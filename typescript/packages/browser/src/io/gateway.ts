@@ -89,7 +89,7 @@ async function through(
   const tickets: Ticket[] = []
   let over = false
   // Tell every workspace that let the request through how it went, once.
-  const ended = async (how: NetworkEnd, received: number): Promise<void> => {
+  const ended = async (how: NetworkEnd, out: number, received: number): Promise<void> => {
     if (over) return
     over = true
     for (const { egress, ctx, passed } of tickets) {
@@ -98,7 +98,7 @@ async function through(
         egress.policies,
         {
           ...ctx,
-          bytesSent: sent ?? 0,
+          bytesSent: out,
           bytesReceived: received,
           seconds: (Date.now() - started) / 1000,
           ended: how,
@@ -117,7 +117,7 @@ async function through(
     try {
       answer = await preNetworkGate(policies, ctx)
     } catch {
-      await ended('refused', 0)
+      await ended('refused', 0, 0)
       throw new TypeError('Failed to fetch')
     }
     tickets.push({ egress, ctx, passed: answer[0] })
@@ -128,7 +128,7 @@ async function through(
     }
   }
   if (cap !== null && (sent === null || sent > cap)) {
-    await ended('limit', 0)
+    await ended('limit', 0, 0)
     throw new TypeError('Failed to fetch')
   }
   const stop = new AbortController()
@@ -152,17 +152,17 @@ async function through(
     })
   } catch (err) {
     if (timer !== null) clearTimeout(timer)
-    await ended(stop.signal.aborted ? 'limit' : 'error', 0)
+    await ended(stop.signal.aborted ? 'limit' : 'error', sent ?? 0, 0)
     throw err
   }
   if (response.type === 'opaqueredirect' && redirect === 'follow') {
     if (timer !== null) clearTimeout(timer)
-    await ended('refused', 0)
+    await ended('refused', sent ?? 0, 0)
     throw new TypeError('Failed to fetch')
   }
   if (response.body === null) {
     if (timer !== null) clearTimeout(timer)
-    await ended('closed', 0)
+    await ended('closed', sent ?? 0, 0)
     return response
   }
   let received = 0
@@ -174,13 +174,13 @@ async function through(
         step = await reader.read()
       } catch (err) {
         if (timer !== null) clearTimeout(timer)
-        await ended(stop.signal.aborted ? 'limit' : 'error', received)
+        await ended(stop.signal.aborted ? 'limit' : 'error', sent ?? 0, received)
         controller.error(err)
         return
       }
       if (step.done) {
         if (timer !== null) clearTimeout(timer)
-        await ended('closed', received)
+        await ended('closed', sent ?? 0, received)
         controller.close()
         return
       }
@@ -193,7 +193,7 @@ async function through(
         await reader.cancel().catch((err: unknown) => {
           console.debug('gateway: body cancel failed:', err)
         })
-        await ended('limit', received)
+        await ended('limit', sent ?? 0, received)
         controller.error(new TypeError('network error'))
         return
       }
@@ -203,7 +203,7 @@ async function through(
     async cancel(reason) {
       if (timer !== null) clearTimeout(timer)
       await reader.cancel(reason)
-      await ended('closed', received)
+      await ended('closed', sent ?? 0, received)
     },
   })
   const relayed = new Response(counted, {

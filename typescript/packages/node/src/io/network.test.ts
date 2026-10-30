@@ -95,6 +95,45 @@ async function ask(at: number): Promise<void> {
   })
 }
 
+// Reads what a socket the CLI opened brings back before it ends.
+function drained(socket: Socket): Promise<string> {
+  return new Promise((resolve) => {
+    let got = ''
+    socket.on('data', (chunk: Buffer) => {
+      got += chunk.toString()
+    })
+    socket.once('connect', () => {
+      socket.write('GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+    })
+    socket.once('close', () => {
+      resolve(got)
+    })
+    socket.once('error', () => undefined)
+  })
+}
+
+// A workspace with one CLI, `probe`, whose run is `fn`.
+async function probed(fn: () => Promise<string>, policy: Policy): Promise<string> {
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  ws.registerCli(
+    'probe',
+    new CLI({
+      spec: new CommandSpec({ name: 'probe' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async () => [new TextEncoder().encode(await fn()), new IOResult()],
+        }),
+      },
+    }),
+  )
+  ws.policies.add(policy)
+  try {
+    return new TextDecoder().decode((await ws.shell('probe')).stdout)
+  } finally {
+    await ws.close()
+  }
+}
+
 describe('a workspace network rule', () => {
   let server: Server
   let port = 0
@@ -327,45 +366,6 @@ describe('a workspace network rule', () => {
     expect(asked?.words?.map((word) => word.text)).toEqual(['acme', 'deploy'])
   })
 
-  // Reads what a socket the CLI opened brings back before it ends.
-  function drained(socket: Socket): Promise<string> {
-    return new Promise((resolve) => {
-      let got = ''
-      socket.on('data', (chunk: Buffer) => {
-        got += chunk.toString()
-      })
-      socket.once('connect', () => {
-        socket.write('GET / HTTP/1.1\r\nHost: x\r\n\r\n')
-      })
-      socket.once('close', () => {
-        resolve(got)
-      })
-      socket.once('error', () => undefined)
-    })
-  }
-
-  // A workspace with one CLI, `probe`, whose run is `fn`.
-  async function probed(fn: () => Promise<string>, policy: Policy): Promise<string> {
-    const ws = new Workspace({ '/data': new RAMVFS() })
-    ws.registerCli(
-      'probe',
-      new CLI({
-        spec: new CommandSpec({ name: 'probe' }),
-        handlers: {
-          '': new CLIHandler({
-            fn: async () => [new TextEncoder().encode(await fn()), new IOResult()],
-          }),
-        },
-      }),
-    )
-    ws.policies.add(policy)
-    try {
-      return new TextDecoder().decode((await ws.shell('probe')).stdout)
-    } finally {
-      await ws.close()
-    }
-  }
-
   it('judges a positional connect as any other', async () => {
     const watch = new Watch(['127.0.0.1'])
     const got = await probed(() => drained(new Socket().connect(port, '127.0.0.1')), watch)
@@ -421,6 +421,35 @@ describe('a workspace network rule', () => {
       await ws.close()
     }
     expect(watch.asked.map((ctx) => [ctx.mount, ctx.port])).toEqual([['/remote', port]])
+  })
+
+  it('lets a mount go when its file stream is closed unread', async () => {
+    const ws = new Workspace({ '/remote': new Streaming() })
+    ws.policies.add(new Watch())
+    try {
+      const stream = await ws.vfs.read('/remote/f', { stream: true })
+      await stream[Symbol.asyncIterator]().return?.()
+      await Promise.race([
+        ws.unmount('/remote'),
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            reject(new Error('unmount waited'))
+          }, 5000),
+        ),
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps a saved process substitution under a rule', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { network: false })
+    try {
+      const line = 'f() { exec 3<"$1"; }; f <(printf \'a\\nb\\n\'); cat <&3'
+      expect(new TextDecoder().decode((await ws.shell(line)).stdout)).toBe('a\nb\n')
+    } finally {
+      await ws.close()
+    }
   })
 
   it('holds each session to its profile network besides the workspace one', async () => {

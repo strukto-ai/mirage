@@ -66,7 +66,7 @@ describe('the page gateway', () => {
       judged(policy, () => fetch('https://api.test/up', { method: 'POST', body: 'x'.repeat(100) })),
     ).rejects.toThrow('Failed to fetch')
     expect(sent).toEqual([])
-    expect(policy.ended.map((ctx) => ctx.ended)).toEqual(['limit'])
+    expect(policy.ended.map((ctx) => [ctx.ended, ctx.bytesSent])).toEqual([['limit', 0]])
   })
 
   it('refuses a redirect the page would follow, and hands back one it handles', async () => {

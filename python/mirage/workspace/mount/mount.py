@@ -102,6 +102,7 @@ from mirage.core.generic.rewrite import (
     truncate_by_rewrite,
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
+from mirage.io.gateway import with_egress
 from mirage.io.memory import check_memory
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
@@ -2970,11 +2971,13 @@ class MountEntry:
         return cast(
             AsyncIterator[bytes],
             self.activity.hold(
-                with_caller(
-                    with_host_io(
-                        self._observe_stream(scope, self.index, source)
-                    ),
-                    caller,
+                with_egress(
+                    with_caller(
+                        with_host_io(
+                            self._observe_stream(scope, self.index, source)
+                        ),
+                        caller,
+                    )
                 )
             ),
         )

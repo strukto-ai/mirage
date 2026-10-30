@@ -528,6 +528,30 @@ async def test_a_file_stream_keeps_its_egress_past_the_op(port):
 
 
 @pytest.mark.asyncio
+async def test_an_unread_file_stream_still_lets_its_mount_go(port):
+    ws = Workspace({"/remote": _Streaming(port)})
+    ws.policies.add(_Watch())
+    try:
+        stream, _ = await ws.dispatch(
+            "read", PathSpec.from_str_path("/remote/f"), stream=True
+        )
+        await stream.aclose()
+        await asyncio.wait_for(ws.unmount("/remote"), 5)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_saved_process_substitution_keeps_its_bytes_under_a_rule():
+    ws = Workspace({"/data": RAMVFS()}, network=False)
+    try:
+        line = "f() { exec 3<\"$1\"; }; f <(printf 'a\\nb\\n'); cat <&3"
+        assert (await ws.shell(line)).stdout == b"a\nb\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_profile_narrows_its_sessions_network(port):
     ws = Workspace(
         {"/data": RAMVFS()},

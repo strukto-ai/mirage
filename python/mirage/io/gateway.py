@@ -37,7 +37,7 @@ from mirage.io.network import (
     run_with_network,
     watch_network,
 )
-from mirage.io.types import IOResult
+from mirage.io.stream import OutputStream
 from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied
 from mirage.policy.policies import (
@@ -135,62 +135,46 @@ def live_egress() -> tuple[Egress, ...]:
     return () if egress is None else (egress,)
 
 
-async def with_egress(
-    it: AsyncIterator[T], egress: Egress | None
-) -> AsyncIterator[T]:
-    """``it`` pulled and closed under ``egress``: a stream a file op
-    returned opens each later connection, whoever pulls it and however
-    late, under the workspace's rule and policies, as ``with_caller``
-    keeps its caller. Mirrors TS's ``withEgress``.
+def with_egress(it: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    """``it`` pulled and closed under the egress bound where it was made:
+    a mount's stream opens each later connection, whoever pulls it and
+    however late, under the workspace's rule and policies, as
+    ``with_caller`` keeps its caller. Its close reaches the stream even
+    before a first pull. Handed back as it is where neither limits
+    anything. Mirrors TS's ``withEgress``.
 
     Args:
-        it (AsyncIterator[T]): the stream.
-        egress (Egress | None): the egress it was made under.
+        it (AsyncIterator[bytes]): the stream.
     """
+    live = live_egress()
+    egress = live[-1] if live else None
+    if egress is None or (egress.rule is None and not egress.hooked):
+        return it
+    bound = egress
 
     async def under(call: Awaitable[T]) -> T:
-        if egress is None:
-            return await call
-        token = _egress.set(egress)
+        token = _egress.set(bound)
         try:
-            return await run_with_network(egress.rule, call)
+            return await run_with_network(bound.rule, call)
         finally:
             _egress.reset(token)
 
     iterator = it.__aiter__()
-    try:
+
+    async def pulled() -> AsyncIterator[bytes]:
         while True:
             try:
                 item = await under(iterator.__anext__())
             except StopAsyncIteration:
                 return
             yield item
-    finally:
-        close = getattr(iterator, "aclose", None)
-        if close is not None:
-            await under(close())
 
+    async def close() -> None:
+        aclose = getattr(iterator, "aclose", None)
+        if aclose is not None:
+            await under(aclose())
 
-async def keep_egress(
-    work: Awaitable[tuple[Any, IOResult]],
-) -> tuple[Any, IOResult]:
-    """``work``'s answer, a stream in it kept under the egress bound
-    here, so a file op's stream pulled after the op returned still opens
-    its connections under the workspace's rule and policies. Nothing is
-    wrapped where neither limits anything. Mirrors TS's ``keepEgress``.
-
-    Args:
-        work (Awaitable[tuple[Any, IOResult]]): the op.
-    """
-    result, io = await work
-    live = live_egress()
-    if (
-        live
-        and isinstance(result, AsyncIterator)
-        and (live[-1].rule is not None or live[-1].hooked)
-    ):
-        result = with_egress(result, live[-1])
-    return result, io
+    return OutputStream(pulled(), close)
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,7 +348,8 @@ class _Gateway:
                     ticket.context,
                     functools.partial(pre_network_gate, policies, ctx),
                 )
-            except PolicyDenied:
+            except PolicyDenied as exc:
+                logger.debug("gateway: %s refused: %s", address, exc)
                 continue
             reached = await self._attempt(
                 ticket, policies, ctx, passed, limit, (reader, writer)

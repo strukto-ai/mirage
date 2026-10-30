@@ -14,7 +14,7 @@
 
 import { currentCaller } from '../context/session_context.ts'
 import type { Policies } from '../policy/policies.ts'
-import type { IOResult } from './types.ts'
+import { OutputStream } from './stream.ts'
 import type { NetworkContext } from '../policy/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import { rstripSlash } from '../utils/slash.ts'
@@ -72,47 +72,35 @@ export function runWithEgress<T>(
 }
 
 /**
- * `it` pulled and closed under `bound`: a stream a file op returned opens
- * each later connection, whoever pulls it and however late, under the
- * workspace's rule and policies, as `withCaller` keeps its caller. Mirrors
- * Python's `with_egress`.
+ * `it` pulled and closed under the egress bound where it was made: a mount's
+ * stream opens each later connection, whoever pulls it and however late,
+ * under the workspace's rule and policies, as `withCaller` keeps its caller.
+ * Its close reaches the stream even before a first pull. Handed back as it
+ * is where neither limits anything. Mirrors Python's `with_egress`.
  */
-export async function* withEgress<T>(it: AsyncIterable<T>, bound: Egress): AsyncGenerator<T> {
+export function withEgress(it: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> {
+  const bound = egress.getStore()
+  if (
+    bound === undefined ||
+    (bound.rule === null && (bound.policies === null || bound.listening === false))
+  ) {
+    return it
+  }
   const under = <R>(fn: () => Promise<R>): Promise<R> =>
     runWithNetwork(bound.rule, () => Promise.resolve(egress.run(bound, fn)))
   const iterator = it[Symbol.asyncIterator]()
-  try {
+  async function* pulled(): AsyncGenerator<Uint8Array> {
     for (;;) {
       const step = await under(() => iterator.next())
       if (step.done === true) return
       yield step.value
     }
-  } finally {
+  }
+  return new OutputStream(pulled(), async () => {
     await under(async () => {
       await iterator.return?.()
     })
-  }
-}
-
-/**
- * `work`'s answer, a stream in it kept under the egress bound here, so a
- * file op's stream pulled after the op returned still opens its connections
- * under the workspace's rule and policies. Nothing is wrapped where neither
- * limits anything. Mirrors Python's `keep_egress`.
- */
-export async function keepEgress(work: Promise<[unknown, IOResult]>): Promise<[unknown, IOResult]> {
-  const [result, io] = await work
-  const bound = egress.getStore()
-  if (
-    bound !== undefined &&
-    (bound.rule !== null || (bound.policies !== null && bound.listening !== false)) &&
-    typeof result === 'object' &&
-    result !== null &&
-    Symbol.asyncIterator in result
-  ) {
-    return [withEgress(result as AsyncIterable<unknown>, bound), io]
-  }
-  return [result, io]
+  })
 }
 
 /**
