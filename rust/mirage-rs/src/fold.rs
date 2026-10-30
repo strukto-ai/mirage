@@ -1,8 +1,15 @@
 use serde::Deserialize;
 
+use serde_json::Value as Json;
+
+use crate::number::{self, ERANGE};
+use crate::scan::{Typed, Values, unknown};
 use crate::utf8::{Char, char_at};
 use crate::width::{TAB_WIDTH, char_width, is_space};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, parse_config, quoted};
+
+/// The widest `-w` GNU fold 9.7 takes, 2**64 - 10.
+const WIDTH_MAX: u128 = u64::MAX as u128 - 9;
 
 /// What a line's width is counted in.
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -20,6 +27,25 @@ struct Config {
     width: u64,
     spaces: bool,
     count: Count,
+}
+
+/// `-w` as GNU fold reads each one typed: a whole decimal from 1 to
+/// `WIDTH_MAX`, the range clause only for a word that is a number.
+pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
+    let mut values = Values::new();
+    for (name, raw) in options {
+        if name != "width" {
+            return Err(unknown("fold", name));
+        }
+        let width = number::unsigned_decimal(raw);
+        let Some(width) = width.filter(|width| (1..=WIDTH_MAX).contains(width)) else {
+            let reason = width.map_or(String::new(), |_| format!(": {ERANGE}"));
+            let refused = format!("fold: invalid number of columns: '{}'{reason}", quoted(raw));
+            return Err(StreamError::refusal(refused.as_bytes(), 1));
+        };
+        values.insert(name.clone(), Json::from(width as u64));
+    }
+    Ok(values)
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {

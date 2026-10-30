@@ -127,7 +127,6 @@ async def _walk_tree(
     ignore_pattern: str | None,
     dirs_only: bool,
     match_pattern: str | None,
-    warnings: list[str],
     mounts: MountView | None = None,
     cross_readdir: Readdir | None = None,
     cross_stat: Stat | None = None,
@@ -144,10 +143,8 @@ async def _walk_tree(
 
     A directory the walk could not open (a rule refused it below the
     operand) contributes no lines and counts itself, so the caller
-    marks its own line the way GNU does and the run exits 2; the
-    refusal itself is kept in ``warnings`` for the root case, which has
-    no line to mark. A directory past ``budget`` is drawn but not
-    opened.
+    marks its own line the way GNU does and the run exits 2. A
+    directory past ``budget`` is drawn but not opened.
     """
     lines: list[str] = []
     dirs = 0
@@ -172,7 +169,7 @@ async def _walk_tree(
         # unopened row even when mounts sit under it; swallowing that to
         # draw the children would report a readable tree that is not.
         if not (child_mounts and isinstance(exc, MISS_ERRORS)):
-            warnings.append(f"tree: '{path.raw_path}': {exc}")
+            logger.debug("tree: cannot open %s: %s", path.raw_path, exc)
             return lines, dirs, files, 1
         entries = []
     if child_mounts:
@@ -201,7 +198,7 @@ async def _walk_tree(
             try:
                 s = await stat(entry_spec)
             except WALK_ERRORS as exc:
-                warnings.append(f"tree: '{entry}': {exc}")
+                logger.debug("tree: cannot stat %s: %s", entry, exc)
                 continue
         if not show_hidden and s.name.startswith("."):
             continue
@@ -262,7 +259,6 @@ async def _walk_tree(
             ignore_pattern=ignore_pattern,
             dirs_only=dirs_only,
             match_pattern=match_pattern,
-            warnings=warnings,
             mounts=mounts,
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
@@ -373,7 +369,6 @@ async def tree(
                 body.append(root_label + UNOPENABLE_MARK)
                 total_files += 1
                 continue
-        warnings: list[str] = []
         budget = WalkBudget(path, mounts)
         lines, dirs, files, unopened = await _walk_tree(
             path,
@@ -386,7 +381,6 @@ async def tree(
             ignore_pattern=ignore_pattern,
             dirs_only=dirs_only,
             match_pattern=match_pattern,
-            warnings=warnings,
             mounts=mounts,
             cross_readdir=cross_readdir,
             cross_stat=cross_stat,
@@ -394,11 +388,11 @@ async def tree(
             budget=budget,
         )
         stopped.extend(f"tree: {line}" for line in budget.stopped)
-        # `warnings` only decides the marker; emitting it would diverge.
         # With stat_path wired the two clear cases are already answered
         # above, so this covers a directory that exists but could not be
-        # read (a permission error).
-        if warnings and not lines:
+        # read (a permission error). A root that lists entries none of
+        # which stat draws plainly and exits 0, as tree 2.2.1 does.
+        if unopened and not lines:
             body.append(root_label + UNOPENABLE_MARK)
             failed = True
             continue

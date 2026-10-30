@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.xxd import xxd_generic
+from mirage.commands.builtin.generic.xxd import parse_flags, xxd_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -31,9 +31,13 @@ async def xxd(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
     return await xxd_generic(
+        parsed,
         resolved,
         list(texts),
         ctx,

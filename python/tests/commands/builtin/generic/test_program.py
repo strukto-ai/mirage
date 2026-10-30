@@ -2,6 +2,7 @@ import pytest
 
 from mirage.commands.builtin.generic.program import (
     prepare_program,
+    program_file_refusal,
     read_program_file,
 )
 from mirage.io.types import IOResult, materialize
@@ -75,3 +76,13 @@ async def test_a_directory_program_file_is_read_as_the_command_reads_it(
             await read_program_file(name, _typed("dir"), dispatch)
     else:
         assert await read_program_file(name, _typed("dir"), dispatch) == data
+
+
+def test_a_program_file_refusal_without_a_posix_phrase_names_the_error():
+    line, code = program_file_refusal(
+        "sed", _typed("p.sed"), OSError("backend exploded")
+    )
+    assert (line, code) == (
+        "sed: couldn't open file p.sed: backend exploded\n",
+        4,
+    )

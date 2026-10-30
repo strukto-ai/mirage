@@ -14,7 +14,7 @@ from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.jq import load_failure
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import eisdir, fs_strerror
+from mirage.errors.fs import eisdir, strerror_of
 from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn
@@ -68,7 +68,7 @@ def program_file_refusal(
         exc (BaseException): why it could not be read.
     """
     shown = path.raw_path or path.virtual
-    strerror = fs_strerror(exc)
+    strerror = strerror_of(exc)
     read_failed = isinstance(exc, IsADirectoryError)
     if name == "sed":
         return f"sed: couldn't open file {shown}: {strerror}\n", 4

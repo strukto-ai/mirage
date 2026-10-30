@@ -24,6 +24,7 @@ mod look;
 mod network;
 pub mod nfs;
 mod nl;
+mod number;
 mod numfmt;
 mod od;
 mod paste;
@@ -41,6 +42,7 @@ mod rg_format;
 mod rg_grapheme;
 mod rg_input;
 mod rg_matcher;
+mod scan;
 mod sed;
 mod seq;
 pub mod shell;
@@ -251,7 +253,13 @@ pub(crate) fn latin1<'de, D: serde::Deserializer<'de>>(
         .ok_or_else(|| serde::de::Error::custom("a byte string holds a character past U+00FF"))
 }
 
-fn latin1_bytes(text: &str) -> Option<Vec<u8>> {
+/// Bytes as a string of one character per byte, the form `latin1` reads
+/// back and a refusal carries its stderr in.
+pub(crate) fn byte_text(raw: &[u8]) -> String {
+    raw.iter().map(|&b| char::from(b)).collect()
+}
+
+pub(crate) fn latin1_bytes(text: &str) -> Option<Vec<u8>> {
     text.chars()
         .map(|c| u8::try_from(u32::from(c)).ok())
         .collect()
@@ -308,18 +316,114 @@ pub(crate) fn quoted(text: &[u8]) -> String {
     out
 }
 
+/// `text` in GNU's shell-escape quoting, as a diagnostic names a word: bare
+/// when a shell reads it back as itself, else `'...'` with a quote as
+/// `'\''` and a run of controls as one `$'...'` group, or `"..."` for a
+/// word whose only trouble is a quote. A character past ASCII is ordinary,
+/// as under a UTF-8 locale, except the C1 controls and U+2028 and U+2029;
+/// a byte that is no UTF-8 is ordinary too.
+pub(crate) fn shell_quoted(text: &[u8]) -> Vec<u8> {
+    const ALWAYS: &[u8] = b" !\"$&'()*:;<=>?[\\^`|";
+    const DOUBLE_BLOCKERS: &[u8] = b"!\"#$&()*;<=>?[\\^`{|}~";
+    let chars: Vec<(Option<char>, &[u8])> = text
+        .utf8_chunks()
+        .flat_map(|chunk| {
+            let valid = chunk.valid();
+            let chars = valid
+                .char_indices()
+                .map(move |(at, c)| (Some(c), &valid.as_bytes()[at..at + c.len_utf8()]));
+            chars.chain(chunk.invalid().chunks(1).map(|byte| (None, byte)))
+        })
+        .collect();
+    let escaped = |c: Option<char>| {
+        c.is_some_and(|c| matches!(u32::from(c), 0..=0x1f | 0x7f..=0x9f | 0x2028 | 0x2029))
+    };
+    let special =
+        |c: Option<char>, set: &[u8]| c.is_some_and(|c| c.is_ascii() && set.contains(&(c as u8)));
+    let bare = !text.is_empty()
+        && text != b"{"
+        && text != b"}"
+        && !matches!(text.first(), Some(b'#' | b'~'))
+        && chars
+            .iter()
+            .all(|&(c, _)| !escaped(c) && !special(c, ALWAYS));
+    if bare {
+        return text.to_vec();
+    }
+    if text.contains(&b'\'')
+        && chars
+            .iter()
+            .all(|&(c, _)| !escaped(c) && !special(c, DOUBLE_BLOCKERS))
+    {
+        return [b"\"", text, b"\""].concat();
+    }
+    let mut out = vec![b'\''];
+    let mut in_escape = false;
+    for (c, bytes) in chars {
+        if escaped(c) {
+            if !in_escape {
+                out.extend_from_slice(b"'$'");
+                in_escape = true;
+            }
+            match c {
+                Some('\x07') => out.extend_from_slice(b"\\a"),
+                Some('\x08') => out.extend_from_slice(b"\\b"),
+                Some('\t') => out.extend_from_slice(b"\\t"),
+                Some('\n') => out.extend_from_slice(b"\\n"),
+                Some('\x0b') => out.extend_from_slice(b"\\v"),
+                Some('\x0c') => out.extend_from_slice(b"\\f"),
+                Some('\r') => out.extend_from_slice(b"\\r"),
+                _ => bytes
+                    .iter()
+                    .for_each(|byte| out.extend_from_slice(format!("\\{byte:03o}").as_bytes())),
+            }
+        } else if bytes == b"'" {
+            out.extend_from_slice(b"'\\''");
+            in_escape = false;
+        } else {
+            if in_escape {
+                out.extend_from_slice(b"''");
+                in_escape = false;
+            }
+            out.extend_from_slice(bytes);
+        }
+    }
+    out.push(b'\'');
+    out
+}
+
 /// A refusal: the message is the command's own stderr wording, or what the
-/// host reports it as (`sort -c` sends the disordered record's number).
+/// host reports it as (`sort -c` sends the disordered record's number),
+/// and the status the command exits with. A refusal of a command's
+/// options or operands holds its stderr one character per byte, so both
+/// hosts write back the same bytes whether `open` fails with it or a
+/// `Refused` stream reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamError {
     pub message: String,
+    pub status: i32,
 }
 
 impl StreamError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            status: 1,
         }
+    }
+
+    /// The refusal of a command's options or operands: the bytes it writes
+    /// to stderr, without the final newline, and its exit status.
+    pub fn refusal(stderr: &[u8], status: i32) -> Self {
+        Self {
+            message: byte_text(stderr),
+            status,
+        }
+    }
+
+    /// The bytes the refusal writes to stderr.
+    pub(crate) fn stderr(&self) -> Vec<u8> {
+        latin1_bytes(&self.message).unwrap_or_else(|| self.message.as_bytes().to_vec())
     }
 }
 
@@ -371,6 +475,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "rev" => rev::open(config),
         "rg" => rg::open(config),
         "rg_format" => rg_format::open(config),
+        "scan" => scan::open(config),
         "sed" => sed::open(config),
         "seq" => seq::open(config),
         "shuf" => shuf::open(config),
@@ -536,5 +641,36 @@ mod tests {
         let mut out = Vec::new();
         assert!(drain_steps(&mut stream, &mut out).is_err());
         assert_eq!((stream.taken, out.len()), (4, 12));
+    }
+}
+
+#[cfg(test)]
+mod shell_quote_tests {
+    use super::shell_quoted;
+
+    #[test]
+    fn shell_quoting_matches_gnu_shell_escape() {
+        for (text, quoted) in [
+            ("x", "x"),
+            ("", "''"),
+            ("{", "'{'"),
+            ("#a", "'#a'"),
+            ("a#", "a#"),
+            ("a b", "'a b'"),
+            ("it's", "\"it's\""),
+            ("it's$", "'it'\\''s$'"),
+            ("a\u{9}b", "'a'$'\\t''b'"),
+            ("a\u{1}'b", "'a'$'\\001'\\''b'"),
+            ("é", "é"),
+            ("\u{85}x", "''$'\\302\\205''x'"),
+            ("a\u{2028}", "'a'$'\\342\\200\\250'"),
+            ("~", "'~'"),
+            ("-3", "-3"),
+            (" 1", "' 1'"),
+            ("\u{1}\u{2}z", "''$'\\001\\002''z'"),
+        ] {
+            assert_eq!(shell_quoted(text.as_bytes()), quoted.as_bytes(), "{text:?}");
+        }
+        assert_eq!(shell_quoted(b"a\xffb"), b"a\xffb");
     }
 }

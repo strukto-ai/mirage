@@ -3,27 +3,36 @@ from collections.abc import AsyncIterator
 import pytest
 
 from mirage.commands.builtin.generic.uniq import (
-    SKIP_FIELDS,
-    _parse_count,
+    UniqFlags,
     parse_flags,
+    uniq_flags,
     uniq_generic,
 )
 from mirage.commands.errors import UsageError
 from mirage.io.memory import MemoryBudget, run_with_memory
-from mirage.io.types import ByteSource
 from mirage.types import PathSpec
+from mirage.commands.spec.types import FlagValue
+from mirage.io.types import ByteSource, IOResult
 
 
 def _unused_read_stream(_accessor, _path):
     raise AssertionError("read_stream should not be called for stdin input")
 
 
-async def _collect(stdin: ByteSource | None, **kwargs) -> bytes:
+def _flags(flags: dict[str, FlagValue]) -> UniqFlags:
+    parsed = uniq_flags(flags)
+    assert isinstance(parsed, UniqFlags)
+    return parsed
+
+
+async def _collect(
+    stdin: ByteSource | None, flags: dict[str, FlagValue] | None = None
+) -> bytes:
     source, _io = await uniq_generic(
+        _flags(flags or {}),
         [],
         read_stream=_unused_read_stream,
         stdin=stdin,
-        **kwargs,
     )
     chunks = [chunk async for chunk in source]
     return b"".join(chunks)
@@ -33,7 +42,7 @@ async def _collect(stdin: ByteSource | None, **kwargs) -> bytes:
 async def test_skip_fields_unset_matches_zero():
     data = b"a one\nb one\n"
     unset = await _collect(data)
-    zero = await _collect(data, skip_fields="0")
+    zero = await _collect(data, {"skip_fields": "0"})
     assert unset == zero == b"a one\nb one\n"
 
 
@@ -114,9 +123,12 @@ def test_a_count_refusal_names_the_value_raw(value):
     bytes as typed, never through quote(): `uniq -f 1é` keeps both
     UTF-8 bytes intact.
     """
-    with pytest.raises(ValueError) as exc:
-        _parse_count(value, SKIP_FIELDS)
-    assert str(exc.value) == f"uniq: {value}: invalid number of fields to skip"
+    refusal = uniq_flags({"skip_fields": value})
+    assert isinstance(refusal, IOResult)
+    assert (refusal.stderr, refusal.exit_code) == (
+        f"uniq: {value}: invalid number of fields to skip\n".encode(),
+        1,
+    )
 
 
 # Neither option's candidates share a prefix that spans two values, so
@@ -163,7 +175,7 @@ async def test_uniq_emits_before_reading_the_tail_and_closes(
             closed = True
 
     output, _ = await uniq_generic(
-        [], read_stream=_unused_read_stream, stdin=source(), flags=flags
+        _flags(flags), [], read_stream=_unused_read_stream, stdin=source()
     )
     try:
         assert await anext(output) == expected
@@ -223,7 +235,7 @@ async def test_output_operand_spills_past_the_default_memory_budget():
     async def run():
         path = PathSpec.from_str_path("/same")
         out, io = await uniq_generic(
-            [path, path], read_stream=read, write_bytes=write
+            _flags({}), [path, path], read_stream=read, write_bytes=write
         )
         assert out == b""
         assert io.exit_code == 0

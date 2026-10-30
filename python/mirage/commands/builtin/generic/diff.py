@@ -1,4 +1,4 @@
-import re
+import json
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, tzinfo
 from functools import partial
 
-from mirage.commands.builtin.constants import INTMAX
 from mirage.commands.builtin.utils.formatting import full_iso_time
 from mirage.commands.builtin.utils.links import dispatch_of, links_of
 from mirage.commands.builtin.utils.paths import vfs_stat_path
@@ -21,7 +20,6 @@ from mirage.commands.builtin.utils.stream import (
 )
 from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
@@ -29,7 +27,6 @@ from mirage.commands.spec.types import Argument, CommandName, FlagValue
 from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
-    usage_hint,
 )
 from mirage.core.api.errors import ApiError
 from mirage.errors.constants import FS_ERRORS
@@ -42,8 +39,17 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
 from mirage.rs.diff_types import DiffComputer, DiffOptions, PairResult
 from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused
+from mirage.rs.stream import open_stream
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec, ReadStreamFn
+from mirage.shell.bytes import byte_view
+from mirage.types import (
+    FileStat,
+    FileType,
+    JsonValue,
+    PathSpec,
+    ReadStreamFn,
+)
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
@@ -594,36 +600,51 @@ async def _output(parts: list[bytes]) -> AsyncIterator[bytes]:
 __all__ = ["diff"]
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> DiffFlags:
+def _unified_context(typed: list[str | None]) -> int | IOResult:
+    """The context -U and --unified give, read by the diff engine.
+
+    Args:
+        typed (list[str | None]): each value as typed, None for a bare
+            --unified.
+    """
+    if not typed:
+        return 3
+    unified: list[JsonValue] = [
+        None if text is None else byte_view(text) for text in typed
+    ]
+    try:
+        engine = open_stream("diff", {"unified": unified})
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    context = json.loads(engine.metadata())["context"]
+    return int(context)
+
+
+def parse_flags(flags: Mapping[str, FlagValue]) -> DiffFlags | IOResult:
+    """diff's options, -U refused by the diff engine before any operand.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the parsed flags.
+
+    Returns:
+        DiffFlags | IOResult: the flags, or diff's refusal of a -U, exit 2.
+    """
     fl = FlagView(flags, spec=SPECS["diff"])
-    context = -1
-    unified = fl.as_bool("u")
-    for _, value in fl.occurrences("U", "unified"):
-        unified = True
-        if value is True:
-            context = max(context, 3)
-        elif (
-            isinstance(value, str)
-            and (
-                value == ""
-                or re.fullmatch(r"[ \t\n\r\v\f]*[+-]?[0-9]+", value)
-            )
-            and int(value or "0") >= 0
-        ):
-            context = max(context, min(int(value or "0"), INTMAX))
-        else:
-            raise UsageError(
-                f"diff: invalid context length '{value}'\n"
-                + usage_hint("diff")
-            )
+    typed = [
+        None if value is True else str(value)
+        for _, value in fl.occurrences("U", "unified")
+    ]
+    context = _unified_context(typed)
+    if isinstance(context, IOResult):
+        return context
     new_file = fl.as_bool("new_file")
     return DiffFlags(
         ignore_case=fl.as_bool("i"),
         ignore_all_space=fl.as_bool("w"),
         ignore_space_change=fl.as_bool("b"),
         ed=fl.as_bool("e"),
-        unified=unified,
-        context=3 if context == -1 else context,
+        unified=fl.as_bool("u") or bool(typed),
+        context=context,
         brief=fl.as_bool("brief"),
         recursive=fl.as_bool("recursive"),
         new_file=new_file,
@@ -635,6 +656,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> DiffFlags:
 
 
 async def diff_generic(
+    parsed: DiffFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -647,7 +669,7 @@ async def diff_generic(
         stream=stream,
         readdir_fn=readdir_fn,
         stat_fn=stat_fn,
-        flags=parse_flags(ctx.flags),
+        flags=parsed,
         stdin=ctx.stdin,
         argv=ctx.argv,
         stat_path=vfs_stat_path(ctx.vfs),

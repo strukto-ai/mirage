@@ -21,7 +21,14 @@ fn compare(config: &str, old: &[u8], new: &[u8]) -> (Vec<u8>, Vec<u8>, i32, Vec<
     stream.take_stderr(&mut stderr);
     let mut metadata = Vec::new();
     stream.metadata(&mut metadata);
-    (output, stderr, stream.status(), metadata)
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata).expect("json");
+    let outcome = serde_json::json!({ "outcome": metadata["outcome"] });
+    (
+        output,
+        stderr,
+        stream.status(),
+        outcome.to_string().into_bytes(),
+    )
 }
 
 #[test]

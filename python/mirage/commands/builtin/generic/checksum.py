@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import (
     AsyncGenerator,
@@ -29,7 +30,6 @@ from mirage.commands.builtin.utils.stream import (
 )
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
-from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -41,9 +41,10 @@ from mirage.errors.render import fs_error_line
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.rs import run_stream
+from mirage.rs import StreamRefusal, open_stream, run_stream
+from mirage.rs.scan import refused
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.key_prefix import mount_key, mount_prefix_of
 from mirage.utils.path import resolve_path
@@ -128,6 +129,8 @@ def _refuse_conflicts(fl: FlagView, name: str) -> None:
 
 
 BLAKE2B = "blake2b"
+# The bits of a whole BLAKE2b digest.
+_FULL_BITS = 512
 
 
 def _prog(algorithm: str) -> str:
@@ -152,36 +155,31 @@ def _tag(algorithm: str) -> str:
     return algorithm.upper()
 
 
-def _blake2b(fl: FlagView, name: str) -> str:
-    """b2sum's digest for its -l, read as GNU reads it in the option loop:
-    a decimal count of bits, 0 or past 512 meaning 512 whatever it is, and
-    one under 512 a multiple of 8 (coreutils 9.7).
+def _blake2b(fl: FlagView) -> str | IOResult:
+    """b2sum's digest for its -l, which the digest engine reads as GNU
+    reads it in the option loop, or b2sum's refusal of it.
 
     Args:
         fl (FlagView): The command's flags.
-        name (str): The invoked command.
-
-    Raises:
-        UsageError: a length that is no count or no multiple of 8.
     """
-    value = fl.as_str("length")
+    value = fl.as_text("length")
     if value is None:
         return BLAKE2B
-    match = re.fullmatch(r"\s*\+?([0-9]+)", value)
-    refusal = f"{name}: invalid length: '{quote_text(value)}'"
-    if match is None:
-        raise UsageError(refusal, 1)
-    bits = int(match.group(1))
-    if bits == 0 or bits >= 512:
-        return BLAKE2B
-    if bits % 8:
-        raise UsageError(
-            f"{refusal}\n{name}: length is not a multiple of 8", 1
-        )
-    return f"{BLAKE2B}-{bits}"
+    config: dict[str, JsonValue] = {
+        "algorithm": BLAKE2B,
+        "length": byte_view(value),
+    }
+    try:
+        engine = open_stream("digest", config)
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    bits = json.loads(engine.metadata())["bits"]
+    return BLAKE2B if bits == _FULL_BITS else f"{BLAKE2B}-{bits}"
 
 
-def parse_flags(flags: Mapping[str, FlagValue], name: str) -> ChecksumFlags:
+def parse_flags(
+    flags: Mapping[str, FlagValue], name: str
+) -> ChecksumFlags | IOResult:
     """Parse the shared ``*sum`` flag set against one command's spec.
 
     Args:
@@ -189,13 +187,16 @@ def parse_flags(flags: Mapping[str, FlagValue], name: str) -> ChecksumFlags:
         name (str): The invoked command (md5sum, sha256sum, b2sum, ...),
             whose spec validates the names; b2sum adds -l to the set.
 
+    Returns:
+        ChecksumFlags | IOResult: the flags, or b2sum's refusal of -l.
+
     Raises:
         UsageError: a combination GNU refuses.
     """
     fl = FlagView(flags, spec=SPECS[name])
-    algorithm = (
-        _blake2b(fl, name) if name == "b2sum" else name.removesuffix("sum")
-    )
+    algorithm = _blake2b(fl) if name == "b2sum" else name.removesuffix("sum")
+    if isinstance(algorithm, IOResult):
+        return algorithm
     _refuse_conflicts(fl, name)
     return ChecksumFlags(
         algorithm=algorithm,
@@ -226,7 +227,7 @@ async def hash_source(source: ByteSource, algorithm: str) -> str:
     family, _, bits = algorithm.partition("-")
     config: dict[str, JsonValue] = {"algorithm": family}
     if bits:
-        config["length"] = int(bits)
+        config["length"] = bits
     async with aclosing(run_stream("digest", config, source)) as parts:
         hexdigest = b"".join([part async for part in parts])
     return hexdigest.decode()
@@ -632,6 +633,7 @@ async def checksum(
 
 
 async def checksum_generic(
+    parsed: ChecksumFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -649,6 +651,7 @@ async def checksum_generic(
     names against ``ctx.cwd``), and the stdin fallback.
 
     Args:
+        parsed (ChecksumFlags): the options, read before the operands were.
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by checksums.
         ctx (Context): Flags, stdin and cwd from the dispatcher.
@@ -661,7 +664,6 @@ async def checksum_generic(
         stored (StoredDigest | None): the mount's ``checksum``, the
             digest it keeps, asked before an operand is read.
     """
-    parsed = parse_flags(ctx.flags, name)
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, ctx.stdin)
     if parsed.check:

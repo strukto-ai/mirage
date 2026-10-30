@@ -1,10 +1,10 @@
-import { uniqGeneric } from '@struktoai/mirage-core/commands/builtin/generic/uniq'
-import { xxdGeneric } from '@struktoai/mirage-core/commands/builtin/generic/xxd'
+import { uniqGeneric, uniqFlags } from '@struktoai/mirage-core/commands/builtin/generic/uniq'
+import { xxdGeneric, parseFlags as xxdFlags } from '@struktoai/mirage-core/commands/builtin/generic/xxd'
 import { checksumGeneric } from '@struktoai/mirage-core/commands/builtin/generic/checksum'
 import { MemoryBudget, runWithMemory } from '@struktoai/mirage-core/io/memory'
 import { expect, it, vi } from 'vitest'
 import { ByteSpool } from '@struktoai/mirage-core/io/spool'
-import { materialize } from '@struktoai/mirage-core/io/types'
+import { IOResult, materialize } from '@struktoai/mirage-core/io/types'
 import { shufGeneric } from '@struktoai/mirage-core/commands/builtin/generic/shuf'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { Context } from '@struktoai/mirage-core/commands/config'
@@ -92,7 +92,10 @@ it('spills uniq OUTPUT before overwriting its own input under the default budget
   }
   const path = PathSpec.fromStrPath('/same')
   await runWithMemory(new MemoryBudget(32 << 20, () => 0), async () => {
+    const parsed = uniqFlags({})
+    if (parsed instanceof IOResult) throw new Error('invalid uniq flags')
     const result = await uniqGeneric(
+      parsed,
       [path, path],
       { flags: {}, stdin: null, cwd: PathSpec.fromStrPath('/') } as Context,
       read,
@@ -126,7 +129,10 @@ it('patches an existing xxd output larger than the default memory budget', async
     }
   }
   await runWithMemory(new MemoryBudget(32 << 20, () => 0), async () => {
+    const parsed = xxdFlags({ r: true })
+    if (parsed instanceof IOResult) throw new Error('invalid xxd flags')
     const [, io] = await xxdGeneric(
+      parsed,
       [input, target],
       { flags: { r: true }, stdin: null, cwd: PathSpec.fromStrPath('/') } as Context,
       read,

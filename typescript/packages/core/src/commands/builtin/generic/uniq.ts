@@ -25,37 +25,21 @@ import { CommandName, type FlagValue, type ParsedFlagValue } from '../../spec/ty
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { openStream } from '../../../rs/stream.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused } from '../../../rs/scan.ts'
+import { openStream, openStreamSync } from '../../../rs/stream.ts'
+import { byteView, encodeText } from '../../../shell/bytes.ts'
+import type { JsonValue } from '../../../types.ts'
 
-interface UniqFlags {
+export interface UniqFlags {
   count: boolean
   duplicatesOnly: boolean
   uniqueOnly: boolean
-  skipFields: number
-  skipChars: number
-  checkChars: number | null
+  counts: [string, string][]
   ignoreCase: boolean
   allRepeated: 'none' | 'prepend' | 'separate' | null
   group: 'separate' | 'prepend' | 'append' | 'both' | null
   zeroTerminated: boolean
-}
-
-// How GNU reads a -f, -s or -w count: leading C whitespace, a sign and
-// decimal digits, nothing after them.
-const COUNT_WORD = /^[ \t\n\v\f\r]*[+-]?[0-9]+$/
-const SKIP_FIELDS = 'fields to skip'
-const SKIP_CHARS = 'bytes to skip'
-const CHECK_CHARS = 'bytes to compare'
-
-// A -f, -s or -w count: decimal, never negative, any size (a huge one is
-// clamped, as GNU clamps it to SIZE_MAX).
-function parseCount(value: ParsedFlagValue | undefined, what: string): number | null {
-  if (value === undefined || value === false) return null
-  const text = String(value)
-  const count = COUNT_WORD.test(text) ? Number(text.trim()) : Number.NaN
-  if (!(count >= 0)) throw new Error(`uniq: ${text}: invalid number of ${what}`)
-  return Math.min(count, Number.MAX_SAFE_INTEGER)
 }
 
 // The --all-repeated and --group words, in the order GNU lists each back. No
@@ -109,9 +93,7 @@ function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
     count,
     duplicatesOnly,
     uniqueOnly,
-    skipFields: parseCount(fl.asStr('skip_fields'), SKIP_FIELDS) ?? 0,
-    skipChars: parseCount(fl.asStr('skip_chars'), SKIP_CHARS) ?? 0,
-    checkChars: parseCount(fl.asStr('check_chars'), CHECK_CHARS),
+    counts: fl.texts('skip_fields', 'skip_chars', 'check_chars'),
     ignoreCase: fl.asBool('ignore_case'),
     allRepeated,
     group,
@@ -119,7 +101,44 @@ function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
   }
 }
 
+/**
+ * uniq's options, its counts refused by the engine before any operand is
+ * resolved: the flags, or uniq's refusal. Mirrors Python's `uniq_flags`.
+ */
+export function uniqFlags(bag: Record<string, FlagValue>): UniqFlags | IOResult {
+  let parsed: UniqFlags
+  try {
+    parsed = parseFlags(bag)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })
+  }
+  try {
+    openStreamSync('uniq', engineConfig(parsed)).close()
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  return parsed
+}
+
+/** The uniq engine's config, the counts as typed. Mirrors Python's
+ * `engine_config`. */
+export function engineConfig(parsed: UniqFlags): Record<string, JsonValue> {
+  return {
+    count: parsed.count,
+    repeated: parsed.duplicatesOnly,
+    unique: parsed.uniqueOnly,
+    counts: parsed.counts.map(([name, text]) => [name, byteView(text)]),
+    ignore_case: parsed.ignoreCase,
+    all_repeated: parsed.allRepeated,
+    group: parsed.group,
+    zero_terminated: parsed.zeroTerminated,
+  }
+}
+
 export async function uniqGeneric(
+  parsed: UniqFlags,
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
@@ -128,13 +147,6 @@ export async function uniqGeneric(
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
   if (paths.length > 2) throw extraOperandError(CommandName.UNIQ, paths[2]?.rawPath ?? '')
-  let parsed: UniqFlags
-  try {
-    parsed = parseFlags(ctx.flags)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })]
-  }
   if (paths.length > 0 && stat !== undefined) {
     // The input is stat'ed before the lazy stream starts, so a missing or
     // unreadable one is reported in uniq's own words rather than
@@ -155,22 +167,7 @@ export async function uniqGeneric(
       return [null, new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })]
     }
   }
-  const output = streamOutput(
-    await openStream('uniq', {
-      count: parsed.count,
-      repeated: parsed.duplicatesOnly,
-      unique: parsed.uniqueOnly,
-      skip_fields: parsed.skipFields,
-      skip_chars: parsed.skipChars,
-      check_chars: parsed.checkChars,
-      ignore_case: parsed.ignoreCase,
-      all_repeated: parsed.allRepeated,
-      group: parsed.group,
-      zero_terminated: parsed.zeroTerminated,
-    }),
-    source,
-    ctx.signal,
-  )
+  const output = streamOutput(await openStream('uniq', engineConfig(parsed)), source, ctx.signal)
   const outputPath = paths[1]
   if (outputPath !== undefined && outputPath.rawPath !== '-') {
     if (write === undefined) {

@@ -14,6 +14,8 @@
 
 import { chunks } from '../../../io/cooperative.ts'
 import { OutputStream } from '../../../io/stream.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused, scan } from '../../../rs/scan.ts'
 import { closeStream, mergeOutput, openStream } from '../../../rs/stream.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import type { JsonValue } from '../../../types.ts'
@@ -24,70 +26,14 @@ import type { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { formatFsError } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
-import { CMP_SIZE_UNITS, INTMAX, SUFFIXED_COUNT_PATTERN } from '../constants.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
-import { parseBase0 } from '../utils/size_suffix.ts'
-import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
-import { CommandName } from '../../spec/types.ts'
-import { UsageError } from '../../errors.ts'
+import { extraOperandError, missingOperandError } from '../../spec/usage.ts'
+import { CommandName, type FlagValue } from '../../spec/types.ts'
 
 const ENC = new TextEncoder()
 
-const TRY_HELP = `\n${usageHint(CommandName.CMP)}`
-
-/**
- * One GNU `cmp` byte count, read the way diffutils 3.10 reads it.
- *
- * Base 0, so `010` is 8 and `0x400` is 1024; one leading `+` and
- * leading whitespace are allowed; the remainder is a size suffix from
- * cmp's own letter set. Every rejection -- unparsable digits, unknown
- * suffix, or a product past INTMAX -- is the same usage error naming
- * the long option, not a crash and not od's "too large".
- *
- * `shown` overrides the spelling named in the diagnostic: GNU prints
- * the operand from the position it was reading, so a bad `SKIP1` names
- * the whole `SKIP1:SKIP2` pair while a bad `SKIP2` names only itself.
- *
- * The accept/reject boundary is computed in BigInt and so is exact, but
- * the returned count is a double like od's: above 2**53 it is the
- * nearest representable value, not python's exact integer. The count is
- * only ever a slice bound, and no file reaches an exabyte, so the two
- * runtimes still compare the same bytes.
- */
-export function parseCount(raw: string, option: string, shown?: string): number {
-  const error = new UsageError(`cmp: invalid ${option} value '${shown ?? raw}'${TRY_HELP}`)
-  const match = SUFFIXED_COUNT_PATTERN.exec(raw)
-  const suffix = match?.[2] ?? ''
-  const unit = suffix === '' ? 1 : CMP_SIZE_UNITS[suffix]
-  if (match === null || unit === undefined) throw error
-  const count = parseBase0(match[1] ?? '') * BigInt(unit)
-  if (count > INTMAX) throw error
-  return Number(count)
-}
-
-/**
- * The `-i` operand as one skip per file.
- *
- * GNU takes `SKIP` for both files or `SKIP1:SKIP2` for one each, so
- * `-i 0:3` compares all of the first file against the fourth byte
- * onward of the second. A colon is the only place the first count may
- * stop, which is why `1b:1` is rejected naming the whole pair while
- * `1:1b` is rejected naming just `1b`.
- */
-export function parseSkip(raw: string): [number, number] {
-  const cut = raw.indexOf(':')
-  if (cut === -1) {
-    const both = parseCount(raw, '--ignore-initial')
-    return [both, both]
-  }
-  return [
-    parseCount(raw.slice(0, cut), '--ignore-initial', raw),
-    parseCount(raw.slice(cut + 1), '--ignore-initial'),
-  ]
-}
-
-interface CmpFlags {
+export interface CmpFlags {
   readonly silent: boolean
   readonly verbose: boolean
   readonly limit: number | null
@@ -95,42 +41,36 @@ interface CmpFlags {
   readonly skip: readonly [number, number]
 }
 
-function parseFlags(fl: FlagView): CmpFlags {
-  const silent = fl.asBool('quiet') || fl.asBool('silent')
-  const verbose = fl.asBool('verbose')
-  // diffutils refuses the pair while it reads the options, so ahead of any
-  // operand check.
-  if (silent && verbose) throw new UsageError(`cmp: options -l and -s are incompatible${TRY_HELP}`)
-  const nRaw = fl.asStr('bytes')
-  const iRaw = fl.asStr('ignore_initial')
-  return {
-    silent,
-    verbose,
-    limit: nRaw === undefined ? null : parseCount(nRaw, '--bytes'),
-    printBytes: fl.asBool('print_bytes'),
-    skip: iRaw === undefined ? [0, 0] : parseSkip(iRaw),
-  }
-}
-
 /**
- * The skips cmp's SKIP1 and SKIP2 operands give, beside -i's.
- *
- * Each is read as -i reads its counts, and each file keeps the larger of the
- * two skips it was given: a smaller one, from -i or from an operand, never
- * lowers the other. Past the fourth operand is an extra one, which GNU cmp
- * refuses only after both skips have parsed. Mirrors Python's operand_skips.
+ * cmp's counts read by mirage-rs before any operand is resolved: -n, -i, -l
+ * and -s in the order typed, so the first refusal is the one diffutils makes
+ * while it reads its options, then the SKIP1 and SKIP2 operands of `texts`.
+ * The flags, or cmp's refusal, exit 2. A count past 2**53 is the nearest
+ * double, which no file reaches. Mirrors Python's `parse_flags`.
  */
-export function operandSkips(
-  texts: readonly string[],
-  skip: readonly [number, number],
-): [number, number] {
-  const skips: [number, number] = [skip[0], skip[1]]
-  texts.slice(0, 2).forEach((raw, f) => {
-    skips[f] = Math.max(skips[f] ?? 0, parseCount(raw, '--ignore-initial'))
-  })
-  const extra = texts[2]
-  if (extra !== undefined) throw extraOperandError(CommandName.CMP, extra)
-  return skips
+export function parseFlags(
+  bag: Record<string, FlagValue>,
+  texts: readonly string[] = [],
+): CmpFlags | IOResult {
+  const fl = new FlagView(bag, specOf('cmp'))
+  const typed = fl.texts('bytes', 'ignore_initial', 'verbose', 'silent', 'quiet')
+  for (const text of texts.slice(0, 2)) typed.push(['skip', text])
+  let values
+  try {
+    values = scan('cmp', typed)
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  const { limit, skip } = values
+  const [first, second] = Array.isArray(skip) ? skip : []
+  return {
+    silent: fl.asBool('quiet') || fl.asBool('silent'),
+    verbose: fl.asBool('verbose'),
+    limit: typeof limit === 'number' ? limit : null,
+    printBytes: fl.asBool('print_bytes'),
+    skip: [typeof first === 'number' ? first : 0, typeof second === 'number' ? second : 0],
+  }
 }
 
 /** One operand's bytes as cmp pulls them, its first chunk read on open,
@@ -285,6 +225,7 @@ async function oneStdinTwice(
  * Mirrors Python's cmp_cmd.
  */
 export async function cmpGeneric(
+  parsed: CmpFlags,
   paths: PathSpec[],
   texts: readonly string[],
   ctx: Context,
@@ -292,10 +233,11 @@ export async function cmpGeneric(
   sizeOf?: (p: PathSpec) => Promise<number | null>,
   lengthOf = sizeOf,
 ): Promise<[ByteSource | null, IOResult]> {
-  const parsed = parseFlags(new FlagView(ctx.flags, specOf('cmp')))
   const p0 = paths[0]
   if (p0 === undefined) throw missingOperandError(CommandName.CMP, null, ctx.argv ?? [])
-  const skip = operandSkips(texts, parsed.skip)
+  const extra = texts[2]
+  if (extra !== undefined) throw extraOperandError(CommandName.CMP, extra)
+  const skip = parsed.skip
   // A lone FILE1 is compared with stdin, which GNU names `-`.
   const p1 = paths[1] ?? STDIN_OPERAND
   const read = stdinStream(stream, ctx.stdin, true)

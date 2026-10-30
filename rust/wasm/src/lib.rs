@@ -13,6 +13,8 @@ struct Slot {
     stream: Box<dyn Stream>,
     out: Vec<u8>,
     error: Vec<u8>,
+    /// The status the last refusal exits with.
+    status: i32,
     /// A reply being handed over a window at a time.
     staged: Vec<u8>,
 }
@@ -24,6 +26,21 @@ struct State {
     input: Vec<u8>,
     args: Vec<u8>,
     open_error: Vec<u8>,
+    open_status: i32,
+}
+
+impl Slot {
+    fn refuse(&mut self, err: StreamError) {
+        self.error = err.message.into_bytes();
+        self.status = err.status;
+    }
+}
+
+impl State {
+    fn refuse_open(&mut self, err: StreamError) {
+        self.open_error = err.message.into_bytes();
+        self.open_status = err.status;
+    }
 }
 
 thread_local! {
@@ -52,7 +69,7 @@ fn call(
         match f(slot.stream.as_mut(), input, &mut slot.out) {
             Ok(()) => 0,
             Err(err) => {
-                slot.error = err.message.into_bytes();
+                slot.refuse(err);
                 1
             }
         }
@@ -90,6 +107,7 @@ pub extern "C" fn mirage_rs_open(kind_len: usize, config_len: usize) -> u32 {
                     stream,
                     out: Vec::new(),
                     error: Vec::new(),
+                    status: 0,
                     staged: Vec::new(),
                 };
                 state.slots.insert(handle, slot);
@@ -99,7 +117,7 @@ pub extern "C" fn mirage_rs_open(kind_len: usize, config_len: usize) -> u32 {
                 handle
             }
             Err(err) => {
-                state.open_error = err.message.into_bytes();
+                state.refuse_open(err);
                 0
             }
         }
@@ -192,7 +210,7 @@ pub extern "C" fn mirage_rs_test(handle: u32, len: usize) -> i32 {
         match slot.stream.test(&state.input[..len.min(state.input.len())]) {
             Ok(answer) => i32::from(answer),
             Err(err) => {
-                slot.error = err.message.into_bytes();
+                slot.refuse(err);
                 -1
             }
         }
@@ -276,7 +294,7 @@ pub extern "C" fn mirage_rs_respond(handle: u32, reply_len: usize) -> i32 {
         match slot.stream.respond(reply, data, &mut slot.out) {
             Ok(()) => 0,
             Err(err) => {
-                slot.error = err.message.into_bytes();
+                slot.refuse(err);
                 1
             }
         }
@@ -312,6 +330,15 @@ pub extern "C" fn mirage_rs_error_len(handle: u32) -> usize {
         return STATE.with_borrow(|state| state.open_error.len());
     }
     with_slot(handle, 0, |slot| slot.error.len())
+}
+
+/// The status the refusal `mirage_rs_error` reads exits with.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_error_status(handle: u32) -> i32 {
+    if handle == 0 {
+        return STATE.with_borrow(|state| state.open_status);
+    }
+    with_slot(handle, 1, |slot| slot.status)
 }
 
 #[unsafe(no_mangle)]
@@ -365,7 +392,7 @@ pub extern "C" fn mirage_rs_nfs_open(config_len: usize) -> u32 {
             handle
         }),
         Err(err) => {
-            STATE.with_borrow_mut(|state| state.open_error = err.message.into_bytes());
+            STATE.with_borrow_mut(|state| state.refuse_open(err));
             0
         }
     }

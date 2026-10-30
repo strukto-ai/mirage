@@ -40,7 +40,6 @@ import {
 } from '../utils/copy.ts'
 import {
   errorVirtualPath,
-  fsStrerror,
   innerSuffix,
   isFsError,
   isLandedMove,
@@ -332,7 +331,7 @@ async function exchangePair(
   } catch (err) {
     if (!isFsError(err)) throw err
     const restored = await undoExchange(strategy, src, target, holding, staged, swapped)
-    errors.push(`${refused}: ${String(fsStrerror(err))}`)
+    errors.push(`${refused}: ${strerrorOf(err)}`)
     if (!restored) {
       errors.push(`mv: '${src.rawPath}' left at '${holding.rawPath}' after a failed exchange`)
     }
@@ -530,7 +529,7 @@ export async function mvGeneric(
         if (!isFsError(err)) throw err
         // Reading it as "empty" would clobber a directory whose contents
         // could not be verified.
-        errors.push(replaceError(src, target, String(fsStrerror(err)), across))
+        errors.push(replaceError(src, target, strerrorOf(err), across))
         continue
       }
       if (children.length > 0) {
@@ -546,7 +545,7 @@ export async function mvGeneric(
         guard(src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(moveError(src, target, String(fsStrerror(err))))
+        errors.push(moveError(src, target, strerrorOf(err)))
         continue
       }
     }
@@ -576,7 +575,7 @@ export async function mvGeneric(
         strategy.checkUnlink?.(src)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(moveError(src, target, String(fsStrerror(err))))
+        errors.push(moveError(src, target, strerrorOf(err)))
         continue
       }
     }
@@ -612,7 +611,7 @@ export async function mvGeneric(
         await renameLink(copies, src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(moveError(src, target, String(fsStrerror(err))))
+        errors.push(moveError(src, target, strerrorOf(err)))
         continue
       }
     } else if (isPrimitiveMove(strategy)) {
@@ -629,7 +628,7 @@ export async function mvGeneric(
           await strategy.rmdir(target)
         } catch (err) {
           if (!isFsError(err)) throw err
-          errors.push(replaceError(src, target, String(fsStrerror(err)), across))
+          errors.push(replaceError(src, target, strerrorOf(err), across))
           continue
         }
       }
@@ -678,7 +677,7 @@ export async function mvGeneric(
         const from = withInner(src.rawPath, inner)
         if (isLandedMove(err)) {
           // Report the source refusal even when compensation reverted the copy.
-          errors.push(`mv: cannot remove '${from}': ${String(fsStrerror(err))}`)
+          errors.push(`mv: cannot remove '${from}': ${strerrorOf(err)}`)
           if (!srcIsDir && err.recovered !== true) created.add(keyOf(target))
           if (err.recovered === false) {
             const reason = err.recoveryError ?? err.recoveryReason ?? 'cleanup incomplete'
@@ -697,7 +696,7 @@ export async function mvGeneric(
         const lost = errorVirtualPath(err)
         const atTarget = underPath(lost, target.virtual) || underPath(lost, virtualOf(target))
         const changed = !stale ? '' : `'${atTarget ? to : from}' `
-        errors.push(`mv: cannot move '${from}' to '${to}': ${changed}${String(fsStrerror(err))}`)
+        errors.push(`mv: cannot move '${from}' to '${to}': ${changed}${strerrorOf(err)}`)
         continue
       }
     }

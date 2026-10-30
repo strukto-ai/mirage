@@ -156,11 +156,16 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags:
     if error is not None:
         raise ValueError(error)
     follow, by_name, retry = _follow_flags(fl)
-    # The last of -q and -v decides, as in GNU tail.
+    # The last of -q and -v decides, as in GNU tail, and so does the last
+    # of -n and -c once both have parsed.
     order = fl.typed_order("q", "v")
     headers = order[-1] if order else None
+    units = fl.typed_order("n", "c")
+    unit = units[-1] if units else None
     return TailFlags(
-        counts=parse_counts(n_raw, c_raw),
+        counts=parse_counts(
+            None if unit == "c" else n_raw, None if unit == "n" else c_raw
+        ),
         quiet=headers == "q",
         verbose=headers == "v",
         follow=follow,
@@ -340,7 +345,7 @@ async def tail_multi(
                     pending = b""
                 yield chunk
         except FS_ERRORS as exc:
-            if io is None or len(paths) == 1:
+            if io is None:
                 raise
             # A read that fails once the stat passed (a table past its
             # read cap) is reported, and the next operand still prints.

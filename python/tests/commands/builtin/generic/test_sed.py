@@ -4,7 +4,6 @@ from collections.abc import AsyncGenerator, AsyncIterator
 import pytest
 
 from mirage.commands.builtin.generic.sed import (
-    _line_length,
     _script_origins,
     sed_generic,
     sed_writes,
@@ -35,22 +34,6 @@ async def _resolved(paths: list[PathSpec]) -> list[PathSpec]:
 async def _no_read(path: PathSpec) -> AsyncIterator[bytes]:
     raise AssertionError(f"read {path.virtual}")
     yield b""
-
-
-@pytest.mark.parametrize(
-    "raw,width",
-    [
-        (None, 70),
-        ("  +12", 12),
-        ("-3", 0),
-        ("x", 0),
-        ("4294967297", 1),
-        ("2147483648", 0),
-        ("9" * 40, 0),
-    ],
-)
-def test_line_length_reads_as_gnus_atoi(raw: str | None, width: int) -> None:
-    assert _line_length(raw) == width
 
 
 def test_script_origins_name_the_script_files() -> None:

@@ -15,13 +15,15 @@
 import { z } from 'zod'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { ByteSpool } from '../../../io/spool.ts'
-import { runStream } from '../../../rs/stream.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused } from '../../../rs/scan.ts'
+import { openStreamSync, runStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { usageExitCode, usageHint } from '../../spec/usage.ts'
-import { quoteText } from '../../quote.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -44,7 +46,7 @@ export type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 // The mount's stored digest of a file for an algorithm, or null to read it.
 export type StoredDigest = (p: PathSpec, algorithm: string) => Promise<string | null>
 
-interface ChecksumFlags {
+export interface ChecksumFlags {
   readonly algorithm: string
   readonly check: boolean
   readonly binary: boolean
@@ -58,6 +60,8 @@ interface ChecksumFlags {
 }
 
 const BLAKE2B = 'blake2b'
+// The bits of a whole BLAKE2b digest.
+const FULL_BITS = 512
 
 // The *sum command that computes `algorithm`, a hashlib name or `blake2b-N`
 // for BLAKE2b at N bits.
@@ -76,7 +80,7 @@ function tag(algorithm: string): string {
 async function hashSource(source: ByteSource, algorithm: string): Promise<string> {
   const parts: Uint8Array[] = []
   const [family = algorithm, bits] = algorithm.split('-')
-  const config = bits === undefined ? { algorithm } : { algorithm: family, length: Number(bits) }
+  const config = bits === undefined ? { algorithm } : { algorithm: family, length: bits }
   for await (const part of runStream('digest', config, source)) parts.push(part)
   return DEC.decode(concat(parts))
 }
@@ -168,27 +172,35 @@ function refuseConflicts(fl: FlagView, name: string): void {
   }
 }
 
-// b2sum's digest for its -l, read as GNU reads it in the option loop: a
-// decimal count of bits, 0 or past 512 meaning 512 whatever it is, and one
-// under 512 a multiple of 8 (coreutils 9.7).
-function blake2b(fl: FlagView, name: string): string {
-  const value = fl.asStr('length')
+// b2sum's digest for its -l, which the digest engine reads as GNU reads it in
+// the option loop, or b2sum's refusal of it. Mirrors Python's `_blake2b`.
+function blake2b(fl: FlagView): string | IOResult {
+  const value = fl.asText('length')
   if (value === undefined) return BLAKE2B
-  const match = /^\s*\+?([0-9]+)$/.exec(value)
-  const refusal = `${name}: invalid length: '${quoteText(value)}'`
-  if (match === null) throw new UsageError(refusal, 1)
-  const bits = BigInt(match[1] ?? '0')
-  if (bits === 0n || bits >= 512n) return BLAKE2B
-  if (bits % 8n !== 0n)
-    throw new UsageError(`${refusal}\n${name}: length is not a multiple of 8`, 1)
-  return `${BLAKE2B}-${String(bits)}`
+  let engine
+  try {
+    engine = openStreamSync('digest', { algorithm: BLAKE2B, length: byteView(value) })
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  try {
+    const { bits } = JSON.parse(DEC.decode(engine.metadata())) as { bits: number }
+    return bits === FULL_BITS ? BLAKE2B : `${BLAKE2B}-${String(bits)}`
+  } finally {
+    engine.close()
+  }
 }
 
-// Parse the shared `*sum` flag set against one command's spec; b2sum adds -l
-// to the set.
-function parseFlags(bag: Record<string, FlagValue>, name: string): ChecksumFlags {
+/**
+ * Parse the shared `*sum` flag set against one command's spec; b2sum adds -l
+ * to the set. The flags, or b2sum's refusal of -l; a combination GNU refuses
+ * throws. Mirrors Python's `parse_flags`.
+ */
+export function parseFlags(bag: Record<string, FlagValue>, name: string): ChecksumFlags | IOResult {
   const fl = new FlagView(bag, specOf(name))
-  const algorithm = name === 'b2sum' ? blake2b(fl, name) : name.slice(0, -3)
+  const algorithm = name === 'b2sum' ? blake2b(fl) : name.slice(0, -3)
+  if (algorithm instanceof IOResult) return algorithm
   refuseConflicts(fl, name)
   const mode = readMode(fl)
   return {
@@ -380,6 +392,7 @@ async function checkNote(store: ByteSpool, line: string): Promise<void> {
  * always verified against the bytes. Mirrors Python's checksum_generic.
  */
 export async function checksumGeneric(
+  parsed: ChecksumFlags,
   paths: PathSpec[],
   ctx: Context,
   read: Stream,
@@ -387,7 +400,6 @@ export async function checksumGeneric(
   stat?: (p: PathSpec) => Promise<unknown>,
   stored?: StoredDigest,
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(ctx.flags, name)
   const stream = stdinStream(read, ctx.stdin)
   if (parsed.check) {
     const output = new ByteSpool()

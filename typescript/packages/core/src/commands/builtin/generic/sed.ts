@@ -30,22 +30,6 @@ import { byteView, encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { openStreamSync } from '../../../rs/stream.ts'
 
-const SED_LINE_LENGTH = 70
-
-// GNU's atoi over -l: leading blanks, a sign, digits. The value stops at the
-// largest long and keeps its low 32 bits as an int, so `-l 4294967297` is 1.
-// A negative length never folds, the same as 0.
-function lineLength(raw: string | undefined): number {
-  if (raw === undefined) return SED_LINE_LENGTH
-  const m = /^\s*([+-]?)(\d*)/.exec(raw)
-  const digits = m?.[2] ?? ''
-  if (digits === '' || m?.[1] === '-') return 0
-  // Twenty digits already pass the largest long.
-  const value = BigInt(digits.replace(/^0+/, '').slice(0, 20) || '0')
-  const longMax = (1n << 63n) - 1n
-  return Math.max(Number(BigInt.asIntN(32, value > longMax ? longMax : value)), 0)
-}
-
 function failed(stderr: string, exitCode: number): CommandFnResult {
   return [null, new IOResult({ exitCode, stderr: encodeText(stderr) })]
 }
@@ -93,7 +77,7 @@ interface SedFlags {
   readonly suppress: boolean
   readonly extended: boolean
   readonly separate: boolean
-  readonly lineLength: number
+  readonly lineLength: string | null
   // -e and -f in the order typed, each with its text.
   readonly scripts: readonly (readonly [string, string])[]
 }
@@ -105,7 +89,7 @@ function parseFlags(bag: Record<string, FlagValue>): SedFlags {
     suppress: fl.asBool('n'),
     extended: fl.asBool('E') || fl.asBool('r'),
     separate: fl.asBool('separate'),
-    lineLength: lineLength(fl.asStr('line_length')),
+    lineLength: fl.asText('line_length') ?? null,
     scripts: fl.occurrences('e', 'f').map(([name, value]) => [name, String(value)] as const),
   }
 }
@@ -205,7 +189,7 @@ export async function sedGeneric(
     quiet: parsed.suppress,
     separate: parsed.separate,
     in_place: parsed.inPlace,
-    line_length: parsed.lineLength,
+    line_length: parsed.lineLength === null ? null : byteView(parsed.lineLength),
     inputs: names.map((name) => byteView(name)),
     paths: paths.map((p) => byteView(p.virtual)),
     cwd: byteView(ctx.cwd.virtual),

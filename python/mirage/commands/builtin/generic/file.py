@@ -140,7 +140,7 @@ async def file_cmd(
         mounts (MountView | None): the mount boundaries.
     """
     if not paths:
-        raise ValueError("file: missing operand")
+        return None, IOResult(exit_code=1, stderr=b"file: missing operand\n")
     lines: list[str] = []
     for p in paths:
         if links is not None:

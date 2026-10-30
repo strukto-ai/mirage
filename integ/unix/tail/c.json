@@ -75,6 +75,45 @@
       "flags": [
         "c"
       ]
+    },
+    {
+      "id": "tail_last_of_c_and_n_decides",
+      "seq": 19990121,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "tail -c +3 -n +2 /data/a.txt; tail -n +2 -c +3 /data/a.txt; tail -c 4 -n 1 /data/a.txt; tail -n 1 -c 4 /data/a.txt; tail -n x -c 4 /data/a.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "world\nfoo\nbar\nbaz\nllo\nworld\nfoo\nbar\nbaz\nbaz\nbaz\nrc=1\n",
+        "stderr": "tail: invalid number of lines: 'x'\n"
+      },
+      "flags": [
+        "c",
+        "n"
+      ]
     }
   ]
 }

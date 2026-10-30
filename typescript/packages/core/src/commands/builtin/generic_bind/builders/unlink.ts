@@ -31,7 +31,7 @@ const unlink: CommandFn = async (_accessor, paths, _texts, ctx) => {
     throw extraOperandError('unlink', extra === undefined ? '' : extra.rawPath)
   }
   const p = resolved[0]
-  if (p === undefined) return [null, new IOResult()]
+  if (p === undefined) throw missingOperandError('unlink', null)
   const enc = new TextEncoder()
   const links = linksOf(ctx) ?? null
   // unlink(2) never follows, so a trailing slash on a link operand is

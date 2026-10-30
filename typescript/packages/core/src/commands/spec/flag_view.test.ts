@@ -202,6 +202,16 @@ function jqView(...words: string[]): FlagView {
   return new FlagView(parseToKwargs(parseCommand(specOf('jq'), words, '/', 'jq')), specOf('jq'))
 }
 
+describe('FlagView.texts', () => {
+  it('leaves out a switch that is off', () => {
+    const fl = new FlagView({ verbose: false, quiet: true, bytes: '4' }, specOf('cmp'))
+    expect(fl.texts('verbose', 'quiet', 'bytes')).toEqual([
+      ['quiet', ''],
+      ['bytes', '4'],
+    ])
+  })
+})
+
 describe('FlagView.occurrences', () => {
   it('reads the operands where they were typed', () => {
     const fl = jqView('-c', '.', '--args', 'a', '--jsonargs', '1')

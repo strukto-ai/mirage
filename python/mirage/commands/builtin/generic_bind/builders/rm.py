@@ -41,7 +41,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
+from mirage.errors.fs import inner_suffix, strerror_of, with_inner
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import FsCondition, WalkDeclinedError
@@ -88,7 +88,7 @@ async def rm(
             if f and isinstance(exc, (FileNotFoundError, NotADirectoryError)):
                 continue
             errors.append(
-                f"rm: cannot remove '{p.raw_path}': {fs_strerror(exc)}"
+                f"rm: cannot remove '{p.raw_path}': {strerror_of(exc)}"
             )
             continue
         entry_lines: list[str] = []
@@ -142,7 +142,7 @@ async def rm(
                         )
                         errors.extend(
                             f"rm: cannot remove '{entry.raw_path}': "
-                            f"{fs_strerror(exc)}"
+                            f"{strerror_of(exc)}"
                             for entry, exc in failures
                         )
                     entry_lines = removal_lines(listed, p) if v else []
@@ -183,7 +183,7 @@ async def rm(
             errors.append(
                 "rm: cannot remove "
                 f"'{with_inner(p.raw_path, inner_suffix(p, exc))}': "
-                f"{fs_strerror(exc)}"
+                f"{strerror_of(exc)}"
             )
             continue
         if v:

@@ -8,24 +8,16 @@ from mirage.commands.builtin.utils.operands import (
     split_readable,
 )
 from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
-from mirage.commands.builtin.utils.strtol import (
-    EOVERFLOW_REASON,
-    ERANGE_REASON,
-    unsigned_decimal,
-)
 from mirage.commands.config import Context
-from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused, scan
 from mirage.rs.stream import run_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
-
-_DEFAULT_WIDTH = 75
-# GNU 9.7 refuses a -w past 2500.
-_WIDEST = 2500
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,45 +31,25 @@ class FmtFlags:
     uniform: bool = False
 
 
-def _width_refusal(text: str, value: int | None) -> str:
-    """fmt's refusal of a -w value, past its range a range error.
+def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags | IOResult:
+    """fmt's options, -w and -g read by mirage-rs before any operand is
+    resolved.
 
     Args:
-        text (str): the value as typed.
-        value (int | None): what it scanned to, None for no number.
+        flags (Mapping[str, FlagValue]): the parsed flags.
+
+    Returns:
+        FmtFlags | IOResult: the flags, or fmt's refusal of a width.
     """
-    reason = "" if value is None else f": {ERANGE_REASON}"
-    return f"fmt: invalid width: '{quote_text(text)}'{reason}"
-
-
-def _goal_refusal(text: str, value: int | None) -> str:
-    """fmt's refusal of a -g value, past the width too large.
-
-    Args:
-        text (str): the value as typed.
-        value (int | None): what it scanned to, None for no number.
-    """
-    reason = "" if value is None else f": {EOVERFLOW_REASON}"
-    return f"fmt: invalid width: '{quote_text(text)}'{reason}"
-
-
-def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags:
     fl = FlagView(flags, spec=SPECS["fmt"])
-    # GNU 9.7 takes -w as a decimal from 0 to 2500, then -g as one from 0
-    # to that width.
-    width = fl.as_number(
-        "width", unsigned_decimal, _width_refusal, low=0, high=_WIDEST
-    )
-    goal = fl.as_number(
-        "goal",
-        unsigned_decimal,
-        _goal_refusal,
-        low=0,
-        high=_DEFAULT_WIDTH if width is None else width,
-    )
+    try:
+        values = scan("fmt", fl.texts("width", "goal"))
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    width, goal = values.get("width"), values.get("goal")
     return FmtFlags(
-        width=width,
-        goal=goal,
+        width=width if isinstance(width, int) else None,
+        goal=goal if isinstance(goal, int) else None,
         prefix=fl.as_str("prefix"),
         split_only=fl.as_bool("split_only"),
         tagged=fl.as_bool("tagged_paragraph"),
@@ -87,6 +59,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> FmtFlags:
 
 
 async def fmt_generic(
+    parsed: FmtFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -98,6 +71,7 @@ async def fmt_generic(
     Each operand is reflowed on its own.
 
     Args:
+        parsed (FmtFlags): the options, read before the operands were.
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by fmt.
         ctx (Context): Flags and stdin from the dispatcher.
@@ -106,7 +80,6 @@ async def fmt_generic(
             ``stream(path)``.
     """
     stat = stdin_stat(stat)
-    parsed = parse_flags(ctx.flags)
     readable, err = await split_readable(paths, stat, "fmt")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
@@ -126,4 +99,4 @@ async def fmt_generic(
     return await merge_split_errors((output, io), err)
 
 
-__all__ = ["fmt_generic"]
+__all__ = ["fmt_generic", "parse_flags"]

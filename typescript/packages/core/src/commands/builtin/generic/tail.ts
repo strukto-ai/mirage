@@ -23,6 +23,7 @@ import { abortable } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { FileType, type FileStat, type PathSpec, type ReadStreamFn } from '../../../types.ts'
 import { wordRefusalError } from '../../spec/usage.ts'
+import { UsageError } from '../../errors.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import {
@@ -65,15 +66,13 @@ export interface FollowFlags {
 // --follow=name --retry. The mode is whichever of -f/--follow and -F came
 // last, GNU's own order (`-F --follow=descriptor` follows the descriptor),
 // while -F's --retry half stays on either way.
-export function followFlags(fl: FlagView): FollowFlags | string {
+export function followFlags(fl: FlagView): FollowFlags | UsageError {
   const raw: unknown = fl.raw('follow')
   let how: string | null = null
   if (typeof raw === 'string') {
     const match = matchWord(raw, FOLLOW_ARGS)
     if (!match.matched) {
-      return (
-        wordRefusalError('tail', '--follow', raw, FOLLOW_ARGS, undefined, match.kind).message + '\n'
-      )
+      return wordRefusalError('tail', '--follow', raw, FOLLOW_ARGS, undefined, match.kind)
     }
     how = match.word
   }
@@ -93,7 +92,7 @@ export function followFlags(fl: FlagView): FollowFlags | string {
     // number must be at least 0. NaN is not, so it is refused, while `inf`
     // passes both and is ACCEPTED (measured, coreutils 9.4).
     if (seconds === null || !(0 <= seconds)) {
-      return `tail: invalid number of seconds: '${quoteText(rawSeconds)}'\n`
+      return new UsageError(`tail: invalid number of seconds: '${quoteText(rawSeconds)}'`, 1)
     }
     interval = seconds
   }
@@ -685,18 +684,20 @@ interface TailFlags {
   readonly following: FollowFlags
 }
 
-function parseFlags(bag: Record<string, FlagValue>): TailFlags | string {
+function parseFlags(bag: Record<string, FlagValue>): TailFlags | UsageError {
   const fl = new FlagView(bag, specOf('tail'))
   const nRaw = fl.asStr('n') ?? null
   const cRaw = fl.asStr('c') ?? null
   const numErr = numberFlagError('tail', nRaw, cRaw)
-  if (numErr !== null) return numErr
+  if (numErr !== null) return new UsageError(numErr.replace(/\n$/, ''), 1)
   const following = followFlags(fl)
-  if (typeof following === 'string') return following
-  // The last of -q and -v decides, as in GNU tail.
+  if (following instanceof UsageError) return following
+  // The last of -q and -v decides, as in GNU tail, and so does the last of
+  // -n and -c once both have parsed.
   const headers = fl.typedOrder('q', 'v').at(-1)
+  const unit = fl.typedOrder('n', 'c').at(-1)
   return {
-    counts: parseCounts(nRaw, cRaw),
+    counts: parseCounts(unit === 'c' ? null : nRaw, unit === 'n' ? null : cRaw),
     quiet: headers === 'q',
     verbose: headers === 'v',
     following,
@@ -728,8 +729,11 @@ export async function tailGeneric(
   const parsed = parseFlags(ctx.flags)
   const backend = stream
   stream = stdinStream(stream, ctx.stdin)
-  if (typeof parsed === 'string')
-    return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
+  if (parsed instanceof UsageError)
+    return [
+      null,
+      new IOResult({ exitCode: parsed.exitCode, stderr: encodeText(parsed.message + '\n') }),
+    ]
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
   const n = counts.lines ?? 10
   const fromEnd = counts.byteCount === null && counts.fromLine === null && counts.fromByte === null

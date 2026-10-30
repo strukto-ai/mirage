@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::ops::Range;
 
-use crate::{Stream, StreamError};
+use crate::{Stream, StreamError, number};
 use serde::Deserialize;
 use similar::{
     Algorithm, DiffOp, DiffTag, capture_diff_slices, capture_diff_slices_by_key, group_diff_ops,
@@ -10,6 +10,7 @@ use similar::{
 };
 
 const BINARY_PROBE_BYTES: usize = 4096;
+const HINT: &[u8] = b"diff: Try 'diff --help' for more information.";
 
 #[derive(Clone, Copy, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -24,6 +25,9 @@ struct Config {
     mode: Mode,
     #[serde(deserialize_with = "crate::saturating_usize")]
     context: usize,
+    /// `-U` and `--unified` as typed, each value one character per byte
+    /// and a bare `--unified` null; when given, they set `context`.
+    unified: Option<Vec<Option<String>>>,
     ignore_case: bool,
     ignore_all_space: bool,
     ignore_space_change: bool,
@@ -39,6 +43,7 @@ impl Default for Config {
         Self {
             mode: Mode::Normal,
             context: 3,
+            unified: None,
             ignore_case: false,
             ignore_all_space: false,
             ignore_space_change: false,
@@ -52,8 +57,46 @@ impl Default for Config {
     }
 }
 
+/// The context `-U` and `--unified` give as diffutils 3.10 reads each one
+/// typed: a bare `--unified` is 3, an empty value 0, and any other a whole
+/// decimal past blanks with one sign, refused below 0, a value past
+/// `intmax_t` the largest; the widest wins, and none is 3.
+fn unified_context(typed: &[Option<String>]) -> Result<usize, StreamError> {
+    let mut widest = None;
+    for text in typed {
+        let context = match text {
+            None => 3,
+            Some(text) => {
+                let raw = crate::latin1_bytes(text)
+                    .ok_or_else(|| StreamError::new("a -U value holds a character past U+00FF"))?;
+                let value = if raw.is_empty() {
+                    Some(0)
+                } else {
+                    number::signed_decimal(&raw).filter(|&value| value >= 0)
+                };
+                let Some(value) = value else {
+                    let refused = [
+                        b"diff: invalid context length '".as_slice(),
+                        &raw,
+                        b"'\n",
+                        HINT,
+                    ]
+                    .concat();
+                    return Err(StreamError::refusal(&refused, 2));
+                };
+                usize::try_from(value.min(i128::from(i64::MAX))).unwrap_or(usize::MAX)
+            }
+        };
+        widest = widest.max(Some(context));
+    }
+    Ok(widest.unwrap_or(3))
+}
+
 pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let config: Config = crate::parse_config(config)?;
+    let mut config: Config = crate::parse_config(config)?;
+    if let Some(typed) = &config.unified {
+        config.context = unified_context(typed)?;
+    }
     Ok(Box::new(Diff {
         config,
         inputs: [Vec::new(), Vec::new()],
@@ -461,14 +504,53 @@ impl Stream for Diff {
     fn status(&self) -> i32 {
         self.status
     }
+    /// `{"outcome": "equal" | "different", "context": N}`.
     fn metadata(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(if self.equal {
-            b"{\"outcome\":\"equal\"}"
-        } else {
-            b"{\"outcome\":\"different\"}"
-        });
+        let outcome = if self.equal { "equal" } else { "different" };
+        let metadata = serde_json::json!({"outcome": outcome, "context": self.config.context});
+        out.extend_from_slice(metadata.to_string().as_bytes());
     }
     fn take_stderr(&mut self, out: &mut Vec<u8>) {
         out.append(&mut self.stderr);
+    }
+}
+
+#[cfg(test)]
+mod unified_tests {
+    use serde_json::json;
+
+    fn opened(typed: serde_json::Value) -> Result<String, (String, i32)> {
+        let config = json!({ "unified": typed }).to_string();
+        match crate::open("diff", config.as_bytes()) {
+            Ok(stream) => {
+                let mut out = Vec::new();
+                stream.metadata(&mut out);
+                Ok(String::from_utf8(out).expect("json"))
+            }
+            Err(e) => Err((e.message, e.status)),
+        }
+    }
+
+    #[test]
+    fn the_widest_context_typed_wins_and_a_bad_one_is_refused() {
+        let context = |typed| {
+            opened(typed).map(|m| {
+                serde_json::from_str::<serde_json::Value>(&m).expect("json")["context"].clone()
+            })
+        };
+        assert_eq!(context(json!([" +5", null, "1"])), Ok(json!(5)));
+        assert_eq!(context(json!(["", "-0"])), Ok(json!(0)));
+        assert_eq!(
+            context(json!(["99999999999999999999999"])),
+            Ok(json!(i64::MAX))
+        );
+        let hint = "\ndiff: Try 'diff --help' for more information.";
+        for typed in ["x", "-1", "1 ", "0x1"] {
+            let refused = opened(json!(["2", typed])).err();
+            assert_eq!(
+                refused,
+                Some((format!("diff: invalid context length '{typed}'{hint}"), 2))
+            );
+        }
     }
 }

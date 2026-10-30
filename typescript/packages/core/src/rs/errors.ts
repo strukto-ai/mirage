@@ -18,15 +18,18 @@
  * (`gh --jq`), whose output stays on stdout ahead of the diagnostic.
  * `message` is the refusal, without a newline: the command's stderr wording,
  * or what the caller reports it as (`sort -c` gets the disordered record's
- * number). Mirrors Python's StreamRefusal.
+ * number); `status` the status the command exits with. Mirrors Python's
+ * StreamRefusal.
  */
 export class StreamRefusal extends Error {
   readonly output: Uint8Array
+  readonly status: number
 
-  constructor(message: string, output: Uint8Array) {
+  constructor(message: string, output: Uint8Array, status = 1) {
     super(message)
     this.name = 'StreamRefusal'
     this.output = output
+    this.status = status
   }
 }
 

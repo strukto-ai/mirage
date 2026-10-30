@@ -106,7 +106,7 @@ fn short_records_bound_allocation_volume_and_live_input() {
     for (kind, config) in [
         ("wc", br#"{"lines":false,"words":true,"bytes":false,"chars":false,"max_line_length":false}"#.as_slice()),
         ("cut", br#"{"list":"2","mode":"fields","delimiter":[44],"complement":false,"only_delimited":false,"whitespace":null,"no_partial":false,"output_delimiter":null,"zero_terminated":false}"#),
-        ("uniq", br#"{"count":true,"repeated":false,"unique":false,"skip_fields":0,"skip_chars":0,"check_chars":null,"ignore_case":true,"all_repeated":null,"group":null,"zero_terminated":false}"#),
+        ("uniq", br#"{"count":true,"repeated":false,"unique":false,"counts":[],"ignore_case":true,"all_repeated":null,"group":null,"zero_terminated":false}"#),
     ] { hot_loop_allocations(kind, config, b"alpha,theta,words\n"); }
     for bytes in [4 * 1024 * 1024, 64 * 1024 * 1024] {
         scatter_memory(bytes);

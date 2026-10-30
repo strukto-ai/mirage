@@ -7,9 +7,15 @@ use pyo3::types::PyBytes;
 
 create_exception!(mirage._rs, StreamError, PyException);
 
+/// A stream's refusal as Python raises it: the message, the output
+/// written before it, and the status the command exits with.
+fn refused(err: streams::StreamError, output: Bound<'_, PyBytes>) -> PyErr {
+    StreamError::new_err((err.message, output.unbind(), err.status))
+}
+
 /// One open stream: `feed` takes a chunk and returns the bytes it produced;
-/// a refusal raises `StreamError(message, output)` with the output written
-/// before it. Opening a stream and each step of its work run with the GIL
+/// a refusal raises `StreamError(message, output, status)` with the output
+/// written before it and the status the command exits with. Opening a stream and each step of its work run with the GIL
 /// released, so a stream working on one thread never stalls Python on
 /// another (a workspace's loop beside the server's).
 #[pyclass(module = "mirage._rs")]
@@ -34,7 +40,7 @@ impl Stream {
         streams::release_capacity(out);
         match result {
             Ok(()) => Ok(output),
-            Err(err) => Err(StreamError::new_err((err.message, output.unbind()))),
+            Err(err) => Err(refused(err, output)),
         }
     }
 }
@@ -45,7 +51,7 @@ impl Stream {
     fn new(py: Python<'_>, kind: &str, config: &[u8]) -> PyResult<Self> {
         let inner = py
             .detach(|| streams::open(kind, config))
-            .map_err(|err| StreamError::new_err((err.message,)))?;
+            .map_err(|err| refused(err, PyBytes::new(py, b"")))?;
         Ok(Self {
             inner,
             out: Vec::new(),
@@ -98,7 +104,7 @@ impl Stream {
     fn begin(&mut self, py: Python<'_>, config: &[u8]) -> PyResult<()> {
         self.inner
             .begin(config)
-            .map_err(|err| StreamError::new_err((err.message, PyBytes::new(py, b"").unbind())))
+            .map_err(|err| refused(err, PyBytes::new(py, b"")))
     }
 
     /// Whether the input fed since the last answer, then `data`, passes the
@@ -106,7 +112,7 @@ impl Stream {
     fn test(&mut self, py: Python<'_>, data: &[u8]) -> PyResult<bool> {
         let inner = &mut self.inner;
         py.detach(|| inner.test(data))
-            .map_err(|err| StreamError::new_err((err.message, PyBytes::new(py, b"").unbind())))
+            .map_err(|err| refused(err, PyBytes::new(py, b"")))
     }
 
     /// Whether the stream wants no more of the current input.
