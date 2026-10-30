@@ -6,6 +6,7 @@ import type {
   CommandContext,
   CommandRule,
   Decision,
+  Deny,
   Route,
   SessionContext,
 } from '@struktoai/mirage-core/policy/types'
@@ -373,7 +374,10 @@ async function mediaCallerIsolation(): Promise<void> {
   }
 }
 
-async function sessionCallbackIsolation(method: 'preSession' | 'postSession'): Promise<void> {
+async function sessionCallbackIsolation(
+  method: 'preSession' | 'postSession',
+  replacePolicy = false,
+): Promise<void> {
   equal(asyncContextIsolatesTasks, false)
   const entered = deferred()
   const release = deferred()
@@ -395,7 +399,13 @@ async function sessionCallbackIsolation(method: 'preSession' | 'postSession'): P
       () => true,
     )
     await within(entered.promise)
-    await ws.setSessionProfile('agent', { paths: { hide: ['/data/unrelated'] } })
+    if (replacePolicy) {
+      const refuse = (ctx: SessionContext): Deny | null =>
+        ctx.key === 'LIFECYCLE' && ctx.value === 'after'
+          ? { kind: 'deny', reason: 'late writes are closed' }
+          : null
+      ws.policies.add(method === 'preSession' ? { preSession: refuse } : { postSession: refuse })
+    } else await ws.setSessionProfile('agent', { paths: { hide: ['/data/unrelated'] } })
     release.resolve()
     equal(await within(running), true)
     equal((await agent.shell('printf "%s" "$LIFECYCLE"')).stdoutText, 'before')
@@ -633,5 +643,13 @@ export const POLICY_CHECKS: [string, () => Promise<void>][] = [
   [
     'a suspended postSession callback rolls back after its browser caller is replaced',
     () => sessionCallbackIsolation('postSession'),
+  ],
+  [
+    'adding a preSession rule while a callback waits refuses the stale write',
+    () => sessionCallbackIsolation('preSession', true),
+  ],
+  [
+    'adding a postSession rule while a callback waits rolls back the stale write',
+    () => sessionCallbackIsolation('postSession', true),
   ],
 ]
