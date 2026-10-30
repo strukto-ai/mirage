@@ -20,16 +20,12 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
-import { EOVERFLOW_REASON, ERANGE_REASON, unsignedDecimal } from '../utils/strtol.ts'
-import { quoteText } from '../../quote.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused, scan } from '../../../rs/scan.ts'
 import { runStream } from '../../../rs/stream.ts'
 import { byteView } from '../../../shell/bytes.ts'
 
-const DEFAULT_WIDTH = 75
-// GNU 9.7 refuses a -w past 2500.
-const WIDEST = 2500
-
-interface FmtFlags {
+export interface FmtFlags {
   readonly width: number | null
   readonly goal: number | null
   readonly prefix: string | null
@@ -39,35 +35,23 @@ interface FmtFlags {
   readonly uniform: boolean
 }
 
-// fmt's refusal of a -w value, past its range a range error. Mirrors Python's
-// `_width_refusal`.
-function widthRefusal(text: string, value: bigint | null): string {
-  const reason = value === null ? '' : `: ${ERANGE_REASON}`
-  return `fmt: invalid width: '${quoteText(text)}'${reason}`
-}
-
-// fmt's refusal of a -g value, past the width too large. Mirrors Python's
-// `_goal_refusal`.
-function goalRefusal(text: string, value: bigint | null): string {
-  const reason = value === null ? '' : `: ${EOVERFLOW_REASON}`
-  return `fmt: invalid width: '${quoteText(text)}'${reason}`
-}
-
-function parseFlags(bag: Record<string, FlagValue>): FmtFlags {
+/**
+ * fmt's options, -w and -g read by mirage-rs before any operand is resolved:
+ * the flags, or fmt's refusal of a width. Mirrors Python's `parse_flags`.
+ */
+export function parseFlags(bag: Record<string, FlagValue>): FmtFlags | IOResult {
   const fl = new FlagView(bag, specOf('fmt'))
-  // GNU 9.7 takes -w as a decimal from 0 to 2500, then -g as one from 0 to
-  // that width.
-  const width = fl.asNumber('width', unsignedDecimal, widthRefusal, {
-    low: 0n,
-    high: BigInt(WIDEST),
-  })
-  const goal = fl.asNumber('goal', unsignedDecimal, goalRefusal, {
-    low: 0n,
-    high: width ?? BigInt(DEFAULT_WIDTH),
-  })
+  let values
+  try {
+    values = scan('fmt', fl.texts('width', 'goal'))
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  const { width, goal } = values
   return {
-    width: width === undefined ? null : Number(width),
-    goal: goal === undefined ? null : Number(goal),
+    width: typeof width === 'number' ? width : null,
+    goal: typeof goal === 'number' ? goal : null,
     prefix: fl.asStr('prefix') ?? null,
     splitOnly: fl.asBool('split_only'),
     tagged: fl.asBool('tagged_paragraph'),
@@ -78,12 +62,12 @@ function parseFlags(bag: Record<string, FlagValue>): FmtFlags {
 
 // Each operand is reflowed on its own. Mirrors Python's fmt_generic.
 export function fmtGeneric(
+  parsed: FmtFlags,
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
   stream = stdinStream(stream, ctx.stdin)
-  const parsed = parseFlags(ctx.flags)
   const config = {
     width: parsed.width,
     goal: parsed.goal,

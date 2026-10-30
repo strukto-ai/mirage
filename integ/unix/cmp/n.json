@@ -209,6 +209,41 @@
       "flags": [
         "n"
       ]
+    },
+    {
+      "id": "cmp_counts_refuse_in_typed_order_before_any_file",
+      "seq": 19990127,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cmp -n 1 -l -s -n x /data/nope /data/gone",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "cmp: options -l and -s are incompatible\ncmp: Try 'cmp --help' for more information.\n"
+      }
     }
   ]
 }

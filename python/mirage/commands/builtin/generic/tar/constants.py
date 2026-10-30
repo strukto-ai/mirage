@@ -16,8 +16,6 @@ NO_MODE = (
     "'--test-label' options"
 )
 MULTIPLE_ARCHIVES = "tar: Multiple archive files require '-M' option"
-# A --strip-components value that is no count, named first.
-STRIP_COUNT = "tar: {}: Invalid number of elements"
 # GNU normalizes an empty operand to `.` before it stats it, says so, and
 # then still names the operand as typed when the stat fails (tar 1.35).
 EMPTY_MEMBER = "tar: Substituting `.' for empty member name"

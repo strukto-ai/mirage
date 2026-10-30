@@ -13,7 +13,7 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { FileType, type PathSpec } from '../../../types.ts'
-import { eisdir, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { eisdir, isEisdir, isFsError, strerrorOf } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 
 // The commands whose program files the executor reads before routing and
@@ -52,7 +52,7 @@ export const FILE_KEYS: Readonly<Record<string, string>> = {
  */
 export function programFileRefusal(name: string, path: PathSpec, err: unknown): [string, number] {
   const shown = path.rawPath !== '' ? path.rawPath : path.virtual
-  const strerror = fsStrerror(err) ?? ''
+  const strerror = strerrorOf(err)
   const readFailed = isEisdir(err)
   if (name === 'sed') return [`sed: couldn't open file ${shown}: ${strerror}\n`, 4]
   if (name === 'awk') {

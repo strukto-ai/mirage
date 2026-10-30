@@ -181,6 +181,16 @@ def _jq_view(*words: str) -> FlagView:
     )
 
 
+def test_texts_leave_out_a_switch_that_is_off():
+    fl = FlagView(
+        {"verbose": False, "quiet": True, "bytes": "4"}, spec=SPECS["cmp"]
+    )
+    assert fl.texts("verbose", "quiet", "bytes") == [
+        ("quiet", ""),
+        ("bytes", "4"),
+    ]
+
+
 def test_occurrences_read_operands_where_they_were_typed():
     fl = _jq_view("-c", ".", "--args", "a", "--jsonargs", "1")
     assert fl.occurrences("args", "jsonargs", OPERAND) == [

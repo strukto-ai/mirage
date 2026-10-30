@@ -51,7 +51,7 @@ const DEPTH_DEC = /^[+-]?[1-9][0-9]*$/
  * decimal, and a value outside `intmax_t` overflows. Surrounding whitespace
  * is not allowed.
  */
-export function parseDepth(text: string): number | null {
+export function parseDepth(text: string): bigint | null {
   const body = text.replace(/^[+-]/, '')
   let magnitude: bigint
   if (DEPTH_HEX.test(text)) magnitude = BigInt(`0x${body.slice(2)}`)
@@ -59,7 +59,7 @@ export function parseDepth(text: string): number | null {
   else if (DEPTH_DEC.test(text)) magnitude = BigInt(body)
   else return null
   const value = text.startsWith('-') ? -magnitude : magnitude
-  return value >= -INTMAX - 1n && value <= INTMAX ? Number(value) : null
+  return value >= -INTMAX - 1n && value <= INTMAX ? value : null
 }
 
 /** The parsed `du` command line. */
@@ -113,7 +113,7 @@ export function parseFlags(ctx: Context): DuFlags {
   const s = fl.asBool('s')
   const a = fl.asBool('a')
   const raw = fl.asStr('max_depth')
-  let maxDepth: number | null = null
+  let maxDepth: bigint | null = null
   if (typeof raw === 'string') {
     maxDepth = parseDepth(raw)
     if (maxDepth === null) {
@@ -127,7 +127,7 @@ export function parseFlags(ctx: Context): DuFlags {
   if (s && maxDepth !== null) {
     // GNU treats -s and --max-depth=0 as the same request, so it warns and
     // carries on; any other depth is a real conflict and exits 1.
-    if (maxDepth !== 0) {
+    if (maxDepth !== 0n) {
       throw new UsageError(
         `du: warning: summarizing conflicts with --max-depth=${String(maxDepth)}\n${usageHint('du')}`,
         1,
@@ -141,7 +141,7 @@ export function parseFlags(ctx: Context): DuFlags {
     h: fl.asBool('h'),
     c: fl.asBool('c'),
     S: fl.asBool('separate_dirs'),
-    maxDepth,
+    maxDepth: maxDepth === null ? null : Number(maxDepth),
     ...(warning === undefined ? {} : { warning }),
   }
 }

@@ -967,3 +967,14 @@ fn a_long_back_referenced_search_goes_on_across_drains() {
     );
     assert!(run.drains > 2, "{}", run.drains);
 }
+
+#[test]
+fn the_line_length_reads_as_atoi() {
+    let read = |raw: &[u8]| super::line_length(Some(raw));
+    assert_eq!(super::line_length(None), 70);
+    assert_eq!(
+        (read(b"  +12"), read(b"4294967297"), read(b"-3"), read(b"x")),
+        (12, 1, 0, 0)
+    );
+    assert_eq!((read(b"2147483648"), read(&[b'9'; 40])), (0, 0));
+}

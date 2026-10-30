@@ -268,7 +268,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "tar: x: Invalid number of elements\nTry 'tar --help' for more information.\n"
+        "stderr": "tar: x: Invalid number of elements\nTry 'tar --help' or 'tar --usage' for more information.\n"
       }
     },
     {

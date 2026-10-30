@@ -17,7 +17,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import (
     transfer_primitives,
 )
-from mirage.commands.builtin.generic.tar import tar_generic
+from mirage.commands.builtin.generic.tar import parse_flags, tar_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.archive_io import (
     is_dir_of,
@@ -40,6 +40,9 @@ async def tar(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths)
     dispatch = dispatch_of(ctx)
@@ -53,6 +56,7 @@ async def tar(
         # this mount's own walk: its planner walks this mount's tree.
         prim = transfer_primitives(dispatch)
         return await tar_generic(
+            parsed,
             resolved,
             list(texts),
             ctx,
@@ -63,6 +67,7 @@ async def tar(
             relay=True,
         )
     return await tar_generic(
+        parsed,
         resolved,
         list(texts),
         ctx,

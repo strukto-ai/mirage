@@ -1,6 +1,10 @@
 use serde::Deserialize;
 
-use crate::{Stream, StreamError, parse_config};
+use serde_json::Value as Json;
+
+use crate::number;
+use crate::scan::{Typed, Values, unknown};
+use crate::{Stream, StreamError, parse_config, quoted};
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const INVALID: &str = "base64: invalid input";
@@ -15,6 +19,26 @@ enum Config {
     Decode {
         ignore_garbage: bool,
     },
+}
+
+/// `-w` as GNU base64 9.7 reads each one typed: a whole signed decimal,
+/// refused below 0, and a width past `intmax_t` is no wrapping at all.
+pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
+    let mut values = Values::new();
+    for (name, raw) in options {
+        if name != "wrap" {
+            return Err(unknown("base64", name));
+        }
+        let Some(wrap) = number::signed_decimal(raw).filter(|&wrap| wrap >= 0) else {
+            let refused = format!("base64: invalid wrap size: '{}'", quoted(raw));
+            return Err(StreamError::refusal(refused.as_bytes(), 1));
+        };
+        let wrap = u64::try_from(wrap)
+            .ok()
+            .filter(|&wrap| wrap <= i64::MAX as u64);
+        values.insert(name.clone(), Json::from(wrap.unwrap_or(0)));
+    }
+    Ok(values)
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {

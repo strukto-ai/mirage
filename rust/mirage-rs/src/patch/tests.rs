@@ -10,7 +10,7 @@ fn seq(n: usize) -> String {
 
 fn patch(host: &mut Host, options: &str) -> (i32, String, String) {
     let defaults =
-        r#"{"strip": 0, "reverse": false, "forward": false, "file": null, "dry_run": false}"#;
+        r#"{"strip": "0", "reverse": false, "forward": false, "file": null, "dry_run": false}"#;
     let config = crate::config(defaults, options);
     let mut stream = crate::open("patch", config.as_bytes()).expect("opens");
     let status = host.drive(stream.as_mut());
@@ -28,7 +28,7 @@ fn file(host: &Host, name: &str) -> Option<String> {
 #[test]
 fn a_matching_patch_applies_quietly() {
     let mut host = Host::with(&[("poem.txt", POEM)], POEM_DIFF);
-    let (status, out, err) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, err) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(
         (status, out.as_str(), err.as_str()),
         (0, "patching file poem.txt\n", "")
@@ -112,7 +112,7 @@ fn a_patch_already_applied_is_skipped() {
     let dark = "roses are red\nviolets are dark\nsugar is sweet\n";
     let rejects = "--- poem.txt\n+++ poem.txt\n@@ -1,3 +1,3 @@\n roses are red\n-violets are blue\n+violets are dark\n sugar is sweet\n";
     let mut host = Host::with(&[("poem.txt", dark)], POEM_DIFF);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(status, 1);
     assert_eq!(
         out,
@@ -121,7 +121,7 @@ fn a_patch_already_applied_is_skipped() {
     assert_eq!(file(&host, "poem.txt.rej").as_deref(), Some(rejects));
     assert_eq!(file(&host, "poem.txt").as_deref(), Some(dark));
     let mut host = Host::with(&[("poem.txt", dark)], POEM_DIFF);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1, "forward": true}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1", "forward": true}"#);
     assert_eq!(status, 1);
     assert_eq!(
         out,
@@ -133,7 +133,7 @@ fn a_patch_already_applied_is_skipped() {
 fn reverse_undoes_and_refuses_a_patch_not_applied() {
     let dark = "roses are red\nviolets are dark\nsugar is sweet\n";
     let mut host = Host::with(&[("poem.txt", dark)], POEM_DIFF);
-    let (status, _, _) = patch(&mut host, r#"{"strip": 1, "reverse": true}"#);
+    let (status, _, _) = patch(&mut host, r#"{"strip": "1", "reverse": true}"#);
     assert_eq!(
         (status, file(&host, "poem.txt").as_deref()),
         (0, Some(POEM))
@@ -141,7 +141,7 @@ fn reverse_undoes_and_refuses_a_patch_not_applied() {
     let mut host = Host::with(&[("poem.txt", POEM)], POEM_DIFF);
     let (status, out, _) = patch(
         &mut host,
-        r#"{"strip": 1, "reverse": true, "forward": true}"#,
+        r#"{"strip": "1", "reverse": true, "forward": true}"#,
     );
     assert_eq!(status, 1);
     assert_eq!(
@@ -160,7 +160,7 @@ fn reverse_undoes_and_refuses_a_patch_not_applied() {
 fn reverse_swaps_the_reject_names() {
     let diff = "--- old/e.txt\t2020\n+++ new/e.txt\t2021\n@@ -1 +1 @@\n-y\n+z\n";
     let mut host = Host::with(&[("e.txt", "x\n")], diff);
-    let (status, _, _) = patch(&mut host, r#"{"strip": 1, "reverse": true}"#);
+    let (status, _, _) = patch(&mut host, r#"{"strip": "1", "reverse": true}"#);
     assert_eq!(status, 1);
     assert_eq!(
         file(&host, "e.txt.rej").as_deref(),
@@ -173,7 +173,7 @@ fn a_directory_is_refused_whole() {
     let diff = "--- a/sub\n+++ b/sub\n@@ -1 +1 @@\n-a\n+b\n";
     let mut host = Host::with(&[], diff);
     host.directories.push("sub".to_owned());
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(status, 1);
     assert_eq!(
         out,
@@ -210,13 +210,13 @@ fn a_link_is_refused_whole_even_by_a_deletion() {
 fn a_missing_file_is_made_only_by_a_patch_that_creates_it() {
     let diff = "--- /dev/null\n+++ b/d/new.txt\n@@ -0,0 +1,2 @@\n+one\n+two\n";
     let mut host = Host::with(&[], diff);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!((status, out.as_str()), (0, "patching file d/new.txt\n"));
     assert_eq!(file(&host, "d/new.txt").as_deref(), Some("one\ntwo\n"));
     assert_eq!(host.directories, ["d"]);
     let diff = "x\n--- a/gone.txt\n+++ b/gone.txt\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n";
     let mut host = Host::with(&[], diff);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(status, 1);
     assert_eq!(
         out,
@@ -230,7 +230,7 @@ fn a_patch_that_empties_a_file_deletes_it_and_the_directories_it_empties() {
     let diff = "--- a/d/e/f.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n";
     let mut host = Host::with(&[("d/e/f.txt", "a\n"), ("d/s.txt", "s\n")], diff);
     host.directories = vec!["d".to_owned(), "d/e".to_owned()];
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!((status, out.as_str()), (0, "patching file d/e/f.txt\n"));
     assert_eq!(host.directories, ["d"]);
     assert!(!host.files.contains_key("d/e/f.txt"));
@@ -331,7 +331,7 @@ fn a_dry_run_checks_each_file_and_writes_nothing() {
     ];
     for (diff, code, report) in cases {
         let mut host = Host::with(&[("poem.txt", POEM)], diff);
-        let (status, out, _) = patch(&mut host, r#"{"strip": 1, "dry_run": true}"#);
+        let (status, out, _) = patch(&mut host, r#"{"strip": "1", "dry_run": true}"#);
         assert_eq!((status, out.as_str()), (code, report), "{diff}");
         assert_eq!(host.files.len(), 1, "{diff}");
         assert_eq!(file(&host, "poem.txt").as_deref(), Some(POEM));
@@ -345,7 +345,7 @@ fn git_moves_read_their_diff_line_refuse_dangerous_names_and_keep_modes() {
     let differ =
         "diff --git a/src b/dst\nsimilarity index 100%\nrename from src\nrename to ../outside\n";
     let mut host = Host::with(&[("src", "hi\n")], differ);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(
         (status, out.as_str()),
         (0, "patching file dst (renamed from src)\n")
@@ -353,12 +353,12 @@ fn git_moves_read_their_diff_line_refuse_dangerous_names_and_keep_modes() {
     let doubled =
         "diff --git a/src b//abs/out\nsimilarity index 100%\ncopy from src\ncopy to /abs/out\n";
     let mut host = Host::with(&[("src", "hi\n")], doubled);
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(out, "patching file abs/out (copied from src)\n");
     let cannot = "Cannot rename file without two valid file names\n";
     let spaced = "diff --git a/x y b/z\nsimilarity index 100%\nrename from x y\nrename to z\n";
     let mut host = Host::with(&[("x y", "hi\n")], spaced);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(
         (status, out.as_str()),
         (1, cannot),
@@ -377,7 +377,7 @@ fn git_moves_read_their_diff_line_refuse_dangerous_names_and_keep_modes() {
     ] {
         let diff = format!("{header}rename from x\nrename to y\n{hunk}");
         let mut host = Host::with(&[("src", "hi\n"), ("../src", "hi\n")], &diff);
-        let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+        let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
         let expected = format!("{said}{cannot}1 out of 1 hunk ignored\n");
         assert_eq!((status, out.as_str()), (1, expected.as_str()), "{header}");
         assert_eq!(file(&host, "src").as_deref(), Some("hi\n"));
@@ -386,19 +386,19 @@ fn git_moves_read_their_diff_line_refuse_dangerous_names_and_keep_modes() {
         "diff --git a/gone b/dst\nsimilarity index 90%\nrename from gone\nrename to dst\n{hunk}"
     );
     let mut host = Host::with(&[], &missing);
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(out, format!("{cannot}1 out of 1 hunk ignored\n"));
 
     // The target keeps the source's mode, through the hunks after it too.
     let rename = "diff --git a/old b/new\nsimilarity index 100%\nrename from old\nrename to new\n";
     let mut host = Host::with(&[("old", "x\n")], rename);
     host.modes.insert("old".into(), 0o755);
-    patch(&mut host, r#"{"strip": 1}"#);
+    patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(host.modes.get("new"), Some(&0o755));
     let copy = "diff --git a/old b/new\nsimilarity index 90%\ncopy from old\ncopy to new\n--- a/old\n+++ b/new\n@@ -1 +1 @@\n-x\n+y\n";
     let mut host = Host::with(&[("old", "x\n")], copy);
     host.modes.insert("old".into(), 0o751);
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(out, "patching file new (copied from old)\n");
     assert_eq!(host.modes.get("new"), Some(&0o751));
     assert_eq!(file(&host, "new").as_deref(), Some("y\n"));
@@ -406,7 +406,7 @@ fn git_moves_read_their_diff_line_refuse_dangerous_names_and_keep_modes() {
     // An ORIGFILE stands in for the source.
     let edited = copy.replace("copy", "rename");
     let mut host = Host::with(&[("old", "x\n"), ("target", "x\n")], &edited);
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1, "file": "target"}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1", "file": "target"}"#);
     assert_eq!(out, "patching file new (renamed from target)\n");
     assert_eq!(file(&host, "new").as_deref(), Some("y\n"));
     assert_eq!(file(&host, "old").as_deref(), Some("x\n"));
@@ -418,7 +418,7 @@ fn git_headers_move_files_set_modes_and_refuse_binary_patches() {
     let rename =
         "diff --git a/old b/renamed\nsimilarity index 100%\nrename from old\nrename to renamed\n";
     let mut host = Host::with(&[("old", "one\n")], rename);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(
         (status, out.as_str()),
         (0, "patching file renamed (renamed from old)\n")
@@ -427,16 +427,16 @@ fn git_headers_move_files_set_modes_and_refuse_binary_patches() {
     assert!(!host.files.contains_key("old"));
     // Taken as done once the target stands, the other way round too.
     host.stdin = rename.as_bytes().to_vec();
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(
         (status, out.as_str()),
         (0, "patching file renamed (already renamed from old)\n")
     );
     host.stdin = rename.as_bytes().to_vec();
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1, "reverse": true}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1", "reverse": true}"#);
     assert_eq!(out, "patching file old (renamed from renamed)\n");
     let mut host = Host::with(&[], rename);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(
         (status, out.as_str()),
         (1, "Cannot rename file without two valid file names\n")
@@ -444,7 +444,7 @@ fn git_headers_move_files_set_modes_and_refuse_binary_patches() {
 
     let edited = "diff --git a/old b/renamed\nsimilarity index 50%\nrename from old\nrename to renamed\nindex 1..2 100644\n--- a/old\n+++ b/renamed\n@@ -1 +1 @@\n-one\n+two\n";
     let mut host = Host::with(&[("old", "one\n")], edited);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(
         (status, out.as_str()),
         (0, "patching file renamed (renamed from old)\n")
@@ -453,21 +453,21 @@ fn git_headers_move_files_set_modes_and_refuse_binary_patches() {
 
     let copy = "diff --git a/old b/other\nsimilarity index 100%\ncopy from old\ncopy to other\n";
     let mut host = Host::with(&[("old", "one\n"), ("other", "x\n")], copy);
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(out, "patching file other (copied from old)\n");
     assert_eq!(file(&host, "other").as_deref(), Some("one\n"));
     assert_eq!(file(&host, "old").as_deref(), Some("one\n"));
 
     let modes = "diff --git a/f b/f\nold mode 100644\nnew mode 100755\n";
     let mut host = Host::with(&[("f", "a\n")], modes);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!((status, out.as_str()), (0, "patching file f\n"));
     assert_eq!(host.modes.get("f"), Some(&0o755));
     host.stdin = modes.as_bytes().to_vec();
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1, "dry_run": true}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1", "dry_run": true}"#);
     assert_eq!(out, "checking file f\n");
     let mut host = Host::with(&[], modes);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(status, 1);
     assert!(
         out.starts_with("can't find file to patch at input line 3\n"),
@@ -477,20 +477,20 @@ fn git_headers_move_files_set_modes_and_refuse_binary_patches() {
 
     let empty = "diff --git a/new b/new\nnew file mode 100755\nindex 0000000..e69de29\n";
     let mut host = Host::with(&[], empty);
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(out, "patching file new\n");
     assert_eq!(file(&host, "new").as_deref(), Some(""));
     assert_eq!(host.modes.get("new"), Some(&0o755));
     let gone = "diff --git a/f b/f\ndeleted file mode 100644\nindex e69de29..0000000\n";
     let mut host = Host::with(&[("f", "")], gone);
-    let (_, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (_, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(out, "patching file f\n");
     assert!(!host.files.contains_key("f"));
 
     let binary =
         "diff --git a/f b/f\nindex 1234567..89abcde\nGIT binary patch\nliteral 1\nIcmZ?d00001\n\n";
     let mut host = Host::with(&[("f", "a\n")], binary);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!(
         (status, out.as_str()),
         (1, "File f: git binary diffs are not supported.\n")
@@ -498,7 +498,30 @@ fn git_headers_move_files_set_modes_and_refuse_binary_patches() {
     let differ =
         "diff --git a/f b/f\nindex 1234567..89abcde 100644\nBinary files a/f and b/f differ\n";
     let mut host = Host::with(&[("f", "a\n")], differ);
-    let (status, out, _) = patch(&mut host, r#"{"strip": 1}"#);
+    let (status, out, _) = patch(&mut host, r#"{"strip": "1"}"#);
     assert_eq!((status, out.as_str()), (0, "patching file f\n"));
     assert_eq!(file(&host, "f").as_deref(), Some("a\n"));
+}
+
+#[test]
+fn a_strip_count_is_refused_in_patch_words_with_exit_2() {
+    let refused = |typed: &str| {
+        let config = serde_json::json!({ "strip": typed }).to_string();
+        crate::open("patch", config.as_bytes())
+            .err()
+            .map(|e| (e.message, e.status))
+    };
+    for (typed, said) in [
+        ("x", "patch: **** strip count x is not a number"),
+        ("3x", "patch: **** strip count 3x is not a number"),
+        (" 1", "patch: **** strip count ' 1' is not a number"),
+        (" +1", "patch: **** strip count ' +1' is not a number"),
+        ("", "patch: **** strip count '' is not a number"),
+        ("-2", "patch: **** strip count -2 is negative"),
+    ] {
+        assert_eq!(refused(typed), Some((said.to_owned(), 2)), "{typed:?}");
+    }
+    for typed in ["+0", "-0", "99999999999999999999999"] {
+        assert_eq!(refused(typed), None, "{typed:?}");
+    }
 }

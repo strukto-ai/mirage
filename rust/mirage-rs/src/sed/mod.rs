@@ -13,6 +13,7 @@ mod tests;
 
 use serde::Deserialize;
 
+use crate::number;
 use crate::request::Opening;
 use crate::{Stream, StreamError, parse_config};
 
@@ -51,9 +52,9 @@ struct Config {
     /// -i.
     #[serde(default)]
     in_place: bool,
-    /// -l.
-    #[serde(default = "line_length")]
-    line_length: i64,
+    /// -l as typed, which GNU reads with `atoi`; none is 70.
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    line_length: Option<Vec<u8>>,
     /// The inputs as `F` names them, each the operand at its place; none
     /// reads standard input.
     #[serde(default, deserialize_with = "crate::latin1_list")]
@@ -66,8 +67,10 @@ struct Config {
     cwd: Vec<u8>,
 }
 
-fn line_length() -> i64 {
-    70
+/// -l as GNU's `atoi` reads it: a long's low 32 bits as an int, so
+/// `4294967297` is 1, and a negative length never folds, as 0 does not.
+fn line_length(raw: Option<&[u8]>) -> i64 {
+    raw.map_or(70, |raw| i64::from(number::atoi(raw) as i32).max(0))
 }
 
 struct Sed {
@@ -108,7 +111,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
                 quiet: config.quiet,
                 separate: config.separate,
                 in_place: config.in_place,
-                line_length: config.line_length,
+                line_length: line_length(config.line_length.as_deref()),
                 utf8: config.utf8,
                 cwd: config.cwd,
             };

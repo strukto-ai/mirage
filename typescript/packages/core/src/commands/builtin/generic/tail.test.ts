@@ -27,7 +27,8 @@ import {
 import type { Context } from '../../config.ts'
 import { efbig, enoent } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
-import { followFlags, tailGeneric } from './tail.ts'
+import { followFlags, tailGeneric, type FollowFlags } from './tail.ts'
+import { UsageError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { Handed } from '../../../vfs/types.ts'
@@ -677,6 +678,12 @@ describe('tail -f', () => {
   })
 })
 
+// The flags tail follows by, or the stderr line its refusal prints.
+function said(fl: FlagView): FollowFlags | string {
+  const answer = followFlags(fl)
+  return answer instanceof UsageError ? answer.message + '\n' : answer
+}
+
 // Both of tail's own flag refusals name the refused word through gnulib's
 // quote(), so a byte outside 0x20-0x7e comes back escaped rather than
 // interpolated raw. Every row measured against GNU coreutils 9.4 under
@@ -689,7 +696,7 @@ const QUOTED_WORDS: [string, string][] = [
 
 describe('tail quotes the word it names', () => {
   it.each(QUOTED_WORDS)('escapes %j in the --follow clause', (value, escaped) => {
-    expect(followFlags(new FlagView({ follow: value }, specOf('tail')))).toBe(
+    expect(said(new FlagView({ follow: value }, specOf('tail')))).toBe(
       `tail: invalid argument '${escaped}' for '--follow'\n` +
         "Valid arguments are:\n  - 'descriptor'\n  - 'name'\n" +
         "Try 'tail --help' for more information.\n",
@@ -697,7 +704,7 @@ describe('tail quotes the word it names', () => {
   })
 
   it.each(QUOTED_WORDS)('escapes %j in the -s clause', (value, escaped) => {
-    expect(followFlags(new FlagView({ sleep_interval: `1${value}` }, specOf('tail')))).toBe(
+    expect(said(new FlagView({ sleep_interval: `1${value}` }, specOf('tail')))).toBe(
       `tail: invalid number of seconds: '1${escaped}'\n`,
     )
   })
@@ -711,13 +718,13 @@ describe('tail --follow accepts an unambiguous prefix', () => {
     ['d', false],
     ['n', true],
   ])('resolves --follow=%s', (value, byName) => {
-    const answer = followFlags(new FlagView({ follow: value }, specOf('tail')))
+    const answer = said(new FlagView({ follow: value }, specOf('tail')))
     expect(typeof answer === 'string' ? answer : answer.follow).toBe(true)
     expect(typeof answer === 'string' ? answer : answer.byName).toBe(byName)
   })
 
   it('still refuses an unmatched word', () => {
-    const answer = followFlags(new FlagView({ follow: 'nn' }, specOf('tail')))
+    const answer = said(new FlagView({ follow: 'nn' }, specOf('tail')))
     expect(typeof answer === 'string' ? answer.split('\n')[0] : answer).toBe(
       "tail: invalid argument 'nn' for '--follow'",
     )
@@ -729,7 +736,7 @@ describe('tail --follow accepts an unambiguous prefix', () => {
 // (`tail -s <v> f`). Mirrors test_tail.py.
 describe('tail -s reads exactly what strtod reads', () => {
   it.each(['\r1', '0x.8p1', 'infinity'])('accepts %j', (value) => {
-    const answer = followFlags(new FlagView({ sleep_interval: value }, specOf('tail')))
+    const answer = said(new FlagView({ sleep_interval: value }, specOf('tail')))
     expect(typeof answer).not.toBe('string')
   })
 
@@ -738,7 +745,7 @@ describe('tail -s reads exactly what strtod reads', () => {
   // python's `float()` strip trailing whitespace where `xstrtod` demands
   // the whole string be consumed.
   it.each(['1\r', '0xp1', 'nan'])('refuses %j', (value) => {
-    const answer = followFlags(new FlagView({ sleep_interval: value }, specOf('tail')))
+    const answer = said(new FlagView({ sleep_interval: value }, specOf('tail')))
     expect(typeof answer).toBe('string')
   })
 })

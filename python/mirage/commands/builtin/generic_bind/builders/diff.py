@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.diff import diff_generic
+from mirage.commands.builtin.generic.diff import diff_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.config import Context
@@ -27,9 +27,13 @@ async def diff(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths)
     return await diff_generic(
+        parsed,
         resolved,
         list(texts),
         ctx,

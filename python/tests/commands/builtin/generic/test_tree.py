@@ -90,6 +90,24 @@ async def test_tree_not_a_directory_matches_the_missing_path_shape():
     assert io.exit_code == 2
 
 
+@pytest.mark.asyncio
+async def test_tree_root_whose_entries_all_fail_to_stat_is_drawn_plainly():
+    """tree 2.2.1 on a readable directory without search permission
+    lists its names, stats none, and draws the root plainly with exit 0;
+    only a root it cannot open is marked.
+    """
+
+    async def readdir(p: PathSpec, _index=None) -> list[str]:
+        return ["/r/x", "/r/y"]
+
+    async def stat(p: PathSpec, index=None) -> FileStat:
+        raise PermissionError(p.virtual)
+
+    output, io = await tree([_spec("/r")], readdir=readdir, stat=stat)
+    assert output.decode().splitlines() == ["/r", "", "0 directories, 0 files"]
+    assert io.exit_code == 0
+
+
 def _dispatch_pair(parent: dict, child: dict, root: str):
     """The dispatcher's view: each path answered by its OWNING mount.
 

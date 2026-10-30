@@ -1,8 +1,16 @@
 use serde::Deserialize;
 
+use serde_json::{Value as Json, json};
+
+use crate::number;
+use crate::scan::{Typed, Values, unknown};
 use crate::{Stream, StreamError, latin1_list, parse_config};
 
 const INTMAX: u64 = i64::MAX as u64;
+/// The size letters diffutils 3.10's cmp takes after a count: no `b`, no
+/// lower-case `m`, and none past `Y`.
+const SIZE_LETTERS: &[u8] = b"kKMGTPEZY";
+const HINT: &[u8] = b"\ncmp: Try 'cmp --help' for more information.";
 const WINDOW: usize = 64 * 1024;
 
 #[derive(Deserialize)]
@@ -19,6 +27,69 @@ struct Config {
     verbose: bool,
     #[serde(default)]
     print_bytes: bool,
+}
+
+/// cmp's options as diffutils 3.10 reads them, in the order typed: `bytes`
+/// (-n) and `ignore_initial` (-i, SKIP or SKIP1:SKIP2), `verbose` (-l)
+/// and `silent` or `quiet` (-s), which refuse each other, then `skip`,
+/// the SKIP1 and SKIP2 operands. Each file keeps the larger of the skips
+/// it is given. Every refusal exits 2.
+pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
+    let mut limit = None;
+    let mut skip = [0u64; 2];
+    let mut operand = 0;
+    let (mut verbose, mut silent) = (false, false);
+    for (name, raw) in options {
+        match name.as_str() {
+            "bytes" => limit = Some(count(raw, "--bytes", raw)?),
+            "ignore_initial" => {
+                skip = match raw.iter().position(|&b| b == b':') {
+                    Some(at) => [
+                        count(&raw[..at], "--ignore-initial", raw)?,
+                        count(&raw[at + 1..], "--ignore-initial", &raw[at + 1..])?,
+                    ],
+                    None => [count(raw, "--ignore-initial", raw)?; 2],
+                };
+            }
+            "verbose" => verbose = true,
+            "silent" | "quiet" => silent = true,
+            "skip" if operand < 2 => {
+                let value = count(raw, "--ignore-initial", raw)?;
+                skip[operand] = skip[operand].max(value);
+                operand += 1;
+            }
+            _ => return Err(unknown("cmp", name)),
+        }
+        if verbose && silent {
+            let refused = [b"cmp: options -l and -s are incompatible".as_slice(), HINT].concat();
+            return Err(StreamError::refusal(&refused, 2));
+        }
+    }
+    let mut values = Values::new();
+    values.insert("limit".to_owned(), limit.map_or(Json::Null, Json::from));
+    values.insert("skip".to_owned(), json!(skip));
+    Ok(values)
+}
+
+/// One cmp count: C's base 0 after blanks and one `+`, then a size letter
+/// from cmp's set, at most `INTMAX`. A refusal names `shown`, the word GNU
+/// was reading: a bad SKIP1 names the whole SKIP1:SKIP2.
+fn count(raw: &[u8], option: &str, shown: &[u8]) -> Result<u64, StreamError> {
+    let parts = number::parts(raw, true);
+    let multiplier = match parts.rest {
+        [] => Some(1),
+        suffix => number::unit(suffix, SIZE_LETTERS),
+    };
+    let value = multiplier
+        .filter(|_| !parts.negative() && !parts.digits.is_empty())
+        .and_then(|multiplier| parts.value()?.checked_mul(multiplier))
+        .and_then(|value| u64::try_from(value).ok())
+        .filter(|&value| value <= INTMAX);
+    value.ok_or_else(|| {
+        let head = format!("cmp: invalid {option} value '");
+        let refused = [head.as_bytes(), shown, b"'", HINT].concat();
+        StreamError::refusal(&refused, 2)
+    })
 }
 
 /// GNU cmp over two inputs fed side by side: each is skipped, cut at -n,

@@ -267,6 +267,41 @@
       "flags": [
         "l"
       ]
+    },
+    {
+      "id": "b2sum_refuses_a_length_off_8_before_the_file",
+      "seq": 19990135,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "b2sum -l 12 /data/nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "b2sum: invalid length: '12'\nb2sum: length is not a multiple of 8\n"
+      }
     }
   ]
 }

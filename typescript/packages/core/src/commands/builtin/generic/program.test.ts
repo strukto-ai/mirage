@@ -4,7 +4,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { prepareProgram, readProgramFile } from './program.ts'
+import { prepareProgram, programFileRefusal, readProgramFile } from './program.ts'
 
 describe('program file routing', () => {
   it.each([
@@ -102,5 +102,22 @@ describe('a program file the command cannot read', () => {
     const read = readProgramFile(name, typed('dir'), dispatch)
     if (empty) expect((await read).byteLength).toBe(0)
     else await expect(read).rejects.toMatchObject({ code: 'EISDIR' })
+  })
+})
+
+describe('programFileRefusal', () => {
+  // Mirrors test_program.py.
+  it('names an error that has no POSIX phrase', () => {
+    const path = new PathSpec({
+      virtual: '/p.sed',
+      directory: '/',
+      vfsPath: '',
+      resolved: true,
+      rawPath: 'p.sed',
+    })
+    expect(programFileRefusal('sed', path, new Error('backend exploded'))).toEqual([
+      "sed: couldn't open file p.sed: backend exploded\n",
+      4,
+    ])
   })
 })

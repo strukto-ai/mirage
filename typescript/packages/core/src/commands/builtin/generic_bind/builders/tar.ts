@@ -16,7 +16,8 @@ import type { FileStat, PathSpec } from '../../../../types.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
-import { tarGeneric } from '../../generic/tar/tar.ts'
+import { parseFlags, tarGeneric } from '../../generic/tar/tar.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -24,6 +25,8 @@ import { isDirOf, relayIsDirOf, walkOf } from '../archive_io.ts'
 import { dispatchOf } from '../../utils/links.ts'
 
 const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const parsed = parseFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   const dispatch = dispatchOf(ctx)
@@ -35,6 +38,7 @@ const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
     // path routes to the mount that owns it. Only -c stays on the
     // accessor: its planner walks this mount's tree.
     return tarGeneric(
+      parsed,
       resolved,
       texts,
       ctx,
@@ -47,7 +51,7 @@ const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
       true,
     )
   }
-  return tarGeneric(resolved, texts, ctx, {
+  return tarGeneric(parsed, resolved, texts, ctx, {
     stream: files.read,
     stat: async (p: PathSpec): Promise<FileStat> => files.stat(p),
     walk,

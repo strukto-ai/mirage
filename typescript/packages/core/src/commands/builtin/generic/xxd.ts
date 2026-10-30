@@ -20,7 +20,6 @@ import { type FlagValue } from '../../spec/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import type { ByteSource } from '../../../io/types.ts'
-import { cInt, strtol } from '../utils/strtol.ts'
 import { singleChunk } from '../utils/operands.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -29,6 +28,7 @@ import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
 import { isStdin, resolveSource, stdinStream, streamOutput } from '../utils/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused, scan } from '../../../rs/scan.ts'
 import { openStream, runStream, streamOutputChunks } from '../../../rs/stream.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { extraOperandError, readFailExitCode } from '../../spec/usage.ts'
@@ -43,10 +43,6 @@ const OPEN_OUTPUT_EXIT = 3
 const CANNOT_SEEK_EXIT = 4
 const SEEK_BACK_EXIT = 5
 const CANNOT_SEEK = 'xxd: Sorry, cannot seek.\n'
-// The most octets vim's xxd puts on a line outside -p (its COLS), and its
-// refusal of a -c past that or under 1.
-const COLS_MAX = 256
-const COLS_REFUSAL = `xxd: invalid number of columns (max. ${String(COLS_MAX)}).`
 
 function dumpStream(
   source: AsyncIterable<Uint8Array>,
@@ -166,23 +162,6 @@ export interface XxdSeek {
   readonly offset: number
   readonly relative: boolean
   readonly back: boolean
-}
-
-/** The `-l` operand: null for none, and a negative count too, which xxd reads
- * as no limit; `0` (or no number) dumps nothing. Mirrors Python's
- * parse_limit. */
-export function parseLimit(raw: string | undefined): number | null {
-  if (raw === undefined) return null
-  const limit = Number(strtol(raw)[0])
-  return limit < 0 ? null : limit
-}
-
-/** The `-s` operand. Mirrors Python's parse_seek. */
-export function parseSeek(raw: string): XxdSeek {
-  const relative = raw.startsWith('+')
-  const rest = relative ? raw.slice(1) : raw
-  const back = rest.startsWith('-')
-  return { offset: Number(strtol(back ? rest.slice(1) : rest)[0]), relative, back }
 }
 
 /** `source` with its first `count` bytes read off, or null when it ends
@@ -356,7 +335,7 @@ async function writeOutput(
   return [null, new IOResult()]
 }
 
-interface XxdFlags {
+export interface XxdFlags {
   readonly reverse: boolean
   readonly plain: boolean
   readonly uppercase: boolean
@@ -366,47 +345,31 @@ interface XxdFlags {
   readonly limit: number | null
 }
 
-// A `-c` or `-g` count as xxd reads it: `(int)strtol(text, NULL, 0)`, so a
-// word with no number is 0 and only its leading number counts. Mirrors
-// Python's `_octets`.
-function octets(text: string): bigint {
-  return cInt(strtol(text)[0])
-}
-
-// xxd's one refusal of a -c count, whatever was typed. Mirrors Python's
-// `_cols_refusal`.
-function colsRefusal(): string {
-  return COLS_REFUSAL
-}
-
-// `-g` as xxd settles it against the line's `cols`: a negative count is the
-// default 2, and one under 1 or past `cols` is the whole line, which is how
-// `-g 0` turns grouping off. Mirrors Python's `_group_of`.
-function groupOf(text: string | undefined, cols: number): number {
-  const typed = text === undefined ? 2 : Number(octets(text))
-  const group = typed < 0 ? 2 : typed
-  return group < 1 || group > cols ? cols : group
-}
-
-function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
+/**
+ * xxd's counts read by mirage-rs before any operand is resolved: the flags, or
+ * xxd's refusal of a -c. Mirrors Python's `parse_flags`.
+ */
+export function parseFlags(bag: Record<string, FlagValue>): XxdFlags | IOResult {
   const fl = new FlagView(bag, specOf('xxd'))
-  const plain = fl.asBool('p')
-  const typedCols = fl.asNumber('c', octets, colsRefusal, {
-    low: 0n,
-    ...(plain ? {} : { high: BigInt(COLS_MAX) }),
-  })
-  // Only a dump outside -p caps the count. -c 0 is a dump's default 16, and
-  // puts all of a -p dump on one line, whose default is 30.
-  const typed = typedCols === undefined ? undefined : Number(typedCols)
-  const cols = plain ? (typed ?? 30) : typed === 0 ? 16 : (typed ?? 16)
+  let values
+  try {
+    values = scan('xxd', fl.texts('p', 'c', 'g', 's', 'args_l'))
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  const { cols, group, seek, limit } = values as unknown as Pick<
+    XxdFlags,
+    'cols' | 'group' | 'seek' | 'limit'
+  >
   return {
     reverse: fl.asBool('r'),
-    plain,
+    plain: fl.asBool('p'),
     uppercase: fl.asBool('u'),
     cols,
-    group: groupOf(fl.asText('g'), cols),
-    seek: parseSeek(fl.asStr('s') ?? ''),
-    limit: parseLimit(fl.asStr('args_l')),
+    group,
+    seek,
+    limit,
   }
 }
 
@@ -421,6 +384,7 @@ function parseFlags(bag: Record<string, FlagValue>): XxdFlags {
  * Python's xxd.
  */
 export async function xxdGeneric(
+  parsed: XxdFlags,
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
@@ -428,7 +392,6 @@ export async function xxdGeneric(
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
   const read = stdinStream(stream, ctx.stdin, true)
-  const parsed = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
   const { seek, limit, uppercase, plain } = parsed
   let source: AsyncIterable<Uint8Array>

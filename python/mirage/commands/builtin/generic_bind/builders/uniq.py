@@ -14,6 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.generic.uniq import uniq_flags
 from mirage.commands.builtin.generic.uniq import uniq_generic as generic_uniq
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
@@ -32,14 +33,17 @@ async def uniq(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    parsed = uniq_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     files = command_files(ctx, paths)
     paths = await resolve_or_empty(files, paths)
     return await generic_uniq(
+        parsed,
         paths,
         read_stream=files.read,
         write_bytes=(files.write if files.answers("write") else None),
         stdin=ctx.stdin,
-        flags=ctx.flags,
         stat=dir_aware_stat(files, ctx),
     )
 

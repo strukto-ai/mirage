@@ -19,38 +19,38 @@ import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource, stdinStat, stdinStream } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
-import { signedDecimal } from '../utils/strtol.ts'
-import { INTMAX } from '../constants.ts'
-import { quoteText } from '../../quote.ts'
 import { extraOperandError } from '../../spec/usage.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused, scan } from '../../../rs/scan.ts'
 import { runStream } from '../../../rs/stream.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 
 // GNU base64's line length when -w names none.
 const WRAP_WIDTH = 76
 
-interface Base64Flags {
+export interface Base64Flags {
   readonly decode: boolean
   readonly wrap: number | null
   readonly ignoreGarbage: boolean
 }
 
-// base64's refusal of a -w value that is no number or negative. Mirrors
-// Python's `_wrap_refusal`.
-function wrapRefusal(text: string): string {
-  return `base64: invalid wrap size: '${quoteText(text)}'`
-}
-
-function parseFlags(bag: Record<string, FlagValue>): Base64Flags {
+/**
+ * base64's options, -w read by mirage-rs before any operand is resolved: the
+ * flags, or base64's refusal of a -w. Mirrors Python's `parse_flags`.
+ */
+export function parseFlags(bag: Record<string, FlagValue>): Base64Flags | IOResult {
   const fl = new FlagView(bag, specOf('base64'))
-  // GNU 9.7 reads -w as a signed decimal and takes a width past intmax_t as no
-  // wrapping at all.
-  const wrap = fl.asNumber('wrap', signedDecimal, wrapRefusal, { low: 0n })
+  let wrap
+  try {
+    wrap = scan('base64', fl.texts('wrap')).wrap
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
   return {
     decode: fl.asBool('D') || fl.asBool('decode'),
-    wrap: wrap === undefined ? null : wrap > INTMAX ? 0 : Number(wrap),
+    wrap: typeof wrap === 'number' ? wrap : null,
     ignoreGarbage: fl.asBool('ignore_garbage'),
   }
 }
@@ -86,6 +86,7 @@ async function* base64DecodeStream(
 // file or directory`) instead of surfacing mid-drain. Mirrors Python's
 // base64_generic.
 export async function base64Generic(
+  parsed: Base64Flags,
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
@@ -96,16 +97,6 @@ export async function base64Generic(
   if (paths.length === 1) {
     const [, err] = await splitReadable(paths, stdinStat(stat), 'base64')
     if (err !== '') return [null, new IOResult({ exitCode: 1, stderr: encodeText(err) })]
-  }
-  const parsed = parseFlags(ctx.flags)
-  if (parsed.wrap !== null && parsed.wrap < 0) {
-    return [
-      null,
-      new IOResult({
-        exitCode: 1,
-        stderr: encodeText(`base64: invalid wrap size: '${String(parsed.wrap)}'\n`),
-      }),
-    ]
   }
   let source: AsyncIterable<Uint8Array>
   if (paths.length > 0) {
