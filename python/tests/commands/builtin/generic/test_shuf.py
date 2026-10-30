@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
+import logging
 
 import pytest
 
@@ -219,3 +220,41 @@ async def test_shuf_keeps_large_records_spilled_and_closes_spools(
     assert io.exit_code == 0
     assert total == (CHUNK_SIZE if early else 2 * (pieces * CHUNK_SIZE + 1))
     assert stores and all(store.closed for store in stores)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_at", [0, 1])
+@pytest.mark.parametrize("early", [False, True])
+async def test_shuf_closes_every_spool_after_a_cleanup_failure(
+    monkeypatch, caplog, failed_at, early
+):
+    closed = []
+    original = ByteSpool.close
+    first = OSError("first close failed")
+    later = OSError("later close failed")
+
+    async def failing_close(spool):
+        closed.append(spool)
+        await original(spool)
+        if len(closed) == failed_at + 1:
+            raise first
+        if failed_at == 0 and len(closed) == 3:
+            raise later
+
+    monkeypatch.setattr(ByteSpool, "close", failing_close)
+    caplog.set_level(logging.DEBUG, logger=command.__name__)
+    output, io = await shuf_generic(
+        [], ["a", "b"], read=_read_operand, echo=True, ids=SeededIdSource(5)
+    )
+    assert io.exit_code == 0
+    if early:
+        await close_quietly(output)
+    else:
+        with pytest.raises(OSError) as caught:
+            await _text(output)
+        assert caught.value is first
+    await close_quietly(output)
+    assert len(closed) == 3
+    assert all(spool.closed for spool in closed)
+    if failed_at == 0:
+        assert "later close failed" in caplog.text

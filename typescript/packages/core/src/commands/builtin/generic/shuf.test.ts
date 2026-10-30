@@ -738,3 +738,46 @@ it.each([
     spy.mockRestore()
   }
 })
+
+it.each([
+  [0, false],
+  [1, false],
+  [0, true],
+  [1, true],
+] as const)('closes every spool after cleanup failure %i (early %s)', async (failedAt, early) => {
+  const closed: ByteSpool[] = []
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const original = ByteSpool.prototype.close
+  const first = new Error('first close failed')
+  const later = new Error('later close failed')
+  const debug = vi.spyOn(console, 'debug').mockReturnValue(undefined)
+  const close = vi.spyOn(ByteSpool.prototype, 'close').mockImplementation(async function (
+    this: ByteSpool,
+  ) {
+    closed.push(this)
+    await original.call(this)
+    if (closed.length === failedAt + 1) throw first
+    if (failedAt === 0 && closed.length === 3) throw later
+  })
+  const ctx = {
+    flags: { echo: true },
+    stdin: null,
+    ids: new SeededIdSource(5),
+    cwd: PathSpec.fromStrPath('/'),
+    vfs: { kind: 'ram' } as never,
+  } as Context
+  try {
+    const result = await shufGeneric([], ['a', 'b'], ctx, stubStream, stubWrite)
+    if (result?.[0] == null) throw new Error('shuf declined')
+    expect(result[1].exitCode).toBe(0)
+    if (early) await closeQuietly(result[0])
+    else await expect(materialize(result[0])).rejects.toBe(first)
+    await closeQuietly(result[0])
+    expect(closed).toHaveLength(3)
+    expect(closed.every((spool) => spool.closed)).toBe(true)
+    if (failedAt === 0) expect(debug).toHaveBeenCalledWith('shuf cleanup failed:', later)
+  } finally {
+    close.mockRestore()
+    debug.mockRestore()
+  }
+})

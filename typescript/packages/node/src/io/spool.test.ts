@@ -7,6 +7,10 @@ import type { Context } from '@struktoai/mirage-core/commands/config'
 import { SeededIdSource } from '@struktoai/mirage-core/utils/ids'
 import './spool.ts'
 
+function unexpected(): never {
+  throw new Error('unexpected file operand')
+}
+
 it('replays spilled bytes through SDK and fetch upload bodies', async () => {
   const spool = new ByteSpool(0)
   const expected = new Uint8Array(70000).map((_, i) => i % 251)
@@ -54,9 +58,6 @@ it('streams repeated shuf records larger than the memory budget from disk', asyn
     cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
   } as Context
-  const unexpected = (): never => {
-    throw new Error('unexpected file operand')
-  }
   try {
     const result = await shufGeneric([], [], ctx, unexpected, unexpected)
     if (result === null) throw new Error('shuf declined')

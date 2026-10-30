@@ -1,3 +1,4 @@
+import logging
 import re
 from collections.abc import (
     Awaitable,
@@ -7,6 +8,7 @@ from collections.abc import (
 from contextlib import aclosing
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 
 from mirage.commands.builtin.constants import C_SPACE, EOVERFLOW_TEXT, UINTMAX
 from mirage.commands.builtin.utils.stream import stdin_stream
@@ -33,6 +35,8 @@ from mirage.rs.stream import (
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 from mirage.utils.ids import IdSource, SystemIdSource, random_below
 from mirage.utils.key_prefix import mount_key
+
+logger = logging.getLogger(__name__)
 
 # A `-o` reached a backend wired without a write op, which is a wiring
 # fault rather than anything the command line did wrong. The TypeScript
@@ -413,13 +417,22 @@ class ShufHost:
         if self.closed:
             return
         self.closed = True
-        try:
-            await close_stream(self.stream)
-        finally:
-            await self.errors.close()
-            for spool in self.spools.values():
-                await spool.close()
-            self.spools.clear()
+        failures: list[BaseException] = []
+        closers: tuple[Callable[[], Awaitable[None]], ...] = (
+            partial(close_stream, self.stream),
+            self.errors.close,
+            *(spool.close for spool in self.spools.values()),
+        )
+        for close in closers:
+            try:
+                await close()
+            except BaseException as exc:
+                failures.append(exc)
+        self.spools.clear()
+        if failures:
+            for failure in failures[1:]:
+                logger.debug("shuf cleanup failed", exc_info=failure)
+            raise failures[0]
 
 
 def _engine(

@@ -326,12 +326,22 @@ class ShufHost {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
-    try {
-      await closeStream(this.stream)
-    } finally {
-      await this.errors.close()
-      for (const spool of this.spools.values()) await spool.close()
-      this.spools.clear()
+    const failures: unknown[] = []
+    for (const close of [
+      () => closeStream(this.stream),
+      () => this.errors.close(),
+      ...[...this.spools.values()].map((spool) => () => spool.close()),
+    ]) {
+      try {
+        await close()
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    this.spools.clear()
+    if (failures.length > 0) {
+      for (const error of failures.slice(1)) console.debug('shuf cleanup failed:', error)
+      throw failures[0]
     }
   }
 }
