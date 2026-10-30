@@ -149,6 +149,11 @@ async def write(
                                 if len(pending) >= STREAM_BATCH_BYTES:
                                     await write_pending()
                         size += len(chunk)
+                async with lock:
+                    with disk_errors(path_spec.virtual):
+                        if failed:
+                            raise await timer_failure()
+                        await write_pending()
             except BaseException as exc:
                 if (
                     isinstance(exc, asyncio.CancelledError)
@@ -167,11 +172,6 @@ async def write(
                     except OSError as exc:
                         logger.debug("streamed write lost its tail: %s", exc)
                 raise
-            async with lock:
-                with disk_errors(path_spec.virtual):
-                    if failed:
-                        raise await timer_failure()
-                    await write_pending()
         finally:
             if flushing is not None:
                 flushing.cancel()
