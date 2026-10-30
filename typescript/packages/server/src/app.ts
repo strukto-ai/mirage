@@ -117,7 +117,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   })
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   app.addHook('onRequest', (request, reply, done) => {
-    const { host, origin } = request.headers
+    const { host, origin, 'sec-fetch-site': fetchSite } = request.headers
     if (!isHostAllowed(host, allowedHosts)) {
       console.warn(
         `rejecting request from ${request.ip}: Host=${JSON.stringify(host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
@@ -125,8 +125,6 @@ export function buildApp(options: BuildAppOptions = {}) {
       void reply.code(400).send({ detail: 'Invalid host header' })
       return
     }
-    const site = request.headers['sec-fetch-site']
-    const fetchSite = Array.isArray(site) ? site.join(', ') : site
     if (isCrossOrigin(host, origin, fetchSite)) {
       console.warn(
         `rejecting request from ${request.ip}: Origin=${JSON.stringify(origin)} Sec-Fetch-Site=${JSON.stringify(fetchSite)} is not Host=${JSON.stringify(host)}`,

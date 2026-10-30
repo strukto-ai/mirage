@@ -205,8 +205,9 @@ def build_app(
             ``Host`` header. ``None`` (default) reads
             ``$MIRAGE_ALLOWED_HOSTS`` (CSV) or falls back to
             loopback-only (``127.0.0.1``, ``localhost``, ``::1``).
-            Pass ``["*"]`` to disable enforcement (only safe behind
-            a trusted reverse proxy).
+            Pass ``["*"]`` to skip the Host comparison (only safe
+            behind a trusted reverse proxy). Browser requests from
+            another origin are refused either way.
         auth_config (AuthConfig | None): bearer/JWT auth config.
             ``None`` (default) resolves from ``MIRAGE_AUTH_MODE`` env
             and the mode-specific ``MIRAGE_*`` env vars.

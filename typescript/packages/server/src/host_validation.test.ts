@@ -97,6 +97,7 @@ describe('isHostAllowed: malformed Host headers fail closed', () => {
 describe('isCrossOrigin', () => {
   it('refuses other fetch sites', () => {
     expect(isCrossOrigin('127.0.0.1:8765', undefined, 'cross-site')).toBe(true)
+    expect(isCrossOrigin('127.0.0.1:8765', 'https://evil.example', 'same-origin')).toBe(true)
     expect(isCrossOrigin('localhost:8765', undefined, 'same-site')).toBe(true)
   })
 
@@ -122,6 +123,7 @@ describe('isCrossOrigin', () => {
     expect(isCrossOrigin('127.0.0.1:8765', 'http://127.0.0.1:8765', undefined)).toBe(false)
     expect(isCrossOrigin('[::1]:8765', 'http://[::1]:8765', undefined)).toBe(false)
     expect(isCrossOrigin('Localhost:8765', 'http://localhost:8765', undefined)).toBe(false)
+    expect(isCrossOrigin('localhost:8765', 'http://LOCALHOST:8765', undefined)).toBe(false)
     expect(isCrossOrigin('mirage.example.com', 'https://mirage.example.com', 'same-origin')).toBe(
       false,
     )
@@ -229,7 +231,7 @@ describe('buildApp host header enforcement', () => {
     }
   })
 
-  it('disables enforcement when allowedHosts contains "*"', async () => {
+  it('skips the Host check when allowedHosts contains "*"', async () => {
     const app = buildApp({ allowedHosts: ['*'] })
     try {
       const res = await app.inject({

@@ -88,6 +88,12 @@ def test_is_host_allowed_accepts_loopback():
 
 def test_is_cross_origin_refuses_other_fetch_sites():
     assert is_cross_origin("127.0.0.1:8765", None, "cross-site") is True
+    assert (
+        is_cross_origin(
+            "127.0.0.1:8765", "https://evil.example", "same-origin"
+        )
+        is True
+    )
     assert is_cross_origin("localhost:8765", None, "same-site") is True
 
 
@@ -113,6 +119,7 @@ def test_is_cross_origin_admits_its_own_origin():
         ("127.0.0.1:8765", "http://127.0.0.1:8765", None),
         ("[::1]:8765", "http://[::1]:8765", None),
         ("Localhost:8765", "http://localhost:8765", None),
+        ("localhost:8765", "http://LOCALHOST:8765", None),
         ("mirage.example.com", "https://mirage.example.com", "same-origin"),
     ):
         assert is_cross_origin(host, origin, site) is False, origin
@@ -227,7 +234,7 @@ async def test_env_override_extends_allowlist(monkeypatch):
 
 @pytest.mark.no_host_override
 @pytest.mark.asyncio
-async def test_explicit_wildcard_disables_enforcement(monkeypatch):
+async def test_explicit_wildcard_skips_host_check(monkeypatch):
     monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
     app = build_app(idle_grace_seconds=10.0, allowed_hosts=["*"])
     transport = ASGITransport(app=app)
