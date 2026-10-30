@@ -67,8 +67,12 @@ function optionalMethod(
   return match.word
 }
 
-function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
+function parseFlags(bag: Record<string, FlagValue>, operands: readonly string[]): UniqFlags {
   const fl = new FlagView(bag, specOf('uniq'))
+  const typed = fl.texts(OPERAND, 'skip_fields', 'skip_chars', 'check_chars')
+  if (typed.every(([name]) => name !== OPERAND)) {
+    typed.push(...operands.map((word): [string, string] => [OPERAND, word]))
+  }
   const count = fl.asBool('count')
   const duplicatesOnly = fl.asBool('repeated')
   const uniqueOnly = fl.asBool('unique')
@@ -88,7 +92,7 @@ function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
     count,
     duplicatesOnly,
     uniqueOnly,
-    typed: fl.texts(OPERAND, 'skip_fields', 'skip_chars', 'check_chars'),
+    typed,
     ignoreCase: fl.asBool('ignore_case'),
     allRepeated,
     group,
@@ -117,10 +121,13 @@ function conflict(parsed: UniqFlags): string | null {
  * carry each operand's glob spread over its matches. Mirrors Python's
  * `uniq_flags`.
  */
-export function uniqFlags(bag: Record<string, FlagValue>): UniqFlags | IOResult {
+export function uniqFlags(
+  bag: Record<string, FlagValue>,
+  operands: readonly string[] = [],
+): UniqFlags | IOResult {
   let parsed: UniqFlags
   try {
-    parsed = parseFlags(bag)
+    parsed = parseFlags(bag, operands)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })

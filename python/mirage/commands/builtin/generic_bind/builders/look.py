@@ -55,7 +55,7 @@ async def look(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
-    words = [*texts, *(path.raw_path for path in resolved)]
+    words = [*texts, *(path.raw_path for path in resolved)] if texts else []
     config: dict[str, JsonValue] = {
         "operands": [byte_view(word) for word in words],
         "fold": FlagView(ctx.flags, spec=SPECS["look"]).as_bool("f"),

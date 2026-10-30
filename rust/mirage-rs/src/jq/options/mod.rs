@@ -160,6 +160,9 @@ struct Reading {
     at: usize,
     finished: bool,
     out: Vec<u8>,
+    /// What the scanner wrote so far, its frames read as they arrive;
+    /// `None` for the decoder, whose output is the text itself.
+    documents: Option<Documents>,
     purpose: Purpose,
 }
 
@@ -167,6 +170,7 @@ impl Reading {
     fn new(
         engine: Result<Box<dyn Stream>, StreamError>,
         bytes: Vec<u8>,
+        documents: Option<Documents>,
         purpose: Purpose,
     ) -> Result<Self, StreamError> {
         Ok(Self {
@@ -175,18 +179,24 @@ impl Reading {
             at: 0,
             finished: false,
             out: Vec::new(),
+            documents,
             purpose,
         })
     }
 
     /// jq's scanner, writing each document as the text it was typed as.
     fn scan(bytes: Vec<u8>, purpose: Purpose) -> Result<Self, StreamError> {
-        Self::new(super::parse::open(b"{}"), bytes, purpose)
+        Self::new(
+            super::parse::open(b"{}"),
+            bytes,
+            Some(Documents::default()),
+            purpose,
+        )
     }
 
     /// jq's decoder, the text a `--rawfile` binds.
     fn decode(bytes: Vec<u8>, purpose: Purpose) -> Result<Self, StreamError> {
-        Self::new(super::unicode::open_decode(b"{}"), bytes, purpose)
+        Self::new(super::unicode::open_decode(b"{}"), bytes, None, purpose)
     }
 
     /// One bounded step; true once every byte is through.
@@ -203,34 +213,59 @@ impl Reading {
         } else {
             return Ok(true);
         }
+        if let Some(documents) = &mut self.documents {
+            documents.take(&mut self.out)?;
+        }
         Ok(false)
     }
 }
 
-/// What the scanner wrote: each document's text, then the parse error
+/// What jq's scanner wrote: each document's text, then the parse error
 /// that stopped it, if one did.
-fn documents(frames: &[u8]) -> Result<(Vec<Vec<u8>>, Option<String>), StreamError> {
-    let mut texts = Vec::new();
-    let mut text = Vec::new();
-    let mut at = 0;
-    while at < frames.len() {
-        let size = frames
-            .get(at + 1..at + 5)
-            .and_then(|size| size.try_into().ok())
-            .map(|size: [u8; 4]| u32::from_le_bytes(size) as usize)
-            .ok_or_else(|| StreamError::new("jq: a scanner frame was cut short"))?;
-        let payload = frames
-            .get(at + 5..at + 5 + size)
-            .ok_or_else(|| StreamError::new("jq: a scanner frame was cut short"))?;
-        match frames[at] {
-            1 => text.extend_from_slice(payload),
-            2 => texts.push(std::mem::take(&mut text)),
-            3 => return Ok((texts, Some(String::from_utf8_lossy(payload).into_owned()))),
-            _ => return Err(StreamError::new("jq: unknown scanner frame")),
+#[derive(Default)]
+struct Documents {
+    texts: Vec<Vec<u8>>,
+    text: Vec<u8>,
+    failure: Option<String>,
+}
+
+impl Documents {
+    /// Read the whole frames at the front of `frames` and drop them,
+    /// leaving a frame the scanner has not finished writing.
+    fn take(&mut self, frames: &mut Vec<u8>) -> Result<(), StreamError> {
+        let mut at = 0;
+        while self.failure.is_none() {
+            let Some(size) = frames
+                .get(at + 1..at + 5)
+                .and_then(|size| size.try_into().ok())
+                .map(|size: [u8; 4]| u32::from_le_bytes(size) as usize)
+            else {
+                break;
+            };
+            let Some(payload) = frames.get(at + 5..at + 5 + size) else {
+                break;
+            };
+            match frames[at] {
+                1 => self.text.extend_from_slice(payload),
+                2 => self.texts.push(std::mem::take(&mut self.text)),
+                3 => self.failure = Some(String::from_utf8_lossy(payload).into_owned()),
+                _ => return Err(StreamError::new("jq: unknown scanner frame")),
+            }
+            at += 5 + size;
         }
-        at += 5 + size;
+        frames.drain(..at);
+        Ok(())
     }
-    Ok((texts, None))
+
+    /// The documents once the scanner is done: a frame left unread was
+    /// cut short, unless a parse error came before it.
+    fn done(mut self, rest: &mut Vec<u8>) -> Result<Self, StreamError> {
+        self.take(rest)?;
+        if self.failure.is_none() && !rest.is_empty() {
+            return Err(StreamError::new("jq: a scanner frame was cut short"));
+        }
+        Ok(self)
+    }
 }
 
 /// A host string as JSON text: jq's `jv_string`, which takes bytes that
@@ -291,11 +326,9 @@ fn indent_width(word: &[u8]) -> Result<i8, StreamError> {
 /// The one JSON value an `--argjson` or `--jsonargs` word holds, as the
 /// text it was typed as, or jq's refusal when it holds none, several, or
 /// bad JSON.
-fn one_value(frames: &[u8], option: &str) -> Result<String, StreamError> {
-    match documents(frames)? {
-        (texts, None) if texts.len() == 1 => Ok(lossy(&texts[0])
-            .trim_matches([' ', '\t', '\r', '\n'])
-            .to_owned()),
+fn one_value(documents: Documents, option: &str) -> Result<String, StreamError> {
+    match (documents.texts.as_slice(), documents.failure) {
+        ([text], None) => Ok(lossy(text).trim_matches([' ', '\t', '\r', '\n']).to_owned()),
         _ => Err(usage(
             format!("invalid JSON text passed to {option}").as_bytes(),
         )),
@@ -304,9 +337,8 @@ fn one_value(frames: &[u8], option: &str) -> Result<String, StreamError> {
 
 /// The array of documents a `--slurpfile` holds, or jq's report of the
 /// parse error that stopped it.
-fn slurped(frames: &[u8], name: &[u8], shown: &[u8]) -> Result<String, StreamError> {
-    let (texts, failure) = documents(frames)?;
-    if let Some(message) = failure {
+fn slurped(documents: Documents, name: &[u8], shown: &[u8]) -> Result<String, StreamError> {
+    if let Some(message) = documents.failure {
         let line = [
             b"jq: Bad JSON in --slurpfile ".as_slice(),
             name,
@@ -318,7 +350,7 @@ fn slurped(frames: &[u8], name: &[u8], shown: &[u8]) -> Result<String, StreamErr
         .concat();
         return Err(StreamError::refusal(&line, ERROR_SYSTEM));
     }
-    let texts: Vec<String> = texts.iter().map(|text| lossy(text)).collect();
+    let texts: Vec<String> = documents.texts.iter().map(|text| lossy(text)).collect();
     Ok(format!("[{}]", texts.join(",")))
 }
 
@@ -477,19 +509,26 @@ impl Loop {
 
     /// The text a finished reading makes, or jq's refusal of it.
     fn finished(&mut self, reading: Reading) -> Result<(), StreamError> {
-        let Reading { out, purpose, .. } = reading;
-        let text = match &purpose {
-            Purpose::Bind {
-                binding: Binding::RawFile,
-                ..
-            } => string_text(&out),
-            Purpose::Bind {
-                binding: Binding::SlurpFile,
-                name,
-                shown,
-            } => slurped(&out, name, shown)?,
-            Purpose::Bind { binding, .. } => one_value(&out, binding.option())?,
-            Purpose::Positional => one_value(&out, "--jsonargs")?,
+        let Reading {
+            mut out,
+            documents,
+            purpose,
+            ..
+        } = reading;
+        let text = match (documents, &purpose) {
+            (None, _) => string_text(&out),
+            (Some(documents), purpose) => {
+                let documents = documents.done(&mut out)?;
+                match purpose {
+                    Purpose::Bind {
+                        binding: Binding::SlurpFile,
+                        name,
+                        shown,
+                    } => slurped(documents, name, shown)?,
+                    Purpose::Bind { binding, .. } => one_value(documents, binding.option())?,
+                    Purpose::Positional => one_value(documents, "--jsonargs")?,
+                }
+            }
         };
         match purpose {
             Purpose::Bind { name, .. } => self.named.push((name, text)),

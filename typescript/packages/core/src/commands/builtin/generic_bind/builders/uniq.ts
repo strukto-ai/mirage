@@ -24,12 +24,8 @@ const uniq: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const groups: PathSpec[][] = []
   for (const path of paths) groups.push(await files.resolveGlob([path]))
-  const parsed = uniqFlags(
-    spreadOperands(
-      ctx.flags,
-      groups.map((group) => group.map((path) => path.rawPath)),
-    ),
-  )
+  const words = groups.map((group) => group.map((path) => path.rawPath))
+  const parsed = uniqFlags(spreadOperands(ctx.flags, words), words.flat())
   if (parsed instanceof IOResult) return [null, parsed]
   return uniqGeneric(
     parsed,

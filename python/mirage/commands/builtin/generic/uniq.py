@@ -1,4 +1,10 @@
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import split_readable
@@ -59,8 +65,13 @@ def _method_word(option: str, value: str, allowed: tuple[str, ...]) -> str:
     return match.word
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
+def parse_flags(
+    flags: Mapping[str, FlagValue], operands: Sequence[str] = ()
+) -> UniqFlags:
     fl = FlagView(flags, spec=SPECS["uniq"])
+    typed = fl.texts(OPERAND, "skip_fields", "skip_chars", "check_chars")
+    if all(name != OPERAND for name, _ in typed):
+        typed += [(OPERAND, word) for word in operands]
     raw_all = fl.raw("all_repeated")
     all_repeated: str | None = None
     if fl.as_bool("D") or raw_all is True:
@@ -79,9 +90,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
         count=fl.as_bool("count"),
         repeated=fl.as_bool("repeated"),
         unique=fl.as_bool("unique"),
-        typed=tuple(
-            fl.texts(OPERAND, "skip_fields", "skip_chars", "check_chars")
-        ),
+        typed=tuple(typed),
         ignore_case=fl.as_bool("ignore_case"),
         all_repeated=all_repeated,
         group=group,
@@ -110,19 +119,24 @@ def _conflict(parsed: UniqFlags) -> str | None:
     return None
 
 
-def uniq_flags(flags: Mapping[str, FlagValue]) -> UniqFlags | IOResult:
+def uniq_flags(
+    flags: Mapping[str, FlagValue], operands: Sequence[str] = ()
+) -> UniqFlags | IOResult:
     """uniq's options, its counts and operands refused by the engine in
     the order typed, before any operand is read.
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flags, each operand's
             glob spread over its matches.
+        operands (Sequence[str]): the operands as typed, glob matches in
+            place; a call whose flags carry no tape reads them after
+            every option.
 
     Returns:
         UniqFlags | IOResult: the flags, or uniq's refusal.
     """
     try:
-        parsed = parse_flags(flags)
+        parsed = parse_flags(flags, operands)
     except UsageError as exc:
         return IOResult(
             exit_code=exc.exit_code, stderr=encode_text(str(exc) + "\n")

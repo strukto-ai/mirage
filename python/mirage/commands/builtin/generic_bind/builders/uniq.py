@@ -35,10 +35,10 @@ async def uniq(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     groups = [await files.resolve_glob([path]) for path in paths]
+    words = [[path.raw_path for path in group] for group in groups]
     parsed = uniq_flags(
-        spread_operands(
-            ctx.flags, [[path.raw_path for path in group] for group in groups]
-        )
+        spread_operands(ctx.flags, words),
+        [word for group in words for word in group],
     )
     if isinstance(parsed, IOResult):
         return None, parsed

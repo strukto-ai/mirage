@@ -42,7 +42,7 @@ async function* matched(
 const look: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  const words = [...texts, ...resolved.map((path) => path.rawPath)]
+  const words = texts.length > 0 ? [...texts, ...resolved.map((path) => path.rawPath)] : []
   const config = {
     operands: words.map((word) => byteView(word)),
     fold: new FlagView(ctx.flags, specOf('look')).asBool('f'),
