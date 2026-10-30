@@ -726,7 +726,13 @@ export class Policies {
     for (const policy of policies.filter((p) => !(codedOnly && p instanceof PermissionsPolicy))) {
       if (policy[method] === undefined) continue
       if (!isSessionScoped(policy)) return true
-      if (await policy.wantsFor(method, sessionId)) return true
+      const before =
+        explaining() === DryRun.DECIDING || Array.isArray(explaining())
+          ? null
+          : this.decisions.facts(sessionId)
+      const wanted = await policy.wantsFor(method, sessionId)
+      if (before !== null) await this.decisions.assertCurrent(sessionId, null, before)
+      if (wanted) return true
     }
     return false
   }
