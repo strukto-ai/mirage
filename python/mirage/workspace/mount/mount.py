@@ -201,7 +201,8 @@ def _wrap_mount_streams(
 
 
 def _wrap_stream(result: Any, mount_id: str, activity: Activity) -> Any:
-    """Hold the host-I/O bypass around an op result that streams.
+    """Hold the host-I/O bypass, and the op's caller and egress, around an
+    op result that streams.
 
     An op that returns an async iterator has not run its body yet: the
     backend opens the file on the first ``__anext__``, after the frame
@@ -218,9 +219,16 @@ def _wrap_stream(result: Any, mount_id: str, activity: Activity) -> Any:
     """
     if hasattr(result, "__aiter__"):
         return activity.hold(
-            OutputStream(
-                with_host_io(with_mount_context(result, mount_id)),
-                functools.partial(close_quietly, result),
+            with_egress(
+                OutputStream(
+                    with_host_io(
+                        with_caller(
+                            with_mount_context(result, mount_id),
+                            current_caller(),
+                        )
+                    ),
+                    functools.partial(close_quietly, result),
+                )
             )
         )
     return result

@@ -452,6 +452,37 @@ describe('a workspace network rule', () => {
     }
   })
 
+  // A RAM mount whose follow asks a server between two lines, as a remote
+  // VFS's change stream polls for what is new.
+  class Following extends RAMVFS {
+    override follow(): Promise<AsyncIterable<Uint8Array> | null> {
+      const at = port
+      return Promise.resolve(
+        (async function* () {
+          yield new TextEncoder().encode('a\n')
+          await ask(at)
+          yield new TextEncoder().encode('b\n')
+        })(),
+      )
+    }
+  }
+
+  it('keeps a follow stream under its egress past the op', async () => {
+    const watch = new Watch()
+    const ws = new Workspace({ '/remote': [new Following(), MountMode.WRITE] as const })
+    ws.policies.add(watch)
+    try {
+      await ws.shell('echo x > /remote/f')
+      const stream = (await ws.dispatch('follow', '/remote/f', [1, 1])) as AsyncIterable<Uint8Array>
+      let got = ''
+      for await (const chunk of stream) got += new TextDecoder().decode(chunk)
+      expect(got).toBe('a\nb\n')
+    } finally {
+      await ws.close()
+    }
+    expect(watch.asked.map((ctx) => [ctx.mount, ctx.port])).toEqual([['/remote', port]])
+  })
+
   it('holds each session to its profile network besides the workspace one', async () => {
     const held = { allowed_domains: [`127.0.0.1:${String(port)}`] }
     const ws = new Workspace(

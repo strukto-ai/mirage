@@ -60,7 +60,7 @@ import type { Clock } from '../../utils/clock.ts'
 import { getExtension } from '../../utils/filetype.ts'
 import { withEgress } from '../../io/gateway.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
-import { closeQuietly, rechunk } from '../../io/stream.ts'
+import { OutputStream, closeQuietly, rechunk } from '../../io/stream.ts'
 import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
@@ -2274,15 +2274,17 @@ export class MountEntry {
         ...kwargs,
         ...(kwargs.index === undefined ? { index: this.index } : {}),
       }
-      return runWithMountContext(
-        () =>
-          this.runWithWriteRevisions(async () => {
-            const result = await this.callKeyed(name, scope, args, effectiveKwargs, access)
-            return result === null || result === undefined
-              ? null
-              : wrapStream(result, this.mountId, this.activity)
-          }),
-        this.mountId,
+      return runWithCaller({ ...currentCaller(), vfsMount: this.prefix }, () =>
+        runWithMountContext(
+          () =>
+            this.runWithWriteRevisions(async () => {
+              const result = await this.callKeyed(name, scope, args, effectiveKwargs, access)
+              return result === null || result === undefined
+                ? null
+                : wrapStream(result, this.mountId, this.activity)
+            }),
+          this.mountId,
+        ),
       )
     })
   }
@@ -2413,10 +2415,23 @@ export class MountEntry {
   }
 }
 
-/** Preserve a streaming operation's recording owner after its dispatch frame exits. */
+/**
+ * Preserve a streaming operation's recording owner, caller and egress after
+ * its dispatch frame exits.
+ */
 export function wrapStream(result: unknown, mountId: string, activity: Activity): unknown {
   if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
-    return activity.hold(withMountContext(result as AsyncIterable<Uint8Array>, mountId))
+    const kept = withCaller(
+      withMountContext(result as AsyncIterable<Uint8Array>, mountId),
+      currentCaller(),
+    )
+    return activity.hold(
+      withEgress(
+        new OutputStream(kept[Symbol.asyncIterator](), () =>
+          closeQuietly(result as AsyncIterable<Uint8Array>),
+        ),
+      ),
+    )
   }
   return result
 }

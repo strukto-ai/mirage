@@ -2395,22 +2395,26 @@ export class Dispatcher {
         return [await recorded(() => this.openStream(call, mount, scope, filler)), dst, fullArgs]
       }
       const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
-        mount.use(async () => {
-          const answer = await runWithMountContext(
-            () =>
-              mount.runWithWriteRevisions(async () => {
-                const pending = Promise.resolve(
-                  name === 'setattr'
-                    ? this.applySetattr(mount, scope, p, opKwargs)
-                    : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
-                )
-                onCall?.(pending)
-                return pending
-              }),
-            mount.mountId,
-          )
-          return wrapStream(answer, mount.mountId, mount.activity)
-        })
+        mount.use(async () =>
+          // On the mount, as Python's `_on_mount` binds an op: a connection
+          // the backend opens names the mount it serves.
+          runWithCaller({ ...currentCaller(), vfsMount: mount.prefix }, async () => {
+            const answer = await runWithMountContext(
+              () =>
+                mount.runWithWriteRevisions(async () => {
+                  const pending = Promise.resolve(
+                    name === 'setattr'
+                      ? this.applySetattr(mount, scope, p, opKwargs)
+                      : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
+                  )
+                  onCall?.(pending)
+                  return pending
+                }),
+              mount.mountId,
+            )
+            return wrapStream(answer, mount.mountId, mount.activity)
+          }),
+        )
       if (filler !== null) {
         const kept = await recorded(() =>
           filler.fill(
