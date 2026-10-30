@@ -8,8 +8,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any
 
-from mirage.commands.builtin.generic.sort import stream_config
-from mirage.commands.builtin.sort_keys import Key, KeyMods, SortConfig
+from mirage.commands.builtin.generic.sort import engine_config
 from mirage.commands.builtin.utils import formatting
 from mirage.commands.builtin.utils.identity import Identity, identity_of
 from mirage.commands.builtin.utils.links import (
@@ -45,6 +44,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkError, DotWalkLoop, FsCondition
 from mirage.io.types import IOResult
 from mirage.rs import open_stream
+from mirage.rs.scan import scan
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
@@ -688,20 +688,10 @@ async def link_targets(
 # broken by bytes as sort's last resort does (1,500 random directories
 # agreed), so the names go through mirage-rs's sort with one version key.
 # A run holds every name, so the sort writes one run and never merges.
-_VERSION_SORT: dict[str, JsonValue] = {
-    **stream_config(
-        SortConfig(
-            keys=(Key(1, 1, False, None, None, False, KeyMods(version=True)),),
-            field_sep=None,
-            reverse=False,
-            unique=False,
-            stable=False,
-        ),
-        zero_terminated=True,
-    ),
-    "mode": "sort",
-    "run_bytes": sys.maxsize,
-}
+def _version_sort() -> dict[str, JsonValue]:
+    typed = (("version_sort", ""), ("zero_terminated", ""))
+    config = engine_config(scan("sort", typed))
+    return {**config, "mode": "sort", "run_bytes": sys.maxsize}
 
 
 def sort_by_version(names: Sequence[str]) -> list[int]:
@@ -719,7 +709,7 @@ def sort_by_version(names: Sequence[str]) -> list[int]:
         raw = name.encode("utf-8", "surrogateescape")
         places.setdefault(raw, deque()).append(index)
         records += raw + b"\0"
-    stream = open_stream("sort", _VERSION_SORT)
+    stream = open_stream("sort", _version_sort())
     out = bytearray(stream.feed(bytes(records)))
     out += stream.finish()
     while stream.busy():

@@ -1,25 +1,16 @@
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import aclosing
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from enum import Enum
 
-from mirage.commands.builtin.sort_keys import (
-    KeyMods,
-    SortConfig,
-    build_config,
-    parse_keydef,
-    tab_byte,
-)
 from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.stream import (
     stdin_stream,
 )
-from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import word_refusal_error
-from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
@@ -28,17 +19,33 @@ from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs import StreamRefusal, open_stream, run_stream
+from mirage.rs.scan import refused, scan
 from mirage.rs.stream import OpenStream
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 from mirage.utils.quote import shell_quote
 
-# The --check words as GNU lists them back: `quiet` and `silent` map to
-# the same value, so they share one `  - ` line.
-CHECK_WORDS = (("quiet", "silent"), ("diagnose-first",))
-
-MULTIPLE_OUTPUTS = "sort: multiple output files specified"
-
-CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
+# The options sort's grammar in mirage-rs reads.
+GRAMMAR = (
+    "reverse",
+    "numeric_sort",
+    "general_numeric_sort",
+    "human_numeric_sort",
+    "version_sort",
+    "month_sort",
+    "ignore_case",
+    "dictionary_order",
+    "ignore_nonprinting",
+    "ignore_leading_blanks",
+    "unique",
+    "stable",
+    "zero_terminated",
+    "field_separator",
+    "key",
+    "output",
+    "c",
+    "C",
+    "check",
+)
 
 # The steps GNU sort names when a file fails it. GNU checks that every
 # input is readable before it reads any (`cannot read`), opens the
@@ -118,197 +125,82 @@ def _earliest(
 
 @dataclass(frozen=True, slots=True)
 class SortFlags:
-    reverse: bool = False
-    numeric: bool = False
-    unique: bool = False
-    fold_case: bool = False
-    key_defs: tuple[str, ...] = ()
-    field_separator: str | None = None
-    human_numeric: bool = False
-    version_sort: bool = False
-    month_sort: bool = False
-    ignore_blanks: bool = False
-    stable: bool = False
+    config: dict[str, JsonValue]
     check: bool = False
     check_quiet: bool = False
-    dictionary: bool = False
-    general_numeric: bool = False
-    ignore_nonprinting: bool = False
     merge: bool = False
     output: PathSpec | None = None
     zero_terminated: bool = False
 
 
-def _check_mode(raw: FlagValue, dest: str) -> str:
-    """The check mode one check option asks for, as GNU's letter.
+def _typed_options(
+    fl: FlagView, paths: list[PathSpec]
+) -> list[tuple[str, str]]:
+    """sort's options in the order typed, then its operands.
 
-    ``-c``, a bare ``--check`` and ``--check=diagnose-first`` are ``c``;
-    ``-C`` and ``--check=quiet`` (or ``silent``) are ``C``.
+    An output is the word typed, which GNU compares (STREQ), so
+    ``-o ./out -o out`` names two outputs though they are one file, and
+    a bare ``--check`` is ``-c``, apart from ``--check=``'s empty word.
 
     Args:
-        raw (FlagValue): one check option's value.
-        dest (str): ``c``, ``C`` or ``check``.
-
-    Raises:
-        UsageError: ``--check`` names no mode, which GNU refuses with
-            exit 1.
+        fl (FlagView): sort's flags.
+        paths (list[PathSpec]): the operands.
     """
-    if dest != "check":
-        return dest
-    if raw is True:
-        return "c"
-    word = str(raw)
-    match = match_word(word, CHECK_WORDS)
-    if not isinstance(match, WordMatch):
-        raise word_refusal_error(
-            "sort", "--check", word, CHECK_WORDS, 1, match.kind
-        )
-    # The canonical word of the ('quiet', 'silent') value is `quiet`, so
-    # `--check=s` and `--check=silent` both land here.
-    return "C" if match.word == "quiet" else "c"
+    outputs = iter(fl.as_paths("output"))
+    typed: list[tuple[str, str]] = []
+    for name, value in fl.occurrences(*GRAMMAR):
+        if name == "output":
+            path = next(outputs, None)
+            if path is not None:
+                typed.append((name, path.raw_path))
+        elif value is True:
+            typed.append(("c" if name == "check" else name, ""))
+        elif isinstance(value, str):
+            typed.append((name, value))
+    typed.extend((OPERAND, path.raw_path) for path in paths)
+    return typed
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> SortFlags:
-    """Read sort's flags once, refusing what GNU's option loop refuses.
+def engine_config(values: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
+    """The configuration a sort scan read, which every sort engine takes.
 
-    Each option is validated in its original scan order, including
-    interleaved accumulating options and repeated scalar check modes.
-    Output paths are compared as typed, in both languages.
+    Args:
+        values (Mapping[str, JsonValue]): what ``scan("sort", ...)`` read.
+    """
+    config = values.get("config")
+    return config if isinstance(config, dict) else {}
+
+
+def parse_flags(
+    flags: Mapping[str, FlagValue], paths: list[PathSpec]
+) -> SortFlags:
+    """Read sort's options and operands in mirage-rs, before any input.
 
     Args:
         flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
+        paths (list[PathSpec]): the operands.
 
     Raises:
-        UsageError: a refused option, exit 1 for a refused ``--check``
-            word and 2 for the rest.
-        UsageError: a ``-k`` that is not a KEYDEF.
+        StreamRefusal: what GNU sort refuses first, exit 1 for a refused
+            ``--check`` word and 2 for the rest.
     """
     fl = FlagView(flags, spec=SPECS["sort"])
-    mode: str | None = None
-    output: PathSpec | None = None
-    # Each -o is the next word typed, and GNU compares two by that word
-    # (STREQ), so `-o ./out -o out` names two outputs even though they
-    # are one file.
-    typed = iter(fl.as_paths("output"))
-    tab: int | None = None
-    for dest, value in fl.occurrences(
-        "key", "output", "c", "C", "check", "field_separator"
-    ):
-        if dest == "field_separator" and isinstance(value, str):
-            byte = tab_byte(value)
-            if tab is not None and byte != tab:
-                raise UsageError("sort: incompatible tabs")
-            tab = byte
-        elif dest == "key" and isinstance(value, str):
-            parse_keydef(value, KeyMods(), False)
-        elif dest == "output":
-            path = next(typed)
-            if output is not None and path.raw_path != output.raw_path:
-                raise UsageError(MULTIPLE_OUTPUTS)
-            output = path
-        elif dest == "check" or value is True:
-            letter = _check_mode(value, dest)
-            if mode is not None and letter != mode:
-                raise UsageError(CHECK_MODES_CONFLICT)
-            mode = letter
+    values = scan("sort", _typed_options(fl, paths))
+    outputs = fl.as_paths("output")
     return SortFlags(
-        reverse=fl.as_bool("reverse"),
-        numeric=fl.as_bool("numeric_sort"),
-        unique=fl.as_bool("unique"),
-        fold_case=fl.as_bool("ignore_case"),
-        key_defs=tuple(fl.as_list("key")),
-        field_separator=fl.as_str("field_separator"),
-        human_numeric=fl.as_bool("human_numeric_sort"),
-        version_sort=fl.as_bool("version_sort"),
-        month_sort=fl.as_bool("month_sort"),
-        ignore_blanks=fl.as_bool("ignore_leading_blanks"),
-        stable=fl.as_bool("stable"),
-        check=mode is not None,
-        check_quiet=mode == "C",
-        dictionary=fl.as_bool("dictionary_order"),
-        general_numeric=fl.as_bool("general_numeric_sort"),
-        ignore_nonprinting=fl.as_bool("ignore_nonprinting"),
+        config=engine_config(values),
+        check=values.get("check") is not None,
+        check_quiet=values.get("check") == "C",
         merge=fl.as_bool("merge"),
-        output=output,
+        output=outputs[-1] if outputs else None,
         zero_terminated=fl.as_bool("zero_terminated"),
     )
-
-
-def _config(parsed: SortFlags) -> SortConfig:
-    return build_config(
-        key_defs=list(parsed.key_defs),
-        field_sep=parsed.field_separator,
-        reverse=parsed.reverse,
-        numeric=parsed.numeric,
-        unique=parsed.unique,
-        fold_case=parsed.fold_case,
-        human_numeric=parsed.human_numeric,
-        version_sort=parsed.version_sort,
-        month_sort=parsed.month_sort,
-        ignore_blanks=parsed.ignore_blanks,
-        stable=parsed.stable,
-        general_numeric=parsed.general_numeric,
-        dictionary=parsed.dictionary,
-        ignore_nonprinting=parsed.ignore_nonprinting,
-    )
-
-
-def _refusal_of(exc: ValueError) -> IOResult:
-    if isinstance(exc, UsageError):
-        # Already GNU-worded and carrying its own code: GNU exits 1 on a
-        # refused word, so `--check=x` is 1 where sort's other usage
-        # errors are 2.
-        return IOResult(stderr=f"{exc}\n".encode(), exit_code=exc.exit_code)
-    return IOResult(stderr=f"sort: {exc}\n".encode(), exit_code=2)
-
-
-def operand_refusal(
-    paths: list[PathSpec], parsed: SortFlags
-) -> IOResult | None:
-    """What ``-c`` refuses in its operands, which GNU checks before reading.
-
-    A second operand outranks an ``-o``, and both name the check mode by
-    its own letter, so ``sort -C a b`` is ``not allowed with -C``.
-
-    Args:
-        paths (list[PathSpec]): the operands.
-        parsed (SortFlags): the parsed flags.
-    """
-    if not parsed.check:
-        return None
-    mode = "C" if parsed.check_quiet else "c"
-    if len(paths) > 1:
-        label = paths[1].raw_path
-        return IOResult(
-            stderr=(
-                f"sort: extra operand '{label}' not allowed with -{mode}\n"
-            ).encode(),
-            exit_code=2,
-        )
-    if parsed.output is not None:
-        return IOResult(
-            stderr=f"sort: options '-{mode}o' are incompatible\n".encode(),
-            exit_code=2,
-        )
-    return None
 
 
 def _label(path: PathSpec | None) -> str:
     if path is None:
         return "-"
     return path.raw_path
-
-
-def stream_config(
-    cfg: SortConfig, zero_terminated: bool
-) -> dict[str, JsonValue]:
-    """The mirage-rs sort configuration every mode shares.
-
-    Args:
-        cfg (SortConfig): the comparison.
-        zero_terminated (bool): ``-z``.
-    """
-    return {"compare": asdict(cfg), "zero_terminated": zero_terminated}
 
 
 # A run is sorted once its records reach SORT_RUN_BYTES, each counting its
@@ -325,7 +217,7 @@ async def _merge_spools(
 
     Args:
         runs (list[ByteSpool]): the runs, closed once merged.
-        config (Mapping[str, JsonValue]): ``stream_config``'s.
+        config (Mapping[str, JsonValue]): the engine's, as mirage-rs read it.
     """
     output = ByteSpool()
     readers = [chunks(run.stream()) for run in runs]
@@ -370,10 +262,9 @@ async def _external_records(
     read: PolymorphicReadFn,
     stdin: ByteSource | None,
     parsed: SortFlags,
-    cfg: SortConfig,
 ) -> ByteSpool | bytes:
     separator = record_separator(parsed.zero_terminated)
-    config = stream_config(cfg, parsed.zero_terminated)
+    config = parsed.config
     levels: list[list[ByteSpool]] = [[]]
     refused: tuple[InputStage, bytes] | None = None
     stream = stdin_stream(read, stdin)
@@ -494,9 +385,8 @@ async def _check_stream(
     source: ByteSource,
     path: PathSpec | None,
     parsed: SortFlags,
-    cfg: SortConfig,
 ) -> IOResult:
-    config = {**stream_config(cfg, parsed.zero_terminated), "mode": "check"}
+    config = {**parsed.config, "mode": "check"}
     try:
         async with aclosing(run_stream("sort", config, source)) as checked:
             async for _ in checked:
@@ -530,23 +420,12 @@ async def sort_generic(
     read: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
-    flags: Mapping[str, FlagValue] | None = None,
-    reverse: bool = False,
-    numeric: bool = False,
-    unique: bool = False,
-    fold_case: bool = False,
-    key_defs: list[str] | None = None,
-    field_separator: str | None = None,
-    human_numeric: bool = False,
-    version_sort: bool = False,
-    month_sort: bool = False,
-    ignore_blanks: bool = False,
-    stable: bool = False,
+    flags: Mapping[str, FlagValue],
 ) -> tuple[ByteSource | None, IOResult]:
     """GNU sort over the given inputs.
 
-    The refusals come in GNU's order: the option loop's, then with ``-c``
-    a second operand and an ``-o``, then the inputs, and last the output.
+    The refusals come in GNU's order: what mirage-rs refuses in the
+    options and the operands, then the inputs, and last the output.
     Deliberate divergence: GNU opens ``-o`` before it reads any input and
     this writes it once every input has been read, so when an input fails
     only at its stat or its read (a directory), GNU reports an unopenable
@@ -560,34 +439,12 @@ async def sort_generic(
         write_bytes (Callable | None): writes ``-o``'s file, or None where
             the backend cannot write.
         stdin (ByteSource | None): standard input.
-        flags (Mapping[str, FlagValue] | None): the dispatcher's flag bag;
-            None takes the keyword options instead.
+        flags (Mapping[str, FlagValue]): the dispatcher's flag bag.
     """
     try:
-        parsed = (
-            parse_flags(flags)
-            if flags is not None
-            else SortFlags(
-                reverse=reverse,
-                numeric=numeric,
-                unique=unique,
-                fold_case=fold_case,
-                key_defs=tuple(key_defs or ()),
-                field_separator=field_separator,
-                human_numeric=human_numeric,
-                version_sort=version_sort,
-                month_sort=month_sort,
-                ignore_blanks=ignore_blanks,
-                stable=stable,
-            )
-        )
-        cfg = _config(parsed)
-    except ValueError as exc:
-        return b"", _refusal_of(exc)
-
-    refusal = operand_refusal(paths, parsed)
-    if refusal is not None:
-        return b"", refusal
+        parsed = parse_flags(flags, paths)
+    except StreamRefusal as refusal:
+        return b"", refused(refusal)
     if parsed.check:
         path = paths[0] if paths else None
         source = (
@@ -595,8 +452,8 @@ async def sort_generic(
             if path is not None
             else stdin or b""
         )
-        return b"", await _check_stream(source, path, parsed, cfg)
-    ordered = await _external_records(paths, read, stdin, parsed, cfg)
+        return b"", await _check_stream(source, path, parsed)
+    ordered = await _external_records(paths, read, stdin, parsed)
     if isinstance(ordered, bytes):
         return b"", IOResult(stderr=ordered, exit_code=2)
 

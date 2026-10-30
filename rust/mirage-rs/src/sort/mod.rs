@@ -1,5 +1,6 @@
 mod key;
 mod number;
+pub(crate) mod options;
 mod version;
 
 use std::cmp::Ordering;

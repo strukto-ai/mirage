@@ -7,8 +7,8 @@ from mirage.commands.builtin.generic.sort import (
     parse_flags,
     sort_generic,
 )
-from mirage.commands.errors import UsageError
 from mirage.io.types import IOResult, materialize
+from mirage.rs import StreamRefusal
 from mirage.shell.descriptors import unreadable_stdin
 from mirage.types import PathSpec
 
@@ -30,11 +30,12 @@ async def _unused_read_bytes(_path: PathSpec) -> bytes:
     ],
 )
 def test_check_refusal_quotes_the_word(value, escaped):
-    with pytest.raises(UsageError) as exc:
-        parse_flags({"check": value})
-    assert str(exc.value).startswith(
+    with pytest.raises(StreamRefusal) as exc:
+        parse_flags({"check": value}, [])
+    assert exc.value.message.startswith(
         f"sort: invalid argument '{escaped}' for '--check'\n"
     )
+    assert exc.value.status == 1
 
 
 # GNU resolves an unambiguous prefix of one candidate, so
@@ -42,9 +43,22 @@ def test_check_refusal_quotes_the_word(value, escaped):
 # `quiet` and `silent` are one value, so its canonical word decides
 # whether the check is quiet.
 def test_check_accepts_an_unambiguous_prefix():
-    assert parse_flags({"check": "q"}).check_quiet
-    assert not parse_flags({"check": "d"}).check_quiet
-    assert parse_flags({"check": "d"}).check
+    assert parse_flags({"check": "q"}, []).check_quiet
+    assert not parse_flags({"check": "d"}, []).check_quiet
+    assert parse_flags({"check": "d"}, []).check
+
+
+# A bare --check is -c, and --check= names the empty word, which is a
+# prefix of both modes (coreutils 9.7: ambiguous, exit 1).
+def test_a_bare_check_is_c_and_an_empty_word_is_ambiguous():
+    parsed = parse_flags({"check": True}, [])
+    assert parsed.check and not parsed.check_quiet
+    with pytest.raises(StreamRefusal) as exc:
+        parse_flags({"check": ""}, [])
+    assert exc.value.message.startswith(
+        "sort: ambiguous argument '' for '--check'\n"
+    )
+    assert exc.value.status == 1
 
 
 def _spec(virtual: str, raw: str | None = None) -> PathSpec:
@@ -164,35 +178,41 @@ async def test_a_second_operand_outranks_the_output_and_names_the_mode():
     ],
 )
 def test_the_two_check_modes_refuse_to_mix(flags):
-    with pytest.raises(UsageError) as exc:
-        parse_flags(flags)
-    assert str(exc.value) == "sort: options '-cC' are incompatible"
-    assert exc.value.exit_code == 2
+    with pytest.raises(StreamRefusal) as exc:
+        parse_flags(flags, [])
+    assert exc.value.message == "sort: options '-cC' are incompatible"
+    assert exc.value.status == 2
 
 
 def test_one_mode_may_be_asked_for_twice():
-    assert parse_flags({"C": True, "check": "quiet"}).check_quiet
-    assert parse_flags({"c": True, "check": "diagnose-first"}).check
+    assert parse_flags({"C": True, "check": "quiet"}, []).check_quiet
+    assert parse_flags({"c": True, "check": "diagnose-first"}, []).check
 
 
-def test_two_outputs_are_refused_unless_they_name_one_file():
-    with pytest.raises(UsageError) as exc:
-        parse_flags({"output": [_spec("/data/p1"), _spec("/data/p2")]})
-    assert str(exc.value) == "sort: multiple output files specified"
-    assert exc.value.exit_code == 2
-    parsed = parse_flags({"output": [_spec("/data/p1"), _spec("/data/p1")]})
+def test_two_outputs_are_refused_unless_typed_as_one_word():
+    with pytest.raises(StreamRefusal) as exc:
+        parse_flags({"output": [_spec("/data/p1"), _spec("/data/p2")]}, [])
+    assert exc.value.message == "sort: multiple output files specified"
+    assert exc.value.status == 2
+    with pytest.raises(StreamRefusal):
+        parse_flags(
+            {"output": [_spec("/data/o", "./o"), _spec("/data/o", "o")]}, []
+        )
+    parsed = parse_flags(
+        {"output": [_spec("/data/p1"), _spec("/data/p1")]}, []
+    )
     assert parsed.output is not None and parsed.output.virtual == "/data/p1"
 
 
 def test_the_first_bad_option_on_the_line_is_the_one_refused():
     outputs = [_spec("/data/p1"), _spec("/data/p2")]
-    with pytest.raises(UsageError):
-        parse_flags({"output": outputs, "key": ["0"]})
-    with pytest.raises(UsageError):
-        parse_flags({"key": ["0"], "output": outputs})
-    with pytest.raises(UsageError) as exc:
-        parse_flags({"c": True, "C": True, "output": outputs})
-    assert "'-cC'" in str(exc.value)
+    with pytest.raises(StreamRefusal):
+        parse_flags({"output": outputs, "key": ["0"]}, [])
+    with pytest.raises(StreamRefusal):
+        parse_flags({"key": ["0"], "output": outputs}, [])
+    with pytest.raises(StreamRefusal) as exc:
+        parse_flags({"c": True, "C": True, "output": outputs}, [])
+    assert "'-cC'" in exc.value.message
 
 
 _MIXED = {"numeric_sort": True, "general_numeric_sort": True}

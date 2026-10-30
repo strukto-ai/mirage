@@ -28,24 +28,17 @@ import { posixPhrase } from '../../../errors/posix.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { shellQuote } from '../../../utils/quote.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { UsageError } from '../../errors.ts'
-import {
-  buildConfig,
-  parseKeydef,
-  tabByte,
-  type KeyMods,
-  type SortConfig,
-  type SortGlobals,
-} from '../sort_keys.ts'
-import { wordRefusalError } from '../../spec/usage.ts'
-import { matchWord } from '../../spec/word_choice.ts'
+import { refused, scan } from '../../../rs/scan.ts'
+import { OPERAND } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { type FlagValue, type ParsedFlagValue } from '../../spec/types.ts'
+import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 
 const ENC = new TextEncoder()
 
-export interface SortFlags extends SortGlobals {
+export interface SortFlags {
+  /** The engine's configuration, as mirage-rs read it. */
+  config: Record<string, JsonValue>
   check: boolean
   checkQuiet: boolean
   merge: boolean
@@ -53,13 +46,28 @@ export interface SortFlags extends SortGlobals {
   zeroTerminated: boolean
 }
 
-// The --check words as GNU lists them back: `quiet` and `silent` map to the
-// same value, so they share one `  - ` line.
-const CHECK_WORDS: readonly (readonly string[])[] = [['quiet', 'silent'], ['diagnose-first']]
-
-export const MULTIPLE_OUTPUTS = 'sort: multiple output files specified'
-
-export const CHECK_MODES_CONFLICT = "sort: options '-cC' are incompatible"
+// The options sort's grammar in mirage-rs reads.
+const GRAMMAR = [
+  'reverse',
+  'numeric_sort',
+  'general_numeric_sort',
+  'human_numeric_sort',
+  'version_sort',
+  'month_sort',
+  'ignore_case',
+  'dictionary_order',
+  'ignore_nonprinting',
+  'ignore_leading_blanks',
+  'unique',
+  'stable',
+  'zero_terminated',
+  'field_separator',
+  'key',
+  'output',
+  'c',
+  'C',
+  'check',
+] as const
 
 // The steps GNU sort names when a file fails it. GNU checks that every input
 // is readable before it reads any (`cannot read`), opens the output and the
@@ -69,15 +77,6 @@ export const CANNOT_READ = 'cannot read'
 export const OPEN_FAILED = 'open failed'
 export const STAT_FAILED = 'stat failed'
 export const READ_FAILED = 'read failed'
-
-const NO_MODS: KeyMods = {
-  numeric: false,
-  human: false,
-  version: false,
-  month: false,
-  fold: false,
-  reverse: false,
-}
 
 // The step at which GNU sort first meets an input's failure, declared in
 // the order GNU takes the steps, so the value is also the precedence: sort
@@ -126,122 +125,62 @@ function earliest(
   return refused
 }
 
-// The check mode one check option asks for, as GNU's letter: `-c`, a bare
-// `--check` and `--check=diagnose-first` are `c`; `-C` and `--check=quiet`
-// (or `silent`) are `C`. A refused `--check` word throws its UsageError,
-// exit 1.
-function checkMode(raw: ParsedFlagValue, dest: string): string {
-  if (dest !== 'check') return dest
-  if (raw === true) return 'c'
-  const word = String(raw)
-  const match = matchWord(word, CHECK_WORDS)
-  if (!match.matched) throw wordRefusalError('sort', '--check', word, CHECK_WORDS, 1, match.kind)
-  // The canonical word of the ['quiet', 'silent'] value is `quiet`, so
-  // `--check=s` and `--check=silent` both land here.
-  return match.word === 'quiet' ? 'C' : 'c'
-}
-
-// Validate every occurrence in scan order, before reading any inputs.
-export function parseFlags(bag: Record<string, FlagValue>): SortFlags {
-  const fl = new FlagView(bag, specOf('sort'))
-  let mode: string | null = null
-  let output: PathSpec | null = null
-  // Each -o is the next word typed, and GNU compares two by that word
-  // (STREQ), so `-o ./out -o out` names two outputs even though they are one
-  // file. Mirrors sort.py.
-  const typed = fl.asPaths('output')
-  let next = 0
-  let tab: number | null = null
-  for (const [dest, value] of fl.occurrences(
-    'key',
-    'output',
-    'c',
-    'C',
-    'check',
-    'field_separator',
-  )) {
-    if (dest === 'field_separator' && typeof value === 'string') {
-      const byte = tabByte(value)
-      if (tab !== null && byte !== tab) throw new UsageError('sort: incompatible tabs')
-      tab = byte
-    } else if (dest === 'key' && typeof value === 'string') {
-      parseKeydef(value, NO_MODS, false)
-    } else if (dest === 'output') {
-      const path = typed[next]
-      next += 1
-      if (path === undefined) continue
-      if (output !== null && path.rawPath !== output.rawPath) {
-        throw new UsageError(MULTIPLE_OUTPUTS)
-      }
-      output = path
-    } else if (dest === 'check' || value === true) {
-      const letter = checkMode(value, dest)
-      if (mode !== null && letter !== mode) throw new UsageError(CHECK_MODES_CONFLICT)
-      mode = letter
+// sort's options in the order typed, then its operands. An output is the word
+// typed, which GNU compares (STREQ), so `-o ./out -o out` names two outputs
+// though they are one file, and a bare `--check` is `-c`, apart from
+// `--check=`'s empty word. Mirrors _typed_options in sort.py.
+function typedOptions(fl: FlagView, paths: readonly PathSpec[]): [string, string][] {
+  const outputs = fl.asPaths('output')[Symbol.iterator]()
+  const typed: [string, string][] = []
+  for (const [name, value] of fl.occurrences(...GRAMMAR)) {
+    if (name === 'output') {
+      const path = outputs.next()
+      if (path.done !== true) typed.push([name, path.value.rawPath])
+    } else if (value === true) {
+      typed.push([name === 'check' ? 'c' : name, ''])
+    } else if (typeof value === 'string') {
+      typed.push([name, value])
     }
   }
+  for (const path of paths) typed.push([OPERAND, path.rawPath])
+  return typed
+}
+
+/**
+ * The configuration a sort scan read, which every sort engine takes. Mirrors
+ * engine_config in sort.py.
+ */
+export function engineConfig(values: Record<string, JsonValue>): Record<string, JsonValue> {
+  const config = values.config
+  return typeof config === 'object' && config !== null && !Array.isArray(config) ? config : {}
+}
+
+/**
+ * Read sort's options and operands in mirage-rs, before any input. Throws
+ * StreamRefusal for what GNU sort refuses first, exit 1 for a refused
+ * `--check` word and 2 for the rest. Mirrors parse_flags in sort.py.
+ */
+export function parseFlags(bag: Record<string, FlagValue>, paths: readonly PathSpec[]): SortFlags {
+  const fl = new FlagView(bag, specOf('sort'))
+  const values = scan('sort', typedOptions(fl, paths))
+  const outputs = fl.asPaths('output')
   return {
-    reverse: fl.asBool('reverse'),
-    numeric: fl.asBool('numeric_sort'),
-    unique: fl.asBool('unique'),
-    foldCase: fl.asBool('ignore_case'),
-    keyDefs: fl.asList('key'),
-    fieldSep: fl.asStr('field_separator') ?? null,
-    humanNumeric: fl.asBool('human_numeric_sort'),
-    versionSort: fl.asBool('version_sort'),
-    monthSort: fl.asBool('month_sort'),
-    ignoreBlanks: fl.asBool('ignore_leading_blanks'),
-    stable: fl.asBool('stable'),
-    generalNumeric: fl.asBool('general_numeric_sort'),
-    dictionary: fl.asBool('dictionary_order'),
-    ignoreNonprinting: fl.asBool('ignore_nonprinting'),
-    check: mode !== null,
-    checkQuiet: mode === 'C',
+    config: engineConfig(values),
+    check: values.check !== null && values.check !== undefined,
+    checkQuiet: values.check === 'C',
     merge: fl.asBool('merge'),
-    output,
+    output: outputs[outputs.length - 1] ?? null,
     zeroTerminated: fl.asBool('zero_terminated'),
   }
-}
-
-function refusalOf(error: unknown): IOResult {
-  // Already GNU-worded and carrying its own code: GNU exits 1 on a refused
-  // word, so `--check=x` is 1 where sort's other usage errors are 2.
-  if (error instanceof UsageError) {
-    return new IOResult({ exitCode: error.exitCode, stderr: ENC.encode(`${error.message}\n`) })
-  }
-  throw error
-}
-
-// What `-c` refuses in its operands, which GNU checks before reading. A
-// second operand outranks an `-o`, and both name the check mode by its own
-// letter, so `sort -C a b` is `not allowed with -C`.
-export function operandRefusal(paths: readonly PathSpec[], parsed: SortFlags): IOResult | null {
-  if (!parsed.check) return null
-  const mode = parsed.checkQuiet ? 'C' : 'c'
-  const extra = paths[1]
-  if (extra !== undefined) {
-    return new IOResult({
-      exitCode: 2,
-      stderr: ENC.encode(`sort: extra operand '${extra.rawPath}' not allowed with -${mode}\n`),
-    })
-  }
-  if (parsed.output !== null) {
-    return new IOResult({
-      exitCode: 2,
-      stderr: ENC.encode(`sort: options '-${mode}o' are incompatible\n`),
-    })
-  }
-  return null
 }
 
 async function checkStream(
   source: ByteSource,
   path: PathSpec | null,
   parsed: SortFlags,
-  cfg: SortConfig,
   signal?: AbortSignal,
 ): Promise<IOResult> {
-  const config = { ...streamConfig(cfg, parsed.zeroTerminated), mode: 'check' }
+  const config = { ...parsed.config, mode: 'check' }
   try {
     await drain(runStream('sort', config, source, signal))
   } catch (error) {
@@ -272,39 +211,6 @@ async function checkStream(
 
 function label(path: PathSpec | null): string {
   return path === null ? '-' : path.rawPath
-}
-
-/** The mirage-rs sort configuration every mode shares. Mirrors stream_config in sort.py. */
-export function streamConfig(cfg: SortConfig, zeroTerminated: boolean): Record<string, JsonValue> {
-  return {
-    compare: {
-      keys: cfg.keys.map(({ mods, ...key }) => ({
-        start_field: key.startField,
-        start_char: key.startChar,
-        start_skip: key.startSkip,
-        end_field: key.endField,
-        end_char: key.endChar,
-        end_skip: key.endSkip,
-        mods: {
-          numeric: mods.numeric,
-          general_numeric: mods.generalNumeric ?? false,
-          human: mods.human,
-          version: mods.version,
-          month: mods.month,
-          fold: mods.fold,
-          reverse: mods.reverse,
-          dictionary: mods.dictionary ?? false,
-          ignore_nonprinting: mods.ignoreNonprinting ?? false,
-          random: mods.random ?? false,
-        },
-      })),
-      field_sep: cfg.fieldSep,
-      reverse: cfg.reverse,
-      unique: cfg.unique,
-      stable: cfg.stable,
-    },
-    zero_terminated: zeroTerminated,
-  }
 }
 
 // A run is sorted once its records reach SORT_RUN_BYTES, each counting its
@@ -362,11 +268,10 @@ async function externalRecords(
   stream: (path: PathSpec) => AsyncIterable<Uint8Array>,
   stdin: ByteSource | null,
   parsed: SortFlags,
-  cfg: SortConfig,
   signal?: AbortSignal,
 ): Promise<ByteSpool | Uint8Array> {
   const separator = recordSeparator(parsed.zeroTerminated)
-  const config = streamConfig(cfg, parsed.zeroTerminated)
+  const config = parsed.config
   const levels: ByteSpool[][] = [[]]
   let refused: [InputStage, Uint8Array] | null = null
   let merges = 0
@@ -473,9 +378,9 @@ async function externalRecords(
   }
 }
 
-// GNU sort over the given inputs. The refusals come in GNU's order: the
-// option loop's, then with `-c` a second operand and an `-o`, then the
-// inputs, and last the output. Deliberate divergence: GNU opens `-o` before
+// GNU sort over the given inputs. The refusals come in GNU's order: what
+// mirage-rs refuses in the options and the operands, then the inputs, and
+// last the output. Deliberate divergence: GNU opens `-o` before
 // it reads any input and this writes it once every input has been read, so
 // when an input fails only at its stat or its read (a directory), GNU
 // reports an unopenable output first and leaves a new one behind empty, and
@@ -489,15 +394,12 @@ export async function sortGeneric(
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
   let parsed: SortFlags
-  let cfg: SortConfig
   try {
-    parsed = parseFlags(ctx.flags)
-    cfg = buildConfig(parsed)
+    parsed = parseFlags(ctx.flags, paths)
   } catch (error) {
-    return [new Uint8Array(), refusalOf(error)]
+    if (error instanceof StreamRefusal) return [new Uint8Array(), refused(error)]
+    throw error
   }
-  const refusal = operandRefusal(paths, parsed)
-  if (refusal !== null) return [new Uint8Array(), refusal]
   if (parsed.check) {
     const path = paths[0] ?? null
     return [
@@ -506,12 +408,11 @@ export async function sortGeneric(
         path === null ? (ctx.stdin ?? new Uint8Array()) : stream(path),
         path,
         parsed,
-        cfg,
         ctx.signal,
       ),
     ]
   }
-  const ordered = await externalRecords(paths, stream, ctx.stdin, parsed, cfg, ctx.signal)
+  const ordered = await externalRecords(paths, stream, ctx.stdin, parsed, ctx.signal)
   if (ordered instanceof Uint8Array)
     return [new Uint8Array(), new IOResult({ exitCode: 2, stderr: ordered })]
   if (parsed.output !== null) {

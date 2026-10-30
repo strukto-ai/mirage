@@ -178,8 +178,19 @@ describe('sort -c and -C', () => {
   })
 
   it('accepts one mode asked for twice', () => {
-    expect(parseFlags({ C: true, check: 'quiet' }).checkQuiet).toBe(true)
-    expect(parseFlags({ c: true, check: 'diagnose-first' }).check).toBe(true)
+    expect(parseFlags({ C: true, check: 'quiet' }, []).checkQuiet).toBe(true)
+    expect(parseFlags({ c: true, check: 'diagnose-first' }, []).check).toBe(true)
+  })
+
+  // A bare --check is -c, and --check= names the empty word, which is a
+  // prefix of both modes (coreutils 9.7: ambiguous, exit 1). Mirrors
+  // test_sort.py.
+  it('reads a bare --check as -c and --check= as an ambiguous word', async () => {
+    const parsed = parseFlags({ check: true }, [])
+    expect([parsed.check, parsed.checkQuiet]).toEqual([true, false])
+    const [, stderr, code] = await run({ stdin: bytes('a\n'), flags: { check: '' } })
+    expect(stderr.split('\n')[0]).toBe("sort: ambiguous argument '' for '--check'")
+    expect(code).toBe(1)
   })
 })
 
@@ -192,9 +203,16 @@ describe('sort -o', () => {
     expect(stderr).toBe('sort: multiple output files specified\n')
     expect(code).toBe(2)
     expect(
-      parseFlags({ output: [PathSpec.fromStrPath('/data/p1'), PathSpec.fromStrPath('/data/p1')] })
-        .output?.virtual,
+      parseFlags(
+        { output: [PathSpec.fromStrPath('/data/p1'), PathSpec.fromStrPath('/data/p1')] },
+        [],
+      ).output?.virtual,
     ).toBe('/data/p1')
+    const [, typed] = await run({
+      stdin: bytes('a\n'),
+      flags: { output: [spec('/data/o', './o'), spec('/data/o', 'o')] },
+    })
+    expect(typed).toBe('sort: multiple output files specified\n')
   })
 
   it('refuses the first bad option on the line', async () => {

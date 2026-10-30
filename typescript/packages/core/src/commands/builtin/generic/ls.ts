@@ -68,7 +68,8 @@ import { vfsStatPath } from '../utils/paths.ts'
 import { WalkBudget } from '../utils/tree.ts'
 import { openStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { streamConfig } from './sort.ts'
+import { scan } from '../../../rs/scan.ts'
+import { engineConfig } from './sort.ts'
 
 type Readdir = (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
 type Stat = (p: PathSpec) => Promise<FileStat>
@@ -311,36 +312,12 @@ const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 // broken by bytes as sort's last resort does (1,500 random directories
 // agreed), so the names go through mirage-rs's sort with one version key.
 // A run holds every name, so the sort writes one run and never merges.
-const VERSION_SORT: Record<string, JsonValue> = {
-  ...streamConfig(
-    {
-      keys: [
-        {
-          startField: 1,
-          startChar: 1,
-          startSkip: false,
-          endField: null,
-          endChar: null,
-          endSkip: false,
-          mods: {
-            numeric: false,
-            human: false,
-            version: true,
-            month: false,
-            fold: false,
-            reverse: false,
-          },
-        },
-      ],
-      fieldSep: null,
-      reverse: false,
-      unique: false,
-      stable: false,
-    },
-    true,
-  ),
-  mode: 'sort',
-  run_bytes: Number.MAX_SAFE_INTEGER,
+function versionSort(): Record<string, JsonValue> {
+  const typed: [string, string][] = [
+    ['version_sort', ''],
+    ['zero_terminated', ''],
+  ]
+  return { ...engineConfig(scan('sort', typed)), mode: 'sort', run_bytes: Number.MAX_SAFE_INTEGER }
 }
 
 /**
@@ -355,7 +332,7 @@ export async function sortByVersion(names: readonly string[]): Promise<number[]>
     if (queue === undefined) places.set(key, [index])
     else queue.push(index)
   })
-  const stream = await openStream('sort', VERSION_SORT)
+  const stream = await openStream('sort', versionSort())
   const out: Uint8Array[] = []
   try {
     out.push(stream.feed(ENC.encode(names.map((name) => `${name}\0`).join(''))), stream.finish())
