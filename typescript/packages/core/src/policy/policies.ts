@@ -869,7 +869,8 @@ export class Policies {
             console.error(`${method} policy ${name} raised: ${detail}`)
             answered = { kind: 'deny', reason: `${name} failed`, policy: name, failed: true }
           }
-          if (answered === null || answered instanceof Limit) passed?.push(policy)
+          const items: unknown[] = Array.isArray(answered) ? answered : [answered]
+          if (items.every((item) => item === null || item instanceof Limit)) passed?.push(policy)
           pending = Array.isArray(answered) ? answered : [answered]
           cursor = 0
         }

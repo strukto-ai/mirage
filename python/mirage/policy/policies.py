@@ -1082,8 +1082,13 @@ class Policies:
                         )
                     finally:
                         reset_explaining(token)
-                    if passed is not None and (
-                        answered is None or isinstance(answered, Limit)
+                    if passed is not None and all(
+                        item is None or isinstance(item, Limit)
+                        for item in (
+                            answered
+                            if isinstance(answered, tuple)
+                            else (answered,)
+                        )
                     ):
                         passed.append(policy)
                     pending = (

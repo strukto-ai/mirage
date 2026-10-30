@@ -32,6 +32,69 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { rulePool } from './network.ts'
 
+// Refuses the addresses it is given, counts what is open, keeps what each
+// method saw.
+class Watch implements Policy {
+  open = 0
+  readonly asked: NetworkContext[] = []
+  readonly ended: NetworkResultContext[] = []
+  constructor(
+    private readonly refused: readonly string[] = [],
+    private readonly limit: Limit | null = null,
+  ) {}
+
+  preNetwork(ctx: NetworkContext): Deny | Limit | null {
+    this.asked.push(ctx)
+    if (this.refused.includes(ctx.address)) {
+      return { kind: 'deny', reason: `${ctx.address} is not for this tenant` }
+    }
+    this.open += 1
+    return this.limit
+  }
+
+  postNetwork(ctx: NetworkResultContext): null {
+    this.ended.push(ctx)
+    this.open -= 1
+    return null
+  }
+}
+
+async function held(
+  line: string,
+  policies: Policy[],
+  network: NetworkSetting = true,
+): Promise<number> {
+  const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] as const }, { network })
+  for (const policy of policies) ws.policies.add(policy)
+  try {
+    return (await ws.shell(line)).exitCode
+  } finally {
+    await ws.close()
+  }
+}
+
+// Waits for the gateway to hand a connection's end to postNetwork.
+async function settled(watch: Watch, count: number): Promise<void> {
+  for (let i = 0; i < 100 && watch.ended.length < count; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+// Asks the server once, as a remote client would before it answers.
+async function ask(at: number): Promise<void> {
+  const socket = netConnect({ host: '127.0.0.1', port: at })
+  await new Promise<void>((resolve, reject) => {
+    socket.once('connect', () => {
+      socket.end('GET / HTTP/1.1\r\nHost: remote\r\n\r\n')
+    })
+    socket.on('data', () => undefined)
+    socket.once('close', () => {
+      resolve()
+    })
+    socket.once('error', reject)
+  })
+}
+
 describe('a workspace network rule', () => {
   let server: Server
   let port = 0
@@ -117,54 +180,6 @@ describe('a workspace network rule', () => {
     expect(rulePool(rule)).not.toBe(pool)
   })
 
-  // Refuses the addresses it is given, counts what is open, keeps what each
-  // method saw.
-  class Watch implements Policy {
-    open = 0
-    readonly asked: NetworkContext[] = []
-    readonly ended: NetworkResultContext[] = []
-    constructor(
-      private readonly refused: readonly string[] = [],
-      private readonly limit: Limit | null = null,
-    ) {}
-
-    preNetwork(ctx: NetworkContext): Deny | Limit | null {
-      this.asked.push(ctx)
-      if (this.refused.includes(ctx.address)) {
-        return { kind: 'deny', reason: `${ctx.address} is not for this tenant` }
-      }
-      this.open += 1
-      return this.limit
-    }
-
-    postNetwork(ctx: NetworkResultContext): null {
-      this.ended.push(ctx)
-      this.open -= 1
-      return null
-    }
-  }
-
-  async function held(
-    line: string,
-    policies: Policy[],
-    network: NetworkSetting = true,
-  ): Promise<number> {
-    const ws = new Workspace({ '/data': [new RAMVFS(), MountMode.WRITE] as const }, { network })
-    for (const policy of policies) ws.policies.add(policy)
-    try {
-      return (await ws.shell(line)).exitCode
-    } finally {
-      await ws.close()
-    }
-  }
-
-  // Waits for the gateway to hand a connection's end to postNetwork.
-  async function settled(watch: Watch, count: number): Promise<void> {
-    for (let i = 0; i < 100 && watch.ended.length < count; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-  }
-
   it('refuses a connection preNetwork denies as a closed port', async () => {
     const watch = new Watch(['127.0.0.1'])
     const url = `http://127.0.0.1:${String(port)}/a`
@@ -213,6 +228,22 @@ describe('a workspace network rule', () => {
     expect([counted.open, refusing.open, refusing.ended]).toEqual([0, 0, []])
   })
 
+  it('lets a connection through on an empty answer and tells it how it ended', async () => {
+    const ended: NetworkResultContext[] = []
+    const quiet: Policy = {
+      preNetwork: () => [],
+      postNetwork: (ctx) => {
+        ended.push(ctx)
+        return null
+      },
+    }
+    expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, [quiet])).toBe(0)
+    for (let i = 0; i < 100 && ended.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(ended.map((ctx) => ctx.ended)).toEqual(['closed'])
+  })
+
   it('cuts a connection past its Limit with a reset', async () => {
     const watch = new Watch([], new Limit({ maxBytes: 40 }))
     expect(await held(`curl -sS http://127.0.0.1:${String(port)}/`, [watch])).not.toBe(0)
@@ -238,21 +269,6 @@ describe('a workspace network rule', () => {
     expect(counted.ended).toHaveLength(1)
     expect(counted.open).toBe(0)
   })
-
-  // Asks the server once, as a remote client would before it answers.
-  async function ask(at: number): Promise<void> {
-    const socket = netConnect({ host: '127.0.0.1', port: at })
-    await new Promise<void>((resolve, reject) => {
-      socket.once('connect', () => {
-        socket.end('GET / HTTP/1.1\r\nHost: remote\r\n\r\n')
-      })
-      socket.on('data', () => undefined)
-      socket.once('close', () => {
-        resolve()
-      })
-      socket.once('error', reject)
-    })
-  }
 
   // A RAM mount whose listing first asks a server, as a remote VFS's client
   // would.

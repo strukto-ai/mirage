@@ -301,6 +301,29 @@ async def test_post_network_reaches_each_policy_that_let_it_through(port):
     assert (counted.open, refusing.open, refusing.ended) == (0, 0, [])
 
 
+class _Quiet(Policy):
+    """Answers with no action at all, and keeps how each connection
+    ended."""
+
+    def __init__(self) -> None:
+        self.ended: list[NetworkResultContext] = []
+
+    async def pre_network(self, ctx: NetworkContext) -> tuple[()]:
+        return ()
+
+    async def post_network(self, ctx: NetworkResultContext) -> None:
+        self.ended.append(ctx)
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_lets_a_connection_through_and_hears_it_end(
+    port,
+):
+    quiet = _Quiet()
+    assert await _held(port, "curl -sS http://127.0.0.1:{port}/", quiet) == 0
+    assert [e.ended for e in quiet.ended] == ["closed"]
+
+
 @pytest.mark.asyncio
 async def test_a_limit_cuts_the_connection_with_a_reset(port):
     watch = _Watch(limit=Limit(max_bytes=40))
@@ -310,15 +333,16 @@ async def test_a_limit_cuts_the_connection_with_a_reset(port):
     assert watch.ended[0].bytes_sent + watch.ended[0].bytes_received == 40
 
 
+async def _hold(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    await reader.read()
+    writer.close()
+
+
 @pytest_asyncio.fixture
 async def silent():
-    async def hold(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        await reader.read()
-        writer.close()
-
-    server = await asyncio.start_server(hold, "127.0.0.1", 0)
+    server = await asyncio.start_server(_hold, "127.0.0.1", 0)
     yield server.sockets[0].getsockname()[1]
     server.close()
     await server.wait_closed()
