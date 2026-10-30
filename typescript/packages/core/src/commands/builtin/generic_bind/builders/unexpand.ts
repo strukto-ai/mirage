@@ -12,15 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { unexpandGeneric } from '../../generic/unexpand.ts'
+import { unexpandConfig, unexpandGeneric } from '../../generic/unexpand.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
 const unexpand: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const config = unexpandConfig(ctx.flags)
+  if (config instanceof IOResult) return [null, config]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return unexpandGeneric(resolved, ctx, dirAwareStream(files, ctx))
+  return unexpandGeneric(config, resolved, ctx, dirAwareStream(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

@@ -1,3 +1,5 @@
+mod tabs;
+
 use serde::Deserialize;
 
 use crate::width::TAB_WIDTH;
@@ -9,24 +11,10 @@ const OUTPUT: usize = 64 * 1024;
 /// One resolved `-t` list: the explicit stops in typed order, `/N`'s
 /// multiple past them and `+N`'s step from the last of them. All empty is
 /// the default size 8.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Tabs {
-    #[serde(deserialize_with = "stops")]
     stops: Vec<u64>,
-    #[serde(deserialize_with = "crate::saturating_u64")]
     extend: u64,
-    #[serde(deserialize_with = "crate::saturating_u64")]
     increment: u64,
-}
-
-fn stops<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<u64>, D::Error> {
-    #[derive(Deserialize)]
-    struct Stop(#[serde(deserialize_with = "crate::saturating_u64")] u64);
-    Ok(Vec::<Stop>::deserialize(deserializer)?
-        .into_iter()
-        .map(|Stop(stop)| stop)
-        .collect())
 }
 
 impl Tabs {
@@ -75,25 +63,48 @@ impl Tabs {
     }
 }
 
+/// One option as typed: its name and its text, one character per byte.
+#[derive(Deserialize)]
+struct Typed(String, #[serde(deserialize_with = "crate::latin1")] Vec<u8>);
+
+/// expand's and unexpand's config: `-t`, `-i`, `-a` and `--first-only` as
+/// typed, `[name, text]` in typed order, a switch's text empty.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ExpandConfig {
-    tabs: Tabs,
-    initial_only: bool,
+struct Config {
+    options: Vec<Typed>,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct UnexpandConfig {
-    tabs: Tabs,
-    all: bool,
+/// The options `program` reads: its tab list, whether any `-t` was typed
+/// and whether each switch in `switches` was, in that order.
+fn read<const N: usize>(
+    program: &str,
+    config: &[u8],
+    switches: [&str; N],
+) -> Result<(Tabs, bool, [bool; N]), StreamError> {
+    let Config { options } = parse_config(config)?;
+    let mut values = Vec::new();
+    let mut typed = [false; N];
+    for Typed(name, text) in &options {
+        if name == "tabs" {
+            values.push(text.as_slice());
+        } else if let Some(at) = switches.iter().position(|switch| switch == name) {
+            typed[at] = true;
+        } else {
+            return Err(StreamError::new(format!(
+                "{program} reads no option {name}"
+            )));
+        }
+    }
+    let listed = !values.is_empty();
+    Ok((tabs::tab_list(program, &values)?, listed, typed))
 }
 
 pub(crate) fn open_expand(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let config = parse_config::<ExpandConfig>(config)?;
+    let (tabs, _, [initial_only]) = read("expand", config, ["initial"])?;
     Ok(Box::new(Expand {
-        tabs: config.tabs,
-        initial_only: config.initial_only,
+        tabs,
+        initial_only,
         column: 0,
         leading: true,
         pad: 0,
@@ -102,11 +113,13 @@ pub(crate) fn open_expand(config: &[u8]) -> Result<Box<dyn Stream>, StreamError>
     }))
 }
 
+/// unexpand: a tab list implies `-a`, and `--first-only` overrides both
+/// (GNU 9.7), even an empty list (`-t ''`).
 pub(crate) fn open_unexpand(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let config = parse_config::<UnexpandConfig>(config)?;
+    let (tabs, listed, [all, first_only]) = read("unexpand", config, ["all", "first_only"])?;
     Ok(Box::new(Unexpand {
-        tabs: config.tabs,
-        all: config.all,
+        tabs,
+        all: (all || listed) && !first_only,
         column: 0,
         converting: true,
         leading: true,
@@ -299,16 +312,21 @@ impl Stream for Unexpand {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use serde_json::json;
 
+    use super::Tabs;
     use crate::{open, run};
 
-    fn tabs(stops: &[u64], extend: u64, increment: u64) -> Value {
-        json!({"stops": stops, "extend": extend, "increment": increment})
+    fn tabs(stops: &[u64], extend: u64, increment: u64) -> Tabs {
+        Tabs {
+            stops: stops.to_vec(),
+            extend,
+            increment,
+        }
     }
 
-    fn splits(kind: &str, config: &Value, input: &[u8]) -> Vec<u8> {
-        let config = config.to_string();
+    fn splits(kind: &str, options: &[(&str, &str)], input: &[u8]) -> Vec<u8> {
+        let config = json!({ "options": options }).to_string();
         let whole = run(kind, &config, &[input]).0;
         for split in 0..=input.len() {
             assert_eq!(
@@ -319,42 +337,39 @@ mod tests {
         whole
     }
 
-    fn expand(tabs: Value, initial_only: bool, input: &[u8]) -> Vec<u8> {
-        splits(
-            "expand",
-            &json!({"tabs": tabs, "initial_only": initial_only}),
-            input,
-        )
+    fn expand(options: &[(&str, &str)], input: &[u8]) -> Vec<u8> {
+        splits("expand", options, input)
     }
 
-    fn unexpand(tabs: Value, all: bool, input: &[u8]) -> Vec<u8> {
-        splits("unexpand", &json!({"tabs": tabs, "all": all}), input)
+    fn unexpand(options: &[(&str, &str)], input: &[u8]) -> Vec<u8> {
+        splits("unexpand", options, input)
     }
 
     #[test]
     fn expand_pads_to_each_kind_of_stop() {
         let input = b"a\tb\tc\td\te\n";
+        assert_eq!(expand(&[], input), b"a       b       c       d       e\n");
+        for (list, expected) in [
+            ("3", b"a  b  c  d  e\n".as_slice()),
+            ("2,5", b"a b  c d e\n"),
+            ("2,/4", b"a b c   d   e\n"),
+            ("2,+4", b"a b   c   d   e\n"),
+        ] {
+            assert_eq!(expand(&[("tabs", list)], input), expected, "{list}");
+        }
         assert_eq!(
-            expand(tabs(&[], 0, 0), false, input),
-            b"a       b       c       d       e\n"
-        );
-        assert_eq!(expand(tabs(&[3], 0, 0), false, input), b"a  b  c  d  e\n");
-        assert_eq!(expand(tabs(&[2, 5], 0, 0), false, input), b"a b  c d e\n");
-        assert_eq!(expand(tabs(&[2], 4, 0), false, input), b"a b c   d   e\n");
-        assert_eq!(expand(tabs(&[2], 0, 4), false, input), b"a b   c   d   e\n");
-        assert_eq!(
-            expand(tabs(&[], 0, 0), false, b"a\r\x08\x08\tb\xc3\xa9\tc\n"),
+            expand(&[], b"a\r\x08\x08\tb\xc3\xa9\tc\n"),
             b"a\r\x08\x08        b\xc3\xa9     c\n"
         );
         assert_eq!(
-            expand(tabs(&[1, 3], 0, 0), true, b"\ta\tb\n \tc\n"),
+            expand(&[("tabs", "1,3"), ("initial", "")], b"\ta\tb\n \tc\n"),
             b" a\tb\n   c\n"
         );
     }
 
     #[test]
     fn a_far_stop_pads_a_window_per_call() {
-        let config = json!({"tabs": tabs(&[1 << 20], 0, 0), "initial_only": false}).to_string();
+        let config = json!({"options": [["tabs", (1 << 20).to_string()]]}).to_string();
         let mut stream = open("expand", config.as_bytes()).unwrap();
         let mut out = Vec::new();
         stream.feed(b"\tx", &mut out).unwrap();
@@ -370,30 +385,39 @@ mod tests {
 
     #[test]
     fn unexpand_joins_blanks_that_reach_a_stop() {
-        let eight = tabs(&[], 0, 0);
+        let all = ("all", "");
+        assert_eq!(unexpand(&[], b"        a        b\n"), b"\ta        b\n");
+        assert_eq!(unexpand(&[all], b"        a        b\n"), b"\ta\t b\n");
         assert_eq!(
-            unexpand(eight.clone(), false, b"        a        b\n"),
-            b"\ta        b\n"
-        );
-        assert_eq!(
-            unexpand(eight.clone(), true, b"        a        b\n"),
-            b"\ta\t b\n"
-        );
-        assert_eq!(
-            unexpand(eight.clone(), true, b"abcdefg x\nabcdefg  x\n"),
+            unexpand(&[all], b"abcdefg x\nabcdefg  x\n"),
             b"abcdefg x\nabcdefg\t x\n"
         );
+        assert_eq!(unexpand(&[], b"\x08        a\n"), b"\x08        a\n");
+        assert_eq!(unexpand(&[("tabs", "1")], b" \rc\n"), b"\t\rc\n");
+        assert_eq!(unexpand(&[("tabs", "1")], b"\x08 \n"), b"\x08 \n");
         assert_eq!(
-            unexpand(eight, false, b"\x08        a\n"),
-            b"\x08        a\n"
-        );
-        let one = tabs(&[1], 0, 0);
-        assert_eq!(unexpand(one.clone(), true, b" \rc\n"), b"\t\rc\n");
-        assert_eq!(unexpand(one, true, b"\x08 \n"), b"\x08 \n");
-        assert_eq!(
-            unexpand(tabs(&[3, 7], 0, 0), true, b"   aaa \t\x08\n"),
+            unexpand(&[("tabs", "3,7")], b"   aaa \t\x08\n"),
             b"\taaa \t\x08\n"
         );
+    }
+
+    #[test]
+    fn a_tab_list_implies_all_and_first_only_overrides_both() {
+        let input = b"        a        b\n";
+        assert_eq!(unexpand(&[("tabs", "4")], input), b"\t\ta\t\t b\n");
+        assert_eq!(unexpand(&[("tabs", "")], input), b"\ta\t b\n");
+        for options in [
+            [("tabs", "4"), ("first_only", "")],
+            [("first_only", ""), ("tabs", "4")],
+            [("all", ""), ("first_only", "")],
+        ] {
+            let leading = if options.contains(&("tabs", "4")) {
+                b"\t\ta        b\n".as_slice()
+            } else {
+                b"\ta        b\n"
+            };
+            assert_eq!(unexpand(&options, input), leading, "{options:?}");
+        }
     }
 
     #[test]
@@ -418,8 +442,24 @@ mod tests {
             (tabs(&[2], 0, 4), 7, 10),
         ];
         for (tabs, column, expected) in cases {
-            let tabs: super::Tabs = serde_json::from_value(tabs).unwrap();
             assert_eq!(tabs.next(column), expected, "column {column}");
+        }
+    }
+
+    #[test]
+    fn the_engines_refuse_in_their_own_names_before_any_input() {
+        for (kind, program) in [("expand", "expand"), ("unexpand", "unexpand")] {
+            let config = json!({"options": [["tabs", "3,1"]]}).to_string();
+            let Err(refusal) = open(kind, config.as_bytes()) else {
+                panic!("{kind} opened a descending list");
+            };
+            assert_eq!(
+                refusal.message,
+                format!("{program}: tab sizes must be ascending")
+            );
+            assert_eq!(refusal.status, 1);
+            let config = json!({"options": [["width", "3"]]}).to_string();
+            assert!(open(kind, config.as_bytes()).is_err());
         }
     }
 }

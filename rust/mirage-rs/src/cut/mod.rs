@@ -1,3 +1,5 @@
+mod options;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -9,49 +11,24 @@ use crate::{Stream, StreamError, parse_config, quoted};
 const BLOCK: usize = 8192;
 const WORK: usize = 16384;
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
     Bytes,
     Characters,
     Fields,
 }
 
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Whitespace {
     Default,
     Trimmed,
 }
 
+/// cut's options as typed, `[name, text]` in typed order (`options::Typed`).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
-    #[serde(deserialize_with = "crate::latin1")]
-    list: Vec<u8>,
-    mode: Mode,
-    delimiter: Vec<u32>,
-    complement: bool,
-    only_delimited: bool,
-    whitespace: Option<Whitespace>,
-    no_partial: bool,
-    output_delimiter: Option<OutputDelimiter>,
-    zero_terminated: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum OutputDelimiter {
-    Bytes {
-        #[serde(deserialize_with = "crate::latin1")]
-        value: Vec<u8>,
-    },
-    DeferredUtf8EncodingError,
-}
-
-enum OutputEncoding {
-    Valid,
-    RefuseAtRecord,
+    options: Vec<options::Typed>,
 }
 
 struct Options {
@@ -739,7 +716,6 @@ struct Cut {
     record: Record,
     output: Option<OutputRecord>,
     ended: bool,
-    output_encoding: OutputEncoding,
     cancelled: bool,
 }
 
@@ -770,13 +746,10 @@ impl Cut {
                 let len = separator.unwrap_or(bytes.len());
                 if separator.is_some() && self.record.len == 0 {
                     let cost = (len + 1).saturating_mul(3 + self.options.output_delimiter.len());
-                    if cost <= work {
-                        self.check_output_encoding()?;
-                        if self.options.fast_record(&bytes[..len], &self.ranges, out) {
-                            self.cursor += len + 1;
-                            work -= cost;
-                            continue;
-                        }
+                    if cost <= work && self.options.fast_record(&bytes[..len], &self.ranges, out) {
+                        self.cursor += len + 1;
+                        work -= cost;
+                        continue;
                     }
                 }
                 self.record.extend(&bytes[..len]);
@@ -785,7 +758,6 @@ impl Cut {
                 if separator.is_some() {
                     self.cursor += 1;
                     work -= 1;
-                    self.check_output_encoding()?;
                     self.output = Some(OutputRecord::new(
                         std::mem::take(&mut self.record),
                         &self.options,
@@ -795,7 +767,6 @@ impl Cut {
                 self.input.clear();
                 self.cursor = 0;
                 if self.ended && self.record.len > 0 {
-                    self.check_output_encoding()?;
                     self.output = Some(OutputRecord::new(
                         std::mem::take(&mut self.record),
                         &self.options,
@@ -806,15 +777,6 @@ impl Cut {
             }
         }
         Ok(())
-    }
-
-    fn check_output_encoding(&self) -> Result<(), StreamError> {
-        match self.output_encoding {
-            OutputEncoding::Valid => Ok(()),
-            OutputEncoding::RefuseAtRecord => {
-                Err(StreamError::new("cut: cannot encode output delimiter"))
-            }
-        }
     }
 }
 
@@ -866,40 +828,31 @@ impl Stream for Cut {
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let config: Config = parse_config(config)?;
-    let [character] = config.delimiter.as_slice() else {
-        return Err(StreamError::new(
-            "cut: the delimiter must be a single character",
-        ));
-    };
-    let character = char::from_u32(*character);
-    let ranges = intervals(&config.list, config.mode, "cut")?;
-    let (output_delimiter, output_encoding) = match config.output_delimiter {
-        Some(OutputDelimiter::Bytes { value }) => (value, OutputEncoding::Valid),
-        Some(OutputDelimiter::DeferredUtf8EncodingError) => {
-            (Vec::new(), OutputEncoding::RefuseAtRecord)
+    let Config { options } = parse_config(config)?;
+    let selection = options::read(&options)?;
+    let ranges = intervals(&selection.list, selection.mode, "cut")?;
+    let output_delimiter = selection.output_delimiter.unwrap_or_else(|| {
+        if selection.mode != Mode::Fields {
+            Vec::new()
+        } else if selection.whitespace.is_some() {
+            b"\t".to_vec()
+        } else {
+            selection
+                .delimiter
+                .map_or_else(String::new, |ch| ch.to_string())
+                .into_bytes()
         }
-        None => {
-            let delimiter = if config.mode != Mode::Fields {
-                String::new()
-            } else if config.whitespace.is_some() {
-                "\t".to_owned()
-            } else {
-                character.map_or_else(String::new, |ch| ch.to_string())
-            };
-            (delimiter.into_bytes(), OutputEncoding::Valid)
-        }
-    };
+    });
     Ok(Box::new(Cut {
         options: Options {
-            mode: config.mode,
-            delimiter: character,
-            complement: config.complement,
-            only_delimited: config.only_delimited,
-            whitespace: config.whitespace,
-            no_partial: config.no_partial,
+            mode: selection.mode,
+            delimiter: selection.delimiter,
+            complement: selection.complement,
+            only_delimited: selection.only_delimited,
+            whitespace: selection.whitespace,
+            no_partial: selection.no_partial,
             output_delimiter,
-            separator: if config.zero_terminated { 0 } else { b'\n' },
+            separator: if selection.zero_terminated { 0 } else { b'\n' },
         },
         ranges,
         input: Vec::new(),
@@ -907,7 +860,6 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         record: Record::default(),
         output: None,
         ended: false,
-        output_encoding,
         cancelled: false,
     }))
 }
@@ -919,26 +871,21 @@ mod tests {
 
     const TRY: &str = "Try 'cut --help' for more information.";
 
-    fn config(list: &str, mode: &str) -> Value {
-        json!({
-            "list": list.as_bytes().iter().map(|byte| char::from(*byte)).collect::<String>(),
-            "mode": mode,
-            "delimiter": [9],
-            "complement": false,
-            "only_delimited": false,
-            "whitespace": null,
-            "no_partial": false,
-            "output_delimiter": null,
-            "zero_terminated": false,
-        })
+    fn typed(name: &str, text: &[u8]) -> Value {
+        json!([name, crate::byte_text(text)])
     }
 
-    fn output(text: &str) -> Value {
-        json!({"kind": "bytes", "value": text.as_bytes().iter().map(|byte| char::from(*byte)).collect::<String>()})
+    fn switch(name: &str) -> Value {
+        json!([name, null])
     }
 
-    fn execute(config: &Value, input: &[u8], split: usize) -> Vec<u8> {
-        let mut stream = open(&serde_json::to_vec(config).unwrap()).unwrap();
+    fn config(list: &str, mode: &str) -> Vec<Value> {
+        vec![typed(mode, list.as_bytes())]
+    }
+
+    fn execute(options: &[Value], input: &[u8], split: usize) -> Vec<u8> {
+        let config = json!({ "options": options });
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
         let mut output = Vec::new();
         for chunk in input.chunks(split.max(1)) {
             let mut step = Vec::new();
@@ -1095,13 +1042,13 @@ mod tests {
                 assert_eq!(execute(&config(list, mode), b"abcdef", 1), expected);
             }
             let mut options = config("2-3", mode);
-            options["complement"] = json!(true);
-            options["output_delimiter"] = output(":");
+            options.push(switch("complement"));
+            options.push(typed("output_delimiter", b":"));
             assert_eq!(execute(&options, b"abcde\n\n", 2), b"a:de\n\n");
         }
         let mut options = config("3,1", "fields");
         assert_eq!(execute(&options, b"a\tb\tc\nraw\n", 1), b"a\tc\nraw\n");
-        options["complement"] = json!(true);
+        options.push(switch("complement"));
         assert_eq!(execute(&options, b"a\tb\tc\td\n", 2), b"b\td\n");
     }
 
@@ -1123,12 +1070,12 @@ mod tests {
             }
         }
         let mut options = config("3", "bytes");
-        options["no_partial"] = json!(true);
+        options.push(switch("no_partial"));
         assert_eq!(execute(&options, b"\xffabc\n", 1), b"\xffab\n");
-        options["list"] = json!("4");
+        options.push(typed("bytes", b"4"));
         assert_eq!(execute(&options, b"\xffabc\n", 2), b"c\n");
-        options["list"] = json!("2,5");
-        options["output_delimiter"] = output(":");
+        options.push(typed("bytes", b"2,5"));
+        options.push(typed("output_delimiter", b":"));
         assert_eq!(execute(&options, "éxé".as_bytes(), 1), "é:é\n".as_bytes());
     }
 
@@ -1139,33 +1086,36 @@ mod tests {
             execute(&options, b"\xffabc\nx\t\xffz\na\t\n\t\n", 1),
             b"\xffabc\n\xef\xbf\xbdz\n\n\n"
         );
-        options["only_delimited"] = json!(true);
+        options.push(switch("only_delimited"));
         assert_eq!(execute(&options, b"raw\na\tb\n", 1), b"b\n");
-        options["delimiter"] = json!([233]);
-        options["output_delimiter"] = output("|");
-        options["list"] = json!("1,3");
+        options.push(typed("delimiter", "é".as_bytes()));
+        options.push(typed("output_delimiter", b"|"));
+        options.push(typed("fields", b"1,3"));
         assert_eq!(execute(&options, "aébéc".as_bytes(), 1), b"a|c\n");
     }
 
     #[test]
     fn whitespace_extensions_keep_trimmed_and_boundary_fields() {
         let mut options = config("1,2,3", "fields");
-        options["whitespace"] = json!("default");
+        options.push(switch("w"));
         assert_eq!(execute(&options, b" \ta  b\t \n\t \n", 1), b"\ta\tb\n\t\n");
-        options["whitespace"] = json!("trimmed");
+        options = vec![
+            typed("fields", b"1,2,3"),
+            typed("whitespace_delimited", b"trim"),
+        ];
         assert_eq!(
             execute(&options, b" \ta  b\t \n\t \nraw\n", 1),
             b"a\tb\n\nraw\n"
         );
-        options["only_delimited"] = json!(true);
+        options.push(switch("only_delimited"));
         assert_eq!(execute(&options, b"\t \nraw\n a b \n", 2), b"a\tb\n");
     }
 
     #[test]
     fn zero_records_and_unterminated_records_keep_terminators() {
         let mut options = config("2", "fields");
-        options["delimiter"] = json!([44]);
-        options["zero_terminated"] = json!(true);
+        options.push(typed("delimiter", b","));
+        options.push(switch("zero_terminated"));
         assert_eq!(execute(&options, b"a,b\0c,d\0e,f", 1), b"b\0d\0f\0");
         assert!(execute(&options, b"", 1).is_empty());
         assert_eq!(execute(&options, b"\0", 1), b"\0");
@@ -1174,38 +1124,30 @@ mod tests {
     #[test]
     fn raw_delimiter_sentinels_never_match_replacement_decoding() {
         let mut options = config("1", "fields");
-        options["delimiter"] = json!([0xdcff]);
+        options.push(typed("delimiter", b"\xff"));
         for input in [b"a\xffb\n".as_slice(), "a\u{fffd}b\n".as_bytes()] {
             assert_eq!(execute(&options, input, 1), input);
         }
-        options["only_delimited"] = json!(true);
+        options.push(switch("only_delimited"));
         assert!(execute(&options, b"a\xffb\n", 1).is_empty());
-        options["mode"] = json!("bytes");
+        options[0] = typed("bytes", b"1");
         assert_eq!(execute(&options, b"a\xffb\n", 1), b"a\n");
-        options["mode"] = json!("characters");
+        options[0] = typed("characters", b"1");
         assert_eq!(execute(&options, b"a\xffb\n", 1), b"a\n");
-        options["mode"] = json!("fields");
-        options["delimiter"] = json!([0xfffd]);
+        options[0] = typed("fields", b"1");
+        options.push(typed("delimiter", "\u{fffd}".as_bytes()));
         assert_eq!(execute(&options, b"a\xffb\n", 1), b"a\n");
     }
 
     #[test]
-    fn output_encoding_refusal_is_deferred_until_a_complete_or_final_record() {
-        let mut options = config("1", "fields");
-        options["only_delimited"] = json!(true);
-        options["output_delimiter"] = json!({"kind": "deferred_utf8_encoding_error"});
-        let bytes = serde_json::to_vec(&options).unwrap();
-        let mut stream = open(&bytes).unwrap();
-        let mut out = Vec::new();
-        stream.feed(b"plain", &mut out).unwrap();
-        assert!(out.is_empty());
-        assert!(stream.finish(&mut out).is_err());
-        assert!(out.is_empty());
-        let mut stream = open(&bytes).unwrap();
-        stream.finish(&mut out).unwrap();
-        let mut stream = open(&bytes).unwrap();
-        assert!(stream.feed(b"\n", &mut out).is_err());
-        assert!(out.is_empty());
+    fn a_raw_output_delimiter_byte_is_written_as_typed() {
+        let mut options = config("1,3", "characters");
+        options.push(typed("output_delimiter", b"\xff"));
+        assert_eq!(execute(&options, b"abc\n", 1), b"a\xffc\n");
+        let mut options = config("1,2", "fields");
+        options.push(typed("delimiter", b":"));
+        options.push(typed("output_delimiter", b""));
+        assert_eq!(execute(&options, b"a:b:c\n", 1), b"a\0b\n");
     }
 
     fn cancellable_cut() -> Cut {
@@ -1226,7 +1168,6 @@ mod tests {
             record: Record::default(),
             output: None,
             ended: false,
-            output_encoding: OutputEncoding::Valid,
             cancelled: false,
         }
     }
@@ -1323,9 +1264,9 @@ mod tests {
             let input = [vec![b'x'; 2 * 1024 * 1024], b"\n".to_vec()].concat();
             assert_eq!(execute(&options, &input, 16384), input);
             if mode == "fields" {
-                options["delimiter"] = json!([120]);
-                options["list"] = json!("1,3");
-                options["output_delimiter"] = output(&"y".repeat(3 * WORK));
+                options.push(typed("delimiter", b"x"));
+                options.push(typed("fields", b"1,3"));
+                options.push(typed("output_delimiter", "y".repeat(3 * WORK).as_bytes()));
                 assert_eq!(
                     execute(&options, b"xxx\n", 1),
                     [vec![b'y'; 3 * WORK], b"\n".to_vec()].concat()

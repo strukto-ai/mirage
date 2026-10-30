@@ -1519,6 +1519,44 @@
       ]
     },
     {
+      "id": "expand_t_stops_past_2_53_are_exact",
+      "seq": 17200206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\tb\\n' | expand -t 2,9007199254740993; echo rc=$?; printf 'a\\tb\\n' | expand -t 9007199254740993,9007199254740992; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b\nrc=0\nrc=1\n",
+        "stderr": "expand: tab sizes must be ascending\n"
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
       "id": "expand_t_slash_and_plus_are_mutually_exclusive",
       "seq": 17200202,
       "targets": [

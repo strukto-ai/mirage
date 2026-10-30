@@ -13,7 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.unexpand import unexpand_generic
+from mirage.commands.builtin.generic.unexpand import (
+    unexpand_config,
+    unexpand_generic,
+)
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -31,11 +34,14 @@ async def unexpand(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    config = unexpand_config(ctx.flags)
+    if isinstance(config, IOResult):
+        return None, config
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
     return await unexpand_generic(
+        config,
         resolved,
-        list(texts),
         ctx,
         dir_aware_stat(files, ctx),
         files.read,

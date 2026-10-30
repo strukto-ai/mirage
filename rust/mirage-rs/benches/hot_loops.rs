@@ -16,13 +16,9 @@ fn main() {
         (
             "cut-f",
             "cut",
-            json!({"list":"2","mode":"fields","delimiter":[44],"complement":false,"only_delimited":false,"whitespace":null,"no_partial":false,"output_delimiter":null,"zero_terminated":false}),
+            json!({"options": [["fields", "2"], ["delimiter", ","]]}),
         ),
-        (
-            "cut-c",
-            "cut",
-            json!({"list":"1-10","mode":"characters","delimiter":[9],"complement":false,"only_delimited":false,"whitespace":null,"no_partial":false,"output_delimiter":null,"zero_terminated":false}),
-        ),
+        ("cut-c", "cut", json!({"options": [["characters", "1-10"]]})),
         (
             "fold",
             "fold",
