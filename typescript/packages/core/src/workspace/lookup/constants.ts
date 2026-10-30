@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { directoriesAction } from '../../commands/builtin/generic/grep.ts'
+import { recurses } from '../../commands/builtin/generic/grep.ts'
 import { linkMode } from '../../commands/builtin/generic/ls.ts'
 import { walksDescendantMounts } from '../../commands/builtin/generic/rg.ts'
 import { sedWrites } from '../../commands/builtin/generic/sed.ts'
@@ -255,7 +255,7 @@ export function walksMounts(name: string, bag: Record<string, FlagValue>): boole
   if (runs === 'du') return !fl.asBool('one_file_system')
   if (runs === 'tree') return !fl.asBool('x')
   if (runs === 'ls') return fl.asBool('recursive')
-  return directoriesAction(fl) === 'recurse'
+  return recurses(fl)
 }
 
 /**

@@ -50,6 +50,8 @@ fn grammar(command: &str) -> Result<Grammar, StreamError> {
         "cmp" => crate::cmp::scan,
         "fmt" => crate::reflow::scan,
         "fold" => crate::fold::scan,
+        "grep" => crate::grep::scan,
+        "rg" => crate::rg_options::scan,
         "xxd" => crate::xxd::scan,
         _ => return Err(StreamError::new(format!("scan: no grammar for {command}"))),
     })
@@ -69,6 +71,17 @@ pub(crate) fn last<'a>(options: &'a [Typed], name: &str) -> Option<&'a [u8]> {
         .rev()
         .find(|(typed, _)| typed == name)
         .map(|(_, raw)| raw.as_slice())
+}
+
+/// Each option's last occurrence, in the order those occurrences were
+/// typed: what a host's parsed flags keep of a scalar option typed twice.
+pub(crate) fn latest(options: &[Typed]) -> Vec<&Typed> {
+    options
+        .iter()
+        .enumerate()
+        .filter(|(at, (name, _))| !options[at + 1..].iter().any(|(later, _)| later == name))
+        .map(|(_, typed)| typed)
+        .collect()
 }
 
 /// The values a scan read, written once the host finishes it.
@@ -274,6 +287,156 @@ mod tests {
         let values = scan("xxd", &[("c", b"300"), ("p", b"")]).expect("read");
         assert_eq!(values["cols"], json!(300));
         assert_eq!(scan("xxd", &[("p", b"")]).expect("read")["cols"], json!(30));
+    }
+
+    #[test]
+    fn grep_context_takes_what_both_hosts_took() {
+        for (raw, value) in [
+            (" 5", 5u64),
+            ("+5", 5),
+            ("5 ", 5),
+            ("1_0", 10),
+            ("-0", 0),
+            ("05", 5),
+            ("\u{a0}5\u{3000}", 5),
+            ("99999999999999999999", u64::MAX),
+        ] {
+            let values = scan("grep", &[("after_context", raw.as_bytes())]).expect(raw);
+            assert_eq!(values["after_context"], json!(value), "{raw}");
+        }
+        for raw in [
+            "",
+            "x",
+            "-1",
+            "0x5",
+            "1e3",
+            "1__0",
+            "_1",
+            "1_",
+            "\u{661}",
+            "\u{85}5",
+            "\u{feff}5",
+            "\x1c5",
+        ] {
+            let shown = format!("grep: {raw}: invalid context length argument");
+            let refused = refusal("grep", &[("after_context", raw.as_bytes())]);
+            assert_eq!(
+                refused,
+                (shown.chars().map(|c| c.to_string()).collect::<String>(), 2)
+            );
+        }
+    }
+
+    #[test]
+    fn grep_reads_each_option_at_its_last_and_checks_in_greps_order() {
+        let typed: &[(&str, &[u8])] = &[("after_context", b"x"), ("after_context", b"1")];
+        assert_eq!(
+            scan("grep", typed).expect("read")["after_context"],
+            json!(1)
+        );
+        let typed: &[(&str, &[u8])] = &[("context", b"3"), ("after_context", b"0")];
+        let values = scan("grep", typed).expect("read");
+        assert_eq!(
+            (&values["after_context"], &values["before_context"]),
+            (&json!(0), &json!(3))
+        );
+        let typed: &[(&str, &[u8])] = &[
+            ("max_count", b"y"),
+            ("directories", b"z"),
+            ("after_context", b"x"),
+            ("binary_files", b"v"),
+        ];
+        assert_eq!(
+            refusal("grep", typed),
+            ("grep: unknown binary-files type".to_owned(), 2)
+        );
+        let typed: &[(&str, &[u8])] = &[("max_count", b"y"), ("directories", b"z")];
+        assert_eq!(refusal("grep", typed).1, 1);
+    }
+
+    #[test]
+    fn grep_max_count_takes_blanks_a_sign_and_digits() {
+        for (raw, value) in [
+            (" 5", json!(5)),
+            ("+1", json!(1)),
+            ("-1", json!(null)),
+            ("-0", json!(0)),
+        ] {
+            assert_eq!(
+                scan("grep", &[("max_count", raw.as_bytes())]).expect(raw)["max_count"],
+                value
+            );
+        }
+        for raw in ["5 ", "1_0", "0x5", "", "\u{a0}1"] {
+            let refused = refusal("grep", &[("max_count", raw.as_bytes())]);
+            assert_eq!(refused, ("grep: invalid max count".to_owned(), 2), "{raw}");
+        }
+    }
+
+    #[test]
+    fn grep_directories_take_a_prefix_and_devices_only_the_word() {
+        for (typed, action) in [
+            (&[("directories", b"rec".as_slice())][..], "recurse"),
+            (
+                &[("recursive", b"".as_slice()), ("directories", b"s")][..],
+                "skip",
+            ),
+            (
+                &[
+                    ("directories", b"skip".as_slice()),
+                    ("dereference_recursive", b""),
+                ][..],
+                "recurse",
+            ),
+        ] {
+            assert_eq!(
+                scan("grep", typed).expect("read")["directories"],
+                json!(action)
+            );
+        }
+        let (shown, status) = refusal("grep", &[("directories", b"re")]);
+        assert_eq!(status, 1);
+        assert_eq!(
+            shown,
+            "grep: ambiguous argument 're' for '--directories'\nValid arguments are:\n  - 'read'\n  \
+             - 'recurse'\n  - 'skip'\nUsage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' \
+             for more information."
+        );
+        let (shown, _) = refusal(
+            "grep",
+            &[
+                ("directories", "x\u{e9}'".as_bytes()),
+                ("directories", b"read"),
+            ],
+        );
+        assert!(shown.starts_with("grep: invalid argument 'x\\303\\251\\'' for '--directories'"));
+        let typed: &[(&str, &[u8])] = &[("devices", b"x"), ("devices", b"skip")];
+        assert_eq!(
+            refusal("grep", typed),
+            ("grep: unknown devices method".to_owned(), 2)
+        );
+        let values = scan("grep", &[("devices", b"skip")]).expect("read");
+        assert_eq!(values["skip_devices"], json!(true));
+    }
+
+    #[test]
+    fn grep_binary_mode_is_the_last_of_its_group() {
+        for (typed, mode) in [
+            (
+                &[("text", b"".as_slice()), ("binary_files", b"binary")][..],
+                "binary",
+            ),
+            (
+                &[("binary_files", b"text".as_slice()), ("args_I", b"")][..],
+                "without-match",
+            ),
+            (&[][..], "binary"),
+        ] {
+            assert_eq!(
+                scan("grep", typed).expect("read")["binary_mode"],
+                json!(mode)
+            );
+        }
     }
 
     #[test]

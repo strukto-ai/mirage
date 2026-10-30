@@ -2,9 +2,12 @@ use std::collections::VecDeque;
 
 use memchr::{memchr, memchr_iter, memrchr};
 use serde::Deserialize;
+use serde_json::Value as Json;
 
+use crate::number;
 use crate::regex::{Options, Regex, STEPS, Step, Syntax};
-use crate::{Stream, StreamError, parse_config};
+use crate::scan::{self, Typed, Values};
+use crate::{Stream, StreamError, parse_config, quoted};
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -179,6 +182,175 @@ struct Grep {
     stderr: Vec<u8>,
     /// Steps left in this call.
     budget: u64,
+}
+
+/// What `--directories` takes, an unambiguous prefix naming one too.
+const DIRECTORIES: [&str; 3] = ["read", "recurse", "skip"];
+/// What `--devices` takes, only as spelled.
+const DEVICES: [&str; 2] = ["read", "skip"];
+/// What `--binary-files` takes, only as spelled.
+const BINARY_FILES: [&str; 3] = ["binary", "text", "without-match"];
+/// The help hint and synopsis grep 3.11 ends a refused `-d` word with.
+const USAGE: &str =
+    "Usage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.";
+
+/// grep's and zgrep's option values, read in the order grep 3.11 checks
+/// them: the binary-files mode, each context length, each `-d` and `-D`
+/// word, then the max count. A scalar option typed twice is read at its
+/// last occurrence, except that every `-d` and `-D` word is checked.
+pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
+    let latest = scan::latest(options);
+    let mut binary = "binary";
+    let mut contexts: [Option<u64>; 3] = [None; 3];
+    let mut directories = "read";
+    let mut devices = None;
+    let mut max_count = None;
+    for (name, raw) in &latest {
+        match name.as_str() {
+            "text" => binary = "text",
+            "args_I" => binary = "without-match",
+            "binary_files" => {
+                binary = BINARY_FILES
+                    .into_iter()
+                    .find(|word| word.as_bytes() == raw.as_slice())
+                    .ok_or_else(|| usage(b"grep: unknown binary-files type".to_vec(), 2))?;
+            }
+            "after_context"
+            | "before_context"
+            | "context"
+            | "recursive"
+            | "dereference_recursive"
+            | "directories"
+            | "devices"
+            | "max_count" => {}
+            _ => return Err(scan::unknown("grep", name)),
+        }
+    }
+    for (name, raw) in &latest {
+        let slot = match name.as_str() {
+            "after_context" => 0,
+            "before_context" => 1,
+            "context" => 2,
+            _ => continue,
+        };
+        contexts[slot] = Some(context_length(raw)?);
+    }
+    for (name, raw) in options {
+        if name == "devices" {
+            if !DEVICES.iter().any(|word| word.as_bytes() == raw.as_slice()) {
+                return Err(usage(b"grep: unknown devices method".to_vec(), 2));
+            }
+        } else if name == "directories" {
+            directory(raw)?;
+        }
+    }
+    for (name, raw) in &latest {
+        match name.as_str() {
+            "recursive" | "dereference_recursive" => directories = "recurse",
+            "directories" => directories = directory(raw)?,
+            "devices" => devices = Some(raw.as_slice()),
+            "max_count" => max_count = self::max_count(raw)?,
+            _ => {}
+        }
+    }
+    let [after, before, both] = contexts;
+    Ok(Values::from_iter([
+        ("binary_mode".to_owned(), Json::from(binary)),
+        ("after_context".to_owned(), Json::from(after.or(both))),
+        ("before_context".to_owned(), Json::from(before.or(both))),
+        ("directories".to_owned(), Json::from(directories)),
+        (
+            "skip_devices".to_owned(),
+            Json::from(devices == Some(b"skip".as_slice())),
+        ),
+        ("max_count".to_owned(), Json::from(max_count)),
+    ]))
+}
+
+fn usage(stderr: Vec<u8>, status: i32) -> StreamError {
+    StreamError::refusal(&stderr, status)
+}
+
+/// One `-A`, `-B` or `-C` value: a whole decimal, its digit groups split
+/// by single underscores and blanks around it, 0 at least; a count past
+/// `u64` saturates.
+fn context_length(raw: &[u8]) -> Result<u64, StreamError> {
+    let refused = || {
+        let mut stderr = b"grep: ".to_vec();
+        stderr.extend_from_slice(raw);
+        stderr.extend_from_slice(b": invalid context length argument");
+        usage(stderr, 2)
+    };
+    let text = std::str::from_utf8(raw).map_err(|_| refused())?;
+    let text = text.trim_matches(host_space);
+    let (negative, digits) = match text.as_bytes().first() {
+        Some(b'-') => (true, &text[1..]),
+        Some(b'+') => (false, &text[1..]),
+        _ => (false, text),
+    };
+    let grouped = !digits.is_empty()
+        && digits
+            .split('_')
+            .all(|group| !group.is_empty() && group.bytes().all(|b| b.is_ascii_digit()));
+    if !grouped {
+        return Err(refused());
+    }
+    let value = digits
+        .bytes()
+        .filter(u8::is_ascii_digit)
+        .fold(0u128, |value, digit| {
+            value
+                .saturating_mul(10)
+                .saturating_add(u128::from(digit - b'0'))
+        });
+    if negative && value > 0 {
+        return Err(refused());
+    }
+    Ok(u64::try_from(value).unwrap_or(u64::MAX))
+}
+
+/// The blanks both hosts once trimmed from a context length: Unicode's
+/// white space, less the separators and U+0085 one of them kept.
+fn host_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
+    )
+}
+
+/// One `-d` word, whole or an unambiguous prefix, refused with the valid
+/// words and grep's usage, exit 1.
+fn directory(raw: &[u8]) -> Result<&'static str, StreamError> {
+    if let Some(word) = DIRECTORIES.iter().find(|word| word.as_bytes() == raw) {
+        return Ok(word);
+    }
+    let mut prefixed = DIRECTORIES
+        .iter()
+        .filter(|word| word.as_bytes().starts_with(raw));
+    let kind = match (prefixed.next(), prefixed.next()) {
+        (Some(word), None) => return Ok(word),
+        (Some(_), Some(_)) => "ambiguous",
+        _ => "invalid",
+    };
+    let words: Vec<String> = DIRECTORIES
+        .iter()
+        .map(|word| format!("  - '{word}'"))
+        .collect();
+    let refused = format!(
+        "grep: {kind} argument '{}' for '--directories'\nValid arguments are:\n{}\n{USAGE}",
+        quoted(raw),
+        words.join("\n")
+    );
+    Err(usage(refused.into_bytes(), 1))
+}
+
+/// `-m` as grep 3.11 reads it: C blanks, a sign and digits; a negative
+/// count is no limit, and a count past `u64` saturates.
+fn max_count(raw: &[u8]) -> Result<Option<u64>, StreamError> {
+    let (negative, value) =
+        number::decimal(raw).ok_or_else(|| usage(b"grep: invalid max count".to_vec(), 2))?;
+    Ok((!negative || value == 0).then(|| u64::try_from(value).unwrap_or(u64::MAX)))
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {

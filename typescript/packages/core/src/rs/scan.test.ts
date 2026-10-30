@@ -14,7 +14,8 @@
 
 import { expect, it } from 'vitest'
 import { StreamRefusal } from './errors.ts'
-import { refused, scan } from './scan.ts'
+import { UsageError } from '../commands/errors.ts'
+import { refused, scan, scanned } from './scan.ts'
 
 it('reads each value typed', () => {
   const values = scan('cmp', [
@@ -40,4 +41,16 @@ it('keeps a refusal its bytes and status', () => {
       "cmp: invalid --bytes value '1é'\ncmp: Try 'cmp --help' for more information.\n",
     ),
   )
+})
+
+it('throws a refusal as the usage error it is', () => {
+  let caught: unknown
+  try {
+    scanned('grep', [['after_context', 'é']])
+  } catch (err) {
+    caught = err
+  }
+  if (!(caught instanceof UsageError)) throw new Error('scanned took the value')
+  expect([caught.message, caught.exitCode]).toEqual(['grep: é: invalid context length argument', 2])
+  expect(scanned('grep', [['max_count', '-1']]).max_count).toBeNull()
 })

@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 
 from mirage.commands.builtin.find_parse import find_expr_tail
 from mirage.commands.builtin.generic.awk import is_assignment
-from mirage.commands.builtin.generic.grep import directories_action
+from mirage.commands.builtin.generic.grep import recurses
 from mirage.commands.builtin.generic.program import FILE_KEYS
 from mirage.commands.cli.types import CLI
 from mirage.commands.cli.walk import walk
@@ -115,7 +115,7 @@ def default_cwd_operand(
         return None
     if cmd_name == "grep":
         fl = FlagView(parse_to_kwargs(parsed), spec=spec)
-        if directories_action(fl) != "recurse":
+        if not recurses(fl):
             return None
     elif (
         cmd_name == "rg"

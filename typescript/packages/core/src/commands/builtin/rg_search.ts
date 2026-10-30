@@ -98,6 +98,9 @@ export interface RgFlags {
   // -E: auto (when unset), none, or the WHATWG name of the encoding a label
   // named.
   encoding?: string
+  // ripgrep's compile limits in bytes, null (or unset) for its own.
+  regexSizeLimit?: number | null
+  dfaSizeLimit?: number | null
 }
 
 /**

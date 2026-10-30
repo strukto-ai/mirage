@@ -1,9 +1,10 @@
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import aclosing
 from functools import partial
+from typing import cast
 
 from mirage.commands.builtin.generic.decompress import decompress_inputs
-from mirage.commands.builtin.generic.grep import listing_mode, max_count
+from mirage.commands.builtin.generic.grep import GrepValues, listing_mode
 from mirage.commands.builtin.grep_binary import GrepFlags
 from mirage.commands.builtin.grep_pattern import (
     matcher_syntax,
@@ -28,6 +29,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import OutputStream, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.rs.scan import scanned
 from mirage.rs.stream import close_stream
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -50,7 +52,8 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         never_match (bool): An empty pattern file matches nothing.
     """
     files_only, files_without_match = listing_mode(fl)
-    count = max_count(fl)
+    values = cast(GrepValues, scanned("grep", fl.texts("max_count")))
+    count = values["max_count"]
     return GrepFlags(
         ignore_case=fl.as_bool("ignore_case"),
         invert=fl.as_bool("invert_match"),
