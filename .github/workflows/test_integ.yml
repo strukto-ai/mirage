@@ -354,12 +354,11 @@ jobs:
           node-version: '24'
       - name: Install TypeScript dependencies
         working-directory: typescript
-        # The current run's artifact supplies dist and generated sources.
-        # Keep the allowed native dependency's install hook; core's prepare
-        # would compile the same Rust WASM again before downloading it.
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
         run: |
           pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm rebuild @zkochan/fuse-native
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
       - uses: actions/download-artifact@v8
         with:
           name: integ-typescript-dist
@@ -1132,12 +1131,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        # The current run's artifact supplies dist and generated sources.
-        # Keep the allowed native dependency's install hook; core's prepare
-        # would compile the same Rust WASM again before downloading it.
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
         run: |
           pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm rebuild @zkochan/fuse-native
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -1605,12 +1603,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        # The current run's artifact supplies dist and generated sources.
-        # Keep the allowed native dependency's install hook; core's prepare
-        # would compile the same Rust WASM again before downloading it.
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
         run: |
           pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm rebuild @zkochan/fuse-native
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -1627,7 +1624,9 @@ jobs:
       - name: Run TypeScript FUSE mount and check (real libfuse)
         working-directory: integ
         run: |
+          set -o pipefail
           pnpm exec tsx fuse/fuse.ts 2>&1 \
+            | tee /dev/stderr \
             | ../python/.venv/bin/python check_json.py fuse/truth_fuse.json
 
   integ-fuse-windows:
@@ -2029,12 +2028,11 @@ jobs:
 
       - name: Install TypeScript dependencies
         working-directory: typescript
-        # The current run's artifact supplies dist and generated sources.
-        # Keep the allowed native dependency's install hook; core's prepare
-        # would compile the same Rust WASM again before downloading it.
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
         run: |
           pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm rebuild @zkochan/fuse-native
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2211,12 +2209,11 @@ jobs:
 
       - name: Install TypeScript dependencies
         working-directory: typescript
-        # The current run's artifact supplies dist and generated sources.
-        # Keep the allowed native dependency's install hook; core's prepare
-        # would compile the same Rust WASM again before downloading it.
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
         run: |
           pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm rebuild @zkochan/fuse-native
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2314,12 +2311,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        # The current run's artifact supplies dist and generated sources.
-        # Keep the allowed native dependency's install hook; core's prepare
-        # would compile the same Rust WASM again before downloading it.
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
         run: |
           pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm rebuild @zkochan/fuse-native
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2412,12 +2408,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        # The current run's artifact supplies dist and generated sources.
-        # Keep the allowed native dependency's install hook; core's prepare
-        # would compile the same Rust WASM again before downloading it.
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
         run: |
           pnpm install --frozen-lockfile=false --ignore-scripts
-          pnpm rebuild @zkochan/fuse-native
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8

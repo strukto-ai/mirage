@@ -56,7 +56,8 @@ runs:
       shell: bash
       run: |
         pnpm install --frozen-lockfile=false --ignore-scripts
-        pnpm rebuild @zkochan/fuse-native
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
     # Built here rather than downloaded from a bootstrap job, which held
     # every typescript-host job back by a minute and a half before it could

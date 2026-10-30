@@ -243,7 +243,10 @@ of waiting for it.
 
 The bootstrap artifact carries both `dist` and `core/src/generated`, so
 consumers install dependencies without rerunning core's Rust/WASM prepare
-hook, then rebuild the allowed native dependency (`@zkochan/fuse-native`).
+hook, then run the allowed native dependency's `buildgyp` script directly.
+`pnpm rebuild` skips `@zkochan/fuse-native` because its build is implicit in
+`binding.gyp` rather than an install script; `buildgyp` loads an existing
+native build or compiles it when missing.
 Python-only battery jobs use the same install path because their fake servers
 do not import mirage packages. Jobs that build TypeScript still run prepare.
 
