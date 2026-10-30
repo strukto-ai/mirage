@@ -222,6 +222,7 @@ fn is_canonical(text: &str) -> bool {
 /// jvp_dtoa_fmt: the shortest digits that read back as `x`, laid out the
 /// way jq prints a computed number.
 pub(crate) fn format_double(x: f64, out: &mut String) {
+    use std::fmt::Write;
     if x.is_nan() {
         out.push_str("null");
         return;
@@ -234,32 +235,66 @@ pub(crate) fn format_double(x: f64, out: &mut String) {
         out.push('0');
         return;
     }
-    let sci = format!("{:e}", x.abs());
-    let (mantissa, exp) = sci.split_once('e').unwrap_or((&sci, "0"));
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let x = x.abs();
+    if x < 1e15 && x.fract() == 0.0 {
+        let _ = write!(out, "{}", x as u64);
+        return;
+    }
+    let mut sci = Scratch::default();
+    let _ = write!(sci, "{x:e}");
+    let sci = sci.as_str();
+    let (mantissa, exp) = sci.split_once('e').unwrap_or((sci, "0"));
+    let (lead, rest) = mantissa.split_at(1);
+    let rest = rest.strip_prefix('.').unwrap_or(rest);
     let decpt = exp.parse::<i32>().unwrap_or(0) + 1;
-    let nd = digits.len() as i32;
+    let nd = 1 + rest.len() as i32;
     if decpt <= -4 || decpt > nd + 15 {
-        out.push_str(&digits[..1]);
+        out.push_str(lead);
         if nd > 1 {
             out.push('.');
-            out.push_str(&digits[1..]);
+            out.push_str(rest);
         }
-        out.push('e');
         let e = decpt - 1;
-        out.push(if e < 0 { '-' } else { '+' });
-        out.push_str(&format!("{:02}", e.abs()));
+        let _ = write!(out, "e{}{:02}", if e < 0 { '-' } else { '+' }, e.abs());
     } else if decpt <= 0 {
         out.push_str("0.");
         out.extend(std::iter::repeat_n('0', (-decpt) as usize));
-        out.push_str(&digits);
+        out.push_str(lead);
+        out.push_str(rest);
     } else if decpt >= nd {
-        out.push_str(&digits);
+        out.push_str(lead);
+        out.push_str(rest);
         out.extend(std::iter::repeat_n('0', (decpt - nd) as usize));
     } else {
-        out.push_str(&digits[..decpt as usize]);
+        out.push_str(lead);
+        out.push_str(&rest[..decpt as usize - 1]);
         out.push('.');
-        out.push_str(&digits[decpt as usize..]);
+        out.push_str(&rest[decpt as usize - 1..]);
+    }
+}
+
+/// Room on the stack for a double's shortest `{:e}` spelling.
+#[derive(Default)]
+struct Scratch {
+    bytes: [u8; 32],
+    len: usize,
+}
+
+impl Scratch {
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).expect("formatting writes UTF-8")
+    }
+}
+
+impl fmt::Write for Scratch {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let end = self.len + text.len();
+        self.bytes
+            .get_mut(self.len..end)
+            .ok_or(fmt::Error)?
+            .copy_from_slice(text.as_bytes());
+        self.len = end;
+        Ok(())
     }
 }
 
@@ -2352,6 +2387,91 @@ fn hex4(bytes: &[u8], at: usize) -> Result<u32, String> {
 mod tests {
     use super::super::meter::{self, Meter};
     use super::*;
+
+    /// `format_double` as it was before it kept off the heap, the
+    /// reference the fast paths are checked against.
+    fn formatted(x: f64) -> String {
+        let mut out = String::new();
+        if x.is_nan() {
+            return "null".into();
+        }
+        let x = x.clamp(-f64::MAX, f64::MAX);
+        if x.is_sign_negative() {
+            out.push('-');
+        }
+        if x == 0.0 {
+            out.push('0');
+            return out;
+        }
+        let sci = format!("{:e}", x.abs());
+        let (mantissa, exp) = sci.split_once('e').unwrap_or((&sci, "0"));
+        let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+        let decpt = exp.parse::<i32>().unwrap_or(0) + 1;
+        let nd = digits.len() as i32;
+        if decpt <= -4 || decpt > nd + 15 {
+            out.push_str(&digits[..1]);
+            if nd > 1 {
+                out.push('.');
+                out.push_str(&digits[1..]);
+            }
+            out.push('e');
+            let e = decpt - 1;
+            out.push(if e < 0 { '-' } else { '+' });
+            out.push_str(&format!("{:02}", e.abs()));
+        } else if decpt <= 0 {
+            out.push_str("0.");
+            out.extend(std::iter::repeat_n('0', (-decpt) as usize));
+            out.push_str(&digits);
+        } else if decpt >= nd {
+            out.push_str(&digits);
+            out.extend(std::iter::repeat_n('0', (decpt - nd) as usize));
+        } else {
+            out.push_str(&digits[..decpt as usize]);
+            out.push('.');
+            out.push_str(&digits[decpt as usize..]);
+        }
+        out
+    }
+
+    #[test]
+    fn doubles_print_as_the_heap_spelling_did() {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut values = vec![
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            1e15,
+            1e15 - 1.0,
+            999_999_999_999_999.0,
+            1e16,
+            1e17,
+            0.1,
+            1e-4,
+            1e-5,
+            123.456,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            5e-324,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            1_600_000_000.0,
+            2f64.powi(53),
+            2f64.powi(53) + 2.0,
+        ];
+        for _ in 0..300_000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            values.push(f64::from_bits(state));
+            values.push((state % 2_000_000_000_000_000) as f64 - 1e15);
+            values.push((state % 100_000_000) as f64 / 10f64.powi((state >> 40) as i32 % 12));
+        }
+        for x in values {
+            assert_eq!(printed(x), formatted(x), "{:?}", x.to_bits());
+        }
+    }
 
     #[test]
     fn a_literal_printed_the_same_is_both_spellings() {
