@@ -29,7 +29,7 @@ async function runJoin(
   vfs: RAMVFS,
   paths: PathSpec[],
   flags: Record<string, string | boolean | number | string[]> = {},
-): Promise<{ out: string; exitCode: number }> {
+): Promise<{ out: string; exitCode: number; stderr: string }> {
   const cmd = RAM_JOIN[0]
   if (cmd === undefined) throw new Error('join not registered')
   const result = await onMount(vfs, (files) =>
@@ -40,7 +40,7 @@ async function runJoin(
       cwd: PathSpec.fromStrPath('/'),
     }),
   )
-  if (result === null) return { out: '', exitCode: -1 }
+  if (result === null) return { out: '', exitCode: -1, stderr: '' }
   const [out, ioResult] = result
   const buf =
     out === null
@@ -48,17 +48,17 @@ async function runJoin(
       : out instanceof Uint8Array
         ? out
         : await materialize(out as AsyncIterable<Uint8Array>)
-  return { out: DEC.decode(buf), exitCode: ioResult.exitCode }
+  const stderr = ioResult.stderr instanceof Uint8Array ? DEC.decode(ioResult.stderr) : ''
+  return { out: DEC.decode(buf), exitCode: ioResult.exitCode, stderr }
 }
 
 describe('join', () => {
   it("refuses fewer than 2 paths with GNU's usage error, exit 1", async () => {
-    const vfs = new RAMVFS()
-    const call = runJoin(vfs, [])
-    await expect(call).rejects.toThrow(
-      "join: missing operand\nTry 'join --help' for more information.",
-    )
-    await expect(call).rejects.toMatchObject({ exitCode: 1 })
+    expect(await runJoin(new RAMVFS(), [])).toEqual({
+      out: '',
+      exitCode: 1,
+      stderr: "join: missing operand\nTry 'join --help' for more information.\n",
+    })
   })
 })
 

@@ -50,6 +50,7 @@ fn grammar(command: &str) -> Result<Grammar, StreamError> {
         "cmp" => crate::cmp::scan,
         "fmt" => crate::reflow::scan,
         "fold" => crate::fold::scan,
+        "join" => crate::join::options::scan,
         "xxd" => crate::xxd::scan,
         _ => return Err(StreamError::new(format!("scan: no grammar for {command}"))),
     })

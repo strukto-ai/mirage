@@ -1,3 +1,5 @@
+pub(crate) mod options;
+
 use serde::Deserialize;
 
 use crate::records::{Records, Take};
