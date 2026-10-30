@@ -254,7 +254,7 @@ export async function handleBackground(
   const bgCallStack = (callStack ?? new CallStack()).fork(false, simpleCommand(left) ? null : true)
   const jobHanded =
     handed !== null && decisions !== null
-      ? decisions.split(session.sessionId, handed, occurrenceOf(left, handed))
+      ? await decisions.split(session.sessionId, handed, occurrenceOf(left, handed))
       : null
 
   const abort = new AbortController()
@@ -428,7 +428,7 @@ export async function handleBackground(
         // A job that ended held on a question leaves its grants standing
         // for the retry, as a held line does; a killed or failed one spends
         // them.
-        if (hold.ended) decisions.release(session.sessionId, jobHanded)
+        if (hold.ended) await decisions.release(session.sessionId, jobHanded)
         else await decisions.revoke(session.sessionId, jobHanded)
       }
     }

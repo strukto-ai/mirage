@@ -395,10 +395,17 @@ export interface Abandoned {
  * in. Mirrors the Python SessionDecisionsQuery.
  */
 export interface SessionDecisionsQuery {
-  decisionSessions(): readonly string[]
-  decisionsOf(sessionId: string): readonly Decision[]
-  setDecisions(sessionId: string, records: readonly Decision[]): void
-  flush(): Promise<void>
+  approvalSessions(): readonly string[]
+  approvalStateOf(sessionId: string): Record<string, unknown> | null
+  incarnationOf(sessionId: string): string | null
+  ensureLoaded(): Promise<void>
+  activate(sessionId: string): Promise<string>
+  refreshApproval(sessionId: string, incarnation: string): Promise<void>
+  approvalEvent(
+    sessionId: string,
+    event: Record<string, unknown>,
+    incarnation?: string | null,
+  ): Promise<Record<string, unknown>>
 }
 
 /**

@@ -164,7 +164,7 @@ export async function runShellFunction(
     ;[session.parseCurrent, session.parseRow] = outerParse
     session.aliasView = outerView
     session.aliasExpansion = outerExpansion
-    if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)
+    if (nested !== null && decisions !== null) await decisions.handUp(session.sessionId, nested)
     scope.release()
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames

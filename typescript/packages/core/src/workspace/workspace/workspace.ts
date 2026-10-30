@@ -434,7 +434,11 @@ export class Workspace {
     // The approval ledger an Ask is taken to (design 3.9): grants live on
     // the sessions, the host answers through `onAsk` (or just records
     // the question when none is wired) and reads `ws.decisions`.
-    this.registry.policies.decisions = new Decisions(this.sessionManager, options.onAsk ?? null)
+    this.registry.policies.decisions = new Decisions(
+      this.sessionManager,
+      options.onAsk ?? null,
+      () => this.registry.policies.revision,
+    )
     // What every method sees of its session: the one its context was built
     // from when given (a line explain walks, a call's cwd and env), else
     // the one the call is made under when the method's is it, else the

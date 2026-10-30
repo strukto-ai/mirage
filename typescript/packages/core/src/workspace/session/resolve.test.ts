@@ -69,7 +69,7 @@ const PROFILES: Record<string, SessionProfile> = {
   }),
 }
 
-it('preserves saved rule mount identity through compilation and inline restrictions', () => {
+it('normalizes empty and absent saved rule mount anchors', () => {
   const restored = ruleFromDict({ reason: 'permission', commands: ['git push'] })
   const omitted: CommandRule = { reason: 'permission', commands: ['git push'] }
   for (const rule of [restored, omitted]) {
@@ -100,7 +100,7 @@ it('preserves saved rule mount identity through compilation and inline restricti
         paths: compiled.paths ?? [],
         ...(rule.mount === '' ? {} : { mount: '' }),
       }
-      expect(covers(saved, other, ['git', 'push'], '/repo')).toBe(false)
+      expect(covers(saved, other, ['git', 'push'], '/repo')).toBe(true)
     }
   }
 })

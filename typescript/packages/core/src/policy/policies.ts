@@ -33,12 +33,12 @@ import { rstripSlash } from '../utils/slash.ts'
 import type { Policy } from './base.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
-import { Explained, PolicyDenied } from './errors.ts'
+import { ApprovalUnavailable, Explained, PolicyDenied } from './errors.ts'
 import { Composition, composeSettled, type CompositionResult } from './composition.ts'
 import { sourceOf } from './match/decide.ts'
 import { operandPaths } from './match/rule.ts'
 import { isSessionScoped } from './mixin.ts'
-import { Decisions, opQuestion } from './decisions.ts'
+import { Decisions, callOf, getOpCall, opQuestion } from './decisions.ts'
 import {
   DryRun,
   Outcome,
@@ -395,6 +395,31 @@ function apart<T>(answer: () => Promise<T>): Promise<T> {
   return asyncContextIsolatesTasks ? commandRecords(answer, true) : answer()
 }
 
+async function validateCaller(
+  policies: Policies,
+  sessionId: string,
+  caller?: Caller,
+): Promise<void> {
+  const call =
+    caller === undefined
+      ? asyncContextIsolatesTasks
+        ? getOpCall(policies.decisions, sessionId)
+        : null
+      : callOf(caller, policies.decisions, sessionId)
+  if (call === null) return
+  try {
+    await policies.decisions.validate(sessionId, call)
+  } catch (error) {
+    if (!(error instanceof ApprovalUnavailable)) throw error
+    throw policyDenied(
+      { kind: 'deny', reason: error.message, failed: true },
+      sessionId,
+      undefined,
+      caller,
+    )
+  }
+}
+
 export async function preVfsGate(
   policies: Policies,
   call: VfsCall,
@@ -436,9 +461,13 @@ export async function preVfsGate(
   }
   const deciding = trace === DryRun.DECIDING
   if (deciding && write) throw erofs(path)
+  if (!deciding) await validateCaller(policies, sessionId, caller)
   if (!(policies.wants('preVfs') || (write && context.mode !== undefined))) return
   const answer: Deny | Ask | null = await apart(() => policies.preVfs(ctx, deciding))
-  await refuseOp(ctx, answer, line ? null : decisions, caller)
+  if (!deciding) await validateCaller(policies, sessionId, caller)
+  await refuseOp(ctx, answer, line ? null : decisions, caller, () =>
+    apart(() => policies.preVfs(ctx, deciding)),
+  )
 }
 
 async function refuseOp(
@@ -446,6 +475,7 @@ async function refuseOp(
   answer: Deny | Ask | null,
   decisions: Decisions | null,
   caller: Caller | undefined,
+  recheck: () => Promise<Deny | Ask | null>,
 ): Promise<void> {
   let refused: Deny | Pending | null
   if (answer?.kind === 'ask') {
@@ -457,7 +487,7 @@ async function refuseOp(
         caller,
       )
     }
-    refused = await decisions.resolveOp(ctx, answer, caller)
+    refused = await decisions.resolveOp(ctx, answer, caller, recheck)
   } else {
     refused = answer
   }
@@ -488,9 +518,9 @@ export async function postVfsGate(
   const { decisions = null, caller, ...context } = access
   const line = caller === undefined ? lineRunning() : caller.refusals !== null
   const trace = caller === undefined ? explaining() : caller.explaining
-  if (trace === DryRun.DECIDING || !(await policies.wantsFor('postVfs', sessionId))) {
-    return
-  }
+  if (trace === DryRun.DECIDING || Array.isArray(trace)) return
+  if (!(await policies.wantsFor('postVfs', sessionId))) return
+  await validateCaller(policies, sessionId, caller)
   const ctx: VfsResultContext = {
     call,
     path,
@@ -502,7 +532,11 @@ export async function postVfsGate(
     caller: policyCaller((caller ?? currentCaller()).session, policies.account),
     result,
   }
-  await refuseOp(ctx, await apart(() => policies.postVfs(ctx)), line ? null : decisions, caller)
+  const answer = await apart(() => policies.postVfs(ctx))
+  await validateCaller(policies, sessionId, caller)
+  await refuseOp(ctx, answer, line ? null : decisions, caller, () =>
+    apart(() => policies.postVfs(ctx)),
+  )
 }
 
 /**
@@ -518,10 +552,16 @@ export async function postExecuteGate(
   signal?: AbortSignal,
 ): Promise<[Deny | Pending | null, Limit | null]> {
   if (!(await policies.wantsFor('postExecute', ctx.sessionId))) return [null, null]
-  const [answer, bound] = await policies.postExecute(ctx)
+  if (claimant !== null) await policies.decisions.validate(ctx.sessionId, claimant.line)
+  let [answer, bound] = await policies.postExecute(ctx)
+  if (claimant !== null) await policies.decisions.validate(ctx.sessionId, claimant.line)
   if (answer?.kind !== 'ask') return [answer, bound]
   const [asked, keyed] = opQuestion(ctx, answer)
-  const said = await policies.decisions.resolve(asked, keyed, signal, claimant)
+  const said = await policies.decisions.resolve(asked, keyed, signal, claimant, async () => {
+    const [current, updated] = await policies.postExecute(ctx)
+    bound = updated
+    return current?.kind === 'ask' ? opQuestion(ctx, current)[1] : current
+  })
   if (said?.kind === 'abandoned') throw makeAbortError()
   return [said, said === null ? bound : null]
 }
@@ -540,9 +580,13 @@ export async function postCommandGate(
   signal?: AbortSignal,
 ): Promise<Deny | Pending | null> {
   if (!(await policies.wantsFor('postCommand', ctx.sessionId ?? ''))) return null
+  if (claimant !== null) await policies.decisions.validate(ctx.sessionId ?? '', claimant.line)
   const answer = await policies.postCommand(ctx)
+  if (claimant !== null) await policies.decisions.validate(ctx.sessionId ?? '', claimant.line)
   if (answer?.kind !== 'ask') return answer
-  const said = await policies.decisions.resolve(ctx, answer, signal, claimant)
+  const said = await policies.decisions.resolve(ctx, answer, signal, claimant, () =>
+    policies.postCommand(ctx),
+  )
   if (said?.kind === 'abandoned') throw makeAbortError()
   return said
 }
@@ -560,16 +604,23 @@ export async function postSessionGate(
 ): Promise<void> {
   if (policies === null) return
   if (!(await policies.wantsFor('postSession', ctx.sessionId))) return
+  await validateCaller(policies, ctx.sessionId)
   const landed: SessionResultContext = { ...ctx, old }
-  await sessionRefused(policies, landed, await policies.postSession(landed))
+  const answer = await policies.postSession(landed)
+  await validateCaller(policies, ctx.sessionId)
+  await sessionRefused(policies, landed, answer, () => policies.postSession(landed))
 }
 
 async function sessionRefused(
   policies: Policies,
   ctx: SessionContext,
   answer: Deny | Ask | null,
+  recheck: () => Promise<Deny | Ask | null>,
 ): Promise<void> {
-  const refused = answer?.kind === 'ask' ? await policies.decisions.resolveOp(ctx, answer) : answer
+  const refused =
+    answer?.kind === 'ask'
+      ? await policies.decisions.resolveOp(ctx, answer, undefined, recheck)
+      : answer
   if (refused !== null) {
     throw policyDenied(refused, ctx.key, `${ctx.key}: permission denied`)
   }
@@ -589,8 +640,12 @@ export async function preSessionGate(
   ctx: SessionContext,
 ): Promise<void> {
   if (explaining() === DryRun.DECIDING) throw eacces(ctx.key)
-  if (!policies?.wants('preSession')) return
-  await sessionRefused(policies, ctx, await policies.preSession(ctx))
+  if (policies === null) return
+  await validateCaller(policies, ctx.sessionId)
+  if (!policies.wants('preSession')) return
+  const answer = await policies.preSession(ctx)
+  await validateCaller(policies, ctx.sessionId)
+  await sessionRefused(policies, ctx, answer, () => policies.preSession(ctx))
 }
 
 /**
@@ -628,6 +683,7 @@ export class Policies {
       ) => (Required<Pick<RouteContext, 'session' | 'caller'>> & Pick<RouteContext, 'vfs'>) | null)
     | null = null
   account: string | null = null
+  revision = 0
 
   constructor(policies?: readonly Policy[]) {
     this.policies = [...(policies ?? [])]
@@ -675,6 +731,7 @@ export class Policies {
   }
 
   private rescan(): void {
+    this.revision += 1
     const wanted = new Set<Method>()
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
     for (const method of Object.keys(VALIDITY) as Method[]) {

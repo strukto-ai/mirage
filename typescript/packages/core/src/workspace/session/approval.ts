@@ -5,7 +5,7 @@ import { SecretRefSchema } from '../../secrets/config.ts'
 import { parseProcessPermissions } from '../../process/config.ts'
 import { SessionState } from './session.ts'
 import { openStreamSync } from '../../rs/stream.ts'
-import { uuid7 } from '../../utils/ids.ts'
+import { authorityId } from '../../utils/ids.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
 
@@ -47,6 +47,7 @@ const resultSchema = z
       'missing',
       'blocked',
       'rebased',
+      'grants',
     ]),
   })
   .passthrough()
@@ -143,12 +144,16 @@ export function planReset(
   current: RecordFields | null,
   close: boolean,
 ): SessionReset {
+  const payload = structuredClone(fields)
+  payload.generation = generationOf(current)
+  delete payload.incarnation
+  delete payload.approval_state
   return {
-    fields: structuredClone(fields),
-    event: { op: 'reset', incarnation: uuid7(), closed: close ? uuid7() : null },
+    fields: payload,
+    event: { op: 'reset', incarnation: authorityId(), closed: close ? authorityId() : null },
     expectedEpoch: current?.incarnation == null ? null : z.string().parse(current.incarnation),
     expectedClosed: current?.closed == null ? null : z.string().parse(current.closed),
-    transition: uuid7(),
+    transition: authorityId(),
   }
 }
 
@@ -183,7 +188,7 @@ export function approvalEpoch(state: RecordFields | null): string | null {
 export function emptyApprovals(incarnation: string | null = null): RecordFields {
   return {
     version: 1,
-    incarnation: incarnation ?? uuid7(),
+    incarnation: incarnation ?? authorityId(),
     revision: 0,
     records: [],
     claims: [],
@@ -202,7 +207,7 @@ export async function transactApprovals(
 ): Promise<ApprovalReply> {
   baseline = structuredClone(baseline)
   const sessionId = z.string().parse(baseline.session_id)
-  const transition = transitionId ?? uuid7()
+  const transition = transitionId ?? authorityId()
   const initial = emptyApprovals(expectedEpoch)
   const ownEpoch = event.op === 'reset' ? z.string().parse(event.incarnation) : initial.incarnation
   let lastError: unknown

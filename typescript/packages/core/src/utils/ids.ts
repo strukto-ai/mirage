@@ -79,6 +79,11 @@ export function uuid7(): string {
   return SYSTEM_IDS.uuid7()
 }
 
+/** An unpredictable approval identity, independent of seeded workspace draws. */
+export function authorityId(): string {
+  return crypto.randomUUID()
+}
+
 /** Mint a fresh workspace id (UUIDv7). */
 export function newWorkspaceId(): string {
   return uuid7()

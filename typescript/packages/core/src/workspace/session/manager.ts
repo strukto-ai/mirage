@@ -36,7 +36,7 @@ import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
-import { SystemIdSource, uuid7, type IdSource } from '../../utils/ids.ts'
+import { SystemIdSource, authorityId, type IdSource } from '../../utils/ids.ts'
 
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
@@ -269,7 +269,13 @@ export class SessionManager extends SessionOwner {
   }
 
   approvalStateOf(sessionId: string): RecordFields | null {
-    return structuredClone(this.get(sessionId).approvalState)
+    const session = this.sessions.get(sessionId)
+    if (session !== undefined) return structuredClone(session.approvalState)
+    const closed = this.closedRecords.get(sessionId)
+    if (closed === undefined) throw new ApprovalUnavailable('session_disappeared')
+    return closed.approval_state == null
+      ? null
+      : structuredClone(z.record(z.string(), z.unknown()).parse(closed.approval_state))
   }
 
   approvalSessions(): readonly string[] {
@@ -284,7 +290,8 @@ export class SessionManager extends SessionOwner {
   async activate(sessionId: string): Promise<string> {
     await this.ensureLoaded()
     return this.persistLock.withLock(sessionId, async () => {
-      const session = this.get(sessionId)
+      const session = this.approvalSession(sessionId)
+      if (session === null) throw new ApprovalUnavailable('session_closed')
       await this.flushOne(session)
       const incarnation = session.incarnation
       if (incarnation === null) throw new ApprovalUnavailable('session_invalid')
@@ -296,9 +303,18 @@ export class SessionManager extends SessionOwner {
   /** Refresh policy facts under the identity an existing caller captured. */
   async refreshApproval(sessionId: string, incarnation: string): Promise<void> {
     await this.ensureLoaded()
-    return this.persistLock.withLock(sessionId, () =>
-      this.refreshApprovalLocked(this.get(sessionId), incarnation),
-    )
+    return this.persistLock.withLock(sessionId, () => {
+      const session = this.approvalSession(sessionId)
+      if (session === null) throw new ApprovalUnavailable('session_closed')
+      return this.refreshApprovalLocked(session, incarnation)
+    })
+  }
+
+  private approvalSession(sessionId: string): SessionState | null {
+    const session = this.sessions.get(sessionId)
+    if (session !== undefined) return session
+    if (this.closedRecords.has(sessionId)) return null
+    throw new ApprovalUnavailable('session_disappeared')
   }
 
   private async refreshApprovalLocked(session: SessionState, incarnation: string): Promise<void> {
@@ -340,7 +356,11 @@ export class SessionManager extends SessionOwner {
   ): Promise<RecordFields> {
     await this.ensureLoaded()
     return this.persistLock.withLock(sessionId, async () => {
-      const session = this.get(sessionId)
+      const session = this.approvalSession(sessionId)
+      if (session === null) {
+        if (['release', 'revoke', 'hand_up'].includes(String(event.op))) return { kind: 'applied' }
+        throw new ApprovalUnavailable('session_closed')
+      }
       if (this.resets.has(sessionId)) throw new ApprovalUnavailable('session_transition_pending')
       try {
         const reply = await transactApprovals(
@@ -396,6 +416,16 @@ export class SessionManager extends SessionOwner {
       this.sessions.set(sessionId, session)
     }
     this.defaultIdInternal = sessionId
+  }
+
+  async restoreDefault(sessionId: string): Promise<void> {
+    if (sessionId === this.defaultIdInternal) return
+    const previous = this.defaultIdInternal
+    await this.persistLock.withLock(previous, async () => {
+      await this.closeRecord(this.get(previous))
+      this.adoptDefault(sessionId)
+    })
+    this.incarnations.delete(previous)
   }
 
   get cwd(): string {
@@ -555,7 +585,7 @@ export class SessionManager extends SessionOwner {
         this.persisted.set(sid, JSON.stringify(reply.fields))
         return
       }
-      session.incarnation ??= uuid7()
+      session.incarnation ??= authorityId()
       const expected = session.generation
       session.generation = expected + 1
       const fields = session.toDict() as RecordFields
@@ -681,19 +711,7 @@ export class SessionManager extends SessionOwner {
       if (session === undefined) {
         throw new Error(`unknown session: ${sessionId}`)
       }
-      const reset = this.resets.get(sessionId)
-      if (reset !== undefined && reset.event.closed == null) await this.commitReset(session)
-      if (!this.resets.has(sessionId)) {
-        const current = await this.sessionStore.get(sessionId)
-        if (current !== null && (current.incarnation ?? null) !== session.incarnation) {
-          throw new ApprovalUnavailable('session_replaced')
-        }
-        this.resets.set(
-          sessionId,
-          planReset({ session_id: sessionId, generation: session.generation }, current, true),
-        )
-      }
-      await this.commitReset(session)
+      await this.closeRecord(session)
 
       const keep = [...this.sessions.entries()]
         .filter(([id]) => id !== sessionId)
@@ -703,6 +721,19 @@ export class SessionManager extends SessionOwner {
       this.persisted.delete(sessionId)
       this.incarnations.delete(sessionId)
     })
+  }
+
+  private async closeRecord(session: SessionState): Promise<void> {
+    const sid = session.sessionId
+    const reset = this.resets.get(sid)
+    if (reset !== undefined && reset.event.closed == null) await this.commitReset(session)
+    if (!this.resets.has(sid)) {
+      const current = await this.sessionStore.get(sid)
+      if (current !== null && (current.incarnation ?? null) !== session.incarnation)
+        throw new ApprovalUnavailable('session_replaced')
+      this.resets.set(sid, planReset({ session_id: sid }, current, true))
+    }
+    await this.commitReset(session)
   }
 
   private defaultSession(): SessionState {

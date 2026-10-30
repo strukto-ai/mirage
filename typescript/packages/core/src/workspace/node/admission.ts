@@ -17,9 +17,7 @@ import { callerSignal, sessionAccess } from '../../context/session_context.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
-  Outcome,
   PermissionsPolicy,
-  Scope,
   askRule,
   policyDenied,
   refusalOf,
@@ -35,6 +33,7 @@ import type {
   Pending,
 } from '../../policy/index.ts'
 import { settled } from '../../policy/policies.ts'
+import { ApprovalUnavailable } from '../../policy/errors.ts'
 import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
 import { lineTokens } from '../../policy/match/allow.ts'
 import { patternMatches, splitPattern } from '../../policy/match/pattern.ts'
@@ -622,7 +621,13 @@ export async function resolved(
   claimant: Claimant | null,
 ): Promise<Deny | Pending | null> {
   if (asked?.kind !== 'ask') return asked
-  const action = await registry.decisions.resolve(ctx, asked, signal, claimant)
+  const action = await registry.decisions.resolve(ctx, asked, signal, claimant, async () =>
+    settled(
+      (await registry.policies.answers('preCommand', ctx)).filter(
+        (answer): answer is Deny | Ask => answer.kind !== 'route',
+      ),
+    ),
+  )
   if (action !== null && action.kind === 'abandoned') throw makeAbortError()
   return action
 }
@@ -656,6 +661,22 @@ export async function admit(
   // Ask the profile's rules alone, as `gate` takes it.
   rulesOnly = false,
 ): Promise<Refused | Admitted> {
+  if (claimant !== null) {
+    try {
+      await registry.decisions.validate(session.sessionId, claimant.line)
+    } catch (error) {
+      if (!(error instanceof ApprovalUnavailable)) throw error
+      const deny: Deny = { kind: 'deny', reason: error.message, failed: true }
+      const [stderr, exitCode] = await renderCommandDeny(name, deny, {
+        command: name,
+        argv: args,
+        cwd: session.cwd,
+        paths: [],
+        sessionId: session.sessionId,
+      })
+      return { stderr, exitCode, refusal: refusalOf(deny) }
+    }
+  }
   const gated = await gate(
     name,
     args,
@@ -674,9 +695,7 @@ export async function admit(
   const [ctx, asked] = gated
   const action = await resolved(ctx, asked, registry, signal, claimant)
   if (action === null) {
-    const granted = session.decisions
-      .filter((r) => r.scope === Scope.SESSION && r.outcome === Outcome.ALLOW)
-      .map((r) => r.rule)
+    const granted = await registry.decisions.sessionGrants(ctx, claimant)
     if (asked !== null && asked.kind === 'ask')
       granted.unshift(...(asked.rules ?? [askRule(ctx, asked)]))
     return new Admitted({

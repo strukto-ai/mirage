@@ -15,6 +15,9 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
+import { RAMNamespaceStore } from '../workspace/mount/namespace/ram.ts'
+import { SessionManager } from '../workspace/session/manager.ts'
+import type { RecordFields } from '../workspace/record/types.ts'
 import { openStream } from '../rs/stream.ts'
 
 import { Decisions, askRule, covers, decisionId, encloses } from './decisions.ts'
@@ -27,7 +30,6 @@ import type {
   Decision,
   HandOff,
   Occurrence,
-  SessionDecisionsQuery,
 } from './types.ts'
 
 const RULE: CommandRule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
@@ -350,7 +352,7 @@ describe('decisions', () => {
     // releases its claim; the second during this line's own pass.
     const earlier: HandOff = fresh()
     expect(await ledger.resolve(ctx(), ASK, undefined, at(earlier))).toBeNull()
-    ledger.release('s', earlier)
+    await ledger.release('s', earlier)
     const line: HandOff = fresh()
     expect(await ledger.resolve(ctx(), both, undefined, at(line))).toBeNull()
     expect(asked).toBe(4)
@@ -511,10 +513,10 @@ describe('decisions', () => {
       await ledger.answer(waiting.id, Outcome.ALLOW)
       expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, index))).toBeNull()
     }
-    const job = ledger.split('s', handed, { parent: null, source: 'line', start: 1, end: 2 })
+    const job = await ledger.split('s', handed, { parent: null, source: 'line', start: 1, end: 2 })
     expect(handed.claimed.map((c) => c.occurrence.start)).toEqual([0, 1])
     expect(job.claimed.map((c) => c.occurrence.start)).toEqual([1])
-    ledger.release('s', handed)
+    await ledger.release('s', handed)
     // The line's grant is on offer again; the job's is not.
     expect(await ledger.resolve(ctx(), ASK, undefined, at(fresh(), 0))).toBeNull()
     expect((await ledger.held(ctx(), ASK, at(fresh(), 1)))?.kind).toBe('pending')
@@ -551,53 +553,62 @@ describe('decisions', () => {
   })
 
   it('claims an inline grant before the ledger yields to its store', async () => {
-    // A host's inline nod is claimed for the asking line in the same step
-    // that records it, before the flush waits on the store. A line judged
-    // during that wait finds the grant claimed, not standing, and asks for
-    // itself; it used to take the nod, and the first line, resuming to
-    // find its nod gone, ran on nothing at all. The in-memory ledger never
-    // yields, which is what hid the window.
-    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
-    const held = new Map<string, readonly Decision[]>()
-    let flushes = 0
-    const store: SessionDecisionsQuery = {
-      decisionSessions: () => [...held.keys()],
-      decisionsOf: (sessionId) => held.get(sessionId) ?? [],
-      setDecisions: (sessionId, records) => {
-        held.set(sessionId, records)
-      },
-      flush: async () => {
-        flushes += 1
-        await tick()
-      },
+    let confirm = (): void => undefined
+    let entered = (): void => undefined
+    const blocked = new Promise<void>((resolve) => {
+      confirm = resolve
+    })
+    const written = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    class YieldingStore extends RAMNamespaceStore {
+      paused = false
+      override async casSet(key: string, fields: RecordFields, expected: number): Promise<boolean> {
+        const placed = await super.casSet(key, fields, expected)
+        const state = z
+          .object({ records: z.array(z.object({ outcome: z.string().nullable() })) })
+          .optional()
+          .parse(fields.approval_state)
+        if (placed && !this.paused && state?.records.some((record) => record.outcome === 'allow')) {
+          this.paused = true
+          entered()
+          await blocked
+        }
+        return placed
+      }
     }
     let asked = 0
-    const ledger = new Decisions(store, (r) => {
-      asked += 1
-      return Promise.resolve({ ...r, outcome: Outcome.ALLOW, scope: Scope.ONCE })
-    })
-    const first = fresh()
-    const second = fresh()
+    const allow = (record: Decision): Promise<Decision> => {
+      asked++
+      return Promise.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
+    }
+    const store = new YieldingStore()
+    const ledger = new Decisions(new SessionManager('s', store), allow)
+    const first = fresh(),
+      second = fresh()
     let done = false
     const running = ledger.resolve(ctx(), ASK, undefined, at(first)).finally(() => {
       done = true
     })
-    // Two flushes in, the question has been recorded and then answered,
-    // and the first line is parked in the flush of its answer.
-    for (let i = 0; i < 20 && flushes < 2; i += 1) await tick()
-    expect(flushes).toBe(2)
-    expect(done).toBe(false)
-    expect(ledger.list('s').map((r) => r.outcome)).toEqual([Outcome.ALLOW])
-    expect(asked).toBe(1)
-    expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
-    expect(asked).toBe(2)
-    expect(await running).toBeNull()
-    expect(first.claimed).toHaveLength(1)
-    expect(second.claimed).toHaveLength(1)
-    expect(ledger.list('s')).toHaveLength(2)
-    await ledger.revoke('s', first)
-    await ledger.revoke('s', second)
-    expect(ledger.list('s')).toEqual([])
+    try {
+      await written
+      expect(done).toBe(false)
+      expect(ledger.list('s').map((record) => record.outcome)).toEqual([null])
+      const other = new Decisions(new SessionManager('s', store), allow)
+      expect(await other.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
+      expect(asked).toBe(2)
+      confirm()
+      expect(await running).toBeNull()
+      expect(first.claimed).toHaveLength(1)
+      expect(second.claimed).toHaveLength(1)
+      expect(ledger.list('s')).toHaveLength(2)
+      await ledger.revoke('s', first)
+      await other.revoke('s', second)
+      expect(other.list('s')).toEqual([])
+    } finally {
+      confirm()
+      await running
+    }
   })
 
   it("binds a gate's own answer to its place on the line", async () => {
@@ -641,7 +652,7 @@ describe('decisions', () => {
     const nested = fresh(outer)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(nested, 1))).toBeNull()
     const inner = fresh(nested)
-    const job = ledger.split('s', inner, { parent: null, source: 'line', start: 1, end: 2 })
+    const job = await ledger.split('s', inner, { parent: null, source: 'line', start: 1, end: 2 })
     expect(outer.claimed.map((c) => c.occurrence.start)).toEqual([0, 1])
     expect(nested.claimed).toEqual([])
     expect(inner.claimed).toEqual([])
@@ -667,8 +678,8 @@ describe('decisions', () => {
     const line = fresh()
     expect(await ledger.resolve(ctx(), ASK, undefined, at(line))).toBeNull()
     const scope: Occurrence = { parent: null, source: 'line', start: 0, end: 1 }
-    const first = ledger.split('s', line, scope)
-    const second = ledger.split('s', line, scope)
+    const first = await ledger.split('s', line, scope)
+    const second = await ledger.split('s', line, scope)
     expect(first.claimed).toHaveLength(1)
     expect(second.claimed).toHaveLength(1)
     await ledger.revoke('s', line)
@@ -698,20 +709,18 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK, undefined, at(first))).toBeNull()
     expect(asked).toBe(1)
     expect(first.claimed).toHaveLength(1)
-    ledger.handUp('s', first)
+    await ledger.handUp('s', first)
     expect(first.claimed).toEqual([])
     expect(outer.claimed).toHaveLength(1)
     expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
     const second = fresh(outer)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
     expect(asked).toBe(1)
-    ledger.handUp('s', second)
+    await ledger.handUp('s', second)
     expect(outer.claimed).toHaveLength(1)
     await ledger.revoke('s', outer)
     expect(ledger.list('s')).toEqual([])
-    expect(() => {
-      ledger.handUp('s', fresh())
-    }).toThrow()
+    await expect(ledger.handUp('s', fresh())).rejects.toThrow()
   })
 
   it("spends a job's unspent grant when the job ends", async () => {
@@ -721,7 +730,7 @@ describe('decisions', () => {
     await ledger.answer(waiting.id, Outcome.ALLOW)
     const handed: HandOff = fresh()
     expect(await ledger.resolve(ctx(), ASK, undefined, at(handed))).toBeNull()
-    const job = ledger.split('s', handed, { parent: null, source: 'line', start: 0, end: 1 })
+    const job = await ledger.split('s', handed, { parent: null, source: 'line', start: 0, end: 1 })
     await ledger.revoke('s', handed)
     expect(ledger.list('s')).toHaveLength(1)
     await ledger.revoke('s', job)
@@ -741,7 +750,7 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK, undefined, at(handed))).toBeNull()
     expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
     expect((await ledger.held(ctx(), ASK, at(fresh())))?.kind).toBe('pending')
-    ledger.release('s', handed)
+    await ledger.release('s', handed)
     expect(await ledger.held(ctx(), ASK)).toBeNull()
   })
 
@@ -800,7 +809,7 @@ describe('decisions', () => {
     })
     expect(await ledger.resolve(ctx(), ASK, controller.signal)).toEqual({ kind: 'abandoned' })
     expect(asked).toBe(false)
-    expect(ledger.pending()).toHaveLength(1)
+    expect(ledger.pending()).toHaveLength(0)
   })
 
   it('drops an answer that arrives after the kill instead of recording it', async () => {

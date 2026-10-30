@@ -12,6 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
+import { KeyLock } from '../cache/lock.ts'
+import { authorityId } from '../utils/ids.ts'
+import { openStreamSync } from '../rs/stream.ts'
+import { units, fromUnits, ruleWire } from '../rs/policy.ts'
+import type { RecordFields } from '../workspace/record/types.ts'
 import { concat } from '../utils/bytes.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
@@ -23,7 +29,7 @@ import {
 } from '../context/session_context.ts'
 import { sha256Hex } from '../utils/hash.ts'
 import type { Refusal } from '../types.ts'
-import { PolicyDenied } from './errors.ts'
+import { ApprovalUnavailable, PolicyDenied } from './errors.ts'
 import { DecisionOwner, Outcome } from './types.ts'
 import type {
   Abandoned,
@@ -147,15 +153,10 @@ function sameList(a: readonly string[] = [], b: readonly string[] = []): boolean
 export function sameRule(a: CommandRule, b: CommandRule): boolean {
   return (
     a.reason === b.reason &&
-    a.mount === b.mount &&
+    (a.mount ?? '') === (b.mount ?? '') &&
     sameList(a.commands, b.commands) &&
     sameList(a.paths, b.paths)
   )
-}
-
-function sameLine(record: Decision, argv: readonly string[], cwd: string): boolean {
-  const words = [record.command, ...record.argv]
-  return record.cwd === cwd && words.length === argv.length && words.every((w, i) => w === argv[i])
 }
 
 /**
@@ -174,9 +175,20 @@ export function covers(
   argv: readonly string[],
   cwd: string,
 ): boolean {
-  if (record.outcome === null || !sameRule(record.rule, rule)) return false
-  if (record.scope === Scope.SESSION) return record.outcome === Outcome.ALLOW
-  return sameLine(record, argv, cwd)
+  const command = argv[0]
+  if (command === undefined) throw new Error('approval question needs a command')
+  const question = { ...record, command, argv: argv.slice(1), cwd }
+  const result = inspectApproval(emptyLedger('inspection'), {
+    op: 'inspect',
+    query: {
+      kind: 'covers',
+      record: decisionWire(record),
+      rule: ruleWire(rule),
+      question: decisionWire(question),
+    },
+  })
+  if (result.kind !== 'matches') throw new Error('invalid approval comparison')
+  return result.matched
 }
 
 /**
@@ -270,223 +282,585 @@ export function opQuestion(
  * @param occurrence the command's place.
  */
 export function encloses(scope: Occurrence, occurrence: Occurrence): boolean {
-  for (let within: Occurrence | null = occurrence; within !== null; within = within.parent) {
-    if (sameOccurrence(within.parent, scope.parent) && within.source === scope.source) {
-      return scope.start <= within.start && within.end <= scope.end
-    }
+  const result = inspectApproval(emptyLedger('inspection'), {
+    op: 'inspect',
+    query: {
+      kind: 'encloses',
+      scope: occurrenceWire(scope),
+      occurrence: occurrenceWire(occurrence),
+    },
+  })
+  if (result.kind !== 'matches') throw new Error('invalid approval comparison')
+  return result.matched
+}
+
+const unitSchema = z.array(z.number().int().min(0).max(0x10ffff))
+const ruleSchema = z.object({
+  reason: unitSchema,
+  commands: z.array(unitSchema),
+  paths: z.array(unitSchema),
+  mount: unitSchema.nullable(),
+})
+const decisionSchema = z.object({
+  id: z.string(),
+  session_id: z.string(),
+  command: unitSchema,
+  argv: z.array(unitSchema),
+  cwd: unitSchema,
+  paths: z.array(unitSchema),
+  reason: unitSchema,
+  rule: ruleSchema,
+  outcome: z.enum([Outcome.ALLOW, Outcome.DENY]).nullable(),
+  scope: z.enum(Scope),
+  note: unitSchema,
+})
+const occurrenceSchema = z.object({
+  parent: z.unknown(),
+  source: unitSchema,
+  start: z.number().int().nonnegative(),
+  end: z.number().int().nonnegative(),
+})
+const ledgerSchema = z
+  .object({
+    version: z.literal(1),
+    incarnation: z.string(),
+    revision: z.number().int().nonnegative(),
+    records: z.array(decisionSchema),
+    claims: z.array(
+      z.object({
+        owner: z.string(),
+        holder: z.string(),
+        decision: z.string(),
+        occurrence: z.unknown(),
+      }),
+    ),
+  })
+  .passthrough()
+const resultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('allow') }),
+  z.object({ kind: z.literal('pending'), record: decisionSchema, fresh: z.boolean() }),
+  z.object({ kind: z.literal('deny'), reason: unitSchema }),
+  z.object({ kind: z.literal('answered'), record: decisionSchema }),
+  z.object({ kind: z.literal('applied') }),
+  z.object({ kind: z.literal('missing') }),
+  z.object({ kind: z.literal('blocked'), status: z.string() }),
+  z.object({ kind: z.literal('matches'), matched: z.boolean() }),
+  z.object({ kind: z.literal('grants'), rules: z.array(ruleSchema) }),
+])
+const effectSchema = z.object({
+  op: z.literal('persist_approvals'),
+  evaluation: z.string(),
+  transition: z.string(),
+  effect: z.literal(1),
+  ledger: ledgerSchema,
+})
+type ApprovalResult = z.infer<typeof resultSchema>
+type DecisionWire = z.infer<typeof decisionSchema>
+interface ScopeBinding {
+  sessionId: string
+  incarnation: string
+}
+export const logger: { debug?: (message: string) => void } = {}
+
+export function emptyLedger(incarnation: string): RecordFields {
+  return {
+    version: 1,
+    incarnation,
+    revision: 0,
+    records: [],
+    claims: [],
+    holders: [],
+    receipts: [],
+    retired: [],
   }
-  return false
+}
+
+export function decisionWire(record: Decision): RecordFields {
+  return {
+    id: record.id,
+    session_id: record.sessionId,
+    command: units(record.command),
+    argv: record.argv.map(units),
+    cwd: units(record.cwd),
+    paths: record.paths.map(units),
+    reason: units(record.reason),
+    rule: ruleWire(record.rule),
+    outcome: record.outcome,
+    scope: record.scope,
+    note: units(record.note),
+  }
+}
+
+export function decisionFromWire(record: DecisionWire): Decision {
+  const mount = record.rule.mount === null ? '' : fromUnits(record.rule.mount)
+  return {
+    id: record.id,
+    sessionId: record.session_id,
+    command: fromUnits(record.command),
+    argv: record.argv.map(fromUnits),
+    cwd: fromUnits(record.cwd),
+    paths: record.paths.map(fromUnits),
+    reason: fromUnits(record.reason),
+    rule: {
+      reason: fromUnits(record.rule.reason),
+      commands: record.rule.commands.map(fromUnits),
+      paths: record.rule.paths.map(fromUnits),
+      ...(mount === '' ? {} : { mount }),
+    },
+    outcome: record.outcome,
+    scope: record.scope,
+    note: fromUnits(record.note),
+  }
+}
+
+export function occurrenceWire(occurrence: Occurrence): RecordFields {
+  return {
+    parent: occurrence.parent === null ? null : occurrenceWire(occurrence.parent),
+    source: units(occurrence.source),
+    start: occurrence.start,
+    end: occurrence.end,
+  }
+}
+
+export function occurrenceFromWire(value: unknown): Occurrence {
+  const parsed = occurrenceSchema.parse(value)
+  return {
+    parent: parsed.parent === null ? null : occurrenceFromWire(parsed.parent),
+    source: fromUnits(parsed.source),
+    start: parsed.start,
+    end: parsed.end,
+  }
+}
+
+export function resolveWire(
+  ctx: CommandContext,
+  rules: readonly CommandRule[],
+  claimant: RecordFields | null,
+): RecordFields {
+  const rule = rules[0]
+  if (rule === undefined) throw new Error('approval resolution needs a rule')
+  const record: Decision = {
+    id: authorityId(),
+    sessionId: ctx.sessionId ?? '',
+    command: ctx.command,
+    argv: ctx.argv,
+    cwd: ctx.cwd,
+    paths: ctx.paths.map((path) => path.virtual),
+    reason: rule.reason,
+    rule,
+    outcome: null,
+    scope: Scope.ONCE,
+    note: '',
+  }
+  return { op: 'resolve', question: decisionWire(record), rules: rules.map(ruleWire), claimant }
+}
+
+export function inspectApproval(ledger: RecordFields, event: RecordFields): ApprovalResult {
+  const stream = openStreamSync('policy_decisions', {})
+  try {
+    const identity = authorityId()
+    stream.feed(
+      new TextEncoder().encode(
+        JSON.stringify({ evaluation: identity, transition: identity, ledger, event }),
+      ),
+    )
+    stream.finish()
+    if (stream.request() !== null) throw new Error('approval inspection requested a write')
+    return resultSchema.parse(JSON.parse(new TextDecoder().decode(stream.finish())))
+  } finally {
+    stream.close()
+  }
 }
 
 export class Decisions extends DecisionOwner {
-  private readonly sessions: SessionDecisionsQuery | null
-  private readonly onAsk: AskHandler | null
-  private readonly memory = new Map<string, Decision[]>()
-  // The hand-offs holding a claim, per session: a reservation is a fact
-  // about a line running in this process, so it lives here and not in
-  // the store the records persist to.
-  private readonly live = new Map<string, Set<HandOff>>()
+  private readonly owner = authorityId()
+  private readonly memory = new Map<string, RecordFields>()
+  private readonly locks = new KeyLock()
+  private readonly holders = new WeakMap<HandOff, string>()
+  private readonly bindings = new WeakMap<HandOff, ScopeBinding>()
+  private readonly terminal = new WeakSet<HandOff>()
+  private readonly readers = new Set<HandOff>()
+  private readonly versions = new Map<string, number>()
 
-  constructor(sessions: SessionDecisionsQuery | null = null, onAsk: AskHandler | null = null) {
+  constructor(
+    private readonly sessions: SessionDecisionsQuery | null = null,
+    private readonly onAsk: AskHandler | null = null,
+    private readonly version: (() => number) | null = null,
+  ) {
     super()
-    this.sessions = sessions
-    this.onAsk = onAsk
   }
 
-  /** Every record, oldest first: questions waiting and questions settled. */
+  private id(handed: HandOff): string {
+    let found = this.holders.get(handed)
+    if (found === undefined) {
+      found = authorityId()
+      this.holders.set(handed, found)
+    }
+    return found
+  }
+
+  private root(handed: HandOff): HandOff {
+    let root = handed
+    while (root.parent !== null) root = root.parent
+    return root
+  }
+
+  private binding(sessionId: string, handed: HandOff): ScopeBinding | undefined {
+    if (lineage(handed).some((reader) => this.terminal.has(reader)))
+      throw new ApprovalUnavailable('stale_holder')
+    const bound = this.bindings.get(this.root(handed))
+    if (bound !== undefined && bound.sessionId !== sessionId)
+      throw new ApprovalUnavailable('session_mismatch')
+    return bound
+  }
+
+  async begin(sessionId: string, handed: HandOff): Promise<string> {
+    let bound = this.binding(sessionId, handed)
+    if (bound === undefined) {
+      let incarnation: string
+      if (this.sessions !== null) incarnation = await this.sessions.activate(sessionId)
+      else {
+        let state = this.memory.get(sessionId)
+        if (state === undefined) {
+          state = emptyLedger(authorityId())
+          this.memory.set(sessionId, state)
+        }
+        incarnation = ledgerSchema.parse(state).incarnation
+      }
+      bound = { sessionId, incarnation }
+      this.bindings.set(this.root(handed), bound)
+    }
+    this.readers.add(handed)
+    this.id(handed)
+    return bound.incarnation
+  }
+
+  private state(sessionId: string): RecordFields {
+    if (this.sessions !== null)
+      return (
+        this.sessions.approvalStateOf(sessionId) ??
+        emptyLedger(this.sessions.incarnationOf(sessionId) ?? 'unbound')
+      )
+    return this.memory.get(sessionId) ?? emptyLedger('unbound')
+  }
+
+  private keys(): readonly string[] {
+    return this.sessions?.approvalSessions() ?? [...this.memory.keys()]
+  }
+
   list(sessionId = ''): Decision[] {
-    if (sessionId) return [...this.records(sessionId)]
-    return this.keys().flatMap((key) => [...this.records(key)])
+    const keys = sessionId === '' ? this.keys() : [sessionId]
+    return keys.flatMap((key) => ledgerSchema.parse(this.state(key)).records.map(decisionFromWire))
   }
 
-  /** The records nobody has answered, oldest first. */
   pending(sessionId = ''): Decision[] {
-    return this.list(sessionId).filter((r) => r.outcome === null)
+    return this.list(sessionId).filter((record) => record.outcome === null)
   }
 
-  /**
-   * Answer a waiting record, yes or no.
-   *
-   * ALLOW at ONCE passes the one line it was given for and is consumed
-   * by it — the line that asked, when the host answers while it waits,
-   * or that line's retry when the answer comes later; at SESSION it
-   * passes every line the rule covers for the rest of the session. DENY
-   * refuses the retry of the line in the deny voice, once, whether the
-   * host answered inline or later, and asking again raises a new
-   * record.
-   */
+  private project(sessionId: string): void {
+    const state = ledgerSchema.parse(this.state(sessionId))
+    const records = new Map(state.records.map((record) => [record.id, decisionFromWire(record)]))
+    for (const reader of this.readers) {
+      const bound = this.bindings.get(this.root(reader))
+      if (bound?.sessionId !== sessionId) continue
+      const holder = this.id(reader)
+      const claims = state.claims
+        .filter((claim) => claim.owner === this.owner && claim.holder === holder)
+        .map((claim) => {
+          const decision = records.get(claim.decision)
+          if (decision === undefined) throw new Error('approval claim refers to a missing record')
+          return { occurrence: occurrenceFromWire(claim.occurrence), decision }
+        })
+      reader.claimed.splice(0, reader.claimed.length, ...claims)
+    }
+  }
+
+  private claimant(claimant: Claimant | null): RecordFields | null {
+    return claimant === null
+      ? null
+      : {
+          owner: this.owner,
+          holder: this.id(claimant.line),
+          lineage: lineage(claimant.line.parent).map((parent) => this.id(parent)),
+          occurrence: occurrenceWire(claimant.occurrence),
+        }
+  }
+
+  private async event(
+    sessionId: string,
+    event: RecordFields,
+    epoch: string,
+  ): Promise<ApprovalResult> {
+    const revision = this.version?.()
+    let result: ApprovalResult
+    if (this.sessions !== null)
+      result = resultSchema.parse(await this.sessions.approvalEvent(sessionId, event, epoch))
+    else
+      result = await this.locks.withLock(sessionId, async () => {
+        const stream = openStreamSync('policy_decisions', {})
+        const identity = authorityId()
+        try {
+          stream.feed(
+            new TextEncoder().encode(
+              JSON.stringify({
+                evaluation: identity,
+                transition: identity,
+                ledger: this.state(sessionId),
+                event,
+                expected_incarnation: epoch,
+              }),
+            ),
+          )
+          stream.finish()
+          const taken = stream.request()
+          if (taken !== null) {
+            const effect = effectSchema.parse(taken[0])
+            if (taken[1].byteLength !== 0) throw new Error('invalid approval storage effect')
+            this.memory.set(sessionId, effect.ledger)
+            stream.respond(
+              {
+                evaluation: identity,
+                transition: identity,
+                effect: 1,
+                status: 'committed',
+                revision: effect.ledger.revision,
+              },
+              new Uint8Array(),
+            )
+          }
+          return resultSchema.parse(JSON.parse(new TextDecoder().decode(stream.finish())))
+        } finally {
+          stream.close()
+        }
+      })
+    if (
+      revision !== this.version?.() &&
+      ['resolve', 'answer', 'validate', 'session_grants'].includes(String(event.op))
+    ) {
+      await this.event(sessionId, { op: 'invalidate' }, epoch)
+      this.versions.set(sessionId, this.version?.() ?? 0)
+      throw new ApprovalUnavailable('policy_changed')
+    }
+    if (result.kind === 'blocked') throw new ApprovalUnavailable(result.status)
+    this.project(sessionId)
+    return result
+  }
+
+  private async checkVersion(sessionId: string, epoch: string): Promise<boolean> {
+    const current = this.version?.() ?? 0
+    const previous = this.versions.get(sessionId)
+    if (previous !== undefined && previous !== current) {
+      await this.event(sessionId, { op: 'invalidate' }, epoch)
+      this.versions.set(sessionId, current)
+      return true
+    }
+    this.versions.set(sessionId, current)
+    return false
+  }
+
+  async validate(sessionId: string, handed: HandOff): Promise<void> {
+    const epoch = await this.begin(sessionId, handed)
+    if (this.sessions !== null) await this.sessions.refreshApproval(sessionId, epoch)
+    await this.checkVersion(sessionId, epoch)
+    await this.event(
+      sessionId,
+      {
+        op: 'validate',
+        owner: this.owner,
+        holders: lineage(handed).map((reader) => this.id(reader)),
+      },
+      epoch,
+    )
+  }
+
   async answer(
     decisionId: string,
     outcome: Outcome,
     scope: Scope = Scope.ONCE,
     note = '',
   ): Promise<void> {
-    this.writeAnswer(decisionId, outcome, scope, note)
-    await this.flush()
-  }
-
-  /**
-   * Settle a waiting record in the session's records, leaving the store
-   * to be flushed by the caller.
-   *
-   * Synchronous on purpose: the records change and nothing yields, so a
-   * line that answered inline can claim the grant in the same step
-   * (`raise`), and a line judged while the flush then waits on the store
-   * finds it claimed rather than standing.
-   *
-   * @returns the settled record.
-   * @throws when no waiting record has that id, or the outcome is ASK.
-   */
-  private writeAnswer(decisionId: string, outcome: Outcome, scope: Scope, note: string): Decision {
-    if (outcome === Outcome.ASK) throw new Error('ASK is the question, not an answer')
-    for (const key of this.keys()) {
-      const records = [...this.records(key)]
-      const index = records.findIndex((r) => r.id === decisionId && r.outcome === null)
-      if (index === -1) continue
-      const record = records[index]
-      if (record === undefined) continue
-      const settled: Decision = { ...record, outcome, scope, note }
-      records[index] = settled
-      this.set(key, records)
-      return settled
+    if (outcome === Outcome.ASK) throw new Error('ASK is not an answer')
+    if (this.sessions !== null) {
+      await this.sessions.ensureLoaded()
+      for (const sid of this.keys()) {
+        const epoch = this.sessions.incarnationOf(sid)
+        if (epoch !== null) await this.sessions.refreshApproval(sid, epoch)
+      }
     }
-    throw new Error(`no decision waiting with id ${decisionId}`)
+    const record = this.pending().find((item) => item.id === decisionId)
+    if (record === undefined) throw new Error(`no decision waiting with id ${decisionId}`)
+    const epoch =
+      this.sessions === null
+        ? ledgerSchema.parse(this.state(record.sessionId)).incarnation
+        : this.sessions.incarnationOf(record.sessionId)
+    if (epoch === null) throw new ApprovalUnavailable('session_invalid')
+    const result = await this.event(
+      record.sessionId,
+      { op: 'answer', id: decisionId, outcome, scope, note: units(note), claimant: null },
+      epoch,
+    )
+    if (result.kind === 'missing') throw new Error(`no decision waiting with id ${decisionId}`)
   }
 
-  /**
-   * The executor's branch for an Ask: settled records answer it, else
-   * the question is raised now.
-   *
-   * Every rule the ask names has to be answered, because each won a
-   * subject of its own and a nod covers the subject it was given for.
-   * They are asked one at a time, the retry of the line raising the
-   * next, and a ONCE grant is only spent once the whole line is
-   * answered: spending one while another is still waiting would make
-   * the first question come back on every retry. Once the line IS
-   * answered, every ONCE grant behind it, the ones already on file and
-   * the one a host gave inline moments ago alike, is the line's. Off a
-   * line it is spent here, so a nod never outlives the line it was
-   * given for. On a line it is claimed on the line's hand-off for the
-   * reader's occurrence instead, whether the reader is a pass that
-   * judges the line before it runs or the gate that runs it, and spent
-   * when the line ends (`revoke`): the pass and the gate then read one
-   * claim, so a compound line costs one question per run rather than
-   * one per reader, and a gate the run reaches again at the same place
-   * (a loop body, the next batch `xargs` hands on) runs on the same nod
-   * rather than asking after the rest of the body already ran once
-   * more.
-   *
-   * A refusal is deliberately not spent by the line it was given for.
-   * The record stands to refuse the agent's immediate retry of the
-   * same line from the ledger, and is spent by that retry, so a human
-   * who said no is not asked twice about it; the run after that is an
-   * open question again.
-   *
-   * @param ctx the classified command being admitted.
-   * @param ask the chain's Ask.
-   * @param signal the run's abort signal, so a question outlives
-   *   neither its run's deadline nor a caller's kill.
-   * @param claimant the reading command and its line, null outside a
-   *   line (a bare chain). A claimed grant is on offer to a reader at
-   *   the occurrence it was claimed for, on the same line or one
-   *   evaluated from it, and to nobody else: not to another spelling
-   *   of the command on the line, and not to another line judged at
-   *   the same time.
-   * @returns the refusal, the question left waiting, an Abandoned for a
-   *   run killed mid-question, or null to run.
-   */
   async resolve(
     ctx: CommandContext,
     ask: Ask,
     signal?: AbortSignal,
     claimant: Claimant | null = null,
-    // The agent the line is attributed to, which a question raised here
-    // names for the host.
+    recheck?: () => Promise<Deny | Ask | null>,
   ): Promise<Deny | Pending | Abandoned | null> {
-    const rules = ask.rules ?? [askRule(ctx, ask)]
-    const argv = [ctx.command, ...ctx.argv]
+    if (Boolean(signal?.aborted)) return ABANDONED
     const sessionId = ctx.sessionId ?? ''
-    const held = this.standing(sessionId, claimant)
-    const answers = rules.map(
-      (rule) => [rule, Decisions.settled(held, rule, argv, ctx.cwd)] as const,
+    try {
+      let epoch: string
+      if (claimant !== null) epoch = await this.begin(sessionId, claimant.line)
+      else if (this.sessions !== null) {
+        await this.sessions.ensureLoaded()
+        epoch = this.sessions.incarnationOf(sessionId) ?? (await this.sessions.activate(sessionId))
+      } else {
+        let state = this.memory.get(sessionId)
+        if (state === undefined) {
+          state = emptyLedger(authorityId())
+          this.memory.set(sessionId, state)
+        }
+        epoch = ledgerSchema.parse(state).incarnation
+      }
+      await this.checkVersion(sessionId, epoch)
+      for (;;) {
+        const rules = ask.rules ?? [askRule(ctx, ask)]
+        const result = await this.event(
+          sessionId,
+          resolveWire(ctx, rules, this.claimant(claimant)),
+          epoch,
+        )
+        if (await this.checkVersion(sessionId, epoch)) {
+          if (recheck !== undefined) {
+            const current = await recheck()
+            if (current?.kind === 'deny') return current
+          }
+          throw new ApprovalUnavailable('policy_changed')
+        }
+        if (result.kind === 'allow') return null
+        if (result.kind === 'deny') return { kind: 'deny', reason: fromUnits(result.reason) }
+        if (result.kind !== 'pending') throw new Error('invalid approval resolution')
+        const record = decisionFromWire(result.record)
+        const onAsk = this.onAsk
+        if (onAsk === null) return { kind: 'pending', id: record.id, reason: record.reason }
+        const said = await answered(() => onAsk(record, signal), signal)
+        if (isAbandoned(said)) return said
+        if (said === null || said.outcome === null)
+          return { kind: 'pending', id: record.id, reason: record.reason }
+        if (said.id !== record.id) throw new ApprovalUnavailable('stale_reply')
+        if (said.outcome === Outcome.ASK) throw new Error('ASK is not an answer')
+        if (Boolean(signal?.aborted)) return ABANDONED
+        if (this.sessions !== null) await this.sessions.refreshApproval(sessionId, epoch)
+        if (await this.checkVersion(sessionId, epoch)) {
+          if (recheck !== undefined) {
+            const current = await recheck()
+            if (current?.kind === 'deny') return current
+          }
+          throw new ApprovalUnavailable('policy_changed')
+        }
+        if (recheck !== undefined) {
+          const current = await recheck()
+          if (current?.kind !== 'ask') {
+            if (current === null && claimant !== null) await this.validate(sessionId, claimant.line)
+            return current
+          }
+          ask = current
+          const checked = await this.event(
+            sessionId,
+            resolveWire(ctx, ask.rules ?? [askRule(ctx, ask)], this.claimant(claimant)),
+            epoch,
+          )
+          if (checked.kind === 'allow') return null
+          if (checked.kind === 'deny') return { kind: 'deny', reason: fromUnits(checked.reason) }
+          if (checked.kind !== 'pending') throw new Error('invalid approval recheck')
+          if (checked.record.id !== record.id) continue
+        }
+        const settled = await this.event(
+          sessionId,
+          {
+            op: 'answer',
+            id: record.id,
+            outcome: said.outcome,
+            scope: said.scope,
+            note: units(said.note),
+            claimant: this.claimant(claimant),
+          },
+          epoch,
+        )
+        if (settled.kind === 'missing') throw new ApprovalUnavailable('stale_reply')
+        if (said.outcome === Outcome.DENY) return { kind: 'deny', reason: record.reason }
+      }
+    } catch (error) {
+      if (!(error instanceof ApprovalUnavailable)) throw error
+      logger.debug?.(`approval admission refused: ${error.status}`)
+      return { kind: 'deny', reason: error.message, failed: true }
+    }
+  }
+
+  async sessionGrants(
+    ctx: CommandContext,
+    claimant: Claimant | null = null,
+  ): Promise<CommandRule[]> {
+    const sessionId = ctx.sessionId ?? ''
+    const call = claimant?.line ?? (asyncContextIsolatesTasks ? getOpCall(this, sessionId) : null)
+    if (claimant === null && call !== null)
+      claimant = {
+        line: call,
+        occurrence: { parent: call.origin, source: ctx.command, start: 0, end: ctx.command.length },
+      }
+    let epoch: string
+    if (claimant !== null) epoch = await this.begin(sessionId, claimant.line)
+    else if (this.sessions !== null) {
+      await this.sessions.ensureLoaded()
+      epoch = this.sessions.incarnationOf(sessionId) ?? (await this.sessions.activate(sessionId))
+    } else {
+      if (!this.memory.has(sessionId)) this.memory.set(sessionId, emptyLedger(authorityId()))
+      epoch = ledgerSchema.parse(this.state(sessionId)).incarnation
+    }
+    if (this.sessions !== null) await this.sessions.refreshApproval(sessionId, epoch)
+    await this.checkVersion(sessionId, epoch)
+    const reader = this.claimant(
+      claimant === null
+        ? null
+        : { ...claimant, occurrence: { parent: null, source: '', start: 0, end: 0 } },
     )
-    const refused = answers.find(([, r]) => r !== null && r.outcome === Outcome.DENY)
-    if (refused !== undefined) {
-      // A standing refusal refuses this line in place, whichever pass reads
-      // it: a line that does not run has no later pass to hand anything to.
-      await this.spend(
-        sessionId,
-        answers
-          .map(([, r]) => r)
-          .filter((r): r is Decision => r !== null && r.scope === Scope.ONCE),
-      )
-      return { kind: 'deny', reason: refused[0].reason }
-    }
-    for (const [rule, record] of answers) {
-      if (record !== null) continue
-      const action = await this.raise(ctx, rule, argv, signal, claimant)
-      if (action !== null) return action
-    }
-    // Every rule is answered and the line may run. The ledger is read again
-    // rather than trusting the entry snapshot, because a host that answered
-    // inline settled its record during the loop above (and, on a line,
-    // `raise` has already claimed it): without the re-read, the grant it
-    // gave THIS line would still be standing for the next identical one,
-    // and whoever allowed once would have allowed twice.
-    const once = this.onceAnswers(sessionId, rules, argv, ctx.cwd, claimant)
-    if (claimant === null) {
-      await this.spend(sessionId, once)
-      return null
-    }
-    this.claim(sessionId, claimant, once)
-    return null
+    const result = await this.event(sessionId, { op: 'session_grants', claimant: reader }, epoch)
+    if (result.kind !== 'grants') throw new Error('invalid session approval grants')
+    return result.rules.map((rule) => ({
+      reason: fromUnits(rule.reason),
+      commands: rule.commands.map(fromUnits),
+      paths: rule.paths.map(fromUnits),
+      ...(rule.mount === null || rule.mount.length === 0 ? {} : { mount: fromUnits(rule.mount) }),
+    }))
   }
 
-  /**
-   * Bind the grants behind a command to its place on the line, for the
-   * line's end to spend.
-   *
-   * A grant the line already holds for this place, claimed by its pass
-   * or by an earlier visit of the same gate, is left as it is: the
-   * reader found it through that claim, and a second claim would say
-   * nothing new. What is new is claimed on the reader's own hand-off,
-   * which goes live with it, so every other line of the session stops
-   * seeing the grant until this one ends.
-   *
-   * @param sessionId the asking session.
-   * @param claimant the reading command and its line.
-   * @param once the settled ONCE records standing behind the command as
-   *   this reader sees them.
-   */
-  private claim(sessionId: string, claimant: Claimant, once: readonly Decision[]): void {
-    const handed = claimant.line
-    const held = lineage(handed).flatMap((h) => h.claimed.map((c) => c.decision))
-    const fresh = once.filter((r) => !held.includes(r))
-    if (fresh.length === 0) return
-    for (const item of fresh.map((decision) => ({ occurrence: claimant.occurrence, decision })))
-      handed.claimed.push(item)
-    const live = this.live.get(sessionId) ?? new Set<HandOff>()
-    live.add(handed)
-    this.live.set(sessionId, live)
+  async held(
+    ctx: CommandContext,
+    ask: Ask,
+    claimant: Claimant | null = null,
+  ): Promise<Deny | Pending | null> {
+    const rules = ask.rules ?? [askRule(ctx, ask)]
+    const result = inspectApproval(this.state(ctx.sessionId ?? ''), {
+      ...resolveWire(ctx, rules, this.claimant(claimant)),
+      explain: true,
+    })
+    if (result.kind === 'allow') return null
+    if (result.kind === 'deny') return { kind: 'deny', reason: fromUnits(result.reason) }
+    if (result.kind === 'blocked')
+      return { kind: 'deny', reason: `approval unavailable: ${result.status}`, failed: true }
+    if (result.kind !== 'pending') throw new Error('invalid approval inspection')
+    const record = decisionFromWire(result.record)
+    return { kind: 'pending', id: record.id, reason: record.reason }
   }
 
-  /**
-   * An Ask about a VFS call or a session write: a standing answer settles
-   * it, else the question is raised now. In a dry run's deciding
-   * (`explain`) the settled records alone answer (`heldOp`) and nothing is
-   * recorded. Neither has a command behind it, so its record names none:
-   * the rule and the subject are the key (`opQuestion`). A ONCE answer passes the next call on that subject under
-   * that rule (every op of it, `withinCall`; a bare op is a call of its
-   * own) and is spent when the call ends; a SESSION answer passes every one
-   * the rule covers, lines included. `caller` is who asked, with the call the answer is claimed on; without
-   * one, the call in the async context, which without task isolation may be
-   * another task's, so a session write spends its answer at once. Mirrors
-   * Python's `resolve_op`.
-   */
   async resolveOp(
     ctx: VfsContext | SessionContext,
     ask: Ask,
     caller?: Caller,
+    recheck?: () => Promise<Deny | Ask | null>,
   ): Promise<Deny | Pending | null> {
     const trace = caller === undefined ? explaining() : caller.explaining
     if (trace === DryRun.DECIDING) return this.heldOp(ctx, ask)
@@ -505,410 +879,118 @@ export class Decisions extends DecisionOwner {
             line: call,
             occurrence: { parent: null, source: asked.argv[0] ?? '', start: 0, end: 0 },
           }
-    const said = await this.resolve(asked, keyed, undefined, claimant)
+    const said = await this.resolve(
+      asked,
+      keyed,
+      undefined,
+      claimant,
+      recheck === undefined
+        ? undefined
+        : async () => {
+            const current = await recheck()
+            return current?.kind === 'ask' ? opQuestion(ctx, current)[1] : current
+          },
+    )
     return said?.kind === 'abandoned' ? { kind: 'deny', reason: ask.reason } : said
   }
 
-  /**
-   * What the settled records alone say about a VFS call or a session
-   * write: the read-only half of `resolveOp`, the one `explain` may take.
-   * Mirrors Python's `held_op`.
-   */
   heldOp(ctx: VfsContext | SessionContext, ask: Ask): Promise<Deny | Pending | null> {
-    const [asked, keyed] = opQuestion(ctx, ask)
-    return this.held(asked, keyed)
+    return this.held(...opQuestion(ctx, ask))
   }
 
-  /**
-   * Run one call (a file tool's, a session write) as the unit an op-level
-   * answer covers. A ONCE grant one of its ops is answered by is claimed
-   * for the call, so every op of the call on that path runs on it (a write
-   * tool reads the file back to stamp its version), and the call's end
-   * spends it, unless the call is held on a question still waiting: its
-   * retry finds the grants standing, as a held line's does. `run` gets the
-   * call's hand-off, for its ops to carry. A call made inside another runs
-   * in the outer one, so a session write on a line or in a job is spent
-   * when that ends; a call another ledger runs (a host callback reaching a
-   * second workspace mid-call) is no call of this one's. Without task
-   * isolation a live call may be another task's, so every call runs as its
-   * own and a held call spends its claims too. Mirrors Python's
-   * `within_call`.
-   */
   async withinCall<T>(sessionId: string, run: (handed: HandOff) => Promise<T>): Promise<T> {
-    // Without task isolation a live call may be another task's, so every
-    // call runs as its own.
     const outer = asyncContextIsolatesTasks ? getOpCall(this, sessionId) : null
     if (outer !== null) return run(outer)
     const handed: HandOff = { claimed: [], parent: null, origin: null }
+    await this.begin(sessionId, handed)
     try {
       return await runWithOpCall(this, handed, sessionId, () => run(handed))
-    } catch (err) {
-      const held = err instanceof PolicyDenied && isPending(err.refusal)
-      if (held && asyncContextIsolatesTasks) this.release(sessionId, handed)
-      throw err
+    } catch (error) {
+      if (error instanceof PolicyDenied && isPending(error.refusal))
+        await this.release(sessionId, handed)
+      throw error
     } finally {
       await this.revoke(sessionId, handed)
     }
   }
 
-  /**
-   * Spend every grant claimed on a hand-off that no other live hand-off
-   * still holds: the line's end.
-   *
-   * The claims in `resolve` leave the grants behind a line's commands
-   * standing while the line runs, each bound to the place it was given
-   * for, and this is where they are spent, however the line ended: run
-   * to completion, refused by the pass on a later command, failed on a
-   * fetch before the run, killed, or short-circuited past the command.
-   * Left standing, a grant would pass the next line spelling that
-   * command on a nod given to this one, so the executor calls this
-   * whichever way a typed line or a job ends, except when a line is
-   * held on a question still waiting (`release`); a nested evaluation
-   * hands its claims up instead (`handUp`). A grant a job launched from
-   * the line still holds a copy of (`split`) is left standing for the
-   * job's own end to spend. A grant already gone from the ledger is
-   * passed over; the hand-off is emptied so a second call is a no-op.
-   *
-   * @param sessionId the session the line was judged in.
-   * @param handed the line's hand-off.
-   */
-  async revoke(sessionId: string, handed: HandOff): Promise<void> {
-    const elsewhere: Decision[] = []
-    for (const other of this.live.get(sessionId) ?? []) {
-      if (other !== handed)
-        for (const item of other.claimed.map((c) => c.decision)) elsewhere.push(item)
-    }
-    await this.spend(
-      sessionId,
-      handed.claimed.map((c) => c.decision).filter((d) => !elsewhere.includes(d)),
-    )
-    this.release(sessionId, handed)
-  }
-
-  /**
-   * Share the claims made for one part of a line with a run of its own:
-   * a background job, whose gates run after the line has returned and
-   * which ends on its own clock.
-   *
-   * Every claim standing inside the scope, on the line or a line it was
-   * evaluated from, is copied onto the new hand-off, and the line keeps
-   * its own: a grant is spent when the last hand-off holding it ends
-   * (`revoke`), so the line's end, a release for a question still
-   * waiting included, leaves the job's copy standing and hidden from
-   * every other line, and a loop that launches the same job again hands
-   * the next job a copy of the same grant. Moving the claim instead left
-   * the second job with nothing, and it asked again after it had already
-   * been launched; sharing one hand-off between line and job let a
-   * release for a pending foreground gate let go of the job's grants
-   * with the rest, and a line judged while the job slept could take
-   * them.
-   *
-   * @param sessionId the session the line was judged in.
-   * @param handed the line's hand-off.
-   * @param scope the job's node on the line.
-   * @returns the job's hand-off, live while it holds a claim.
-   */
-  split(sessionId: string, handed: HandOff, scope: Occurrence): HandOff {
-    const job: HandOff = { claimed: [], parent: handed.parent, origin: handed.origin }
-    for (const owner of lineage(handed)) {
-      for (const claim of owner.claimed) {
-        if (
-          encloses(scope, claim.occurrence) &&
-          !job.claimed.some((c) => c.decision === claim.decision)
-        ) {
-          job.claimed.push(claim)
-        }
+  async split(sessionId: string, handed: HandOff, scope: Occurrence): Promise<HandOff> {
+    const epoch = await this.begin(sessionId, handed)
+    const job: HandOff = { claimed: [], parent: null, origin: handed.origin }
+    this.bindings.set(job, { sessionId, incarnation: epoch })
+    this.readers.add(job)
+    try {
+      await this.event(
+        sessionId,
+        {
+          op: 'split',
+          owner: this.owner,
+          lineage: lineage(handed).map((reader) => this.id(reader)),
+          job: this.id(job),
+          scope: occurrenceWire(scope),
+        },
+        epoch,
+      )
+    } catch (error) {
+      this.terminal.add(job)
+      try {
+        await this.event(
+          sessionId,
+          { op: 'revoke', owner: this.owner, holder: this.id(job) },
+          epoch,
+        )
+      } catch (cleanup) {
+        logger.debug?.(`unconfirmed job approval cleanup: ${String(cleanup)}`)
+      } finally {
+        this.readers.delete(job)
       }
-    }
-    if (job.claimed.length > 0) {
-      const live = this.live.get(sessionId) ?? new Set<HandOff>()
-      live.add(job)
-      this.live.set(sessionId, live)
+      throw error
     }
     return job
   }
 
-  /**
-   * Leave a nested line's claims with the line it was evaluated from, at
-   * the line's end.
-   *
-   * A line the executor evaluates from inside another (`$( )`, `eval`, a
-   * batch `xargs` hands on, the line an alias rewrites to) ends before
-   * the outer line does, and what
-   * its gates claimed is the outer line's: the next evaluation from the
-   * same node (the next batch, the next iteration of a loop around the
-   * `eval`) stands at the same occurrence and runs on it, and the typed
-   * line's end spends it. Spending here instead asked again for every
-   * batch.
-   *
-   * @param sessionId the session the line was judged in.
-   * @param handed the nested line's hand-off, whose `parent` is the line
-   *   it was evaluated from.
-   * @throws when the hand-off is a typed line's, whose claims are spent
-   *   (`revoke`), not handed up.
-   */
-  handUp(sessionId: string, handed: HandOff): void {
-    const parent = handed.parent
-    if (parent === null) throw new Error("a typed line's claims are spent, not handed up")
-    const known = parent.claimed.map((c) => c.decision)
-    for (const item of handed.claimed.filter((c) => !known.includes(c.decision)))
-      parent.claimed.push(item)
-    if (parent.claimed.length > 0) {
-      const live = this.live.get(sessionId) ?? new Set<HandOff>()
-      live.add(parent)
-      this.live.set(sessionId, live)
-    }
-    this.release(sessionId, handed)
-  }
-
-  /**
-   * Let go of a hand-off's claims without spending them.
-   *
-   * For a line held on a question still waiting: its retry is a new
-   * line with a hand-off of its own, and it has to find the grants this
-   * one claimed standing, or the human is asked again for what they
-   * already allowed. Left live, the held line would hide them from every
-   * line after it.
-   */
-  release(sessionId: string, handed: HandOff): void {
-    handed.claimed.length = 0
-    this.live.get(sessionId)?.delete(handed)
-  }
-
-  /**
-   * The session's records as one line may read them.
-   *
-   * A claimed grant is on offer to exactly one place: the command it
-   * was claimed for, read on the line that claimed it, a line evaluated
-   * from that line, or a job launched from it holding a copy of the
-   * claim, whether the pass or the gate is reading. Every other claim is
-   * hidden. A grant claimed by another line is that line's to run on,
-   * and reading it here would let two lines judged at once both pass on
-   * one nod, the second of them running its earlier commands before its
-   * gate found the grant gone. A grant claimed for another occurrence
-   * on this line is that occurrence's: reading it would let a word that
-   * expands at run time into the same command run on the nod a literal
-   * spelling was given, and would let one nod answer two spellings. A
-   * pass re-reading an occurrence its outer line's pass already claimed
-   * finds it answered, which is how a nested line runs on the outer
-   * line's questions rather than asking them again.
-   */
-  private standing(sessionId: string, claimant: Claimant | null): readonly Decision[] {
-    const held = this.records(sessionId)
-    const live = this.live.get(sessionId)
-    if (live === undefined || live.size === 0) return held
-    const offered: Decision[] =
-      claimant === null
-        ? []
-        : lineage(claimant.line).flatMap((h) =>
-            h.claimed
-              .filter((c) => sameOccurrence(c.occurrence, claimant.occurrence))
-              .map((c) => c.decision),
-          )
-    const taken: Decision[] = []
-    for (const other of live) {
-      for (const claim of other.claimed) {
-        if (!offered.includes(claim.decision)) taken.push(claim.decision)
-      }
-    }
-    if (taken.length === 0) return held
-    return held.filter((r) => !taken.includes(r))
-  }
-
-  /** Every ONCE answer standing behind this line, as the ledger holds it now. */
-  private onceAnswers(
-    sessionId: string,
-    rules: readonly CommandRule[],
-    argv: readonly string[],
-    cwd: string,
-    claimant: Claimant | null,
-  ): Decision[] {
-    const held = this.standing(sessionId, claimant)
-    return rules
-      .map((rule) => Decisions.settled(held, rule, argv, cwd))
-      .filter((r): r is Decision => r !== null && r.scope === Scope.ONCE)
-  }
-
-  /**
-   * What the settled records alone say about an asked line.
-   *
-   * The read-only half of `resolve`, and the only half a dry run may
-   * take: it consults what the session already holds and stops there,
-   * spending nothing, recording no question and never reaching the
-   * host. So `explain` can report that a line would be refused, or
-   * would still be waiting, without a question arriving for a line
-   * nobody typed. It reads through the same reservations a run does,
-   * so a grant a live line has claimed reads as waiting here exactly as
-   * a run would find it.
-   *
-   * @param claimant the reading command and its line, null for a dry
-   *   run outside any line.
-   */
-  async held(
-    ctx: CommandContext,
-    ask: Ask,
-    claimant: Claimant | null = null,
-  ): Promise<Deny | Pending | null> {
-    const argv = [ctx.command, ...ctx.argv]
-    const sessionId = ctx.sessionId ?? ''
-    const records = this.standing(sessionId, claimant)
-    const answers = (ask.rules ?? [askRule(ctx, ask)]).map(
-      (rule) => [rule, Decisions.settled(records, rule, argv, ctx.cwd)] as const,
-    )
-    const refused = answers.find(([, r]) => r !== null && r.outcome === Outcome.DENY)
-    if (refused !== undefined) {
-      return { kind: 'deny', reason: refused[0].reason }
-    }
-    const unanswered = answers.find(([, r]) => r === null)
-    if (unanswered === undefined) return null
-    return {
-      kind: 'pending',
-      id: await decisionId(ctx.sessionId ?? '', ctx.cwd, argv),
-      reason: unanswered[0].reason,
+  async handUp(sessionId: string, handed: HandOff): Promise<void> {
+    if (handed.parent === null) throw new Error('a top-level caller has no parent')
+    const bound = this.bindings.get(this.root(handed))
+    if (bound === undefined) return
+    this.readers.add(handed.parent)
+    this.terminal.add(handed)
+    try {
+      await this.event(
+        sessionId,
+        {
+          op: 'hand_up',
+          owner: this.owner,
+          holder: this.id(handed),
+          parent: this.id(handed.parent),
+        },
+        bound.incarnation,
+      )
+    } finally {
+      this.readers.delete(handed)
     }
   }
 
-  /**
-   * Record one rule of a line as a question and put it to the host,
-   * null when the host said yes.
-   *
-   * A question already waiting is reused rather than duplicated, so a
-   * retry keeps quoting one id.
-   *
-   * The host is given the run's signal and the wait is bounded by it,
-   * because a host that asks a person can take an unbounded amount of
-   * time and the executor's own cooperative abort checks cannot reach
-   * inside that wait: without this a killed or timed-out run would sit
-   * here until somebody answered.
-   *
-   * A run killed mid-question is reported as Abandoned and its record is
-   * left waiting, with whatever the host eventually says dropped rather
-   * than recorded: an ALLOW banked against a run that is already dead
-   * would leave a spent-once grant in the ledger for the next identical
-   * line to take, with nobody asked.
-   *
-   * @param ctx the classified command being admitted.
-   * @param rule the one rule of the line being asked about.
-   * @param argv the line, command name first.
-   * @param signal the run's abort signal.
-   * @returns the refusal, the question left waiting, an Abandoned for a
-   *   run killed mid-question, or null to run.
-   */
-  private async raise(
-    ctx: CommandContext,
-    rule: CommandRule,
-    argv: readonly string[],
-    signal?: AbortSignal,
-    // The asking command and its line, null outside a line: a ONCE grant
-    // the host gives is claimed for it in the same step that records it,
-    // before the store is flushed. The write to the records is
-    // synchronous and the flush is not, and a line judged while the flush
-    // waited on a persistent store found the grant standing, claimed it
-    // and ran on it, while this line, resuming to find its own nod claimed
-    // by another, ran on nothing: one nod, two runs. Claimed first, the
-    // grant is hidden from the other line, which asks for itself.
-    claimant: Claimant | null = null,
-  ): Promise<Deny | Pending | Abandoned | null> {
-    let record = this.waiting(ctx, rule, argv)
-    if (record === null) {
-      record = {
-        id: await decisionId(ctx.sessionId ?? '', ctx.cwd, argv),
-        sessionId: ctx.sessionId ?? '',
-        command: ctx.command,
-        argv: [...ctx.argv],
-        cwd: ctx.cwd,
-        paths: ctx.paths.map((p) => p.virtual),
-        reason: rule.reason,
-        rule,
-        outcome: null,
-        scope: Scope.ONCE,
-        note: '',
-      }
-      this.add(ctx.sessionId ?? '', record)
-      await this.flush()
+  private async end(op: 'release' | 'revoke', sessionId: string, handed: HandOff): Promise<void> {
+    const bound = this.bindings.get(this.root(handed))
+    if (bound === undefined) return
+    this.terminal.add(handed)
+    try {
+      await this.event(
+        sessionId,
+        { op, owner: this.owner, holder: this.id(handed) },
+        bound.incarnation,
+      )
+    } finally {
+      this.readers.delete(handed)
     }
-    const onAsk = this.onAsk
-    if (onAsk === null) return { kind: 'pending', id: record.id, reason: rule.reason }
-    const said = await answered(() => onAsk(record, signal), signal)
-    if (isAbandoned(said)) return said
-    if (said?.outcome == null) {
-      return { kind: 'pending', id: record.id, reason: rule.reason }
-    }
-    const settled = this.writeAnswer(record.id, said.outcome, said.scope, said.note)
-    if (claimant !== null && settled.outcome === Outcome.ALLOW && settled.scope === Scope.ONCE) {
-      this.claim(ctx.sessionId ?? '', claimant, [settled])
-    }
-    await this.flush()
-    if (said.outcome === Outcome.DENY) {
-      return { kind: 'deny', reason: rule.reason }
-    }
-    return null
   }
 
-  /** The question already recorded for this rule of this line. */
-  private waiting(
-    ctx: CommandContext,
-    rule: CommandRule,
-    argv: readonly string[],
-  ): Decision | null {
-    for (const record of this.records(ctx.sessionId ?? '')) {
-      if (record.outcome === null && sameRule(record.rule, rule) && sameLine(record, argv, ctx.cwd))
-        return record
-    }
-    return null
+  async revoke(sessionId: string, handed: HandOff): Promise<void> {
+    await this.end('revoke', sessionId, handed)
   }
-
-  /**
-   * The answered record standing behind one rule of a line, null when
-   * nobody has answered it.
-   */
-  private static settled(
-    held: readonly Decision[],
-    rule: CommandRule,
-    argv: readonly string[],
-    cwd: string,
-  ): Decision | null {
-    for (const record of held) {
-      if (record.scope === Scope.ONCE && covers(record, rule, argv, cwd)) return record
-    }
-    for (const record of held) {
-      if (record.scope === Scope.SESSION && covers(record, rule, argv, cwd)) return record
-    }
-    return null
-  }
-
-  /** Drop the ONCE answers this line just used up. */
-  private async spend(sessionId: string, spent: readonly Decision[]): Promise<void> {
-    if (spent.length === 0) return
-    const held = this.records(sessionId)
-    this.set(
-      sessionId,
-      held.filter((r) => !spent.some((s) => s === r)),
-    )
-    await this.flush()
-  }
-
-  private keys(): string[] {
-    if (this.sessions !== null) return [...this.sessions.decisionSessions()]
-    return [...this.memory.keys()]
-  }
-
-  private records(sessionId: string): readonly Decision[] {
-    if (this.sessions !== null) return this.sessions.decisionsOf(sessionId)
-    return this.memory.get(sessionId) ?? []
-  }
-
-  private set(sessionId: string, records: Decision[]): void {
-    if (this.sessions !== null) this.sessions.setDecisions(sessionId, records)
-    else this.memory.set(sessionId, records)
-  }
-
-  private add(sessionId: string, record: Decision): void {
-    this.set(sessionId, [...this.records(sessionId), record])
-  }
-
-  private async flush(): Promise<void> {
-    if (this.sessions !== null) await this.sessions.flush()
+  async release(sessionId: string, handed: HandOff): Promise<void> {
+    await this.end('release', sessionId, handed)
   }
 }
 
