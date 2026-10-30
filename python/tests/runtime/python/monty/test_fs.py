@@ -478,24 +478,27 @@ def test_monty_scan_ends_at_a_stopped_run_instead_of_reading_on():
     assert dispatch.ops.count("readdir") == 1
 
 
+async def _walk_a_link_to_an_ancestor() -> str:
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty"]
+    )
+    try:
+        await ws.shell("mkdir -p /data/sub && ln -s /data /data/sub/up")
+        code = (
+            "import os\n"
+            "d = [p for p, _, _ in os.walk('/data', followlinks=True)]\n"
+            "print(len(d), max(p.count('/') for p in d))"
+        )
+        result = await ws.shell('python3 -c "$CODE"', env={"CODE": code})
+        return await result.stdout_str()
+    finally:
+        await ws.close()
+
+
 def test_monty_a_link_to_an_ancestor_stops_at_scan_link_depth():
     # Such a link never ends on its own; a walk that follows links and
     # names no depth stops SCAN_LINK_DEPTH levels down.
-    async def walk() -> str:
-        ws = Workspace(
-            {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["monty"]
-        )
-        try:
-            await ws.shell("mkdir -p /data/sub && ln -s /data /data/sub/up")
-            code = (
-                "import os\n"
-                "d = [p for p, _, _ in os.walk('/data', followlinks=True)]\n"
-                "print(len(d), max(p.count('/') for p in d))"
-            )
-            result = await ws.shell('python3 -c "$CODE"', env={"CODE": code})
-            return await result.stdout_str()
-        finally:
-            await ws.close()
-
     depth = monty_fs.SCAN_LINK_DEPTH
-    assert asyncio.run(walk()) == f"{depth + 1} {depth + 1}\n"
+    assert asyncio.run(_walk_a_link_to_an_ancestor()) == (
+        f"{depth + 1} {depth + 1}\n"
+    )
