@@ -490,43 +490,6 @@ def record_stream(
     return op_rec
 
 
-def _set_revisions(revisions: dict[str, str] | None) -> CallerToken:
-    return bind_caller(current_caller().changed({"revisions": revisions}))
-
-
-def push_revisions(revisions: dict[str, str] | None) -> CallerToken:
-    """Set the active revision map for the current async context.
-
-    Read functions consult :func:`revision_for` to look up whether a
-    given virtual path should be pinned to a specific backend revision
-    on replay. Mount entry points push their ``revisions`` map here
-    before dispatching, so any read fired inside the mount's command or
-    op handler sees the pin without explicit threading.
-
-    Returns the token from ``ContextVar.set`` so callers can restore
-    the previous state via :func:`reset_revisions`. Task-isolated: the
-    ContextVar copy is per-task, so concurrent mounts don't see each
-    other's pins.
-
-    Args:
-        revisions (dict[str, str] | None): Mapping of virtual path to
-            backend revision. None clears the active map.
-
-    Returns:
-        Token: passable to ``reset_revisions``.
-    """
-    return _set_revisions(revisions)
-
-
-def reset_revisions(token: CallerToken) -> None:
-    """Restore the previous revisions map after a :func:`push_revisions`.
-
-    Args:
-        token (CallerToken): The token returned by ``push_revisions``.
-    """
-    reset_caller(token)
-
-
 def revision_for(path: str) -> str | None:
     """Return the revision pin for ``path`` if one is active.
 

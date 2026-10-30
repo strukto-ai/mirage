@@ -451,7 +451,11 @@ describe('google retry policy', () => {
 
   it.each([...READS, ...WRITES])('%s treats a permission 403 as final', async (_name, call) => {
     const fake = serve(reply(403, reason(403, 'insufficientFilePermissions')))
-    await expect(call(tm)).rejects.toMatchObject({ status: 403 })
+    await expect(call(tm)).rejects.toMatchObject({
+      name: 'GoogleApiError',
+      status: 403,
+      message: 'insufficientFilePermissions',
+    })
     expect(fake).toHaveBeenCalledTimes(1)
     expect(waits).toEqual([])
   })

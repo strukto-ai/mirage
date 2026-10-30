@@ -23,6 +23,7 @@ from mirage.commands.builtin.generic.xxd import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import materialize
 from mirage.types import PathSpec
 
@@ -133,3 +134,43 @@ async def test_a_direct_call_takes_integer_counts():
         "00000000: 64 65 66 67  defg\n00000004: 68           h\n"
     )
     assert io.exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_reverse_patches_a_file_larger_than_the_memory_budget():
+    size = 34 << 20
+    written = 0
+    last = b""
+    target = PathSpec.from_str_path("/large")
+
+    async def read(path):
+        if path.virtual == F.virtual:
+            yield f"00000000: 6162\n{size - 1:08x}: 7a\n".encode()
+        else:
+            for _ in range(size // 16384):
+                yield b"x" * 16384
+
+    async def write(path, source):
+        nonlocal written, last
+        assert path == target
+        assert not isinstance(source, bytes)
+        async for part in source:
+            if not written:
+                assert part.startswith(b"abxx")
+            written += len(part)
+            last = part[-1:]
+
+    async def run():
+        _, io = await xxd_generic(
+            _flags({"r": True}),
+            [F, target],
+            [],
+            Context(flags={"r": True}),
+            read,
+            write,
+        )
+        assert io.exit_code == 0
+
+    await run_with_memory(MemoryBudget(32 << 20, lambda: 0), run())
+    assert written == size
+    assert last == b"z"

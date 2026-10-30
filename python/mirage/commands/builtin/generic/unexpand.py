@@ -1,11 +1,6 @@
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from mirage.commands.builtin.generic.expand import (
-    TabStops,
-    read_tab_stops,
-    tab_config,
-)
 from mirage.commands.builtin.utils.operands import (
     merge_split_errors,
     reported_stream,
@@ -15,6 +10,7 @@ from mirage.commands.builtin.utils.stream import (
     resolve_source,
     stdin_stat,
     stdin_stream,
+    stream_output,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -22,13 +18,15 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
-from mirage.rs.stream import run_stream
-from mirage.types import JsonValue, PathSpec, PolymorphicReadFn, StatFn
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import close_stream, open_stream
+from mirage.shell.bytes import byte_view
+from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 
 @dataclass(frozen=True, slots=True)
 class UnexpandFlags:
-    tabs: TabStops = field(default_factory=TabStops)
+    tabs: tuple[str, ...] = ()
     all_spaces: bool = False
 
 
@@ -46,7 +44,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnexpandFlags:
     fl = FlagView(flags, spec=SPECS["unexpand"])
     tabs = fl.as_list("tabs")
     return UnexpandFlags(
-        tabs=read_tab_stops(tabs, "unexpand"),
+        tabs=tuple(tabs),
         all_spaces=(fl.as_bool("all") or bool(tabs))
         and not fl.as_bool("first_only"),
     )
@@ -72,20 +70,28 @@ async def unexpand_generic(
     stat = stdin_stat(stat)
     try:
         parsed = parse_flags(ctx.flags)
-    except ValueError as exc:
+        engine = open_stream(
+            "unexpand",
+            {
+                "tabs": [byte_view(tab) for tab in parsed.tabs],
+                "all": parsed.all_spaces,
+            },
+        )
+    except (ValueError, StreamRefusal) as exc:
         return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())
-    readable, err = await split_readable(paths, stat, "unexpand")
+    try:
+        readable, err = await split_readable(paths, stat, "unexpand")
+    except BaseException:
+        await close_stream(engine)
+        raise
     if err and not readable:
+        await close_stream(engine)
         return None, IOResult(exit_code=1, stderr=err)
     io = IOResult()
     read = stdin_stream(stream, ctx.stdin)
     sources = [reported_stream(read(p), io, p, "unexpand") for p in readable]
     source = async_chain(sources) if readable else resolve_source(ctx.stdin)
-    config: dict[str, JsonValue] = {
-        "tabs": tab_config(parsed.tabs),
-        "all": parsed.all_spaces,
-    }
-    output = run_stream("unexpand", config, source)
+    output = stream_output(engine, source)
     return await merge_split_errors((output, io), err)
 
 

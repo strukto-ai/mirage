@@ -18,46 +18,46 @@ import type { FlagValue } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { stdinStream } from '../utils/stream.ts'
+import { stdinStream, streamOutput } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
-import { runStream } from '../../../rs/stream.ts'
-import { readTabStops, tabConfig, type TabStops } from './expand.ts'
-
-const ENC = new TextEncoder()
+import { openStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
 
 interface UnexpandFlags {
-  readonly tabs: TabStops
+  readonly tabs: readonly string[]
   readonly allSpaces: boolean
 }
 
-// Read unexpand's flags once, refusing a tab list GNU refuses: the stderr text
-// in its place. A tab list implies -a, and --first-only overrides both (GNU
-// 9.7). Mirrors Python's parse_flags.
-function parseFlags(bag: Record<string, FlagValue>): UnexpandFlags | string {
+export function parseFlags(bag: Record<string, FlagValue>): UnexpandFlags {
   const fl = new FlagView(bag, specOf('unexpand'))
-  const lists = fl.asList('tabs')
-  const tabs = readTabStops(lists, 'unexpand')
-  if (typeof tabs === 'string') return tabs
-  return {
-    tabs,
-    allSpaces: (fl.asBool('all') || lists.length > 0) && !fl.asBool('first_only'),
-  }
+  const tabs = fl.asList('tabs')
+  return { tabs, allSpaces: (fl.asBool('all') || tabs.length > 0) && !fl.asBool('first_only') }
 }
 
-export function unexpandGeneric(
+export async function unexpandGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): CommandFnResult {
+): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
   const parsed = parseFlags(ctx.flags)
-  if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  let engine
+  try {
+    engine = await openStream('unexpand', {
+      tabs: parsed.tabs.map((tab) => byteView(tab)),
+      all: parsed.allSpaces,
+    })
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: new TextEncoder().encode(`${error.message}\n`) }),
+    ]
   }
   const io = new IOResult()
   const sources = paths.map((p) => reportedStream(stream(p), io, p, 'unexpand'))
-  const config = { tabs: tabConfig(parsed.tabs), all: parsed.allSpaces }
   const source = paths.length > 0 ? asyncChain(sources) : (ctx.stdin ?? new Uint8Array())
-  return [runStream('unexpand', config, source, ctx.signal), io]
+  return [streamOutput(engine, source, ctx.signal), io]
 }

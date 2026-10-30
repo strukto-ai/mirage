@@ -12,8 +12,10 @@ const BLOCK: u64 = 1 << 16;
 const STEPS: u64 = 1 << 16;
 /// The most of one record a regular expression is searched in: GNU holds
 /// the record it searches and runs out of memory past what it can get.
+/// Mirage caps a regex record at 8 MiB, leaving room for the old/new
+/// windows and the host reply within the default 32 MiB workspace budget.
 #[cfg(not(test))]
-const MAX_HELD: u64 = 1 << 30;
+const MAX_HELD: u64 = 8 << 20;
 #[cfg(test)]
 const MAX_HELD: u64 = 1 << 20;
 
@@ -197,6 +199,7 @@ impl Tac {
             self.ask = Some(Ask { op, offset, size });
         }
         self.held.truncate((from - self.start) as usize);
+        crate::release_capacity(&mut self.held);
     }
 
     /// Ask for the block before what is held, keeping of it what a

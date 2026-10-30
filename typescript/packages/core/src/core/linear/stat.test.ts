@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../render/json.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { LinearAccessor } from '../../accessor/linear.ts'
@@ -20,7 +21,7 @@ import { ContentType, FileType, PathSpec } from '../../types.ts'
 import { LinearVFS } from '../../vfs/linear/linear.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { LinearTransport } from './client.ts'
-import { normalizeIssue, normalizeTeam, toJsonBytes } from './normalize.ts'
+import { normalizeIssue, normalizeTeam } from './normalize.ts'
 import { Slot } from '../hierarchy/scope.ts'
 import { detectScope } from './scope.ts'
 import { stat } from './stat.ts'
@@ -238,7 +239,7 @@ describe('linear stat of a listed row', () => {
   it('reports the rendered size of issue.json', async () => {
     const s = await statAt(new LinearAccessor(new FixtureTransport()), ISSUE_DIR + '/issue.json')
     expect(s.content).toBe(ContentType.JSON)
-    expect(s.size).toBe(toJsonBytes(normalizeIssue(ISSUES[0] ?? {})).length)
+    expect(s.size).toBe(jsonBytes(normalizeIssue(ISSUES[0] ?? {})).length)
     expect(s.modified).toBe('2026-04-03T00:00:00Z')
     expect(s.extra.issue_id).toBe('ISSUE1')
   })
@@ -260,7 +261,7 @@ describe('linear stat of a listed row', () => {
       '/teams/ENG__Engineering__TEAM1/team.json',
     )
     expect(s.content).toBe(ContentType.JSON)
-    expect(s.size).toBe(toJsonBytes(normalizeTeam(TEAM)).length)
+    expect(s.size).toBe(jsonBytes(normalizeTeam(TEAM)).length)
     expect(s.modified).toBe('2026-04-05T00:00:00Z')
     expect(s.extra.team_id).toBe('TEAM1')
   })

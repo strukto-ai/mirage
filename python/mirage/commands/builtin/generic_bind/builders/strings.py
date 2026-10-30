@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from functools import partial
 
 from mirage.accessor.base import Accessor
@@ -30,9 +31,15 @@ from mirage.commands.builtin.utils.stream import stdin_stat, stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.io.stream import OutputStream
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.stream import open_stream, run_stream
+from mirage.rs.stream import (
+    close_stream,
+    open_stream,
+    run_stream,
+    stream_output_chunks,
+)
 from mirage.shell.bytes import byte_view, from_byte_view
 from mirage.types import JsonValue, PathSpec
 
@@ -47,23 +54,38 @@ async def strings(
     config: dict[str, JsonValue] = {"min_len": min_len and byte_view(min_len)}
     # The engine refuses -n before any operand is touched, as binutils does.
     try:
-        open_stream("strings", config)
+        engine = open_stream("strings", config)
     except StreamRefusal as refusal:
         return None, IOResult(
             exit_code=1, stderr=from_byte_view(f"{refusal.message}\n")
         )
-    files = command_files(ctx, paths)
-    resolved = await resolve_or_empty(files, paths)
-    # binutils strings never reads `-` as stdin; only /dev/stdin is.
-    stat = stdin_stat(dir_aware_stat(files, ctx), dash=False)
-    readable, err = await split_readable(resolved, stat, "strings")
-    if err and not readable:
-        return None, IOResult(exit_code=1, stderr=err)
-    io = IOResult()
-    read = stdin_stream(files.read, ctx.stdin, dash=False)
-    each = partial(run_stream, "strings", config)
-    output = per_operand(readable, read, ctx.stdin, io, "strings", each)
-    return await merge_split_errors((output, io), err)
+    try:
+        files = command_files(ctx, paths)
+        resolved = await resolve_or_empty(files, paths)
+        # binutils strings never reads `-` as stdin; only /dev/stdin is.
+        stat = stdin_stat(dir_aware_stat(files, ctx), dash=False)
+        readable, err = await split_readable(resolved, stat, "strings")
+        if err and not readable:
+            await close_stream(engine)
+            return None, IOResult(exit_code=1, stderr=err)
+        io = IOResult()
+        read = stdin_stream(files.read, ctx.stdin, dash=False)
+        used = False
+
+        def each(source: ByteSource) -> AsyncIterator[bytes]:
+            nonlocal used
+            if used:
+                return run_stream("strings", config, source)
+            used = True
+            return stream_output_chunks(engine, source)
+
+        output = per_operand(readable, read, ctx.stdin, io, "strings", each)
+        return await merge_split_errors(
+            (OutputStream(output, partial(close_stream, engine)), io), err
+        )
+    except BaseException:
+        await close_stream(engine)
+        raise
 
 
 BUILDER = GenericCommand("strings", strings, read=True)

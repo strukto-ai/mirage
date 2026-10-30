@@ -15,7 +15,7 @@
 from mirage.accessor.trello import TrelloAccessor
 from mirage.core.hierarchy.read import make_read
 from mirage.core.hierarchy.scope import ScopeMatch
-from mirage.core.render.json import jsonl_bytes_by_created_at
+from mirage.core.render.json import json_bytes, jsonl_bytes_by_created_at
 from mirage.core.trello.client import (
     get_board,
     get_card,
@@ -33,7 +33,6 @@ from mirage.core.trello.normalize import (
     normalize_list,
     normalize_member,
     normalize_workspace,
-    to_json_bytes,
 )
 from mirage.core.trello.scope import detect_scope
 from mirage.errors.fs import enoent
@@ -50,7 +49,7 @@ async def _read_workspace_json(
     workspace_id = match.slots["workspace_id"]
     for workspace in await list_workspaces(accessor):
         if workspace.get("id") == workspace_id:
-            return to_json_bytes(normalize_workspace(workspace))
+            return json_bytes(normalize_workspace(workspace))
     raise enoent(path.virtual)
 
 
@@ -62,7 +61,7 @@ async def _read_board_json(
     parent: FileStat | None,
 ) -> bytes:
     board = await get_board(accessor, match.slots["board_id"])
-    return to_json_bytes(normalize_board(board))
+    return json_bytes(normalize_board(board))
 
 
 async def _read_member(
@@ -76,7 +75,7 @@ async def _read_member(
     members = await list_board_members(accessor, match.slots["board_id"])
     for member in members:
         if member.get("id") == member_id:
-            return to_json_bytes(normalize_member(member))
+            return json_bytes(normalize_member(member))
     raise enoent(path.virtual)
 
 
@@ -91,7 +90,7 @@ async def _read_label(
     labels = await list_board_labels(accessor, match.slots["board_id"])
     for label in labels:
         if label.get("id") == label_id:
-            return to_json_bytes(normalize_label(label))
+            return json_bytes(normalize_label(label))
     raise enoent(path.virtual)
 
 
@@ -106,7 +105,7 @@ async def _read_list_json(
     lists = await list_board_lists(accessor, match.slots["board_id"])
     for lst in lists:
         if lst.get("id") == list_id:
-            return to_json_bytes(normalize_list(lst))
+            return json_bytes(normalize_list(lst))
     raise enoent(path.virtual)
 
 
@@ -118,7 +117,7 @@ async def _read_card_json(
     parent: FileStat | None,
 ) -> bytes:
     card = await get_card(accessor, match.slots["card_id"])
-    return to_json_bytes(normalize_card(card))
+    return json_bytes(normalize_card(card))
 
 
 async def _read_comments(

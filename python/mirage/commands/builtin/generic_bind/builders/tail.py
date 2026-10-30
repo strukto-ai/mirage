@@ -19,11 +19,12 @@ from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
     dir_aware_stat,
+    file_size,
     resolve_or_empty,
 )
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 async def tail(
@@ -34,11 +35,18 @@ async def tail(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
+    backend_stat = dir_aware_stat(files, ctx)
+    read_size = file_size(files, ctx, opened=True)
+
+    async def stat(path: PathSpec) -> FileStat:
+        row = await backend_stat(path)
+        return row.model_copy(update={"size": await read_size(path)})
+
     return await tail_generic(
         resolved,
         list(texts),
         ctx,
-        dir_aware_stat(files, ctx),
+        stat,
         files.read,
         (files.read if files.answers("read_range") else None),
         (files.last_lines if files.answers("last_lines") else None),

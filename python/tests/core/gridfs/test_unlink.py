@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.context import session_context as caller
 from mirage.core.gridfs.exists import exists
 from mirage.core.gridfs.read import read
 from mirage.core.gridfs.readdir import readdir, tree
@@ -21,7 +22,6 @@ from mirage.core.gridfs.stat import stat
 from mirage.core.gridfs.stream import read_stream
 from mirage.core.gridfs.unlink import unlink
 from mirage.core.gridfs.write import write
-from mirage.observe.context import push_revisions, reset_revisions
 from mirage.types import PathSpec
 from tests.fixtures.gridfs_store import FakeStore, make_accessor
 
@@ -52,12 +52,16 @@ async def test_rm_moves_every_revision_to_the_trash(store: FakeStore):
 @pytest.mark.asyncio
 async def test_rm_then_pinned_read_still_works(store: FakeStore):
     first, _ = await _seed_and_rm(store)
-    token = push_revisions({A_TXT.virtual: str(first)})
+    token = caller.bind_caller(
+        caller.current_caller().changed(
+            {"revisions": {A_TXT.virtual: str(first)}}
+        )
+    )
     try:
         assert await read(make_accessor(), A_TXT) == b"v1"
         chunks = [c async for c in read_stream(make_accessor(), A_TXT)]
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
     assert b"".join(chunks) == b"v1"
 
 
@@ -68,12 +72,16 @@ async def test_rm_then_pinned_stat_finds_the_trashed_revision(
     # cat stats before it reads, so a restore of a file that is still
     # deleted needs the pinned stat to reach the trash too.
     first, _ = await _seed_and_rm(store)
-    token = push_revisions({A_TXT.virtual: str(first)})
+    token = caller.bind_caller(
+        caller.current_caller().changed(
+            {"revisions": {A_TXT.virtual: str(first)}}
+        )
+    )
     try:
         found = await stat(make_accessor(), A_TXT)
         assert await exists(make_accessor(), A_TXT) is True
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
     assert (found.size, found.fingerprint) == (2, str(first))
 
 

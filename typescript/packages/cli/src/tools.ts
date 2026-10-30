@@ -16,7 +16,6 @@ import { buffer } from 'node:stream/consumers'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, handleResponse } from './output.ts'
-import { loadDaemonSettings } from './settings.ts'
 
 interface Target {
   workspace: string
@@ -32,7 +31,7 @@ async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<void> {
-  const c = makeClient(loadDaemonSettings())
+  const c = makeClient()
   await c.ensureRunning({ allowSpawn: false })
   const query =
     target.session === undefined ? '' : `?session_id=${encodeURIComponent(target.session)}`

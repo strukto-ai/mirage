@@ -17,7 +17,8 @@ from mirage.commands.cli.builtin.linear.util import text_or_stdin
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import comment_update
-from mirage.core.linear.normalize import normalize_comment, to_json_bytes
+from mirage.core.linear.normalize import normalize_comment
+from mirage.core.render.json import json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,4 +43,4 @@ async def update(
         )
     else:
         payload = comment
-    return to_json_bytes(payload), IOResult()
+    return json_bytes(payload), IOResult()

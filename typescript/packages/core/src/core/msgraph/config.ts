@@ -76,7 +76,7 @@ export interface MsGraphConfigResolved {
   maxRetries: number
 }
 
-function optionalText(value: string | undefined): string | null {
+export function optionalText(value: string | undefined): string | null {
   const normalized = value?.trim()
   return normalized === undefined || normalized === '' ? null : normalized
 }

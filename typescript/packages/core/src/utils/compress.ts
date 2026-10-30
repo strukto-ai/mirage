@@ -13,11 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { chunks } from '../io/cooperative.ts'
 import { yieldBytes } from '../io/stream.ts'
-import { YieldBudget } from '../io/yield_budget.ts'
 import { StreamRefusal } from '../rs/errors.ts'
-import { openStream, type OpenStream } from '../rs/stream.ts'
+import { closeStream, openStream, streamOutputChunks, type OpenStream } from '../rs/stream.ts'
 import type { JsonValue } from '../types.ts'
 import { materialize } from '../io/types.ts'
 
@@ -77,40 +75,18 @@ async function* codecStream(
   config: Readonly<Record<string, JsonValue>>,
 ): AsyncGenerator<Uint8Array, void> {
   const stream = await openStream('compress', config)
-  const budget = new YieldBudget()
   try {
-    for await (const data of chunks(source)) {
-      const pending = budget.run()
-      if (pending !== undefined) await pending
-      try {
-        yield* output(stream, stream.feed(data))
-        while (stream.busy()) {
-          const draining = budget.run()
-          if (draining !== undefined) await draining
-          yield* output(stream, stream.drain())
-        }
-      } catch (error) {
-        if (!(error instanceof StreamRefusal)) throw error
-        if (error.output.byteLength > 0) yield error.output
-        throw new Error(error.message)
-      }
+    for await (const data of streamOutputChunks(stream, source, undefined, false)) {
+      yield* output(stream, data)
     }
-    const finishing = budget.run()
-    if (finishing !== undefined) await finishing
-    try {
-      yield* output(stream, stream.finish())
-      while (stream.busy()) {
-        const pending = budget.run()
-        if (pending !== undefined) await pending
-        yield* output(stream, stream.drain())
-      }
-    } catch (error) {
-      if (!(error instanceof StreamRefusal)) throw error
-      if (error.output.byteLength > 0) yield error.output
-      throw new Error(error.message)
-    }
+    const error = failure(stream)
+    if (error !== null) throw error
+  } catch (error) {
+    if (!(error instanceof StreamRefusal)) throw error
+    if (error.output.byteLength > 0) yield error.output
+    throw new Error(error.message)
   } finally {
-    stream.close()
+    await closeStream(stream)
   }
 }
 

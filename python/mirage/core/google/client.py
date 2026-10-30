@@ -78,7 +78,11 @@ def google_error_message(body: str, status: int, reason: str | None) -> str:
             return str(error["message"])
         if isinstance(error, str):
             description = parsed.get("error_description")
-            return f"{error}: {description}" if description else error
+            return (
+                f"{error}: {description}"
+                if isinstance(description, str) and description
+                else error
+            )
     return body.strip() or reason or f"HTTP {status}"
 
 

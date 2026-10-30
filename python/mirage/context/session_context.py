@@ -673,9 +673,8 @@ def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
     """Bind the executing mount's prefix and configured mode to the
     current async context, for the run of one command.
 
-    ``Mount.run_command`` binds the same around the handler: its files'
-    calls read it (``get_mount_gate``) to tell a run on one mount from a
-    line that spans mounts, and to ask that mount's facts.
+    The mount's command scope binds the same caller field around its
+    handler; file calls read it through ``current_caller().mount``.
 
     Args:
         prefix (str): the mount's prefix.
@@ -687,13 +686,6 @@ def set_mount_gate(prefix: str, mode: MountMode) -> CallerToken:
 def reset_mount_gate(token: CallerToken) -> None:
     """Restore the previous mount binding."""
     reset_caller(token)
-
-
-def get_mount_gate() -> tuple[str, MountMode] | None:
-    """The executing mount's (prefix, configured mode), None outside a
-    mount's command: a line that spans mounts, run through the dispatcher
-    alone, or the scratch tier."""
-    return _caller.get().mount
 
 
 def set_refusal_sink(sink: RefusalSink) -> CallerToken:

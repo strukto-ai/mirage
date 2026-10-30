@@ -914,6 +914,11 @@ class Policies:
             *((placement,) if placement is not None else ()),
             self._mode,
         )
+        if all(
+            getattr(type(policy), method) is getattr(Policy, method)
+            for policy in policies
+        ):
+            return CompositionResult((), None, None, None)
         composition = Composition()
         try:
             descriptors = []

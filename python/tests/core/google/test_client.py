@@ -26,6 +26,7 @@ from yarl import URL
 from mirage.core.api.errors import ApiError
 from mirage.core.google.client import (
     READ_RETRY,
+    GoogleApiError,
     TokenManager,
     calendar_base,
     docs_base,
@@ -428,6 +429,8 @@ async def test_a_permission_403_is_final(method, url, call):
         )
         with pytest.raises(ApiError) as raised:
             await call(tm)
+    assert isinstance(raised.value, GoogleApiError)
+    assert str(raised.value) == "insufficientFilePermissions"
     assert raised.value.status == 403
     assert waits == []
     await tm.pool.close()

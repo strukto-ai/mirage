@@ -5,7 +5,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, IOResult
 from mirage.rs.stream import chain_output, open_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import PathSpec, ReadStreamFn
@@ -44,7 +44,7 @@ async def column_generic(
     """
     parsed = parse_flags(ctx.flags)
     separator = parsed.separator
-    sources: list[ByteSource] = [await materialize(stream(p)) for p in paths]
+    sources: list[ByteSource] = [stream(p) for p in paths]
     engine = open_stream(
         "column",
         {

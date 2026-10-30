@@ -17,7 +17,7 @@ pub(crate) struct Records {
 }
 
 impl Records {
-    pub(crate) fn push(&mut self, data: &[u8]) {
+    fn compact(&mut self) {
         if self.pos * 2 > self.buf.len() {
             self.buf.drain(..self.pos);
             self.searched -= self.pos;
@@ -25,7 +25,12 @@ impl Records {
                 *end -= self.pos;
             }
             self.pos = 0;
+            crate::release_capacity(&mut self.buf);
         }
+    }
+
+    pub(crate) fn push(&mut self, data: &[u8]) {
+        self.compact();
         self.buf.extend_from_slice(data);
     }
 
@@ -46,6 +51,7 @@ impl Records {
     }
 
     pub(crate) fn peek_span(&mut self, terminator: u8) -> Take<(&[u8], bool)> {
+        self.compact();
         if self.ready.is_none() {
             let from = self.searched.max(self.pos);
             let (end, terminated) = match memchr::memchr(terminator, &self.buf[from..]) {

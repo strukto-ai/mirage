@@ -22,6 +22,7 @@ from mirage.commands.builtin.generic.diff import (
     switch_words,
 )
 from mirage.core.api.errors import ApiError
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.types import materialize
 from mirage.rs.diff_pool import DiffPool
 from mirage.types import FileStat, FileType, PathSpec
@@ -40,6 +41,32 @@ def _operand(raw: str, virtual: str) -> PathSpec:
 DASH = _operand("-", "/d/-")
 DEV_STDIN = PathSpec.from_str_path("/dev/stdin", "")
 DIRS = {"/d/sub": ["x"], "/d/sub2": ["x", "y"]}
+
+
+@pytest.mark.asyncio
+async def test_brief_comparison_reads_inputs_larger_than_the_default_budget():
+    read_bytes = 0
+
+    async def read(path):
+        nonlocal read_bytes
+        chunk = b"x" * 16384
+        for _ in range(2176):
+            read_bytes += len(chunk)
+            yield chunk
+
+    async def run():
+        out, io = await diff(
+            [_operand("a", "/d/a"), _operand("b", "/d/b")],
+            stream=read,
+            readdir_fn=_readdir,
+            stat_fn=_stat,
+            flags=DiffFlags(brief=True),
+        )
+        assert await materialize(out) == b""
+        assert io.exit_code == 0
+
+    await run_with_memory(MemoryBudget(32 << 20, lambda: 0), run())
+    assert read_bytes == 68 << 20
 
 
 async def _readdir(path: PathSpec) -> list[str]:

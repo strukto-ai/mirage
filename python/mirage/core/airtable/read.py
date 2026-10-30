@@ -27,12 +27,12 @@ from mirage.core.airtable.normalize import (
     normalize_base,
     normalize_table,
     records_jsonl,
-    to_json_bytes,
 )
 from mirage.core.airtable.readdir import schema_table
 from mirage.core.airtable.scope import detect_scope
 from mirage.core.hierarchy.read import make_read, per_kind
 from mirage.core.hierarchy.scope import ScopeMatch
+from mirage.core.render.json import json_bytes
 from mirage.errors.fs import efbig, enoent
 from mirage.types import FileStat, PathSpec
 
@@ -66,7 +66,7 @@ async def _read_base_json(
     for base in await list_bases(accessor):
         if base.get("id") == base_id:
             tables = await list_tables(accessor, base_id)
-            return to_json_bytes(normalize_base(base, tables))
+            return json_bytes(normalize_base(base, tables))
     raise enoent(path.virtual)
 
 
@@ -81,7 +81,7 @@ async def _read_table_json(
         table = await schema_table(accessor, match)
     except FileNotFoundError:
         raise enoent(path.virtual) from None
-    return to_json_bytes(normalize_table(table, match.slots["base_id"]))
+    return json_bytes(normalize_table(table, match.slots["base_id"]))
 
 
 async def _render_records(

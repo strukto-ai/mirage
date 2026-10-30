@@ -13,11 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../../io/cooperative.ts'
-import { concat } from '../../../utils/bytes.ts'
-import { YieldBudget } from '../../../io/yield_budget.ts'
+import { OutputStream } from '../../../io/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { refused, scan } from '../../../rs/scan.ts'
-import { closeStream, openStream } from '../../../rs/stream.ts'
+import { closeStream, mergeOutput, openStream } from '../../../rs/stream.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import type { JsonValue } from '../../../types.ts'
 import { specOf } from '../../spec/builtins.ts'
@@ -145,31 +144,30 @@ async function compare(
   signal?: AbortSignal,
 ): Promise<[ByteSource | null, IOResult]> {
   const stream = await openStream('cmp', config)
-  const budget = new YieldBudget(signal)
-  const out: Uint8Array[] = []
-  const drain = async (): Promise<void> => {
-    while (stream.busy()) {
-      await budget.run()
-      out.push(stream.drain())
+  const io = new IOResult()
+  const output = async function* (): AsyncGenerator<Uint8Array> {
+    try {
+      yield* mergeOutput(stream, async (index) => (await operands[index]?.next()) ?? null, signal)
+    } finally {
+      io.exitCode = stream.status()
+      const stderr = stream.takeStderr()
+      io.stderr = stderr.byteLength > 0 ? stderr : null
     }
   }
-  try {
-    for (let index = stream.wants(); index !== null; index = stream.wants()) {
-      const chunk = await operands[index]?.next()
-      out.push(chunk == null ? stream.endInput(index) : stream.feedInput(index, chunk))
-      await drain()
+  const produced = output()
+  const result = new OutputStream(produced, async () => {
+    try {
+      await produced.return(undefined)
+      await closeStream(stream)
+    } finally {
+      for (const operand of operands) await operand.close()
     }
-    out.push(stream.finish())
-    await drain()
-    const stdout = concat(out)
-    const stderr = stream.takeStderr()
-    return [
-      stdout.byteLength > 0 ? stdout : null,
-      new IOResult({ exitCode: stream.status(), stderr: stderr.byteLength > 0 ? stderr : null }),
-    ]
-  } finally {
-    await closeStream(stream)
+  })
+  if (config.verbose !== true) {
+    const bytes = await materialize(result)
+    return [bytes.byteLength > 0 ? bytes : null, io]
   }
+  return [result, io]
 }
 
 /**
@@ -208,6 +206,7 @@ async function oneStdinTwice(
     [new Operand(data.slice(skip[0] + skip[1])), new Operand(new Uint8Array())],
     { ...options, names: ['-', '-'], piped: [true, true], skip: [0, 0] },
   )
+  const stdout = out === null ? null : await materialize(out)
   const held = io.stderr === null ? new Uint8Array() : await materialize(io.stderr)
   const tail = ENC.encode('cmp: -: Bad file descriptor\n')
   const stderr = new Uint8Array(held.byteLength + tail.byteLength)
@@ -215,7 +214,7 @@ async function oneStdinTwice(
   stderr.set(tail, held.byteLength)
   io.stderr = stderr
   io.exitCode = 2
-  return [out, io]
+  return [stdout, io]
 }
 
 /**
@@ -232,6 +231,7 @@ export async function cmpGeneric(
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   sizeOf?: (p: PathSpec) => Promise<number | null>,
+  lengthOf = sizeOf,
 ): Promise<[ByteSource | null, IOResult]> {
   const p0 = paths[0]
   if (p0 === undefined) throw missingOperandError(CommandName.CMP, null, ctx.argv ?? [])
@@ -284,16 +284,34 @@ export async function cmpGeneric(
     if (same) return [null, new IOResult()]
     if (unread !== null)
       return [null, new IOResult({ exitCode: 2, stderr: formatFsError('cmp', unread, paths) })]
-    return await compare(
-      operands as [Operand, Operand],
+    const sizes: (number | null)[] = [null, null]
+    if (parsed.verbose && lengthOf !== undefined) {
+      for (const [index, path] of [p0, p1].entries()) {
+        if (!isStdin(path)) {
+          try {
+            sizes[index] = await lengthOf(path)
+          } catch (err) {
+            if (!isFsError(err)) throw err
+            console.debug(`cmp: no size for ${path.virtual}: ${String(err)}`)
+          }
+        }
+      }
+    }
+    const [first, second] = operands
+    if (first === undefined || second === undefined) throw new Error('cmp inputs were not opened')
+    const result = await compare(
+      [first, second],
       {
         ...options,
         names: [byteView(p0.rawPath), byteView(p1.rawPath)],
         piped: [isStdin(p0), isStdin(p1)],
         skip: [skip[0], skip[1]],
+        sizes,
       },
       ctx.signal,
     )
+    operands.length = 0
+    return result
   } finally {
     for (const operand of operands) await operand.close()
   }

@@ -31,10 +31,10 @@ from mirage.commands.builtin.generic_bind.files import (
 )
 from mirage.commands.config import Context
 from mirage.context import reset_mount_gate, set_mount_gate
+from mirage.context import session_context as caller
 from mirage.errors.types import GlobLimitError
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.observe.context import push_revisions, reset_revisions
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -245,11 +245,13 @@ async def test_file_size_answers_a_store_files_unmoved_unpinned_size(
     ctx = _ctx(_answering(st, now, warm))
     with _on_mount():
         bound = file_size(command_files(ctx), ctx)
-    token = push_revisions(pin)
+    token = caller.bind_caller(
+        caller.current_caller().changed({"revisions": pin})
+    )
     try:
         assert await bound(_path("/f")) == size
     finally:
-        reset_revisions(token)
+        caller.reset_caller(token)
 
 
 @pytest.mark.asyncio
@@ -263,6 +265,64 @@ async def test_a_glob_read_warms_the_operands_after_it():
     warmed = [f"/r{name}" for name in names[1:]]
     assert vfs.reads == ["/r/f00"]
     assert vfs.batches == [warmed[:8], warmed[8:]]
+
+
+@pytest.mark.asyncio
+async def test_custom_reading_keeps_its_bytes_instead_of_raw_size_and_ranges():
+    backend = Backend(stored={"/f": b"raw"})
+    ctx = _ctx(backend, _row(calls=frozenset({"read_range"})))
+
+    async def rendered(ctx, path):
+        yield backend.stored[path.virtual] + b" rendered"
+
+    with _on_mount():
+        assert command_files(ctx).answers("read_range")
+        with with_reading(ctx, Reading(split=True, stream=rendered)) as run:
+            files = command_files(run)
+            assert not files.answers("read_range")
+            assert (
+                await file_size(files, run, opened=True)(_path("/f")) is None
+            )
+            assert (
+                await materialize(files.read(_path("/f"))) == b"raw rendered"
+            )
+    assert backend.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "size,now,expected", [(7, 7, 7), (7, 9, None), (0, 0, None)]
+)
+async def test_opened_file_sizes_still_refuse_changed_and_pipe_sizes(
+    size, now, expected
+):
+    ctx = _ctx(
+        _answering(_st(size=size, mode=0o644), _st(size=now, mode=0o644))
+    )
+    with _on_mount():
+        assert (
+            await file_size(command_files(ctx), ctx, opened=True)(_path("/f"))
+            == expected
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opened", [False, True])
+async def test_unknown_sizes_do_not_refresh_backend_metadata(opened):
+    row = _st()
+
+    async def dispatch(name, path, /, **kwargs):
+        assert not kwargs.get("fresh")
+        return (None if name == "read" else row), IOResult()
+
+    ctx = _ctx(dispatch)
+    with _on_mount():
+        assert (
+            await file_size(command_files(ctx), ctx, opened=opened)(
+                _path("/f")
+            )
+            is None
+        )
 
 
 class TreeRAM(RAMVFS):

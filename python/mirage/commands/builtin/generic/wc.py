@@ -22,9 +22,9 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
 from mirage.io.types import ByteSource, IOResult, PathRecord
 from mirage.rs import run_stream
-from mirage.shell.bytes import encode_text
+from mirage.rs.stream import open_stream
+from mirage.shell.bytes import byte_view, decode_text, encode_text
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
-from mirage.utils.quote import shell_quote
 
 # The --total words in GNU's order, which is both the accepted set and
 # what `--total=x` lists back. No aliases, so one per line.
@@ -164,23 +164,6 @@ def number_width(sizes: list[int | None], operands: int, counts: int) -> int:
     return max(width, 7) if None in sizes else width
 
 
-def labelled(body: str, label: str | None) -> str:
-    """One report row under GNU's name rule (coreutils 9.7).
-
-    A name holding a newline is shell-quoted, as GNU 9.7 prints it, so
-    no row spans two lines; every other name, spaces included, prints as
-    itself.
-
-    Args:
-        body (str): The row's right-aligned counts.
-        label (str | None): The operand's name, or None for no name.
-    """
-    if label is None:
-        return body
-    name = shell_quote(label) if "\n" in label else label
-    return f"{body} {name}"
-
-
 def format_wc_lines(
     rows: list[tuple[WCCounts, str | None]],
     *,
@@ -191,54 +174,33 @@ def format_wc_lines(
     max_line_length: bool = False,
     width: int | None = None,
 ) -> list[str]:
-    """Format a wc report in GNU style.
-
-    Counts are right-aligned to a shared width and space-separated. A
-    caller that knows its operands passes GNU's width (``number_width``);
-    one that holds only counts, such as a database push-down that never
-    renders its files, gets the widest printed number, with a single count
-    for a single operand unpadded and a lone unlabelled row at GNU's 7.
-
-    Args:
-        rows (list[tuple[WCCounts, str | None]]): One entry per output row
-            (including any ``total`` row); ``None`` labels omit the name.
-        lines (bool): Report line count only.
-        words (bool): Report word count only.
-        bytes_ (bool): Report byte count only.
-        chars (bool): Report character count only.
-        max_line_length (bool): Report longest line length only.
-        width (int | None): The column width, or None to size by the
-            printed numbers.
-    """
-    values = [
-        (
-            _selected_values(
-                counts,
-                lines=lines,
-                words=words,
-                bytes_=bytes_,
-                chars=chars,
-                max_line_length=max_line_length,
-            ),
-            label,
-        )
-        for counts, label in rows
-    ]
-    if width is None and len(values) == 1 and len(values[0][0]) == 1:
-        nums, label = values[0]
-        body = str(nums[0])
-        return [labelled(body, label)]
-    if width is None and len(values) == 1 and values[0][1] is None:
-        width = 7
-    if width is None:
-        width = max(
-            (len(str(n)) for nums, _ in values for n in nums), default=1
-        )
-    out: list[str] = []
-    for nums, label in values:
-        body = " ".join(str(n).rjust(width) for n in nums)
-        out.append(labelled(body, label))
-    return out
+    engine = open_stream(
+        "wc",
+        {
+            "report": [
+                {
+                    "values": [
+                        value
+                        for value in _selected_values(
+                            counts,
+                            lines=lines,
+                            words=words,
+                            bytes_=bytes_,
+                            chars=chars,
+                            max_line_length=max_line_length,
+                        )
+                    ],
+                    "label": None if label is None else byte_view(label),
+                }
+                for counts, label in rows
+            ],
+            "width": width,
+        },
+    )
+    output = [engine.finish()]
+    while engine.busy():
+        output.append(engine.drain())
+    return decode_text(b"".join(output)).split("\n")[:-1]
 
 
 def format_count_rows(

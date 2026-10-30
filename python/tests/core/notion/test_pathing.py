@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 
 import pytest
 
@@ -21,7 +20,6 @@ from mirage.core.notion.normalize import (
     database_segment_name,
     normalize_page,
     page_segment_name,
-    to_json_bytes,
 )
 from mirage.core.notion.pathing import format_segment
 from mirage.utils.naming import parse_id_name
@@ -117,12 +115,6 @@ class TestNormalizePage:
     def test_a_non_object_properties_is_not_forwarded(self):
         result = normalize_page({"id": "p1", "properties": []}, [])
         assert result["properties"] == {}
-
-    def test_to_json_bytes(self):
-        data = to_json_bytes({"key": "value"})
-        assert isinstance(data, bytes)
-        parsed = json.loads(data)
-        assert parsed["key"] == "value"
 
 
 CJK_TITLE = "会議" * 100

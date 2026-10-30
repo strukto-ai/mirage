@@ -15,9 +15,9 @@
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { JsonValue, PathSpec } from '../../../types.ts'
-import type { CommandFnResult, Context } from '../../config.ts'
+import type { Context } from '../../config.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { chainOutput, closeStream, openStream } from '../../../rs/stream.ts'
 
@@ -51,14 +51,14 @@ async function* columned(
 
 // util-linux column over every operand, or stdin without one. Mirrors
 // Python's column_generic.
-export async function columnGeneric(
+export function columnGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
+): Promise<[ByteSource | null, IOResult]> {
   const parsed = parseFlags(ctx.flags)
   const sources: ByteSource[] = []
-  for (const path of paths) sources.push(await materialize(stream(path)))
+  for (const path of paths) sources.push(stream(path))
   const config = {
     table: parsed.table,
     separator: parsed.separator === null ? null : byteView(parsed.separator),
@@ -67,5 +67,5 @@ export async function columnGeneric(
     inputs: Math.max(1, sources.length),
   }
   if (sources.length === 0) sources.push(ctx.stdin ?? new Uint8Array())
-  return [columned(config, sources, ctx.signal), new IOResult()]
+  return Promise.resolve([columned(config, sources, ctx.signal), new IOResult()])
 }

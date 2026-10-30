@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { jsonBytes } from '../../../../core/render/json.ts'
 import type { AirtableAccessor } from '../../../../accessor/airtable.ts'
 import {
   createComment,
@@ -28,7 +29,6 @@ import {
   isRow,
   normalizeComment,
   recordsJsonl,
-  toJsonBytes,
   type Row,
 } from '../../../../core/airtable/normalize.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -232,7 +232,7 @@ async function commentAddBody(
   if (text === '') throw new UsageError('the comment text is empty')
   const baseId = scopedBase(accessor.config, fl.asStr('base') ?? '')
   const comment = await createComment(accessor, baseId, fl.asStr('table') ?? '', recordId, text)
-  return [toJsonBytes(normalizeComment(comment)), new IOResult()]
+  return [jsonBytes(normalizeComment(comment)), new IOResult()]
 }
 
 export const recordCreate = run(recordCreateBody)

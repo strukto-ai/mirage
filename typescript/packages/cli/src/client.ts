@@ -25,7 +25,7 @@ import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
 import { LoginError, freshToken, readLogin } from './credentials.ts'
-import { isLocalUrl, type DaemonSettings } from './settings.ts'
+import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.ts'
 
 const requireFromHere = createRequire(import.meta.url)
 
@@ -284,6 +284,6 @@ export class DaemonClient {
   }
 }
 
-export function makeClient(settings: DaemonSettings): DaemonClient {
-  return new DaemonClient(settings)
+export function makeClient(): DaemonClient {
+  return new DaemonClient(loadDaemonSettings())
 }

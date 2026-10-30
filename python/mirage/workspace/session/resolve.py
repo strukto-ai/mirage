@@ -308,20 +308,6 @@ def with_inline(
     )
 
 
-def compile_commands(profile: SessionProfile) -> AdmissionRules | None:
-    """A profile's admission rules: its own, plus every mount entry's,
-    in one list; None when the profile states none.
-
-    Mount rules come first so the entry closest to the data speaks
-    first when several rules match at the same anchor depth and only
-    the message differs.
-
-    Args:
-        profile (SessionProfile): the resolved profile.
-    """
-    return _rules_from(_compile_plan(profile)["commands"])
-
-
 def compile_scripts(effective: SessionProfile, name: str) -> ProfileScripts:
     """The profile's policy programs by method, compiled onto the
     session.
