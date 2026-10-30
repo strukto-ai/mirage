@@ -7,6 +7,7 @@ import type {
   CommandRule,
   Decision,
   Route,
+  SessionContext,
 } from '@struktoai/mirage-core/policy/types'
 import { PosixRegex } from '@struktoai/mirage-core/rs/regex'
 import { openStream, openStreamSync } from '@struktoai/mirage-core/rs/stream'
@@ -372,6 +373,41 @@ async function mediaCallerIsolation(): Promise<void> {
   }
 }
 
+async function sessionCallbackIsolation(method: 'preSession' | 'postSession'): Promise<void> {
+  equal(asyncContextIsolatesTasks, false)
+  const entered = deferred()
+  const release = deferred()
+  const check = async (ctx: SessionContext): Promise<null> => {
+    if (ctx.key === 'LIFECYCLE' && ctx.value === 'after') {
+      entered.resolve()
+      await release.promise
+    }
+    return null
+  }
+  const policy: Policy = method === 'preSession' ? { preSession: check } : { postSession: check }
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, policies: [policy] })
+  let running: Promise<boolean> | undefined
+  try {
+    const agent = await ws.session('agent')
+    equal((await agent.shell('export LIFECYCLE=before')).exitCode, 0)
+    running = agent.shell('export LIFECYCLE=after').then(
+      (result) => result.exitCode !== 0,
+      () => true,
+    )
+    await within(entered.promise)
+    await ws.setSessionProfile('agent', { paths: { hide: ['/data/unrelated'] } })
+    release.resolve()
+    equal(await within(running), true)
+    equal((await agent.shell('printf "%s" "$LIFECYCLE"')).stdoutText, 'before')
+    equal((await agent.shell('export LIFECYCLE=fresh')).exitCode, 0)
+    equal((await agent.shell('printf "%s" "$LIFECYCLE"')).stdoutText, 'fresh')
+  } finally {
+    release.resolve()
+    if (running !== undefined) await Promise.allSettled([running])
+    await ws.close()
+  }
+}
+
 async function allHooks(): Promise<void> {
   const seen = new Set<string>()
   const record = (hook: string): null => {
@@ -590,4 +626,12 @@ export const POLICY_CHECKS: [string, () => Promise<void>][] = [
     () => invalidatedCachedRead(true),
   ],
   ['media reads keep once approvals separate from suspended tool calls', mediaCallerIsolation],
+  [
+    'a suspended preSession callback cannot write through a replaced browser caller',
+    () => sessionCallbackIsolation('preSession'),
+  ],
+  [
+    'a suspended postSession callback rolls back after its browser caller is replaced',
+    () => sessionCallbackIsolation('postSession'),
+  ],
 ]
