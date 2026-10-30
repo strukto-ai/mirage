@@ -42,7 +42,7 @@ export async function* readStream(
   })
   try {
     const regular = (await handle.stat()).isFile()
-    const size = 65536
+    const size = 256 * 1024
     for (;;) {
       const { bytesRead, buffer } = await handle
         .read(new Uint8Array(size), 0, size, null)

@@ -112,6 +112,18 @@ fn a_missing_newline_holds_until_more_follows() {
 }
 
 #[test]
+fn a_long_line_reads_whole_beside_short_ones() {
+    let long = "ab".repeat(33_000);
+    let input = format!("{long}\nx\n{long}\n{long}");
+    let expected = format!("{0}\n1\nx\n2\n{0}\n3\n{0}\n4\n", long.replacen('a', "A", 1));
+    let run = run_host(
+        json!({"pieces": expressions(&["s/a/A/;p;="]), "quiet": true}),
+        Host::with(&[], &input),
+    );
+    assert_eq!(run.out, expected);
+}
+
+#[test]
 fn list_wraps_without_splitting_an_escape() {
     assert_eq!(quiet("l 5", "aaa\tb\n"), "aaa\\\n\\tb$\n");
     assert_eq!(quiet("l 1", "abc\n"), "\\\na\\\nb\\\nc$\n");

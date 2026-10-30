@@ -47,26 +47,47 @@ async function nativeRealpath(file: string): Promise<string> {
   return realpath(file)
 }
 
-/** Prove a fresh native name or inspect the parent's actual names; no name cache. */
+/**
+ * Prove the requested spelling is the entry's own, listing the parent's names
+ * only when nothing cheaper proves it. An ASCII name has one spelling unless
+ * the directory folds case, and the name with one letter's case flipped tells:
+ * absent, a link or another entry means the directory keeps case apart, so the
+ * name that resolved is exact. Where it folds, a native path is trusted only
+ * when the flipped, non-link spelling converges on the same full path whose
+ * leaf is exactly the requested name. A name past ASCII may also fold or
+ * normalize in ways one probe cannot see. Every proof that skips the listing
+ * still opens the parent, so permissions stay uniform; no name cache. Mirrors
+ * Python's exact_name.
+ */
 async function exactName(parent: string, part: string, info: Stats): Promise<boolean> {
   const index = part.search(/[A-Za-z]/)
-  if (['darwin', 'win32'].includes(process.platform) && index !== -1) {
+  let alternate: string | undefined
+  let folds = false
+  if (index !== -1) {
     const char = part[index] ?? ''
     const flipped = char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase()
-    const alternate = path.join(parent, part.slice(0, index) + flipped + part.slice(index + 1))
+    alternate = path.join(parent, part.slice(0, index) + flipped + part.slice(index + 1))
     try {
       const alias = await lstat(alternate)
-      if (!alias.isSymbolicLink() && alias.dev === info.dev && alias.ino === info.ino) {
-        const canonical = await nativeRealpath(path.join(parent, part))
-        if (path.basename(canonical) === part && (await nativeRealpath(alternate)) === canonical) {
-          const listing = await opendir(parent, { bufferSize: 1 })
-          try {
-            await listing.read()
-          } finally {
-            await listing.close()
-          }
-          return true
-        }
+      folds = !alias.isSymbolicLink() && alias.dev === info.dev && alias.ino === info.ino
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+        console.debug('Disk spelling probe unavailable:', code)
+        return (await readdir(parent)).includes(part)
+      }
+    }
+  }
+  if (/^\p{ASCII}*$/u.test(part) && !folds) {
+    await openParent(parent)
+    return true
+  }
+  if (folds && alternate !== undefined && ['darwin', 'win32'].includes(process.platform)) {
+    try {
+      const canonical = await nativeRealpath(path.join(parent, part))
+      if (path.basename(canonical) === part && (await nativeRealpath(alternate)) === canonical) {
+        await openParent(parent)
+        return true
       }
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code
@@ -75,6 +96,15 @@ async function exactName(parent: string, part: string, info: Stats): Promise<boo
     }
   }
   return (await readdir(parent)).includes(part)
+}
+
+async function openParent(parent: string): Promise<void> {
+  const listing = await opendir(parent, { bufferSize: 1 })
+  try {
+    await listing.read()
+  } finally {
+    await listing.close()
+  }
 }
 
 /**

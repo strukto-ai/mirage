@@ -194,7 +194,9 @@ export class ByteSpool {
   async *stream(offset = 0, size?: number): AsyncGenerator<Uint8Array> {
     const end = size === undefined ? this.size : Math.min(this.size, offset + size)
     while (offset < end) {
-      const data = await this.read(offset, Math.min(CHUNK_SIZE, end - offset))
+      // A spilled spool hands on a store read's worth at a time.
+      const step = this.store === null ? CHUNK_SIZE : IO_BUFFER_SIZE
+      const data = await this.read(offset, Math.min(step, end - offset))
       if (data.length === 0) return
       offset += data.length
       yield data
