@@ -339,7 +339,6 @@ fn session_grant_projections_require_and_register_a_live_caller() {
 fn exhausted_retention_refuses_without_discarding_terminal_tickets() {
     let mut input = resolving();
     input["ledger"]["retired"] = json!(vec!["retired"; ENTRY_LIMIT + 1]);
-    let original = input["ledger"]["retired"].clone();
     let mut engine = open(b"{}").unwrap();
     engine
         .feed(&serde_json::to_vec(&input).unwrap(), &mut Vec::new())
@@ -353,7 +352,6 @@ fn exhausted_retention_refuses_without_discarding_terminal_tickets() {
     );
     assert!(engine.done());
     assert!(engine.request(&mut Vec::new()).is_none());
-    assert_eq!(input["ledger"]["retired"], original);
 }
 
 #[test]
@@ -402,4 +400,46 @@ fn pending_reservations_require_live_holders_and_pending_records() {
         assert!(engine.finish(&mut Vec::new()).is_err(), "{mutation}");
         assert!(engine.request(&mut Vec::new()).is_none());
     }
+}
+
+#[test]
+fn repeated_admissions_confirm_storage_without_growing_history() {
+    let mut input = resolving();
+    let reader = json!({"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[],"start":0,"end":0}});
+    input["event"]["claimant"] = reader.clone();
+    let (pending, ledger) = commit(&input);
+    input["ledger"] = ledger;
+    input["transition"] = json!("answer");
+    input["event"] = json!({"op":"answer","id":pending["record"]["id"],"outcome":"allow","scope":"session","note":[],"claimant":reader});
+    let (_, mut ledger) = commit(&input);
+    let revision = ledger["revision"].clone();
+    let receipts = ledger["receipts"].clone();
+    for index in 0..100 {
+        input["ledger"] = ledger;
+        input["transition"] = json!(format!("admission-{index}"));
+        input["event"] = if index % 2 == 0 {
+            json!({"op":"validate","owner":"process","holders":["line"]})
+        } else {
+            json!({"op":"session_grants","claimant":reader})
+        };
+        let mut engine = initialized(&input);
+        let request: Value = serde_json::from_slice(
+            &engine
+                .request(&mut Vec::new())
+                .expect("admission requires a storage acknowledgement"),
+        )
+        .unwrap();
+        assert_eq!(request["ledger"]["revision"], revision);
+        assert_eq!(request["ledger"]["receipts"], receipts);
+        (_, ledger) = commit(&input);
+    }
+    input["ledger"] = ledger;
+    input["transition"] = json!("invalidate");
+    input["event"] = json!({"op":"invalidate"});
+    let (_, ledger) = commit(&input);
+    input["ledger"] = ledger;
+    input["transition"] = json!("admission-0");
+    input["event"] = json!({"op":"validate","owner":"process","holders":["line"]});
+    let (blocked, _) = commit(&input);
+    assert_eq!(blocked, json!({"kind":"blocked","status":"stale_holder"}));
 }

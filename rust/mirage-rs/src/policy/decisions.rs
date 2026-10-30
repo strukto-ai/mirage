@@ -577,13 +577,13 @@ fn apply(
                         && available_to(&ledger.pending_claims, r, claimant.as_ref())
                 }) {
                     let record = record.clone();
-                    if !explain
-                        && let Some(reader) = claimant
-                        && !ledger
-                            .pending_claims
-                            .iter()
-                            .any(|c| c.decision == record.id)
-                    {
+                    if let Some(reader) = claimant.as_ref().filter(|_| {
+                        !explain
+                            && !ledger
+                                .pending_claims
+                                .iter()
+                                .any(|c| c.decision == record.id)
+                    }) {
                         ledger.pending_claims.push(Claim {
                             owner: reader.owner.clone(),
                             holder: reader.holder.clone(),
@@ -1075,6 +1075,14 @@ impl Decisions {
                 return Ok(());
             }
         }
+        let admission_only = match &event {
+            Event::Validate { .. } => true,
+            Event::SessionGrants {
+                claimant: Some(reader),
+                ..
+            } => holder_active(&ledger, &reader.owner, &reader.holder) == Some(true),
+            _ => false,
+        };
         let result = apply(
             &mut ledger,
             &event,
@@ -1089,16 +1097,18 @@ impl Decisions {
             self.state = State::Complete(result);
             return Ok(());
         }
-        ledger.revision = ledger
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| error("ledger revision exhausted"))?;
-        ledger.receipts.push(Receipt {
-            id: transition.clone(),
-            revision: ledger.revision,
-            digest,
-            result: result.clone(),
-        });
+        if !admission_only {
+            ledger.revision = ledger
+                .revision
+                .checked_add(1)
+                .ok_or_else(|| error("ledger revision exhausted"))?;
+            ledger.receipts.push(Receipt {
+                id: transition.clone(),
+                revision: ledger.revision,
+                digest,
+                result: result.clone(),
+            });
+        }
         validate(&ledger)?;
         if serde_json::to_vec(&ledger)
             .map_err(|_| error("invalid ledger"))?
