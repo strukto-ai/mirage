@@ -1,6 +1,16 @@
 {
- "baseline": 2693,
+ "baseline": 2690,
  "modules": {
+  "workspace/session/approval": {
+   "typescript_only": {
+    "approvalSessionSchema": "Zod validates the serialized session boundary before TypeScript constructs SessionState; Python's from_dict constructs these fields directly.",
+    "effectSchema": "Zod validates the unknown JSON storage-effect packet; Python checks the decoded packet before storage.",
+    "pathScopeSchema": "A Zod boundary schema shared by the TypeScript session decoder's path fields.",
+    "resultSchema": "Zod validates the unknown JSON transition result; Python decodes the Rust result directly.",
+    "ruleSchema": "A Zod boundary schema used by the TypeScript session decoder's admission-rule fields.",
+    "stateSchema": "Zod validates the opaque Rust ledger envelope before TypeScript reads its incarnation and revision."
+   }
+  },
   "workspace/executor/builtins/help/help": {
    "typescript_only": {
     "specOf": "A topic's spec by name: Python indexes SHELL_SPECS and lets a missing name raise KeyError; TypeScript's index type carries undefined, so the lookup that throws lives in this helper."
@@ -1127,6 +1137,18 @@
   "cli/settings": {
    "python_only": {
     "_network_text": "tomllib hands Python the network table parsed, so it writes it back as config.toml spells it; the TypeScript CLI reads the line by hand and shows it as written."
+   }
+  },
+  "policy/decisions": {
+   "typescript_only": {
+    "ApprovalResult": "Type inferred from the TypeScript JSON result boundary; Python uses RecordFields for the opaque Rust result.",
+    "ScopeBinding": "Named TypeScript shape for a caller binding; Python represents the same session, incarnation and revision as a typed tuple.",
+    "decisionSchema": "Zod validates decision text and rule fields arriving from Rust; Python decodes the same known result with typed helpers.",
+    "effectSchema": "Zod validates the unknown JSON persistence effect before TypeScript reads it; Python checks the decoded effect directly.",
+    "ledgerSchema": "Zod validates the opaque ledger envelope before TypeScript projects records; Python reads the same fields from RecordFields.",
+    "resultSchema": "Zod validates the Rust result union at the TypeScript boundary; Python checks its result kind.",
+    "ruleSchema": "TypeScript boundary schema for the Rust rule wire shape; Python uses rule_wire and decision_from_wire.",
+    "unitSchema": "TypeScript boundary validation for Unicode code points; Python units/from_units supply the corresponding conversion."
    }
   }
  }

@@ -65,6 +65,12 @@ class RedisNamespaceStore(NamespaceStore):
             self._client.hset(self._key, key, json.dumps(fields)),
         )
 
+    async def get(self, key: str) -> RecordFields | None:
+        raw = await cast(
+            "Awaitable[bytes | None]", self._client.hget(self._key, key)
+        )
+        return None if raw is None else json.loads(raw)
+
     async def cas_set(
         self, key: str, fields: RecordFields, expected_generation: int
     ) -> bool:

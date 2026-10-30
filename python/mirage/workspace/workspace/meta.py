@@ -69,7 +69,7 @@ class WorkspaceMeta:
         Args:
             session_id (str): the snapshot's default session.
         """
-        self._sessions.adopt_default(session_id)
+        await self._sessions.restore_default(session_id)
         self._default_session_id = session_id
         await self._store.replace_meta(
             self._workspace_id,

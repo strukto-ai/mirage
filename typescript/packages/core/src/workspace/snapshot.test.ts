@@ -35,7 +35,7 @@ import { IOResult } from '../io/types.ts'
 import { ALL_COMMANDS } from '../policy/builtin/output_cap.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
-import type { Action, SessionContext } from '../policy/types.ts'
+import { Outcome, type Action, type SessionContext } from '../policy/types.ts'
 import { secretStr } from '../vfs/secrets.ts'
 import { RAMVFS, type RAMVFSState } from '../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../vfs/base.ts'
@@ -1099,9 +1099,8 @@ describe('applyStateDict and the deployment', () => {
     expect(compiled).not.toBeNull()
     const restored = target.getSession('s2')
     expect(restored.profile).toBe('default')
-    expect(restored.commands).toBe(compiled?.policies.commands)
-    expect(restored.scripts).toBe(compiled?.policies.scripts)
-    expect(target.sessionManager.scriptsOf('s2')).toBe(compiled?.policies.scripts)
+    expect(restored.scripts).toEqual(compiled?.policies.scripts)
+    expect(target.sessionManager.scriptsOf('s2')).toEqual(compiled?.policies.scripts)
     expect(restored.env.PUBLIC_A).toBe('1')
     const refused = await target.shell('rm /data/f.txt', { sessionId: 's2' })
     expect(refused.exitCode).toBe(126)
@@ -1145,7 +1144,7 @@ describe('applyStateDict and the deployment', () => {
 
   // The ask ledger was written into the snapshot and dropped by the load,
   // so a host answering a pending ask by id after a reload found nothing.
-  it('a load keeps the ask decisions its tables recorded', async () => {
+  it('a load invalidates the ask decisions its tables recorded', async () => {
     const source = new Workspace(
       { '/data': new RAMVFS() },
       {
@@ -1160,7 +1159,12 @@ describe('applyStateDict and the deployment', () => {
     const loaded = await Workspace.fromState(state, {})
     try {
       expect(recorded).toHaveLength(1)
-      expect(loaded.decisions.list().map((d) => d.id)).toEqual(recorded.map((d) => d.id))
+      expect(loaded.decisions.list()).toEqual([])
+      const previous = recorded[0]
+      if (previous === undefined) throw new Error('Expected a previous approval ticket')
+      await expect(loaded.decisions.answer(previous.id, Outcome.ALLOW)).rejects.toThrow(
+        'no decision waiting',
+      )
     } finally {
       await loaded.close()
     }

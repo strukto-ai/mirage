@@ -12,18 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecordNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
-import { DiskRecordClient } from './disk.ts'
+import { DiskRecordClient, ownerAlive } from './disk.ts'
 
 vi.mock('node:fs/promises', async (original) => {
   const real = await original<typeof fs>()
   return {
     ...real,
+    link: vi.fn(real.link),
     open: vi.fn(real.open),
     rename: vi.fn(real.rename),
     stat: vi.fn(real.stat),
@@ -34,23 +44,71 @@ vi.mock('node:fs/promises', async (original) => {
 const real = await vi.importActual<typeof fs>('node:fs/promises')
 
 afterEach(() => {
+  vi.mocked(fs.link).mockImplementation(real.link)
   vi.mocked(fs.open).mockImplementation(real.open)
   vi.mocked(fs.rename).mockImplementation(real.rename)
   vi.mocked(fs.stat).mockImplementation(real.stat)
   vi.mocked(fs.unlink).mockImplementation(real.unlink)
 })
 
-type LateStep = 'unlink' | 'open'
+type LateStep = 'unlink' | 'link'
 const LATE_STEPS: [string, LateStep][] = [
   ['together', 'unlink'],
-  ['after', 'open'],
+  ['after', 'link'],
 ]
 
 const pause = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+const CRASH_OWNER = `
+import { createRequire, syncBuiltinESMExports } from 'node:module'
+const require = createRequire(import.meta.url)
+const fs = require('node:fs/promises')
+const [source, root, phase] = process.argv.slice(1)
+const open = fs.open
+const link = fs.link
+fs.open = async (...args) => {
+  const handle = await open(...args)
+  if (args[1] === 'wx' && phase === 'before') {
+    handle.write = handle.writeFile = async () => process.exit(73)
+  }
+  return handle
+}
+fs.link = async (...args) => {
+  await link(...args)
+  if (phase === 'after') process.exit(73)
+}
+syncBuiltinESMExports()
+const { DiskRecordClient } = await import(source)
+await new DiskRecordClient(root, '').lock('crash')
+process.exit(73)
+`
+
+function crashOwner(root: string, phase: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      '--input-type=module',
+      '-e',
+      CRASH_OWNER,
+      new URL('./disk.ts', import.meta.url).href,
+      root,
+      phase,
+    ])
+    let errors = ''
+    child.stderr.on('data', (chunk: Buffer) => {
+      errors += chunk.toString()
+    })
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code !== 73 || child.pid === undefined)
+        reject(new Error(errors || `child exited ${String(code)}`))
+      else resolve(child.pid)
+    })
+  })
+}
+
 // Hold the first two stats of `lock` until both have run, then delay the
 // later waiter's `lateStep`: its unlink of the lock (both reclaim at
-// once) or its open of the reclaim guard (it reclaims after the earlier
+// once) or its link of the reclaim guard (it reclaims after the earlier
 // waiter has taken a new lock).
 function raceTwoReclaimers(lock: string, lateStep: LateStep): void {
   let stats = 0
@@ -74,10 +132,10 @@ function raceTwoReclaimers(lock: string, lateStep: LateStep): void {
       await real.unlink(p)
     })
   } else {
-    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
-      if (args[0] === `${lock}.reclaim` && lateCalls++ === 1) await pause(200)
-      return real.open(...args)
-    }) as typeof fs.open)
+    vi.mocked(fs.link).mockImplementation(async (...args) => {
+      if (args[1] === `${lock}.reclaim` && lateCalls++ === 1) await pause(200)
+      return real.link(...args)
+    })
   }
 }
 
@@ -96,6 +154,33 @@ describe('DiskRecordClient lock reclaim and release', () => {
   })
   afterEach(() => {
     rmSync(root, { recursive: true, force: true })
+  })
+
+  it.each(['before', 'after'])(
+    'process death %s publication leaves no incomplete owner',
+    async (phase) => {
+      const client = new DiskRecordClient(root, '')
+      const lock = `${client.path('crash')}.lock`
+      const pid = await crashOwner(root, phase)
+      if (phase === 'before') expect(existsSync(lock)).toBe(false)
+      else {
+        expect(readFileSync(lock, 'utf8')).toBe(String(pid))
+        const past = (Date.now() - 100_000) / 1000
+        utimesSync(lock, past, past)
+      }
+      expect(await client.casPut('crash', { generation: 1 }, 0)).toBe(true)
+      expect(existsSync(lock)).toBe(false)
+    },
+  )
+
+  it('does not reclaim an ambiguous legacy lock owner', async () => {
+    const client = new DiskRecordClient(root, '')
+    const lock = `${client.path('legacy')}.lock`
+    writeFileSync(lock, '')
+    const past = (Date.now() - 100_000) / 1000
+    utimesSync(lock, past, past)
+    expect(await ownerAlive(lock)).toBe(true)
+    expect(existsSync(lock)).toBe(true)
   })
 
   it.each(LATE_STEPS)(
@@ -143,13 +228,13 @@ describe('DiskRecordClient lock reclaim and release', () => {
     const client = new DiskRecordClient(root, '')
     const lock = staleLock(client, 'k')
     const guard = staleLock(client, 'k', '.lock.reclaim')
-    let opens = 0
-    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
-      if (args[0] === guard && opens++ === 1) {
+    let publications = 0
+    vi.mocked(fs.link).mockImplementation(async (...args) => {
+      if (args[1] === guard && publications++ === 1) {
         throw Object.assign(new Error(`EEXIST: ${guard}`), { code: 'EEXIST' })
       }
-      return real.open(...args)
-    }) as typeof fs.open)
+      return real.link(...args)
+    })
     const reclaim = client as unknown as { reclaimStaleLock(path: string): Promise<boolean> }
     expect(await reclaim.reclaimStaleLock(lock)).toBe(false)
     expect(readdirSync(root)).toEqual(['k.json.lock'])
@@ -225,7 +310,84 @@ describe('DiskRecordClient lock reclaim and release', () => {
     await client.put('k', { generation: 0 })
     const body = BigInt(JSON.stringify({ generation: 0 }).length)
     const record = (await real.stat(client.path('k'), { bigint: true })).ino
-    expect(steps).toEqual([['sync', body, record], ['close'], ['rename', body, record]])
+    const directory = await real.stat(root, { bigint: true })
+    expect(steps.slice(-5)).toEqual([
+      ['sync', body, record],
+      ['close'],
+      ['rename', body, record],
+      ['sync', directory.size, directory.ino],
+      ['close'],
+    ])
+  })
+
+  it('does not reclaim an old lock of a live process', async () => {
+    const client = new DiskRecordClient(root, '')
+    await client.put('k', { generation: 1 })
+    const lock = `${client.path('k')}.lock`
+    writeFileSync(lock, String(process.pid))
+    const past = (Date.now() - 100_000) / 1000
+    utimesSync(lock, past, past)
+    let settled = false
+    const waiting = client.casPut('k', { generation: 2 }, 1).finally(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(settled).toBe(false)
+    expect(readFileSync(lock, 'utf8')).toBe(String(process.pid))
+    expect((await client.get('k'))[0]).toEqual({ generation: 1 })
+    await client.put('k', { generation: 2, owner: 'holder' })
+    rmSync(lock)
+    expect(await waiting).toBe(false)
+    expect((await client.get('k'))[0]).toEqual({ generation: 2, owner: 'holder' })
+  })
+
+  it('does not acknowledge publication when directory sync fails', async () => {
+    const client = new DiskRecordClient(root, '')
+    await client.put('k', { generation: 0 })
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      const handle = await real.open(...args)
+      if (String(args[0]) === root) {
+        const sync = handle.sync.bind(handle)
+        handle.sync = async () => {
+          if (
+            (await real.readFile(client.path('k'), 'utf8')) === JSON.stringify({ generation: 1 })
+          ) {
+            throw new Error('directory sync failed')
+          }
+          await sync()
+        }
+      }
+      return handle
+    }) as typeof fs.open)
+    await expect(client.casPut('k', { generation: 1 }, 0)).rejects.toThrow('directory sync failed')
+    expect((await client.get('k'))[0]).toEqual({ generation: 1 })
+    vi.mocked(fs.open).mockImplementation(real.open)
+    expect(await client.casPut('k', { generation: 1 }, 0)).toBe(false)
+  })
+
+  it('confirms existing directory ancestors before publishing a record', async () => {
+    const directory = join(root, 'already-created', 'sessions')
+    await fs.mkdir(directory, { recursive: true })
+    const realRoot = await fs.realpath(root)
+    const realDirectory = await fs.realpath(directory)
+    const client = new DiskRecordClient(directory, '')
+    const synced: string[] = []
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      const handle = await real.open(...args)
+      if (args[1] === 'r') {
+        handle.sync = () => {
+          const name = String(args[0])
+          synced.push(name)
+          return name === realRoot
+            ? Promise.reject(new Error('ancestor sync failed'))
+            : Promise.resolve()
+        }
+      }
+      return handle
+    }) as typeof fs.open)
+    await expect(client.casPut('k', { generation: 1 }, 0)).rejects.toThrow('ancestor sync failed')
+    expect(synced).toEqual([realDirectory, join(realRoot, 'already-created'), realRoot])
+    expect((await client.get('k'))[0]).toBeNull()
   })
 })
 
@@ -234,12 +396,21 @@ it('releases the lock and handle when writing the owner fails', async () => {
   try {
     const client = new DiskRecordClient(root, '')
     const lock = `${client.path('record')}.lock`
-    const handle = await fs.open(lock, 'wx')
-    vi.spyOn(handle, 'write').mockRejectedValueOnce(new Error('write failed'))
-    vi.mocked(fs.open).mockResolvedValueOnce(handle)
+    let owner: Awaited<ReturnType<typeof fs.open>> | undefined
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      const handle = await real.open(...args)
+      if (args[1] === 'wx') {
+        owner = handle
+        vi.spyOn(handle, 'writeFile').mockRejectedValueOnce(new Error('write failed'))
+      }
+      return handle
+    }) as typeof fs.open)
     await expect(client.lock('record')).rejects.toThrow('write failed')
     await expect(fs.stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(handle.stat()).rejects.toMatchObject({ code: 'EBADF' })
+    if (owner === undefined) throw new Error('no owner candidate was opened')
+    await expect(owner.stat()).rejects.toMatchObject({ code: 'EBADF' })
+    expect(await fs.readdir(root)).toEqual([])
+    vi.mocked(fs.open).mockImplementation(real.open)
     await client.unlock('record', await client.lock('record'))
   } finally {
     await fs.rm(root, { recursive: true, force: true })
@@ -316,13 +487,18 @@ describe('RecordNamespaceStore over DiskRecordClient', () => {
     expect(await store.casSet('s', { session_id: 's', generation: 1 }, 0)).toBe(true)
   })
 
-  it('loses to a live lock and wins after release', async () => {
+  it('waits for a busy lock and wins after release', async () => {
     await store.set('s', { session_id: 's', generation: 1 })
     const lock = join(root, 'sessions', 's.json.lock')
     writeFileSync(lock, '9999999')
-    expect(await store.casSet('s', { session_id: 's', generation: 2 }, 1)).toBe(false)
+    let settled = false
+    const waiting = store.casSet('s', { session_id: 's', generation: 2 }, 1).finally(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(settled).toBe(false)
     rmSync(lock)
-    expect(await store.casSet('s', { session_id: 's', generation: 2 }, 1)).toBe(true)
+    expect(await waiting).toBe(true)
   })
 
   it('reclaims a stale lock', async () => {

@@ -13,10 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import builtins
 import dataclasses
-import hashlib
-from collections.abc import Awaitable, Callable, Sequence
-from typing import TypeVar
+import json
+import logging
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, TypeVar
+from weakref import WeakKeyDictionary, WeakSet
 
 from mirage.context.session_context import (
     Caller,
@@ -25,12 +28,11 @@ from mirage.context.session_context import (
     current_caller,
     reset_caller,
 )
-from mirage.policy.errors import PolicyDenied
+from mirage.policy.errors import ApprovalUnavailable, PolicyDenied
 from mirage.policy.match import Outcome
 from mirage.policy.types import (
     Abandoned,
     Ask,
-    Claim,
     Claimant,
     CommandContext,
     CommandRule,
@@ -48,7 +50,12 @@ from mirage.policy.types import (
     SessionDecisionsQuery,
     VfsContext,
 )
+from mirage.rs.policy import from_units, rule_wire, units
+from mirage.rs.stream import close_stream, open_stream
 from mirage.types import PathSpec, Refusal
+from mirage.utils.ids import authority_id
+
+logger = logging.getLogger(__name__)
 
 # A host that answers an Ask inside the line.
 #
@@ -109,29 +116,6 @@ async def answered(
         await asyncio.gather(wait_task, cancel_task, return_exceptions=True)
 
 
-def decision_id(session_id: str, cwd: str, argv: tuple[str, ...]) -> str:
-    """The id a record is named by: a digest of what was asked, so a
-    retry of the same line quotes the same id and a host answers it
-    once.
-
-    The id names the record; it does not decide what a retry matches.
-    That comparison is made against the recorded fields themselves
-    (:func:`covers`), so a line the digest cannot tell apart from
-    another still cannot borrow its answer.
-
-    Args:
-        session_id (str): the session running the line.
-        cwd (str): its working directory.
-        argv (tuple[str, ...]): the line as expanded, command name
-            first.
-    """
-    digest = hashlib.sha256()
-    for part in (session_id, cwd, *argv):
-        digest.update(part.encode())
-        digest.update(b"\0")
-    return digest.hexdigest()[:12]
-
-
 def ask_rule(
     ctx: CommandContext
     | RouteContext
@@ -162,31 +146,6 @@ def ask_rule(
     return CommandRule(reason=ask.reason, commands=(ctx.line,))
 
 
-def covers(
-    record: Decision, rule: CommandRule, argv: tuple[str, ...], cwd: str
-) -> bool:
-    """Whether an answered record answers this rule of this line.
-
-    A ONCE answer covers the exact line it was given for, compared
-    field by field. A SESSION answer covers every line the same rule
-    asks about. Both are keyed on the rule as well as the words: an
-    answer that outlives a rule change (a persisted store reopened
-    under an edited profile) must not answer the new rule's ask, and a
-    stale refusal must not speak in its voice.
-
-    Args:
-        record (Decision): the answered record.
-        rule (CommandRule): the rule to answer.
-        argv (tuple[str, ...]): the line's words, name first.
-        cwd (str): the session working directory.
-    """
-    if record.outcome is None or record.rule != rule:
-        return False
-    if record.scope is Scope.SESSION:
-        return record.outcome is Outcome.ALLOW
-    return (record.command, *record.argv) == argv and record.cwd == cwd
-
-
 def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
     """A hand-off and every line it was evaluated from, innermost
     first; empty outside a line.
@@ -199,22 +158,6 @@ def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
         out.append(handed)
         handed = handed.parent
     return tuple(out)
-
-
-def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
-    """Whether a command stands inside a scope: within the scope's span
-    of the same text, or on a line evaluated from a node that does.
-
-    Args:
-        scope (Occurrence): the enclosing node, a background job's.
-        occurrence (Occurrence): the command's place.
-    """
-    within: Occurrence | None = occurrence
-    while within is not None:
-        if within.parent == scope.parent and within.source == scope.source:
-            return scope.start <= within.start and within.end <= scope.end
-        within = within.parent
-    return False
 
 
 def is_pending(refusal: Refusal | None) -> bool:
@@ -263,70 +206,368 @@ def op_question(
     return asked, keyed
 
 
+def empty_ledger(incarnation: str) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "incarnation": incarnation,
+        "revision": 0,
+        "records": [],
+        "claims": [],
+        "holders": [],
+        "receipts": [],
+        "retired": [],
+    }
+
+
+def decision_wire(record: Decision) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "session_id": record.session_id,
+        "command": units(record.command),
+        "argv": [units(word) for word in record.argv],
+        "cwd": units(record.cwd),
+        "paths": [units(path) for path in record.paths],
+        "reason": units(record.reason),
+        "rule": rule_wire(record.rule),
+        "outcome": None if record.outcome is None else record.outcome.value,
+        "scope": record.scope.value,
+        "note": units(record.note),
+    }
+
+
+def decision_from_wire(record: Mapping[str, Any]) -> Decision:
+    rule = record["rule"]
+    return Decision(
+        id=record["id"],
+        session_id=record["session_id"],
+        command=from_units(record["command"]),
+        argv=tuple(from_units(word) for word in record["argv"]),
+        cwd=from_units(record["cwd"]),
+        paths=tuple(from_units(path) for path in record["paths"]),
+        reason=from_units(record["reason"]),
+        rule=CommandRule(
+            reason=from_units(rule["reason"]),
+            commands=tuple(from_units(word) for word in rule["commands"]),
+            paths=tuple(from_units(path) for path in rule["paths"]),
+            mount=from_units(rule["mount"] or []),
+        ),
+        outcome=None
+        if record["outcome"] is None
+        else Outcome(record["outcome"]),
+        scope=Scope(record["scope"]),
+        note=from_units(record["note"]),
+    )
+
+
+def occurrence_wire(occurrence: Occurrence) -> dict[str, Any]:
+    return {
+        "parent": None
+        if occurrence.parent is None
+        else occurrence_wire(occurrence.parent),
+        "source": units(occurrence.source),
+        "start": occurrence.start,
+        "end": occurrence.end,
+    }
+
+
+def resolve_wire(
+    ctx: CommandContext,
+    rules: tuple[CommandRule, ...],
+    claimant: dict[str, Any] | None,
+) -> dict[str, Any]:
+    record = Decision(
+        authority_id(),
+        ctx.session_id,
+        ctx.command,
+        tuple(ctx.argv),
+        ctx.cwd,
+        tuple(path.virtual for path in ctx.paths),
+        rules[0].reason,
+        rules[0],
+    )
+    return {
+        "op": "resolve",
+        "question": decision_wire(record),
+        "rules": [rule_wire(rule) for rule in rules],
+        "claimant": claimant,
+    }
+
+
+def inspect_approval(
+    ledger: dict[str, Any], event: dict[str, Any]
+) -> dict[str, Any]:
+    stream = open_stream("policy_decisions", {})
+    try:
+        identity = authority_id()
+        stream.feed(
+            json.dumps(
+                {
+                    "evaluation": identity,
+                    "transition": identity,
+                    "ledger": ledger,
+                    "event": event,
+                }
+            ).encode()
+        )
+        stream.finish()
+        if stream.request() is not None:
+            raise RuntimeError("approval inspection requested a write")
+        result: dict[str, Any] = json.loads(stream.finish())
+        return result
+    finally:
+        stream.cancel()
+
+
 class Decisions(DecisionOwner):
-    """The workspace's decision ledger: turns an Ask into run, refuse or
-    pending, and is the host's handle on every question raised and every
-    answer given.
-
-    One record type, one store. A :class:`Decision` with no outcome is a
-    question waiting; one with an outcome is a question settled, and how
-    far the answer reaches is its ``scope``. Keeping both in one place is
-    the point: they used to be two stores, a pending dict that vanished
-    on restart and a per-session answer list that did not, so a host
-    could see a question that no longer existed or miss one that did.
-
-    Reached by the executor through the mount registry like the policy
-    chain, and by the host as ``ws.decisions``. Records are consulted
-    only after the policy chain returned an Ask, which is after every
-    Deny had its say, so an answer never re-opens a deny rule. They are
-    read and written through the session manager by id, so a line
-    running in a fork (``execute(cwd=)``, a background job) consumes and
-    earns the same answers as the session it forked from.
-
-    Args:
-        sessions (SessionDecisionsQuery | None): where records live: the
-            session manager, or None to hold them in memory (a bare
-            policy chain outside a workspace).
-        on_ask (AskHandler | None): a host that answers inside the line,
-            returning the record with an outcome set, or None to leave
-            it pending. Omit it and every question is simply recorded,
-            which is what a host polling ``list`` wants.
-    """
+    """Host prompts and execution scopes over the shared approval model."""
 
     def __init__(
         self,
         sessions: SessionDecisionsQuery | None = None,
         on_ask: AskHandler | None = None,
+        version: Callable[[], int] | None = None,
     ) -> None:
         self._sessions = sessions
         self._on_ask = on_ask
-        self._memory: dict[str, tuple[Decision, ...]] = {}
-        # The hand-offs holding a claim, per session: a reservation is
-        # a fact about a line running in this process, so it lives here
-        # and not in the store the records persist to.
-        self._live: dict[str, list[HandOff]] = {}
+        self._version = version
+        self._versions: dict[str, int] = {}
+        self._owner = authority_id()
+        self._memory: dict[str, dict[str, Any]] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+        self._holders: WeakKeyDictionary[HandOff, str] = WeakKeyDictionary()
+        self._bindings: WeakKeyDictionary[HandOff, tuple[str, str, int]] = (
+            WeakKeyDictionary()
+        )
+        self._terminal: WeakSet[HandOff] = WeakSet()
+        self._pending_scopes: WeakSet[HandOff] = WeakSet()
+
+    def _id(self, handed: HandOff) -> str:
+        found = self._holders.get(handed)
+        if found is None:
+            found = authority_id()
+            self._holders[handed] = found
+        return found
+
+    def _binding(
+        self, session_id: str, handed: HandOff
+    ) -> tuple[str, str, int] | None:
+        family = lineage(handed)
+        if any(reader in self._terminal for reader in family):
+            raise ApprovalUnavailable("stale_holder")
+        bound = self._bindings.get(family[-1])
+        if bound is not None and bound[0] != session_id:
+            raise ApprovalUnavailable("session_mismatch")
+        return bound
+
+    async def begin(self, session_id: str, handed: HandOff) -> str:
+        """Bind a new caller to a confirmed session incarnation.
+
+        Args:
+            session_id (str): the caller's registered session.
+            handed (HandOff): the new line or direct operation.
+        """
+        bound = self._binding(session_id, handed)
+        revision = 0 if self._version is None else self._version()
+        if bound is not None and bound[2] != revision:
+            await self._event(session_id, {"op": "invalidate"}, bound[1])
+            self._versions[session_id] = revision
+            raise ApprovalUnavailable("policy_changed")
+        if bound is None:
+            if self._sessions is not None:
+                epoch = await self._sessions.activate(session_id)
+            else:
+                state = self._memory.setdefault(
+                    session_id, empty_ledger(authority_id())
+                )
+                epoch = state["incarnation"]
+            bound = (session_id, epoch, revision)
+            self._bindings[lineage(handed)[-1]] = bound
+        self._id(handed)
+        self._versions.setdefault(session_id, revision)
+        return bound[1]
+
+    def _state(self, session_id: str) -> dict[str, Any]:
+        if self._sessions is not None:
+            state = self._sessions.approval_state_of(session_id)
+            return (
+                state
+                if state is not None
+                else empty_ledger(
+                    self._sessions.incarnation_of(session_id) or "unbound"
+                )
+            )
+        return self._memory.get(session_id, empty_ledger("unbound"))
+
+    def _keys(self) -> tuple[str, ...]:
+        return (
+            self._sessions.approval_sessions()
+            if self._sessions is not None
+            else tuple(self._memory)
+        )
 
     def list(self, session_id: str = "") -> tuple[Decision, ...]:
-        """Every record, oldest first: questions waiting and questions
-        settled.
-
-        Args:
-            session_id (str): one session, or "" for all of them.
-        """
-        if session_id:
-            return self._records(session_id)
-        out: list[Decision] = []
-        for key in self._keys():
-            out.extend(self._records(key))
-        return tuple(out)
+        keys = (session_id,) if session_id else self._keys()
+        return tuple(
+            decision_from_wire(record)
+            for key in keys
+            for record in self._state(key)["records"]
+        )
 
     def pending(self, session_id: str = "") -> tuple[Decision, ...]:
-        """The records nobody has answered, oldest first.
+        return tuple(
+            record
+            for record in self.list(session_id)
+            if record.outcome is None
+        )
+
+    def _claimant(self, claimant: Claimant | None) -> dict[str, Any] | None:
+        if claimant is None:
+            return None
+        return {
+            "owner": self._owner,
+            "holder": self._id(claimant.line),
+            "lineage": [
+                self._id(parent) for parent in lineage(claimant.line.parent)
+            ],
+            "occurrence": occurrence_wire(claimant.occurrence),
+        }
+
+    async def _event(
+        self, session_id: str, event: dict[str, Any], epoch: str
+    ) -> dict[str, Any]:
+        revision = 0 if self._version is None else self._version()
+        if self._sessions is not None:
+            result = await self._sessions.approval_event(
+                session_id, event, epoch
+            )
+        else:
+            lock = self._locks.setdefault(session_id, asyncio.Lock())
+            async with lock:
+                stream = open_stream("policy_decisions", {})
+                identity = authority_id()
+                try:
+                    stream.feed(
+                        json.dumps(
+                            {
+                                "evaluation": identity,
+                                "transition": identity,
+                                "ledger": self._state(session_id),
+                                "event": event,
+                                "expected_incarnation": epoch,
+                            }
+                        ).encode()
+                    )
+                    stream.finish()
+                    taken = stream.request()
+                    if taken is not None:
+                        effect, data = taken
+                        if data or effect["op"] != "persist_approvals":
+                            raise RuntimeError(
+                                "invalid approval storage effect"
+                            )
+                        ledger = effect["ledger"]
+                        if not isinstance(ledger, dict):
+                            raise RuntimeError("invalid approval ledger")
+                        self._memory[session_id] = ledger
+                        stream.respond(
+                            {
+                                "evaluation": identity,
+                                "transition": identity,
+                                "effect": 1,
+                                "status": "committed",
+                                "revision": ledger["revision"],
+                            },
+                            b"",
+                        )
+                    result = json.loads(stream.finish())
+                finally:
+                    await close_stream(stream)
+        if revision != (
+            0 if self._version is None else self._version()
+        ) and event["op"] in {
+            "resolve",
+            "answer",
+            "validate",
+            "session_grants",
+        }:
+            await self._event(session_id, {"op": "invalidate"}, epoch)
+            self._versions[session_id] = (
+                0 if self._version is None else self._version()
+            )
+            raise ApprovalUnavailable("policy_changed")
+        if result["kind"] == "blocked":
+            raise ApprovalUnavailable(result["status"])
+        return result
+
+    async def _check_version(self, session_id: str, epoch: str) -> bool:
+        current = 0 if self._version is None else self._version()
+        previous = self._versions.get(session_id)
+        if previous is not None and previous != current:
+            await self._event(session_id, {"op": "invalidate"}, epoch)
+            self._versions[session_id] = current
+            return True
+        self._versions[session_id] = current
+        return False
+
+    def facts(self, session_id: str) -> dict[str, Any]:
+        facts = (
+            self._sessions.approval_facts_of(session_id)
+            if self._sessions is not None
+            else {
+                "incarnation": self._state(session_id)["incarnation"],
+                "fields": {},
+            }
+        )
+        return {
+            **facts,
+            "revision": 0 if self._version is None else self._version(),
+        }
+
+    async def assert_current(
+        self, session_id: str, handed: HandOff | None, before: dict[str, Any]
+    ) -> None:
+        if handed is not None:
+            await self.validate(session_id, handed)
+        elif self._sessions is not None and before["incarnation"] is not None:
+            await self._sessions.refresh_approval(
+                session_id, before["incarnation"]
+            )
+        result = inspect_approval(
+            empty_ledger("inspection"),
+            {
+                "op": "inspect",
+                "query": {
+                    "kind": "facts_equal",
+                    "left": before,
+                    "right": self.facts(session_id),
+                },
+            },
+        )
+        if result["kind"] != "matches":
+            raise RuntimeError("invalid approval comparison")
+        if not result["matched"]:
+            raise ApprovalUnavailable("policy_changed")
+
+    async def validate(self, session_id: str, handed: HandOff) -> None:
+        """Confirm an existing caller before its next dynamic gate.
 
         Args:
-            session_id (str): one session, or "" for all of them.
+            session_id (str): the registered session.
+            handed (HandOff): the caller whose identity was captured before execution.
         """
-        return tuple(r for r in self.list(session_id) if r.outcome is None)
+        epoch = await self.begin(session_id, handed)
+        if self._sessions is not None:
+            await self._sessions.refresh_approval(session_id, epoch)
+        await self._check_version(session_id, epoch)
+        await self._event(
+            session_id,
+            {
+                "op": "validate",
+                "owner": self._owner,
+                "holders": [self._id(reader) for reader in lineage(handed)],
+            },
+            epoch,
+        )
 
     async def answer(
         self,
@@ -335,69 +576,43 @@ class Decisions(DecisionOwner):
         scope: Scope = Scope.ONCE,
         note: str = "",
     ) -> None:
-        """Answer a waiting record, yes or no.
-
-        ALLOW at ONCE passes the one line it was given for and is
-        consumed by it -- the line that asked, when the host answers
-        while it waits, or that line's retry when the answer comes
-        later; at SESSION it passes every line the rule covers for the
-        rest of the session. DENY refuses the retry of the line in the
-        deny voice, once, whether the host answered inline or later,
-        and asking again raises a new record.
-
-        Args:
-            decision_id (str): the id the agent was told to quote.
-            outcome (Outcome): ALLOW or DENY. ASK is the question, not
-                an answer.
-            scope (Scope): how far the answer reaches.
-            note (str): what to record alongside it.
-
-        Raises:
-            KeyError: no waiting record has that id.
-            ValueError: the outcome is ASK.
-        """
-        self._write_answer(decision_id, outcome, scope, note)
-        await self._flush()
-
-    def _write_answer(
-        self, decision_id: str, outcome: Outcome, scope: Scope, note: str
-    ) -> Decision:
-        """Settle a waiting record in the session's records, leaving the
-        store to be flushed by the caller.
-
-        Synchronous on purpose: the records change and nothing yields,
-        so a line that answered inline can claim the grant in the same
-        step (:meth:`_raise`), and a line judged while the flush then
-        waits on the store finds it claimed rather than standing.
-
-        Args:
-            decision_id (str): the id the agent was told to quote.
-            outcome (Outcome): ALLOW or DENY.
-            scope (Scope): how far the answer reaches.
-            note (str): what to record alongside it.
-
-        Returns:
-            The settled record.
-
-        Raises:
-            KeyError: no waiting record has that id.
-            ValueError: the outcome is ASK.
-        """
         if outcome is Outcome.ASK:
-            raise ValueError("ASK is the question, not an answer")
-        for key in self._keys():
-            records = self._records(key)
-            for index, record in enumerate(records):
-                if record.id != decision_id or record.outcome is not None:
-                    continue
-                answered = dataclasses.replace(
-                    record, outcome=outcome, scope=scope, note=note
-                )
-                self._set(
-                    key, (*records[:index], answered, *records[index + 1 :])
-                )
-                return answered
-        raise KeyError(decision_id)
+            raise ValueError("ASK is not an answer")
+        if self._sessions is not None:
+            await self._sessions.ensure_loaded()
+        record = next(
+            (item for item in self.pending() if item.id == decision_id), None
+        )
+        if record is None:
+            raise KeyError(decision_id)
+        epoch = (
+            self._sessions.incarnation_of(record.session_id)
+            if self._sessions is not None
+            else self._state(record.session_id)["incarnation"]
+        )
+        if epoch is None:
+            raise ApprovalUnavailable("session_invalid")
+        if self._sessions is not None:
+            await self._sessions.refresh_approval(record.session_id, epoch)
+        await self._check_version(record.session_id, epoch)
+        if not any(
+            item.id == decision_id for item in self.pending(record.session_id)
+        ):
+            raise KeyError(decision_id)
+        result = await self._event(
+            record.session_id,
+            {
+                "op": "answer",
+                "id": decision_id,
+                "outcome": outcome.value,
+                "scope": scope.value,
+                "note": units(note),
+                "claimant": None,
+            },
+            epoch,
+        )
+        if result["kind"] == "missing":
+            raise KeyError(decision_id)
 
     async def resolve(
         self,
@@ -405,133 +620,188 @@ class Decisions(DecisionOwner):
         ask: Ask,
         cancel: asyncio.Event | None = None,
         claimant: Claimant | None = None,
+        recheck: Callable[[], Awaitable[Deny | Ask | None]] | None = None,
     ) -> Deny | Pending | Abandoned | None:
-        """The executor's branch for an Ask: settled records answer it,
-        else the question is raised now.
-
-        Every rule the ask names has to be answered, because each won a
-        subject of its own and a nod covers the subject it was given
-        for. They are asked one at a time, the retry of the line raising
-        the next, and a ONCE grant is only spent once the whole line is
-        answered: spending one while another is still waiting would make
-        the first question come back on every retry. Once the line IS
-        answered, every ONCE grant behind it, the ones already on file
-        and the one a host gave inline moments ago alike, is the line's.
-        Off a line it is spent here, so a nod never outlives the line it
-        was given for. On a line it is claimed on the line's hand-off for
-        the reader's occurrence instead, whether the reader is a pass
-        that judges the line before it runs or the gate that runs it,
-        and spent when the line ends (:meth:`revoke`): the pass and the
-        gate then read one claim, so a compound line costs one question
-        per run rather than one per reader, and a gate the run reaches
-        again at the same place (a loop body, the next batch ``xargs``
-        hands on) runs on the same nod rather than asking after the
-        rest of the body already ran once more.
-
-        A refusal is deliberately not spent by the line it was given
-        for. The record stands to refuse the agent's immediate retry of
-        the same line from the ledger, and is spent by that retry, so a
-        human who said no is not asked twice about it; the run after
-        that is an open question again.
-
-        Args:
-            ctx (CommandContext): the asked line.
-            ask (Ask): the chain's answer.
-            cancel (asyncio.Event | None): the run's kill channel, so a
-                question outlives neither its run's deadline nor a
-                caller's kill.
-            claimant (Claimant | None): the reading command and its
-                line, None outside a line (a bare chain). A claimed
-                grant is on offer to a reader at the occurrence it was
-                claimed for, on the same line or one evaluated from it,
-                and to nobody else: not to another spelling of the
-                command on the line, and not to another line judged at
-                the same time.
-
-        Returns:
-            None to run the line, a Deny to refuse it, a Pending when
-            the host has not decided, an Abandoned for a run killed
-            mid-question.
-        """
-        rules = ask.rules or (ask_rule(ctx, ask),)
-        argv = (ctx.command, *ctx.argv)
-        held = self._standing(ctx.session_id, claimant)
-        answers = [
-            (rule, self._settled(held, rule, argv, ctx.cwd)) for rule in rules
-        ]
-        refused = next(
-            (
-                rule
-                for rule, r in answers
-                if r is not None and r.outcome is Outcome.DENY
-            ),
-            None,
-        )
-        if refused is not None:
-            # A standing refusal refuses this line in place, whichever
-            # pass reads it: a line that does not run has no later pass
-            # to hand anything to.
-            await self._spend(
-                ctx.session_id,
-                tuple(
-                    r
-                    for _rule, r in answers
-                    if r is not None and r.scope is Scope.ONCE
-                ),
-            )
-            return Deny(refused.reason)
-        for rule, record in answers:
-            if record is not None:
-                continue
-            action = await self._raise(ctx, rule, argv, cancel, claimant)
-            if action is not None:
-                return action
-        # Every rule is answered and the line may run. The ledger is read
-        # again rather than trusting the entry snapshot, because a host
-        # that answered inline settled its record during the loop above
-        # (and, on a line, _raise has already claimed it): without the
-        # re-read, the grant it gave THIS line would still be standing
-        # for the next identical one, and whoever allowed once would have
-        # allowed twice.
-        once = self._once_answers(
-            ctx.session_id, rules, argv, ctx.cwd, claimant
-        )
+        if cancel is not None and cancel.is_set():
+            return ABANDONED
         if claimant is None:
-            await self._spend(ctx.session_id, once)
+            handed = HandOff()
+            pending = False
+            try:
+                resolved = await self.resolve(
+                    ctx,
+                    ask,
+                    cancel,
+                    Claimant(
+                        handed,
+                        Occurrence(None, ctx.command, 0, len(ctx.command)),
+                    ),
+                    recheck,
+                )
+                pending = isinstance(resolved, Pending)
+                return resolved
+            finally:
+                if pending:
+                    await self.release(ctx.session_id, handed)
+                else:
+                    await self.revoke(ctx.session_id, handed)
+        try:
+            epoch = await self.begin(ctx.session_id, claimant.line)
+            await self._check_version(ctx.session_id, epoch)
+            while True:
+                rules = ask.rules or (ask_rule(ctx, ask),)
+                result = await self._event(
+                    ctx.session_id,
+                    resolve_wire(ctx, rules, self._claimant(claimant)),
+                    epoch,
+                )
+                if await self._check_version(ctx.session_id, epoch):
+                    raise ApprovalUnavailable("policy_changed")
+                if result["kind"] == "allow":
+                    return None
+                if result["kind"] == "deny":
+                    return Deny(from_units(result["reason"]))
+                if result["kind"] != "pending":
+                    raise RuntimeError("invalid approval resolution")
+                record = decision_from_wire(result["record"])
+                on_ask = self._on_ask
+                if on_ask is None:
+                    self._pending_scopes.add(claimant.line)
+                    return Pending(record.id, record.reason)
+                said = await answered(lambda: on_ask(record), cancel)
+                if isinstance(said, Abandoned):
+                    return said
+                if said is None or said.outcome is None:
+                    self._pending_scopes.add(claimant.line)
+                    return Pending(record.id, record.reason)
+                if said.id != record.id:
+                    raise ApprovalUnavailable("stale_reply")
+                if said.outcome is Outcome.ASK:
+                    raise ValueError("ASK is not an answer")
+                if cancel is not None and cancel.is_set():
+                    return ABANDONED
+                if self._sessions is not None:
+                    await self._sessions.refresh_approval(
+                        ctx.session_id, epoch
+                    )
+                if await self._check_version(ctx.session_id, epoch):
+                    raise ApprovalUnavailable("policy_changed")
+                if recheck is not None:
+                    current = await recheck()
+                    if not isinstance(current, Ask):
+                        if current is None:
+                            await self.validate(ctx.session_id, claimant.line)
+                        return current
+                    ask = current
+                    checked = await self._event(
+                        ctx.session_id,
+                        resolve_wire(
+                            ctx,
+                            ask.rules or (ask_rule(ctx, ask),),
+                            self._claimant(claimant),
+                        ),
+                        epoch,
+                    )
+                    if checked["kind"] == "allow":
+                        return None
+                    if checked["kind"] == "deny":
+                        return Deny(from_units(checked["reason"]))
+                    if checked["kind"] != "pending":
+                        raise RuntimeError("invalid approval recheck")
+                    if checked["record"]["id"] != record.id:
+                        continue
+                settled = await self._event(
+                    ctx.session_id,
+                    {
+                        "op": "answer",
+                        "id": record.id,
+                        "outcome": said.outcome.value,
+                        "scope": said.scope.value,
+                        "note": units(said.note),
+                        "claimant": self._claimant(claimant),
+                    },
+                    epoch,
+                )
+                if settled["kind"] == "missing":
+                    raise ApprovalUnavailable("stale_reply")
+                if said.outcome is Outcome.DENY:
+                    return Deny(record.reason)
+        except ApprovalUnavailable as exc:
+            logger.debug("approval admission refused: %s", exc.status)
+            return Deny(str(exc), failed=True)
+
+    async def session_grants(
+        self, ctx: CommandContext, claimant: Claimant | None = None
+    ) -> builtins.list[CommandRule]:
+        call = (
+            claimant.line
+            if claimant is not None
+            else get_op_call(self, ctx.session_id)
+        )
+        if claimant is None and call is not None:
+            claimant = Claimant(
+                call, Occurrence(call.origin, ctx.command, 0, len(ctx.command))
+            )
+        if claimant is not None:
+            epoch = await self.begin(ctx.session_id, claimant.line)
+        elif self._sessions is not None:
+            epoch = await self._sessions.activate(ctx.session_id)
+        else:
+            state = self._memory.setdefault(
+                ctx.session_id, empty_ledger(authority_id())
+            )
+            epoch = state["incarnation"]
+        if self._sessions is not None:
+            await self._sessions.refresh_approval(ctx.session_id, epoch)
+        await self._check_version(ctx.session_id, epoch)
+        reader = (
+            None
+            if claimant is None
+            else Claimant(claimant.line, Occurrence(None, "", 0, 0))
+        )
+        result = await self._event(
+            ctx.session_id,
+            {"op": "session_grants", "claimant": self._claimant(reader)},
+            epoch,
+        )
+        if result["kind"] != "grants":
+            raise RuntimeError("invalid session approval grants")
+        return [
+            CommandRule(
+                reason=from_units(rule["reason"]),
+                commands=tuple(from_units(word) for word in rule["commands"]),
+                paths=tuple(from_units(path) for path in rule["paths"]),
+                mount=from_units(rule["mount"] or []),
+            )
+            for rule in result["rules"]
+        ]
+
+    def held(
+        self, ctx: CommandContext, ask: Ask, claimant: Claimant | None = None
+    ) -> Deny | Pending | None:
+        rules = ask.rules or (ask_rule(ctx, ask),)
+        event = resolve_wire(ctx, rules, self._claimant(claimant))
+        event["explain"] = True
+        result = inspect_approval(self._state(ctx.session_id), event)
+        if result["kind"] == "allow":
             return None
-        self._claim(ctx.session_id, claimant, once)
-        return None
+        if result["kind"] == "deny":
+            return Deny(from_units(result["reason"]))
+        if result["kind"] == "blocked":
+            return Deny(
+                f"approval unavailable: {result['status']}", failed=True
+            )
+        record = decision_from_wire(result["record"])
+        return Pending(record.id, record.reason)
 
     async def resolve_op(
         self,
         ctx: VfsContext | SessionContext,
         ask: Ask,
         caller: Caller | None = None,
+        recheck: Callable[[], Awaitable[Deny | Ask | None]] | None = None,
     ) -> Deny | Pending | None:
-        """An Ask about a VFS call or a session write: a standing answer
-        settles it, else the question is raised now. In a dry run's
-        deciding (``explain``) the settled records alone answer
-        (:meth:`held_op`) and nothing is recorded.
-
-        Neither has a command behind it, so its record names none: the
-        rule and the subject are the key (:func:`op_question`). A ONCE
-        answer passes the next call on that subject under that rule
-        (every op of it, :meth:`within_call`; a bare op is a call of its
-        own) and is spent when the call ends; a SESSION answer passes
-        every one the rule covers, lines included.
-
-        Args:
-            ctx (VfsContext | SessionContext): what was asked about.
-            ask (Ask): the chain's answer.
-            caller (Caller | None): who asked, with the call the answer
-                is claimed on; None for the caller bound here.
-
-        Returns:
-            None to go on, a Deny to refuse, a Pending when the host has
-            not decided.
-        """
-        if caller is None:
-            caller = current_caller()
+        caller = current_caller() if caller is None else caller
         if caller.explaining is DryRun.DECIDING:
             return self.held_op(ctx, ask)
         asked, keyed = op_question(ctx, ask)
@@ -541,511 +811,145 @@ class Decisions(DecisionOwner):
             if call is not None
             else None
         )
-        said = await self.resolve(asked, keyed, claimant=claimant)
+
+        async def checked() -> Deny | Ask | None:
+            if recheck is None:
+                return keyed
+            current = await recheck()
+            return (
+                op_question(ctx, current)[1]
+                if isinstance(current, Ask)
+                else current
+            )
+
+        said = await self.resolve(
+            asked,
+            keyed,
+            claimant=claimant,
+            recheck=None if recheck is None else checked,
+        )
         return Deny(ask.reason) if isinstance(said, Abandoned) else said
 
     def held_op(
         self, ctx: VfsContext | SessionContext, ask: Ask
     ) -> Deny | Pending | None:
-        """What the settled records alone say about a VFS call or a
-        session write: the read-only half of :meth:`resolve_op`, the one
-        ``explain`` may take.
-
-        Args:
-            ctx (VfsContext | SessionContext): what was asked about.
-            ask (Ask): the chain's answer.
-        """
         return self.held(*op_question(ctx, ask))
 
     async def within_call(
         self, session_id: str, run: Callable[[HandOff], Awaitable[T]]
     ) -> T:
-        """Run one call (a file tool's, a session write) as the unit an
-        op-level answer covers.
-
-        A ONCE grant one of its ops is answered by is claimed for the
-        call, so every op of the call on that path runs on it (a write
-        tool reads the file back to stamp its version), and the call's
-        end spends it, unless the call is held on a question still
-        waiting: its retry finds the grants standing, as a held line's
-        does. ``run`` gets the call's hand-off, for its ops to carry. A
-        call made inside another runs in the outer one, so a session
-        write on a line or in a job is spent when that ends; a call
-        another ledger runs (a host callback reaching a second workspace
-        mid-call) is no call of this one's.
-
-        Args:
-            session_id (str): the session the call runs as.
-            run (Callable[[HandOff], Awaitable[T]]): the call.
-
-        Returns:
-            T: what the call returned.
-        """
         outer = get_op_call(self, session_id)
         if outer is not None:
             return await run(outer)
         handed = HandOff()
+        await self.begin(session_id, handed)
         token = set_op_call(self, handed, session_id)
         try:
             return await run(handed)
         except PolicyDenied as exc:
             if is_pending(exc.refusal):
-                self.release(session_id, handed)
+                self._pending_scopes.add(handed)
             raise
         finally:
             reset_op_call(token)
-            await self.revoke(session_id, handed)
+            if handed in self._pending_scopes:
+                await self.release(session_id, handed)
+            else:
+                await self.revoke(session_id, handed)
 
-    def _claim(
-        self, session_id: str, claimant: Claimant, once: tuple[Decision, ...]
-    ) -> None:
-        """Bind the grants behind a command to its place on the line,
-        for the line's end to spend.
-
-        A grant the line already holds for this place, claimed by its
-        pass or by an earlier visit of the same gate, is left as it is:
-        the reader found it through that claim, and a second claim would
-        say nothing new. What is new is claimed on the reader's own
-        hand-off, which goes live with it, so every other line of the
-        session stops seeing the grant until this one ends.
-
-        Args:
-            session_id (str): the asking session.
-            claimant (Claimant): the reading command and its line.
-            once (tuple[Decision, ...]): the settled ONCE records
-                standing behind the command as this reader sees them.
-        """
-        handed = claimant.line
-        held = [c.decision for h in lineage(handed) for c in h.claimed]
-        fresh = [r for r in once if not any(r is h for h in held)]
-        if not fresh:
-            return
-        handed.claimed.extend(Claim(claimant.occurrence, r) for r in fresh)
-        live = self._live.setdefault(session_id, [])
-        if not any(h is handed for h in live):
-            live.append(handed)
-
-    def split(
+    async def split(
         self, session_id: str, handed: HandOff, scope: Occurrence
     ) -> HandOff:
-        """Share the claims made for one part of a line with a run of
-        its own: a background job, whose gates run after the line has
-        returned and which ends on its own clock.
-
-        Every claim standing inside the scope, on the line or a line it
-        was evaluated from, is copied onto the new hand-off, and the
-        line keeps its own: a grant is spent when the last hand-off
-        holding it ends (:meth:`revoke`), so the line's end, a release
-        for a question still waiting included, leaves the job's copy
-        standing and hidden from every other line, and a loop that
-        launches the same job again hands the next job a copy of the
-        same grant. Moving the claim instead left the second job with
-        nothing, and it asked again after it had already been launched;
-        sharing one hand-off between line and job let a release for a
-        pending foreground gate let go of the job's grants with the
-        rest, and a line judged while the job slept could take them.
-
-        Args:
-            session_id (str): the session the line was judged in.
-            handed (HandOff): the line's hand-off.
-            scope (Occurrence): the job's node on the line.
-
-        Returns:
-            The job's hand-off, live while it holds a claim.
-        """
-        job = HandOff(parent=handed.parent, origin=handed.origin)
-        for owner in lineage(handed):
-            for claim in owner.claimed:
-                if encloses(scope, claim.occurrence) and not any(
-                    c.decision is claim.decision for c in job.claimed
-                ):
-                    job.claimed.append(claim)
-        if job.claimed:
-            self._live.setdefault(session_id, []).append(job)
+        epoch = await self.begin(session_id, handed)
+        job = HandOff(origin=handed.origin)
+        self._bindings[job] = (
+            session_id,
+            epoch,
+            0 if self._version is None else self._version(),
+        )
+        try:
+            await self._event(
+                session_id,
+                {
+                    "op": "split",
+                    "owner": self._owner,
+                    "lineage": [
+                        self._id(reader) for reader in lineage(handed)
+                    ],
+                    "job": self._id(job),
+                    "scope": occurrence_wire(scope),
+                },
+                epoch,
+            )
+        except BaseException:
+            self._terminal.add(job)
+            try:
+                await self._event(
+                    session_id,
+                    {
+                        "op": "revoke",
+                        "owner": self._owner,
+                        "holder": self._id(job),
+                    },
+                    epoch,
+                )
+            except Exception:
+                logger.debug("unconfirmed job approval cleanup", exc_info=True)
+            raise
         return job
 
-    def hand_up(self, session_id: str, handed: HandOff) -> None:
-        """Leave a nested line's claims with the line it was evaluated
-        from, at the line's end.
+    async def hand_up(self, session_id: str, handed: HandOff) -> None:
+        if handed.parent is None:
+            raise ValueError("a top-level caller has no parent")
+        bound = self._bindings.get(lineage(handed)[-1])
+        if bound is None:
+            return
+        self._terminal.add(handed)
+        try:
+            await self._event(
+                session_id,
+                {
+                    "op": "hand_up",
+                    "owner": self._owner,
+                    "holder": self._id(handed),
+                    "parent": self._id(handed.parent),
+                },
+                bound[1],
+            )
+        except ApprovalUnavailable as exc:
+            if exc.status not in {
+                "session_replaced",
+                "session_closed",
+                "stale_incarnation",
+            }:
+                raise
+            logger.debug("approval cleanup fenced: %s", exc.status)
 
-        A line the executor evaluates from inside another (``$( )``,
-        ``eval``, a batch ``xargs`` hands on, the line an alias
-        rewrites to) ends before the outer line does, and what its
-        gates claimed is the outer line's: the next evaluation from the
-        same node (the next batch, the next iteration of a loop around
-        the ``eval``) stands at the same occurrence and runs on it, and
-        the typed line's end spends it. Spending here instead asked
-        again for every batch.
-
-        Args:
-            session_id (str): the session the line was judged in.
-            handed (HandOff): the nested line's hand-off, whose
-                ``parent`` is the line it was evaluated from.
-
-        Raises:
-            ValueError: the hand-off is a typed line's, whose claims are
-                spent (:meth:`revoke`), not handed up.
-        """
-        parent = handed.parent
-        if parent is None:
-            raise ValueError("a typed line's claims are spent, not handed up")
-        known = [c.decision for c in parent.claimed]
-        parent.claimed.extend(
-            c
-            for c in handed.claimed
-            if not any(c.decision is k for k in known)
-        )
-        live = self._live.setdefault(session_id, [])
-        if parent.claimed and not any(h is parent for h in live):
-            live.append(parent)
-        self.release(session_id, handed)
+    async def _end(self, op: str, session_id: str, handed: HandOff) -> None:
+        bound = self._bindings.get(lineage(handed)[-1])
+        if bound is None:
+            return
+        self._terminal.add(handed)
+        try:
+            await self._event(
+                session_id,
+                {"op": op, "owner": self._owner, "holder": self._id(handed)},
+                bound[1],
+            )
+        except ApprovalUnavailable as exc:
+            if exc.status not in {
+                "session_replaced",
+                "session_closed",
+                "stale_incarnation",
+            }:
+                raise
+            logger.debug("approval cleanup fenced: %s", exc.status)
 
     async def revoke(self, session_id: str, handed: HandOff) -> None:
-        """Spend every grant claimed on a hand-off that no other live
-        hand-off still holds: the line's end.
+        await self._end("revoke", session_id, handed)
 
-        The claims in :meth:`resolve` leave the grants behind a line's
-        commands standing while the line runs, each bound to the place
-        it was given for, and this is where they are spent, however the
-        line ended: run to completion, refused by the pass on a later
-        command, failed on a fetch before the run, killed, or
-        short-circuited past the command. Left standing, a grant would
-        pass the next line spelling that command on a nod given to this
-        one, so the executor calls this whichever way a typed line or a
-        job ends, except when a line is held on a question still
-        waiting (:meth:`release`); a nested evaluation hands its claims
-        up instead (:meth:`hand_up`). A grant a job launched from the
-        line still holds a copy of (:meth:`split`) is left standing for
-        the job's own end to spend. A grant already gone from the ledger
-        is passed over; the hand-off is emptied so a second call is a
-        no-op.
-
-        Args:
-            session_id (str): the session the line was judged in.
-            handed (HandOff): the line's hand-off.
-        """
-        elsewhere = [
-            c.decision
-            for other in self._live.get(session_id, ())
-            if other is not handed
-            for c in other.claimed
-        ]
-        await self._spend(
-            session_id,
-            tuple(
-                c.decision
-                for c in handed.claimed
-                if not any(c.decision is e for e in elsewhere)
-            ),
-        )
-        self.release(session_id, handed)
-
-    def release(self, session_id: str, handed: HandOff) -> None:
-        """Let go of a hand-off's claims without spending them.
-
-        For a line held on a question still waiting: its retry is a new
-        line with a hand-off of its own, and it has to find the grants
-        this one claimed standing, or the human is asked again for what
-        they already allowed. Left live, the held line would hide them
-        from every line after it.
-
-        Args:
-            session_id (str): the session the line was judged in.
-            handed (HandOff): the line's hand-off.
-        """
-        handed.claimed.clear()
-        live = self._live.get(session_id, [])
-        self._live[session_id] = [h for h in live if h is not handed]
-
-    def _standing(
-        self, session_id: str, claimant: Claimant | None
-    ) -> tuple[Decision, ...]:
-        """The session's records as one reader may see them.
-
-        A claimed grant is on offer to exactly one place: the command it
-        was claimed for, read on the line that claimed it, a line
-        evaluated from that line, or a job launched from it holding a
-        copy of the claim, whether the pass or the gate is reading.
-        Every other claim is hidden. A grant claimed by another line is
-        that line's to run on, and reading it here would let two lines
-        judged at once both pass on one nod, the second of them running
-        its earlier commands before its gate found the grant gone. A
-        grant claimed for another occurrence on this line is that
-        occurrence's: reading it would let a word that expands at run
-        time into the same command run on the nod a literal spelling
-        was given, and would let one nod answer two spellings. A pass
-        re-reading an occurrence its outer line's pass already claimed
-        finds it answered, which is how a nested line runs on the outer
-        line's questions rather than asking them again.
-
-        Args:
-            session_id (str): the asking session.
-            claimant (Claimant | None): the reading command and its
-                line, None outside a line.
-        """
-        held = self._records(session_id)
-        live = self._live.get(session_id, ())
-        if not live:
-            return held
-        offered: list[Decision] = []
-        if claimant is not None:
-            offered = [
-                c.decision
-                for h in lineage(claimant.line)
-                for c in h.claimed
-                if c.occurrence == claimant.occurrence
-            ]
-        taken = [
-            c.decision
-            for other in live
-            for c in other.claimed
-            if not any(c.decision is o for o in offered)
-        ]
-        if not taken:
-            return held
-        return tuple(r for r in held if not any(r is t for t in taken))
-
-    def _once_answers(
-        self,
-        session_id: str,
-        rules: Sequence[CommandRule],
-        argv: tuple[str, ...],
-        cwd: str,
-        claimant: Claimant | None,
-    ) -> tuple[Decision, ...]:
-        """Every ONCE answer standing behind this line, as the ledger
-        holds it now.
-
-        Args:
-            session_id (str): the asking session.
-            rules (Sequence[CommandRule]): the rules the ask named.
-            argv (tuple[str, ...]): the line, command name first.
-            cwd (str): the directory the line was typed in.
-            claimant (Claimant | None): the reading command and its
-                line.
-
-        Returns:
-            tuple[Decision, ...]: the settled ONCE records.
-        """
-        held = self._standing(session_id, claimant)
-        found = (self._settled(held, rule, argv, cwd) for rule in rules)
-        return tuple(
-            r for r in found if r is not None and r.scope is Scope.ONCE
-        )
-
-    def held(
-        self, ctx: CommandContext, ask: Ask, claimant: Claimant | None = None
-    ) -> Deny | Pending | None:
-        """What the settled records alone say about an asked line.
-
-        The read-only half of :meth:`resolve`, and the only half a dry
-        run may take: it consults what the session already holds and
-        stops there, spending nothing, recording no question and never
-        reaching the host. So ``explain`` can report that a line would
-        be refused, or would still be waiting, without a question
-        arriving for a line nobody typed. It reads through the same
-        reservations a run does, so a grant a live line has claimed
-        reads as waiting here exactly as a run would find it.
-
-        Args:
-            ctx (CommandContext): the asked line.
-            ask (Ask): the chain's answer.
-            claimant (Claimant | None): the reading command and its
-                line, None for a dry run outside any line.
-
-        Returns:
-            None when every rule the ask names is already answered, a
-            Deny when a record refuses one, a Pending naming the first
-            rule nothing answers.
-        """
-        argv = (ctx.command, *ctx.argv)
-        held = self._standing(ctx.session_id, claimant)
-        answers = [
-            (rule, self._settled(held, rule, argv, ctx.cwd))
-            for rule in (ask.rules or (ask_rule(ctx, ask),))
-        ]
-        refused = next(
-            (
-                rule
-                for rule, r in answers
-                if r is not None and r.outcome is Outcome.DENY
-            ),
-            None,
-        )
-        if refused is not None:
-            return Deny(refused.reason)
-        unanswered = next((rule for rule, r in answers if r is None), None)
-        if unanswered is None:
-            return None
-        return Pending(
-            decision_id(ctx.session_id, ctx.cwd, argv), unanswered.reason
-        )
-
-    async def _raise(
-        self,
-        ctx: CommandContext,
-        rule: CommandRule,
-        argv: tuple[str, ...],
-        cancel: asyncio.Event | None = None,
-        claimant: Claimant | None = None,
-    ) -> Deny | Pending | Abandoned | None:
-        """Record one rule of a line as a question and put it to the
-        host, None when the host said yes.
-
-        A question already waiting is reused rather than duplicated, so
-        a retry keeps quoting one id.
-
-        A ONCE grant the host gives is claimed for the asking command in
-        the same step that records it, before the store is flushed. The
-        write to the records is synchronous and the flush is not, and
-        a line judged while the flush waited on a persistent store found
-        the grant standing, claimed it and ran on it, while this line,
-        resuming to find its own nod claimed by another, ran on nothing:
-        one nod, two runs. Claimed first, the grant is hidden from the
-        other line, which asks for itself.
-
-        The host is given the run's kill channel and the wait is bounded
-        by it, because a host that asks a person can take an unbounded
-        amount of time and the executor's own cooperative abort checks
-        cannot reach inside that wait: without this a killed or
-        timed-out run would sit here until somebody answered.
-
-        A run killed mid-question is reported as Abandoned and its
-        record is left waiting, with whatever the host eventually says
-        dropped rather than recorded: an ALLOW banked against a run that
-        is already dead would leave a spent-once grant in the ledger for
-        the next identical line to take, with nobody asked.
-
-        Args:
-            ctx (CommandContext): the asked line.
-            rule (CommandRule): the rule nothing answers.
-            argv (tuple[str, ...]): the line's words, name first.
-            cancel (asyncio.Event | None): the run's kill channel.
-            claimant (Claimant | None): the asking command and its line,
-                None outside a line.
-        """
-        record = self._waiting(ctx, rule, argv)
-        if record is None:
-            record = Decision(
-                id=decision_id(ctx.session_id, ctx.cwd, argv),
-                session_id=ctx.session_id,
-                command=ctx.command,
-                argv=tuple(ctx.argv),
-                cwd=ctx.cwd,
-                paths=tuple(p.virtual for p in ctx.paths),
-                reason=rule.reason,
-                rule=rule,
-            )
-            self._add(ctx.session_id, record)
-            await self._flush()
-        on_ask = self._on_ask
-        if on_ask is None:
-            return Pending(record.id, rule.reason)
-        said = await answered(lambda: on_ask(record), cancel)
-        if isinstance(said, Abandoned):
-            return said
-        if said is None or said.outcome is None:
-            return Pending(record.id, rule.reason)
-        settled = self._write_answer(
-            record.id, said.outcome, said.scope, said.note
-        )
-        if (
-            claimant is not None
-            and settled.outcome is Outcome.ALLOW
-            and settled.scope is Scope.ONCE
-        ):
-            self._claim(ctx.session_id, claimant, (settled,))
-        await self._flush()
-        if said.outcome is Outcome.DENY:
-            return Deny(rule.reason)
-        return None
-
-    def _waiting(
-        self, ctx: CommandContext, rule: CommandRule, argv: tuple[str, ...]
-    ) -> Decision | None:
-        """The question already recorded for this rule of this line.
-
-        Args:
-            ctx (CommandContext): the asked line.
-            rule (CommandRule): the rule nothing answers.
-            argv (tuple[str, ...]): the line's words, name first.
-        """
-        for record in self._records(ctx.session_id):
-            if (
-                record.outcome is None
-                and record.rule == rule
-                and (record.command, *record.argv) == argv
-                and record.cwd == ctx.cwd
-            ):
-                return record
-        return None
-
-    @staticmethod
-    def _settled(
-        held: tuple[Decision, ...],
-        rule: CommandRule,
-        argv: tuple[str, ...],
-        cwd: str,
-    ) -> Decision | None:
-        """The answered record standing behind one rule of a line, None
-        when nobody has answered it.
-
-        Args:
-            held (tuple[Decision, ...]): the session's records.
-            rule (CommandRule): the rule to answer.
-            argv (tuple[str, ...]): the line's words, name first.
-            cwd (str): the session working directory.
-        """
-        for record in held:
-            if record.scope is Scope.ONCE and covers(record, rule, argv, cwd):
-                return record
-        for record in held:
-            if record.scope is Scope.SESSION and covers(
-                record, rule, argv, cwd
-            ):
-                return record
-        return None
-
-    async def _spend(
-        self, session_id: str, spent: tuple[Decision, ...]
-    ) -> None:
-        """Drop the ONCE answers this line just used up.
-
-        Args:
-            session_id (str): the session running the line.
-            spent (tuple[Decision, ...]): the records the line consumed.
-        """
-        if not spent:
-            return
-        held = self._records(session_id)
-        self._set(
-            session_id,
-            tuple(r for r in held if not any(r is s for s in spent)),
-        )
-        await self._flush()
-
-    def _keys(self) -> tuple[str, ...]:
-        if self._sessions is not None:
-            return self._sessions.decision_sessions()
-        return tuple(self._memory)
-
-    def _records(self, session_id: str) -> tuple[Decision, ...]:
-        if self._sessions is not None:
-            return self._sessions.decisions_of(session_id)
-        return self._memory.get(session_id, ())
-
-    def _set(self, session_id: str, records: tuple[Decision, ...]) -> None:
-        if self._sessions is not None:
-            self._sessions.set_decisions(session_id, records)
-        else:
-            self._memory[session_id] = records
-
-    def _add(self, session_id: str, record: Decision) -> None:
-        self._set(session_id, (*self._records(session_id), record))
-
-    async def _flush(self) -> None:
-        if self._sessions is not None:
-            await self._sessions.flush()
+    async def release(self, session_id: str, handed: HandOff) -> None:
+        await self._end("release", session_id, handed)
 
 
 def set_op_call(

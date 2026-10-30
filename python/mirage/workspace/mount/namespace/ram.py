@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import copy
 from collections.abc import Iterable
 
 from mirage.workspace.mount.namespace.store import NamespaceStore
@@ -30,17 +31,23 @@ class RAMNamespaceStore(NamespaceStore):
         self._entries: dict[str, RecordFields] = {}
 
     async def load(self) -> dict[str, RecordFields]:
-        return {key: dict(f) for key, f in self._entries.items()}
+        return copy.deepcopy(self._entries)
+
+    async def get(self, key: str) -> RecordFields | None:
+        return copy.deepcopy(self._entries.get(key))
+
+    async def approval_guarantee(self) -> None:
+        return None
 
     async def set(self, key: str, fields: RecordFields) -> None:
-        self._entries[key] = dict(fields)
+        self._entries[key] = copy.deepcopy(fields)
 
     async def cas_set(
         self, key: str, fields: RecordFields, expected_generation: int
     ) -> bool:
         if generation_of(self._entries.get(key)) != expected_generation:
             return False
-        self._entries[key] = dict(fields)
+        self._entries[key] = copy.deepcopy(fields)
         return True
 
     async def delete(self, keys: Iterable[str]) -> None:
@@ -48,7 +55,7 @@ class RAMNamespaceStore(NamespaceStore):
             self._entries.pop(key, None)
 
     async def replace_all(self, entries: dict[str, RecordFields]) -> None:
-        self._entries = {key: dict(f) for key, f in entries.items()}
+        self._entries = copy.deepcopy(entries)
 
     async def clear(self) -> None:
         self._entries.clear()

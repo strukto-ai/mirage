@@ -90,8 +90,8 @@ jobs:
             # and runtime; workspace/abort owns only line orchestration.
             # The bc package split and shared Rust jq codecs stay covered
             # by the whole-host filters, including Node/browser providers.
-            # Rust cut/tr and policy composition streams plus both host adapters
-            # use these filters. The shared policy corpus selects both hosts too.
+            # Rust cut/tr, policy composition and approval streams plus both host
+            # adapters use these filters. Shared policy corpora select both hosts.
             # Git's remaining TypeScript diff_format helpers use the TS
             # filter; shell diff uses the shared Rust engine on both hosts.
             # Shared fixtures under packages/*/tests and the openai-agents

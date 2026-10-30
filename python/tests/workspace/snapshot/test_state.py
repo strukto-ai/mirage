@@ -41,7 +41,7 @@ from mirage.errors.types import QuotaExceededError
 from mirage.io import IOResult
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
-from mirage.policy.types import SessionContext
+from mirage.policy.types import Outcome, SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
@@ -715,10 +715,10 @@ async def test_a_session_the_restore_creates_runs_under_the_default_profile():
         assert compiled is not None
         restored = target.get_session("s2")
         assert restored.profile == "default"
-        assert restored.commands is compiled.policies.commands
-        assert restored.scripts is compiled.policies.scripts
+        assert restored.commands == compiled.policies.commands
+        assert restored.scripts == compiled.policies.scripts
         assert (
-            target._session_mgr.scripts_of("s2") is compiled.policies.scripts
+            target._session_mgr.scripts_of("s2") == compiled.policies.scripts
         )
         assert restored.env.get("PUBLIC_A") == "1"
         refused = await target.shell("rm /f.txt", session_id="s2")
@@ -763,10 +763,8 @@ async def test_a_checkout_keeps_the_live_mount_caps_and_adds_the_tables():
         await target.close()
 
 
-# The ask ledger was written into the snapshot and dropped by the load, so
-# a host answering a pending ask by id after a reload found nothing.
 @pytest.mark.asyncio
-async def test_a_load_keeps_the_ask_decisions_its_tables_recorded():
+async def test_a_load_retires_approval_tickets_from_the_snapshot():
     source = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.WRITE,
@@ -775,13 +773,23 @@ async def test_a_load_keeps_the_ask_decisions_its_tables_recorded():
     try:
         assert (await source.shell("rm /f.txt")).exit_code == 126
         recorded = source.decisions.list()
+        epoch = source.get_session(source.default_session_id).incarnation
         state = await to_state_dict(source)
     finally:
         await source.close()
     loaded = await Workspace.from_state(state)
     try:
         assert len(recorded) == 1
-        assert loaded.decisions.list() == recorded
+        assert loaded.decisions.list() == ()
+        assert (
+            loaded.get_session(loaded.default_session_id).incarnation != epoch
+        )
+        with pytest.raises(KeyError):
+            await loaded.decisions.answer(recorded[0].id, Outcome.ALLOW)
+        assert (await loaded.shell("rm /f.txt")).exit_code == 126
+        pending = loaded.decisions.list()
+        assert len(pending) == 1
+        assert pending[0].id != recorded[0].id
     finally:
         await loaded.close()
 

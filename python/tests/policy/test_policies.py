@@ -43,8 +43,10 @@ from mirage.policy import (
     refusal_of,
     render_deny,
 )
+from mirage.policy.errors import ApprovalUnavailable
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.policies import agreed, settled
+from mirage.policy.profile import SessionProfile
 from mirage.policy.types import RouteContext, SessionContext
 from mirage.types import (
     FileStat,
@@ -58,6 +60,7 @@ from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.session.resolve import compile_profile
 
 
 class DenyWeird(Policy):
@@ -79,6 +82,79 @@ class IllegalReturn(Policy):
 
 class Silent(Policy):
     pass
+
+
+@pytest.mark.asyncio
+async def test_a_profile_change_during_a_silent_policy_wait_refuses_the_command():
+    entered, resume = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    class Wait(Policy):
+        async def pre_command(self, ctx):
+            nonlocal calls
+            if ctx.command == "rm":
+                calls += 1
+                entered.set()
+                await resume.wait()
+
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, policies=[Wait()]
+    )
+    try:
+        await ws.vfs.write("/data/f", b"protected")
+        running = asyncio.create_task(ws.shell("rm /data/f"))
+        await entered.wait()
+        await ws._session_mgr.set_profile(
+            ws.default_session_id,
+            compile_profile(
+                SessionProfile.model_validate({"commands": {"deny": ["rm"]}})
+            ),
+        )
+        resume.set()
+        result = await running
+        assert result.exit_code == 126
+        assert calls == 1
+        assert await ws.vfs.exists("/data/f")
+    finally:
+        resume.set()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_change_during_post_vfs_wait_suppresses_the_read_result():
+    entered, resume = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    class Wait(Policy):
+        async def post_vfs(self, ctx):
+            nonlocal calls
+            if ctx.call.name == "read":
+                calls += 1
+                entered.set()
+                await resume.wait()
+
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, policies=[Wait()]
+    )
+    try:
+        await ws.vfs.write("/data/f", b"protected")
+        agent = await ws.session("agent")
+        running = asyncio.create_task(agent.tools.read("/data/f"))
+        await entered.wait()
+        await ws._session_mgr.set_profile(
+            "agent",
+            compile_profile(
+                SessionProfile.model_validate({"commands": {"deny": ["rm"]}})
+            ),
+        )
+        resume.set()
+        result = await running
+        assert result.is_error
+        assert "protected" not in result.text
+        assert calls == 1
+    finally:
+        resume.set()
+        await ws.close()
 
 
 class AskRm(Policy):
@@ -681,6 +757,32 @@ async def test_wants_for_refines_wants_per_session():
 
 
 @pytest.mark.asyncio
+async def test_a_false_scope_check_cannot_skip_a_policy_added_while_it_waited():
+    entered, resume = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    class Wait(Policy, SessionScopedMixin):
+        async def pre_session(self, ctx):
+            return None
+
+        async def wants_for(self, method, session_id):
+            nonlocal calls
+            calls += 1
+            entered.set()
+            await resume.wait()
+            return False
+
+    policies = Policies([Wait()])
+    running = asyncio.create_task(policies.wants_for("pre_session", "s"))
+    await asyncio.wait_for(entered.wait(), 5)
+    policies.add(ForEveryone())
+    resume.set()
+    with pytest.raises(ApprovalUnavailable, match="policy_changed"):
+        await running
+    assert calls == 1
+
+
+@pytest.mark.asyncio
 async def test_remove_by_identity_refreshes_methods_and_keeps_admission_order():
     policies = Policies()
 
@@ -696,7 +798,9 @@ async def test_remove_by_identity_refreshes_methods_and_keeps_admission_order():
     assert not policies.remove(DenyWeird())
     refusal = await policies.pre_command(_ctx("weird"))
     assert isinstance(refusal, Deny)
-    assert refusal.reason == "nope"
+    assert "policy_changed" in refusal.reason
+    assert refusal.failed
+    assert (await policies.pre_command(_ctx("weird"))).reason == "nope"
     assert policies.wants("pre_command")
     assert policies.remove(last)
     assert not policies.wants("pre_command")
@@ -732,7 +836,7 @@ async def test_composition_stops_before_an_invalid_later_action(method: str):
 
 
 @pytest.mark.asyncio
-async def test_composition_keeps_registration_snapshot_during_suspension():
+async def test_composition_refuses_a_registration_change_during_suspension():
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -746,7 +850,10 @@ async def test_composition_keeps_registration_snapshot_during_suspension():
     await entered.wait()
     policies.add(DenyWeird())
     release.set()
-    assert await running is None
+    refused = await running
+    assert isinstance(refused, Deny)
+    assert "policy_changed" in refused.reason
+    assert refused.failed
     refused = await policies.pre_command(_ctx("weird", []))
     assert isinstance(refused, Deny)
     assert refused.reason == "nope"

@@ -798,6 +798,7 @@ async def run_prepared_line(
         # job's subtree runs on a hand-off of the job's own.
         if handed is None:
             handed = HandOff()
+        await ws.registry.decisions.begin(effective_session.session_id, handed)
         line_handed = handed
         # The line's own layer of the caller, bound before placement, so
         # an op a policy script makes while the line is judged is inside
@@ -1116,14 +1117,14 @@ async def run_prepared_line(
         finally:
             reset_caller(line_token)
             if held:
-                ws.registry.decisions.release(
+                await ws.registry.decisions.release(
                     effective_session.session_id, handed
                 )
             elif handed.parent is not None:
                 # A nested evaluation's claims are the outer line's to
                 # keep for the next evaluation from the same node and
                 # to spend at its own end.
-                ws.registry.decisions.hand_up(
+                await ws.registry.decisions.hand_up(
                     effective_session.session_id, handed
                 )
             else:

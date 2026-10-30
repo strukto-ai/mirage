@@ -67,6 +67,12 @@ export class RedisNamespaceStore extends NamespaceStore {
     await c.hSet(this.key, key, JSON.stringify(fields))
   }
 
+  override async get(key: string): Promise<RecordFields | null> {
+    const c = await this.redis.client()
+    const raw = await c.hGet(this.key, key)
+    return raw == null ? null : (JSON.parse(raw) as RecordFields)
+  }
+
   async casSet(key: string, fields: RecordFields, expectedGeneration: number): Promise<boolean> {
     const c = await this.redis.client()
     const result = await c.eval(CAS_SCRIPT, {

@@ -14,13 +14,10 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { CommandRule, AdmissionRules, Decision, ProfileScript } from '../../policy/types.ts'
-import { Outcome, Scope } from '../../policy/types.ts'
+import type { CommandRule, AdmissionRules, ProfileScript } from '../../policy/types.ts'
 import {
   commandsFromDict,
   commandsToDict,
-  decisionFromDict,
-  decisionToDict,
   ruleFromDict,
   ruleToDict,
   scriptFromDict,
@@ -66,29 +63,6 @@ describe('session record codecs', () => {
     const data = commandsToDict(unlisted)
     expect(data.allow).toBeNull()
     expect(commandsFromDict(data)).toEqual(unlisted)
-  })
-
-  it('a decision round-trips', () => {
-    const rule: CommandRule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
-    const record: Decision = {
-      id: 'd1',
-      sessionId: 'agent',
-      command: 'git',
-      argv: ['push'],
-      cwd: '/repo',
-      paths: ['/repo'],
-      reason: 'sign-off',
-      rule,
-      outcome: Outcome.ALLOW,
-      scope: Scope.SESSION,
-      note: 'ok',
-    }
-    expect(decisionFromDict(decisionToDict(record))).toEqual(record)
-    // A record still waiting has no outcome.
-    const waiting: Decision = { ...record, id: 'd2', outcome: null, scope: Scope.ONCE, note: '' }
-    expect(decisionFromDict(decisionToDict(waiting))).toEqual(waiting)
-    expect(decisionToDict(record).outcome).toBe('allow')
-    expect(decisionToDict(record).scope).toBe('session')
   })
 
   it('a script keeps an env pointer as the pointer', () => {

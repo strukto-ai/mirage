@@ -519,7 +519,8 @@ async function runPreparedLine(
           // that runs it, which the walker binds into the entry point (`withHandOff`),
           // not this line's: a background job's subtree runs on a hand-off of
           // the job's own.
-          const handed: HandOff = options.handed ?? { claimed: [], parent: null, origin: null }
+          const handed: HandOff = options.handed ?? { parent: null, origin: null }
+          await env.registry.decisions.begin(effectiveSession.sessionId, handed)
           // The line's commands judged once, for placement and the pass that
           // refuses the line alike.
           let judgments: [Walked, Judged[]][] | null = null
@@ -553,7 +554,7 @@ async function runPreparedLine(
           // for it is swept as the line's end sweeps it.
           const sweep = async (): Promise<void> => {
             if (handed.parent !== null)
-              env.registry.decisions.handUp(effectiveSession.sessionId, handed)
+              await env.registry.decisions.handUp(effectiveSession.sessionId, handed)
             else await env.registry.decisions.revoke(effectiveSession.sessionId, handed)
           }
           let placed: RouteDecision<Runtime> | Deny | Pending
@@ -593,7 +594,7 @@ async function runPreparedLine(
             // A question on the line as a whole holds it for its retry
             // like one on a command.
             if (placed.kind === 'pending') {
-              env.registry.decisions.release(effectiveSession.sessionId, handed)
+              await env.registry.decisions.release(effectiveSession.sessionId, handed)
             } else {
               await sweep()
             }
@@ -639,7 +640,7 @@ async function runPreparedLine(
             if (opts.handed !== undefined) {
               innerOpts.handed =
                 opts.node === undefined
-                  ? { claimed: [], parent: opts.handed, origin: null }
+                  ? { parent: opts.handed, origin: null }
                   : evaluatedFrom(opts.node, opts.handed, opts.span)
             }
             // `command NAME` re-runs the inner line and must forward the pipe
@@ -1295,11 +1296,11 @@ async function runParsedLine(
       return new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode)
     }
   } finally {
-    if (held) env.registry.decisions.release(effectiveSession.sessionId, handed)
+    if (held) await env.registry.decisions.release(effectiveSession.sessionId, handed)
     // A nested evaluation's claims are the outer line's to keep for the
     // next evaluation from the same node and to spend at its own end.
     else if (handed.parent !== null)
-      env.registry.decisions.handUp(effectiveSession.sessionId, handed)
+      await env.registry.decisions.handUp(effectiveSession.sessionId, handed)
     else
       await joinOrAbort(env.registry.decisions.revoke(effectiveSession.sessionId, handed), killed)
   }

@@ -261,23 +261,21 @@ export class MirageToolOperations {
    * anything else is the `read` answer for the same bytes. Either way
    * the file is stamped for a later edit.
    */
-  async readMedia(
-    given: string,
-    offset = 0,
-    limit = 2000,
-  ): Promise<ToolResult | WorkspaceMediaRead> {
-    const versions = await this.versions()
-    const path = given.startsWith('/') ? given : `${rstripSlash(this.session.state.cwd)}/${given}`
-    let data: Uint8Array
-    try {
-      data = await versions.read(path)
-    } catch (err) {
-      return this.readFailure(versions, path, err)
-    }
-    const media = mediaOf(path, data)
-    if (media === undefined) return this.numbered(versions, path, data, offset, limit)
-    versions.markSeen(path)
-    return media
+  readMedia(given: string, offset = 0, limit = 2000): Promise<ToolResult | WorkspaceMediaRead> {
+    return oneCall(this.session, async (vfs) => {
+      const versions = (await this.versions()).through(vfs)
+      const path = given.startsWith('/') ? given : `${rstripSlash(this.session.state.cwd)}/${given}`
+      let data: Uint8Array
+      try {
+        data = await versions.read(path)
+      } catch (err) {
+        return this.readFailure(versions, path, err)
+      }
+      const media = mediaOf(path, data)
+      if (media === undefined) return this.numbered(versions, path, data, offset, limit)
+      versions.markSeen(path)
+      return media
+    })
   }
 
   private async readFailure(

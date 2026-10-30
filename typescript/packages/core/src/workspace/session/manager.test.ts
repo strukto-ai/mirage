@@ -14,12 +14,13 @@
 
 import { seedVar } from './state.ts'
 import { describe, expect, it, vi } from 'vitest'
-import type { AdmissionRules, Decision } from '../../policy/types.ts'
+import type { AdmissionRules } from '../../policy/types.ts'
 import type { CompiledProfile, ProfilePolicies, ProfileSetup } from '../../policy/profile.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import { MountMode, type Visibility } from '../../types.ts'
 import { SessionManager } from './manager.ts'
+import { Decisions } from '../../policy/decisions.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { compileProfile } from './resolve.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
@@ -329,13 +330,13 @@ describe('SessionManager with a session table', () => {
     expect(entries.get('agent')?.mount_modes).toEqual({ '/s3': 'read' })
   })
 
-  it('close deletes the session from the store', async () => {
+  it('close retains a terminal fence in the store', async () => {
     const store = new RAMNamespaceStore()
     const m = new SessionManager('def', store)
     m.create('gone')
     await m.flush()
     await m.close('gone')
-    expect((await store.load()).has('gone')).toBe(false)
+    expect((await store.get('gone'))?.closed).toEqual(expect.any(String))
   })
 })
 
@@ -482,72 +483,29 @@ describe('SessionManager admission rules', () => {
   })
 })
 
-describe('SessionManager decision ledger', () => {
-  const RULE = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
-
-  function record(id: string, sessionId: string): Decision {
-    return {
-      id,
-      sessionId,
-      command: 'git',
-      argv: ['push'],
-      cwd: '/repo',
-      paths: [],
+it.each(['def', 'agent'])(
+  'hydrates actual session approval authority for %s',
+  async (sessionId) => {
+    const store = new RAMNamespaceStore()
+    const manager = new SessionManager('def', store)
+    if (sessionId !== 'def') manager.create(sessionId)
+    const decisions = new Decisions(manager)
+    const ctx = { command: 'git', argv: ['push'], paths: [], cwd: '/repo', sessionId }
+    const ask = {
+      kind: 'ask' as const,
       reason: 'sign-off',
-      rule: RULE,
-      outcome: Outcome.ALLOW,
-      scope: Scope.SESSION,
-      note: '',
+      rule: { reason: 'sign-off', commands: ['git push'] },
     }
-  }
-
-  it('live on the registered session and persist', async () => {
-    const store = new RAMNamespaceStore()
-    const m = new SessionManager('def', store)
-    await m.ensureLoaded()
-    const live = m.create('agent')
-    expect(m.decisionsOf('agent')).toEqual([])
-    const entry = record('d1', 'agent')
-    // Written by id onto the registered session, so a fork made before
-    // or after reads the same answers through the manager, whatever
-    // its own copy holds; durable at the next flush.
-    const fork = live.fork()
-    m.setDecisions('agent', [entry])
-    expect(live.decisions).toEqual([entry])
-    expect(fork.decisions).toEqual([])
-    expect(m.decisionsOf(fork.sessionId)).toEqual([entry])
-    expect(m.decisionSessions()).toEqual(['agent'])
-    await m.flush()
-    const stored = (await store.load()).get('agent') as {
-      decisions: { outcome: string; scope: string }[]
-    }
-    expect(stored.decisions[0]?.outcome).toBe('allow')
-    expect(stored.decisions[0]?.scope).toBe('session')
-    // A manager reading that record back holds the answer.
-    const again = new SessionManager('def', store)
-    await again.ensureLoaded()
-    expect(again.decisionsOf('agent')).toEqual([entry])
-    expect(() => m.decisionsOf('nobody')).toThrow(/unknown session/)
-  })
-
-  it('hydrate onto the default session', async () => {
-    const store = new RAMNamespaceStore()
-    const m = new SessionManager('def', store)
-    await m.ensureLoaded()
-    const entry = record('d2', 'def')
-    m.setDecisions('def', [entry])
-    await m.flush()
-    // The default session takes the stored durable fields on reopen;
-    // the records are among them, so an approved line does not ask
-    // again after a restart and the next flush keeps the answer.
-    const again = new SessionManager('def', store)
-    await again.ensureLoaded()
-    expect(again.decisionsOf('def')).toEqual([entry])
-    await again.flush()
-    const stored = (await store.load()).get('def') as { decisions: { scope: string }[] }
-    expect(stored.decisions[0]?.scope).toBe('session')
-  })
-})
+    const pending = await decisions.resolve(ctx, ask)
+    if (pending?.kind !== 'pending') throw new Error('Expected a pending approval')
+    await decisions.answer(pending.id, Outcome.ALLOW, Scope.SESSION)
+    const reopened = new SessionManager('def', store)
+    await reopened.ensureLoaded()
+    const restored = new Decisions(reopened)
+    expect(await restored.resolve(ctx, ask)).toBeNull()
+    expect(restored.pending(sessionId)).toEqual([])
+  },
+)
 
 describe('hasManagedEnv', () => {
   const managed: ShellVar = {
@@ -760,10 +718,13 @@ it.each([false, true])(
       resume = resolve
     })
     const casSet = store.casSet.bind(store)
+    let firstWrite = true
     const spy = vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+      const first = firstWrite
+      firstWrite = false
       enter()
       await release
-      if (failure) throw new Error('store unavailable')
+      if (failure && first) throw new Error('store unavailable')
       return casSet(...args)
     })
     const updating = manager
@@ -782,7 +743,7 @@ it.each([false, true])(
       await updating
       await closing
       expect(() => manager.get('agent')).toThrow('unknown session')
-      expect((await store.load()).has('agent')).toBe(false)
+      expect((await store.get('agent'))?.closed).toEqual(expect.any(String))
     } finally {
       resume()
       await updating
@@ -799,5 +760,115 @@ it('a final flush after session deletion does not recreate it', async () => {
   await manager.flush('gone')
   await manager.close('gone')
   await manager.flush('gone')
-  expect((await store.load()).has('gone')).toBe(false)
+  expect((await store.get('gone'))?.closed).toEqual(expect.any(String))
 })
+
+it('retires the old default root before a snapshot rekeys the session', async () => {
+  const store = new RAMNamespaceStore()
+  const manager = new SessionManager('old', store)
+  const old = await manager.activate('old')
+  await manager.restoreDefault('new')
+  expect(manager.defaultId).toBe('new')
+  expect(manager.has('old')).toBe(false)
+  const closed = await store.get('old')
+  expect(closed?.closed).toEqual(expect.any(String))
+  expect(manager.approvalStateOf('old')).toEqual(closed?.approval_state)
+  await expect(
+    manager.approvalEvent('old', { op: 'revoke', owner: 'owner', holder: 'holder' }, old),
+  ).resolves.toEqual({ kind: 'applied' })
+  await expect(manager.activate('old')).rejects.toThrow('session_closed')
+  await manager.replaceFromSnapshot([manager.get('new')])
+  expect(await manager.activate('new')).not.toBe(old)
+})
+
+it('keeps the old default until its retirement is confirmed and retries the same fence', async () => {
+  const store = new RAMNamespaceStore()
+  const manager = new SessionManager('old', store)
+  const epoch = await manager.activate('old')
+  const casSet = store.casSet.bind(store)
+  let rejectAcknowledgement = true
+  const spy = vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+    const placed = await casSet(...args)
+    if (placed && args[1].closed != null && rejectAcknowledgement) {
+      throw new Error('acknowledgement lost')
+    }
+    return placed
+  })
+  try {
+    await expect(manager.restoreDefault('new')).rejects.toThrow('storage_unconfirmed')
+    expect(manager.defaultId).toBe('old')
+    expect(manager.has('new')).toBe(false)
+    const fenced = await store.get('old')
+    await expect(
+      manager.approvalEvent('old', { op: 'revoke', owner: 'owner', holder: 'holder' }, epoch),
+    ).rejects.toThrow('session_transition_pending')
+    rejectAcknowledgement = false
+    await manager.restoreDefault('new')
+    expect(manager.defaultId).toBe('new')
+    expect((await store.get('old'))?.incarnation).toBe(fenced?.incarnation)
+    expect((await store.get('old'))?.closed).toBe(fenced?.closed)
+  } finally {
+    spy.mockRestore()
+  }
+})
+
+it('restores an imported session into a missing destination with a fresh root', async () => {
+  const source = new SessionManager('restored')
+  const importedEpoch = await source.activate('restored')
+  const imported = source.get('restored').fork()
+  const store = new RAMNamespaceStore()
+  const target = new SessionManager('default', store)
+  await target.replaceFromSnapshot([imported])
+  const current = await store.get('restored')
+  expect(current?.incarnation).toEqual(expect.any(String))
+  expect(current?.incarnation).not.toBe(importedEpoch)
+  expect(current?.generation).toBe(1)
+})
+
+it.each([
+  [false, false],
+  [false, true],
+  [true, false],
+  [true, true],
+])(
+  'restores the newly requested snapshot after an uncertain earlier reset (stored=%s, shared=%s)',
+  async (stored, shared) => {
+    const store = new RAMNamespaceStore()
+    const manager = new SessionManager('s', store)
+    await manager.activate('s')
+    const first = manager.get('s').fork({ cwd: '/snapshot-a' })
+    seedVar(first, 'SNAPSHOT', 'a')
+    first.commands = { allow: ['cat'], ask: [], deny: [] }
+    const second = shared ? manager.get('s') : manager.get('s').fork()
+    second.cwd = '/snapshot-b'
+    seedVar(second, 'SNAPSHOT', 'b')
+    second.commands = { allow: ['ls'], ask: [], deny: [] }
+    const casSet = store.casSet.bind(store)
+    let uncertain = true
+    const spy = vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+      if (uncertain) {
+        if (stored) await casSet(...args)
+        throw new Error('reset acknowledgement unavailable')
+      }
+      return casSet(...args)
+    })
+    try {
+      await expect(manager.replaceFromSnapshot([first])).rejects.toThrow('storage_unconfirmed')
+      const earlier = await store.get('s')
+      uncertain = false
+      await manager.replaceFromSnapshot([second])
+      expect(manager.get('s').cwd).toBe('/snapshot-b')
+      expect(manager.get('s').env.SNAPSHOT).toBe('b')
+      expect(manager.commandsOf('s')?.allow).toEqual(['ls'])
+      const restored = await store.get('s')
+      expect(restored).toMatchObject({
+        cwd: '/snapshot-b',
+        env: { SNAPSHOT: 'b' },
+        commands: { allow: ['ls'] },
+      })
+      expect(restored?.incarnation).not.toBe(earlier?.incarnation)
+    } finally {
+      spy.mockRestore()
+    }
+  },
+)

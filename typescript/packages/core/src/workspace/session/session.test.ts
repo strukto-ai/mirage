@@ -18,8 +18,7 @@ import { varsFromEntries, varsFromEnv, varsFromFields, varsToFields } from './se
 import { describe, expect, it } from 'vitest'
 import { SessionState } from './session.ts'
 import { MountMode } from '../../types.ts'
-import type { AdmissionRules, Decision } from '../../policy/types.ts'
-import { Outcome, Scope } from '../../policy/types.ts'
+import type { AdmissionRules } from '../../policy/types.ts'
 
 describe('SessionState', () => {
   it('defaults cwd=/ and an env holding only the seeded $PWD', () => {
@@ -438,36 +437,6 @@ describe('the command tier round-trips through the record', () => {
     })
     expect((bare.toDict().commands as { allow: unknown }).allow).toBeNull()
     expect(bare.fork().commands).toBe(bare.commands)
-  })
-})
-
-describe('ledger records round-trip through the record', () => {
-  it('writes the Python spelling and reads it back', () => {
-    const rule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
-    const base = {
-      sessionId: 's1',
-      command: 'git',
-      cwd: '/repo',
-      paths: [],
-      reason: 'sign-off',
-      rule,
-      note: '',
-    }
-    const records: Decision[] = [
-      { ...base, id: 'd1', argv: ['push'], outcome: Outcome.ALLOW, scope: Scope.SESSION },
-      { ...base, id: 'd2', argv: ['push', '--force'], outcome: Outcome.DENY, scope: Scope.ONCE },
-    ]
-    const s = new SessionState({ sessionId: 's1', decisions: records })
-    const d = s.toDict() as { decisions?: { id: string; outcome: string; scope: string }[] }
-    expect(d.decisions?.map((r) => [r.id, r.outcome, r.scope])).toEqual([
-      ['d1', 'allow', 'session'],
-      ['d2', 'deny', 'once'],
-    ])
-    const back = SessionState.fromDict(d as Parameters<typeof SessionState.fromDict>[0])
-    expect(back.decisions).toEqual(records)
-    // Nothing held writes nothing, and a fork carries what is held.
-    expect('decisions' in new SessionState({ sessionId: 's2' }).toDict()).toBe(false)
-    expect(s.fork().decisions).toEqual(records)
   })
 })
 

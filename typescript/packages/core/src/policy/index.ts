@@ -14,7 +14,7 @@
 
 export type { Policy } from './base.ts'
 export { PolicyDenied } from './errors.ts'
-export { Decisions, askRule, covers, decisionId, type AskHandler } from './decisions.ts'
+export { Decisions, askRule, type AskHandler } from './decisions.ts'
 export { MountRootPolicy } from './builtin/mount_root.ts'
 export { PermissionsPolicy } from './builtin/permissions.ts'
 export { resolveProducer, resolveLimit } from './builtin/output_cap.ts'
@@ -56,7 +56,6 @@ export {
   type Route,
   type RouteContext,
   type Decision,
-  type Claim,
   type Claimant,
   type HandOff,
   type Occurrence,

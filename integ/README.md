@@ -324,7 +324,9 @@ The mirrored `core/msgraph/paths` and `core/dropbox/paths` spelling guards,
 disk resolvers and `session/visibility.json` case-alias regressions use these
 same whole-host filters. The shared policy composition stream, mirrored
 `policy/composition` adapters and `integ/policy/composition.json` use these
-filters too. The composition corpus also runs in the real browser suite.
+filters too. The approval stream, both approval adapters and
+`integ/policy/approvals.json` use these filters. Both policy corpora also run
+in the real browser suite.
 No per-verb allowlist is needed. The mirrored `commands/builtin/general/bc/`
 wrappers use these same whole-host filters, and `rust/` selects both hosts
 for their shared evaluator. The shared Rust diff engine, mirrored `rs/diff_*`

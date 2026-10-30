@@ -121,6 +121,11 @@ def uuid7() -> str:
     return _SYSTEM_IDS.uuid7()
 
 
+def authority_id() -> str:
+    """Mint an unpredictable identity outside a workspace's seeded sequence."""
+    return str(uuid.uuid4())
+
+
 def new_workspace_id() -> str:
     """Mint a fresh workspace id (UUIDv7).
 

@@ -55,6 +55,10 @@ export class S3RecordClient {
     return `${this.prefix}${name}.json`
   }
 
+  approvalGuarantee(): Promise<void> {
+    return Promise.reject(new Error('S3 approval persistence has not been qualified'))
+  }
+
   /** Read one record; `[fields, etag]`, `[null, '']` when absent. */
   async get(name: string): Promise<[Record<string, unknown> | null, string]> {
     const [client, mod] = await Promise.all([this.client(), loadS3Module(this.config)])

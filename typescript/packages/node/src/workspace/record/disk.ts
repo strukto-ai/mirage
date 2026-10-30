@@ -12,18 +12,73 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdir, open, readFile, readdir, rename, stat, unlink } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import {
+  link,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  stat,
+  unlink,
+} from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { generationOf } from '@struktoai/mirage-core/workspace/record/types'
 
-// A .lock older than this is presumed abandoned by a crashed writer and
-// reclaimed (loudly). Live CAS critical sections are milliseconds.
 const LOCK_STALE_SECONDS = 10
 const LOCK_RETRY_SLEEP_MS = 5
 const LOCK_RETRY_LIMIT = 2000
 
 let tmpCounter = 0
+
+export async function ownerAlive(lockPath: string): Promise<boolean> {
+  let value: string
+  try {
+    value = await readFile(lockPath, 'utf8')
+  } catch (error) {
+    if (isMissing(error)) return false
+    throw error
+  }
+  const pid = Number(value)
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(pid) || pid <= 0) return true
+  try {
+    process.kill(pid, 0)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error) {
+      if (error.code === 'ESRCH') return false
+      if (error.code === 'EPERM') return true
+    }
+    throw error
+  }
+  return true
+}
+
+export async function syncDirectory(directory: string): Promise<void> {
+  const handle = await open(directory, 'r')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+export async function prepareDirectory(directory: string): Promise<void> {
+  await mkdir(directory, { recursive: true })
+  const synced = new Set<string>()
+  for (const start of [await realpath(directory), path.resolve(directory)]) {
+    let current = start
+    while (!synced.has(current)) {
+      await syncDirectory(current)
+      synced.add(current)
+      const parent = path.dirname(current)
+      if (parent === current) break
+      current = parent
+    }
+  }
+}
 
 // Match Python's urllib quote(safe=""): percent-encode everything
 // outside the unreserved set, so both runtimes produce byte-identical
@@ -45,7 +100,7 @@ function isMissing(e: unknown): boolean {
  * The disk twin of `S3RecordClient`: a record is one file at
  * `{root}/{prefix}{name}.json`, written atomically (tmp, synced, then
  * rename(2)) so readers never see a torn record. The conditional write serializes
- * on a `{record}.lock` created with O_CREAT|O_EXCL, so compare and
+ * on a `{record}.lock` published by an exclusive hard link, so compare and
  * write hit the same stored version. Record names are percent-encoded
  * into filenames, so any id is safe. Mirrors the Python
  * DiskRecordClient byte-for-byte on disk.
@@ -55,6 +110,10 @@ export class DiskRecordClient {
 
   constructor(root: string, prefix: string) {
     this.dir = path.join(root, prefix)
+  }
+
+  approvalGuarantee(): Promise<void> {
+    return Promise.resolve()
   }
 
   path(name: string): string {
@@ -75,7 +134,7 @@ export class DiskRecordClient {
   }
 
   async put(name: string, fields: Record<string, unknown>): Promise<void> {
-    await mkdir(this.dir, { recursive: true })
+    await prepareDirectory(this.dir)
     await this.writeRecord(this.path(name), fields)
   }
 
@@ -83,23 +142,17 @@ export class DiskRecordClient {
    * Write one record iff its stored generation matches.
    *
    * Take the record's lockfile, re-read under the lock, check the
-   * generation, then tmp-write + rename. Losing the lock race or the
-   * generation check resolves false; the caller adopts and retries.
+   * generation, then tmp-write + rename. Wait for a busy writer;
+   * a changed generation resolves false for the caller to rebase.
    */
   async casPut(
     name: string,
     fields: Record<string, unknown>,
     expectedGeneration: number,
   ): Promise<boolean> {
-    await mkdir(this.dir, { recursive: true })
     const target = this.path(name)
     const lockPath = `${target}.lock`
-    let fh = await this.acquireLock(lockPath)
-    if (fh === null) {
-      if (!(await this.reclaimStaleLock(lockPath))) return false
-      fh = await this.acquireLock(lockPath)
-      if (fh === null) return false
-    }
+    const fh = await this.lock(name)
     try {
       const [stored] = await this.get(name)
       if (generationOf(stored) !== expectedGeneration) return false
@@ -151,7 +204,7 @@ export class DiskRecordClient {
    * lock for the whole retry budget (~10s).
    */
   async lock(name: string): Promise<FileHandle> {
-    await mkdir(this.dir, { recursive: true })
+    await prepareDirectory(this.dir)
     const lockPath = `${this.path(name)}.lock`
     for (let i = 0; i < LOCK_RETRY_LIMIT; i++) {
       const fh = await this.acquireLock(lockPath)
@@ -166,23 +219,34 @@ export class DiskRecordClient {
     await this.releaseLock(fh, `${this.path(name)}.lock`)
   }
 
-  // O_CREAT|O_EXCL ('wx'): filesystem-atomic mutex, the git protocol.
-  // Local filesystems only (O_EXCL is unreliable on ancient NFS, the
-  // same caveat git ships with).
+  // Publish a complete owner before another local writer can observe the lock.
   private async acquireLock(lockPath: string): Promise<FileHandle | null> {
-    let fh: FileHandle
+    const candidate = `${lockPath}.${randomUUID()}.owner`
+    const fh = await open(candidate, 'wx')
+    let published = false
+    let removed = false
     try {
-      fh = await open(lockPath, 'wx')
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'EEXIST') return null
-      throw e
-    }
-    try {
-      await fh.write(String(process.pid))
+      await fh.writeFile(String(process.pid))
+      await fh.sync()
+      try {
+        await link(candidate, lockPath)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') return null
+        throw error
+      }
+      published = true
+      await unlink(candidate)
+      removed = true
       return fh
-    } catch (error) {
-      await this.releaseLock(fh, lockPath)
-      throw error
+    } finally {
+      if (!removed) {
+        try {
+          await unlink(candidate)
+        } finally {
+          if (published) await this.releaseLock(fh, lockPath)
+          else await fh.close()
+        }
+      }
     }
   }
 
@@ -216,6 +280,7 @@ export class DiskRecordClient {
     try {
       seen = await age()
       if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
+      if (await ownerAlive(lockPath)) return false
       console.warn(`mirage: reclaiming stale lock ${lockPath} (age ${seen.toFixed(1)}s)`)
       try {
         await unlink(lockPath)
@@ -264,5 +329,6 @@ export class DiskRecordClient {
       await fh.close()
     }
     await rename(tmp, target)
+    await syncDirectory(path.dirname(target))
   }
 }

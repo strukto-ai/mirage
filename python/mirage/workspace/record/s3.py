@@ -54,6 +54,9 @@ class S3RecordClient:
     def key(self, name: str) -> str:
         return f"{self._prefix}{name}.json"
 
+    async def approval_guarantee(self) -> None:
+        raise RuntimeError("S3 approval persistence has not been qualified")
+
     async def get(self, name: str) -> tuple[dict[str, Any] | None, str]:
         """Read one record; ``(fields, etag)``, ``(None, "")`` when absent."""
         client = await self.client()

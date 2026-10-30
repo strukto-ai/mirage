@@ -32,6 +32,12 @@ export type NodeFields = Record<string, string | number>
 export abstract class NamespaceStore {
   // Read every stored record (hydration at first use).
   abstract load(): Promise<Map<string, RecordFields>>
+  async get(key: string): Promise<RecordFields | null> {
+    return (await this.load()).get(key) ?? null
+  }
+  approvalGuarantee(): Promise<void> {
+    return Promise.reject(new Error('store does not provide confirmed approval persistence'))
+  }
   // Upsert one record (a virtual path or a session id) with its full field set.
   abstract set(key: string, fields: RecordFields): Promise<void>
   /**
@@ -77,6 +83,15 @@ export class RecordNamespaceStore extends NamespaceStore {
 
   async set(key: string, fields: RecordFields): Promise<void> {
     await this.records.put(key, fields)
+  }
+
+  override async get(key: string): Promise<RecordFields | null> {
+    const [fields] = await this.records.get(key)
+    return fields
+  }
+
+  override async approvalGuarantee(): Promise<void> {
+    await this.records.approvalGuarantee()
   }
 
   async casSet(key: string, fields: RecordFields, expectedGeneration: number): Promise<boolean> {

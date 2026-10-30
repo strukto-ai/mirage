@@ -1,8 +1,19 @@
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { Policies, agreed, settled } from '@struktoai/mirage-core/policy/policies'
-import type { Ask, CommandContext, CommandRule, Route } from '@struktoai/mirage-core/policy/types'
+import { Outcome, Scope } from '@struktoai/mirage-core/policy/types'
+import type {
+  Ask,
+  CommandContext,
+  CommandRule,
+  Decision,
+  Deny,
+  Route,
+  SessionContext,
+} from '@struktoai/mirage-core/policy/types'
 import { PosixRegex } from '@struktoai/mirage-core/rs/regex'
 import { openStream, openStreamSync } from '@struktoai/mirage-core/rs/stream'
+import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_context'
+import { applyStateDict, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
 import { checkCompositionCorpus } from '../policy/composition.ts'
 
@@ -21,6 +32,390 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 
 function context(command: string): CommandContext {
   return { command, paths: [], argv: [], cwd: '/' }
+}
+
+async function within<T>(pending: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error('approval lifecycle check timed out')), 5000)
+      }),
+    ])
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function rejects(pending: Promise<unknown>): Promise<void> {
+  const refused = await pending.then(
+    () => false,
+    () => true,
+  )
+  equal(refused, true)
+}
+
+function pendingId(ws: Workspace, sessionId: string): string {
+  const pending = ws.decisions.pending(sessionId)
+  equal(pending.length, 1)
+  const record = pending[0]
+  if (record === undefined) throw new Error('expected one pending approval')
+  return record.id
+}
+
+const FILE_APPROVAL = {
+  commands: { ask: [{ reason: 'review protected files', paths: ['/data/protected/*'] }] },
+}
+
+async function overlappingOnceCalls(): Promise<void> {
+  equal(asyncContextIsolatesTasks, false)
+  const entered = deferred()
+  const release = deferred()
+  const asked: Decision[] = []
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      async onAsk(record) {
+        asked.push(record)
+        if (asked.length === 1) {
+          entered.resolve()
+          await release.promise
+        }
+        return { ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE }
+      },
+    },
+  )
+  let slow: ReturnType<Workspace['tools']['read']> | undefined
+  try {
+    await ws.vfs.mkdir('/data/protected')
+    await ws.vfs.write('/data/protected/item', 'private payload')
+    const first = await ws.session('first', { profile: FILE_APPROVAL })
+    const second = await ws.session('second', { profile: FILE_APPROVAL })
+    slow = first.tools.read('/data/protected/item')
+    await within(entered.promise)
+    equal((await first.tools.read('/data/protected/item')).isError, undefined)
+    equal((await second.tools.read('/data/protected/item')).isError, undefined)
+    equal((await first.tools.read('/data/protected/item')).isError, undefined)
+    equal(
+      asked.map((record) => record.sessionId),
+      ['first', 'first', 'second', 'first'],
+    )
+    equal(new Set(asked.map((record) => record.id)).size, 4)
+    release.resolve()
+    equal((await slow).isError, undefined)
+  } finally {
+    release.resolve()
+    if (slow !== undefined) await Promise.allSettled([slow])
+    await ws.close()
+  }
+}
+
+async function cancelledPrompt(): Promise<void> {
+  const entered = deferred()
+  const release = deferred()
+  const abort = new AbortController()
+  const asked: Decision[] = []
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          preCommand: (ctx) =>
+            ctx.command === 'touch' ? { kind: 'ask', reason: 'review touch' } : null,
+        },
+      ],
+      async onAsk(record) {
+        asked.push(record)
+        if (asked.length !== 1) return null
+        entered.resolve()
+        await release.promise
+        return { ...record, outcome: Outcome.ALLOW }
+      },
+    },
+  )
+  const running = ws.shell('touch /data/late', { signal: abort.signal })
+  const outcome = running.then(
+    () => 'completed',
+    (error: unknown) => (error instanceof Error ? error.name : String(error)),
+  )
+  try {
+    await within(entered.promise)
+    abort.abort()
+    equal(await within(outcome), 'AbortError')
+    release.resolve()
+    equal(await ws.vfs.exists('/data/late'), false)
+    const retry = await ws.shell('touch /data/late')
+    equal(retry.refusal?.kind, 'pending')
+    equal(asked.length, 2)
+    equal(new Set(asked.map((record) => record.id)).size, 2)
+    const stale = asked[0]
+    if (stale === undefined) throw new Error('expected the canceled prompt')
+    await rejects(ws.decisions.answer(stale.id, Outcome.ALLOW))
+    equal(await ws.vfs.exists('/data/late'), false)
+  } finally {
+    abort.abort()
+    release.resolve()
+    await outcome
+    await ws.close()
+  }
+}
+
+async function closedPrompt(): Promise<void> {
+  const entered = deferred()
+  const release = deferred()
+  let oldId = ''
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      async onAsk(record) {
+        if (oldId !== '') return null
+        oldId = record.id
+        entered.resolve()
+        await release.promise
+        return { ...record, outcome: Outcome.ALLOW, scope: Scope.SESSION }
+      },
+    },
+  )
+  await ws.vfs.mkdir('/data/protected')
+  const original = await ws.session('worker', { profile: FILE_APPROVAL })
+  const running = original.shell('touch /data/protected/late')
+  const outcome = running.then(
+    () => undefined,
+    () => undefined,
+  )
+  try {
+    await within(entered.promise)
+    await ws.closeSession('worker')
+    const replacement = await ws.session('worker', { profile: FILE_APPROVAL })
+    release.resolve()
+    await within(outcome)
+    equal(await ws.vfs.exists('/data/protected/late'), false)
+    await rejects(ws.decisions.answer(oldId, Outcome.ALLOW))
+    equal((await replacement.shell('touch /data/protected/late')).refusal?.kind, 'pending')
+    const freshId = pendingId(ws, 'worker')
+    equal(freshId === oldId, false)
+    await ws.decisions.answer(freshId, Outcome.ALLOW)
+    equal((await replacement.shell('touch /data/protected/late')).exitCode, 0)
+    equal((await replacement.shell('touch /data/protected/late')).refusal?.kind, 'pending')
+  } finally {
+    release.resolve()
+    await outcome
+    await ws.close()
+  }
+}
+
+async function profileInvalidatesTicket(): Promise<void> {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.mkdir('/data/protected')
+    const agent = await ws.session('agent', { profile: FILE_APPROVAL })
+    equal((await agent.shell('touch /data/protected/item')).refusal?.kind, 'pending')
+    const oldId = pendingId(ws, 'agent')
+    await ws.setSessionProfile('agent', {
+      commands: { deny: [{ reason: 'touch is closed', commands: ['touch'] }] },
+    })
+    await rejects(ws.decisions.answer(oldId, Outcome.ALLOW))
+    equal((await agent.shell('touch /data/protected/item')).exitCode, 126)
+    equal(await ws.vfs.exists('/data/protected/item'), false)
+    await ws.setSessionProfile('agent', FILE_APPROVAL)
+    equal((await agent.shell('touch /data/protected/item')).refusal?.kind, 'pending')
+    equal(pendingId(ws, 'agent') === oldId, false)
+  } finally {
+    await ws.close()
+  }
+}
+
+async function snapshotInvalidatesApprovals(): Promise<void> {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.mkdir('/data/protected')
+    const agent = await ws.session('agent', { profile: FILE_APPROVAL })
+    equal((await agent.shell('touch /data/protected/item')).refusal?.kind, 'pending')
+    const pending = pendingId(ws, 'agent')
+    const state = await toStateDict(ws)
+    await ws.decisions.answer(pending, Outcome.ALLOW, Scope.SESSION)
+    equal((await agent.shell('touch /data/protected/item')).exitCode, 0)
+    equal((await agent.shell('touch /data/protected/other')).exitCode, 0)
+    await applyStateDict(ws, state)
+    equal(await ws.vfs.exists('/data/protected/item'), false)
+    equal(await ws.vfs.exists('/data/protected/other'), false)
+    await rejects(ws.decisions.answer(pending, Outcome.ALLOW))
+    equal((await agent.shell('touch /data/protected/item')).refusal?.kind, 'pending')
+    const freshId = pendingId(ws, 'agent')
+    equal(freshId === pending, false)
+    await ws.decisions.answer(freshId, Outcome.ALLOW)
+    equal((await agent.shell('touch /data/protected/item')).exitCode, 0)
+    equal((await agent.shell('touch /data/protected/item')).refusal?.kind, 'pending')
+  } finally {
+    await ws.close()
+  }
+}
+
+class CachedRAM extends RAMVFS {
+  override readonly cachesReads = true
+  reads = 0
+
+  override read(...args: Parameters<RAMVFS['read']>): ReturnType<RAMVFS['read']> {
+    this.reads++
+    return super.read(...args)
+  }
+}
+
+async function invalidatedCachedRead(restore: boolean): Promise<void> {
+  const entered = deferred()
+  const release = deferred()
+  const ram = new CachedRAM()
+  let paused = false
+  let prompts = 0
+  const ws = new Workspace(
+    { '/data': ram },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          async postVfs(ctx) {
+            if (paused || ctx.call.name !== 'read' || ctx.path.virtual !== '/data/protected/item')
+              return null
+            paused = true
+            entered.resolve()
+            await release.promise
+            return null
+          },
+        },
+      ],
+      onAsk: async (record) => {
+        prompts++
+        return { ...record, outcome: Outcome.ALLOW }
+      },
+    },
+  )
+  let running: ReturnType<Workspace['tools']['read']> | undefined
+  try {
+    await ws.vfs.mkdir('/data/protected')
+    await ws.vfs.write('/data/protected/item', 'cached private payload')
+    await ws.cache.set('/data/protected/item', new TextEncoder().encode('cached private payload'), {
+      ttl: 600,
+    })
+    const agent = await ws.session('agent', { profile: FILE_APPROVAL })
+    const state = restore ? await toStateDict(ws) : null
+    running = agent.tools.read('/data/protected/item')
+    await within(entered.promise)
+    equal(ram.reads, 0)
+    if (state === null) {
+      await ws.setSessionProfile('agent', {
+        commands: { ask: [{ reason: 'review changed files', paths: ['/data/protected/*'] }] },
+      })
+    } else await applyStateDict(ws, state)
+    release.resolve()
+    const result = await within(running)
+    equal(result.isError, true)
+    equal(
+      result.content.some((part) => part.text.includes('cached private payload')),
+      false,
+    )
+    equal((await agent.tools.read('/data/protected/item')).isError, undefined)
+    equal(prompts, 2)
+  } finally {
+    release.resolve()
+    if (running !== undefined) await Promise.allSettled([running])
+    await ws.close()
+  }
+}
+
+async function mediaCallerIsolation(): Promise<void> {
+  equal(asyncContextIsolatesTasks, false)
+  const entered = deferred()
+  const release = deferred()
+  let paused = false
+  let prompts = 0
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          async postVfs(ctx) {
+            if (paused || ctx.call.name !== 'read' || ctx.path.virtual !== '/data/protected/item')
+              return null
+            paused = true
+            entered.resolve()
+            await release.promise
+            return null
+          },
+        },
+      ],
+      onAsk: async (record) => {
+        prompts++
+        return { ...record, outcome: Outcome.ALLOW }
+      },
+    },
+  )
+  let slow: ReturnType<Workspace['tools']['read']> | undefined
+  try {
+    await ws.vfs.mkdir('/data/protected')
+    await ws.vfs.write('/data/protected/item', 'private payload')
+    const agent = await ws.session('agent', { profile: FILE_APPROVAL })
+    slow = agent.tools.read('/data/protected/item')
+    await within(entered.promise)
+    const media = await agent.tools.readMedia('/data/protected/item')
+    if (!('content' in media)) throw new Error('expected a text media fallback')
+    equal(media.isError, undefined)
+    equal(prompts, 2)
+    release.resolve()
+    equal((await slow).isError, undefined)
+  } finally {
+    release.resolve()
+    if (slow !== undefined) await Promise.allSettled([slow])
+    await ws.close()
+  }
+}
+
+async function sessionCallbackIsolation(
+  method: 'preSession' | 'postSession',
+  replacePolicy = false,
+): Promise<void> {
+  equal(asyncContextIsolatesTasks, false)
+  const entered = deferred()
+  const release = deferred()
+  const check = async (ctx: SessionContext): Promise<null> => {
+    if (ctx.key === 'LIFECYCLE' && ctx.value === 'after') {
+      entered.resolve()
+      await release.promise
+    }
+    return null
+  }
+  const policy: Policy = method === 'preSession' ? { preSession: check } : { postSession: check }
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, policies: [policy] })
+  let running: Promise<boolean> | undefined
+  try {
+    const agent = await ws.session('agent')
+    equal((await agent.shell('export LIFECYCLE=before')).exitCode, 0)
+    running = agent.shell('export LIFECYCLE=after').then(
+      (result) => result.exitCode !== 0,
+      () => true,
+    )
+    await within(entered.promise)
+    if (replacePolicy) {
+      const refuse = (ctx: SessionContext): Deny | null =>
+        ctx.key === 'LIFECYCLE' && ctx.value === 'after'
+          ? { kind: 'deny', reason: 'late writes are closed' }
+          : null
+      ws.policies.add(method === 'preSession' ? { preSession: refuse } : { postSession: refuse })
+    } else await ws.setSessionProfile('agent', { paths: { hide: ['/data/unrelated'] } })
+    release.resolve()
+    equal(await within(running), true)
+    equal((await agent.shell('printf "%s" "$LIFECYCLE"')).stdoutText, 'before')
+    equal((await agent.shell('export LIFECYCLE=fresh')).exitCode, 0)
+    equal((await agent.shell('printf "%s" "$LIFECYCLE"')).stdoutText, 'fresh')
+  } finally {
+    release.resolve()
+    if (running !== undefined) await Promise.allSettled([running])
+    await ws.close()
+  }
 }
 
 async function allHooks(): Promise<void> {
@@ -221,4 +616,40 @@ export const POLICY_CHECKS: [string, () => Promise<void>][] = [
   ['policy composition reaches all eight real workspace hooks', allHooks],
   ['suspended policy evaluations survive retirement without callback replay', suspendedRetirement],
   ['a cancelled policy callback cannot authorize a late filesystem effect', cancelledCallback],
+  [
+    'overlapping RAM tool calls keep once approvals on their explicit callers',
+    overlappingOnceCalls,
+  ],
+  ['a canceled inline approval cannot authorize a late filesystem effect', cancelledPrompt],
+  ['closing and recreating a RAM session rejects late replies and stale tickets', closedPrompt],
+  ['changing a profile invalidates its pending approval ticket', profileInvalidatesTicket],
+  [
+    'restoring a snapshot invalidates RAM approvals and pending tickets',
+    snapshotInvalidatesApprovals,
+  ],
+  [
+    'a profile change revokes a suspended caller before cached data returns',
+    () => invalidatedCachedRead(false),
+  ],
+  [
+    'a snapshot restore revokes a suspended caller before cached data returns',
+    () => invalidatedCachedRead(true),
+  ],
+  ['media reads keep once approvals separate from suspended tool calls', mediaCallerIsolation],
+  [
+    'a suspended preSession callback cannot write through a replaced browser caller',
+    () => sessionCallbackIsolation('preSession'),
+  ],
+  [
+    'a suspended postSession callback rolls back after its browser caller is replaced',
+    () => sessionCallbackIsolation('postSession'),
+  ],
+  [
+    'adding a preSession rule while a callback waits refuses the stale write',
+    () => sessionCallbackIsolation('preSession', true),
+  ],
+  [
+    'adding a postSession rule while a callback waits rolls back the stale write',
+    () => sessionCallbackIsolation('postSession', true),
+  ],
 ]

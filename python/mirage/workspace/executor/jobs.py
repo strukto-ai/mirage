@@ -294,7 +294,7 @@ async def handle_background(
         loops=False, paren=None if simple_command(left) else True
     )
     job_handed = (
-        decisions.split(
+        await decisions.split(
             session.session_id, handed, occurrence_of(left, handed)
         )
         if handed is not None and decisions is not None
@@ -445,7 +445,7 @@ async def handle_background(
                 # standing for the retry, as a held line does; a killed
                 # or failed one spends them.
                 if ended_held:
-                    decisions.release(session.session_id, job_handed)
+                    await decisions.release(session.session_id, job_handed)
                 else:
                     await decisions.revoke(session.session_id, job_handed)
 

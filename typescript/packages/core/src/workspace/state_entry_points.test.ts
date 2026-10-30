@@ -42,6 +42,7 @@ import {
   voicedStderr,
 } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { compileProfile } from './session/resolve.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -2292,10 +2293,10 @@ describe('ask end to end', () => {
     expect(ws.decisions.pending()).toEqual([])
     // The grant is session state: on the record, and not another
     // session's.
-    const record = ws.sessionManager.get(ws.sessionManager.defaultId).toDict() as {
-      decisions: { outcome: string; scope: string }[]
-    }
-    expect(record.decisions[0]?.scope).toBe('session')
+    const record = ws.sessionManager.get(ws.sessionManager.defaultId).toDict()
+    expect(record.approval_state).toMatchObject({
+      records: [{ outcome: 'allow', scope: 'session' }],
+    })
     ws.createSession('other')
     await ws.shell('touch /scratch/w', { sessionId: 'other' })
     const other = await line(ws, 'rm /scratch/w', 'other')
@@ -2312,7 +2313,7 @@ describe('ask end to end', () => {
     expect(err).toBe(`wc: Permission denied\nrequires approval: looks risky (ask ${request.id})\n`)
     // The synthesized rule names the program, so a session grant covers
     // every wc line.
-    expect(request.rule).toEqual({ reason: 'looks risky', commands: ['wc'] })
+    expect(request.rule).toEqual({ reason: 'looks risky', commands: ['wc'], paths: [] })
     await ws.decisions.answer(request.id, Outcome.ALLOW, Scope.SESSION)
     expect(await line(ws, 'wc -c /scratch/z')).toEqual([0, '0 /scratch/z\n', ''])
     expect(await line(ws, 'wc -l /scratch/z')).toEqual([0, '0 /scratch/z\n', ''])
@@ -3065,4 +3066,47 @@ describe('admitted path rules on recursive commands', () => {
     expect(voicedStderr(result)).toContain('/data/src/cache')
     expect(voicedStderr(result)).toContain('Permission denied')
   })
+})
+
+it('rechecks an unprivileged command after a profile changes during a coded policy wait', async () => {
+  let entered = (): void => undefined
+  let resume = (): void => undefined
+  const suspended = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const release = new Promise<void>((resolve) => {
+    resume = resolve
+  })
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          async preCommand(ctx) {
+            if (ctx.command === 'rm') {
+              entered()
+              await release
+            }
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.write('/data/f', 'protected')
+    const running = ws.shell('rm /data/f')
+    await suspended
+    await ws.sessionManager.setProfile(
+      ws.defaultSessionId,
+      compileProfile({ commands: { deny: [{ reason: 'changed', commands: ['rm'] }] } }),
+    )
+    resume()
+    expect((await running).exitCode).toBe(126)
+    expect(await ws.vfs.exists('/data/f')).toBe(true)
+  } finally {
+    resume()
+    await ws.close()
+  }
 })

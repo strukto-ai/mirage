@@ -43,8 +43,13 @@ from mirage.policy.composition import (
     CompositionResult,
     compose_settled,
 )
-from mirage.policy.decisions import Decisions, op_question
-from mirage.policy.errors import Explained, PolicyDenied
+from mirage.policy.decisions import (
+    Decisions,
+    call_of,
+    get_op_call,
+    op_question,
+)
+from mirage.policy.errors import ApprovalUnavailable, Explained, PolicyDenied
 from mirage.policy.match.decide import source_of
 from mirage.policy.match.rule import operand_paths
 from mirage.policy.mixin import SessionScopedMixin
@@ -364,6 +369,24 @@ async def _apart(answer: Awaitable[_T]) -> _T:
         return await answer
 
 
+async def _validate_caller(
+    policies: "Policies", session_id: str, caller: Caller | None = None
+) -> None:
+    handed = (
+        get_op_call(policies.decisions, session_id)
+        if caller is None
+        else call_of(caller, policies.decisions, session_id)
+    )
+    if handed is None:
+        return
+    try:
+        await policies.decisions.validate(session_id, handed)
+    except ApprovalUnavailable as exc:
+        raise policy_denied(
+            Deny(str(exc), failed=True), session_id, caller=caller
+        ) from exc
+
+
 async def pre_vfs_gate(
     policies: "Policies",
     call: VfsCall,
@@ -444,10 +467,20 @@ async def pre_vfs_gate(
     deciding = trace is DryRun.DECIDING
     if deciding and write:
         raise erofs(path.virtual)
+    if not deciding:
+        await _validate_caller(policies, session_id, caller)
     if not (policies.wants("pre_vfs") or (write and mode is not None)):
         return
     answer = await _apart(policies.pre_vfs(ctx, rules_only=deciding))
-    await _refuse_op(ctx, answer, None if line else decisions, caller)
+    if not deciding:
+        await _validate_caller(policies, session_id, caller)
+    await _refuse_op(
+        ctx,
+        answer,
+        None if line else decisions,
+        caller,
+        lambda: _apart(policies.pre_vfs(ctx, rules_only=deciding)),
+    )
 
 
 async def _refuse_op(
@@ -455,13 +488,14 @@ async def _refuse_op(
     answer: Deny | Ask | None,
     decisions: Decisions | None,
     caller: Caller,
+    recheck: Callable[[], Awaitable[Deny | Ask | None]],
 ) -> None:
     if isinstance(answer, Ask):
         if decisions is None:
             raise policy_denied(
                 Deny(answer.reason), ctx.path.virtual, caller=caller
             )
-        refused = await decisions.resolve_op(ctx, answer, caller)
+        refused = await decisions.resolve_op(ctx, answer, caller, recheck)
     else:
         refused = answer
     if isinstance(refused, Deny) and refused.error is not None:
@@ -562,10 +596,13 @@ async def post_vfs_gate(
     """
     if caller is None:
         caller = current_caller()
-    if caller.explaining is DryRun.DECIDING or not await policies.wants_for(
-        "post_vfs", session_id
+    if caller.explaining is DryRun.DECIDING or isinstance(
+        caller.explaining, list
     ):
+        return
+    if not await policies.wants_for("post_vfs", session_id):
         return None
+    await _validate_caller(policies, session_id, caller)
     ctx = VfsResultContext(
         call=call,
         path=path,
@@ -576,11 +613,14 @@ async def post_vfs_gate(
         caller=policy_caller(caller.session, policies.account),
         result=result,
     )
+    answer = await _apart(policies.post_vfs(ctx))
+    await _validate_caller(policies, session_id, caller)
     await _refuse_op(
         ctx,
-        await _apart(policies.post_vfs(ctx)),
+        answer,
         None if caller.refusals is not None else decisions,
         caller,
+        lambda: _apart(policies.post_vfs(ctx)),
     )
 
 
@@ -609,9 +649,16 @@ async def pre_session_gate(
     """
     if explaining() is DryRun.DECIDING:
         raise eacces(ctx.key)
-    if policies is None or not policies.wants("pre_session"):
+    if policies is None:
         return
-    await _session_refused(policies, ctx, await policies.pre_session(ctx))
+    await _validate_caller(policies, ctx.session_id)
+    if not policies.wants("pre_session"):
+        return
+    answer = await policies.pre_session(ctx)
+    await _validate_caller(policies, ctx.session_id)
+    await _session_refused(
+        policies, ctx, answer, lambda: policies.pre_session(ctx)
+    )
 
 
 async def post_execute_gate(
@@ -639,11 +686,25 @@ async def post_execute_gate(
     """
     if not await policies.wants_for("post_execute", ctx.session_id):
         return None, None
+    if claimant is not None:
+        await policies.decisions.validate(ctx.session_id, claimant.line)
     answer, bound = await policies.post_execute(ctx)
+    if claimant is not None:
+        await policies.decisions.validate(ctx.session_id, claimant.line)
     if not isinstance(answer, Ask):
         return answer, bound
+
+    async def recheck() -> Deny | Ask | None:
+        nonlocal bound
+        current, bound = await policies.post_execute(ctx)
+        return (
+            op_question(ctx, current)[1]
+            if isinstance(current, Ask)
+            else current
+        )
+
     said = await policies.decisions.resolve(
-        *op_question(ctx, answer), cancel, claimant
+        *op_question(ctx, answer), cancel, claimant, recheck
     )
     if isinstance(said, Abandoned):
         raise MirageAbortError()
@@ -674,10 +735,16 @@ async def post_command_gate(
     """
     if not await policies.wants_for("post_command", ctx.session_id):
         return None
+    if claimant is not None:
+        await policies.decisions.validate(ctx.session_id, claimant.line)
     answer = await policies.post_command(ctx)
+    if claimant is not None:
+        await policies.decisions.validate(ctx.session_id, claimant.line)
     if not isinstance(answer, Ask):
         return answer
-    said = await policies.decisions.resolve(ctx, answer, cancel, claimant)
+    said = await policies.decisions.resolve(
+        ctx, answer, cancel, claimant, lambda: policies.post_command(ctx)
+    )
     if isinstance(said, Abandoned):
         raise MirageAbortError()
     return said
@@ -701,18 +768,24 @@ async def post_session_gate(
         "post_session", ctx.session_id
     ):
         return
+    await _validate_caller(policies, ctx.session_id)
     facts = {f.name: getattr(ctx, f.name) for f in fields(ctx)}
     landed = SessionResultContext(**facts, old=old)
+    answer = await policies.post_session(landed)
+    await _validate_caller(policies, ctx.session_id)
     await _session_refused(
-        policies, landed, await policies.post_session(landed)
+        policies, landed, answer, lambda: policies.post_session(landed)
     )
 
 
 async def _session_refused(
-    policies: "Policies", ctx: SessionContext, answer: Deny | Ask | None
+    policies: "Policies",
+    ctx: SessionContext,
+    answer: Deny | Ask | None,
+    recheck: Callable[[], Awaitable[Deny | Ask | None]],
 ) -> None:
     refused = (
-        await policies.decisions.resolve_op(ctx, answer)
+        await policies.decisions.resolve_op(ctx, answer, recheck=recheck)
         if isinstance(answer, Ask)
         else answer
     )
@@ -791,9 +864,10 @@ class Policies:
         self._policies: list[Policy] = list(policies or [])
         self._placement: Policy | None = None
         self._wanted: frozenset[str] = frozenset()
+        self.revision = 0
         self._rescan()
         self._mode = MountModePolicy()
-        self.decisions = Decisions()
+        self.decisions = Decisions(version=lambda: self.revision)
         self.views: (
             Callable[
                 [str, "SessionState | None"],
@@ -883,11 +957,19 @@ class Policies:
                 continue
             if not isinstance(policy, SessionScopedMixin):
                 return True
-            if await policy.wants_for(method, session_id):
+            guard = explaining() is not DryRun.DECIDING and not isinstance(
+                explaining(), list
+            )
+            before = self.decisions.facts(session_id) if guard else None
+            wanted = await policy.wants_for(method, session_id)
+            if before is not None:
+                await self.decisions.assert_current(session_id, None, before)
+            if wanted:
                 return True
         return False
 
     def _rescan(self) -> None:
+        self.revision += 1
         wanted = set()
         policies = [*self._policies, *filter(None, [self._placement])]
         for method in VALIDITY:
@@ -980,6 +1062,20 @@ class Policies:
                         ctx = replace(
                             ctx, session=session, vfs=vfs, caller=caller
                         )
+                    guard = (
+                        not every
+                        and not isinstance(ctx, WorkspaceContext)
+                        and explaining() is not DryRun.DECIDING
+                        and not isinstance(explaining(), list)
+                    )
+                    session_id = (
+                        ""
+                        if isinstance(ctx, WorkspaceContext)
+                        else ctx.session_id
+                    )
+                    before = (
+                        self.decisions.facts(session_id) if guard else None
+                    )
                     token = set_explaining(DryRun.DECIDING)
                     try:
                         answered = getattr(policy, method)(ctx)
@@ -996,6 +1092,13 @@ class Policies:
                         )
                     finally:
                         reset_explaining(token)
+                    if before is not None:
+                        try:
+                            await self.decisions.assert_current(
+                                session_id, None, before
+                            )
+                        except ApprovalUnavailable as exc:
+                            answered = Deny(str(exc), failed=True)
                     pending = (
                         answered
                         if isinstance(answered, tuple)

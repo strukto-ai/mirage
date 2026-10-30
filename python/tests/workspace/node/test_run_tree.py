@@ -103,7 +103,7 @@ async def _cross_node(cmd: str):
         ws.job_table,
         _noop_execute,
         parse(cmd),
-        EvaluationContext(SessionState(session_id="t", cwd="/")),
+        EvaluationContext(ws.create_session("t")),
         None,
         None,
     )

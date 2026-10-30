@@ -262,7 +262,7 @@ export async function executeCommand(
           )
         } finally {
           session.aliasExpansion = previous
-          if (expansion !== null) registry.decisions.handUp(session.sessionId, expansion)
+          if (expansion !== null) await registry.decisions.handUp(session.sessionId, expansion)
         }
       } finally {
         scope.release()

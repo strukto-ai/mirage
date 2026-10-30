@@ -808,7 +808,7 @@ async def _gate_restored_state(
     ``script_of`` answers for an id the manager does not know and the
     profile ``_restore_sessions`` then puts the created session under.
     A workspace built for the state seats every table first, its
-    narrowing, ask decisions, cwd and variables, so each is judged as
+    narrowing, cwd and variables, so each is judged as
     the session it records, under the policy it then runs under.
 
     Args:
@@ -830,7 +830,6 @@ async def _gate_restored_state(
             sid = fields.session_id
             session = mgr.get(sid) if mgr.has(sid) else mgr.create(sid)
             narrow(session, narrowing_of(fields))
-            session.decisions = fields.decisions
             set_cwd(session, fields.cwd)
             session.vars = fields.vars
     for fields in sessions:
@@ -856,9 +855,7 @@ async def _restore_sessions(
     # tools, so none keeps what was read before.
     ws._forget_reads()
     if default_sid is not None:
-        # The snapshot's default session identity wins over the live
-        # one, and the discovery record's pointer follows it.
-        await ws._adopt_default_session(default_sid)
+        await ws._session_mgr.restore_default(default_sid)
     restored: list[Any] = []
     for fields in tables:
         sid = fields.session_id
@@ -894,6 +891,8 @@ async def _restore_sessions(
     # The snapshot's session table wins over prior store contents,
     # mirroring Namespace.replace_nodes.
     await ws._session_mgr.replace_from_snapshot(restored)
+    if default_sid is not None:
+        await ws._adopt_default_session(default_sid)
 
 
 def _restore_cache(ws: WorkspaceLike, state: dict[str, Any]) -> None:

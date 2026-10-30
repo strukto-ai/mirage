@@ -81,7 +81,7 @@ export class WorkspaceMeta {
    * point the discovery record at it.
    */
   async adoptDefault(sessionId: string): Promise<void> {
-    this.sessions.adoptDefault(sessionId)
+    await this.sessions.restoreDefault(sessionId)
     await this.store.replaceMeta(this.wsId, {
       workspace_id: this.wsId,
       default_session_id: sessionId,

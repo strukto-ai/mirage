@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import json
 import logging
 import os
@@ -22,6 +23,7 @@ from collections.abc import Iterable
 from itertools import count
 from typing import Any
 from urllib.parse import quote, unquote
+from uuid import uuid4
 
 import aiofiles
 import aiofiles.os
@@ -34,8 +36,6 @@ if sys.platform == "darwin":
 
 logger = logging.getLogger(__name__)
 
-# A .lock older than this is presumed abandoned by a crashed writer and
-# reclaimed (loudly). Live CAS critical sections are milliseconds.
 LOCK_STALE_SECONDS = 10.0
 LOCK_RETRY_SLEEP = 0.005
 LOCK_RETRY_LIMIT = 2000
@@ -43,21 +43,92 @@ LOCK_RETRY_LIMIT = 2000
 _TMP_COUNTER = count()
 
 
+def owner_alive(lock_path: str) -> bool:
+    """Whether the lock's process may still be running.
+
+    Args:
+        lock_path (str): the process-owned local lockfile.
+    """
+    try:
+        with open(lock_path, encoding="ascii") as handle:
+            value = handle.read()
+    except FileNotFoundError:
+        return False
+    if not value.isascii() or not value.isdecimal() or int(value) <= 0:
+        return True
+    try:
+        os.kill(int(value), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def sync_directory(path: str) -> None:
+    """Persist a directory's published entries.
+
+    Args:
+        path (str): the local directory to sync.
+    """
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def prepare_directory(path: str) -> None:
+    """Create the directory and persist its links from existing ancestors.
+
+    Args:
+        path (str): the record directory.
+    """
+    os.makedirs(path, exist_ok=True)
+    synced: set[str] = set()
+    for start in (os.path.realpath(path), os.path.abspath(path)):
+        current = start
+        while current not in synced:
+            sync_directory(current)
+            synced.add(current)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+
+
 def _acquire_lock(lock_path: str) -> int | None:
-    """Create the lockfile with O_CREAT|O_EXCL; fd on success, None when
-    another writer holds it (filesystem-atomic mutex, the git protocol).
-    Local filesystems only: O_EXCL is unreliable on ancient NFS, the
-    same caveat git ships with."""
+    """Publish a complete owner with an exclusive hard link; fd on
+    success, None when another local writer holds it."""
+    candidate = f"{lock_path}.{uuid4().hex}.owner"
+    fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+    published = False
+    removed = False
     try:
-        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        return None
-    try:
-        os.write(fd, str(os.getpid()).encode())
-    except BaseException:
-        _release_lock(fd, lock_path)
-        raise
-    return fd
+        owner = str(os.getpid()).encode()
+        while owner:
+            written = os.write(fd, owner)
+            if written == 0:
+                raise OSError(errno.EIO, "lock owner write made no progress")
+            owner = owner[written:]
+        os.fsync(fd)
+        try:
+            os.link(candidate, lock_path)
+        except FileExistsError:
+            return None
+        published = True
+        os.unlink(candidate)
+        removed = True
+        return fd
+    finally:
+        if not removed:
+            try:
+                os.unlink(candidate)
+            finally:
+                if published:
+                    _release_lock(fd, lock_path)
+                else:
+                    os.close(fd)
 
 
 def _reclaim_stale_lock(lock_path: str) -> bool:
@@ -90,6 +161,8 @@ def _reclaim_stale_lock(lock_path: str) -> bool:
         seen = age()
         if seen is None or seen <= LOCK_STALE_SECONDS:
             return seen is None
+        if owner_alive(lock_path):
+            return False
         logger.warning("reclaiming stale lock %s (age %.1fs)", lock_path, seen)
         try:
             os.unlink(lock_path)
@@ -146,7 +219,7 @@ class DiskRecordClient:
     The disk twin of ``S3RecordClient``: a record is one file at
     ``{root}/{prefix}{name}.json``, written atomically (tmp, synced,
     then rename(2)) so readers never see a torn record. The conditional
-    write serializes on a ``{record}.lock`` created with O_CREAT|O_EXCL,
+    write serializes on a ``{record}.lock`` published by an exclusive hard link,
     so compare and write hit the same stored version. Record names are
     percent-encoded into filenames, so any id is safe.
     """
@@ -157,6 +230,9 @@ class DiskRecordClient:
 
     def path(self, name: str) -> str:
         return os.path.join(self._dir, f"{quote(name, safe='')}.json")
+
+    async def approval_guarantee(self) -> None:
+        return None
 
     async def get(self, name: str) -> tuple[dict[str, Any] | None, str]:
         """Read one record; ``(fields, "")``, ``(None, "")`` when absent.
@@ -172,7 +248,7 @@ class DiskRecordClient:
         return json.loads(body), ""
 
     async def put(self, name: str, fields: dict[str, Any]) -> None:
-        await aiofiles.os.makedirs(self._dir, exist_ok=True)
+        await run_blocking(prepare_directory, self._dir)
         await self._write_record(self.path(name), fields)
 
     async def cas_put(
@@ -181,19 +257,12 @@ class DiskRecordClient:
         """Write one record iff its stored generation matches.
 
         Take the record's lockfile, re-read under the lock, check the
-        generation, then tmp-write + rename. Losing the lock race or the
-        generation check returns False; the caller adopts and retries.
+        generation, then tmp-write + rename. Wait for a busy writer;
+        a changed generation returns False for the caller to rebase.
         """
-        await aiofiles.os.makedirs(self._dir, exist_ok=True)
         path = self.path(name)
         lock_path = path + ".lock"
-        fd = await _acquire_owned(lock_path)
-        if fd is None:
-            if not await asyncio.to_thread(_reclaim_stale_lock, lock_path):
-                return False
-            fd = await _acquire_owned(lock_path)
-            if fd is None:
-                return False
+        fd = await self.lock(name)
         try:
             stored, _ = await self.get(name)
             if generation_of(stored) != expected_generation:
@@ -210,7 +279,7 @@ class DiskRecordClient:
         (e.g. the single-file namespace plane); spins past contention
         and reclaims stale locks, raising only if a live writer holds
         the lock for the whole retry budget (~10s)."""
-        await aiofiles.os.makedirs(self._dir, exist_ok=True)
+        await run_blocking(prepare_directory, self._dir)
         lock_path = self.path(name) + ".lock"
         for _ in range(LOCK_RETRY_LIMIT):
             fd = await _acquire_owned(lock_path)
@@ -226,25 +295,40 @@ class DiskRecordClient:
 
     async def _write_record(self, path: str, fields: dict[str, Any]) -> None:
         tmp = f"{path}.{os.getpid()}.{next(_TMP_COUNTER)}.tmp"
-        async with aiofiles.open(tmp, "wb") as f:
-            await f.write(json.dumps(fields).encode())
-            await f.flush()
-            fd = f.fileno()
 
-            def sync() -> None:
-                # Full sync on macOS; plain fsync where the volume refuses it.
-                if sys.platform == "darwin":
-                    try:
-                        fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
-                        return
-                    except OSError:
-                        logger.debug(
-                            "F_FULLFSYNC refused on %s", tmp, exc_info=True
-                        )
-                os.fsync(fd)
+        async def publish() -> None:
+            async with aiofiles.open(tmp, "wb") as f:
+                await f.write(json.dumps(fields).encode())
+                await f.flush()
+                fd = f.fileno()
 
-            await run_blocking(sync)
-        await aiofiles.os.replace(tmp, path)
+                def sync() -> None:
+                    if sys.platform == "darwin":
+                        try:
+                            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+                            return
+                        except OSError as exc:
+                            if exc.errno not in (
+                                errno.ENOTSUP,
+                                errno.EINVAL,
+                                errno.ENOTTY,
+                            ):
+                                raise
+                            logger.debug(
+                                "F_FULLFSYNC refused on %s", tmp, exc_info=True
+                            )
+                    os.fsync(fd)
+
+                await run_blocking(sync)
+            await aiofiles.os.replace(tmp, path)
+            await run_blocking(sync_directory, os.path.dirname(path))
+
+        task = asyncio.create_task(publish())
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            await settle(task)
+            raise
 
     async def list_names(self) -> list[str]:
         if not await aiofiles.os.path.isdir(self._dir):

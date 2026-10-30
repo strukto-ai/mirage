@@ -16,6 +16,7 @@ import asyncio
 import errno
 import json
 import os
+import sys
 import threading
 import time
 from itertools import count
@@ -28,6 +29,101 @@ import pytest
 
 import mirage.workspace.record.disk as disk
 from mirage.workspace.record.disk import DiskRecordClient
+
+CRASH_OWNER = """
+import os
+import sys
+from mirage.workspace.record.disk import _acquire_lock
+
+target, phase = sys.argv[1:]
+write = os.write
+link = os.link
+
+def write_owner(fd, data):
+    if phase == 'before':
+        os._exit(73)
+    return write(fd, data)
+
+def publish(source, destination):
+    link(source, destination)
+    if phase == 'after':
+        os._exit(73)
+
+os.write = write_owner
+os.link = publish
+_acquire_lock(target)
+os._exit(73)
+"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["before", "after"])
+async def test_process_death_cannot_publish_an_incomplete_lock_owner(
+    tmp_path, phase
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    lock = Path(client.path("crash") + ".lock")
+    child = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        CRASH_OWNER,
+        str(lock),
+        phase,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, errors = await asyncio.wait_for(child.communicate(), 5)
+    assert child.returncode == 73, errors.decode()
+    if phase == "before":
+        assert not lock.exists()
+    else:
+        assert lock.read_text() == str(child.pid)
+        past = time.time() - 100
+        os.utime(lock, (past, past))
+    assert await client.cas_put("crash", {"generation": 1}, 0)
+    assert not lock.exists()
+
+
+def test_an_ambiguous_legacy_lock_owner_is_not_reclaimed(tmp_path):
+    lock = tmp_path / "legacy.json.lock"
+    lock.write_text("")
+    past = time.time() - 100
+    os.utime(lock, (past, past))
+    assert not disk._reclaim_stale_lock(str(lock))
+    assert lock.exists()
+
+
+def test_owner_write_failure_closes_and_removes_the_candidate(
+    tmp_path, monkeypatch
+):
+    fds = []
+
+    def fail(fd, data):
+        fds.append(fd)
+        raise OSError("owner write failed")
+
+    monkeypatch.setattr(os, "write", fail)
+    with pytest.raises(OSError, match="owner write failed"):
+        disk._acquire_lock(str(tmp_path / "owner.lock"))
+    assert list(tmp_path.iterdir()) == []
+    with pytest.raises(OSError):
+        os.fstat(fds[0])
+
+
+def test_owner_is_complete_after_short_writes(tmp_path, monkeypatch):
+    write = os.write
+
+    def short(fd, data):
+        return write(fd, data[:1])
+
+    monkeypatch.setattr(os, "write", short)
+    path = str(tmp_path / "owner.lock")
+    fd = disk._acquire_lock(path)
+    assert fd is not None
+    try:
+        assert Path(path).read_text() == str(os.getpid())
+    finally:
+        disk._release_lock(fd, path)
 
 
 @pytest.mark.asyncio
@@ -131,17 +227,17 @@ async def test_cancel_during_acquisition_releases_lock(
 
 
 def _race_two_reclaimers(
-    monkeypatch, lock_path: str, late_step: Literal["unlink", "open"]
+    monkeypatch, lock_path: str, late_step: Literal["unlink", "link"]
 ) -> None:
     """Hold the first two stats of ``lock_path`` until both have run, then
     delay the later waiter's ``late_step``: its unlink of the lock (both
-    reclaim at once) or its open of the reclaim guard (it reclaims after
+    reclaim at once) or its link of the reclaim guard (it reclaims after
     the earlier waiter has taken a new lock).
 
     Args:
         monkeypatch (pytest.MonkeyPatch): the test's patcher.
         lock_path (str): the lockfile both waiters contend for.
-        late_step (Literal["unlink", "open"]): the os call delayed.
+        late_step (Literal["unlink", "link"]): the os call delayed.
     """
     both_saw_it = threading.Barrier(2)
     stats = count()
@@ -157,7 +253,8 @@ def _race_two_reclaimers(
         return result
 
     def late(path, *args, **kwargs):
-        if path == late_path and next(late_calls) == 1:
+        target = args[0] if late_step == "link" else path
+        if target == late_path and next(late_calls) == 1:
             time.sleep(0.2)
         return real_late(path, *args, **kwargs)
 
@@ -177,7 +274,7 @@ def _stale_lock(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "late_step", ["unlink", "open"], ids=["together", "after"]
+    "late_step", ["unlink", "link"], ids=["together", "after"]
 )
 async def test_two_claims_over_one_stale_lock_have_one_winner(
     tmp_path, monkeypatch, late_step
@@ -236,15 +333,15 @@ async def test_a_reclaimer_that_loses_the_guard_leaves_the_lock(
     client = DiskRecordClient(str(tmp_path), "")
     lock_path = _stale_lock(client, "k")
     guard = _stale_lock(client, "k", ".lock.reclaim")
-    opens = count()
-    real_open = os.open
+    publications = count()
+    real_link = os.link
 
-    def open_(path, *args, **kwargs):
-        if path == guard and next(opens) == 1:
+    def link(source, target, *args, **kwargs):
+        if target == guard and next(publications) == 1:
             raise FileExistsError(guard)
-        return real_open(path, *args, **kwargs)
+        return real_link(source, target, *args, **kwargs)
 
-    monkeypatch.setattr(os, "open", open_)
+    monkeypatch.setattr(os, "link", link)
     assert not disk._reclaim_stale_lock(lock_path)
     assert os.listdir(tmp_path) == ["k.json.lock"]
 
@@ -296,7 +393,129 @@ async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
     await client.put("k", {"generation": 0})
     body = len(json.dumps({"generation": 0}))
     record = os.stat(client.path("k")).st_ino
-    assert steps == [(how, body, record), ("replace", body, record)]
+    directory = os.stat(tmp_path)
+    assert steps[-3:] == [
+        (how, body, record),
+        ("replace", body, record),
+        ("fsync", directory.st_size, directory.st_ino),
+    ]
+    assert all(step[0] == "fsync" for step in steps[:-3])
+
+
+@pytest.mark.asyncio
+async def test_an_old_lock_of_a_live_process_is_not_reclaimed(tmp_path):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 1})
+    lock = Path(client.path("k") + ".lock")
+    lock.write_text(str(os.getpid()))
+    past = time.time() - 100
+    os.utime(lock, (past, past))
+    waiting = asyncio.create_task(client.cas_put("k", {"generation": 2}, 1))
+    await asyncio.sleep(0.025)
+    assert not waiting.done()
+    assert lock.read_text() == str(os.getpid())
+    assert (await client.get("k"))[0] == {"generation": 1}
+    await client.put("k", {"generation": 2, "owner": "holder"})
+    lock.unlink()
+    assert not await waiting
+    assert (await client.get("k"))[0] == {"generation": 2, "owner": "holder"}
+
+
+@pytest.mark.asyncio
+async def test_cancellation_joins_publication_before_releasing_cas_lock(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    replace = aiofiles.os.replace
+
+    async def delayed(source, target):
+        entered.set()
+        await release.wait()
+        await replace(source, target)
+
+    monkeypatch.setattr(aiofiles.os, "replace", delayed)
+    task = asyncio.create_task(client.cas_put("k", {"generation": 1}, 0))
+    await entered.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0.01)
+    try:
+        assert not task.done()
+        assert Path(client.path("k") + ".lock").exists()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (await client.get("k"))[0] == {"generation": 1}
+    assert not Path(client.path("k") + ".lock").exists()
+
+
+@pytest.mark.asyncio
+async def test_directory_sync_failure_is_not_a_commit_acknowledgement(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+    original = disk.sync_directory
+
+    def fail_directory_sync(path):
+        if Path(client.path("k")).read_text() == json.dumps({"generation": 1}):
+            raise OSError(errno.EIO, "directory sync failed")
+        original(path)
+
+    monkeypatch.setattr(disk, "sync_directory", fail_directory_sync)
+    with pytest.raises(OSError, match="directory sync failed"):
+        await client.cas_put("k", {"generation": 1}, 0)
+    assert (await client.get("k"))[0] == {"generation": 1}
+    monkeypatch.setattr(disk, "sync_directory", original)
+    assert not await client.cas_put("k", {"generation": 1}, 0)
+
+
+@pytest.mark.asyncio
+async def test_existing_directory_ancestors_are_confirmed_before_record_publish(
+    tmp_path, monkeypatch
+):
+    directory = tmp_path / "already-created" / "sessions"
+    directory.mkdir(parents=True)
+    client = DiskRecordClient(str(directory), "")
+    synced: list[str] = []
+
+    def sync(path):
+        synced.append(path)
+        if path == str(tmp_path):
+            raise OSError(errno.EIO, "ancestor sync failed")
+
+    monkeypatch.setattr(disk, "sync_directory", sync)
+    with pytest.raises(OSError, match="ancestor sync failed"):
+        await client.cas_put("k", {"generation": 1}, 0)
+    assert synced == [str(directory), str(directory.parent), str(tmp_path)]
+    assert (await client.get("k"))[0] is None
+
+
+@pytest.mark.asyncio
+async def test_file_sync_io_failure_is_not_retried_as_weaker_sync(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+
+    def fail_file_sync(fd, command):
+        raise OSError(errno.EIO, "file sync failed")
+
+    monkeypatch.setattr(disk.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        disk,
+        "fcntl",
+        SimpleNamespace(F_FULLFSYNC=51, fcntl=fail_file_sync),
+        raising=False,
+    )
+    with pytest.raises(OSError, match="file sync failed"):
+        await client.cas_put("k", {"generation": 1}, 0)
+    assert (await client.get("k"))[0] == {"generation": 0}
 
 
 @pytest.mark.asyncio

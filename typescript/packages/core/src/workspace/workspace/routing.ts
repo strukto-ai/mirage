@@ -92,10 +92,20 @@ export class Router {
     const placed = options.runtime === undefined ? null : this.placed(options.runtime)
     if (!placing || (held !== undefined && (await held()))) return placed ?? this.unplaced()
     const ctx = this.context(command, session, await judged())
-    const [said, route] = await policies.preExecute(ctx, placed !== null)
+    const [said, initialRoute] = await policies.preExecute(ctx, placed !== null)
+    let route = initialRoute
     const action =
       said?.kind === 'ask'
-        ? await this.registry.decisions.resolve(...opQuestion(ctx, said), signal, claimant)
+        ? await this.registry.decisions.resolve(
+            ...opQuestion(ctx, said),
+            signal,
+            claimant,
+            async () => {
+              const [current, updated] = await policies.preExecute(ctx, placed !== null)
+              route = updated
+              return current?.kind === 'ask' ? opQuestion(ctx, current)[1] : current
+            },
+          )
         : said
     if (action?.kind === 'abandoned') throw makeAbortError()
     if (action !== null) return action

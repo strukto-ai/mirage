@@ -63,7 +63,7 @@ function body(node: TSNodeLike, frame: Frame): Frame {
 }
 
 function fresh(origin: Occurrence | null = null): HandOff {
-  return { claimed: [], parent: null, origin }
+  return { parent: null, origin }
 }
 
 describe('occurrence', () => {
@@ -228,7 +228,7 @@ describe('occurrence', () => {
     // on the line: the rewritten line's command is placed under the word
     // that named it, and the line it runs as hands up to the line's own
     // hand-off.
-    const handed: HandOff = { claimed: [], parent: null, origin: null }
+    const handed: HandOff = { parent: null, origin: null }
     const root = parse('c && c')
     const underFirst = evaluatedFrom(command(root, 0), handed)
     const underSecond = evaluatedFrom(command(root, 1), handed)

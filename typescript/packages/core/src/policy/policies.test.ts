@@ -24,6 +24,7 @@ import { type FileStat, Limit, MountMode, OnExceed, PathSpec } from '../types.ts
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from './base.ts'
+import { SESSION_SCOPED, type SessionScoped } from './mixin.ts'
 import { ebusy } from '../errors/fs.ts'
 import { MountRootPolicy } from './builtin/mount_root.ts'
 import { PolicyDenied } from './errors.ts'
@@ -2144,4 +2145,38 @@ it('composition merges many asks without recounting prior rules', async () => {
   const policies = new Policies([{ preCommand: () => questions }])
   const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
   expect(await policies.preCommand(ctx)).toMatchObject({ rules })
+})
+
+it('fences a session-scoped callback that returns false after its policy chain changes', async () => {
+  let entered = (): void => undefined
+  let resume = (): void => undefined
+  const suspended = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const release = new Promise<void>((resolve) => {
+    resume = resolve
+  })
+  class Scoped implements Policy, SessionScoped {
+    readonly [SESSION_SCOPED] = true
+    postVfs(): null {
+      return null
+    }
+    async wantsFor(): Promise<boolean> {
+      entered()
+      await release
+      return false
+    }
+  }
+  const ws = new Workspace({}, { policies: [new Scoped()] })
+  const policies = ws.registry.policies
+  const waiting = policies.wantsFor('postVfs', ws.defaultSessionId)
+  try {
+    await suspended
+    policies.add({ postVfs: () => null })
+    resume()
+    await expect(waiting).rejects.toThrow('policy_changed')
+  } finally {
+    resume()
+    await ws.close()
+  }
 })

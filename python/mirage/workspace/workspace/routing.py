@@ -130,9 +130,21 @@ class Router:
         said, route = await policies.pre_execute(
             ctx, placed=placed is not None
         )
+
+        async def recheck() -> Deny | Ask | None:
+            nonlocal route
+            current, route = await policies.pre_execute(
+                ctx, placed=placed is not None
+            )
+            return (
+                op_question(ctx, current)[1]
+                if isinstance(current, Ask)
+                else current
+            )
+
         action = (
             await self._registry.decisions.resolve(
-                *op_question(ctx, said), cancel, claimant
+                *op_question(ctx, said), cancel, claimant, recheck
             )
             if isinstance(said, Ask)
             else said

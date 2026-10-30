@@ -15,14 +15,11 @@
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from mirage.policy.match import Outcome
 from mirage.policy.types import (
     AdmissionRules,
     CommandRule,
-    Decision,
     ProfileScript,
     ProfileScripts,
-    Scope,
 )
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import SecretRef
@@ -155,46 +152,3 @@ def scripts_from_dict(
         method: tuple(script_from_dict(entry) for entry in entries)
         for method, entries in data.items()
     }
-
-
-def decision_to_dict(record: Decision) -> dict[str, Any]:
-    """A ledger record as the session record stores it.
-
-    Args:
-        record (Decision): the record.
-    """
-    return {
-        "id": record.id,
-        "session_id": record.session_id,
-        "command": record.command,
-        "argv": list(record.argv),
-        "cwd": record.cwd,
-        "paths": list(record.paths),
-        "reason": record.reason,
-        "rule": rule_to_dict(record.rule),
-        "outcome": record.outcome.value if record.outcome else None,
-        "scope": record.scope.value,
-        "note": record.note,
-    }
-
-
-def decision_from_dict(data: Mapping[str, Any]) -> Decision:
-    """A ledger record read back from a session record.
-
-    Args:
-        data (Mapping[str, Any]): what ``decision_to_dict`` wrote.
-    """
-    outcome = data.get("outcome")
-    return Decision(
-        id=data["id"],
-        session_id=data.get("session_id", ""),
-        command=data.get("command", ""),
-        argv=tuple(data.get("argv", ())),
-        cwd=data.get("cwd", "/"),
-        paths=tuple(data.get("paths", ())),
-        reason=data.get("reason", ""),
-        rule=rule_from_dict(data["rule"]),
-        outcome=Outcome(outcome) if outcome else None,
-        scope=Scope(data.get("scope", Scope.ONCE.value)),
-        note=data.get("note", ""),
-    )

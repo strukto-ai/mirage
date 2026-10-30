@@ -45,6 +45,20 @@ class NamespaceStore(ABC):
         """
         raise NotImplementedError
 
+    async def get(self, key: str) -> RecordFields | None:
+        """Read one authoritative record without using a session cache.
+
+        Args:
+            key (str): the record identity.
+        """
+        return (await self.load()).get(key)
+
+    async def approval_guarantee(self) -> None:
+        """Refuse approval authority until a store declares its guarantees."""
+        raise RuntimeError(
+            "store does not provide confirmed approval persistence"
+        )
+
     @abstractmethod
     async def set(self, key: str, fields: RecordFields) -> None:
         """Upsert one record.
@@ -130,6 +144,13 @@ class RecordNamespaceStore(NamespaceStore):
             for name, (fields, _) in zip(names, records)
             if fields is not None
         }
+
+    async def get(self, key: str) -> RecordFields | None:
+        fields, _ = await self._records.get(key)
+        return fields
+
+    async def approval_guarantee(self) -> None:
+        await self._records.approval_guarantee()
 
     async def set(self, key: str, fields: RecordFields) -> None:
         await self._records.put(key, fields)

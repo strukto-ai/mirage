@@ -321,7 +321,7 @@ describe('explain', () => {
     const w = await ws()
     for (let i = 0; i < 3; i += 1) await w.explain('git push origin main', 's')
     expect(w.decisions.pending()).toEqual([])
-    expect(w.getSession('s').decisions).toEqual([])
+    expect(w.decisions.list('s')).toEqual([])
     await w.explain('rm /data/prod/x.txt', 's')
     expect((await w.vfs.readdir('/data')).sort()).toEqual([
       '/data/a.txt',

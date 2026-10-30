@@ -26,6 +26,18 @@ class PolicyError(Exception):
     """
 
 
+class ApprovalUnavailable(RuntimeError):
+    """Approval authority could not be confirmed.
+
+    Args:
+        status (str): the transition or storage condition preventing admission.
+    """
+
+    def __init__(self, status: str) -> None:
+        super().__init__(f"approval unavailable: {status}")
+        self.status = status
+
+
 class Explained(Exception):
     """A dry run reached the op gate: the dispatcher stops there, before any
     backend or cache is touched, with what the gate would answer noted

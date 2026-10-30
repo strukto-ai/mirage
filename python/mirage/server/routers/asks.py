@@ -93,9 +93,6 @@ async def answer_ask(
     entry = require_entry(request, workspace_id)
     await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     if req.answer == "deny" and req.scope == "session":
-        # covers() never lets a session-scoped deny answer anything: a
-        # deny refuses the retry once, and asking again raises a new
-        # record. Recording one would be a rule that can never speak.
         raise HTTPException(
             status_code=422,
             detail="a deny answers once; asking again raises a new record",

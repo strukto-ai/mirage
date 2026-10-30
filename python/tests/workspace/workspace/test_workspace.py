@@ -25,6 +25,7 @@ from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
+from mirage.policy.errors import ApprovalUnavailable
 from mirage.runtime.sandbox import RemoteSandbox
 from mirage.shell.job_table.ram import RAMJobStore
 from mirage.types import MountBackend, MountMode
@@ -245,7 +246,47 @@ async def test_the_default_tool_table_follows_a_restored_default():
 
 
 @pytest.mark.asyncio
-async def test_an_explicit_default_id_keeps_its_session_after_a_restore():
+async def test_a_restored_default_is_stored_before_it_is_discoverable(
+    monkeypatch,
+):
+    source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await source.shell("echo one > /a.txt")
+    source_epoch = source.get_session(source.default_session_id).incarnation
+    buf = io.BytesIO()
+    await source.snapshot(buf)
+    restored = source.default_session_id
+    await source.close()
+    buf.seek(0)
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("true")
+    previous = ws.default_session_id
+    store = ws.state_store
+    replace_meta = store.replace_meta
+    published = False
+
+    async def checked(workspace_id, fields):
+        nonlocal published
+        sessions = store.sessions(workspace_id)
+        target = await sessions.get(fields["default_session_id"])
+        assert target is not None
+        assert target.get("closed") is None
+        assert target["incarnation"] != source_epoch
+        assert (await sessions.get(previous))["closed"]
+        await replace_meta(workspace_id, fields)
+        published = True
+
+    monkeypatch.setattr(store, "replace_meta", checked)
+    try:
+        await apply_state_dict(ws, read_tar(buf))
+        assert published
+        meta = await store.load_meta(ws.workspace_id)
+        assert meta["default_session_id"] == restored
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_old_default_id_is_closed_after_a_restore():
     source = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await source.shell("echo one > /a.txt")
     buf = io.BytesIO()
@@ -257,7 +298,7 @@ async def test_an_explicit_default_id_keeps_its_session_after_a_restore():
     try:
         assert pinned is not ws.tools
         await apply_state_dict(ws, read_tar(buf))
-        with pytest.raises(KeyError):
+        with pytest.raises(ApprovalUnavailable, match="session_closed"):
             await pinned.call("read", {"path": "/a.txt"})
     finally:
         await ws.close()

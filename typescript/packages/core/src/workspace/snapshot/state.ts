@@ -742,7 +742,6 @@ async function gateRestoredState(
       const sid = fields.sessionId
       const session = manager.has(sid) ? manager.get(sid) : manager.create(sid)
       narrow(session, narrowingOf(fields))
-      session.decisions = fields.decisions
       setCwd(session, fields.cwd)
       session.vars = fields.vars
     }
@@ -771,7 +770,7 @@ async function restoreSessions(
   // Python None-guard.
   ws.forgetReads()
   if (state.default_session_id != null) {
-    await ws.adoptDefaultSession(state.default_session_id)
+    await ws.sessionManager.restoreDefault(state.default_session_id)
   }
   const restored: SessionState[] = []
   for (const fields of tables) {
@@ -803,6 +802,7 @@ async function restoreSessions(
   // The snapshot's session table wins over prior store contents,
   // mirroring Namespace.replaceNodes.
   await ws.sessionManager.replaceFromSnapshot(restored)
+  if (state.default_session_id != null) await ws.adoptDefaultSession(state.default_session_id)
 }
 
 function restoreCache(ws: WorkspaceLike, state: WorkspaceStateDict): void {

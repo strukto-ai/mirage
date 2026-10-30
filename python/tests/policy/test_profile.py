@@ -2095,7 +2095,7 @@ async def test_a_session_grant_covers_the_rule_and_a_deny_is_never_reopened():
         # The answer is session state: on the record, and not another
         # session's.
         default = ws._session_mgr.get(ws._session_mgr.default_id)
-        stored = default.to_dict()["decisions"][0]
+        stored = default.to_dict()["approval_state"]["records"][0]
         assert (stored["outcome"], stored["scope"]) == ("allow", "session")
         ws.create_session("other")
         await ws.shell("touch /scratch/w", session_id="other")
@@ -2203,9 +2203,7 @@ async def test_a_host_still_deciding_does_not_outlive_the_run():
         cancel.set()
         with pytest.raises(MirageAbortError):
             await line
-        # The kill is not an answer: the question is still open, and the
-        # file the line would have removed is still there.
-        assert len(ws.decisions.pending()) == 1
+        assert ws.decisions.pending() == ()
         assert (await _line(ws, "cat /scratch/z"))[0] == 0
     finally:
         await ws.close()
@@ -2235,7 +2233,7 @@ async def test_a_compound_line_asked_before_it_runs_is_killable_too():
         cancel.set()
         with pytest.raises(MirageAbortError):
             await line
-        assert len(ws.decisions.pending()) == 1
+        assert ws.decisions.pending() == ()
         assert (await _line(ws, "cat /scratch/z"))[0] == 0
     finally:
         await ws.close()

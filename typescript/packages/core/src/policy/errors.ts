@@ -27,6 +27,16 @@ export class PolicyError extends Error {
   }
 }
 
+export class ApprovalUnavailable extends Error {
+  constructor(
+    readonly status: string,
+    options?: ErrorOptions,
+  ) {
+    super(`approval unavailable: ${status}`, options)
+    this.name = 'ApprovalUnavailable'
+  }
+}
+
 /**
  * A dry run reached the op gate: the dispatcher stops there, before any backend
  * or cache is touched, with what the gate would answer noted for

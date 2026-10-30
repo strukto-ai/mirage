@@ -189,20 +189,18 @@ async def test_concurrent_cas_writers_lose_nothing(store):
 
 
 @pytest.mark.asyncio
-async def test_disk_lock_held_by_live_writer_loses(tmp_path):
+async def test_disk_lock_held_by_live_writer_waits_for_release(tmp_path):
     store = _disk_store(tmp_path)
     await store.set("s", {"session_id": "s", "generation": 1})
     lock = tmp_path / "sessions" / "s.json.lock"
-    lock.write_bytes(b"9999999")
-    assert (
-        await store.cas_set("s", {"session_id": "s", "generation": 2}, 1)
-        is False
+    lock.write_text(str(os.getpid()))
+    waiting = asyncio.create_task(
+        store.cas_set("s", {"session_id": "s", "generation": 2}, 1)
     )
+    await asyncio.sleep(0.025)
+    assert not waiting.done()
     lock.unlink()
-    assert (
-        await store.cas_set("s", {"session_id": "s", "generation": 2}, 1)
-        is True
-    )
+    assert await waiting
     await store.close()
 
 

@@ -470,6 +470,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "patch" => patch::open(config),
         "policy" => policy::stream::open(config),
         "policy_compose" => policy::composition::open(config),
+        "policy_decisions" => policy::decisions::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),
         "rev" => rev::open(config),

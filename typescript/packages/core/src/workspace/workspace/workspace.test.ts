@@ -199,7 +199,7 @@ describe('session tools', () => {
     const pinned = new Session(ws, ws.defaultSessionId).tools
     expect(pinned).not.toBe(ws.tools)
     await applyStateDict(ws, state)
-    await expect(pinned.call('read', { path: '/a.txt' })).rejects.toThrow('unknown session')
+    await expect(pinned.call('read', { path: '/a.txt' })).rejects.toThrow('session_closed')
   })
 
   it('starts a restored default with no read history', async () => {

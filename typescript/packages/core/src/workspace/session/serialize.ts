@@ -15,14 +15,11 @@
 import type {
   CommandRule,
   AdmissionRules,
-  Decision,
-  Outcome,
   ProfileScript,
   ProfileScripts,
   ScriptMethod,
 } from '../../policy/types.ts'
 import { METHODS } from '../../policy/constants.ts'
-import type { Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import { snakeToCamel } from '../../utils/normalize.ts'
 import type { Language } from '../../runtime/types.ts'
@@ -123,51 +120,4 @@ export function scriptsFromDict(data: Record<string, ScriptJSON[]>): ProfileScri
   return Object.fromEntries(
     Object.entries(data).map(([key, entries]) => [snakeToCamel(key), entries.map(scriptFromDict)]),
   )
-}
-
-/** A ledger record as the session record stores it (the Python spelling). */
-export interface DecisionJSON {
-  id: string
-  session_id: string
-  command: string
-  argv: string[]
-  cwd: string
-  paths: string[]
-  reason: string
-  rule: RuleJSON
-  outcome: string | null
-  scope: string
-  note: string
-}
-
-export function decisionToDict(record: Decision): DecisionJSON {
-  return {
-    id: record.id,
-    session_id: record.sessionId,
-    command: record.command,
-    argv: [...record.argv],
-    cwd: record.cwd,
-    paths: [...record.paths],
-    reason: record.reason,
-    rule: ruleToDict(record.rule),
-    outcome: record.outcome,
-    scope: record.scope,
-    note: record.note,
-  }
-}
-
-export function decisionFromDict(data: DecisionJSON): Decision {
-  return {
-    id: data.id,
-    sessionId: data.session_id,
-    command: data.command,
-    argv: data.argv,
-    cwd: data.cwd,
-    paths: data.paths,
-    reason: data.reason,
-    rule: ruleFromDict(data.rule),
-    outcome: data.outcome !== null ? (data.outcome as Outcome) : null,
-    scope: data.scope as Scope,
-    note: data.note,
-  }
 }
