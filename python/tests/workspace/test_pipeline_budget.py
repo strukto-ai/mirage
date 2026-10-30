@@ -115,6 +115,11 @@ async def test_rust_filters_yield_to_deadlines_and_stop_ready_input(line):
     chunk = b"theta,\x80,words\n" * 1024
     if line.startswith("zgrep"):
         chunk = gzip.compress(chunk)
+    warm = _ws()
+    try:
+        await warm.shell(line, stdin=chunk)
+    finally:
+        await warm.close()
     reads = 0
 
     async def source():

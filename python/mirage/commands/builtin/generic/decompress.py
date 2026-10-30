@@ -1,6 +1,7 @@
 import posixpath
 import string
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass, replace
 
 from mirage.commands.builtin.constants import (
@@ -136,11 +137,14 @@ def _retries(
 async def _resumed(
     first: bytes | None, rest: AsyncIterator[bytes]
 ) -> AsyncIterator[bytes]:
-    if first is None:
-        return
-    yield first
-    async for chunk in rest:
-        yield chunk
+    try:
+        if first is None:
+            return
+        yield first
+        async for chunk in rest:
+            yield chunk
+    finally:
+        await close_quietly(rest)
 
 
 async def _opened(source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
@@ -379,13 +383,16 @@ async def decompress_inputs(
             try:
                 failure: GzipDataError | None = None
                 try:
-                    async for chunk in gunzip_stream(
-                        source, test_only, force and not in_place
-                    ):
-                        if in_place:
-                            await spool.append(chunk)
-                        elif not test_only:
-                            yield chunk
+                    async with aclosing(
+                        gunzip_stream(
+                            source, test_only, force and not in_place
+                        )
+                    ) as decoded:
+                        async for chunk in decoded:
+                            if in_place:
+                                await spool.append(chunk)
+                            elif not test_only:
+                                yield chunk
                 except GzipDataError as exc:
                     failure = exc
                 except FS_ERRORS as exc:

@@ -371,6 +371,38 @@
         "stdout": "2\n",
         "stderr": "\ngzip: stdin: unexpected end of file\n"
       }
+    },
+    {
+      "id": "zgrep_early_pipe_close_keeps_status_and_pipefail",
+      "seq": 917112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box"
+      ],
+      "command": "( set -o pipefail; printf 'hello\\n' | gzip -c | zgrep -c hello | head -n1; echo \"$? ${PIPESTATUS[*]}\"; printf 'hello\\n' | gzip -c | zgrep -c absent | head -n1; echo \"$? ${PIPESTATUS[*]}\"; printf 'hello\\n' | gzip -c | zgrep -l hello | head -n1; echo \"$? ${PIPESTATUS[*]}\" )",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n0 0 0 0 0\n0\n1 0 0 1 0\n-\n0 0 0 0 0\n",
+        "stderr": ""
+      },
+      "note": "GNU gzip 1.13 in debian:stable-slim (sha256:a717a33469731894e77e912ea7d714e27c2dc38ee6554fd1a3102e92999cfc66). Early downstream closure preserves zgrep selection status in PIPESTATUS and pipefail."
     }
   ]
 }

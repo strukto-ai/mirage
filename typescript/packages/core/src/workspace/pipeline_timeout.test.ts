@@ -52,6 +52,12 @@ describe('line deadline', () => {
       char.charCodeAt(0),
     )
     if (line.startsWith('zgrep')) chunk = await gzip(chunk)
+    const warm = buildWs()
+    try {
+      await warm.shell(line, { stdin: chunk })
+    } finally {
+      await warm.close()
+    }
     let reads = 0
     async function* source(): AsyncGenerator<Uint8Array> {
       for (;;) {

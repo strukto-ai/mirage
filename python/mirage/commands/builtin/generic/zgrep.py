@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import aclosing
 from functools import partial
 
 from mirage.commands.builtin.generic.decompress import decompress_inputs
@@ -119,7 +120,7 @@ async def zgrep_generic(
                     resolver=resolver,
                 )
                 selected = IOResult(exit_code=1)
-                async for chunk in stream_input(
+                output = stream_input(
                     ensure_stream(body or b""),
                     stream,
                     operand_label(p, GREP_STDIN_LABEL),
@@ -127,19 +128,25 @@ async def zgrep_generic(
                     selected,
                     consume_all=True,
                     list_label=p.raw_path,
-                ):
-                    yield chunk
-                any_match = any_match or selected.exit_code == 0
-                failed = failed or io.exit_code == 1 or selected.exit_code == 2
-                diagnostic = (
-                    await io.materialize_stderr()
-                    + await selected.materialize_stderr()
                 )
-                if diagnostic:
-                    result.stderr = (
-                        await materialize(result.stderr) + diagnostic
+                try:
+                    async with aclosing(output):
+                        async for chunk in output:
+                            yield chunk
+                finally:
+                    any_match = any_match or selected.exit_code == 0
+                    failed = (
+                        failed or io.exit_code == 1 or selected.exit_code == 2
                     )
-                result.exit_code = exit_code_for(any_match, failed, False)
+                    diagnostic = (
+                        await io.materialize_stderr()
+                        + await selected.materialize_stderr()
+                    )
+                    if diagnostic:
+                        result.stderr = (
+                            await materialize(result.stderr) + diagnostic
+                        )
+                    result.exit_code = exit_code_for(any_match, failed, False)
         finally:
             await close_stream(stream)
 

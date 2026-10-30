@@ -109,27 +109,30 @@ export async function zgrepGeneric(
           resolver,
         })
         const selected = new IOResult({ exitCode: 1 })
-        yield* streamInput(
-          ensureStream(body ?? new Uint8Array()),
-          stream,
-          operandLabel(p, GREP_STDIN_LABEL),
-          showFilename,
-          selected,
-          false,
-          null,
-          ctx.signal,
-          true,
-          p.rawPath,
-        )
-        anyMatch ||= selected.exitCode === 0
-        failed ||= io.exitCode === 1 || selected.exitCode === 2
-        const diagnostic = concat([
-          await io.materializeStderr(),
-          await selected.materializeStderr(),
-        ])
-        if (diagnostic.length)
-          result.stderr = concat([await materialize(result.stderr), diagnostic])
-        result.exitCode = exitCodeFor(anyMatch, failed, false)
+        try {
+          yield* streamInput(
+            ensureStream(body ?? new Uint8Array()),
+            stream,
+            operandLabel(p, GREP_STDIN_LABEL),
+            showFilename,
+            selected,
+            false,
+            null,
+            ctx.signal,
+            true,
+            p.rawPath,
+          )
+        } finally {
+          anyMatch ||= selected.exitCode === 0
+          failed ||= io.exitCode === 1 || selected.exitCode === 2
+          const diagnostic = concat([
+            await io.materializeStderr(),
+            await selected.materializeStderr(),
+          ])
+          if (diagnostic.length)
+            result.stderr = concat([await materialize(result.stderr), diagnostic])
+          result.exitCode = exitCodeFor(anyMatch, failed, false)
+        }
       }
     } finally {
       await closeStream(stream)
