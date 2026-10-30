@@ -172,3 +172,12 @@ describe('buildApp drain', () => {
     expect((await line).stdoutText).toBe('done\n')
   })
 })
+
+describe('buildApp close', () => {
+  it('marks the server shutting down on every close', async () => {
+    const app = buildApp()
+    expect(app.registry.draining).toBe(false)
+    await app.close()
+    expect(app.registry.draining).toBe(true)
+  })
+})

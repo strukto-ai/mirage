@@ -759,15 +759,22 @@ async def _settle(entry: WorkspaceEntry, seconds: float) -> None:
     """
     ws = entry.runner.ws
 
+    # The deadline starts before a capture already under way is waited
+    # for, so a snapshot holding the workspace cannot stretch it.
     async def settle() -> None:
         try:
-            async with ws._quiesced(seconds):
-                return
+            async with asyncio.timeout(seconds):
+                async with ws._quiesced(seconds):
+                    return
+        except TimeoutError as exc:
+            logger.debug(
+                "drain: %s still busy at the deadline: %r", entry.id, exc
+            )
         except OSError as exc:
             if exc.errno != errno.EBUSY:
                 raise
             logger.debug("drain: cancelling %s's lines: %s", entry.id, exc)
-            await ws.cancel()
+        await ws.cancel()
 
     try:
         await entry.runner.call(settle())

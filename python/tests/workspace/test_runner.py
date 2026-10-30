@@ -29,6 +29,14 @@ def _runners() -> set[threading.Thread]:
     }
 
 
+async def _built() -> Workspace:
+    return _make_ws()
+
+
+async def _refused() -> Workspace:
+    raise ValueError("bad config")
+
+
 def _make_ws() -> Workspace:
     return Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
@@ -158,11 +166,8 @@ async def test_build_constructs_the_workspace_on_the_runners_thread():
 async def test_a_failed_build_stops_the_thread_it_started():
     before = _runners()
 
-    async def make() -> Workspace:
-        raise ValueError("bad config")
-
     with pytest.raises(ValueError, match="bad config"):
-        await WorkspaceRunner.build(make())
+        await WorkspaceRunner.build(_refused())
     assert _runners() == before
 
 
@@ -185,13 +190,10 @@ async def test_a_caller_cancelled_after_the_build_still_closes_it(monkeypatch):
             raise asyncio.CancelledError()
         return result
 
-    async def make() -> Workspace:
-        return _make_ws()
-
     monkeypatch.setattr(Workspace, "close", spy)
     monkeypatch.setattr(runner_module, "on_loop", cancelled_once_built)
     before = _runners()
     with pytest.raises(asyncio.CancelledError):
-        await WorkspaceRunner.build(make())
+        await WorkspaceRunner.build(_built())
     assert len(closed) == 1
     assert _runners() == before

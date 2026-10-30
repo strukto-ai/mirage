@@ -1731,3 +1731,54 @@ async def test_a_server_shutting_down_refuses_new_workspaces():
         r = await client.post("/v1/workspaces", json=_minimal_config())
     assert r.status_code == 503
     assert r.json() == {"detail": "server is shutting down"}
+
+
+@pytest.mark.asyncio
+async def test_a_load_past_max_sessions_is_refused():
+    free, _ = _make_app_with_short_grace(grace=10.0)
+    capped = build_app(idle_grace_seconds=10.0, max_sessions=2)
+    async with AsyncClient(
+        transport=ASGITransport(app=free), base_url="http://test"
+    ) as client:
+        wid = (
+            await client.post("/v1/workspaces", json=_minimal_config())
+        ).json()["id"]
+        for sid in ("a", "b"):
+            r = await client.post(
+                f"/v1/workspaces/{wid}/sessions", json={"session_id": sid}
+            )
+            assert r.status_code == 201, r.text
+        tar = await _download(client, wid)
+    async with AsyncClient(
+        transport=ASGITransport(app=capped), base_url="http://test"
+    ) as client:
+        r = await _upload(client, tar)
+    assert r.status_code == 400
+    assert r.json()["detail"] == (
+        "load failed: the snapshot holds 3 sessions, past max_sessions (2)"
+    )
+    assert len(capped.state.registry) == 0
+    await free.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_create_stops_its_runner(monkeypatch):
+    before = _runner_threads()
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    monkeypatch.setattr(app.state.registry, "add", _cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await client.post("/v1/workspaces", json=_minimal_config())
+    assert _runner_threads() == before
+
+
+def _runner_threads() -> set[threading.Thread]:
+    return {
+        t for t in threading.enumerate() if t.name.startswith("mirage-ws-")
+    }
+
+
+def _cancelled(*args, **kwargs):
+    raise asyncio.CancelledError()

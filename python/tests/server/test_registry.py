@@ -306,3 +306,26 @@ async def test_a_drain_lets_running_lines_finish_and_cancels_the_rest():
     with pytest.raises(MirageAbortError):
         await long
     await registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_drain_deadline_counts_a_capture_it_waits_behind():
+    registry = WorkspaceRegistry(idle_grace_seconds=10.0)
+    entry = registry.add(_ws(), "w")
+    ws = entry.runner.ws
+    line = asyncio.ensure_future(entry.runner.call(ws.shell("sleep 30")))
+    await asyncio.sleep(0.05)
+
+    async def capture() -> None:
+        async with ws._quiesced(30):
+            return
+
+    snapshot = asyncio.ensure_future(entry.runner.call(capture()))
+    await asyncio.sleep(0.05)
+    started = time.monotonic()
+    await registry.drain(0.3)
+    assert time.monotonic() - started < 5
+    with pytest.raises(MirageAbortError):
+        await line
+    await snapshot
+    await registry.close_all()

@@ -381,7 +381,9 @@ async def create_workspace(
             except ValueError as e:
                 await runner.stop()
                 raise HTTPException(status_code=409, detail=str(e))
-            except Exception:
+            except BaseException:
+                # A cancelled create stops the runner too: nothing else
+                # holds it before it is registered.
                 await runner.stop()
                 raise
         return await make_detail(entry)
@@ -605,7 +607,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
         async def restore() -> Workspace:
             async with registry.restoring() as policies:
                 restored.extend(policies)
-                return await run_with_network(
+                ws = await run_with_network(
                     rule,
                     Workspace.load(
                         source,
@@ -617,6 +619,15 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                         policies=policies,
                     ),
                 )
+            held = len(ws.list_sessions())
+            cap = registry.max_sessions
+            if cap is not None and held > cap:
+                await ws.close()
+                raise ValueError(
+                    f"the snapshot holds {held} sessions, past max_sessions "
+                    f"({cap})"
+                )
+            return ws
 
         try:
             runner = await WorkspaceRunner.build(restore())

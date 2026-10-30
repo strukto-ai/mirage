@@ -136,6 +136,36 @@ describe('workspaces router', () => {
     await app.close()
   })
 
+  it('refuses a load past max_sessions', async () => {
+    const free = buildApp()
+    const capped = buildApp({ maxSessions: 2 })
+    try {
+      const created = await free.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { id: 'many', config: RAM },
+      })
+      expect(created.statusCode).toBe(201)
+      for (const sid of ['a', 'b']) {
+        const r = await free.inject({
+          method: 'POST',
+          url: '/v1/workspaces/many/sessions',
+          payload: { session_id: sid },
+        })
+        expect(r.statusCode).toBe(201)
+      }
+      const r = await upload(capped, await download(free, 'many'))
+      expect(r.statusCode).toBe(400)
+      expect(r.json()).toEqual({
+        detail: 'load failed: the snapshot holds 3 sessions, past max_sessions (2)',
+      })
+      expect(capped.registry.size()).toBe(0)
+    } finally {
+      await free.close()
+      await capped.close()
+    }
+  })
+
   it('answers 503 while shutting down', async () => {
     const app = buildApp()
     app.registry.draining = true

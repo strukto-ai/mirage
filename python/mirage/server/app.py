@@ -269,6 +269,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if listener is not None:
             listener.close()
             await listener.wait_closed()
+        app.state.registry.draining = True
+        app.state.unregister_metrics()
         if app.state.graceful_timeout > 0:
             await app.state.registry.drain(app.state.graceful_timeout)
         try:
@@ -413,7 +415,7 @@ def build_app(
     )
     app.state.graceful_timeout = resolve_graceful_timeout(graceful_timeout)
     app.state.jobs = app.state.registry.jobs
-    register_metrics(app.state.registry)
+    app.state.unregister_metrics = register_metrics(app.state.registry)
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )

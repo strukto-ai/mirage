@@ -14,7 +14,7 @@
 
 import functools
 import weakref
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Counter, Meter, Observation
@@ -28,8 +28,9 @@ _RUNNING = frozenset({ExecutionStatus.RUNNING, ExecutionStatus.STOPPING})
 _registries: "weakref.WeakSet[WorkspaceRegistry]" = weakref.WeakSet()
 
 
-def register_metrics(registry: WorkspaceRegistry) -> None:
-    """Report ``registry`` through OpenTelemetry's global meter provider.
+def register_metrics(registry: WorkspaceRegistry) -> Callable[[], None]:
+    """Report ``registry`` through OpenTelemetry's global meter provider,
+    until the returned function is called as the app stops.
 
     Mirage records through the OpenTelemetry API only, so nothing is sent
     until the process sets up an SDK (``opentelemetry-instrument``, or a
@@ -38,9 +39,13 @@ def register_metrics(registry: WorkspaceRegistry) -> None:
 
     Args:
         registry (WorkspaceRegistry): the app's workspaces.
+
+    Returns:
+        Callable[[], None]: stops reporting it.
     """
     _registries.add(registry)
     _instruments()
+    return functools.partial(_registries.discard, registry)
 
 
 def refused(reason: str) -> None:

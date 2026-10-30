@@ -21,6 +21,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from mirage.server import app as app_module
+from mirage.server import metrics as metrics_module
 from mirage.server.app import (
     _remove_pid_file,
     _watch_exit,
@@ -231,3 +232,13 @@ async def test_the_lifespan_puts_the_servers_handlers_back():
     async with app.router.lifespan_context(app):
         assert signal.getsignal(signal.SIGINT) is not before
     assert signal.getsignal(signal.SIGINT) is before
+
+
+@pytest.mark.asyncio
+async def test_every_close_marks_the_server_shutting_down():
+    app = build_app(idle_grace_seconds=10.0)
+    async with app.router.lifespan_context(app):
+        assert not app.state.registry.draining
+        assert app.state.registry in metrics_module._registries
+    assert app.state.registry.draining
+    assert app.state.registry not in metrics_module._registries

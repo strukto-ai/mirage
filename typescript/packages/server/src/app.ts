@@ -211,11 +211,10 @@ export function buildApp(options: BuildAppOptions = {}) {
       ssh.listener = await startSSHServer(registry, sshConfig)
     })
   }
-  if (gracefulTimeout > 0) {
-    app.addHook('preClose', async () => {
-      await registry.drain(gracefulTimeout)
-    })
-  }
+  app.addHook('preClose', async () => {
+    registry.draining = true
+    if (gracefulTimeout > 0) await registry.drain(gracefulTimeout)
+  })
   app.addHook('onClose', async () => {
     unregisterMetrics()
     if (ssh.listener !== null) await ssh.listener.close()

@@ -608,13 +608,28 @@ function workspaceContext(
  */
 async function settle(entry: WorkspaceEntry, seconds: number): Promise<void> {
   const ws = entry.runner.ws
+  // The deadline starts before a capture already under way is waited for,
+  // so a snapshot holding the workspace cannot stretch it.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(false)
+    }, seconds * 1000)
+  })
+  const quiet = ws
+    .quiesced(() => Promise.resolve(true), seconds)
+    .catch((err: unknown) => {
+      if ((err as { code?: unknown }).code !== 'EBUSY') throw err
+      console.debug(`drain: cancelling ${entry.id}'s lines:`, err)
+      return false
+    })
   try {
-    await ws.quiesced(() => Promise.resolve(), seconds)
-  } catch (err) {
-    if ((err as { code?: unknown }).code !== 'EBUSY') throw err
-    console.debug(`drain: cancelling ${entry.id}'s lines:`, err)
-    await ws.cancel()
+    if (await Promise.race([quiet, late])) return
+  } finally {
+    clearTimeout(timer)
   }
+  await ws.cancel()
+  await quiet
 }
 
 async function stop(entry: WorkspaceEntry, drop = false): Promise<void> {

@@ -492,6 +492,14 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         }
         return answer(reply, 400, { detail: `load failed: ${(e as Error).message}` })
       }
+      const held = ws.listSessions().length
+      const cap = deps.registry.maxSessions
+      if (cap !== null && held > cap) {
+        await ws.close()
+        return answer(reply, 400, {
+          detail: `load failed: the snapshot holds ${String(held)} sessions, past max_sessions (${String(cap)})`,
+        })
+      }
       let entry
       try {
         entry = deps.registry.add(ws, wid, req.account, restoredWith)

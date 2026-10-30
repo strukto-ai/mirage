@@ -355,3 +355,24 @@ describe('drain', () => {
     await registry.closeAll()
   })
 })
+
+describe('drain deadline', () => {
+  it('counts a capture it waits behind', async () => {
+    const registry = new WorkspaceRegistry({ idleGraceSeconds: 10 })
+    const entry = registry.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'w')
+    const ws = entry.runner.ws
+    const line = ws.shell('sleep 30').then(
+      () => 'ended',
+      () => 'cancelled',
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const snapshot = ws.quiesced(() => Promise.resolve(), 30).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const started = Date.now()
+    await registry.drain(0.3)
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(await line).toBe('cancelled')
+    await snapshot
+    await registry.closeAll()
+  })
+})
