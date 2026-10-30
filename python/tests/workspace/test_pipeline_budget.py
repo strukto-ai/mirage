@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import gzip
 
 import pytest
 
@@ -96,3 +97,52 @@ async def test_early_finish_reports_downstream_code_not_sigpipe():
     r = await ws.shell("cat | head -n1", stdin=_multiline_stdin())
     assert r.exit_code == 0
     assert (await r.stdout_str()) == "line0\n"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "cat -n | wc -c",
+        "cat -A | wc -c",
+        "zgrep -c theta",
+        "zgrep -q theta",
+        "rg -E latin1 -c theta",
+        "rg -E latin1 -q absent",
+    ],
+)
+@pytest.mark.asyncio
+async def test_rust_filters_yield_to_deadlines_and_stop_ready_input(line):
+    chunk = b"theta,\x80,words\n" * 1024
+    if line.startswith("zgrep"):
+        chunk = gzip.compress(chunk)
+    reads = 0
+
+    async def source():
+        nonlocal reads
+        while True:
+            reads += 1
+            yield chunk
+
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        command_limits={
+            "@line": Limit(timeout_seconds=0.1),
+            "@all": Limit(max_lines=None, max_bytes=None),
+        },
+    )
+    start = asyncio.get_running_loop().time()
+    stdin = source()
+    try:
+        result = await ws.shell(line, stdin=stdin)
+        assert result.exit_code == 124
+        assert reads > 1
+        assert asyncio.get_running_loop().time() - start < 2
+        stopped = reads
+        await asyncio.sleep(0.01)
+        assert reads <= stopped + 1
+        settled = reads
+        await asyncio.sleep(0.01)
+        assert reads == settled
+    finally:
+        await stdin.aclose()
+        await ws.close()

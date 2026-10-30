@@ -67,8 +67,69 @@ fn short_record_allocations(config: &[u8], data: &[u8], expected: &[u8]) -> usiz
     calls
 }
 
+fn filter_memory(kind: &str, config: &[u8], begin: &[u8], chunk: &[u8], bytes: usize) {
+    let mut stream = mirage_rs::open(kind, config).unwrap();
+    if kind != "cat" {
+        stream.begin(begin).unwrap();
+    }
+    let mut out = Vec::new();
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    for _ in 0..bytes / chunk.len() {
+        out.clear();
+        stream.feed(chunk, &mut out).unwrap();
+        while stream.busy() {
+            out.clear();
+            stream.drain(&mut out).unwrap();
+        }
+    }
+    out.clear();
+    stream.finish(&mut out).unwrap();
+    while stream.busy() {
+        out.clear();
+        stream.drain(&mut out).unwrap();
+    }
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(
+        peak < 2 * 1024 * 1024,
+        "{kind} retained {peak} live bytes while processing {bytes} input bytes",
+    );
+    assert_eq!(stream.status(), 0);
+}
+
 #[test]
 fn short_records_bound_allocation_volume_and_live_input() {
+    let row = [b"theta,\x80,".as_slice(), &vec![b'x'; 1015], b"\n"].concat();
+    let rows = row.repeat(16);
+    let unended = vec![255; 16 * 1024];
+    for bytes in [4 * 1024 * 1024, 64 * 1024 * 1024] {
+        filter_memory("cat", br#"{"number_lines":true}"#, b"{}", &rows, bytes);
+        filter_memory(
+            "cat",
+            br#"{"show_nonprinting":true}"#,
+            b"{}",
+            &unended,
+            bytes,
+        );
+        filter_memory(
+            "grep",
+            br#"{"patterns":["theta"],"syntax":"basic","count":true}"#,
+            br#"{"label":"f"}"#,
+            &rows,
+            bytes,
+        );
+        for mode in ["convert", "quit"] {
+            let begin = format!(r#"{{"binary_mode":"{mode}","encoding":"windows-1252"}}"#);
+            filter_memory(
+                "rg",
+                br#"{"pattern":"theta","count_only":true}"#,
+                begin.as_bytes(),
+                &rows,
+                bytes,
+            );
+        }
+    }
+
     for records in [16_384, 131_072] {
         for (config, row, expected) in [
             (
