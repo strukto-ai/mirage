@@ -16,6 +16,9 @@ pub(super) struct Bytes {
     first: usize,
     base: usize,
     len: usize,
+    /// The bytes its blocks hold room for, which it is charged with a
+    /// slot's overhead per block.
+    held: usize,
     charge: Charge,
 }
 
@@ -67,9 +70,17 @@ impl Bytes {
             let taken = bytes.len().min(BLOCK - self.len % BLOCK);
             if block.capacity() < block.len() + taken {
                 let room = (block.len() + taken).max(2 * block.capacity()).min(BLOCK);
+                let before = block.capacity();
                 block.reserve_exact(room - block.len());
+                self.held += block.capacity() - before;
+                self.blocks
+                    .back_mut()
+                    .expect("a block to write")
+                    .extend_from_slice(&bytes[..taken]);
+                self.recharge();
+            } else {
+                block.extend_from_slice(&bytes[..taken]);
             }
-            block.extend_from_slice(&bytes[..taken]);
             self.len += taken;
             bytes = &bytes[taken..];
         }
@@ -79,7 +90,8 @@ impl Bytes {
         let value = self.blocks.back_mut()?.pop()?;
         self.len -= 1;
         if self.blocks.back().is_some_and(Vec::is_empty) {
-            self.blocks.pop_back();
+            let block = self.blocks.pop_back().expect("an emptied block");
+            self.held -= block.capacity();
             self.recharge();
         }
         Some(value)
@@ -87,7 +99,8 @@ impl Bytes {
 
     pub(super) fn release_before(&mut self, at: usize) {
         while self.base + BLOCK <= at && self.blocks.front().is_some_and(|b| b.len() == BLOCK) {
-            self.blocks.pop_front();
+            let block = self.blocks.pop_front().expect("a full block");
+            self.held -= block.capacity();
             self.first += 1;
             self.base += BLOCK;
             self.recharge();
@@ -96,7 +109,8 @@ impl Bytes {
 
     /// Free the first block; whether none is left.
     pub(super) fn discard_block(&mut self) -> bool {
-        if self.blocks.pop_front().is_some() {
+        if let Some(block) = self.blocks.pop_front() {
+            self.held -= block.capacity();
             self.base = ((self.first + 1) * BLOCK).min(self.len);
             self.first += 1;
         }
@@ -120,7 +134,7 @@ impl Bytes {
     }
 
     fn recharge(&mut self) {
-        self.charge.set(self.blocks.len() * (BLOCK + 64));
+        self.charge.set(self.held + self.blocks.len() * 64);
     }
 
     /// The blocks that hold bytes; an emptied buffer kept for reuse holds
@@ -522,6 +536,25 @@ mod tests {
         bytes.extend(&[b'd'; 2 * BLOCK + 5]);
         assert_eq!(bytes.len(), 4 * BLOCK + 5);
         assert!(bytes.blocks.iter().all(|block| block.capacity() <= BLOCK));
+    }
+
+    #[test]
+    fn bytes_are_charged_for_the_room_they_hold() {
+        let meter = std::sync::Arc::new(super::super::meter::Meter::default());
+        let _installed = super::super::meter::install(&meter);
+        let mut bytes = Bytes::default();
+        bytes.push(b'1');
+        assert!(meter.live() < 100, "{}", meter.live());
+        bytes.extend(&[b'a'; 2 * BLOCK]);
+        let room = |bytes: &Bytes| {
+            bytes.blocks.iter().map(Vec::capacity).sum::<usize>() + 64 * bytes.blocks.len()
+        };
+        assert_eq!(meter.live(), room(&bytes));
+        bytes.pop();
+        bytes.discard_block();
+        assert_eq!(meter.live(), room(&bytes));
+        drop(bytes);
+        assert_eq!(meter.live(), 0);
     }
 
     #[test]

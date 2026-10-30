@@ -1740,6 +1740,32 @@ mod tests {
     }
 
     #[test]
+    fn whitespace_between_documents_is_not_held() {
+        // A room smaller than the whitespace between two documents still
+        // reads both: only what a document holds counts.
+        let mut text = b"1\n".to_vec();
+        text.extend_from_slice(&b"    \n".repeat(2000));
+        text.extend_from_slice(b"2\n");
+        let text: &'static [u8] = Box::leak(text.into_boxed_slice());
+        let room = serde_json::json!({ "memory": 4096 });
+        let ran = run_with(config(".", 1, room), &[Source::Bytes(text)], 1 << 20);
+        assert_eq!(ran.out, "1\n2\n");
+        let mut text = b"\x1e]\n".to_vec();
+        text.extend_from_slice(&b"    \n".repeat(2000));
+        text.extend_from_slice(b"\x1e2\n");
+        let text: &'static [u8] = Box::leak(text.into_boxed_slice());
+        let room = serde_json::json!({ "memory": 4096, "seq": true });
+        let ran = run_with(config(".", 1, room), &[Source::Bytes(text)], 1 << 20);
+        assert_eq!(
+            (ran.out.as_str(), ran.err.as_str()),
+            (
+                "\x1e2\n",
+                "jq: ignoring parse error: Unmatched ']' at line 1, column 2 (need RS to resync)\n"
+            )
+        );
+    }
+
+    #[test]
     fn a_document_the_room_refuses_is_freed_after_cancel() {
         // The document read whole as the memory ran out is left for the
         // host's cancel to free a slice at a time.

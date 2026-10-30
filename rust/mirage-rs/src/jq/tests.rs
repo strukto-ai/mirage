@@ -4459,7 +4459,7 @@ fn low_caps_during_compilation_become_terminal_frames_without_panicking() {
 fn compilation_limits_cannot_become_availability_refusals() {
     for (program, zone, memory) in [
         ("remainder(1;2)", "UTC", 0),
-        (r#""\n" | strflocaltime("%Z")"#, "Europe/Paris", 3000),
+        (r#""\n" | strflocaltime("%Z")"#, "Europe/Paris", 500),
         ("localtime", "/usr/share/zoneinfo/Europe/Paris", 0),
     ] {
         let config = serde_json::json!({"program":program,"zone":zone,"memory":memory});
