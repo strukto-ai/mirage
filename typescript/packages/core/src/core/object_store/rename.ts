@@ -32,7 +32,6 @@ import {
   type PairFn,
   requireHook,
 } from './driver.ts'
-import type { Measured } from '../../cache/types.ts'
 import { ConditionLostError } from './errors.ts'
 
 /**
@@ -106,10 +105,13 @@ export function makeRename<A extends Accessor, C>(
       return Promise.resolve()
     }
     // The path a refusal names and the version its write sent.
-    const named = (key: string, err: ConditionLostError): [PathSpec, Measured | null] => {
+    const named = (key: string, err: ConditionLostError): [PathSpec, string | null] => {
       if (key === kp.apply(kpfx, dst.mountPath)) return [dst, conditionVersion(cond)]
-      if (key === srcKey) return [src, err.versions.get(key) ?? source]
-      return [kp.keyPath(src, kpfx, key), err.versions.get(key) ?? null]
+      const sent = err.versions.get(key) ?? (key === srcKey ? source : null)
+      return [
+        key === srcKey ? src : kp.keyPath(src, kpfx, key),
+        typeof sent === 'string' ? sent : null,
+      ]
     }
     const upto = lostCount()
     const { conn, close } = await driver.connect(accessor)
@@ -130,7 +132,7 @@ export function makeRename<A extends Accessor, C>(
       else if (lost === dst) {
         if (source !== null && source !== '') await dropCached(src, source)
       } else if (cond?.kind === 'match') await dropCached(dst, cond.version)
-      const refusal = await stale(lost, { landed: err.landed, gone: err.gone, version: sent })
+      const refusal = await stale(lost, { landed: err.landed, version: sent })
       throw Object.assign(refusal, {
         recovered: err.recovered,
         recoveryError: err.recoveryError !== null ? strerrorOf(err.recoveryError) : null,

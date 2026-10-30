@@ -61,6 +61,19 @@ def write_conditions(vfs: BaseVFS) -> frozenset[WriteKind]:
     )
 
 
+def create_conditions(vfs: BaseVFS) -> frozenset[WriteKind]:
+    """The operations this mount's backend can condition on absence.
+
+    Args:
+        vfs (BaseVFS): the backend being mounted.
+    """
+    return frozenset(
+        kind
+        for kind, modes in vfs.condition_support.items()
+        if "absent" in modes
+    )
+
+
 def check_write_capability(
     prefix: str,
     vfs: BaseVFS,

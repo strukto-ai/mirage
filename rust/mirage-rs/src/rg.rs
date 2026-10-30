@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::rg_matcher::{CaptureRequirement, Matches, Options, Program, Search};
+use crate::utf8::Validator as Utf8;
 use crate::{Stream, StreamError, parse_config};
 
 const WORK: usize = 16 * 1024;
@@ -196,18 +197,13 @@ struct Begin {
     #[serde(deserialize_with = "crate::latin1_opt")]
     label: Option<Vec<u8>>,
     binary_mode: String,
-    binary_offset: Option<u64>,
-    binary_converted: bool,
-    binary_skipped: bool,
+    #[serde(default = "auto_encoding")]
+    encoding: String,
+    pipe: bool,
 }
 
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct Metadata {
-    binary_offset: Option<u64>,
-    binary_converted: Option<bool>,
-    binary_skipped: Option<bool>,
-    searched: Option<u64>,
+fn auto_encoding() -> String {
+    "auto".to_owned()
 }
 
 #[derive(Default, Serialize)]
@@ -277,46 +273,6 @@ struct Region {
     last: usize,
     from: usize,
     to: usize,
-}
-
-#[derive(Default)]
-struct Utf8 {
-    left: u8,
-    low: u8,
-    high: u8,
-    invalid: bool,
-}
-
-impl Utf8 {
-    fn push(&mut self, byte: u8) {
-        if self.invalid {
-            return;
-        }
-        if self.left > 0 {
-            if byte < self.low || byte > self.high {
-                self.invalid = true;
-                return;
-            }
-            self.left -= 1;
-            self.low = 0x80;
-            self.high = 0xbf;
-            return;
-        }
-        (self.left, self.low, self.high) = match byte {
-            0..=0x7f => (0, 0x80, 0xbf),
-            0xc2..=0xdf => (1, 0x80, 0xbf),
-            0xe0 => (2, 0xa0, 0xbf),
-            0xe1..=0xec | 0xee..=0xef => (2, 0x80, 0xbf),
-            0xed => (2, 0x80, 0x9f),
-            0xf0 => (3, 0x90, 0xbf),
-            0xf1..=0xf3 => (3, 0x80, 0xbf),
-            0xf4 => (3, 0x80, 0x8f),
-            _ => {
-                self.invalid = true;
-                (0, 0x80, 0xbf)
-            }
-        };
-    }
 }
 
 enum Piece {
@@ -1861,7 +1817,6 @@ struct Input {
     notice_label: Option<Vec<u8>>,
     binary_converted: bool,
     tally: Tally,
-    searched_override: Option<u64>,
     pending: Buffer<u8>,
     queued: VecDeque<u8>,
     record: Vec<u8>,
@@ -1904,13 +1859,8 @@ impl Input {
             } else {
                 begin.label
             },
-            binary_converted: begin.binary_converted,
-            tally: Tally {
-                nul: begin.binary_offset,
-                skipped: begin.binary_skipped,
-                ..Tally::default()
-            },
-            searched_override: None,
+            binary_converted: false,
+            tally: Tally::default(),
             pending: Buffer::new(),
             queued: VecDeque::new(),
             record: Vec::new(),
@@ -1939,7 +1889,7 @@ impl Input {
             stop_armed: false,
             finishing: false,
             finalized: false,
-            done: config.max_count == Some(0) || begin.binary_skipped,
+            done: config.max_count == Some(0),
             multi: None,
         }
     }
@@ -2020,9 +1970,7 @@ impl Input {
             return;
         }
         self.finalized = true;
-        if let Some(searched) = self.searched_override {
-            self.tally.searched = searched;
-        } else if let Some(offset) = self.tally.nul {
+        if let Some(offset) = self.tally.nul {
             self.tally.searched = offset;
         }
         if config.max_count == Some(0) || self.tally.skipped || self.tally.error.is_some() {
@@ -2067,7 +2015,13 @@ impl Input {
         }
         let _ = config;
     }
-    fn accept(&mut self, record: OwnedRecord, config: &Config) -> Option<OwnedRecord> {
+    fn accept(
+        &mut self,
+        record: OwnedRecord,
+        config: &Config,
+        out: &mut Vec<u8>,
+        budget: &mut usize,
+    ) -> Option<OwnedRecord> {
         let hit = record.hit(config.invert);
         if config.quiet || config.files_only || config.files_without_match {
             if hit {
@@ -2141,6 +2095,41 @@ impl Input {
                 self.pieces.push_back(Piece::bytes(self.notice()));
                 self.done = true;
                 Some(record)
+            } else if !config.context()
+                && !config.granular()
+                && !config.json
+                && !config.trim
+                && config.max_columns.is_none()
+                && !config.crlf
+                && record
+                    .data
+                    .len()
+                    .saturating_add(self.label.as_ref().map_or(0, Vec::len))
+                    .saturating_add(config.field_match_separator.len().saturating_mul(3))
+                    .saturating_add(64)
+                    <= *budget
+            {
+                let before = out.len();
+                let sep = &config.field_match_separator;
+                if let Some(label) = &self.label {
+                    out.extend_from_slice(label);
+                    out.extend_from_slice(if config.null { b"\0" } else { sep });
+                }
+                if config.line_numbers {
+                    crate::integer::decimal(record.number, false, 0, out);
+                    out.extend_from_slice(sep);
+                }
+                if config.byte_offsets {
+                    crate::integer::decimal(record.offset, false, 0, out);
+                    out.extend_from_slice(sep);
+                }
+                out.extend_from_slice(&record.data);
+                if !record.terminated {
+                    out.extend_from_slice(config.end());
+                }
+                *budget -= out.len() - before;
+                self.last_printed = Some(record.number);
+                Some(record)
             } else if config.context() {
                 let first = self.before.front().map_or(record.number, |r| r.number);
                 if self.last_printed.is_some_and(|last| first > last + 1) {
@@ -2180,6 +2169,8 @@ impl Input {
 }
 
 struct Rg {
+    haystack: Option<crate::rg_input::Haystack>,
+    ending: bool,
     config: Config,
     program: Program,
     input: Option<Input>,
@@ -2240,6 +2231,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         .max()
         .unwrap_or(0);
     Ok(Box::new(Rg {
+        haystack: None,
+        ending: false,
         config,
         program,
         input: None,
@@ -2268,13 +2261,59 @@ fn pcre_patterns(patterns: &[String], fixed: bool) -> Vec<String> {
 }
 
 impl Rg {
+    fn search_busy(&self) -> bool {
+        self.input.as_ref().is_some_and(|state| {
+            state.pending.previous.is_some()
+                || !state.queued.is_empty()
+                || !state.pieces.is_empty()
+                || !state.jobs.is_empty()
+                || !state.flush_before.is_empty()
+                || state.ready.is_some()
+                || state.trailing.is_some()
+                || state.search.is_some()
+                || state.multi.is_some() && !state.done
+                || !state.done
+                    && (!self.config.multiline
+                        && (state.scan < state.pending.len() || state.record_end.is_some())
+                        || state.finishing)
+                || state.finishing && !state.finalized
+        })
+    }
+    fn drive(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if !self.search_busy() {
+            let source = self
+                .haystack
+                .as_mut()
+                .ok_or_else(|| StreamError::new("rg stream fed before begin"))?;
+            let state = self.input.as_mut().expect("haystack has an input");
+            if !state.done {
+                if let Some(read) = source.ready.front_mut() {
+                    state.tally.nul = read.nul;
+                    state.tally.skipped = read.skipped;
+                    state.binary_converted = read.converted;
+                    state.done = read.skipped;
+                    let end = read.data.len().min(read.position + 64 * 1024);
+                    state.append(&read.data[read.position..end]);
+                    read.position = end;
+                    if end == read.data.len() {
+                        source.ready.pop_front();
+                    }
+                } else if source.stopped {
+                    self.ending = true;
+                }
+            }
+            if self.ending && (state.done || source.ready.is_empty()) {
+                state.finishing = true;
+            }
+        }
+        self.step(out)
+    }
     fn input(&mut self) -> Result<&mut Input, StreamError> {
         self.input
             .as_mut()
             .ok_or_else(|| StreamError::new("rg stream fed before begin"))
     }
     fn step(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let initial_output = out.len();
         let config = &self.config;
         let program = &self.program;
         let input = self
@@ -2332,9 +2371,6 @@ impl Rg {
                 if input.finishing {
                     input.finalize(config);
                 }
-                break;
-            }
-            if out.len() > initial_output {
                 break;
             }
             if let Some(search) = input.search.as_mut() {
@@ -2403,7 +2439,7 @@ impl Rg {
                     };
                     if let Some(Record {
                         mut data, matches, ..
-                    }) = input.accept(record, config)
+                    }) = input.accept(record, config, out, &mut budget)
                     {
                         debug_assert!(input.record.is_empty());
                         data.clear();
@@ -2652,12 +2688,7 @@ impl Rg {
             input.tally.searched = input.offset;
             input.scan = 0;
             input.record_end = None;
-            let all = if config.pcre {
-                config.needs_every_match()
-            } else {
-                !(config.quiet || config.files_only || config.files_without_match)
-                    || config.counts()
-            };
+            let all = config.needs_every_match();
             input.search = Some(if let Some(mut scratch) = input.scratch.take() {
                 scratch.reset(data, all);
                 scratch
@@ -2672,12 +2703,12 @@ impl Rg {
 impl Stream for Rg {
     fn begin(&mut self, config: &[u8]) -> Result<(), StreamError> {
         let begin: Begin = parse_config(config)?;
-        if !matches!(
-            begin.binary_mode.as_str(),
-            "" | "text" | "convert" | "note" | "quit"
-        ) {
-            return Err(StreamError::new("unknown rg binary mode"));
-        }
+        self.haystack = Some(crate::rg_input::Haystack::new(
+            &begin.binary_mode,
+            &begin.encoding,
+            begin.pipe,
+        )?);
+        self.ending = false;
         self.input = Some(Input::new(begin, &self.config));
         Ok(())
     }
@@ -2692,8 +2723,11 @@ impl Stream for Rg {
         if state.done {
             return Ok(());
         }
-        state.append(input);
-        self.step(out)
+        self.haystack
+            .as_mut()
+            .expect("input has a haystack")
+            .feed(input, false);
+        self.drive(out)
     }
     fn feed_input(
         &mut self,
@@ -2707,53 +2741,31 @@ impl Stream for Rg {
         if index == 2 {
             return crate::rg_format::format(input, out);
         }
-        if index != 1 {
-            return Err(StreamError::new("unknown rg input"));
-        }
-        let metadata: Metadata = parse_config(input)?;
-        let state = self.input()?;
-        if let Some(offset) = metadata.binary_offset {
-            state.tally.nul = Some(offset);
-        }
-        if let Some(converted) = metadata.binary_converted {
-            state.binary_converted = converted;
-        }
-        if let Some(skipped) = metadata.binary_skipped {
-            state.tally.skipped = skipped;
-            if skipped {
-                state.done = true;
-            }
-        }
-        if let Some(searched) = metadata.searched {
-            state.searched_override = Some(searched);
-            state.tally.searched = searched;
-        }
-        Ok(())
+        Err(StreamError::new("unknown rg input"))
     }
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.input()?.finishing = true;
-        self.step(out)
+        self.input()?;
+        if !self.ending {
+            self.haystack
+                .as_mut()
+                .expect("input has a haystack")
+                .feed(b"", true);
+            self.ending = true;
+        }
+        self.drive(out)
     }
     fn busy(&self) -> bool {
-        self.input.as_ref().is_some_and(|state| {
-            state.pending.previous.is_some()
-                || !state.queued.is_empty()
-                || !state.pieces.is_empty()
-                || !state.jobs.is_empty()
-                || !state.flush_before.is_empty()
-                || state.ready.is_some()
-                || state.trailing.is_some()
-                || state.search.is_some()
-                || state.multi.is_some() && !state.done
-                || !state.done
-                    && (!self.config.multiline
-                        && (state.scan < state.pending.len() || state.record_end.is_some())
-                        || state.finishing)
-                || state.finishing && !state.finalized
-        })
+        self.search_busy()
+            || self.input.as_ref().is_some_and(|state| {
+                !state.done
+                    && self.haystack.as_ref().is_some_and(|source| {
+                        !source.ready.is_empty() || source.stopped && !state.finalized
+                    })
+                    || self.ending && !state.finalized
+            })
     }
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.step(out)
+        self.drive(out)
     }
     fn done(&self) -> bool {
         self.input.as_ref().is_some_and(|state| state.done)
@@ -2828,6 +2840,19 @@ mod tests {
         let mut metadata = Vec::new();
         stream.metadata(&mut metadata);
         (out, serde_json::from_slice(&metadata).unwrap(), calls)
+    }
+
+    #[test]
+    fn long_field_separators_use_the_bounded_renderer() {
+        let separator = ":".repeat(3 * WORK);
+        let (out, _, _) = run(
+            b"hit\n",
+            json!({"pattern":"hit", "line_numbers":true, "field_match_separator":separator}),
+        );
+        let mut expected = b"1".to_vec();
+        expected.extend_from_slice(separator.as_bytes());
+        expected.extend_from_slice(b"hit\n");
+        assert_eq!(out, expected);
     }
 
     #[test]
@@ -3270,6 +3295,8 @@ mod tests {
     fn ready_output_does_not_start_an_unrelated_record_search() {
         use crate::Stream;
         let mut stream = super::Rg {
+            haystack: None,
+            ending: false,
             config: super::Config::default(),
             program: super::Program::with_options(
                 &["needle".to_owned()],
@@ -3735,14 +3762,14 @@ mod tests {
     fn converted_binary_suppresses_passthru_nonmatching_lines() {
         for (data, expected) in [
             (
-                b"before\nneedle\ntail\n".as_slice(),
+                b"before\nneedle\0tail\n".as_slice(),
                 b"binary file matches (found \"\\0\" byte around offset 13)\n".as_slice(),
             ),
-            (b"before\nafter\n".as_slice(), b"".as_slice()),
+            (b"before\nafter\0".as_slice(), b"".as_slice()),
         ] {
             let mut stream = open(br#"{"pattern":"needle","passthru":true}"#).unwrap();
             stream
-                .begin(br#"{"name":"file","binary_mode":"convert","binary_offset":13,"binary_converted":true}"#)
+                .begin(br#"{"name":"file","binary_mode":"convert"}"#)
                 .unwrap();
             let mut out = Vec::new();
             stream.feed(data, &mut out).unwrap();

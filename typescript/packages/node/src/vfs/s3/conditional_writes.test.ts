@@ -282,6 +282,17 @@ describe('conditional writes on an S3 mount', () => {
     const data = mock.store.get('b', key)
     return data === undefined ? undefined : DEC.decode(data)
   }
+  const refusedUntilRead = async (ws: Workspace, key: string): Promise<void> => {
+    let [code, , err] = await run(ws, `echo z > /s3/${key}`)
+    expect([code, err.includes(STALE)], err).toEqual([1, true])
+    expect(object(key)).toBeUndefined()
+    await run(ws, `cat /s3/${key}`)
+    mock.ledger.length = 0
+    ;[code, , err] = await run(ws, `echo z > /s3/${key}`)
+    expect(code, err).toBe(0)
+    expect(object(key)).toBe('z\n')
+    expect(sent('PutObject')).toEqual([{ IfNoneMatch: '*' }])
+  }
 
   it.each([WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL])(
     'preserves a concurrent append when missing-file creation is delayed: %s',
@@ -367,14 +378,20 @@ describe('conditional writes on an S3 mount', () => {
       'PutObject',
       [{ IfMatch: etag('hi\n') }],
     ],
-    ['removed', ['cat /s3/f', 'rm /s3/f'], 'echo x > /s3/f', 'PutObject', [{}]],
+    ['removed', ['cat /s3/f', 'rm /s3/f'], 'echo x > /s3/f', 'PutObject', [{ IfNoneMatch: '*' }]],
     ['unread-tee', [], 'echo y | tee /s3/g', 'PutObject', [{}]],
     ['unread-cross-cp', [], 'echo r > /ram/r; cp /ram/r /s3/g', 'PutObject', [{}]],
     ['unread-cp', [], 'cp /s3/f /s3/g', 'CopyObject', [{}]],
-    ['rm-on-line', [], 'cat /s3/f; rm /s3/f; echo x > /s3/f', 'PutObject', [{}]],
+    ['rm-on-line', [], 'cat /s3/f; rm /s3/f; echo x > /s3/f', 'PutObject', [{ IfNoneMatch: '*' }]],
     ['mv-on-line', [], 'cat /s3/g; mv /s3/g /s3/h; echo y > /s3/g', 'PutObject', [{}]],
-    ['rm-r-on-line', [], 'cat /s3/d/a; rm -r /s3/d; echo x > /s3/d/a', 'PutObject', [{}]],
-    ['rm-r', ['cat /s3/d/a; rm -r /s3/d'], 'echo x > /s3/d/a', 'PutObject', [{}]],
+    [
+      'rm-r-on-line',
+      [],
+      'cat /s3/d/a; rm -r /s3/d; echo x > /s3/d/a',
+      'PutObject',
+      [{ IfNoneMatch: '*' }],
+    ],
+    ['rm-r', ['cat /s3/d/a; rm -r /s3/d'], 'echo x > /s3/d/a', 'PutObject', [{ IfNoneMatch: '*' }]],
     ['dir-mv', ['cat /s3/d/a; mv /s3/d /s3/e'], 'echo x > /s3/d/a', 'PutObject', [{}]],
     [
       'dir-mv-copies',
@@ -412,26 +429,102 @@ describe('conditional writes on an S3 mount', () => {
     },
   )
 
-  it.each([
-    ['cat /s3/f', 'cp /s3/g /s3/f'],
-    ['cat /s3/f', 'mv /s3/g /s3/f'],
-    ['grep one /s3/f', 'echo x > /s3/f'],
-  ])(
-    'refuses a write to a file deleted since it was read, then frees it: %s; %s',
-    async (setup, line) => {
-      // Gone, so no newer bytes to protect: no version is kept, the retry goes plain.
+  it.each(['cat /s3/f', 'grep one /s3/f'])(
+    'refuses a write to a file deleted since it was read until read: %s',
+    async (setup) => {
+      // A peer may create it again, so the retry is held to what was read.
       const ws = workspace()
       await run(ws, setup)
       mock.store.delete('b', 'f')
-      const [code, , err] = await run(ws, line)
-      expect([code, err.includes(STALE)]).toEqual([1, true])
-      expect(object('f')).toBeUndefined()
-      expect((await run(ws, line))[0]).toBe(0)
+      await refusedUntilRead(ws, 'f')
     },
   )
 
+  it.each(['cp /s3/g /s3/f', 'mv /s3/g /s3/f'])(
+    'creates a file a copy finds deleted: %s',
+    async (line) => {
+      // The copy's own look finds no file, which is the session's to see.
+      const ws = workspace()
+      await run(ws, 'cat /s3/f')
+      mock.store.delete('b', 'f')
+      const [code, , err] = await run(ws, line)
+      expect(code, err).toBe(0)
+      expect(object('f')).toBe(SEED.g)
+    },
+  )
+
+  it('lifts a refusal when a later read on the line finds no file', async () => {
+    const ws = workspace()
+    await run(ws, 'cat /s3/f')
+    mock.store.delete('b', 'f')
+    mock.ledger.length = 0
+    const [, out, err] = await run(ws, 'echo a > /s3/f; cat /s3/f; echo b > /s3/f; echo $?')
+    expect([out, err.split(STALE).length - 1], err).toEqual(['0\n', 1])
+    expect(object('f')).toBe('b\n')
+    expect(sent('PutObject').at(-1)).toEqual({ IfNoneMatch: '*' })
+  })
+
+  it('keeps asking for absence after a refused create', async () => {
+    // The append saw no file; a peer's create beats it, and the retry too.
+    const ws = workspace()
+    mock.before('PutObject', () => {
+      theirs('new')
+    })
+    let [code, , err] = await run(ws, 'echo x >> /s3/new')
+    expect([code, err.includes(STALE)], err).toEqual([1, true])
+    mock.ledger.length = 0
+    ;[code, , err] = await run(ws, 'echo y > /s3/new')
+    expect([code, err.includes(STALE)], err).toEqual([1, true])
+    expect(sent('PutObject')).toEqual([{ IfNoneMatch: '*' }])
+    expect(object('new')).toBe('theirs\n')
+  })
+
+  it('lets a move whose copy stayed write its destination', async () => {
+    // e was not new, so the rollback leaves the session's own bytes there
+    // and it holds no version of e to refuse its next write on.
+    const ws = workspace()
+    mock.store.set('b', 'e', ENC.encode('old-e\n'))
+    await run(ws, 'cat /s3/f /s3/e')
+    mock.before('DeleteObject', () => {
+      theirs('f')
+    })
+    expect((await run(ws, 'mv /s3/f /s3/e'))[0]).toBe(1)
+    expect(object('e')).toBe(SEED.f)
+    const [code, , err] = await run(ws, 'echo z > /s3/e')
+    expect(code, err).toBe(0)
+    expect(object('e')).toBe('z\n')
+  })
+
+  it.each(['cp', 'mv'])(
+    'refuses a %s onto a file seen missing that a peer created',
+    async (verb) => {
+      const ws = workspace()
+      await run(ws, 'test -e /s3/new')
+      theirs('new')
+      mock.ledger.length = 0
+      const [code, , err] = await run(ws, `${verb} /s3/f /s3/new`)
+      expect(code, err).toBe(1)
+      expect(sent('CopyObject')[0]).toMatchObject({ IfNoneMatch: '*' })
+      expect(object('new')).toBe('theirs\n')
+    },
+  )
+
+  it('creates a file a truncate finds gone only if absent', async () => {
+    // truncate looks first and sees no file; a restore beats its create.
+    const ws = workspace()
+    await run(ws, 'cat /s3/f')
+    mock.store.delete('b', 'f')
+    mock.ledger.length = 0
+    mock.before('PutObject', () => {
+      mock.store.set('b', 'f', ENC.encode(SEED.f ?? ''))
+    })
+    const [code, , err] = await run(ws, 'truncate -s 5 /s3/f')
+    expect([code, err.includes(STALE)], err).toEqual([1, true])
+    expect(mutations()).toEqual([['PutObject', { IfNoneMatch: '*' }]])
+    expect(object('f')).toBe(SEED.f)
+  })
+
   it.each([
-    ['shell', 'truncate -s 5 /s3/f'],
     ['shell', 'echo x >> /s3/f'],
     ['append', 'x\n'],
     ['append', ''],
@@ -825,7 +918,7 @@ describe('conditional writes on an S3 mount', () => {
     ['gone', true],
     ['never read', false],
   ] as const)('renames a directory onto a key it holds no version of: %s', async (_name, read) => {
-    // A destination key found gone keeps no version; one never read is replaced plain.
+    // A destination key found gone stays held; one never read is replaced plain.
     const ws = workspace()
     mock.store.set('b', 'e/a', ENC.encode('ea\n'))
     if (read) {
@@ -834,9 +927,7 @@ describe('conditional writes on an S3 mount', () => {
       await expect(ws.vfs.rename('/s3/d', '/s3/e')).rejects.toMatchObject({
         code: 'STALE_WRITE',
       })
-      const [code, , err] = await run(ws, 'echo z > /s3/e/a')
-      expect(code, err).toBe(0)
-      expect(object('e/a')).toBe('z\n')
+      await refusedUntilRead(ws, 'e/a')
     } else {
       await ws.vfs.rename('/s3/d', '/s3/e')
       expect(object('e/a')).toBe('a\n')
@@ -914,8 +1005,8 @@ describe('conditional writes on an S3 mount', () => {
     expect((await run(ws, 'cat /s3/f'))[1]).toBe('theirs\n')
   })
 
-  it('keeps no version for a refusal on a file since removed', async () => {
-    // Lost on a 412, then found gone: the gone refusal keeps no version.
+  it('keeps its version for a refusal on a file since removed', async () => {
+    // Lost on a 412, then found gone: every retry sends what was read.
     const ws = workspace()
     await run(ws, 'cat /s3/f')
     mock.before('PutObject', () => {
@@ -925,31 +1016,30 @@ describe('conditional writes on an S3 mount', () => {
       mock.store.objects('b').delete('f')
     })
     const [, out, err] = await run(ws, 'echo a > /s3/f; echo b > /s3/f; echo c > /s3/f; echo $?')
-    expect([out, err.split(STALE).length - 1], err).toEqual(['0\n', 2])
-    expect(object('f')).toBe('c\n')
+    expect([out, err.split(STALE).length - 1], err).toEqual(['1\n', 3])
+    expect(object('f')).toBeUndefined()
+    expect(sent('PutObject')).toEqual([ONE, ONE, ONE])
   })
 
   it.each([
     ['file mv', 'cat /s3/f /s3/g', 'mv /s3/g /s3/f', 'g'],
     ['dir mv', 'cat /s3/d/a /s3/d/b', 'mv /s3/d /s3/e', 'd/a'],
   ] as const)(
-    'keeps no version for a move source found gone: %s',
+    'keeps its version for a move source found gone: %s',
     async (_name, setup, line, key) => {
-      // Nothing newer is there to guard, so the path is written plain again.
+      // A peer may create the source again, so it stays held to the read.
       const ws = workspace()
       await run(ws, setup)
       mock.before('CopyObject', () => {
         mock.store.objects('b').delete(key)
       })
       expect((await run(ws, line))[0]).toBe(1)
-      const [code, , err] = await run(ws, `echo z > /s3/${key}`)
-      expect(code, err).toBe(0)
-      expect(object(key)).toBe('z\n')
+      await refusedUntilRead(ws, key)
     },
   )
 
-  it('keeps no version for a walk key found gone beside the named one', async () => {
-    // d/a is named; d/b, gone too, is kept by the walk and keeps nothing.
+  it('keeps its version for a walk key found gone beside the named one', async () => {
+    // d/a is named; d/b, gone too, stays held to what was read.
     const ws = workspace()
     await run(ws, 'cat /s3/d/a /s3/d/b')
     mock.before('CopyObject', () => {
@@ -957,9 +1047,7 @@ describe('conditional writes on an S3 mount', () => {
       mock.store.objects('b').delete('d/b')
     })
     expect((await run(ws, 'mv /s3/d /s3/e'))[0]).toBe(1)
-    const [code, , err] = await run(ws, 'echo z > /s3/d/b')
-    expect(code, err).toBe(0)
-    expect(object('d/b')).toBe('z\n')
+    await refusedUntilRead(ws, 'd/b')
   })
 
   it('reports a refused key in a page and keeps the lost one', async () => {
@@ -1264,9 +1352,7 @@ describe('conditional writes on an S3 mount', () => {
       expect(code, `${policy}: ${err}`).toBe(0)
       ops[policy] = mock.ledger.map(([op]) => op)
     }
-    const expected = [...(ops[WritePolicy.UNCONDITIONAL] ?? [])]
-    if (line === 'mv /s3/g /s3/i') expected.splice(expected.indexOf('CopyObject'), 0, 'HeadObject')
-    expect(ops[WritePolicy.CONDITIONAL]).toEqual(expected)
+    expect(ops[WritePolicy.CONDITIONAL]).toEqual(ops[WritePolicy.UNCONDITIONAL])
   })
 
   it.each([

@@ -18,7 +18,7 @@ AWS_DOMAINS = ("amazonaws.com", "amazonaws.com.cn")
 
 CONDITION_SUPPORT: ConditionSupport = {
     "put": frozenset({"absent", "match"}),
-    "copy": frozenset({"match"}),
+    "copy": frozenset({"absent", "match"}),
     "delete": frozenset({"match"}),
 }
 

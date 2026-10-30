@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { OwnRead } from './types.ts'
 import { VersionHistory, VersionScope } from './versions.ts'
 import { OpRecord } from '../observe/record.ts'
 import { SessionState } from '../workspace/session/session.ts'
@@ -52,18 +53,21 @@ describe('live version history', () => {
     history.observe(scope, '/f', record('read', null))
     expect(history.read(scope, '/f')).toBeNull()
   })
-  it.each(['unlink', 'rename', 'copy', 'append', 'pwrite'])(
-    'point mutation %s leaves children',
-    (op) => {
-      const history = new VersionHistory()
-      const scope = new VersionScope()
-      history.observe(scope, '/f', record())
-      history.observe(scope, '/f/child', record())
-      history.observe(scope, '/f', record(op))
-      expect(history.read(scope, '/f')).toBeNull()
-      expect(history.read(scope, '/f/child')).toBe('v1')
-    },
-  )
+  it.each([
+    ['unlink', OwnRead.ABSENT],
+    ['rename', null],
+    ['copy', null],
+    ['append', null],
+    ['pwrite', null],
+  ] as const)('point mutation %s leaves children', (op, left) => {
+    const history = new VersionHistory()
+    const scope = new VersionScope()
+    history.observe(scope, '/f', record())
+    history.observe(scope, '/f/child', record())
+    history.observe(scope, '/f', record(op))
+    expect(history.read(scope, '/f')).toBe(left)
+    expect(history.read(scope, '/f/child')).toBe('v1')
+  })
   it('retracts subtrees and pins, retaining individual refusals', () => {
     const history = new VersionHistory()
     const scope = new VersionScope()
@@ -71,9 +75,9 @@ describe('live version history', () => {
     history.observe(scope, '/d/a', record())
     history.observe(scope, '/dog', record())
     history.observe(scope, '/d', record('rm_r'))
+    expect(history.read(scope, '/d/pinned')).toBe(OwnRead.ABSENT)
     history.keep(scope, '/d/a', 'v1')
     expect(history.read(scope, '/d/a')).toBe('v1')
-    expect(history.read(scope, '/d/pinned')).toBeNull()
     expect(history.read(scope, '/dog')).toBe('v1')
     history.keep(scope, '/d/a', null)
     expect(history.read(scope, '/d/a')).toBeNull()

@@ -87,9 +87,12 @@ async def test_streaming_preserves_byte_offsets_and_settles_counts() -> None:
     )
 
 
+@pytest.mark.parametrize("binary", [False, True])
 @pytest.mark.asyncio
-async def test_quiet_match_closes_source_before_the_next_chunk() -> None:
-    f = _flags(quiet=True, text=True)
+async def test_stopped_search_closes_source_before_the_next_chunk(
+    binary: bool,
+) -> None:
+    f = _flags() if binary else _flags(quiet=True, text=True)
     program = open_rg("needle", False, f)
     tally = Tally()
     closed = False
@@ -99,20 +102,23 @@ async def test_quiet_match_closes_source_before_the_next_chunk() -> None:
         nonlocal closed, reads
         try:
             reads += 1
-            yield b"needle\n"
+            yield b"x" * 10000 + b"\0" if binary else b"needle\n"
             reads += 1
-            raise AssertionError("read beyond the selected record")
+            raise AssertionError("read beyond the stopped search")
         finally:
             closed = True
 
     chunks = [
         chunk
         async for chunk in stream_haystack(
-            source(), program, f, "f", None, tally, True, False
+            source(), program, f, "f", None, tally, not binary, False
         )
     ]
     assert b"".join(chunks) == b""
-    assert tally.selected
+    assert tally.selected is not binary
+    if binary:
+        assert tally.skipped
+        assert tally.nul == 10000
     assert reads == 1
     assert closed
 

@@ -19,7 +19,7 @@ import type { FlagValue } from '../spec/types.ts'
 import { UsageError } from '../errors.ts'
 import { parseFlags } from './generic/rg.ts'
 import { openRg, streamHaystack } from './rg_stream.ts'
-import { RgBinary, type RgFlags, smartCaseFolds, transcoded } from './rg_search.ts'
+import { type RgFlags, smartCaseFolds } from './rg_search.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -178,40 +178,6 @@ describe('PCRE2 keep', () => {
   })
 })
 
-async function readAll(binary: RgBinary, source: AsyncIterable<Uint8Array>): Promise<string[]> {
-  const out: string[] = []
-  for await (const block of binary.read(source)) out.push(DEC.decode(block))
-  return out
-}
-
-describe('RgBinary', () => {
-  it("ends a walked file's first buffer at a NUL as it arrives", async () => {
-    // The first buffer is still growing toward its first newline, so the NUL
-    // is in it and ripgrep reads no further.
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async function* source(): AsyncIterable<Uint8Array> {
-      yield new Uint8Array([...new Uint8Array(10000).fill(0x78), 0])
-      throw new Error('read past the NUL')
-    }
-    const binary = new RgBinary('quit')
-    expect(await readAll(binary, source())).toEqual([])
-    expect([binary.skipped, binary.offset]).toEqual([true, 10000])
-  })
-
-  it('joins the chunks a file serves into one first read', async () => {
-    // Twenty 8 KiB chunks with no newline grow one first buffer; the file ends
-    // before the step past the newline, so it is all one read.
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async function* source(): AsyncIterable<Uint8Array> {
-      for (let i = 0; i < 20; i++) yield new Uint8Array(8192).fill(0x79)
-      yield ENC.encode('\nz\n')
-    }
-    const binary = new RgBinary('quit')
-    expect(await readAll(binary, source())).toEqual(['y'.repeat(163840) + '\nz\n'])
-    expect(binary.offset).toBeNull()
-  })
-})
-
 async function* parts(...chunks: number[][]): AsyncGenerator<Uint8Array> {
   for (const chunk of chunks) {
     await Promise.resolve()
@@ -225,52 +191,7 @@ async function bytesOf(stream: AsyncIterable<Uint8Array>): Promise<number[]> {
   return out
 }
 
-describe('transcoded', () => {
-  // encoding_rs_io as ripgrep 14.1.1 runs it: a mark is dropped wherever the
-  // chunks split it, a UTF-16 mark overrides -E and a UTF-8 one does not, and
-  // only a decoder drops a second mark of its own.
-  it.each<[string, number[][], number[]]>([
-    ['auto', [[0xef], [0xbb, 0xbf, 0x63, 0x61, 0x66, 0xe9]], [0x63, 0x61, 0x66, 0xe9]],
-    [
-      'auto',
-      [
-        [0xff, 0xfe, 0x68, 0x00],
-        [0x69, 0x00],
-      ],
-      [0x68, 0x69],
-    ],
-    ['windows-1252', [[0xef, 0xbb, 0xbf, 0x63, 0x61, 0x66, 0xe9]], [...ENC.encode('café')]],
-    ['UTF-16LE', [[0xfe, 0xff, 0x00, 0x68]], [0x68]],
-    ['UTF-8', [[0xef, 0xbb, 0xbf, 0xef, 0xbb, 0xbf, 0x68, 0x69]], [0x68, 0x69]],
-    ['auto', [[0xef, 0xbb, 0xbf, 0xef, 0xbb, 0xbf, 0x68, 0x69]], [0xef, 0xbb, 0xbf, 0x68, 0x69]],
-    ['UTF-8', [[0x63, 0x61, 0x66, 0xe9]], [...ENC.encode('caf\ufffd')]],
-    ['auto', [], []],
-  ])('reads marks as ripgrep under %s', async (encoding, chunks, want) => {
-    expect(await bytesOf(transcoded(parts(...chunks), encoding))).toEqual(want)
-  })
-
-  it('closes its source', async () => {
-    const closed: boolean[] = []
-    async function* input(): AsyncGenerator<Uint8Array> {
-      try {
-        await Promise.resolve()
-        yield ENC.encode('abc')
-        yield ENC.encode('def')
-      } finally {
-        closed.push(true)
-      }
-    }
-    const stream = transcoded(input(), 'auto')
-    expect(DEC.decode((await stream.next()).value as Uint8Array)).toBe('abc')
-    await stream.return(undefined)
-    expect(closed).toEqual([true])
-    // An iterable that hands out a fresh iterator has that one closed.
-    const fresh = transcoded({ [Symbol.asyncIterator]: () => input() }, 'auto')
-    expect(DEC.decode((await fresh.next()).value as Uint8Array)).toBe('abc')
-    await fresh.return(undefined)
-    expect(closed).toEqual([true, true])
-  })
-
+describe('encoded haystacks', () => {
   it('feeds the search what -E names', async () => {
     async function found(data: number[], pattern: string, flags: Record<string, FlagValue>) {
       const f = flagsOf(flags)

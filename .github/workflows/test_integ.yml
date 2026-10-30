@@ -76,6 +76,8 @@ jobs:
           # and typescript filters here and in runtime, as config itself does.
           predicate-quantifier: some-with-excludes
           filters: |
+            # Rust cat, rg_input, shuf and the shared hot-loop helpers, plus
+            # their host adapters, use these whole-host filters on both languages.
             # Git's search and listing commands stay under these whole-host
             # filters, so their disk/RAM CLI corpus runs with either twin.
             # LanceDB's shared core/lancedb/types modules select the embedded
@@ -311,7 +313,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: integ-typescript-dist
-          path: typescript/packages/*/dist
+          path: |
+            typescript/packages/*/dist
+            typescript/packages/core/src/generated
           if-no-files-found: error
           retention-days: 1
 
@@ -352,7 +356,11 @@ jobs:
           node-version: '24'
       - name: Install TypeScript dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
       - uses: actions/download-artifact@v8
         with:
           name: integ-typescript-dist
@@ -1125,7 +1133,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -1593,7 +1605,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -1610,7 +1626,9 @@ jobs:
       - name: Run TypeScript FUSE mount and check (real libfuse)
         working-directory: integ
         run: |
+          set -o pipefail
           pnpm exec tsx fuse/fuse.ts 2>&1 \
+            | tee /dev/stderr \
             | ../python/.venv/bin/python check_json.py fuse/truth_fuse.json
 
   integ-fuse-windows:
@@ -1851,18 +1869,16 @@ jobs:
       # max(python, typescript) rather than their sum. The JSON drivers run
       # each case on every backend it lists, so they cost more than cli.sh,
       # mostly Pyodide starting a fresh interpreter for each run (about 2 s
-      # on a runner). Legs split by top-level folder of integ/runtime, and
-      # path by suite, balanced using run 40260308235: each leg's job time,
-      # the `suite <host>/<name> <n>s` lines cli.sh prints, and the gaps
-      # between the `ok` lines the JSON drivers stream once cli.sh is done.
-      # Re-read them before moving a folder across.
+      # on a runner). Run 40993380901 left write and dir last; their longest
+      # JSON suites now ride the shorter policy and open legs. Use job times,
+      # the CLI's per-suite timings and streamed JSON output to rebalance.
       LEG_A_SUITES: "path/cwd path/rename path/stat"
       LEG_B_SUITES: "path/exists path/link path/remove path/symlink path/unlink path/utime path/xattr"
-      LEG_C_SUITES: "open"
-      LEG_D_SUITES: "dir facade"
+      LEG_C_SUITES: "open dir/readdir"
+      LEG_D_SUITES: "dir/glob dir/mkdir dir/rmdir dir/walk facade"
       LEG_E_SUITES: "read routing workspace"
-      LEG_F_SUITES: "write"
-      LEG_G_SUITES: "policy program quickjs"
+      LEG_F_SUITES: "write/capacity write/exit write/fd write/order write/parallel write/pwrite write/sync write/truncate write/writev"
+      LEG_G_SUITES: "policy program quickjs write/write"
     steps:
       - uses: actions/checkout@v7
 
@@ -2012,7 +2028,11 @@ jobs:
 
       - name: Install TypeScript dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2110,19 +2130,10 @@ jobs:
             sleep 1
           done
 
-      # The JSON drivers run behind the CLI step, on the cores it leaves. They
-      # share nothing with it: run ids scope the MinIO prefixes, the sandbox
-      # suites send stateless commands, no driver binds a fixed port, and the
-      # CLI never reaches MongoDB. They do share MongoDB with each other: each
-      # drops and reseeds the bridge suite's database, so they run in turn,
-      # and the second still runs when the first fails.
+      # Keep both JSON hosts busy behind the CLI battery. The driver waits
+      # for both, then runs suites that share database or sandbox mount state.
       - name: Start every runtime through the JSON suites (background)
-        run: |
-          integ/scripts/background.sh start json '
-            status=0
-            ./python/.venv/bin/python integ/runtime/run.py $SUITES || status=1
-            (cd integ && pnpm exec tsx runtime/run.ts $SUITES) || status=1
-            exit $status'
+        run: bash integ/runtime/parallel.sh start
 
       - name: Run every runtime through the CLI and both daemons
         run: |
@@ -2131,10 +2142,10 @@ jobs:
             "node typescript/packages/cli/dist/bin/mirage.js" \
             $SUITES
 
-      - name: Run every runtime through the JSON suites (python, then typescript)
+      - name: Collect both runtime JSON drivers and the serialized suites
         if: ${{ !cancelled() }}
         timeout-minutes: 15
-        run: integ/scripts/background.sh wait json
+        run: bash integ/runtime/parallel.sh wait
 
       - name: Verify the oldest supported Pyodide
         if: ${{ !cancelled() && contains(env.SUITES, 'pyodide/network') }}
@@ -2198,7 +2209,11 @@ jobs:
 
       - name: Install TypeScript dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2296,7 +2311,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2389,7 +2408,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # Reuse dist/generated from this run. Build the native addon explicitly:
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8

@@ -142,9 +142,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         blank_run: 0,
         overflowed: false,
         aborted: false,
-        pending: Vec::new(),
-        at: 0,
-        searched: 0,
+        records: crate::records::Records::default(),
         ended: false,
         pad: 0,
         fill: b' ',
@@ -279,11 +277,7 @@ struct Nl {
     blank_run: u64,
     overflowed: bool,
     aborted: bool,
-    /// The current input's bytes from `at` on, not yet numbered.
-    pending: Vec<u8>,
-    at: usize,
-    /// How far `pending` has been searched for a newline.
-    searched: usize,
+    records: crate::records::Records,
     /// The current input has ended.
     ended: bool,
     /// Padding still owed for the last line, then the rest of that line.
@@ -301,7 +295,7 @@ impl Nl {
     fn step(&mut self, out: &mut Vec<u8>) {
         let limit = out.len() + OUTPUT;
         let mut budget = STEPS;
-        let pending = std::mem::take(&mut self.pending);
+        let mut records = std::mem::take(&mut self.records);
         self.more = false;
         loop {
             if self.pad > 0 {
@@ -318,21 +312,15 @@ impl Nl {
             if self.aborted {
                 break;
             }
-            let from = self.searched.max(self.at);
-            let (line, next) = match memchr::memchr(b'\n', &pending[from..]) {
-                Some(end) => (&pending[self.at..from + end], from + end + 1),
-                None if self.ended && self.at < pending.len() => {
-                    (&pending[self.at..], pending.len())
-                }
-                None => {
-                    self.searched = pending.len();
-                    if self.ended {
-                        self.ended = false;
-                        self.input += 1;
-                        self.at = pending.len();
-                    }
+            let line = match records.peek_span(b'\n') {
+                crate::records::Take::Record((line, _)) => line,
+                crate::records::Take::End => {
+                    self.ended = false;
+                    self.input += 1;
+                    records = crate::records::Records::default();
                     break;
                 }
+                crate::records::Take::Wait => break,
             };
             if out.len() >= limit {
                 self.more = true;
@@ -347,15 +335,10 @@ impl Nl {
                     break;
                 }
             };
-            self.at = next;
             self.line(line, selected, limit, out);
+            records.advance();
         }
-        self.pending = pending;
-        if !self.more {
-            self.pending.drain(..self.at);
-            self.searched -= self.at.min(self.searched);
-            self.at = 0;
-        }
+        self.records = records;
     }
 
     /// Whether the section's pattern numbers `line`: false for a section
@@ -413,16 +396,21 @@ impl Nl {
         if blank {
             self.blank_run = 0;
         }
-        let digits = self.number.to_string().into_bytes();
+        let mut storage = [0; 21];
+        let digits = crate::integer::decimal_bytes(
+            self.number.unsigned_abs(),
+            self.number < 0,
+            &mut storage,
+        );
         let pad = self.width.saturating_sub(digits.len()) as u64;
         let separator = std::mem::take(&mut self.separator);
         match self.format {
             Format::Left => {
-                out.extend_from_slice(&digits);
+                out.extend_from_slice(digits);
                 self.padded(b' ', pad, &[&separator, line, b"\n"], limit, out);
             }
             Format::Right => {
-                self.padded(b' ', pad, &[&digits, &separator, line, b"\n"], limit, out);
+                self.padded(b' ', pad, &[digits, &separator, line, b"\n"], limit, out);
             }
             Format::Zeros => {
                 let sign = usize::from(self.number < 0);
@@ -466,13 +454,14 @@ impl Stream for Nl {
     }
 
     fn feed_input(&mut self, _: usize, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.pending.extend_from_slice(input);
+        self.records.push(input);
         self.step(out);
         Ok(())
     }
 
     fn end_input(&mut self, _: usize, out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.ended = true;
+        self.records.end();
         self.step(out);
         Ok(())
     }

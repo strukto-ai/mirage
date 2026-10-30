@@ -38,6 +38,7 @@ from mirage.commands.builtin.rg_search import (
 )
 from mirage.commands.builtin.rg_stream import (
     RgProgram,
+    encoding_for,
     format_output,
     latin1,
     open_rg,
@@ -77,7 +78,6 @@ from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.join import shell_join
 from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 from mirage.utils.compress import GzipDataError, gunzip_stream
-from mirage.utils.encoding import encoding_for
 from mirage.view.types import MountView
 
 logger = logging.getLogger(__name__)

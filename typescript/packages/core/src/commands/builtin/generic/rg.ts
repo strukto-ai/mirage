@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GzipDataError, gunzipStream } from '../../../utils/compress.ts'
-import { encodingFor } from '../../../utils/encoding.ts'
+import { encodingFor } from '../rg_stream.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { MountView } from '../../../view/types.ts'

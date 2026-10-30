@@ -570,12 +570,9 @@ struct Numfmt {
     delimiter: Option<u8>,
     header: u64,
     separator: u8,
-    held: Vec<u8>,
-    /// How much of `held` is known to hold no separator.
-    scanned: usize,
+    records: crate::records::Records,
     /// The next operand to convert.
     next: usize,
-    eof: bool,
     /// Whether the last call stopped at its output window with records
     /// left to convert.
     again: bool,
@@ -650,10 +647,8 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         fields,
         header,
         config,
-        held: Vec::new(),
-        scanned: 0,
+        records: crate::records::Records::default(),
         next: 0,
-        eof: false,
         again: false,
         failed: false,
     }))
@@ -816,34 +811,22 @@ impl Numfmt {
             }
             return Ok(());
         }
-        let held = std::mem::take(&mut self.held);
-        let mut at = 0;
-        let mut from = self.scanned;
+        let mut records = std::mem::take(&mut self.records);
         let mut result = Ok(());
         while result.is_ok() {
             if out.len() - start >= OUTPUT {
                 self.again = true;
                 break;
             }
-            match memchr::memchr(self.separator, &held[from..]) {
-                Some(found) => {
-                    result = self.line(&held[at..from + found], true, out);
-                    at = from + found + 1;
-                    from = at;
+            match records.peek_span(self.separator) {
+                crate::records::Take::Record((line, terminated)) => {
+                    result = self.line(line, terminated, out);
+                    records.advance();
                 }
-                None => {
-                    if self.eof && at < held.len() {
-                        result = self.line(&held[at..], false, out);
-                        at = held.len();
-                    }
-                    from = held.len();
-                    break;
-                }
+                _ => break,
             }
         }
-        self.held = held;
-        self.held.drain(..at);
-        self.scanned = from - at;
+        self.records = records;
         result
     }
 
@@ -859,12 +842,12 @@ impl Stream for Numfmt {
         if self.failed || !self.config.operands.is_empty() {
             return Ok(());
         }
-        self.held.extend_from_slice(input);
+        self.records.push(input);
         self.checked(out)
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.eof = true;
+        self.records.end();
         if self.failed {
             return Ok(());
         }

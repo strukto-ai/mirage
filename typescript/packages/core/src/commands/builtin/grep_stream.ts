@@ -147,26 +147,30 @@ export async function* streamInput(
   afterOutput = false,
   size: number | null = null,
   signal?: AbortSignal,
+  consumeAll = false,
+  listLabel: string | null = null,
 ): AsyncIterable<Uint8Array> {
   const budget = new YieldBudget(signal)
   stream.begin({
     label: latin1(encodeText(path)),
     show_filename: showFilename,
+    list_label: listLabel === null ? null : latin1(encodeText(listLabel)),
     size,
     after_output: afterOutput,
   })
   io.exitCode = 1
   try {
     // -m0 reads nothing.
-    if (!stream.done()) {
-      reading: for await (const chunk of source) {
+    if (!stream.done() || consumeAll) {
+      for await (const chunk of source) {
+        await budget.run()
         for (let offset = 0; offset < chunk.byteLength; offset += PROBE_BLOCK_BYTES) {
-          if (stream.done()) break reading
+          if (stream.done()) break
           await budget.run()
           const output = stream.feed(chunk.subarray(offset, offset + PROBE_BLOCK_BYTES))
           yield* drained(stream, output, io, budget)
         }
-        if (stream.done()) break
+        if (stream.done() && !consumeAll) break
       }
     }
   } finally {

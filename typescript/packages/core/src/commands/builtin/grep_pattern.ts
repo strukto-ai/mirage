@@ -132,25 +132,6 @@ export function patternWarnings(matcher: LineRegex, prog = 'grep'): string {
   return matcher.warnings.map((w) => `${prog}: warning: ${w}\n`).join('')
 }
 
-/** Whether a pattern list selects one line, given without its terminator. */
-export function lineSelected(
-  matcher: LineRegex,
-  line: string,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  return matcher.matches(line, signal)
-}
-
-/** What -o prints from one line: each match's start and text. */
-export async function linePieces(
-  matcher: LineRegex,
-  line: string,
-  signal?: AbortSignal,
-): Promise<[number, string][]> {
-  const extents = await matcher.extents(line, signal)
-  return extents.map(([start, end]) => [start, line.slice(start, end)])
-}
-
 /**
  * Compile a pattern list into one matcher; `utf8` means the lines are text
  * under a UTF-8 locale. A refusal is GNU grep's wording, and exits 2 as grep

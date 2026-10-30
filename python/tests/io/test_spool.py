@@ -140,3 +140,41 @@ async def test_a_byte_slice_sizes_and_slices_as_its_window():
         assert (tail.offset, len(tail)) == (6, 2)
         assert len(window[10:]) == 0
         assert await materialize(tail.stream()) == b"67"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, 2000000])
+async def test_overwrite_invalidates_cached_reads_and_keeps_size(limit):
+    expected = bytearray(bytes(range(256)) * 1400)
+    async with ByteSpool(limit) as spool:
+        await spool.append(bytes(expected))
+        assert await spool.read(16380, 20) == expected[16380:16400]
+        expected[16380:16400] = b"x" * 20
+        await spool.write(16380, b"x" * 20)
+        assert spool.size == len(expected)
+        assert await spool.read(16380, 20) == b"x" * 20
+        assert await materialize(spool.stream()) == expected
+        for offset in (-1, len(expected)):
+            with pytest.raises(ValueError, match="within its size"):
+                await spool.write(offset, b"x")
+        await spool.append(b"tail")
+        assert await spool.read(len(expected), 4) == b"tail"
+
+
+@pytest.mark.asyncio
+async def test_failed_overwrite_poisons_the_spool(monkeypatch):
+    async with ByteSpool(0) as spool:
+        await spool.append(b"abc")
+        await spool.read(0, 3)
+        original = spool._write
+
+        def fail(data, offset):
+            original(data[:1], offset)
+            raise OSError("scratch full")
+
+        monkeypatch.setattr(spool, "_write", fail)
+        with pytest.raises(OSError, match="scratch full"):
+            await spool.write(0, b"xy")
+        with pytest.raises(OSError) as lost:
+            await spool.read(0, 3)
+        assert lost.value.errno == errno.EIO

@@ -190,3 +190,40 @@ it('sizes and slices a byte slice as its window', async () => {
     await spool.close()
   }
 })
+
+it.each([0, 2000000])('overwrites cached and cross-block windows with budget %s', async (limit) => {
+  let stored: Uint8Array = new Uint8Array()
+  let fail = false
+  setSpoolFactory(() =>
+    Promise.resolve({
+      write: (at, part) => {
+        stored = placed(stored, at, fail ? part.subarray(0, 1) : part)
+        return fail ? Promise.reject(new Error('scratch full')) : Promise.resolve()
+      },
+      read: (offset, size) => Promise.resolve(stored.slice(offset, offset + size)),
+      close: () => Promise.resolve(),
+    }),
+  )
+  const expected = Uint8Array.from({ length: 358400 }, (_, i) => i % 256)
+  const spool = new ByteSpool(limit)
+  try {
+    await spool.append(expected)
+    expect(await spool.read(16380, 20)).toEqual(expected.slice(16380, 16400))
+    expected.fill(120, 16380, 16400)
+    await spool.write(16380, new Uint8Array(20).fill(120))
+    expect(spool.size).toBe(expected.length)
+    expect(await spool.read(16380, 20)).toEqual(expected.slice(16380, 16400))
+    expect(await materialize(spool.stream())).toEqual(expected)
+    for (const offset of [-1, expected.length])
+      await expect(spool.write(offset, Uint8Array.of(1))).rejects.toThrow('within its size')
+    await spool.append(Uint8Array.of(1, 2))
+    expect(await spool.read(expected.length, 2)).toEqual(Uint8Array.of(1, 2))
+    if (limit === 0) {
+      fail = true
+      await expect(spool.write(0, Uint8Array.of(8, 9))).rejects.toThrow('scratch full')
+      await expect(spool.read(0, 3)).rejects.toMatchObject({ code: 'EIO' })
+    }
+  } finally {
+    await spool.close()
+  }
+})

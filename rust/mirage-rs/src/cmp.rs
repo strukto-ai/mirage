@@ -244,14 +244,17 @@ impl Cmp {
         let start = out.len();
         while self.row < self.rows.len() && out.len() - start < WINDOW {
             let (offset, first, second) = self.rows[self.row];
-            out.extend_from_slice(format!("{offset:>width$} {first:>3o}").as_bytes());
+            crate::integer::decimal(offset, false, width, out);
+            out.push(b' ');
+            crate::integer::octal(first, out);
             if self.config.print_bytes {
                 let at = out.len();
                 out.push(b' ');
                 visible(first, out);
                 out.resize(at + 5.max(out.len() - at), b' ');
             }
-            out.extend_from_slice(format!(" {second:>3o}").as_bytes());
+            out.push(b' ');
+            crate::integer::octal(second, out);
             if self.config.print_bytes {
                 out.push(b' ');
                 visible(second, out);

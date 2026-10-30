@@ -19,7 +19,7 @@ import type { IndexCacheStore } from './cache/index/store.ts'
 import type { Handed } from './vfs/types.ts'
 import type { NamespaceLinks, OpKwargs } from './view/types.ts'
 import type { MountRow } from './workspace/types.ts'
-import type { WriteContext } from './cache/types.ts'
+import type { Measured, WriteContext } from './cache/types.ts'
 import { type FileStat, MountMode, PathSpec, type Visibility } from './types.ts'
 import { BaseVFS } from './vfs/base.ts'
 import { RAMVFS } from './vfs/ram/ram.ts'
@@ -267,8 +267,8 @@ export function onMount<T>(
  * refusal test where the store's version, the write's and the one sent all
  * differ. Mirrors Python's `tests/fixtures/write_context.KeptVersions`.
  */
-export function keptVersions(vfs: string): { context: WriteContext; kept: string[] } {
-  const kept: string[] = []
+export function keptVersions(vfs: string): { context: WriteContext; kept: Measured[] } {
+  const kept: Measured[] = []
   const context: WriteContext = {
     vfs,
     conditions: ['put', 'copy', 'delete'],

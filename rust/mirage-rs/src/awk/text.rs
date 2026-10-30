@@ -198,6 +198,38 @@ pub(super) fn split(
     Ok(())
 }
 
+#[derive(Default)]
+pub(super) struct RecordSearch {
+    rs: Vec<u8>,
+    scanned: usize,
+    regex: Option<crate::regex::RecordScan>,
+    paragraph_start: usize,
+    paragraph_end: Option<usize>,
+    initialized: bool,
+}
+impl RecordSearch {
+    pub(super) fn shift(&mut self, count: usize) {
+        self.scanned = self.scanned.saturating_sub(count);
+        self.paragraph_start = self.paragraph_start.saturating_sub(count);
+        if let Some(end) = &mut self.paragraph_end {
+            *end = end.saturating_sub(count);
+        }
+        if count > 0 {
+            if let Some(regex) = &mut self.regex {
+                regex.reset(0, false);
+            }
+        }
+    }
+    pub(super) fn reset(&mut self, start: usize) {
+        self.scanned = start;
+        self.paragraph_start = start;
+        self.paragraph_end = None;
+        if let Some(regex) = &mut self.regex {
+            regex.reset(start, false);
+        }
+    }
+}
+
 /// Cut the next record from `buf[start..]` with an RS value: its range
 /// and where the next one starts, or None when `buf` holds no complete
 /// one yet. One byte is literal, an empty RS is paragraph mode and
@@ -210,15 +242,40 @@ pub(super) fn take_record(
     rs: &[u8],
     last: bool,
     regexes: &mut Regexes,
+    search: &mut RecordSearch,
 ) -> Result<Option<(usize, usize, usize)>, Vec<u8>> {
+    if !search.initialized || search.rs != rs {
+        search.rs.clear();
+        search.rs.extend_from_slice(rs);
+        search.regex = if rs.len() > 1 {
+            regexes.get(rs)?.record_scanner()
+        } else {
+            None
+        };
+        search.initialized = true;
+        search.reset(start);
+    }
     let tail = |start: usize| (last && start < buf.len()).then_some((start, buf.len(), buf.len()));
     match rs {
-        b"" => Ok(paragraph(buf, start, last)),
-        &[sep] => Ok(match memchr::memchr(sep, &buf[start..]) {
-            Some(at) => Some((start, start + at, start + at + 1)),
-            None => tail(start),
-        }),
+        b"" => Ok(paragraph(buf, start, last, search)),
+        &[sep] => {
+            let from = search.scanned.max(start);
+            Ok(match memchr::memchr(sep, &buf[from..]) {
+                Some(at) => Some((start, from + at, from + at + 1)),
+                None => {
+                    search.scanned = buf.len();
+                    tail(start)
+                }
+            })
+        }
         _ => {
+            if let Some(scanner) = &mut search.regex {
+                match scanner.scan(buf, last) {
+                    Ok(false) => return Ok(None),
+                    Ok(true) => {}
+                    Err(()) => search.regex = None,
+                }
+            }
             let regex = regexes.get(rs)?;
             let mut pos = start;
             while pos <= buf.len() {
@@ -230,6 +287,15 @@ pub(super) fn take_record(
                     continue;
                 }
                 if to == buf.len() && !last {
+                    // Anchoring later would discard earlier unfinished alternatives.
+                    if from == start {
+                        if let Some(scanner) = &mut search.regex {
+                            scanner.reset(start, true);
+                            if scanner.scan(buf, false).is_err() {
+                                search.regex = None;
+                            }
+                        }
+                    }
                     return Ok(None);
                 }
                 return Ok(Some((start, from, to)));
@@ -242,18 +308,33 @@ pub(super) fn take_record(
 /// Paragraph mode: records are separated by blank lines, and leading or
 /// trailing newlines never make an empty record. The whole run of
 /// newlines is the separator, so a run reaching the end of `buf` waits.
-fn paragraph(buf: &[u8], mut start: usize, last: bool) -> Option<(usize, usize, usize)> {
+fn paragraph(
+    buf: &[u8],
+    start: usize,
+    last: bool,
+    search: &mut RecordSearch,
+) -> Option<(usize, usize, usize)> {
+    let mut start = start.max(search.paragraph_start);
     while start < buf.len() && buf[start] == b'\n' {
         start += 1;
     }
-    if let Some(at) = memchr::memmem::find(&buf[start..], b"\n\n") {
-        let end = start + at;
-        let mut stop = end + 2;
+    search.paragraph_start = start;
+    if let Some(end) = search.paragraph_end {
+        let mut stop = search.scanned.max(end + 2);
         while stop < buf.len() && buf[stop] == b'\n' {
             stop += 1;
         }
+        search.scanned = stop;
         return (stop < buf.len() || last).then_some((start, end, stop));
     }
+    let from = start.max(search.scanned.saturating_sub(1));
+    if let Some(at) = memchr::memmem::find(&buf[from..], b"\n\n") {
+        let end = from + at;
+        search.paragraph_end = Some(end);
+        search.scanned = end + 2;
+        return paragraph(buf, start, last, search);
+    }
+    search.scanned = buf.len();
     if !last || start == buf.len() {
         return None;
     }
@@ -350,4 +431,99 @@ pub(super) fn substitute(
     }
     grow(&mut out, subject.get(pos..).unwrap_or_default())?;
     Some((count, out))
+}
+
+#[cfg(test)]
+mod record_tests {
+    use super::*;
+
+    #[test]
+    fn incremental_record_search_matches_full_search_at_every_boundary() {
+        for rs in [
+            b"\n".as_slice(),
+            b"",
+            b"END",
+            b"x+",
+            b"a.*z|END",
+            b"ab.*z|E+",
+            b"a$",
+            b"x*",
+            b"[ab]+",
+            b"a{2,4}",
+        ] {
+            for text in [
+                b"alpha\n\nENDxxxENDtail\n".as_slice(),
+                b"aaaaabxxazEND",
+                b"tailaaaa",
+                b"\n\n\nparagraph\n\n\nlast",
+                b"zzzzzzzz",
+                b"abXEEzT",
+            ] {
+                for width in 1..=text.len() {
+                    let mut regexes = Regexes::default();
+                    let mut search = RecordSearch::default();
+                    let mut start = 0;
+                    for end in (width..text.len())
+                        .step_by(width)
+                        .chain(std::iter::once(text.len()))
+                    {
+                        let last = end == text.len();
+                        loop {
+                            let got = take_record(
+                                &text[..end],
+                                start,
+                                rs,
+                                last,
+                                &mut regexes,
+                                &mut search,
+                            )
+                            .unwrap();
+                            let mut reference = RecordSearch {
+                                rs: rs.to_vec(),
+                                initialized: true,
+                                ..RecordSearch::default()
+                            };
+                            let expected = take_record(
+                                &text[..end],
+                                start,
+                                rs,
+                                last,
+                                &mut regexes,
+                                &mut reference,
+                            )
+                            .unwrap();
+                            assert_eq!(
+                                got, expected,
+                                "rs {rs:?}, text {text:?}, width {width}, end {end}"
+                            );
+                            let Some((_, _, next)) = got else { break };
+                            start = next;
+                            search.reset(start);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_records_retain_the_scanned_position() {
+        for rs in [b"\n".as_slice(), b"", b"END", b"x+"] {
+            let mut regexes = Regexes::default();
+            let mut search = RecordSearch::default();
+            let text = vec![b'a'; 1024 * 1024];
+            for end in (4096..=text.len()).step_by(4096) {
+                assert!(
+                    take_record(&text[..end], 0, rs, false, &mut regexes, &mut search)
+                        .unwrap()
+                        .is_none()
+                );
+                if rs.len() <= 1 {
+                    assert_eq!(search.scanned, end);
+                } else {
+                    assert!(search.regex.is_some());
+                }
+            }
+        }
+    }
 }

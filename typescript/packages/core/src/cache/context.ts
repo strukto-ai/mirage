@@ -27,6 +27,7 @@ import {
   type CacheInvalidator,
   type KnownVersions,
   type LiveVersion,
+  type Measured,
   OwnRead,
   type WriteCondition,
   type WriteContext,
@@ -193,6 +194,14 @@ export function conditionVersion(condition: WriteCondition | null): string | nul
   return condition?.kind === 'match' ? condition.version : null
 }
 
+/**
+ * What a write's condition asked for: a version, ABSENT for a create. Mirrors
+ * Python's `condition_basis`.
+ */
+export function conditionBasis(condition: WriteCondition | null): Measured | null {
+  return condition?.kind === 'absent' ? OwnRead.ABSENT : conditionVersion(condition)
+}
+
 export function requireSupported(
   support: ConditionSupport,
   vfs: string,
@@ -255,6 +264,8 @@ export async function writeCondition(
  * version the mount holds, else the one its own lookup found. Mirrors
  * Python's `delete_condition`.
  *
+ * @throws a stale-write error when the session found no file there, and one
+ * has appeared since
  * @throws an ENOTSUP error when the backend cannot condition a delete
  */
 export async function deleteCondition(
@@ -263,7 +274,11 @@ export async function deleteCondition(
 ): Promise<WriteCondition | null> {
   const context = activeWriteContext(path)
   if (context === null) return null
-  const cached = await context.readVersion(path)
+  let cached = await context.readVersion(path)
+  if (cached === OwnRead.ABSENT) {
+    if (lookedUp !== null && lookedUp !== '') throw await stale(path)
+    cached = null
+  }
   const version = cached !== null && cached !== '' ? cached : lookedUp
   return condition(context, path, 'delete', version !== '' ? version : null)
 }
@@ -293,16 +308,21 @@ async function settle(
   path: PathSpec,
   kind: WriteKind,
   read: string | OwnRead | null,
-  cached: string | null,
+  cached: Measured | null,
 ): Promise<WriteCondition> {
   if (read === OwnRead.UNKNOWN) return condition(context, path, kind, null)
   // The op's own read found no file: one the mount saw was removed since.
-  if (read === OwnRead.ABSENT && cached !== null && cached !== '') {
-    throw await stale(path, { gone: true })
+  if (read === OwnRead.ABSENT && typeof cached === 'string' && cached !== '') {
+    throw await stale(path)
   }
   if (read === OwnRead.ABSENT && kind === 'put') return ABSENT_WRITE
   const mine = read === OwnRead.ABSENT ? null : read
   const ownToken = mine === '' ? null : mine
+  // The session last found no file here.
+  if (cached === OwnRead.ABSENT) {
+    if (ownToken === null && (context.creates ?? []).includes(kind)) return ABSENT_WRITE
+    return condition(context, path, kind, ownToken)
+  }
   const cachedToken = cached === '' ? null : cached
   return condition(context, path, kind, ownToken ?? cachedToken)
 }
@@ -336,8 +356,7 @@ export async function nativeCondition(
     throw enotsup(activeWriteContext(path)?.vfs ?? 'native', `conditional ${kind} (absent)`, path)
   const held = conditionVersion(cond)
   if (held === null || held === '') return null
-  if (live === null) throw await stale(path, { gone: true })
-  if (live.content !== held) throw await stale(path, { version: held })
+  if (live?.content !== held) throw await stale(path, { version: held })
   if (live.native === null || live.native === '') {
     throw enotsup(activeWriteContext(path)?.vfs ?? 'native', `conditional ${kind}`, path)
   }
@@ -364,7 +383,9 @@ export async function heldVersions(paths: readonly PathSpec[]): Promise<(string 
   const first = paths[0]
   const context = first === undefined ? null : activeWriteContext(first)
   if (context === null) return paths.map(() => null)
-  return context.readVersions(paths)
+  return (await context.readVersions(paths)).map((token) =>
+    typeof token === 'string' ? token : null,
+  )
 }
 
 /**
@@ -393,9 +414,12 @@ export function conditioned(path: PathSpec, kind: 'copy' | 'delete'): boolean {
   return true
 }
 
-/** Drop the write context's cached copy of `path`, if there is one. */
-export async function dropCached(path: PathSpec, keep: string | null = null): Promise<void> {
-  markLost(path, keep)
+/**
+ * Drop the write context's cached copy of `path`, if there is one. `keep` is
+ * the version to keep without bytes, ABSENT for a refused create.
+ */
+export async function dropCached(path: PathSpec, keep: Measured | null = null): Promise<void> {
+  markLost(path, typeof keep === 'string' ? keep : null)
   const context = activeWriteContext(path)
   if (context === null) return
   await context.drop(path)
@@ -403,26 +427,32 @@ export async function dropCached(path: PathSpec, keep: string | null = null): Pr
 }
 
 /**
- * The refusal for a lost condition, after dropping the cached copy. The
- * version the write lost on is kept, so a retry without a read is refused
- * again; a file found `gone` keeps none, there being no newer bytes for a
- * retry to overwrite. `landed` marks a move whose copy landed before its
- * source's delete lost, which `mv` reports as a failed removal; `version` is
- * the one the write sent, when the line no longer names it (a move retracts
- * both paths), ABSENT when the op found the file gone, which keeps none.
- * Mirrors Python's `stale`.
+ * Drop `path`'s cached copy, keeping what a refused write sent. The condition
+ * stays, so a retry without a read sends it again and is refused again. That
+ * holds for a file found gone too: a peer may create it again before the
+ * retry. `version` is the version the write sent, ABSENT for a create; null
+ * keeps what the session last saw. Mirrors Python's `keep_sent`.
+ */
+export async function keepSent(path: PathSpec, version: Measured | null = null): Promise<void> {
+  const context = activeWriteContext(path)
+  let keep = version
+  if (keep === null && context !== null) keep = await context.readVersion(path)
+  await dropCached(path, keep)
+}
+
+/**
+ * The refusal for a lost condition, after `keepSent`. `landed` marks a move
+ * whose copy landed before its source's delete lost, which `mv` reports as a
+ * failed removal; `version` is the one the write sent, ABSENT for a create,
+ * when the line no longer names it (a move retracts both paths). Mirrors
+ * Python's `stale`.
  */
 export async function stale(
   path: PathSpec,
-  options: { landed?: boolean; gone?: boolean; version?: string | OwnRead.ABSENT | null } = {},
+  options: { landed?: boolean; version?: Measured | null } = {},
 ): Promise<StaleWriteError> {
-  const { landed = false, gone = false, version = null } = options
-  const context = activeWriteContext(path)
-  const keep =
-    !gone && version !== OwnRead.ABSENT && context !== null
-      ? (version ?? (await context.readVersion(path)))
-      : null
-  await dropCached(path, keep)
+  const { landed = false, version = null } = options
+  await keepSent(path, version)
   return staleWrite(path, landed)
 }
 
@@ -440,7 +470,7 @@ export function knownVersions(root: PathSpec, keyPrefix: string): KnownVersions 
     const tokens = await context.readVersions(keys.map((key) => keyPath(root, keyPrefix, key)))
     keys.forEach((key, i) => {
       const token = tokens[i]
-      if (token !== null && token !== undefined && token !== '') known.set(key, token)
+      if (typeof token === 'string' && token !== '') known.set(key, token)
     })
     return known
   }

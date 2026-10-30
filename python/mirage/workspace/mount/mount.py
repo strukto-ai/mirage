@@ -169,6 +169,7 @@ from mirage.workspace.mount.listing import (
 from mirage.workspace.mount.read_policy import coerce_read_policy
 from mirage.workspace.mount.write_policy import (
     coerce_write_policy,
+    create_conditions,
     write_conditions,
 )
 
@@ -1179,6 +1180,7 @@ class MountEntry:
         return WriteContext(
             vfs=self.vfs.name,
             conditions=write_conditions(self.vfs),
+            creates=create_conditions(self.vfs),
             read_version=manager.read_version,
             read_versions=manager.read_versions,
             drop=lambda path: manager.invalidate(path, FileChangeKind.UPDATE),
