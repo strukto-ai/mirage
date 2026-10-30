@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdir, open, readFile, readdir, rename, stat, unlink } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { generationOf } from '@struktoai/mirage-core/workspace/record/types'
@@ -55,24 +55,17 @@ export async function syncDirectory(directory: string): Promise<void> {
 }
 
 export async function prepareDirectory(directory: string): Promise<void> {
-  const missing: string[] = []
-  let current = path.resolve(directory)
-  for (;;) {
-    try {
-      if (!(await stat(current)).isDirectory()) throw new Error(`not a directory: ${current}`)
-      break
-    } catch (error) {
-      if (!isMissing(error)) throw error
-      missing.push(current)
+  await mkdir(directory, { recursive: true })
+  const synced = new Set<string>()
+  for (const start of [await realpath(directory), path.resolve(directory)]) {
+    let current = start
+    while (!synced.has(current)) {
+      await syncDirectory(current)
+      synced.add(current)
       const parent = path.dirname(current)
-      if (parent === current) throw error
+      if (parent === current) break
       current = parent
     }
-  }
-  await mkdir(directory, { recursive: true })
-  for (const made of missing.reverse()) {
-    await syncDirectory(made)
-    await syncDirectory(path.dirname(made))
   }
 }
 

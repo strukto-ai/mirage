@@ -83,18 +83,17 @@ def prepare_directory(path: str) -> None:
     Args:
         path (str): the record directory.
     """
-    missing: list[str] = []
-    current = os.path.abspath(path)
-    while not os.path.isdir(current):
-        missing.append(current)
-        parent = os.path.dirname(current)
-        if parent == current:
-            raise NotADirectoryError(current)
-        current = parent
     os.makedirs(path, exist_ok=True)
-    for made in reversed(missing):
-        sync_directory(made)
-        sync_directory(os.path.dirname(made))
+    synced: set[str] = set()
+    for start in (os.path.realpath(path), os.path.abspath(path)):
+        current = start
+        while current not in synced:
+            sync_directory(current)
+            synced.add(current)
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
 
 
 def _acquire_lock(lock_path: str) -> int | None:

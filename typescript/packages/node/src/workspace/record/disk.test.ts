@@ -226,7 +226,7 @@ describe('DiskRecordClient lock reclaim and release', () => {
     const body = BigInt(JSON.stringify({ generation: 0 }).length)
     const record = (await real.stat(client.path('k'), { bigint: true })).ino
     const directory = await real.stat(root, { bigint: true })
-    expect(steps).toEqual([
+    expect(steps.slice(-5)).toEqual([
       ['sync', body, record],
       ['close'],
       ['rename', body, record],
@@ -262,15 +262,47 @@ describe('DiskRecordClient lock reclaim and release', () => {
     vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
       const handle = await real.open(...args)
       if (String(args[0]) === root) {
+        const sync = handle.sync.bind(handle)
         handle.sync = async () => {
-          throw new Error('directory sync failed')
+          if (
+            (await real.readFile(client.path('k'), 'utf8')) === JSON.stringify({ generation: 1 })
+          ) {
+            throw new Error('directory sync failed')
+          }
+          await sync()
         }
       }
       return handle
     }) as typeof fs.open)
     await expect(client.casPut('k', { generation: 1 }, 0)).rejects.toThrow('directory sync failed')
     expect((await client.get('k'))[0]).toEqual({ generation: 1 })
+    vi.mocked(fs.open).mockImplementation(real.open)
     expect(await client.casPut('k', { generation: 1 }, 0)).toBe(false)
+  })
+
+  it('confirms existing directory ancestors before publishing a record', async () => {
+    const directory = join(root, 'already-created', 'sessions')
+    await fs.mkdir(directory, { recursive: true })
+    const realRoot = await fs.realpath(root)
+    const realDirectory = await fs.realpath(directory)
+    const client = new DiskRecordClient(directory, '')
+    const synced: string[] = []
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      const handle = await real.open(...args)
+      if (args[1] === 'r') {
+        handle.sync = () => {
+          const name = String(args[0])
+          synced.push(name)
+          return name === realRoot
+            ? Promise.reject(new Error('ancestor sync failed'))
+            : Promise.resolve()
+        }
+      }
+      return handle
+    }) as typeof fs.open)
+    await expect(client.casPut('k', { generation: 1 }, 0)).rejects.toThrow('ancestor sync failed')
+    expect(synced).toEqual([realDirectory, join(realRoot, 'already-created'), realRoot])
+    expect((await client.get('k'))[0]).toBeNull()
   })
 })
 
@@ -281,10 +313,13 @@ it('releases the lock and handle when writing the owner fails', async () => {
     const lock = `${client.path('record')}.lock`
     const handle = await fs.open(lock, 'wx')
     vi.spyOn(handle, 'write').mockRejectedValueOnce(new Error('write failed'))
-    vi.mocked(fs.open).mockResolvedValueOnce(handle)
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      return String(args[0]) === lock ? handle : real.open(...args)
+    }) as typeof fs.open)
     await expect(client.lock('record')).rejects.toThrow('write failed')
     await expect(fs.stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(handle.stat()).rejects.toMatchObject({ code: 'EBADF' })
+    vi.mocked(fs.open).mockImplementation(real.open)
     await client.unlock('record', await client.lock('record'))
   } finally {
     await fs.rm(root, { recursive: true, force: true })

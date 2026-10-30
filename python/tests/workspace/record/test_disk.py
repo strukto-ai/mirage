@@ -297,11 +297,12 @@ async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
     body = len(json.dumps({"generation": 0}))
     record = os.stat(client.path("k")).st_ino
     directory = os.stat(tmp_path)
-    assert steps == [
+    assert steps[-3:] == [
         (how, body, record),
         ("replace", body, record),
         ("fsync", directory.st_size, directory.st_ino),
     ]
+    assert all(step[0] == "fsync" for step in steps[:-3])
 
 
 @pytest.mark.asyncio
@@ -362,15 +363,40 @@ async def test_directory_sync_failure_is_not_a_commit_acknowledgement(
 ):
     client = DiskRecordClient(str(tmp_path), "")
     await client.put("k", {"generation": 0})
+    original = disk.sync_directory
 
     def fail_directory_sync(path):
-        raise OSError(errno.EIO, "directory sync failed")
+        if Path(client.path("k")).read_text() == json.dumps({"generation": 1}):
+            raise OSError(errno.EIO, "directory sync failed")
+        original(path)
 
     monkeypatch.setattr(disk, "sync_directory", fail_directory_sync)
     with pytest.raises(OSError, match="directory sync failed"):
         await client.cas_put("k", {"generation": 1}, 0)
     assert (await client.get("k"))[0] == {"generation": 1}
+    monkeypatch.setattr(disk, "sync_directory", original)
     assert not await client.cas_put("k", {"generation": 1}, 0)
+
+
+@pytest.mark.asyncio
+async def test_existing_directory_ancestors_are_confirmed_before_record_publish(
+    tmp_path, monkeypatch
+):
+    directory = tmp_path / "already-created" / "sessions"
+    directory.mkdir(parents=True)
+    client = DiskRecordClient(str(directory), "")
+    synced: list[str] = []
+
+    def sync(path):
+        synced.append(path)
+        if path == str(tmp_path):
+            raise OSError(errno.EIO, "ancestor sync failed")
+
+    monkeypatch.setattr(disk, "sync_directory", sync)
+    with pytest.raises(OSError, match="ancestor sync failed"):
+        await client.cas_put("k", {"generation": 1}, 0)
+    assert synced == [str(directory), str(directory.parent), str(tmp_path)]
+    assert (await client.get("k"))[0] is None
 
 
 @pytest.mark.asyncio
