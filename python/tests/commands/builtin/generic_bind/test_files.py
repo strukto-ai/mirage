@@ -267,6 +267,64 @@ async def test_a_glob_read_warms_the_operands_after_it():
     assert vfs.batches == [warmed[:8], warmed[8:]]
 
 
+@pytest.mark.asyncio
+async def test_custom_reading_keeps_its_bytes_instead_of_raw_size_and_ranges():
+    backend = Backend(stored={"/f": b"raw"})
+    ctx = _ctx(backend, _row(calls=frozenset({"read_range"})))
+
+    async def rendered(ctx, path):
+        yield backend.stored[path.virtual] + b" rendered"
+
+    with _on_mount():
+        assert command_files(ctx).answers("read_range")
+        with with_reading(ctx, Reading(split=True, stream=rendered)) as run:
+            files = command_files(run)
+            assert not files.answers("read_range")
+            assert (
+                await file_size(files, run, opened=True)(_path("/f")) is None
+            )
+            assert (
+                await materialize(files.read(_path("/f"))) == b"raw rendered"
+            )
+    assert backend.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "size,now,expected", [(7, 7, 7), (7, 9, None), (0, 0, None)]
+)
+async def test_opened_file_sizes_still_refuse_changed_and_pipe_sizes(
+    size, now, expected
+):
+    ctx = _ctx(
+        _answering(_st(size=size, mode=0o644), _st(size=now, mode=0o644))
+    )
+    with _on_mount():
+        assert (
+            await file_size(command_files(ctx), ctx, opened=True)(_path("/f"))
+            == expected
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opened", [False, True])
+async def test_unknown_sizes_do_not_refresh_backend_metadata(opened):
+    row = _st()
+
+    async def dispatch(name, path, /, **kwargs):
+        assert not kwargs.get("fresh")
+        return (None if name == "read" else row), IOResult()
+
+    ctx = _ctx(dispatch)
+    with _on_mount():
+        assert (
+            await file_size(command_files(ctx), ctx, opened=opened)(
+                _path("/f")
+            )
+            is None
+        )
+
+
 class TreeRAM(RAMVFS):
     """A RAM mount noting each folder its tree read is asked for."""
 

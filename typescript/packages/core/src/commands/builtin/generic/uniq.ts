@@ -1,3 +1,4 @@
+import { ByteSpool } from '../../../io/spool.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +15,8 @@
 
 import { stdinStat, stdinStream, streamOutput } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { closeQuietly } from '../../../io/stream.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { wordRefusalError, extraOperandError } from '../../spec/usage.ts'
@@ -140,7 +142,7 @@ export async function uniqGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  write?: (p: PathSpec, data: Uint8Array) => Promise<void>,
+  write?: (p: PathSpec, data: ByteSource) => Promise<void>,
   stat?: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
@@ -169,13 +171,21 @@ export async function uniqGeneric(
   const outputPath = paths[1]
   if (outputPath !== undefined && outputPath.rawPath !== '-') {
     if (write === undefined) {
+      await closeQuietly(output)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: encodeText('uniq: output is not writable\n') }),
       ]
     }
-    const data = await materialize(output)
-    await write(outputPath, data)
+    // Consume before writing: Mirage preserves a shared INPUT/OUTPUT;
+    // GNU truncates it when opening the output.
+    const stored = new ByteSpool()
+    try {
+      await stored.fill(output)
+      await write(outputPath, stored.stream())
+    } finally {
+      await stored.close()
+    }
     return [new Uint8Array(), new IOResult()]
   }
   return [output, new IOResult()]

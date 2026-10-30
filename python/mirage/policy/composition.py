@@ -342,6 +342,8 @@ class Composition:
 def compose_settled(
     answers: tuple[Deny | Ask | Route, ...], mode: str
 ) -> Deny | Ask | Route | None:
+    if not answers:
+        return None
     composition = Composition()
     try:
         composition.actions.extend(answers)

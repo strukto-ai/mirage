@@ -372,13 +372,43 @@ describe('& inside a compound body', () => {
     expect(stdoutStr(await ws.shell('jobs'))).toBe('')
   })
 
-  it('loop-body jobs write after the foreground line', async () => {
-    const ws = buildWs()
-    const io = await ws.shell(
-      'for i in 1 2; do { sleep 0.05; echo $i; } & done; echo launched; wait',
-    )
-    expect(stdoutStr(io)).toBe('launched\n1\n2\n')
-  })
+  it.each([
+    [1, 2],
+    [2, 1],
+  ])(
+    'loop-body jobs write after the foreground line in completion order %i, %i',
+    async (first, second) => {
+      const vfs = new RAMVFS()
+      const ws = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
+      const releases = new Map<string, () => void>()
+      const gates = new Map(
+        ['1', '2'].map((id) => [
+          id,
+          new Promise<void>((resolve) => {
+            releases.set(id, resolve)
+          }),
+        ]),
+      )
+      await ws.shell('touch /m/1 /m/2')
+      const read = vi.spyOn(vfs, 'read').mockImplementation(async (path) => {
+        await gates.get(path.vfsPath)
+        return new Uint8Array()
+      })
+      try {
+        const io = await ws.shell('for i in 1 2; do { cat /m/$i; echo $i; } & done; echo launched')
+        expect(stdoutStr(io)).toBe('launched\n')
+        for (const id of [first, second]) {
+          releases.get(String(id))?.()
+          await ws.jobTable.wait(id, ws.sessionManager.defaultId)
+        }
+        expect(stdoutStr(await ws.shell('wait'))).toBe(`${String(first)}\n${String(second)}\n`)
+      } finally {
+        for (const release of releases.values()) release()
+        await ws.close()
+        read.mockRestore()
+      }
+    },
+  )
 
   it('$! names each loop-body job', async () => {
     const ws = buildWs()

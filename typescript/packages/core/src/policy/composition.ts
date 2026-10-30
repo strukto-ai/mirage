@@ -355,6 +355,7 @@ export function composeSettled(
   answers: readonly Answer[],
   mode: 'settled' | 'agreed',
 ): Answer | null {
+  if (answers.length === 0) return null
   const composition = new Composition(answers)
   try {
     composition.feed({

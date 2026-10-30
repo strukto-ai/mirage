@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 
 import pytest
 
+import mirage.commands.builtin.generic.sed as sed_module
 from mirage.commands.builtin.generic.sed import (
     _script_origins,
     sed_generic,
@@ -134,3 +135,12 @@ async def test_reached_writes_and_status_survive_early_output_close(
         assert io.exit_code == code
     finally:
         await ws.close()
+
+
+def test_many_empty_scripts_are_not_retained_in_the_write_cache():
+    sed_module._write_checks.clear()
+    assert not sed_writes({"e": [""] * 5000}, [])
+    assert not sed_module._write_checks
+    assert not sed_writes({"e": ["# small"]}, [])
+    assert len(sed_module._write_checks) == 1
+    sed_module._write_checks.clear()

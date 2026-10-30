@@ -14,7 +14,9 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import extra_operand_error, word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly
+from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused
 from mirage.rs.stream import open_stream
@@ -183,11 +185,15 @@ async def uniq_generic(
     )
     if len(paths) == 2 and paths[1].raw_path != "-":
         if write_bytes is None:
+            await close_quietly(output)
             return None, IOResult(
                 exit_code=1, stderr=b"uniq: output is not writable\n"
             )
-        data = await materialize(output)
-        await write_bytes(paths[1], data)
+        # Consume before writing: Mirage preserves a shared INPUT/OUTPUT;
+        # GNU truncates it when opening the output.
+        async with ByteSpool() as stored:
+            await stored.fill(output)
+            await write_bytes(paths[1], stored.stream())
         return b"", IOResult()
     return output, IOResult()
 

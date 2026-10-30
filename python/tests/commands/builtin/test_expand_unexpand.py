@@ -13,16 +13,46 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import json
+from dataclasses import dataclass
+from types import SimpleNamespace
+
 import pytest
 
-from mirage.commands.builtin.generic.expand import (
-    TabStops,
-    parse_flags,
-    read_tab_stops,
-)
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.stream import open_stream
+from mirage.shell.bytes import byte_view
 from tests.commands.builtin.conftest import output_bytes as _bytes
 from tests.commands.builtin.conftest import ram_workspace as _ws
 from tests.commands.builtin.conftest import run_raw as _run_raw
+
+
+@dataclass(frozen=True)
+class TabStops:
+    stops: tuple[int, ...] = ()
+    extend: int = 0
+    increment: int = 0
+
+
+def read_tab_stops(occurrences: list[str], prog: str = "expand") -> TabStops:
+    try:
+        engine = open_stream(
+            "expand",
+            {
+                "tabs": [byte_view(tab) for tab in occurrences],
+                "initial_only": False,
+            },
+        )
+    except StreamRefusal as exc:
+        raise ValueError(exc.message) from exc
+    fields = json.loads(engine.metadata())
+    return TabStops(
+        tuple(fields["stops"]), fields["extend"], fields["increment"]
+    )
+
+
+def parse_flags(flags):
+    return SimpleNamespace(tabs=read_tab_stops([flags["tabs"]]))
 
 
 def test_expand_default_tab():
@@ -563,3 +593,17 @@ def test_expand_an_invalid_character_does_end_the_scan(raw, message):
     with pytest.raises(ValueError) as refusal:
         read_tab_stops([raw])
     assert str(refusal.value) == message
+
+
+@pytest.mark.parametrize("command", ["expand", "unexpand"])
+def test_tab_error_quotes_raw_argument_bytes(command):
+    ws, _ = _ws()
+    stdout, io = _run_raw(ws, command + r" -t $'\377'")
+    assert io.exit_code == 1
+    assert (
+        io.stderr
+        == (
+            command + ": tab size contains invalid character(s): '\\377'\n"
+        ).encode()
+    )
+    assert not stdout

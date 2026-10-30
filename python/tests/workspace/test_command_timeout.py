@@ -517,7 +517,12 @@ async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
                 await ws.shell(command, cancel=cancel)
             assert timer is not None
             assert fired[0] < 1
-            assert 0 < progress[0][0] < progress[0][1]
+            if command.startswith("tail "):
+                # A suffix read fits in the first bounded window; the
+                # cancellation must land before another operand is read.
+                assert progress[0] == (CHUNK_SIZE, CHUNK_SIZE)
+            else:
+                assert 0 < progress[0][0] < progress[0][1]
         finally:
             if timer is not None:
                 timer.cancel()

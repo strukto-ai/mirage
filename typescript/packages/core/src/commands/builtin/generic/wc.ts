@@ -26,9 +26,10 @@ import { matchWord } from '../../spec/word_choice.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { runStream } from '../../../rs/stream.ts'
-import { shellQuote } from '../../../utils/quote.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { runStream, openStreamSync } from '../../../rs/stream.ts'
+import { byteView, decodeText, encodeText } from '../../../shell/bytes.ts'
+
+import { concat } from '../../../utils/bytes.ts'
 
 const decoder = new TextDecoder()
 
@@ -151,38 +152,21 @@ export function numberWidth(
   return sizes.includes(null) ? Math.max(width, 7) : width
 }
 
-// One report row under GNU's name rule (coreutils 9.7): a name holding a
-// newline is shell-quoted, as GNU 9.7 prints it, so no row spans two lines;
-// every other name, spaces included, prints as itself. Mirrors Python's
-// labelled.
-function labelled(body: string, label: string | null): string {
-  if (label === null) return body
-  return `${body} ${label.includes('\n') ? shellQuote(label) : label}`
-}
-
-// GNU wc layout: counts right-aligned to a shared width and space-separated.
-// A caller that knows its operands passes GNU's width (numberWidth); one that
-// holds only counts, such as a database push-down that never renders its
-// files, gets the widest printed number, with a single count for a single
-// operand unpadded and a lone unlabelled row at GNU's 7.
 export function formatWcLines(rows: WcRow[], width: number | null = null): string[] {
-  const first = rows[0]
-  if (width === null && rows.length === 1 && first?.values.length === 1) {
-    const body = String(first.values[0])
-    return [labelled(body, first.label)]
-  }
-  let pad = width ?? 1
-  if (width === null && rows.length === 1 && first?.label === null) {
-    pad = 7
-  } else if (width === null) {
-    for (const row of rows) {
-      for (const n of row.values) pad = Math.max(pad, String(n).length)
-    }
-  }
-  return rows.map((row) => {
-    const body = row.values.map((n) => String(n).padStart(pad)).join(' ')
-    return labelled(body, row.label)
+  const engine = openStreamSync('wc', {
+    report: rows.map((row) => ({
+      values: row.values,
+      label: row.label === null ? null : byteView(row.label),
+    })),
+    width,
   })
+  try {
+    const output = [engine.finish()]
+    while (engine.busy()) output.push(engine.drain())
+    return decodeText(concat(output)).split('\n').slice(0, -1)
+  } finally {
+    engine.close()
+  }
 }
 
 // Append the `total` row --total asks for and render the report. `only`
