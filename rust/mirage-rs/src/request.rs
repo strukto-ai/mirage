@@ -409,15 +409,21 @@ pub(crate) fn read_failure(command: &[u8], name: &[u8], reply: &Reply) -> Vec<u8
     [command, b": ", name, b": ", &text, b"\n"].concat()
 }
 
-/// A run its options or operands refused before it read anything.
+/// A run its options or operands refused before it read anything, which
+/// a host reads as it reads any run: its stderr and its status.
 pub(crate) struct Refused {
     stderr: Vec<u8>,
+    status: i32,
 }
 
 impl Refused {
-    pub(crate) fn new(mut stderr: Vec<u8>) -> Refused {
+    pub(crate) fn new(refusal: StreamError) -> Refused {
+        let mut stderr = refusal.stderr();
         stderr.push(b'\n');
-        Refused { stderr }
+        Refused {
+            stderr,
+            status: refusal.status,
+        }
     }
 }
 
@@ -431,7 +437,7 @@ impl Stream for Refused {
     }
 
     fn status(&self) -> i32 {
-        1
+        self.status
     }
 
     fn take_stderr(&mut self, err: &mut Vec<u8>) {

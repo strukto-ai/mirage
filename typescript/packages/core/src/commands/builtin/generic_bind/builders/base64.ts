@@ -12,15 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { base64Generic } from '../../generic/base64_cmd.ts'
+import { base64Generic, parseFlags } from '../../generic/base64_cmd.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 
 const base64: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const parsed = parseFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return base64Generic(resolved, ctx, files.read, dirAwareStat(files, ctx))
+  return base64Generic(parsed, resolved, ctx, files.read, dirAwareStat(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

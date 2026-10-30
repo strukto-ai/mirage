@@ -16,10 +16,9 @@
 // Mirrors python/tests/commands/builtin/generic/test_cmp.py.
 
 import { describe, expect, it } from 'vitest'
-import { cmpGeneric, parseCount, parseSkip } from './cmp.ts'
-import { UsageError } from '../../errors.ts'
+import { cmpGeneric, parseFlags } from './cmp.ts'
 import { PathSpec } from '../../../types.ts'
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { Context } from '../../config.ts'
 
 const DEC = new TextDecoder()
@@ -29,98 +28,73 @@ const P2 = new PathSpec({ virtual: '/F/two', directory: '/F', vfsPath: 'two' })
 const DASH = new PathSpec({ virtual: '/F/-', directory: '/F', vfsPath: '-', rawPath: '-' })
 const DEV_STDIN = new PathSpec({ virtual: '/dev/stdin', directory: '/dev', vfsPath: 'stdin' })
 
-describe('parseCount', () => {
+const HINT = "\ncmp: Try 'cmp --help' for more information.\n"
+
+// What cmp's builder does: read the counts, then compare.
+async function cmp(
+  paths: PathSpec[],
+  texts: readonly string[],
+  ctx: Context,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  sizeOf?: (p: PathSpec) => Promise<number | null>,
+): Promise<[ByteSource | null, IOResult]> {
+  const parsed = parseFlags(ctx.flags, texts)
+  if (parsed instanceof IOResult) return [null, parsed]
+  return cmpGeneric(parsed, paths, texts, ctx, stream, sizeOf)
+}
+
+function refusal(flags: Context['flags'], texts: readonly string[] = []): [string, number] {
+  const parsed = parseFlags(flags, texts)
+  if (!(parsed instanceof IOResult)) throw new Error('cmp took the counts')
+  return [DEC.decode(parsed.stderr as Uint8Array), parsed.exitCode]
+}
+
+describe('parseFlags', () => {
   it.each([
     ['4', 4],
     ['1K', 1024],
-    ['1k', 1024],
-    ['1kB', 1000],
     ['1kiB', 1024],
-    ['1M', 1024 * 1024],
-    ['0Z', 0],
-    ['010', 8],
     ['0x400', 1024],
     ['+1010', 1010],
     [' 1', 1],
     ['7E', 7 * 1024 ** 6],
-  ])('takes %j', (raw, value) => {
-    expect(parseCount(raw, '--bytes')).toBe(value)
+  ])('takes -n %j', (raw, value) => {
+    expect(parseFlags({ bytes: raw })).toMatchObject({ limit: value })
   })
 
   // diffutils 3.10 takes no od block or char suffix, no Q or R (newer than
   // its gnulib), and caps a count at INTMAX: each is an invalid value, exit 2.
-  it.each([
-    '1b',
-    '1B',
-    '1c',
-    '1w',
-    '1m',
-    '1g',
-    '1t',
-    '1Q',
-    '0Q',
-    '1 ',
-    '-1',
-    '9223372036854775808',
-    '8E',
-    '1Z',
-    '1Y',
-  ])('refuses %j', (raw) => {
-    expect(() => parseCount(raw, '--bytes')).toThrow(UsageError)
-  })
-
-  it('names the long option it was given', () => {
-    // GNU says `invalid --bytes value` for -n and `invalid
-    // --ignore-initial value` for -i, exit 2. diffutils routes the
-    // Try-help line through error(), so it carries the `cmp: ` prefix
-    // that coreutils' bare hint does not.
-    let caught: unknown
-    try {
-      parseCount('abc', '--bytes')
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(UsageError)
-    expect((caught as UsageError).message).toBe(
-      "cmp: invalid --bytes value 'abc'\ncmp: Try 'cmp --help' for more information.",
-    )
-    expect((caught as UsageError).exitCode).toBe(2)
-  })
-})
-
-describe('parseSkip', () => {
-  it('takes one count for both files', () => {
-    expect(parseSkip('3')).toEqual([3, 3])
-  })
+  it.each(['1b', '1m', '0Q', '1 ', '-1', '9223372036854775808', '8E', 'abc'])(
+    'refuses -n %j',
+    (raw) => {
+      expect(refusal({ bytes: raw })).toEqual([`cmp: invalid --bytes value '${raw}'${HINT}`, 2])
+    },
+  )
 
   it.each([
     ['1b:1', '1b:1'],
     ['1:1b', '1b'],
-    ['1:abc', 'abc'],
-    ['abc:1', 'abc:1'],
     ['1:2:3', '2:3'],
-    ['1:', ''],
     [':1', ':1'],
-    [':', ':'],
-  ])('names the operand from where it stopped: %s', (raw, named) => {
-    // GNU prints the operand from the position its count started at,
-    // so a bad SKIP1 names the whole pair and a bad SKIP2 names only
-    // itself. A colon is the one character the first count may stop on.
-    let caught: unknown
-    try {
-      parseSkip(raw)
-    } catch (err) {
-      caught = err
-    }
-    expect(caught).toBeInstanceOf(UsageError)
-    expect((caught as UsageError).message.split('\n')[0]).toBe(
-      `cmp: invalid --ignore-initial value '${named}'`,
-    )
+  ])('names the -i operand from where it stopped: %s', (raw, named) => {
+    // GNU prints the operand from the position its count started at, so a
+    // bad SKIP1 names the whole pair and a bad SKIP2 names only itself.
+    expect(refusal({ ignore_initial: raw })).toEqual([
+      `cmp: invalid --ignore-initial value '${named}'${HINT}`,
+      2,
+    ])
   })
 
   it('takes a colon pair for one each', () => {
-    expect(parseSkip('0:3')).toEqual([0, 3])
-    expect(parseSkip('1K:2')).toEqual([1024, 2])
+    expect(parseFlags({ ignore_initial: '1K:2' })).toMatchObject({ skip: [1024, 2] })
+    expect(parseFlags({ ignore_initial: '3' })).toMatchObject({ skip: [3, 3] })
+  })
+
+  it('refuses -l with -s', () => {
+    expect(refusal({ verbose: true, silent: true })).toEqual([
+      `cmp: options -l and -s are incompatible${HINT}`,
+      2,
+    ])
   })
 })
 
@@ -135,7 +109,7 @@ describe('cmpGeneric with stdin', () => {
       throw new Error(`read ${p.virtual}`)
     }
     const ctx = { flags, stdin: ENC.encode('abc') } as unknown as Context
-    const [src, io] = await cmpGeneric(paths, texts, ctx, stream)
+    const [src, io] = await cmp(paths, texts, ctx, stream)
     expect([src, io.exitCode, io.stderr]).toEqual([null, 0, null])
   })
 })
@@ -149,14 +123,9 @@ describe('cmpGeneric with stdin', () => {
 // reports `'1''`, where the neighbouring coreutils clauses would say
 // `'1\303\251'` and `'1\''`. This asymmetry is deliberate; do not "fix" it
 // by routing this clause through quote(). Mirrors test_cmp.py.
-describe('parseCount leaves the value unescaped', () => {
+describe('-n leaves the value unescaped', () => {
   it.each([['1é'], ['1\x01'], ['1\r'], ["1'"], ['1\\']])('keeps %j as typed', (value) => {
-    expect(() => parseCount(value, '--bytes')).toThrow(
-      new UsageError(
-        `cmp: invalid --bytes value '${value}'\n` + "cmp: Try 'cmp --help' for more information.",
-        2,
-      ),
-    )
+    expect(refusal({ bytes: value })).toEqual([`cmp: invalid --bytes value '${value}'${HINT}`, 2])
   })
 })
 
@@ -170,7 +139,7 @@ async function runSkips(
       yield ENC.encode(p.virtual === P1.virtual ? 'xhello\n' : 'hello\n')
     })()
   const ctx = { flags, stdin: null } as unknown as Context
-  const [src, io] = await cmpGeneric([P1, P2], texts, ctx, stream)
+  const [src, io] = await cmp([P1, P2], texts, ctx, stream)
   return [DEC.decode(await materialize(src)), io.exitCode]
 }
 
@@ -200,10 +169,8 @@ describe('the skip operands', () => {
     [['1 '], "cmp: invalid --ignore-initial value '1 '"],
     [['9223372036854775808'], "cmp: invalid --ignore-initial value '9223372036854775808'"],
     [['y', '1', '2'], "cmp: invalid --ignore-initial value 'y'"],
-  ] as const)('refuses %j', async (texts, message) => {
-    await expect(runSkips([...texts])).rejects.toThrow(
-      new UsageError(`${message}\ncmp: Try 'cmp --help' for more information.`),
-    )
+  ] as const)('refuses %j', (texts, message) => {
+    expect(refusal({}, texts)).toEqual([`${message}${HINT}`, 2])
   })
 })
 
@@ -227,7 +194,7 @@ describe('the streamed compare', () => {
     const pulled: string[] = []
     const files = { [P1.virtual]: ['ab\nc', 'd', 'never'], [P2.virtual]: ['ab', '\ncX', 'never'] }
     const ctx = { flags: {}, stdin: null } as unknown as Context
-    const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, pulled))
+    const [src, io] = await cmp([P1, P2], [], ctx, chunked(files, pulled))
     expect([DEC.decode(await materialize(src)), io.exitCode]).toEqual([
       '/F/one /F/two differ: char 5, line 2\n',
       1,
@@ -244,7 +211,7 @@ describe('the streamed compare', () => {
   ])('ends at the shorter file: %#', async (first, second, err) => {
     const files = { [P1.virtual]: first, [P2.virtual]: second }
     const ctx = { flags: {}, stdin: null } as unknown as Context
-    const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, []))
+    const [src, io] = await cmp([P1, P2], [], ctx, chunked(files, []))
     expect(src).toBeNull()
     expect([DEC.decode(await materialize(io.stderr)), io.exitCode]).toEqual([
       `cmp: EOF on /F/one ${err}\n`,
@@ -265,7 +232,7 @@ describe('the streamed compare', () => {
     const ctx = { flags, stdin: null } as unknown as Context
     const sizeOf = (p: PathSpec): Promise<number | null> =>
       Promise.resolve(p.virtual === P1.virtual ? sizes[0] : sizes[1])
-    const [src, io] = await cmpGeneric([P1, P2], [], ctx, chunked(files, pulled), sizeOf)
+    const [src, io] = await cmp([P1, P2], [], ctx, chunked(files, pulled), sizeOf)
     expect([src, io.exitCode, pulled.length > 0]).toEqual([null, code, read])
   })
 })

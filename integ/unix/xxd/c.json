@@ -75,6 +75,76 @@
       "flags": [
         "c"
       ]
+    },
+    {
+      "id": "xxd_reads_g_s_l_without_refusing_before_the_file",
+      "seq": 19990128,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "xxd -g x -s y -l z /data/nope",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "xxd: /data/nope: No such file or directory\n"
+      }
+    },
+    {
+      "id": "xxd_refuses_columns_before_the_file",
+      "seq": 19990129,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "xxd -c 257 /data/nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "xxd: invalid number of columns (max. 256).\n"
+      }
     }
   ]
 }

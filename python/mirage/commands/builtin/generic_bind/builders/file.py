@@ -28,8 +28,6 @@ async def file(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
-    if not paths:
-        raise ValueError("file: missing operand")
     resolved = await files.resolve_glob(paths)
     return await file_generic(
         resolved,

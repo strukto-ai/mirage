@@ -12,15 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { foldGeneric } from '../../generic/fold.ts'
+import { foldGeneric, parseFlags } from '../../generic/fold.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
 
 const fold: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const parsed = parseFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return foldGeneric(resolved, ctx, dirAwareStream(files, ctx))
+  return foldGeneric(parsed, resolved, ctx, dirAwareStream(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

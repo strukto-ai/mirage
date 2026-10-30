@@ -29,10 +29,12 @@ def _make_backend(files: dict[str, tuple[bytes, ContentType]], dirs: set[str]):
 
 
 @pytest.mark.asyncio
-async def test_file_missing_operand_raises():
+async def test_file_missing_operand_reports_and_exits_1():
     stat_fn, stream = _make_backend({}, set())
-    with pytest.raises(ValueError):
-        await file_cmd([], stream=stream, stat_fn=stat_fn)
+    out, io = await file_cmd([], stream=stream, stat_fn=stat_fn)
+    assert out is None
+    assert io.exit_code == 1
+    assert io.stderr == b"file: missing operand\n"
 
 
 async def _text_stat(path):

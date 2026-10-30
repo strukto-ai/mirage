@@ -21,7 +21,6 @@ import {
   LINK_MODE,
 } from '../../utils/stat_view.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { MONTHS } from './utils/constants.ts'
 import { lsModeString } from './utils/formatting.ts'
 import { groupName, ownerName, type Identity } from './utils/identity.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -57,7 +56,6 @@ const KIND_TYPE: Record<PrintfKind, FileType> = {
   p: FileType.FIFO,
   f: FileType.FILE,
 }
-const DAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 // Whether a -printf format reads anything off the entry's stat.
 export function printfNeedsStat(fmt: string): boolean {
@@ -85,42 +83,107 @@ function pad(n: number, width: number, fill = '0'): string {
   return String(n).padStart(width, fill)
 }
 
-function timeDirective(letter: string, ts: number): string | null {
-  if (letter === '@') return ts.toFixed(10)
-  const dt = new Date(ts * 1000)
-  const frac = ts.toFixed(10).split('.')[1] ?? '0000000000'
-  switch (letter) {
-    case '+':
-      return `${pad(dt.getUTCFullYear(), 4)}-${pad(dt.getUTCMonth() + 1, 2)}-${pad(dt.getUTCDate(), 2)}+${pad(dt.getUTCHours(), 2)}:${pad(dt.getUTCMinutes(), 2)}:${pad(dt.getUTCSeconds(), 2)}.${frac}`
-    case 'Y':
-      return pad(dt.getUTCFullYear(), 4)
-    case 'y':
-      return pad(dt.getUTCFullYear() % 100, 2)
-    case 'm':
-      return pad(dt.getUTCMonth() + 1, 2)
-    case 'd':
-      return pad(dt.getUTCDate(), 2)
-    case 'e':
-      return String(dt.getUTCDate()).padStart(2, ' ')
-    case 'H':
-      return pad(dt.getUTCHours(), 2)
-    case 'M':
-      return pad(dt.getUTCMinutes(), 2)
-    case 'S':
-      return pad(dt.getUTCSeconds(), 2)
-    case 'j': {
-      const start = Date.UTC(dt.getUTCFullYear(), 0, 0)
-      return pad(Math.floor((dt.getTime() - start) / 86_400_000), 3)
-    }
-    case 'a':
-      return DAY_ABBR[dt.getUTCDay()] ?? ''
-    case 'b':
-    case 'h':
-      return MONTHS[dt.getUTCMonth()] ?? ''
-    case 'p':
-      return dt.getUTCHours() < 12 ? 'AM' : 'PM'
-    default:
-      return null
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+// Midnight UTC of a calendar day, its year as given: `Date.UTC` reads 0-99
+// as 1900-1999.
+function utcDay(year: number, month: number, day: number): Date {
+  const date = new Date(0)
+  date.setUTCFullYear(year, month, day)
+  return date
+}
+
+// The ISO 8601 week-numbering year and week of a UTC date.
+function isoWeek(dt: Date): [number, number] {
+  const thursday = utcDay(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate())
+  thursday.setUTCDate(thursday.getUTCDate() + 3 - ((dt.getUTCDay() + 6) % 7))
+  const year = thursday.getUTCFullYear()
+  const week =
+    1 + Math.floor((thursday.getTime() - utcDay(year, 0, 1).getTime()) / (7 * 86_400_000))
+  return [year, week]
+}
+
+/**
+ * Every `%T<letter>` GNU find renders, for one UTC timestamp. `%TS`, `%TT`
+ * and `%TX` carry the fraction GNU appends. Mirrors Python's `_time_fields`.
+ */
+function timeFields(ts: number): Record<string, string> {
+  const total = Math.round(ts * 1_000_000)
+  const whole = Math.floor(total / 1_000_000)
+  const dt = new Date(whole * 1000)
+  const frac = `${pad(total - whole * 1_000_000, 6)}0000`
+  const [isoYear, isoWeekNo] = isoWeek(dt)
+  const year = dt.getUTCFullYear()
+  const month = dt.getUTCMonth()
+  const hour = dt.getUTCHours()
+  const wday = dt.getUTCDay()
+  const isoDay = wday === 0 ? 7 : wday
+  const yday = Math.floor(
+    (utcDay(year, month, dt.getUTCDate()).getTime() - utcDay(year, 0, 1).getTime()) / 86_400_000,
+  )
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12
+  const day = DAY_NAMES[wday] ?? ''
+  const monthName = MONTH_NAMES[month] ?? ''
+  const clock = `${pad(hour, 2)}:${pad(dt.getUTCMinutes(), 2)}:${pad(dt.getUTCSeconds(), 2)}`
+  const date = `${pad(month + 1, 2)}/${pad(dt.getUTCDate(), 2)}/${pad(year % 100, 2)}`
+  const meridiem = hour < 12 ? 'AM' : 'PM'
+  return {
+    '@': `${String(whole)}.${frac}`,
+    '+': `${pad(year, 4)}-${pad(month + 1, 2)}-${pad(dt.getUTCDate(), 2)}+${clock}.${frac}`,
+    a: day.slice(0, 3),
+    A: day,
+    b: monthName.slice(0, 3),
+    B: monthName,
+    c: `${day.slice(0, 3)} ${monthName.slice(0, 3)} ${pad(dt.getUTCDate(), 2, ' ')} ${clock} ${String(year)}`,
+    C: pad(Math.floor(year / 100), 2),
+    d: pad(dt.getUTCDate(), 2),
+    D: date,
+    e: pad(dt.getUTCDate(), 2, ' '),
+    F: `${pad(year, 4)}-${pad(month + 1, 2)}-${pad(dt.getUTCDate(), 2)}`,
+    g: pad(isoYear % 100, 2),
+    G: String(isoYear),
+    h: monthName.slice(0, 3),
+    H: pad(hour, 2),
+    I: pad(hour12, 2),
+    j: pad(yday + 1, 3),
+    k: pad(hour, 2, ' '),
+    l: pad(hour12, 2, ' '),
+    m: pad(month + 1, 2),
+    M: pad(dt.getUTCMinutes(), 2),
+    n: '\n',
+    p: meridiem,
+    P: meridiem.toLowerCase(),
+    r: `${pad(hour12, 2)}:${pad(dt.getUTCMinutes(), 2)}:${pad(dt.getUTCSeconds(), 2)} ${meridiem}`,
+    R: `${pad(hour, 2)}:${pad(dt.getUTCMinutes(), 2)}`,
+    s: String(whole),
+    S: `${pad(dt.getUTCSeconds(), 2)}.${frac}`,
+    t: '\t',
+    T: `${clock}.${frac}`,
+    u: String(isoDay),
+    U: pad(Math.floor((yday + 7 - wday) / 7), 2),
+    V: pad(isoWeekNo, 2),
+    w: String(wday),
+    W: pad(Math.floor((yday + 7 - (isoDay - 1)) / 7), 2),
+    x: date,
+    X: `${clock}.${frac}`,
+    y: pad(year % 100, 2),
+    Y: String(year),
+    z: '+0000',
+    Z: 'UTC',
   }
 }
 
@@ -241,12 +304,16 @@ export function expandPrintf(
     } else if (code === 'T' && i < n) {
       const letter = fmt.charAt(i)
       i += 1
-      const rendered = timeDirective(letter, st === null ? 0 : st.mtimeEpoch)
-      if (rendered === null) {
+      const rendered = timeFields(st === null ? 0 : st.mtimeEpoch)[letter]
+      if (rendered !== undefined) {
+        out.push(rendered)
+      } else if (/^[A-Za-z0-9]$/.test(letter)) {
+        // GNU prints a letter or digit it has no field for as `%<char>`,
+        // silently; anything else is an unrecognized directive.
+        out.push(`%${letter}`)
+      } else {
         warnUnrecognized(`%T${letter}`, warnings)
         out.push(`%T${letter}`)
-      } else {
-        out.push(rendered)
       }
     } else {
       warnUnrecognized(`%${code}`, warnings)

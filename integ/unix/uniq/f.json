@@ -75,6 +75,41 @@
       "flags": [
         "f"
       ]
+    },
+    {
+      "id": "uniq_refuses_counts_in_typed_order_before_the_file",
+      "seq": 19990134,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "uniq -s y -f x /data/nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "uniq: y: invalid number of bytes to skip\n"
+      }
     }
   ]
 }

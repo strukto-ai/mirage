@@ -8,116 +8,28 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 
-from mirage.commands.builtin.constants import (
-    CMP_SIZE_UNITS,
-    INTMAX,
-    SUFFIXED_COUNT_PATTERN,
-)
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
-from mirage.commands.builtin.utils.size_suffix import parse_base0
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandName, FlagValue
 from mirage.commands.spec.usage import (
     extra_operand_error,
     missing_operand_error,
-    usage_hint,
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import format_fs_error
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused, scan
 from mirage.rs.stream import close_stream, open_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 
 logger = logging.getLogger(__name__)
-
-_TRY_HELP = "\n" + usage_hint(CommandName.CMP)
-
-
-def parse_count(raw: str, option: str, shown: str | None = None) -> int:
-    """One GNU ``cmp`` byte count, read the way diffutils 3.10 reads it.
-
-    Base 0, so ``010`` is 8 and ``0x400`` is 1024; one leading ``+`` and
-    leading whitespace are allowed; the remainder is a size suffix from
-    ``cmp``'s own letter set. Every rejection -- unparsable digits,
-    unknown suffix, or a product past ``INTMAX`` -- is the same usage
-    error naming the long option, not a crash and not od's "too large".
-
-    Args:
-        raw (str): the count to read.
-        option (str): the long option name for the diagnostic, e.g.
-            ``--bytes``.
-        shown (str | None): the spelling to name in the diagnostic when
-            it differs from ``raw``. GNU prints the operand from the
-            position it was reading, so a bad ``SKIP1`` names the whole
-            ``SKIP1:SKIP2`` pair while a bad ``SKIP2`` names only itself.
-
-    Raises:
-        UsageError: the operand is not a count cmp accepts.
-    """
-    named = raw if shown is None else shown
-    error = UsageError(f"cmp: invalid {option} value '{named}'{_TRY_HELP}")
-    match = SUFFIXED_COUNT_PATTERN.match(raw)
-    if match is None:
-        raise error
-    digits, suffix = match.group(1), match.group(2)
-    if suffix and suffix not in CMP_SIZE_UNITS:
-        raise error
-    count = parse_base0(digits) * (CMP_SIZE_UNITS[suffix] if suffix else 1)
-    if count > INTMAX:
-        raise error
-    return count
-
-
-def parse_skip(raw: str) -> tuple[int, int]:
-    """The ``-i`` operand as one skip per file.
-
-    GNU takes ``SKIP`` for both files or ``SKIP1:SKIP2`` for one each,
-    so ``-i 0:3`` compares all of the first file against the fourth
-    byte onward of the second. A colon is the only place the first
-    count may stop, which is why ``1b:1`` is rejected naming the whole
-    pair while ``1:1b`` is rejected naming just ``1b``.
-
-    Args:
-        raw (str): the ``-i`` operand as typed.
-    """
-    first, sep, second = raw.partition(":")
-    head = parse_count(first, "--ignore-initial", raw)
-    if not sep:
-        return head, head
-    return head, parse_count(second, "--ignore-initial")
-
-
-def operand_skips(
-    texts: Sequence[str], skip: tuple[int, int]
-) -> tuple[int, int]:
-    """The skips cmp's SKIP1 and SKIP2 operands give, beside -i's.
-
-    Each is read as -i reads its counts, and each file keeps the larger
-    of the two skips it was given: a smaller one, from -i or from an
-    operand, never lowers the other. Past the fourth operand is an extra
-    one, which GNU cmp refuses only after both skips have parsed.
-
-    Args:
-        texts (Sequence[str]): the operands after FILE1 and FILE2.
-        skip (tuple[int, int]): what -i gave each file.
-
-    Raises:
-        UsageError: a skip is not a count cmp accepts, or an extra
-            operand follows them.
-    """
-    skips = list(skip)
-    for f, raw in enumerate(texts[:2]):
-        skips[f] = max(skips[f], parse_count(raw, "--ignore-initial"))
-    if len(texts) > 2:
-        raise extra_operand_error(CommandName.CMP, texts[2])
-    return skips[0], skips[1]
 
 
 class _Operand:
@@ -200,7 +112,8 @@ async def cmp_cmd(
     Args:
         paths (list[PathSpec]): FILE1 and FILE2; a lone FILE1 is
             compared with stdin.
-        texts (Sequence[str]): SKIP1 and SKIP2.
+        texts (Sequence[str]): SKIP1 and SKIP2, already read into
+            ``skip``; a word past them is an extra operand.
         stream (PolymorphicReadFn): bound reader called as
             ``stream(path)``.
         size_of (Callable | None): a regular file's size, for ``-s``.
@@ -209,12 +122,14 @@ async def cmp_cmd(
         verbose (bool): -l.
         limit (int | None): -n.
         print_bytes (bool): -b.
-        skip (tuple[int, int]): -i, one skip per file.
+        skip (tuple[int, int]): each file's skip, the larger of -i's and
+            its operand's.
         argv (Sequence[str]): the command's words, for usage errors.
     """
     if not paths:
         raise missing_operand_error(CommandName.CMP, None, argv)
-    skip = operand_skips(texts, skip)
+    if len(texts) > 2:
+        raise extra_operand_error(CommandName.CMP, texts[2])
     # A lone FILE1 is compared with stdin, which GNU names `-`.
     p0, p1 = paths[0], paths[1] if len(paths) > 1 else STDIN_OPERAND
     read = stdin_stream(stream, stdin, sole=True)
@@ -376,33 +291,52 @@ class CmpFlags:
     skip: tuple[int, int] = (0, 0)
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> CmpFlags:
+def parse_flags(
+    flags: Mapping[str, FlagValue], texts: Sequence[str] = ()
+) -> CmpFlags | IOResult:
+    """cmp's counts read by mirage-rs before any operand is resolved.
+
+    -n, -i, -l and -s go in the order typed, so the first refusal is
+    the one diffutils makes while it reads its options, then the SKIP1
+    and SKIP2 operands.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the parsed flags.
+        texts (Sequence[str]): the operands after FILE1 and FILE2.
+
+    Returns:
+        CmpFlags | IOResult: the flags, or cmp's refusal, exit 2.
+    """
     fl = FlagView(flags, spec=SPECS["cmp"])
-    silent = fl.as_bool("quiet") or fl.as_bool("silent")
-    verbose = fl.as_bool("verbose")
-    if silent and verbose:
-        # diffutils refuses the pair while it reads the options, so ahead
-        # of any operand check.
-        raise UsageError(f"cmp: options -l and -s are incompatible{_TRY_HELP}")
-    n_raw = fl.as_str("bytes")
-    i_raw = fl.as_str("ignore_initial")
+    typed = fl.texts("bytes", "ignore_initial", "verbose", "silent", "quiet")
+    typed += [("skip", text) for text in texts[:2]]
+    try:
+        values = scan("cmp", typed)
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    limit = values.get("limit")
+    match values.get("skip"):
+        case [int(first), int(second)]:
+            skip = (first, second)
+        case _:
+            skip = (0, 0)
     return CmpFlags(
-        silent=silent,
-        verbose=verbose,
-        limit=parse_count(n_raw, "--bytes") if n_raw is not None else None,
+        silent=fl.as_bool("quiet") or fl.as_bool("silent"),
+        verbose=fl.as_bool("verbose"),
+        limit=limit if isinstance(limit, int) else None,
         print_bytes=fl.as_bool("print_bytes"),
-        skip=parse_skip(i_raw) if i_raw is not None else (0, 0),
+        skip=skip,
     )
 
 
 async def cmp_generic(
+    parsed: CmpFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
     stream: PolymorphicReadFn,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    parsed = parse_flags(ctx.flags)
     return await cmp_cmd(
         paths,
         texts,

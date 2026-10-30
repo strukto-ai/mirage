@@ -5,6 +5,10 @@ use std::collections::VecDeque;
 
 use serde::Deserialize;
 
+use serde_json::{Value as Json, json};
+
+use crate::number;
+use crate::scan::{Typed, Values, last, unknown};
 use crate::{Stream, StreamError, parse_config};
 
 const BACKWARDS: &str = "xxd: Sorry, cannot seek backwards.";
@@ -31,6 +35,63 @@ enum Config {
         plain: bool,
         segments: bool,
     },
+}
+
+/// The most octets vim's xxd puts on a line outside -p.
+const COLS_MAX: i64 = 256;
+
+/// xxd's options as vim's xxd (2024-12-07) reads them, the last of each:
+/// `-c`, `-g`, `-s` and `-l` through `strtol` at base 0, so a word with no
+/// number is 0 and only its leading number counts, and `p` (-p), which
+/// lifts `-c`'s ceiling. `-c` is the one value refused; `-g` under 1 or
+/// past the line is the whole line, and a negative `-l` is no limit.
+pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
+    if let Some((name, _)) = options
+        .iter()
+        .find(|(name, _)| !["p", "c", "g", "s", "args_l"].contains(&name.as_str()))
+    {
+        return Err(unknown("xxd", name));
+    }
+    let plain = last(options, "p").is_some();
+    let typed = last(options, "c").map(octets);
+    if typed.is_some_and(|cols| cols < 0 || (!plain && cols > COLS_MAX)) {
+        let refused = format!("xxd: invalid number of columns (max. {COLS_MAX}).");
+        return Err(StreamError::refusal(refused.as_bytes(), 1));
+    }
+    let cols = match typed {
+        Some(cols) if plain || cols > 0 => cols,
+        _ if plain => 30,
+        _ => 16,
+    };
+    let group = last(options, "g").map_or(2, octets);
+    let group = if group < 0 { 2 } else { group };
+    let group = if group < 1 || group > cols {
+        cols
+    } else {
+        group
+    };
+    let seek = last(options, "s").unwrap_or_default();
+    let relative = seek.first() == Some(&b'+');
+    let rest = if relative { &seek[1..] } else { seek };
+    let back = rest.first() == Some(&b'-');
+    let offset = number::strtol(if back { &rest[1..] } else { rest }).0;
+    let limit = last(options, "args_l")
+        .map(|raw| number::strtol(raw).0)
+        .filter(|&limit| limit >= 0);
+    let mut values = Values::new();
+    values.insert("cols".to_owned(), Json::from(cols));
+    values.insert("group".to_owned(), Json::from(group));
+    values.insert(
+        "seek".to_owned(),
+        json!({"offset": offset, "relative": relative, "back": back}),
+    );
+    values.insert("limit".to_owned(), limit.map_or(Json::Null, Json::from));
+    Ok(values)
+}
+
+/// A `-c` or `-g` count: `(int)strtol(text, NULL, 0)`.
+fn octets(raw: &[u8]) -> i64 {
+    i64::from(number::strtol(raw).0 as i32)
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {

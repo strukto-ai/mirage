@@ -22,16 +22,19 @@ use serde::Deserialize;
 
 use crate::request::{Opening, Reply, Request, WriteMode, bytes, read_failure};
 use crate::task::{self, Host};
-use crate::{Stream, StreamError, parse_config};
+use crate::{Stream, StreamError, parse_config, shell_quoted};
 
 use self::parse::{CUT, End, Move, Section, chomp};
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 struct Config {
-    /// `-p`: the leading components dropped from the patch's names; with
-    /// none given, each name is its basename.
-    #[serde(deserialize_with = "crate::saturating_usize_opt")]
+    /// `-p` as typed, one character per byte.
+    #[serde(rename = "strip", deserialize_with = "crate::latin1_opt")]
+    typed_strip: Option<Vec<u8>>,
+    /// `-p` read: the leading components dropped from the patch's names;
+    /// with none given, each name is its basename.
+    #[serde(skip)]
     strip: Option<usize>,
     /// `-R`: each hunk applied the other way round.
     reverse: bool,
@@ -46,8 +49,32 @@ struct Config {
     dry_run: bool,
 }
 
+/// `-p` as GNU patch 2.8 reads it: one optional sign, then decimal digits
+/// to the end of the word, a count past `usize` the largest. Anything
+/// else is no number, a minus before one past 0 is negative, and either
+/// is fatal, exit 2.
+fn strip_count(raw: &[u8]) -> Result<usize, StreamError> {
+    let parts = crate::number::parts(raw, false);
+    let problem = if !matches!(raw.first(), Some(b'+' | b'-' | b'0'..=b'9')) || !parts.whole() {
+        "is not a number"
+    } else if parts.negative() && parts.saturating() > 0 {
+        "is negative"
+    } else {
+        return Ok(usize::try_from(parts.saturating()).unwrap_or(usize::MAX));
+    };
+    let refused = [
+        b"patch: **** strip count ".as_slice(),
+        &shell_quoted(raw),
+        b" ",
+        problem.as_bytes(),
+    ]
+    .concat();
+    Err(StreamError::refusal(&refused, 2))
+}
+
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let config: Config = parse_config(config)?;
+    let mut config: Config = parse_config(config)?;
+    config.strip = config.typed_strip.as_deref().map(strip_count).transpose()?;
     Ok(task::spawn(|host| run(host, config)))
 }
 

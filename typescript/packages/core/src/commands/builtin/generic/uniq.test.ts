@@ -16,8 +16,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { Context } from '../../config.ts'
 import { ensureStream } from '../../../io/stream.ts'
-import { materialize, type ByteSource } from '../../../io/types.ts'
-import { uniqGeneric } from './uniq.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { uniqFlags, uniqGeneric } from './uniq.ts'
 
 const DEC = new TextDecoder()
 
@@ -28,7 +28,11 @@ async function stderrOf(flags: Context['flags']): Promise<[string, number]> {
     cwd: PathSpec.fromStrPath('/'),
     vfs: { kind: 'ram' } as never,
   } as Context
-  const result = await uniqGeneric([], ctx, () => {
+  const parsed = uniqFlags(flags)
+  if (parsed instanceof IOResult) {
+    return [DEC.decode(parsed.stderr as Uint8Array), parsed.exitCode]
+  }
+  const result = await uniqGeneric(parsed, [], ctx, () => {
     throw new Error('paths are empty; the source is stdin')
   })
   if (result === null) throw new Error('uniq returned no result')
@@ -102,7 +106,10 @@ describe('uniq argument refusals carry GNU candidate blocks', () => {
 })
 
 async function run(stdin: ByteSource, flags: Context['flags']) {
-  const result = await uniqGeneric([], { stdin, flags, cwd: PathSpec.fromStrPath('/') }, () => {
+  const parsed = uniqFlags(flags)
+  if (parsed instanceof IOResult) throw new Error('uniq refused its flags')
+  const ctx = { stdin, flags, cwd: PathSpec.fromStrPath('/') }
+  const result = await uniqGeneric(parsed, [], ctx, () => {
     throw new Error('no file operand')
   })
   if (result === null) throw new Error('uniq returned no result')

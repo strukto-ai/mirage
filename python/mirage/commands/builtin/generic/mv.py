@@ -58,7 +58,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror, inner_suffix, strerror_of, with_inner
+from mirage.errors.fs import inner_suffix, strerror_of, with_inner
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, MoveError, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
@@ -187,7 +187,7 @@ async def _target_is_fifo(stat: StatFn, target: PathSpec) -> bool:
 
 
 def _replace_error(
-    src: PathSpec, target: PathSpec, reason: str | None, across: bool
+    src: PathSpec, target: PathSpec, reason: str, across: bool
 ) -> str:
     """GNU's line for a target mv cannot replace.
 
@@ -198,7 +198,7 @@ def _replace_error(
     Args:
         src (PathSpec): the source being moved.
         target (PathSpec): the target standing in the way.
-        reason (str | None): the error's text, as ``fs_strerror`` gives it.
+        reason (str): the error's text, as ``strerror_of`` gives it.
         across (bool): whether the move crosses mounts.
     """
     if across:
@@ -209,13 +209,13 @@ def _replace_error(
     return f"mv: cannot overwrite '{target.raw_path}': {reason}"
 
 
-def _move_error(src: PathSpec, target: PathSpec, reason: str | None) -> str:
+def _move_error(src: PathSpec, target: PathSpec, reason: str) -> str:
     """GNU's line for a source mv could not move onto its target.
 
     Args:
         src (PathSpec): the source being moved.
         target (PathSpec): where it was to land.
-        reason (str | None): the error's text, as ``fs_strerror`` gives it.
+        reason (str): the error's text, as ``strerror_of`` gives it.
     """
     return f"mv: cannot move '{src.raw_path}' to '{target.raw_path}': {reason}"
 
@@ -400,7 +400,7 @@ async def _exchange_pair(
         restored = await _undo_exchange(
             strategy, src, target, holding, staged, swapped
         )
-        errors.append(f"{refused}: {fs_strerror(exc)}")
+        errors.append(f"{refused}: {strerror_of(exc)}")
         if not restored:
             errors.append(
                 f"mv: '{src.raw_path}' left at "
@@ -655,7 +655,7 @@ async def mv_generic(
                 # Reading it as "empty" would clobber a directory whose
                 # contents could not be verified.
                 errors.append(
-                    _replace_error(src, target, fs_strerror(exc), across)
+                    _replace_error(src, target, strerror_of(exc), across)
                 )
                 continue
             if children:
@@ -675,7 +675,7 @@ async def mv_generic(
             try:
                 guard(src, target)
             except FS_ERRORS as exc:
-                errors.append(_move_error(src, target, fs_strerror(exc)))
+                errors.append(_move_error(src, target, strerror_of(exc)))
                 continue
         backup_strategy = (
             NativeMove(rename=partial(rename_link, copies))
@@ -712,7 +712,7 @@ async def mv_generic(
             try:
                 strategy.check_unlink(src)
             except FS_ERRORS as exc:
-                errors.append(_move_error(src, target, fs_strerror(exc)))
+                errors.append(_move_error(src, target, strerror_of(exc)))
                 continue
         if (
             isinstance(strategy, PrimitiveMove)
@@ -754,7 +754,7 @@ async def mv_generic(
             try:
                 await rename_link(copies, src, target)
             except FS_ERRORS as exc:
-                errors.append(_move_error(src, target, fs_strerror(exc)))
+                errors.append(_move_error(src, target, strerror_of(exc)))
                 continue
         elif isinstance(strategy, PrimitiveMove):
             if target_err is FsCondition.ENOENT:
@@ -772,7 +772,7 @@ async def mv_generic(
                     await strategy.rmdir(target)
                 except FS_ERRORS as exc:
                     errors.append(
-                        _replace_error(src, target, fs_strerror(exc), across)
+                        _replace_error(src, target, strerror_of(exc), across)
                     )
                     continue
             # Across mounts GNU copies and then removes, and -v says so
@@ -833,7 +833,7 @@ async def mv_generic(
                 # Report the source refusal even when compensation reverted the copy.
                 if stale is not None and stale.landed:
                     errors.append(
-                        f"mv: cannot remove '{shown_src}': {fs_strerror(exc)}"
+                        f"mv: cannot remove '{shown_src}': {strerror_of(exc)}"
                     )
                     if not src_is_dir and stale.recovered is not True:
                         created.add(key_of(target))
@@ -860,7 +860,7 @@ async def mv_generic(
                 # keeps going with the remaining sources.
                 errors.append(
                     f"mv: cannot move '{shown_src}' to '{shown_dst}': "
-                    f"{changed}{fs_strerror(exc)}"
+                    f"{changed}{strerror_of(exc)}"
                 )
                 continue
         if not src_is_dir:

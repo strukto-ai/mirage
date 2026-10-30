@@ -12,15 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { uniqGeneric } from '../../generic/uniq.ts'
+import { uniqFlags, uniqGeneric } from '../../generic/uniq.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 
 const uniq: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const parsed = uniqFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   return uniqGeneric(
+    parsed,
     resolved,
     ctx,
     files.read,

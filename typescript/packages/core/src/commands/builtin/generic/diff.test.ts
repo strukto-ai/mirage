@@ -15,7 +15,7 @@
 // Mirrors python/tests/commands/builtin/generic/test_diff.py.
 
 import { describe, expect, it } from 'vitest'
-import { diffGeneric, quoteHeaderName, switchWords } from './diff.ts'
+import { diffGeneric, parseFlags, quoteHeaderName, switchWords } from './diff.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -27,6 +27,15 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import type { DiffComputer, PairOutcome } from '../../../rs/diff_types.ts'
 import { DiffPool } from '../../../rs/diff_pool.ts'
 import { eacces } from '../../../errors/fs.ts'
+
+type Rest = Parameters<typeof diffGeneric> extends [unknown, ...infer R] ? R : never
+
+// What diff's builder does: read the flags, then compare.
+async function diffRun(...[paths, ctx, ...rest]: Rest): ReturnType<typeof diffGeneric> {
+  const parsed = parseFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
+  return diffGeneric(parsed, paths, ctx, ...rest)
+}
 
 const ENC = new TextEncoder()
 
@@ -62,7 +71,7 @@ describe('diffGeneric with stdin', () => {
       throw new Error(`read ${p.virtual}`)
     }
     const ctx = { flags: {}, stdin: ENC.encode('abc') } as unknown as Context
-    const [out, io] = await diffGeneric([DASH, DEV_STDIN], ctx, unread, readdir, stat)
+    const [out, io] = await diffRun([DASH, DEV_STDIN], ctx, unread, readdir, stat)
     expect([out, io.exitCode]).toEqual([null, 0])
   })
 
@@ -101,7 +110,7 @@ describe('diff headers', () => {
       )
     const vfs = statFiles('2021-06-15T12:00:00Z')
     const ctx = { flags: { u: true }, stdin: new Uint8Array(), vfs } as unknown as Context
-    const [out] = await diffGeneric(
+    const [out] = await diffRun(
       [operand('a', '/d/a'), operand('b', '/d/b')],
       ctx,
       read,
@@ -128,7 +137,7 @@ describe('diff headers', () => {
       vfs: statFiles('2026-03-04T05:06:07.123456789Z'),
       env: { TZ: 'Asia/Hong_Kong' },
     } as unknown as Context
-    const [out] = await diffGeneric(
+    const [out] = await diffRun(
       [operand('a', '/d/a'), operand('gone', '/d/gone')],
       ctx,
       read,
@@ -161,7 +170,7 @@ describe('diff headers', () => {
     }
     const pair = [operand('a b', '/d/a b'), operand('c', '/d/c')]
     const ctx = { flags: { u: true }, stdin: new Uint8Array() } as unknown as Context
-    const [out, io] = await diffGeneric(pair, ctx, read, readdir, statOf)
+    const [out, io] = await diffRun(pair, ctx, read, readdir, statOf)
     expect(io.exitCode).toBe(1)
     expect(
       new TextDecoder()
@@ -176,7 +185,7 @@ describe('diff headers', () => {
       flags: { u: true, new_file: true },
       stdin: new Uint8Array(),
     } as unknown as Context
-    const [absent] = await diffGeneric(
+    const [absent] = await diffRun(
       [operand('c', '/d/c'), operand('gone', '/d/gone')],
       gone,
       read,
@@ -205,14 +214,14 @@ it('reports a read failing mid-stream as trouble and closes its input', async ()
   const ctx: Context = { flags: {}, stdin: null, cwd: PathSpec.fromStrPath('/'), diff: pool }
   try {
     const failed = [operand('a', '/d/a'), operand('b', '/d/b')]
-    const [out, io] = await diffGeneric(failed, ctx, read, readdir, stat)
+    const [out, io] = await diffRun(failed, ctx, read, readdir, stat)
     expect([out, io.exitCode]).toEqual([null, 2])
     expect(new TextDecoder().decode(await materialize(io.stderr))).toBe(
       'diff: a: Permission denied\n',
     )
     expect(closed).toEqual(['/d/a'])
     const same = [operand('b', '/d/b'), operand('c', '/d/c')]
-    const [, again] = await diffGeneric(same, ctx, read, readdir, stat)
+    const [, again] = await diffRun(same, ctx, read, readdir, stat)
     expect(again.exitCode).toBe(0)
     expect(closed).toEqual(['/d/a', '/d/b', '/d/c'])
   } finally {
@@ -231,7 +240,7 @@ it.each([
   }
   const ctx: Context = { flags: { recursive: true }, stdin: null, cwd: PathSpec.fromStrPath('/') }
   await expect(
-    diffGeneric([operand('a', '/d/a'), operand('b', '/d/b')], ctx, unread, readdir, () =>
+    diffRun([operand('a', '/d/a'), operand('b', '/d/b')], ctx, unread, readdir, () =>
       Promise.reject(failure),
     ),
   ).rejects.toBe(failure)
@@ -268,7 +277,7 @@ describe('diff with many output chunks', () => {
         cwd: PathSpec.fromStrPath('/'),
         diff: computer,
       }
-      const [out, io] = await diffGeneric(
+      const [out, io] = await diffRun(
         [operand('a', '/d/a'), operand('b', '/d/b')],
         ctx,
         unread,
@@ -293,7 +302,7 @@ describe('diff with many output chunks', () => {
       cwd: PathSpec.fromStrPath('/'),
       diff: computer,
     }
-    const [out, io] = await diffGeneric(
+    const [out, io] = await diffRun(
       [operand('a', '/d/a'), operand('b', '/d/b')],
       ctx,
       unread,

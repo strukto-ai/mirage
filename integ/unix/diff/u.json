@@ -282,6 +282,41 @@
         "stdout": "--- -\tNNNN-NN-NN NN:NN:NN.NNNNNNNNN +NNNN\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "diff_refuses_a_context_length_before_the_files",
+      "seq": 19990139,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "diff -U 2 -U x /data/nope /data/gone",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "diff: invalid context length 'x'\ndiff: Try 'diff --help' for more information.\n"
+      }
     }
   ]
 }

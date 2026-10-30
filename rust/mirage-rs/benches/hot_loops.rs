@@ -38,7 +38,7 @@ fn main() {
         (
             "uniq",
             "uniq",
-            json!({"count":false,"repeated":false,"unique":false,"skip_fields":0,"skip_chars":0,"check_chars":null,"ignore_case":false,"all_repeated":null,"group":null,"zero_terminated":false}),
+            json!({"count":false,"repeated":false,"unique":false,"counts":[],"ignore_case":false,"all_repeated":null,"group":null,"zero_terminated":false}),
         ),
         (
             "seq",

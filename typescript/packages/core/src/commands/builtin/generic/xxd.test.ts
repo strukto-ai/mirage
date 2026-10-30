@@ -14,10 +14,10 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import { parseLimit, parseSeek, xxdGeneric } from './xxd.ts'
+import { parseFlags, xxdGeneric } from './xxd.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -26,6 +26,17 @@ const F = new PathSpec({ virtual: '/f', directory: '/', vfsPath: 'f', rawPath: '
 
 function ctx(flags: Record<string, unknown>, stdin: Uint8Array | null = null): Context {
   return { flags, stdin } as unknown as Context
+}
+
+// What xxd's builder does: read the counts, then dump.
+async function xxd(
+  paths: PathSpec[],
+  context: Context,
+  read: (p: PathSpec) => AsyncIterable<Uint8Array>,
+): Promise<[ByteSource | null, IOResult]> {
+  const parsed = parseFlags(context.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
+  return xxdGeneric(parsed, paths, context, read)
 }
 
 async function* stream(): AsyncIterable<Uint8Array> {
@@ -45,8 +56,8 @@ describe('xxd numbers', () => {
     ['+2', { offset: 2, relative: true, back: false }],
     ['-2', { offset: 2, relative: false, back: true }],
     ['+-2', { offset: 2, relative: true, back: true }],
-  ])('parseSeek %j', (raw, seek) => {
-    expect(parseSeek(raw)).toEqual(seek)
+  ])('-s %j', (raw, seek) => {
+    expect(parseFlags({ s: raw })).toMatchObject({ seek })
   })
 })
 
@@ -60,14 +71,14 @@ describe('xxd -s', () => {
     ['0', undefined, '00000000: 6465 6667 68                             defgh\n'],
   ])('-s %s -l %s', async (seek, limit, out) => {
     const flags = limit === undefined ? { s: seek } : { s: seek, args_l: limit }
-    const [stdout, result] = await xxdGeneric([F], ctx(flags), stream)
+    const [stdout, result] = await xxd([F], ctx(flags), stream)
     expect(DEC.decode(await materialize(stdout))).toBe(out)
     expect(result.exitCode).toBe(0)
   })
 
   // Mirrors python's test_a_seek_before_the_start_cannot_seek.
   it.each(['-10', '+-2'])('-s %s cannot seek', async (seek) => {
-    const [stdout, result] = await xxdGeneric([F], ctx({ s: seek }), stream)
+    const [stdout, result] = await xxd([F], ctx({ s: seek }), stream)
     expect([stdout, result.exitCode, DEC.decode(await materialize(result.stderr))]).toEqual([
       null,
       4,
@@ -81,7 +92,7 @@ describe('xxd -s', () => {
     ['-2', 4, ''],
     ['10', 4, ''],
   ])('stdin -s %s', async (seek, code, out) => {
-    const [stdout, result] = await xxdGeneric([], ctx({ s: seek }, DATA), empty)
+    const [stdout, result] = await xxd([], ctx({ s: seek }, DATA), empty)
     expect([DEC.decode(await materialize(stdout)), result.exitCode]).toEqual([out, code])
   })
 })
@@ -94,15 +105,15 @@ describe('xxd -l', () => {
     ['0', 0],
     ['x', 0],
     ['-1', null],
-  ])('parseLimit %j', (raw, limit) => {
-    expect(parseLimit(raw)).toBe(limit)
+  ])('-l %j', (raw, limit) => {
+    expect(parseFlags(raw === undefined ? {} : { args_l: raw })).toMatchObject({ limit })
   })
 })
 
 describe('xxd -c and -g', () => {
   // Mirrors python's test_a_direct_call_takes_integer_counts.
   it('takes integer counts from a direct call', async () => {
-    const [stdout, result] = await xxdGeneric([F], ctx({ c: 4, g: 1 }), stream)
+    const [stdout, result] = await xxd([F], ctx({ c: 4, g: 1 }), stream)
     expect(DEC.decode(await materialize(stdout))).toBe(
       '00000000: 64 65 66 67  defg\n00000004: 68           h\n',
     )
