@@ -24,7 +24,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.types import BadDescriptorError, FileTooLargeError
 from mirage.io.cooperative import chunks
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import IO_BUFFER_SIZE, ByteSpool
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs import StreamRefusal, open_stream, run_stream
@@ -332,7 +332,11 @@ async def _merge_spools(
         "sort", {**config, "mode": "merge", "inputs": len(runs)}
     )
     try:
-        await output.fill(chain_output(stream, [run.stream() for run in runs]))
+        await output.fill(
+            chain_output(
+                stream, [run.stream(piece=IO_BUFFER_SIZE) for run in runs]
+            )
+        )
         return output
     except BaseException:
         await output.close()
@@ -636,7 +640,9 @@ async def sort_generic(
                 exit_code=2,
             )
         try:
-            await write_bytes(parsed.output, ordered.stream())
+            await write_bytes(
+                parsed.output, ordered.stream(piece=IO_BUFFER_SIZE)
+            )
         except FS_ERRORS as exc:
             strerror = fs_strerror(exc) or str(exc)
             return b"", IOResult(

@@ -148,13 +148,23 @@ class ByteSpool:
         return self._file.read(size)
 
     async def stream(
-        self, offset: int = 0, size: int | None = None
+        self,
+        offset: int = 0,
+        size: int | None = None,
+        piece: int = CHUNK_SIZE,
     ) -> AsyncIterator[bytes]:
+        """The spool's bytes from ``offset``, ``piece`` bytes at a time.
+
+        Args:
+            offset (int): where to start.
+            size (int | None): how many bytes, None for the rest.
+            piece (int): the most bytes one step hands on: a bounded
+                reader keeps ``CHUNK_SIZE``, a writer of the whole spool
+                takes ``IO_BUFFER_SIZE``, one worker read per step.
+        """
         end = self.size if size is None else min(self.size, offset + size)
         while offset < end:
-            # A spilled spool hands on a worker read's worth at a time.
-            step = CHUNK_SIZE if self._file is None else IO_BUFFER_SIZE
-            data = await self.read(offset, min(step, end - offset))
+            data = await self.read(offset, min(piece, end - offset))
             if not data:
                 return
             offset += len(data)
@@ -178,7 +188,7 @@ class ByteSpool:
             data = await self.read(0, self.size)
             await self.close()
             return data
-        return OutputStream(self.stream(), self.close)
+        return OutputStream(self.stream(piece=IO_BUFFER_SIZE), self.close)
 
     def hold(self) -> None:
         """Keep the spool open until ``unhold``, for a reader that took

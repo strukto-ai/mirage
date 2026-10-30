@@ -86,6 +86,8 @@ async def write(
         dirty = False
         pending = bytearray()
         failed: list[OSError] = []
+        writer = asyncio.current_task()
+        stopped = False
 
         async def write_pending() -> None:
             nonlocal dirty
@@ -96,7 +98,7 @@ async def write(
                 dirty = True
 
         async def flush_now_and_then() -> None:
-            nonlocal dirty
+            nonlocal dirty, stopped
             while True:
                 await asyncio.sleep(STREAM_FLUSH_SECONDS)
                 async with lock:
@@ -104,6 +106,11 @@ async def write(
                         await write_pending()
                     except OSError as exc:
                         failed.append(exc)
+                        # The writer may be waiting on input that comes
+                        # late or never: it stops there with this error.
+                        if writer is not None:
+                            stopped = True
+                            writer.cancel()
                         return
                     if not dirty:
                         continue
@@ -113,6 +120,19 @@ async def write(
                         logger.debug("streamed write not flushed: %s", exc)
                         return
                     dirty = False
+
+        async def timer_failure() -> OSError:
+            # The writer saw the failure first: take back the cancel the
+            # timer sent it, which lands at the next await.
+            nonlocal stopped
+            if stopped and writer is not None:
+                stopped = False
+                try:
+                    await asyncio.sleep(0)
+                except asyncio.CancelledError:
+                    if writer.uncancel():
+                        raise
+            return failed[0]
 
         flushing = (
             None if atomic else asyncio.create_task(flush_now_and_then())
@@ -124,12 +144,21 @@ async def write(
                         async with lock:
                             with disk_errors(path_spec.virtual):
                                 if failed:
-                                    raise failed[0]
+                                    raise await timer_failure()
                                 pending += chunk
                                 if len(pending) >= STREAM_BATCH_BYTES:
                                     await write_pending()
                         size += len(chunk)
-            except BaseException:
+            except BaseException as exc:
+                if (
+                    isinstance(exc, asyncio.CancelledError)
+                    and stopped
+                    and writer is not None
+                ):
+                    stopped = False
+                    if not writer.uncancel():
+                        with disk_errors(path_spec.virtual):
+                            raise failed[0] from None
                 # What the stream gave before it stopped is the file's, as
                 # each chunk's own write left it; the stop is the error.
                 async with lock:
@@ -141,7 +170,7 @@ async def write(
             async with lock:
                 with disk_errors(path_spec.virtual):
                     if failed:
-                        raise failed[0]
+                        raise await timer_failure()
                     await write_pending()
         finally:
             if flushing is not None:

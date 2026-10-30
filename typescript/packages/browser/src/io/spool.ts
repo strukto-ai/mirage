@@ -17,29 +17,36 @@ import { setSpoolFactory, type SpoolStore } from '@struktoai/mirage-core/io/spoo
 /**
  * A page's spool scratch: spilled bytes as fixed blocks of Blob, which the
  * browser holds outside the JavaScript heap and may page to disk, so a spool
- * past its memory limit no longer grows the heap. A write past a block's
- * start rebuilds only the blocks it touches. Mirrors Node's spool store.
+ * past its memory limit no longer grows the heap. A write rebuilds only the
+ * blocks it touches, from slices of what they held. Mirrors Node's spool
+ * store.
  */
 function createStore(): Promise<SpoolStore> {
   const BLOCK = 256 * 1024
   const blocks: Blob[] = []
   let length = 0
   return Promise.resolve({
-    async write(at, data) {
+    write(at, data) {
       let offset = 0
       while (offset < data.length) {
         const index = Math.floor((at + offset) / BLOCK)
         const start = (at + offset) % BLOCK
         const count = Math.min(BLOCK - start, data.length - offset)
-        const held = blocks[index]
-        const old = held === undefined ? new Uint8Array() : new Uint8Array(await held.arrayBuffer())
-        const next = new Uint8Array(Math.max(old.length, start + count))
-        next.set(old)
-        next.set(data.subarray(offset, offset + count), start)
-        blocks[index] = new Blob([next])
+        const held = blocks[index] ?? new Blob()
+        const fresh = data.slice(offset, offset + count)
+        blocks[index] =
+          start === 0 && count >= held.size
+            ? new Blob([fresh])
+            : new Blob([
+                held.slice(0, start),
+                new Uint8Array(Math.max(0, start - held.size)),
+                fresh,
+                held.slice(start + count),
+              ])
         offset += count
       }
       length = Math.max(length, at + data.length)
+      return Promise.resolve()
     },
     async read(offset, size) {
       const end = Math.min(length, offset + size)
