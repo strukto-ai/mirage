@@ -303,8 +303,11 @@ async function invalidatedCachedRead(restore: boolean): Promise<void> {
     running = agent.tools.read('/data/protected/item')
     await within(entered.promise)
     equal(ram.reads, 0)
-    if (state === null) await ws.setSessionProfile('agent', FILE_APPROVAL)
-    else await applyStateDict(ws, state)
+    if (state === null) {
+      await ws.setSessionProfile('agent', {
+        commands: { ask: [{ reason: 'review changed files', paths: ['/data/protected/*'] }] },
+      })
+    } else await applyStateDict(ws, state)
     release.resolve()
     const result = await within(running)
     equal(result.isError, true)
