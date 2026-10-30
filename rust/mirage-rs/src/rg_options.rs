@@ -434,7 +434,8 @@ fn path_separator(raw: Option<&[u8]>) -> Result<Option<Vec<u8>>, StreamError> {
     }
 }
 
-/// Lower case as the hosts compared it, Unicode's mapping over the text.
+/// Lower case as the hosts compared it, Unicode's mapping over the text:
+/// ripgrep 14.1.1 takes `blac\u{212A}` (the Kelvin sign) for black too.
 fn lower(raw: &[u8]) -> String {
     String::from_utf8_lossy(raw).to_lowercase()
 }
@@ -825,6 +826,7 @@ mod tests {
             "line:style:Bold",
             "column:none",
             "match:fg:1,2,255",
+            "match:fg:blac\u{212A}",
         ] {
             assert!(scan(&[("colors", spec.as_bytes())]).is_ok(), "{spec}");
         }
