@@ -57,7 +57,7 @@ from mirage.types import (
     WritePolicy,
     parse_mount_mode,
 )
-from mirage.utils.loader import load_attr
+from mirage.utils.loader import load_attr, optional_attr
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
 from mirage.vfs.registry import build_vfs
@@ -82,17 +82,7 @@ if TYPE_CHECKING:
     )
     from mirage.workspace.store.s3 import S3WorkspaceStateStore as _S3Store
 
-RedisWorkspaceStateStore: "type[_RedisStore] | None"
 S3WorkspaceStateStore: "type[_S3Store] | None"
-
-try:
-    from mirage.workspace.store import (
-        RedisWorkspaceStateStore as _RedisWorkspaceStateStore,
-    )
-except ImportError:
-    RedisWorkspaceStateStore = None
-else:
-    RedisWorkspaceStateStore = _RedisWorkspaceStateStore
 
 try:
     from mirage.workspace.store import (
@@ -921,20 +911,22 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
     return IndexConfig(ttl=block.ttl)
 
 
+def _redis_state_store() -> "type[_RedisStore]":
+    store: type[_RedisStore] = optional_attr(
+        "mirage.workspace.store.redis:RedisWorkspaceStateStore",
+        "redis",
+        "A redis store",
+    )
+    return store
+
+
 def _build_store_group(
     block: RamStoreBlock | DiskStoreBlock | RedisStoreBlock | S3StoreBlock,
 ) -> WorkspaceStateStore:
     if isinstance(block, DiskStoreBlock):
         return DiskWorkspaceStateStore(root=block.root)
     if isinstance(block, RedisStoreBlock):
-        if RedisWorkspaceStateStore is None:
-            raise ImportError(
-                "A redis store requires the 'redis' extra. "
-                "Install with: pip install mirage-ai[redis]"
-            )
-        return RedisWorkspaceStateStore(
-            url=block.url, key_prefix=block.key_prefix
-        )
+        return _redis_state_store()(url=block.url, key_prefix=block.key_prefix)
     if isinstance(block, S3StoreBlock):
         if S3WorkspaceStateStore is None:
             raise ImportError(
@@ -963,12 +955,7 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
     )
     jobs = _build_store_group(block.jobs) if block.jobs is not None else None
     if block.type == "redis":
-        if RedisWorkspaceStateStore is None:
-            raise ImportError(
-                "A redis store requires the 'redis' extra. "
-                "Install with: pip install mirage-ai[redis]"
-            )
-        return RedisWorkspaceStateStore(
+        return _redis_state_store()(
             url=block.url,
             key_prefix=block.key_prefix,
             namespace=namespace,

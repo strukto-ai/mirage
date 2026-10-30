@@ -875,7 +875,7 @@ async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
         await ws.close()
 
 
-def test_ram_workspace_loads_no_ssh():
+def test_ram_workspace_loads_no_ssh_or_redis():
     subprocess.run(
         [
             sys.executable,
@@ -888,7 +888,8 @@ def test_ram_workspace_loads_no_ssh():
             "    r = await ws.shell('echo hi > /a && cat /a')\n"
             "    assert await r.stdout_str() == 'hi\\n'\n"
             "asyncio.run(main())\n"
-            "assert 'asyncssh' not in sys.modules\n",
+            "assert 'asyncssh' not in sys.modules\n"
+            "assert 'redis' not in sys.modules\n",
         ],
         check=True,
     )

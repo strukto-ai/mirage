@@ -67,6 +67,29 @@ def load_attr(spec: str) -> Any:
     return getattr(module, attr_name)
 
 
+def optional_attr(spec: str, extra: str, who: str) -> Any:
+    """Load a module attribute via :func:`load_attr` once the optional
+    extra it needs is installed, so the extra loads only when it is used.
+
+    Args:
+        spec (str): ``"module:attr_name"`` of the attribute.
+        extra (str): the extra's package, also its pip extra name.
+        who (str): what needs the extra, named in the error.
+
+    Returns:
+        Any: The loaded attribute.
+
+    Raises:
+        ImportError: the extra is not installed.
+    """
+    if importlib.util.find_spec(extra) is None:
+        raise ImportError(
+            f"{who} requires the '{extra}' extra. "
+            f"Install with: pip install mirage-ai[{extra}]"
+        )
+    return load_attr(spec)
+
+
 def load_backend_class(spec: str) -> type[Any]:
     """Load a backend class from a spec string via :func:`load_attr`.
 
