@@ -232,8 +232,9 @@ enum TokenKind {
         valid: bool,
         decimal: Decimal,
         effective: Option<usize>,
-        /// Under values, a literal longer than a page and its reading.
-        reading: Option<(Vec<u8>, NumberReading)>,
+        /// Under values, a literal longer than a page, charged while it is
+        /// read, and its reading.
+        reading: Option<(Vec<u8>, Charge, NumberReading)>,
     },
     String {
         decoded: Captured,
@@ -405,7 +406,7 @@ impl Token {
                 effective,
                 reading,
             } => loop {
-                if let Some((text, number)) = reading {
+                if let Some((text, _, number)) = reading {
                     while *budget > 0 {
                         *budget -= 1;
                         match number.step(text) {
@@ -469,7 +470,8 @@ impl Token {
                     text.extend_from_slice(&run[..run.len().min(length - text.len())]);
                 }
                 *budget = budget.saturating_sub(length / 64);
-                *reading = Some((text, NumberReading::begin(0, length)));
+                let charge = Charge::open(text.capacity());
+                *reading = Some((text, charge, NumberReading::begin(0, length)));
             },
             TokenKind::String {
                 decoded,
@@ -2636,6 +2638,30 @@ mod tests {
             drop(scanner);
             assert_eq!(meter.live(), 0);
         }
+    }
+
+    #[test]
+    fn a_long_literal_is_charged_while_it_is_read() {
+        // Leading zeros read to a small number, but the reader holds the
+        // literal's text twice while it reads it.
+        let meter = Arc::new(meter::Meter::limited(150_000));
+        let _installed = meter::install(&meter);
+        let mut scanner = Scanner::values(false, false);
+        let mut read = Vec::new();
+        let text = format!("{}1 ", "0".repeat(100_000));
+        for input in text.as_bytes().chunks(4095) {
+            scanner.feed(input, &mut Vec::new()).unwrap();
+            read.extend(scanner.take());
+            while scanner.busy() {
+                scanner.drain(&mut Vec::new()).unwrap();
+                read.extend(scanner.take());
+            }
+        }
+        let [Scanned::Value(value)] = read.as_slice() else {
+            panic!("one number");
+        };
+        assert_eq!(value.dump(), "1");
+        assert!(meter.exceeded());
     }
 
     #[test]

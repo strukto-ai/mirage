@@ -500,6 +500,13 @@ impl Reader {
             let _ = parser.scanner.drain(&mut Vec::new());
         }
     }
+
+    /// Leave a document the loop gives up to be freed a node a step.
+    fn abandon(&mut self, value: Value) {
+        if let Some(parser) = &mut self.parser {
+            parser.scanner.retire(value);
+        }
+    }
 }
 
 /// One fgets of jq's reader: up to and including a newline, or
@@ -992,6 +999,9 @@ impl Main {
         }
         let read = self.reader.next(budget)?;
         if self.memory.is_some() && self.meter.exceeded() {
+            if let Read::Value(value) = read {
+                self.reader.abandon(value);
+            }
             self.flush(out)?;
             return Err(StreamError::new(EXHAUSTED));
         }
@@ -1727,6 +1737,38 @@ mod tests {
             }
         }
         assert_eq!(failed.as_deref(), Some(EXHAUSTED));
+    }
+
+    #[test]
+    fn a_document_the_room_refuses_is_freed_after_cancel() {
+        // The document read whole as the memory ran out is left for the
+        // host's cancel to free a slice at a time.
+        let text: &'static [u8] = Box::leak(
+            format!("[{}[]]", "[],".repeat(1300))
+                .into_bytes()
+                .into_boxed_slice(),
+        );
+        let options = serde_json::json!({ "memory": 30_000 });
+        let mut stream = open(config("length", 1, options).to_string().as_bytes()).unwrap();
+        let mut replies: &[(&[u8], &[u8])] =
+            &[(br#"{"kind":"data"}"#, text), (br#"{"kind":"end"}"#, b"")];
+        let failed = 'run: loop {
+            while stream.busy() {
+                if let Err(error) = stream.drain(&mut Vec::new()) {
+                    break 'run error.message;
+                }
+            }
+            stream.request(&mut Vec::new()).expect("a read");
+            let ((reply, data), rest) = replies.split_first().expect("a reply left");
+            replies = rest;
+            stream.respond(reply, data, &mut Vec::new()).unwrap();
+        };
+        assert_eq!(failed, EXHAUSTED);
+        assert!(stream.cancel());
+        assert!(stream.busy());
+        while stream.busy() {
+            stream.drain(&mut Vec::new()).unwrap();
+        }
     }
 
     #[test]
