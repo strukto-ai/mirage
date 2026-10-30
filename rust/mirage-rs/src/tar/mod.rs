@@ -8,13 +8,13 @@
 
 mod create;
 mod header;
+mod options;
 mod read;
 #[cfg(test)]
 mod tests;
 
 use serde::Deserialize;
 
-use crate::number;
 use crate::request::{Opening, Reply, Request, failed, failure_text};
 use crate::task::Host;
 use crate::{Stream, StreamError, parse_config, task};
@@ -141,10 +141,11 @@ struct Config {
     probe: bool,
     #[serde(deserialize_with = "crate::latin1_list")]
     selectors: Vec<Vec<u8>>,
-    /// Each --strip-components as typed, one character per byte.
-    #[serde(rename = "strip", deserialize_with = "crate::latin1_list")]
-    typed_strip: Vec<Vec<u8>>,
-    /// The last of them, read.
+    /// A command line's main operations, --strip-components and -f as
+    /// typed, `[name, text]` in the order typed; absent for a run no line
+    /// typed.
+    typed: Option<Vec<(String, String)>>,
+    /// The last --strip-components, read.
     #[serde(skip)]
     strip: usize,
     to_stdout: bool,
@@ -162,33 +163,11 @@ struct Config {
     status: i32,
 }
 
-/// --strip-components as tar 1.35 reads each one typed: a whole decimal
-/// past blanks and one `+`, at most `UINTMAX`; the last counts. A value
-/// that is no count is argp's refusal, exit 2.
-fn strip_components(typed: &[Vec<u8>]) -> Result<usize, StreamError> {
-    let mut strip = 0;
-    for raw in typed {
-        let parts = number::parts(raw, false);
-        let count = parts
-            .value()
-            .filter(|&count| !parts.negative() && parts.whole() && count <= u128::from(u64::MAX));
-        let Some(count) = count else {
-            let refused = [
-                b"tar: ".as_slice(),
-                raw,
-                b": Invalid number of elements\nTry 'tar --help' or 'tar --usage' for more information.",
-            ]
-            .concat();
-            return Err(StreamError::refusal(&refused, 2));
-        };
-        strip = usize::try_from(count).unwrap_or(usize::MAX);
-    }
-    Ok(strip)
-}
-
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let mut config: Config = parse_config(config)?;
-    config.strip = strip_components(&config.typed_strip)?;
+    if let Some(typed) = &config.typed {
+        config.strip = options::strip(typed)?;
+    }
     Ok(task::spawn(|host| async move {
         match config.mode {
             Mode::Create => create::run(&host, &config).await,

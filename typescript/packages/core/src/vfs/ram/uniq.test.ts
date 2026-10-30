@@ -122,6 +122,18 @@ describe('uniq', () => {
     expect(r.lines).toEqual([])
   })
 
+  it('refuses a third operand in a call without a tape', async () => {
+    const vfs = new RAMVFS()
+    for (const name of ['a', 'b', 'c']) vfs.store.files.set(`/tmp/${name}`, ENC.encode(`${name}\n`))
+    const r = await runUniq(
+      vfs,
+      ['a', 'b', 'c'].map((name) => PathSpec.fromStrPath(`/tmp/${name}`)),
+    )
+    expect(r.exitCode).toBe(1)
+    expect(r.stderr.startsWith("uniq: extra operand '/tmp/c'\n")).toBe(true)
+    expect(DEC.decode(vfs.store.files.get('/tmp/b'))).toBe('b\n')
+  })
+
   it('rejects trailing text in numeric options', async () => {
     const vfs = new RAMVFS()
     const r = await runUniq(vfs, [], { skip_fields: '2junk' })

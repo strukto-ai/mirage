@@ -14,14 +14,21 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { ByteSpool } from '../../../io/spool.ts'
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { unreadableStdin } from '../../../shell/descriptors.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
-import { parseFlags, SORT_RUN_BYTES, sortGeneric } from './sort.ts'
+import { parseFlags, SORT_RUN_BYTES, sortGeneric, type SortFlags } from './sort.ts'
 
 const DEC = new TextDecoder()
+
+/** What sort's options decide, which these flags must not refuse. */
+function parsed(flags: Context['flags']): SortFlags {
+  const result = parseFlags(flags, [])
+  if (result instanceof IOResult) throw new Error(DEC.decode(result.stderr as Uint8Array))
+  return result
+}
 
 async function stderrOf(flags: Context['flags']): Promise<[string, number]> {
   const ctx = {
@@ -42,7 +49,7 @@ async function stderrOf(flags: Context['flags']): Promise<[string, number]> {
 
 // GNU's word-choice refusal names the refused word quoted, so a byte
 // outside 0x20-0x7e comes back escaped rather than interpolated
-// raw. Every row measured against GNU coreutils 9.4 under `LC_ALL=C` with a
+// raw. Every row measured against GNU coreutils 9.7 under `LC_ALL=C` with a
 // raw `bytes` argv (`sort --check=<w>`). Mirrors test_sort.py.
 describe('sort quotes the word --check refuses', () => {
   it.each([
@@ -57,7 +64,7 @@ describe('sort quotes the word --check refuses', () => {
 
 describe('sort --check resolves an unambiguous prefix', () => {
   // `sort --check=q`, `=s` and `=d` all exit 0 on sorted input (measured,
-  // coreutils 9.4). The stdin here is NOT sorted, so the canonical word is
+  // coreutils 9.7). The stdin here is NOT sorted, so the canonical word is
   // observable: the ('quiet', 'silent') value stays silent while
   // diagnose-first names the first disorder. Mirrors test_sort.py.
   it.each(['q'])('resolves --check=%s to the quiet value', async (value) => {
@@ -179,8 +186,19 @@ describe('sort -c and -C', () => {
   })
 
   it('accepts one mode asked for twice', () => {
-    expect(parseFlags({ C: true, check: 'quiet' }).checkQuiet).toBe(true)
-    expect(parseFlags({ c: true, check: 'diagnose-first' }).check).toBe(true)
+    expect(parsed({ C: true, check: 'quiet' }).checkQuiet).toBe(true)
+    expect(parsed({ c: true, check: 'diagnose-first' }).check).toBe(true)
+  })
+
+  // A bare --check is -c, and --check= names the empty word, which is a
+  // prefix of both modes (coreutils 9.7: ambiguous, exit 1). Mirrors
+  // test_sort.py.
+  it('reads a bare --check as -c and --check= as an ambiguous word', async () => {
+    const bare = parsed({ check: true })
+    expect([bare.check, bare.checkQuiet]).toEqual([true, false])
+    const [, stderr, code] = await run({ stdin: bytes('a\n'), flags: { check: '' } })
+    expect(stderr.split('\n')[0]).toBe("sort: ambiguous argument '' for '--check'")
+    expect(code).toBe(1)
   })
 })
 
@@ -193,9 +211,14 @@ describe('sort -o', () => {
     expect(stderr).toBe('sort: multiple output files specified\n')
     expect(code).toBe(2)
     expect(
-      parseFlags({ output: [PathSpec.fromStrPath('/data/p1'), PathSpec.fromStrPath('/data/p1')] })
+      parsed({ output: [PathSpec.fromStrPath('/data/p1'), PathSpec.fromStrPath('/data/p1')] })
         .output?.virtual,
     ).toBe('/data/p1')
+    const [, typed] = await run({
+      stdin: bytes('a\n'),
+      flags: { output: [spec('/data/o', './o'), spec('/data/o', 'o')] },
+    })
+    expect(typed).toBe('sort: multiple output files specified\n')
   })
 
   it('refuses the first bad option on the line', async () => {

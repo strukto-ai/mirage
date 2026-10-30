@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.generic.tr import tr_engine
 from mirage.commands.builtin.generic.tr import tr_generic as generic_tr
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
@@ -30,15 +31,12 @@ async def tr(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    engine = tr_engine(texts, ctx.flags)
+    if isinstance(engine, IOResult):
+        return None, engine
     files = command_files(ctx, paths)
     paths = await resolve_or_empty(files, paths)
-    return await generic_tr(
-        paths,
-        texts,
-        read_stream=files.read,
-        stdin=ctx.stdin,
-        flags=ctx.flags,
-    )
+    return generic_tr(engine, paths, read_stream=files.read, stdin=ctx.stdin)
 
 
 BUILDER = GenericCommand("tr", tr, read=True)

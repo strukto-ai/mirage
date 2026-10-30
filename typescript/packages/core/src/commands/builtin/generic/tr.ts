@@ -16,88 +16,42 @@ import { byteView } from '../../../shell/bytes.ts'
 import { IOResult } from '../../../io/types.ts'
 import { openStream, type OpenStream } from '../../../rs/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
-import type { JsonValue, PathSpec } from '../../../types.ts'
+import { refused } from '../../../rs/scan.ts'
+import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource, streamOutput } from '../utils/stream.ts'
-import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
-import { UsageError } from '../../errors.ts'
-import { quoteText } from '../../quote.ts'
-import { CommandName, type FlagValue } from '../../spec/types.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 
-const ENC = new TextEncoder()
-const TRY_HELP = `\n${usageHint('tr')}`
-
-interface TrFlags {
-  readonly delete: boolean
-  readonly squeeze: boolean
-  readonly complement: boolean
-  readonly truncateSet1: boolean
-}
-
-function parseFlags(bag: Record<string, FlagValue>): TrFlags {
-  const fl = new FlagView(bag, specOf('tr'))
-  return {
-    delete: fl.asBool('delete'),
-    squeeze: fl.asBool('squeeze_repeats'),
-    complement: fl.asBool('C') || fl.asBool('complement'),
-    truncateSet1: fl.asBool('truncate_set1'),
-  }
-}
-
-function buildConfig(
+/** tr's engine over its sets, or tr's refusal of its operands. Mirrors
+ * Python's `tr_engine`. */
+export async function trEngine(
   texts: readonly string[],
   bag: Record<string, FlagValue>,
-): Readonly<Record<string, JsonValue>> {
-  if (texts.length === 0) throw missingOperandError(CommandName.TR, null)
-  const { delete: del, squeeze, complement, truncateSet1 } = parseFlags(bag)
-  const operandLimit = del && !squeeze ? 1 : 2
-  if (texts.length > operandLimit) {
-    if (texts.length === 2) {
-      throw new Error(
-        `tr: extra operand '${quoteText(texts[1] ?? '')}'\n` +
-          `Only one string may be given when deleting without squeezing repeats.${TRY_HELP}`,
-      )
-    }
-    throw extraOperandError(CommandName.TR, texts[operandLimit] ?? '')
-  }
-  return {
-    set1: byteView(texts[0] ?? ''),
-    set2: texts.length >= 2 ? byteView(texts[1] ?? '') : null,
-    delete: del,
-    squeeze,
-    complement,
-    truncate_set1: truncateSet1,
+): Promise<OpenStream | IOResult> {
+  const fl = new FlagView(bag, specOf('tr'))
+  try {
+    return await openStream('tr', {
+      operands: texts.map((text) => byteView(text)),
+      delete: fl.asBool('delete'),
+      squeeze: fl.asBool('squeeze_repeats'),
+      complement: fl.asBool('C') || fl.asBool('complement'),
+      truncate_set1: fl.asBool('truncate_set1'),
+    })
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
   }
 }
 
-export async function trGeneric(
+export function trGeneric(
+  engine: OpenStream,
   paths: PathSpec[],
-  texts: string[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<CommandFnResult> {
-  let engine: OpenStream
-  try {
-    engine = await openStream('tr', buildConfig(texts, ctx.flags))
-  } catch (err) {
-    if (err instanceof UsageError) throw err
-    const msg =
-      err instanceof StreamRefusal && err.message === 'tr: missing translation operand'
-        ? `tr: missing operand after '${quoteText(texts[0] ?? '')}'\n` +
-          `Two strings must be given when translating.${TRY_HELP}`
-        : err instanceof Error
-          ? err.message
-          : String(err)
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-  }
+): CommandFnResult {
   const first = paths[0]
-  try {
-    const source = first === undefined ? resolveSource(ctx.stdin) : stream(first)
-    return [streamOutput(engine, source, ctx.signal), new IOResult()]
-  } catch (error) {
-    engine.close()
-    throw error
-  }
+  const source = first === undefined ? resolveSource(ctx.stdin) : stream(first)
+  return [streamOutput(engine, source, ctx.signal), new IOResult()]
 }

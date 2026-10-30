@@ -356,7 +356,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "tar: Cowardly refusing to create an empty archive\nTry 'tar --help' for more information.\n"
+        "stderr": "tar: Cowardly refusing to create an empty archive\nTry 'tar --help' or 'tar --usage' for more information.\n"
       },
       "flags": [
         "c"

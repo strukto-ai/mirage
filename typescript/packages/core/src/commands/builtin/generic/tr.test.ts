@@ -1,20 +1,27 @@
 import { describe, expect, it } from 'vitest'
 
 import { ensureStream } from '../../../io/stream.ts'
-import { materialize, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import { trGeneric } from './tr.ts'
+import { trEngine, trGeneric } from './tr.ts'
 
 function unusedRead(): never {
   throw new Error('input source must not be opened')
 }
 
-async function runTr(texts: string[], stdin: ByteSource, flags: Context['flags'] = {}) {
-  const result = await trGeneric(
+async function runTr(
+  texts: string[],
+  stdin: ByteSource,
+  flags: Context['flags'] = {},
+  signal?: AbortSignal,
+) {
+  const engine = await trEngine(texts, flags)
+  if (engine instanceof IOResult) throw new Error('tr refused its operands')
+  const result = trGeneric(
+    engine,
     [],
-    texts,
-    { stdin, flags, cwd: PathSpec.fromStrPath('/') },
+    { stdin, flags, cwd: PathSpec.fromStrPath('/'), ...(signal === undefined ? {} : { signal }) },
     unusedRead,
   )
   const output = result?.[0]
@@ -60,24 +67,23 @@ describe('tr byte stream', () => {
       message: "tr: invalid character class 'bogus'\n",
     },
     {
-      texts: ['a', 'z-a'],
+      texts: ['a'],
       flags: { delete: false },
       message:
         "tr: missing operand after 'a'\n" +
         'Two strings must be given when translating.\n' +
         "Try 'tr --help' for more information.\n",
     },
+    {
+      texts: ['a', ''],
+      flags: {},
+      message: 'tr: when not truncating set1, string2 must be non-empty\n',
+    },
   ])('refuses operands before opening the source for $texts', async ({ texts, flags, message }) => {
-    const result = await trGeneric(
-      [PathSpec.fromStrPath('/input')],
-      texts,
-      { stdin: null, flags, cwd: PathSpec.fromStrPath('/') },
-      unusedRead,
-    )
-    if (result === null) throw new Error('tr returned no refusal')
-    expect(result[0]).toBeNull()
-    expect(result[1].exitCode).toBe(1)
-    expect(new TextDecoder().decode(await materialize(result[1].stderr))).toBe(message)
+    const refused = await trEngine(texts, flags)
+    if (!(refused instanceof IOResult)) throw new Error('tr opened its engine')
+    expect(refused.exitCode).toBe(1)
+    expect(new TextDecoder().decode(await materialize(refused.stderr))).toBe(message)
   })
 
   it('yields bounded output for a large input chunk', async () => {
@@ -123,18 +129,12 @@ describe('tr byte stream', () => {
       }
     }
     const abort = new AbortController()
-    const result = await trGeneric(
-      [],
-      ['a', 'b'],
-      { stdin: source(), flags: {}, cwd: PathSpec.fromStrPath('/'), signal: abort.signal },
-      unusedRead,
-    )
-    if (result === null) throw new Error('tr returned no result')
+    const output = await runTr(['a', 'b'], source(), {}, abort.signal)
     const timer = setTimeout(() => {
       abort.abort()
     }, 5)
     try {
-      await expect(materialize(result[0])).rejects.toMatchObject({ name: 'AbortError' })
+      await expect(materialize(output)).rejects.toMatchObject({ name: 'AbortError' })
     } finally {
       clearTimeout(timer)
     }

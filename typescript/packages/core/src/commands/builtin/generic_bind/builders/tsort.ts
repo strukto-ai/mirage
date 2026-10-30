@@ -15,10 +15,11 @@
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
-import { extraOperandError } from '../../../spec/usage.ts'
-import { CommandName } from '../../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
-import { chainOutput, closeStream, openStream } from '../../../../rs/stream.ts'
+import type { JsonValue } from '../../../../types.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
+import { refused } from '../../../../rs/scan.ts'
+import { chainOutput, closeStream, openStream, openStreamSync } from '../../../../rs/stream.ts'
 import { byteView } from '../../../../shell/bytes.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { stdinStream } from '../../utils/stream.ts'
@@ -26,12 +27,12 @@ import { stdinStream } from '../../utils/stream.ts'
 /** The names in order; a loop, an odd token or a graph past what the engine
  * holds makes the exit 1. Mirrors Python's _ordered. */
 async function* ordered(
-  name: string,
+  config: Readonly<Record<string, JsonValue>>,
   source: ByteSource,
   io: IOResult,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
-  const engine = await openStream('tsort', { name: byteView(name) })
+  const engine = await openStream('tsort', config)
   try {
     yield* chainOutput(engine, [source], signal)
   } finally {
@@ -46,14 +47,20 @@ async function* ordered(
 const tsort: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  if (resolved.length > 1) throw extraOperandError(CommandName.TSORT, resolved[1]?.rawPath ?? '')
+  const config = { operands: resolved.map((path) => byteView(path.rawPath)) }
+  try {
+    openStreamSync('tsort', config).close()
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return [null, refused(err)]
+  }
   const first = resolved[0]
   const source =
     first === undefined
       ? (ctx.stdin ?? new Uint8Array())
       : stdinStream(files.read, ctx.stdin)(first)
   const io = new IOResult()
-  return [ordered(first?.rawPath ?? '-', source, io, ctx.signal), io]
+  return [ordered(config, source, io, ctx.signal), io]
 }
 
 export const BUILDER: GenericCommand = {

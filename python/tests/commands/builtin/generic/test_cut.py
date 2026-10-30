@@ -2,39 +2,71 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.generic.cut import cut, cut_generic, parse_flags
+from mirage.commands.builtin.generic.cut import cut_config, cut_generic
 from mirage.commands.config import Context
 from mirage.io.stream import close_quietly
-from mirage.io.types import materialize
+from mirage.io.types import IOResult, materialize
 from mirage.types import FileStat, FileType, PathSpec
 
 
-def test_multi_char_delimiter_is_rejected():
-    with pytest.raises(
-        ValueError, match="delimiter must be a single character"
-    ):
-        parse_flags({"delimiter": ",,", "fields": "1"})
-
-
-def test_single_char_delimiter_is_accepted():
-    parsed = parse_flags({"delimiter": ",", "fields": "1"})
-    assert parsed.delimiter == ","
-
-
-@pytest.mark.parametrize("value", ["trimmed", "trim", "t"])
-def test_whitespace_delimited_accepts_an_unambiguous_prefix(value):
-    assert (
-        parse_flags({"fields": "1", "whitespace_delimited": value}).whitespace
-        == "trimmed"
+async def cut(paths, *, read_stream, stdin=None, flags=None):
+    config = cut_config(flags or {})
+    assert not isinstance(config, IOResult), config.stderr
+    return await cut_generic(
+        config,
+        paths,
+        Context(flags=flags or {}, stdin=stdin),
+        _stat,
+        read_stream,
     )
 
 
-def test_whitespace_delimited_still_refuses_an_unmatched_word():
-    with pytest.raises(ValueError) as exc:
-        parse_flags({"fields": "1", "whitespace_delimited": "tt"})
-    assert str(exc.value) == (
-        "cut: invalid argument 'tt' for '--whitespace-delimited'"
+@pytest.mark.parametrize(
+    "flags,stderr",
+    [
+        (
+            {"fields": "-"},
+            b"cut: invalid range with no endpoint: -\n"
+            b"Try 'cut --help' for more information.\n",
+        ),
+        (
+            {"fields": "1", "bytes": "2"},
+            b"cut: only one type of list may be specified\n",
+        ),
+        (
+            {"fields": "1", "delimiter": ",,"},
+            b"cut: the delimiter must be a single character\n",
+        ),
+        (
+            {"fields": "1", "whitespace_delimited": "tt"},
+            b"cut: invalid argument 'tt' for '--whitespace-delimited'\n",
+        ),
+        (
+            {"bytes": "1", "w": True},
+            b"cut: '-w' is only meaningful with fields\n",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_cut_refuses_in_its_config_before_any_operand(flags, stderr):
+    refusal = cut_config(flags)
+    assert isinstance(refusal, IOResult)
+    assert refusal.exit_code == 1
+    assert await materialize(refusal.stderr) == stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value,expected", [(True, b"\n"), ("", b"a\n")])
+async def test_cut_reads_a_bare_whitespace_delimited_apart_from_an_empty_word(
+    value, expected
+):
+    output, io = await cut(
+        [],
+        read_stream=_no_stream,
+        stdin=b" a  b\n",
+        flags={"fields": "1", "whitespace_delimited": value},
     )
+    assert (await materialize(output), io.exit_code) == (expected, 0)
 
 
 async def _no_stream(_path):
@@ -129,12 +161,10 @@ async def test_cut_reports_late_read_errors_and_continues(prefix):
         finally:
             closed.append(path.virtual)
 
-    out, io = await cut_generic(
+    out, io = await cut(
         [PathSpec.from_str_path(p) for p in ("/missing", "/denied", "/good")],
-        [],
-        Context(flags={"fields": "1", "delimiter": ","}),
-        _stat,
-        source,
+        read_stream=source,
+        flags={"fields": "1", "delimiter": ","},
     )
     assert (
         await materialize(out) == (b"first\n" if prefix else b"") + b"good\n"
@@ -167,26 +197,6 @@ async def test_cut_does_not_continue_after_fatal_error_or_cancellation(error):
     with pytest.raises(type(error)):
         await materialize(out)
     assert opened == ["/failed"]
-
-
-@pytest.mark.asyncio
-async def test_cut_refuses_the_list_before_input_stat_or_read():
-    async def no_stat(_path):
-        raise AssertionError("cut stat before list refusal")
-
-    output, io = await cut_generic(
-        [PathSpec.from_str_path("/missing")],
-        [],
-        Context(flags={"fields": "-"}),
-        no_stat,
-        _no_stream,
-    )
-    assert output is None
-    assert io.exit_code == 1
-    assert await materialize(io.stderr) == (
-        b"cut: invalid range with no endpoint: -\n"
-        b"Try 'cut --help' for more information.\n"
-    )
 
 
 @pytest.mark.asyncio
@@ -228,46 +238,16 @@ async def test_cut_keeps_raw_delimiter_sentinels_distinct_from_replacement(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("terminated", [False, True])
-async def test_cut_defers_raw_output_delimiter_encoding_error_until_a_record(
-    terminated,
-):
-    pulled = []
-
-    async def source():
-        pulled.append("record")
-        yield b"plain\n" if terminated else b"plain"
-        pulled.append("tail")
-
+@pytest.mark.parametrize("name", ["output_delimiter", "args_O"])
+async def test_cut_writes_a_raw_output_delimiter_byte_as_typed(name):
     output, io = await cut(
         [],
         read_stream=_no_stream,
-        stdin=source(),
-        flags={
-            "fields": "1",
-            "output_delimiter": "\udcff",
-            "only_delimited": True,
-        },
+        stdin=b"abc\n",
+        flags={"characters": "1,3", name: "\udcff"},
     )
     assert io.exit_code == 0
-    assert pulled == []
-    with pytest.raises(UnicodeEncodeError) as caught:
-        await materialize(output)
-    assert caught.value.object == "\udcff"
-    assert caught.value.encoding == "utf-8"
-    assert pulled == (["record"] if terminated else ["record", "tail"])
-
-
-@pytest.mark.asyncio
-async def test_cut_raw_output_delimiter_does_not_refuse_empty_input():
-    output, io = await cut(
-        [],
-        read_stream=_no_stream,
-        stdin=b"",
-        flags={"bytes": "1", "output_delimiter": "\udcff"},
-    )
-    assert io.exit_code == 0
-    assert await materialize(output) == b""
+    assert await materialize(output) == b"a\xffc\n"
 
 
 @pytest.mark.asyncio
