@@ -292,7 +292,7 @@ async def test_explain_spends_nothing(ws):
     for _ in range(3):
         await ws.explain("git push origin main", "s")
     assert ws.decisions.pending() == ()
-    assert ws.get_session("s").decisions == ()
+    assert ws.decisions.list("s") == ()
     await ws.explain("rm /data/prod/x.txt", "s")
     assert sorted(await ws.vfs.readdir("/data")) == [
         "/data/a.txt",
