@@ -16,7 +16,6 @@ import re
 from collections.abc import Mapping
 from enum import Enum
 
-from mirage.commands.builtin.utils.size_suffix import size_suffixes
 from mirage.core.generic.find_eval import RowActionKind
 from mirage.types import ContentType
 
@@ -66,7 +65,6 @@ MAGIC_SIGNATURES: tuple[tuple[bytes, ContentType], ...] = (
 # `[0-9]` not `\d`: GNU is ASCII-only, while python's `\d` would accept other
 # Unicode decimal digits.
 UINTMAX = 2**64 - 1
-INTMAX = 2**63 - 1
 
 # gnulib appends `strerror(EOVERFLOW)` when a value did not fit the type
 # it was scanned into. Measured under LC_ALL=C on glibc; the string here
@@ -86,13 +84,6 @@ C_SPACE = r"[ \t\n\v\f\r]*"
 SUFFIXED_COUNT_PATTERN = re.compile(
     rf"^{C_SPACE}\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$"
 )
-
-# GNU cmp (diffutils 3.10) shares od's grammar above but not its letter set:
-# no b/c/w, lowercase only up to k, and its gnulib predates Q/R, so `0Q`
-# is an invalid value where `0Z` is a valid zero. Its ceiling is INTMAX, not
-# UINTMAX, and an overflowing value reports as the same "invalid ... value"
-# as a bad suffix rather than as too-large.
-CMP_SIZE_UNITS = size_suffixes("kKMGTPEZY")
 
 # gzip 1.13's file naming. The suffix gzip writes and looks for unless -S
 # names another; the suffixes it always recognizes on a name it

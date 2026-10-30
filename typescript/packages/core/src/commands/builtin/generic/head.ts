@@ -20,7 +20,6 @@ import { isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { numberFlagError, parseByteCount } from '../tail_counts.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { asyncChain, closeQuietly } from '../../../io/stream.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
@@ -34,26 +33,42 @@ import { type FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused, scan } from '../../../rs/scan.ts'
 
-interface HeadFlags {
-  lines: number
-  bytesMode: number | null
-  quiet: boolean
-  verbose: boolean
-  zeroTerminated: boolean
+export interface HeadFlags {
+  readonly lines: number
+  readonly bytesMode: number | null
+  readonly quiet: boolean
+  readonly verbose: boolean
+  readonly zeroTerminated: boolean
 }
 
-function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
+/**
+ * head's options, -n and -c read by mirage-rs before any operand is resolved:
+ * the flags, or head's refusal of a count. Mirrors Python's `parse_flags`.
+ */
+export function parseFlags(bag: Record<string, FlagValue>): HeadFlags | IOResult {
   const fl = new FlagView(bag, specOf('head'))
-  const nRaw = fl.asStr('lines') ?? null
-  const cRaw = fl.asStr('bytes') ?? null
-  const numErr = numberFlagError('head', nRaw, cRaw)
-  if (numErr !== null) return numErr
+  let values
+  try {
+    values = scan('head', fl.texts('lines', 'bytes'))
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  const { lines, bytes } = values
+  if (
+    (lines !== null && typeof lines !== 'number') ||
+    (bytes !== null && typeof bytes !== 'number')
+  ) {
+    throw new Error(`head: mirage-rs read -n/-c as ${JSON.stringify(values)}`)
+  }
   // The last of -q and -v decides, as in GNU head.
   const headers = fl.typedOrder('quiet', 'silent', 'verbose').at(-1)
   return {
-    lines: nRaw !== null ? Number.parseInt(nRaw, 10) : 10,
-    bytesMode: cRaw !== null ? parseByteCount(cRaw) : null,
+    lines: lines ?? 10,
+    bytesMode: bytes,
     quiet: headers === 'quiet' || headers === 'silent',
     verbose: headers === 'verbose',
     zeroTerminated: fl.asBool('zero_terminated'),
@@ -242,9 +257,10 @@ async function* headMulti(
  * the default 10) is asked of `firstLines` first, so a mount that can fetch
  * the start of a file on its own (a `LIMIT` on a table) does not send the
  * rest; null, or no `firstLines`, reads the file. Mirrors Python's
- * `head_generic`.
+ * `head_generic`; `parsed` holds the options, read before the operands were.
  */
 export async function headGeneric(
+  parsed: HeadFlags,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -254,10 +270,6 @@ export async function headGeneric(
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   stream = stdinStream(stream, ctx.stdin)
-  const parsed = parseFlags(ctx.flags)
-  if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: encodeText(parsed) })]
-  }
   if (paths.length > 0) {
     const showHeaders = showsHeaders(parsed.verbose, parsed.quiet, paths.length)
     const [opened, unread, err] = await splitOpened(paths, stat, 'head')

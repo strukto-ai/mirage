@@ -16,8 +16,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import { UsageError } from '../../errors.ts'
-import { usageHint } from '../../spec/usage.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
 import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
@@ -27,40 +25,17 @@ import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
 import { scaledSize } from '../utils/formatting.ts'
-import { quoteText } from '../../quote.ts'
-import { INTMAX } from '../constants.ts'
 import type { MountView, StatPath } from '../../../view/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
 import { posixPhrase } from '../../../errors/posix.ts'
 import { mountsOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused, scan } from '../../../rs/scan.ts'
 export type ComputeSize = (p: PathSpec) => Promise<number>
 export type DuEntries = [entries: [string, number][], total: number]
 export type ComputeEntries = (p: PathSpec) => Promise<DuEntries>
-
-const DEPTH_HEX = /^[+-]?0[xX][0-9a-fA-F]+$/
-const DEPTH_OCT = /^[+-]?0[0-7]*$/
-const DEPTH_DEC = /^[+-]?[1-9][0-9]*$/
-
-/**
- * Read a `--max-depth` value the way GNU du 9.7 does.
- *
- * That is C `strtoimax` with base 0: a `0x` prefix is hexadecimal, a bare
- * leading `0` is octal (so `010` is 8 and `09` is invalid), anything else is
- * decimal, and a value outside `intmax_t` overflows. Surrounding whitespace
- * is not allowed.
- */
-export function parseDepth(text: string): bigint | null {
-  const body = text.replace(/^[+-]/, '')
-  let magnitude: bigint
-  if (DEPTH_HEX.test(text)) magnitude = BigInt(`0x${body.slice(2)}`)
-  else if (DEPTH_OCT.test(text)) magnitude = BigInt(`0o${body}`)
-  else if (DEPTH_DEC.test(text)) magnitude = BigInt(body)
-  else return null
-  const value = text.startsWith('-') ? -magnitude : magnitude
-  return value >= -INTMAX - 1n && value <= INTMAX ? value : null
-}
 
 /** The parsed `du` command line. */
 export interface DuFlags {
@@ -102,47 +77,34 @@ function line(size: number, human: boolean, label: string): string {
 }
 
 /**
- * Validate a `du` command line the way GNU does, before any I/O.
- *
- * GNU parses `--max-depth` as each option is read, so a bad depth is reported
- * ahead of the mutually-exclusive checks that run once the whole line is
- * parsed. All three exit 1, du's usage-error code.
+ * du's options, `--max-depth` and its conflicts with `-s` and `-a` read by
+ * mirage-rs before any operand is resolved: the flags, or du's refusal.
+ * Mirrors Python's `parse_flags`.
  */
-export function parseFlags(ctx: Context): DuFlags {
+export function parseFlags(ctx: Context): DuFlags | IOResult {
   const fl = new FlagView(ctx.flags, specOf('du'))
-  const s = fl.asBool('s')
-  const a = fl.asBool('a')
-  const raw = fl.asStr('max_depth')
-  let maxDepth: bigint | null = null
-  if (typeof raw === 'string') {
-    maxDepth = parseDepth(raw)
-    if (maxDepth === null) {
-      throw new UsageError(`du: invalid maximum depth '${quoteText(raw)}'\n${usageHint('du')}`, 1)
-    }
+  let values
+  try {
+    values = scan('du', fl.texts('max_depth', 's', 'a'))
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
   }
-  if (s && a) {
-    throw new UsageError(`du: cannot both summarize and show all entries\n${usageHint('du')}`, 1)
-  }
-  let warning: string | undefined
-  if (s && maxDepth !== null) {
-    // GNU treats -s and --max-depth=0 as the same request, so it warns and
-    // carries on; any other depth is a real conflict and exits 1.
-    if (maxDepth !== 0n) {
-      throw new UsageError(
-        `du: warning: summarizing conflicts with --max-depth=${String(maxDepth)}\n${usageHint('du')}`,
-        1,
-      )
-    }
-    warning = 'du: warning: summarizing is the same as using --max-depth=0'
+  const { max_depth: depth, warning } = values
+  if (
+    (depth !== null && typeof depth !== 'number') ||
+    (warning !== null && typeof warning !== 'string')
+  ) {
+    throw new Error(`du: mirage-rs read --max-depth as ${JSON.stringify(values)}`)
   }
   return {
-    s,
-    a,
+    s: fl.asBool('s'),
+    a: fl.asBool('a'),
     h: fl.asBool('h'),
     c: fl.asBool('c'),
     S: fl.asBool('separate_dirs'),
-    maxDepth: maxDepth === null ? null : Number(maxDepth),
-    ...(warning === undefined ? {} : { warning }),
+    maxDepth: depth,
+    ...(warning === null ? {} : { warning }),
   }
 }
 
@@ -645,6 +607,7 @@ export async function duGeneric(
   repeated?: (p: PathSpec) => boolean,
 ): Promise<[Uint8Array, IOResult]> {
   const flags = parseFlags(ctx)
+  if (flags instanceof IOResult) return [new Uint8Array(), flags]
   const { present, missing } = await duOperands(
     paths,
     ctx.cwd,

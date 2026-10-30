@@ -16,8 +16,10 @@ async def truncate(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    files = command_files(ctx, paths)
     flags = parse_flags(ctx.flags)
+    if isinstance(flags, IOResult):
+        return None, flags
+    files = command_files(ctx, paths)
     truncate_fn = files.truncate
     paths = await files.resolve_glob(paths)
     return await generic_truncate(

@@ -227,6 +227,44 @@
         "s",
         "max_depth"
       ]
+    },
+    {
+      "id": "du_max_depth_refuses_a_trailing_newline",
+      "seq": 19996004,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/dunl/e && printf 12345 > /data/dunl/e/f && du --max-depth=$'1\\n' /data/dunl; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "du: invalid maximum depth '1\\n'\nTry 'du --help' for more information.\n"
+      },
+      "flags": [
+        "max_depth"
+      ]
     }
   ]
 }

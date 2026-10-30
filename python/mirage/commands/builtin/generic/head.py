@@ -4,10 +4,6 @@ from collections.abc import AsyncIterator, Awaitable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from mirage.commands.builtin.tail_counts import (
-    number_flag_error,
-    parse_byte_count,
-)
 from mirage.commands.builtin.utils.constants import CHAR_DEVICE_MAX_BYTES
 from mirage.commands.builtin.utils.limit import truncate_stream
 from mirage.commands.builtin.utils.lines import record_separator
@@ -35,7 +31,8 @@ from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
-from mirage.shell.bytes import encode_text
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused, scan
 from mirage.types import FileType, Limit, PathSpec, PolymorphicReadFn, StatFn
 
 
@@ -48,19 +45,31 @@ class HeadFlags:
     zero_terminated: bool = False
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> HeadFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> HeadFlags | IOResult:
+    """head's options, -n and -c read by mirage-rs before any operand is
+    resolved.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the parsed flags.
+
+    Returns:
+        HeadFlags | IOResult: the flags, or head's refusal of a count.
+    """
     fl = FlagView(flags, spec=SPECS["head"])
-    n_raw = fl.as_str("lines")
-    c_raw = fl.as_str("bytes")
-    error = number_flag_error("head", n_raw, c_raw)
-    if error is not None:
-        raise ValueError(error)
+    try:
+        values = scan("head", fl.texts("lines", "bytes"))
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    lines = values["lines"]
+    bytes_ = values["bytes"]
+    assert lines is None or isinstance(lines, int)
+    assert bytes_ is None or isinstance(bytes_, int)
     # The last of -q and -v decides, as in GNU head.
     order = fl.typed_order("quiet", "silent", "verbose")
     headers = order[-1] if order else None
     return HeadFlags(
-        lines=int(n_raw) if n_raw is not None else None,
-        bytes_=parse_byte_count(c_raw) if c_raw is not None else None,
+        lines=lines,
+        bytes_=bytes_,
         quiet=headers in ("quiet", "silent"),
         verbose=headers == "verbose",
         zero_terminated=fl.as_bool("zero_terminated"),
@@ -281,6 +290,7 @@ async def head_multi(
 
 
 async def head_generic(
+    parsed: HeadFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -293,7 +303,7 @@ async def head_generic(
 
     The wiring resolves globs and binds the backend ops; everything else
     lives here so factory builders and bespoke backend commands agree:
-    flag parsing, the header rule, the per-operand report-and-continue
+    the header rule, the per-operand report-and-continue
     split, and the stdin fallback. Headers count the operands as given
     (GNU heads on operand count, so a failed operand still forces
     headers on the survivors). A line count (``-n N``, or the default
@@ -302,6 +312,7 @@ async def head_generic(
     the rest.
 
     Args:
+        parsed (HeadFlags): the options, read before the operands were.
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by head.
         ctx (Context): Flags and stdin from the dispatcher.
@@ -315,10 +326,6 @@ async def head_generic(
     """
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, ctx.stdin)
-    try:
-        parsed = parse_flags(ctx.flags)
-    except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     if paths:
         show_headers = shows_headers(parsed.verbose, parsed.quiet, len(paths))
         opened, unread, err = await split_opened(paths, stat, "head")

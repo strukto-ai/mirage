@@ -23,7 +23,6 @@ const DECIMAL = new RegExp(`^${C_SPACE}([+-]?)([0-9]+)`)
 const BASE0 = new RegExp(`^${C_SPACE}([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)`)
 const LONG_MIN = -(2n ** 63n)
 const LONG_MAX = 2n ** 63n - 1n
-export const ULONG_MAX = 2n ** 64n - 1n
 export const INT_MAX = 2n ** 31n - 1n
 // What GNU 9.7 appends after a refused number that scanned, measured under
 // LC_ALL=C: ERANGE for a value outside the option's range and
@@ -93,23 +92,4 @@ export function strtol(text: string): [bigint, string] {
   const signed = match[1] === '-' ? -value : value
   const clamped = signed < LONG_MIN ? LONG_MIN : signed > LONG_MAX ? LONG_MAX : signed
   return [clamped, text.slice(match[0].length)]
-}
-
-/**
- * C's `strtoul(text, &end, 0)`: the value and the text at `end`. A minus
- * negates in unsigned arithmetic, so `-1` is `ULONG_MAX`, and a value past
- * `ULONG_MAX` saturates there. Mirrors Python's `strtoul`.
- */
-export function strtoul(text: string): [bigint, string] {
-  const match = BASE0.exec(text)
-  if (match === null) return [0n, text]
-  const value = parseBase0(match[2] ?? '0')
-  const rest = text.slice(match[0].length)
-  if (value > ULONG_MAX) return [ULONG_MAX, rest]
-  return [match[1] === '-' ? (ULONG_MAX + 1n - value) % (ULONG_MAX + 1n) : value, rest]
-}
-
-/** `value` as C's `(int)` cast leaves it: its low 32 bits, signed. Mirrors Python's `c_int`. */
-export function cInt(value: bigint): bigint {
-  return BigInt.asIntN(32, value)
 }

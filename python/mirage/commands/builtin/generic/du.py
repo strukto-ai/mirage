@@ -1,25 +1,22 @@
 import logging
-import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.builtin.constants import INTMAX
 from mirage.commands.builtin.utils.formatting import scaled_size
 from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
-from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.usage import usage_hint
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import ZERO_LENGTH_NAME
 from mirage.errors.types import DotWalkError, FsCondition
 from mirage.io.types import IOResult, PathRecord
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused, scan
 from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
@@ -31,10 +28,6 @@ logger = logging.getLogger(__name__)
 DuEntries = tuple[list[tuple[str, int]], int]
 ComputeSize = Callable[[PathSpec], Awaitable[int]]
 ComputeEntries = Callable[[PathSpec], Awaitable[DuEntries]]
-
-_DEPTH_HEX = re.compile(r"^[+-]?0[xX][0-9a-fA-F]+$")
-_DEPTH_OCT = re.compile(r"^[+-]?0[0-7]*$")
-_DEPTH_DEC = re.compile(r"^[+-]?[1-9][0-9]*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,76 +76,28 @@ class DuOutput:
     records: list[PathRecord] | None = None
 
 
-def parse_depth(text: str) -> int | None:
-    """Read a ``--max-depth`` value the way GNU du 9.7 does.
-
-    That is C ``strtoimax`` with base 0: a ``0x`` prefix is hexadecimal, a
-    bare leading ``0`` is octal (so ``010`` is 8 and ``09`` is invalid),
-    anything else is decimal, and a value outside ``intmax_t`` overflows.
-    Surrounding whitespace is not allowed and neither are Python's own
-    ``int`` conveniences (``1_0``, non-ASCII digits), which GNU rejects.
-
-    Args:
-        text (str): the raw flag value.
-
-    Returns:
-        int | None: the depth, or None if the text is not a number.
-    """
-    if _DEPTH_HEX.match(text):
-        value = int(text, 16)
-    elif _DEPTH_OCT.match(text):
-        value = int(text, 8)
-    elif _DEPTH_DEC.match(text):
-        value = int(text, 10)
-    else:
-        return None
-    return value if -INTMAX - 1 <= value <= INTMAX else None
-
-
-def parse_flags(ctx: Context) -> DuFlags:
-    """Validate a ``du`` command line the way GNU does, before any I/O.
-
-    GNU parses ``--max-depth`` as each option is read, so a bad depth is
-    reported ahead of the mutually-exclusive checks that run once the
-    whole line is parsed. All three exit 1, du's usage-error code.
+def parse_flags(ctx: Context) -> DuFlags | IOResult:
+    """du's options, ``--max-depth`` and its conflicts with ``-s`` and
+    ``-a`` read by mirage-rs before any operand is resolved.
 
     Args:
         ctx (Context): the flags as the dispatcher parsed them.
 
-    Raises:
-        UsageError: on a bad depth or a conflicting combination.
+    Returns:
+        DuFlags | IOResult: the flags, or du's refusal.
     """
     fl = FlagView(ctx.flags, spec=SPECS["du"])
-    s = fl.as_bool("s")
-    a = fl.as_bool("a")
-    raw = fl.as_str("max_depth")
-    depth: int | None = None
-    if raw is not None:
-        depth = parse_depth(raw)
-        if depth is None:
-            raise UsageError(
-                f"du: invalid maximum depth '{quote_text(raw)}'\n{usage_hint('du')}",
-                1,
-            )
-    if s and a:
-        raise UsageError(
-            f"du: cannot both summarize and show all entries\n{usage_hint('du')}",
-            1,
-        )
-    warning: str | None = None
-    if s and depth is not None:
-        # GNU treats -s and --max-depth=0 as the same request, so it warns
-        # and carries on; any other depth is a real conflict and exits 1.
-        if depth != 0:
-            raise UsageError(
-                "du: warning: summarizing conflicts with "
-                f"--max-depth={depth}\n{usage_hint('du')}",
-                1,
-            )
-        warning = "du: warning: summarizing is the same as using --max-depth=0"
+    try:
+        values = scan("du", fl.texts("max_depth", "s", "a"))
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    depth = values["max_depth"]
+    warning = values["warning"]
+    assert depth is None or isinstance(depth, int)
+    assert warning is None or isinstance(warning, str)
     return DuFlags(
-        s=s,
-        a=a,
+        s=fl.as_bool("s"),
+        a=fl.as_bool("a"),
         h=fl.as_bool("h"),
         c=fl.as_bool("c"),
         S=fl.as_bool("separate_dirs"),
@@ -787,10 +732,10 @@ async def du_generic(
         repeated (Callable[[PathSpec], bool] | None): Whether an earlier
             operand's walk already counted an operand.
 
-    Raises:
-        UsageError: on a bad depth or a conflicting flag combination.
     """
     flags = parse_flags(ctx)
+    if isinstance(flags, IOResult):
+        return b"", flags
     present, missing = await du_operands(
         paths,
         ctx.cwd,

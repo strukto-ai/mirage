@@ -1212,6 +1212,21 @@
       }
     },
     {
+      "id": "procsub_truncate_names_a_size_past_2_53_exactly",
+      "seq": 19996003,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "truncate -s 9007199254740993 >(cat); truncate -s 9223372036854775807 >(cat); echo st=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=1\n",
+        "stderr": "truncate: failed to truncate '/dev/fd/63' at 9007199254740993 bytes: Invalid argument\ntruncate: failed to truncate '/dev/fd/63' at 9223372036854775807 bytes: Invalid argument\n"
+      }
+    },
+    {
       "id": "procsub_test_fifo_type_and_mode",
       "seq": 1346134,
       "targets": [

@@ -12,15 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
-import {
-  atoi,
-  boundedDecimal,
-  cInt,
-  strtol,
-  strtoul,
-  signedDecimal,
-  unsignedDecimal,
-} from './strtol.ts'
+import { atoi, boundedDecimal, strtol, signedDecimal, unsignedDecimal } from './strtol.ts'
 
 // Mirrors python/tests/commands/builtin/utils/test_strtol.py.
 describe('strtol', () => {
@@ -40,17 +32,6 @@ describe('strtol', () => {
   })
 
   it.each([
-    ['', 0n, ''],
-    ['0x10', 16n, ''],
-    ['-1', 2n ** 64n - 1n, ''],
-    ['99999999999999999999', 2n ** 64n - 1n, ''],
-    ['3x', 3n, 'x'],
-    ['  ', 0n, '  '],
-  ])('strtoul %j', (raw, value, rest) => {
-    expect(strtoul(raw)).toEqual([value, rest])
-  })
-
-  it.each([
     ['5', 5n, 5n],
     [' \t+5', 5n, 5n],
     ['-5', null, -5n],
@@ -63,12 +44,6 @@ describe('strtol', () => {
     expect(unsignedDecimal(raw)).toBe(unsigned)
     expect(signedDecimal(raw)).toBe(signed)
   })
-
-  it('cInt keeps the low 32 bits signed', () => {
-    expect(cInt(2n ** 32n + 1n)).toBe(1n)
-    expect(cInt(2n ** 64n - 1n)).toBe(-1n)
-    expect(cInt(2n ** 31n)).toBe(-(2n ** 31n))
-  })
 })
 
 describe('a number past any digit limit', () => {
@@ -77,7 +52,6 @@ describe('a number past any digit limit', () => {
     expect(unsignedDecimal(digits)).toBe(10n ** 5000n - 1n)
     expect(signedDecimal(`-${digits}`)).toBe(-(10n ** 5000n - 1n))
     expect(strtol(digits)).toEqual([2n ** 63n - 1n, ''])
-    expect(strtoul(digits)).toEqual([2n ** 64n - 1n, ''])
   })
 })
 

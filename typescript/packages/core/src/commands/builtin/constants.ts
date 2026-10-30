@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RowActionKind } from '../../core/generic/find_eval.ts'
-import { sizeSuffixes } from './utils/size_suffix.ts'
 import { ContentType } from '../../types.ts'
 
 export enum PatternType {
@@ -61,7 +60,6 @@ export const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
 // A bigint: as a double, 2 ** 64 - 1 rounds up to 2 ** 64, which would let
 // exactly-2**64 values through the too-large checks that python rejects.
 export const UINTMAX = 2n ** 64n - 1n
-export const INTMAX = 2n ** 63n - 1n
 
 // gnulib appends strerror(EOVERFLOW) when a value did not fit the type it was
 // scanned into. Measured under LC_ALL=C on glibc; the string here most likely
@@ -81,13 +79,6 @@ export const C_SPACE = '[ \\t\\n\\v\\f\\r]*'
 export const SUFFIXED_COUNT_PATTERN = new RegExp(
   `^${C_SPACE}\\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(.*)$`,
 )
-
-// GNU cmp (diffutils 3.10) shares od's grammar above but not its letter set:
-// no b/c/w, lowercase only up to k, and its gnulib predates Q/R, so `0Q`
-// is an invalid value where `0Z` is a valid zero. Its ceiling is INTMAX, not
-// UINTMAX, and an overflowing value reports as the same "invalid ... value"
-// as a bad suffix rather than as too-large.
-export const CMP_SIZE_UNITS = sizeSuffixes('kKMGTPEZY')
 
 // gzip 1.13's file naming. The suffix gzip writes and looks for unless -S
 // names another; the suffixes it always recognizes on a name it

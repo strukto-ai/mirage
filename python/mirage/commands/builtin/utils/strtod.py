@@ -21,8 +21,7 @@ import re
 # any case. The groups are the sign, the hex float, the decimal float,
 # inf and nan. A match is the longest number at the front of a word,
 # which is what strtod consumes; a GNU tool that reads its value through
-# xstrtod refuses any leftover, trailing blanks included, so it needs a
-# whole-word match (`tail -s $'1\r'` is an invalid number of seconds).
+# xstrtod refuses any leftover, trailing blanks included.
 STRTOD = re.compile(
     r"[ \t\n\v\f\r]*([+-]?)(?:"
     r"(0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)"
@@ -31,15 +30,6 @@ STRTOD = re.compile(
     r"|([iI][nN][fF](?:[iI][nN][iI][tT][yY])?)"
     r"|([nN][aA][nN](?:\([0-9A-Za-z_]*\))?))"
 )
-
-
-def strtod_whole(text: str) -> re.Match[str] | None:
-    """A STRTOD match spanning the whole word, as xstrtod demands, or None.
-
-    Args:
-        text (str): the word as typed.
-    """
-    return STRTOD.fullmatch(text)
 
 
 def _hex_double(text: str) -> float:

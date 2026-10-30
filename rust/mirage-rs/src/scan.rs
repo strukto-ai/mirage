@@ -48,8 +48,13 @@ fn grammar(command: &str) -> Result<Grammar, StreamError> {
     Ok(match command {
         "base64" => crate::base64::scan,
         "cmp" => crate::cmp::scan,
+        "du" => crate::du::scan,
         "fmt" => crate::reflow::scan,
         "fold" => crate::fold::scan,
+        "head" => crate::head::scan,
+        "tail" => crate::tail::scan,
+        "tree" => crate::tree::scan,
+        "truncate" => crate::truncate::scan,
         "xxd" => crate::xxd::scan,
         _ => return Err(StreamError::new(format!("scan: no grammar for {command}"))),
     })
@@ -88,14 +93,14 @@ impl Stream for Scanned {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use serde_json::{Value as Json, json};
 
     use crate::open;
 
     /// What `command` makes of `options`: its values, or its stderr and
     /// status.
-    fn scan(command: &str, options: &[(&str, &[u8])]) -> Result<Json, (Vec<u8>, i32)> {
+    pub(crate) fn scan(command: &str, options: &[(&str, &[u8])]) -> Result<Json, (Vec<u8>, i32)> {
         let options: Vec<(&str, String)> = options
             .iter()
             .map(|(name, raw)| (*name, raw.iter().map(|&b| char::from(b)).collect()))
@@ -107,7 +112,7 @@ mod tests {
         Ok(serde_json::from_slice(&out).expect("json"))
     }
 
-    fn refusal(command: &str, options: &[(&str, &[u8])]) -> (String, i32) {
+    pub(crate) fn refusal(command: &str, options: &[(&str, &[u8])]) -> (String, i32) {
         let (stderr, status) = scan(command, options).expect_err("refused");
         (String::from_utf8_lossy(&stderr).into_owned(), status)
     }

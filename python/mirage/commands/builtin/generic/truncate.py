@@ -1,12 +1,9 @@
-import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from typing import Literal, cast
 
-from mirage.commands.builtin.constants import EOVERFLOW_TEXT
 from mirage.commands.builtin.utils.paths import absent_dest_error
-from mirage.commands.builtin.utils.size_suffix import size_suffixes
 from mirage.commands.errors import UsageError
-from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
@@ -18,82 +15,57 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused, scan
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
 from mirage.utils.path import ends_at_dot
 from mirage.utils.quote import shell_quote_always
 from mirage.utils.stat_view import is_dir
 
-# GNU truncate's letter set differs from split's and od's: lowercase
-# g/k/m/t are accepted, b is not (pinned against coreutils 9.7).
-_UNITS = size_suffixes("EGKMPQRTYZgkmt")
-_OFF_T_MAX = 2**63 - 1
-_WS = " \t\n\v\f\r"
-
-# GNU reads the -s operand as [ws][mode][ws][sign]digits[suffix]: C-locale
-# whitespace is skipped before and after the mode character (` < 4` caps at
-# 4), while the digits must follow the sign immediately, so `1x`, `+ 4`,
-# `++4` and `1_0` are all `Invalid number` rather than a silently truncated
-# read (pinned against coreutils 9.7).
-_DIGITS = re.compile(r"[0-9]+")
+SizeMode = Literal[
+    "absolute",
+    "extend",
+    "reduce",
+    "at_most",
+    "at_least",
+    "round_down",
+    "round_up",
+]
 
 
-def parse_size(value: str, current: int) -> int:
-    """Resolve a GNU ``truncate -s`` spec against a file's current size.
+@dataclass(frozen=True, slots=True)
+class Size:
+    """What ``-s`` asks of a file's size, as mirage-rs read it.
 
     Args:
-        value (str): the ``-s`` operand, e.g. ``10K``, ``+1M``, ``/512``.
+        mode (SizeMode): how the number applies to the current size.
+        number (int): the number typed, its suffix applied.
+    """
+
+    mode: SizeMode
+    number: int
+
+
+def resolve_size(size: Size, current: int) -> int:
+    """The length ``size`` asks for, given a file's current one.
+
+    Args:
+        size (Size): the ``-s`` spec.
         current (int): the file's current size in bytes.
     """
-    stripped = value.lstrip(_WS)
-    operation = stripped[:1] if stripped[:1] in {"<", ">", "/", "%"} else ""
-    remainder = stripped[1:].lstrip(_WS) if operation else stripped
-    sign = remainder[:1] if remainder[:1] in {"+", "-"} else ""
-    if sign and operation:
-        # A sign after <, >, / or % is a second relative modifier, refused
-        # before the number is read (`<+4` is not an invalid number).
-        raise UsageError(
-            "truncate: multiple relative modifiers specified\n"
-            + usage_hint("truncate"),
-            1,
-        )
-    raw = remainder[1:] if sign else remainder
-    suffix = next(
-        (
-            unit
-            for unit in sorted(_UNITS, key=len, reverse=True)
-            if raw.endswith(unit)
-        ),
-        "",
-    )
-    digits = raw[: -len(suffix)] if suffix else raw
-    # GNU quotes the remainder past the skipped whitespace and mode
-    # character, sign included (`<abc` says 'abc'), escaped the way it
-    # escapes every word it quotes.
-    shown = quote_text(remainder)
-    if _DIGITS.fullmatch(digits) is None:
-        raise UsageError(f"truncate: Invalid number: '{shown}'", 1)
-    number = int(digits) * _UNITS.get(suffix, 1)
-    # off_t is signed, so the bound is 2**63 - 1 upward but 2**63 downward
-    # (`-s -8E` reduces to zero while `-s 8E` is too large).
-    if number > _OFF_T_MAX + (1 if sign == "-" else 0):
-        raise UsageError(
-            f"truncate: Invalid number: '{shown}': {EOVERFLOW_TEXT}",
-            1,
-        )
-    if number == 0 and operation in {"/", "%"}:
-        raise UsageError("truncate: division by zero", 1)
-    if sign == "+":
+    number = size.number
+    if size.mode == "extend":
         return current + number
-    if sign == "-":
+    if size.mode == "reduce":
         return max(0, current - number)
-    if operation == "<":
+    if size.mode == "at_most":
         return min(current, number)
-    if operation == ">":
+    if size.mode == "at_least":
         return max(current, number)
-    if operation == "/":
+    if size.mode == "round_down":
         return current - current % number
-    if operation == "%":
+    if size.mode == "round_up":
         return ((current + number - 1) // number) * number
     return number
 
@@ -103,33 +75,38 @@ class TruncateFlags:
     """The truncate flag bag, parsed once.
 
     Args:
-        size (str): the ``-s`` spec, as typed.
+        size (Size): the ``-s`` spec.
         no_create (bool): ``-c``; an absent name stays absent, silently.
     """
 
-    size: str
+    size: Size
     no_create: bool
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags:
-    """Parse the truncate flag bag once into a frozen struct.
-
-    GNU reads the size while it reads the options, so a spec it refuses
-    is refused here, before any operand is touched or named.
+def parse_flags(flags: Mapping[str, FlagValue]) -> TruncateFlags | IOResult:
+    """truncate's options, ``-s`` read by mirage-rs before any operand is
+    resolved.
 
     Args:
         flags (Mapping[str, FlagValue]): the parsed flag bag.
+
+    Returns:
+        TruncateFlags | IOResult: the flags, or truncate's refusal.
     """
     fl = FlagView(flags, spec=SPECS["truncate"])
-    size = fl.as_str("size")
-    if size is None:
-        raise UsageError(
-            "truncate: you must specify either '--size' or '--reference'\n"
-            + usage_hint("truncate"),
-            1,
-        )
-    parse_size(size, 0)
-    return TruncateFlags(size=size, no_create=fl.as_bool("no_create"))
+    try:
+        values = scan("truncate", fl.texts("size"))
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    size = values["size"]
+    assert isinstance(size, dict)
+    mode = size["mode"]
+    number = size["size"]
+    assert isinstance(mode, str) and isinstance(number, str)
+    return TruncateFlags(
+        size=Size(mode=cast(SizeMode, mode), number=int(number)),
+        no_create=fl.as_bool("no_create"),
+    )
 
 
 async def truncate_generic(
@@ -219,7 +196,7 @@ async def _truncate_one(
     slashed = path.raw_path.endswith("/") and not ends_at_dot(path.raw_path)
     if directory or (slashed and not flags.no_create):
         raise eisdir(path)
-    size = parse_size(flags.size, current)
+    size = resolve_size(flags.size, current)
     try:
         await truncate_fn(path, size, flags.no_create)
     except OSError as exc:
@@ -233,4 +210,10 @@ async def _truncate_one(
     return None
 
 
-__all__ = ["TruncateFlags", "parse_flags", "parse_size", "truncate_generic"]
+__all__ = [
+    "Size",
+    "TruncateFlags",
+    "parse_flags",
+    "resolve_size",
+    "truncate_generic",
+]

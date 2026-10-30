@@ -88,6 +88,8 @@ async def run_du(
             which the one walk's globs take.
     """
     rendering = parse_flags(Context(flags=flags))
+    if isinstance(rendering, IOResult):
+        return None, rendering
     bounded = FlagView(flags, spec=SPECS["du"]).as_bool("one_file_system")
     measuring = {k: v for k, v in flags.items() if k not in RENDERING}
     # Each start is then one mount's own part, and keeps only what that

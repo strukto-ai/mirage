@@ -15,11 +15,22 @@
 import { describe, expect, it } from 'vitest'
 import { eacces, efbig } from '../../../errors/fs.ts'
 import { ensureStream } from '../../../io/stream.ts'
-import { materialize } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
-import type { Context } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { resolveSource } from '../utils/stream.ts'
-import { headGeneric } from './head.ts'
+import { headGeneric as generic, parseFlags } from './head.ts'
+
+type Operands<T> = T extends [unknown, ...infer R] ? R : never
+
+// head as its builder runs it: the options read first, a refusal returned.
+async function headGeneric(
+  ...args: Operands<Parameters<typeof generic>>
+): Promise<CommandFnResult> {
+  const parsed = parseFlags(args[2].flags)
+  if (parsed instanceof IOResult) return [null, parsed]
+  return generic(parsed, ...args)
+}
 
 // A first pull that stalls for 2 s, then returns a line.
 async function* stalled(): AsyncIterable<Uint8Array> {
@@ -287,4 +298,24 @@ describe('head asks the mount for the first lines', () => {
       expect(DEC.decode(await materialize(result?.[1].stderr ?? null))).toBe(stderr)
     },
   )
+})
+
+// Mirrors test_head.py: mirage-rs reads -n and -c before any operand, and a
+// refusal is head's stderr and exit 1.
+describe('head refuses a count before reading any operand', () => {
+  it.each([
+    [{ lines: 'x' }, "head: invalid number of lines: 'x'\n"],
+    [{ lines: '2K' }, "head: invalid number of lines: '2K'\n"],
+    [{ bytes: '1y' }, "head: invalid number of bytes: '1y'\n"],
+  ])('%j', (flags, stderr) => {
+    const parsed = parseFlags(flags)
+    if (!(parsed instanceof IOResult)) throw new Error('head read a refused count')
+    expect([parsed.exitCode, DEC.decode(parsed.stderr as Uint8Array)]).toEqual([1, stderr])
+  })
+
+  it('reads -c with its size suffix', () => {
+    const parsed = parseFlags({ bytes: '-2k', lines: '3' })
+    if (parsed instanceof IOResult) throw new Error('head refused a count')
+    expect([parsed.lines, parsed.bytesMode]).toEqual([3, -2048])
+  })
 })

@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Generic, TypeVar, overload
 
-from mirage.commands.errors import UsageError
 from mirage.commands.spec.compile import argument_dest, compile_spec
 from mirage.commands.spec.constants import (
     OPERAND,
@@ -265,50 +264,6 @@ class FlagView:
             raise ValueError(
                 f"flag '{name}' expects a number, got '{value}'"
             ) from exc
-
-    def as_number(
-        self,
-        name: str,
-        scan: Callable[[str], int | None],
-        refusal: Callable[[str, int | None], str],
-        *,
-        low: int | None = None,
-        high: int | None = None,
-        exit_code: int = 1,
-    ) -> int | None:
-        """An integer option read and refused the way its program does.
-
-        Each program scans its own numbers (a whole decimal word, C's
-        ``strtol``, ``atoi``) and words its own refusal, so both come
-        from the caller: ``scan`` is the program's reader, None for a
-        text it does not take, and a scanned value outside
-        ``low``..``high`` is refused the same way, through ``refusal``.
-        An integer value is scanned as its digits (``as_text``).
-
-        Args:
-            name (str): the option's dest.
-            scan (Callable[[str], int | None]): the program's reader.
-            refusal (Callable[[str, int | None], str]): the diagnostic
-                for the text as typed and what it scanned to, None when
-                it did not scan.
-            low (int | None): the smallest value the program takes.
-            high (int | None): the largest value the program takes.
-            exit_code (int): the program's status for the refusal.
-
-        Returns:
-            int | None: the value, or None when the option is absent.
-        """
-        text = self.as_text(name)
-        if text is None:
-            return None
-        value = scan(text)
-        if (
-            value is None
-            or (low is not None and value < low)
-            or (high is not None and value > high)
-        ):
-            raise UsageError(refusal(text, value), exit_code)
-        return value
 
     def as_text(self, name: str) -> str | None:
         """The option as the text a line would have typed for it: a string

@@ -13,35 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
-import { decimalValue, parseBase0, sizeSuffixes } from './size_suffix.ts'
-
-describe('sizeSuffixes', () => {
-  it('maps a letter to its binary power', () => {
-    const table = sizeSuffixes('KMG')
-    expect(table.K).toBe(1024)
-    expect(table.M).toBe(1024 ** 2)
-    expect(table.G).toBe(1024 ** 3)
-  })
-
-  it('B form is decimal, iB form is binary', () => {
-    const table = sizeSuffixes('k')
-    expect(table.k).toBe(1024)
-    expect(table.kB).toBe(1000)
-    expect(table.kiB).toBe(1024)
-  })
-
-  it('the letter b is 512 with no compound forms', () => {
-    expect(sizeSuffixes('b')).toEqual({ b: 512 })
-  })
-
-  it('preserves case instead of folding it', () => {
-    expect(Object.keys(sizeSuffixes('kK')).sort()).toEqual(['K', 'KB', 'KiB', 'k', 'kB', 'kiB'])
-  })
-
-  it('rejects an unknown letter', () => {
-    expect(() => sizeSuffixes('w')).toThrow("unknown size suffix letter 'w'")
-  })
-})
+import { decimalValue, parseBase0 } from './size_suffix.ts'
 
 describe('parseBase0', () => {
   it('reads hex, octal and decimal', () => {
