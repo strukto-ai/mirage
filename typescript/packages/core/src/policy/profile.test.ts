@@ -407,6 +407,24 @@ function policyRuntime(settings: Record<string, unknown>, code: boolean): unknow
 }
 
 describe('parseProfilePolicy', () => {
+  it("reads a program's inline source as a JSON profile spells it", () => {
+    const policy = parseProfilePolicy(
+      { pre_network: [{ script: { source: 'print(1)', language: 'python' } }] },
+      'policy',
+    )
+    expect(policy.preNetwork?.[0]?.script).toEqual(new ScriptSource('print(1)', 'python', false))
+    for (const script of [
+      { source: 1 },
+      { source: 'x', language: 'ruby' },
+      { source: 'x', path: 'p' },
+      ['x'],
+    ]) {
+      expect(() => parseProfilePolicy({ pre_network: [{ script }] }, 'policy')).toThrow(
+        /must be a script path or source/,
+      )
+    }
+  })
+
   it("reads a program's env of literals and pointers, and compiles it", () => {
     const policy = parseProfilePolicy(
       {

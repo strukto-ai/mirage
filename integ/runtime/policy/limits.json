@@ -1601,6 +1601,33 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_denied_port_refuses_its_connection_and_the_line_runs_on",
+      "world": {
+        "network": {
+          "allowed_domains": ["*"],
+          "denied_domains": ["*:9", "[::1]"]
+        },
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "hi\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "curl -sS http://127.0.0.1:9/; echo \"rc=$?\"; cat /ram/f.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=7\nhi\n",
+            "stderr": "curl: (7) Failed to connect to 127.0.0.1 port 9: Could not connect to server\n"
+          }
+        }
+      ]
     }
   ]
 }

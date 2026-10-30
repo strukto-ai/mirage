@@ -31,6 +31,7 @@ from mirage.errors.types import CommandTimeoutError
 from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.errors import MemoryExhausted
+from mirage.io.gateway import run_with_egress
 from mirage.io.memory import run_with_memory
 from mirage.io.network import run_with_network
 from mirage.io.types import ByteSource
@@ -932,8 +933,9 @@ async def run_prepared_line(
                                 await ws.secret_sources(),
                             ),
                         )
-                io = await run_with_network(
-                    ws.registry.network,
+                io = await run_with_egress(
+                    ws.registry.network_of(effective_session.network),
+                    ws.registry.policies,
                     run_with_memory(
                         ws.registry.memory,
                         run_whole_line(
@@ -948,7 +950,8 @@ async def run_prepared_line(
                                 command, effective_session, await judged()
                             )
                             if await ws.registry.policies.wants_for(
-                                "post_execute", effective_session.session_id
+                                "post_execute",
+                                effective_session.session_id,
                             )
                             else None,
                             sink,
@@ -1070,8 +1073,9 @@ async def run_prepared_line(
             # deadline, which a nested one shares, and every object a
             # line builds must fit in what the workspace's max_memory has
             # left, and every connection it opens must clear its network.
-            io, _ = await run_with_network(
-                ws.registry.network,
+            io, _ = await run_with_egress(
+                ws.registry.network_of(effective_session.network),
+                ws.registry.policies,
                 run_with_memory(
                     ws.registry.memory,
                     run_with_timeout(
@@ -1093,7 +1097,8 @@ async def run_prepared_line(
                                 command, effective_session, await judged()
                             )
                             if await ws.registry.policies.wants_for(
-                                "post_execute", effective_session.session_id
+                                "post_execute",
+                                effective_session.session_id,
                             )
                             else None,
                         ),

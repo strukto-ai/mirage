@@ -20,6 +20,7 @@
 # onto stderr.
 
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import urlsplit
@@ -31,6 +32,8 @@ from mirage.commands.builtin.utils.cookie import (
     cookie_value,
     same_origin,
 )
+from mirage.io.stream import prime_stream
+from mirage.io.types import ByteSource
 
 # httpx is the [http] extra, so it stays optional: top-level import guarded the
 # same way the databricks accessor guards its SDK.
@@ -51,7 +54,9 @@ MISSING_HTTPX = "httpx is required for curl/wget: pip install 'mirage[http]'"
 class HttpResponse:
     status: int
     reason: str
-    body: bytes
+    # Whole for every redirect hop; the final hop's arrives as it is read
+    # when the request asked for a stream.
+    body: ByteSource
     # The URL this hop was asked for and the method the client sent for
     # it: a redirect can move both (a POST becomes a GET on 301, 302 and
     # 303, in httpx as in curl).
@@ -83,19 +88,22 @@ def _endpoint(url: str) -> tuple[str, int]:
     return host, port
 
 
-def _hop(resp: Any) -> HttpResponse:
+def _hop(resp: Any, body: ByteSource) -> HttpResponse:
     return HttpResponse(
         status=resp.status_code,
         reason=resp.reason_phrase,
-        body=resp.content,
+        body=body,
         url=str(resp.url),
         headers=tuple(resp.headers.multi_items()),
         method=resp.request.method,
     )
 
 
-def _response(resp: Any) -> HttpResponse:
-    return replace(_hop(resp), history=tuple(_hop(r) for r in resp.history))
+def _response(resp: Any, body: ByteSource) -> HttpResponse:
+    return replace(
+        _hop(resp, body),
+        history=tuple(_hop(r, r.content) for r in resp.history),
+    )
 
 
 def _timeout(url: str, started: float) -> HttpTimeoutError:
@@ -103,6 +111,24 @@ def _timeout(url: str, started: float) -> HttpTimeoutError:
     return HttpTimeoutError(
         host, port, int((time.monotonic() - started) * 1000)
     )
+
+
+async def _streamed(
+    client: Any, resp: Any, url: str, started: float
+) -> AsyncIterator[bytes]:
+    # The body as it arrives, under the same deadline and with the same
+    # failures as the request; the client closes once it ends or is let go.
+    try:
+        async for chunk in resp.aiter_bytes():
+            yield chunk
+    except httpx.TimeoutException as exc:
+        raise _timeout(url, started) from exc
+    except httpx.TransportError as exc:
+        host, port = _endpoint(url)
+        raise HttpConnectError(host, port) from exc
+    finally:
+        await resp.aclose()
+        await client.aclose()
 
 
 async def http_request(
@@ -116,12 +142,16 @@ async def http_request(
     *,
     form_data: dict[str, str] | None = None,
     cookies: CookieJar | None = None,
+    stream: bool = False,
 ) -> HttpResponse:
     # A None timeout is no deadline at all (curl's `--max-time 0`), which
     # is what httpx spells it as too. `verify=False` is curl's -k: the
-    # server's certificate is not checked.
+    # server's certificate is not checked. `stream` hands the final body
+    # over as it arrives instead of holding all of it first, so a download
+    # costs one chunk of memory however large it is.
     if httpx is None:
         raise ImportError(MISSING_HTTPX)
+    host, port = _endpoint(url)
     started = time.monotonic()
     event_hooks: dict[str, list[Any]] = {}
     if cookies is not None:
@@ -154,28 +184,39 @@ async def http_request(
             )
 
         event_hooks = {"request": [send_cookies], "response": [keep_cookies]}
-    async with httpx.AsyncClient(
+    client = httpx.AsyncClient(
         timeout=timeout,
         follow_redirects=follow_redirects,
         verify=verify,
         event_hooks=event_hooks,
-    ) as client:
+    )
+    handed = False
+    try:
         try:
-            resp = await client.request(
-                method,
-                url,
-                headers=_with_default_ua(headers),
-                content=data,
-                data=form_data,
+            resp = await client.send(
+                client.build_request(
+                    method,
+                    url,
+                    headers=_with_default_ua(headers),
+                    content=data,
+                    data=form_data,
+                ),
+                stream=stream,
             )
         # A timeout is a transport error too, so it is told apart first:
         # curl answers it with its own code (28), not the connect one.
         except httpx.TimeoutException as exc:
             raise _timeout(url, started) from exc
         except httpx.TransportError as exc:
-            host, port = _endpoint(url)
             raise HttpConnectError(host, port) from exc
-        return _response(resp)
+        if not stream:
+            return _response(resp, resp.content)
+        body = await prime_stream(_streamed(client, resp, url, started))
+        handed = True
+        return _response(resp, body)
+    finally:
+        if not handed:
+            await client.aclose()
 
 
 async def http_form_request(
@@ -187,6 +228,7 @@ async def http_form_request(
     follow_redirects: bool = False,
     verify: bool = True,
     cookies: CookieJar | None = None,
+    stream: bool = False,
 ) -> HttpResponse:
     return await http_request(
         url,
@@ -197,6 +239,7 @@ async def http_form_request(
         verify=verify,
         form_data=form_data or {},
         cookies=cookies,
+        stream=stream,
     )
 
 
@@ -205,6 +248,7 @@ async def http_get(
     headers: dict[str, str] | None = None,
     timeout: float | None = HTTP_TIMEOUT_SECONDS,
     follow_redirects: bool = True,
+    stream: bool = False,
 ) -> HttpResponse:
     return await http_request(
         url,
@@ -212,4 +256,5 @@ async def http_get(
         headers=headers,
         timeout=timeout,
         follow_redirects=follow_redirects,
+        stream=stream,
     )

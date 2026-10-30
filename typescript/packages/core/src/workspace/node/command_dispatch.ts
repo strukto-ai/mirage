@@ -799,7 +799,13 @@ async function runArgv(
     // registered one runs keeps none of that one's.
     const outer = currentCaller()
     const result = await runWithCaller(
-      { ...outer, gate: gated ?? outer.gate, command: argv.name, declared: null },
+      {
+        ...outer,
+        gate: gated ?? outer.gate,
+        command: argv.name,
+        invocation: gated?.ctx ?? null,
+        declared: null,
+      },
       () =>
         commandRecords((records) => {
           mine = records

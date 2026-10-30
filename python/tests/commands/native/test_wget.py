@@ -26,7 +26,7 @@ from mirage.commands.builtin.general.wget import wget
 from mirage.commands.builtin.utils.http import HttpResponse
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -42,7 +42,9 @@ def _ok(
 def _stub(monkeypatch, resp=None, exc=None) -> list[str]:
     calls: list[str] = []
 
-    async def fake(url, headers=None, timeout=30, follow_redirects=True):
+    async def fake(
+        url, headers=None, timeout=30, follow_redirects=True, stream=False
+    ):
         calls.append(url)
         if exc is not None:
             raise exc
@@ -59,10 +61,12 @@ def _run(
     spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
     vfs = Files(dispatch, ledger=False) if dispatch is not None else None
     ctx = Context(vfs=vfs, cwd=spec, flags=flags)
-    body, io = asyncio.run(wget(NOOPAccessor(), [], list(texts), ctx))
-    if body is None:
-        return b"", io
-    return bytes(body), io
+
+    async def run() -> tuple[bytes, IOResult]:
+        body, io = await wget(NOOPAccessor(), [], list(texts), ctx)
+        return await materialize(body), io
+
+    return asyncio.run(run())
 
 
 def _run_writing(
@@ -72,7 +76,7 @@ def _run_writing(
     written: dict[str, bytes] = {}
 
     async def dispatch(op, scope, **kwargs):
-        written[scope.virtual] = kwargs["data"]
+        written[scope.virtual] = await materialize(kwargs["data"])
 
     body, io = _run(*texts, dispatch=dispatch, **flags)
     return body, io, written

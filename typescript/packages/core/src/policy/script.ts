@@ -45,6 +45,8 @@ import {
   type CommandResultContext,
   type Deny,
   type ExecuteResultContext,
+  type NetworkContext,
+  type NetworkResultContext,
   type PolicyCaller,
   type PolicyMethod,
   type ProfileScript,
@@ -140,7 +142,13 @@ function plain(value: unknown, data = false): JsonValue {
  * Python `script_context`.
  */
 export function scriptContext(
-  ctx: CommandContext | RouteContext | VfsContext | SessionContext | WorkspaceContext,
+  ctx:
+    | CommandContext
+    | RouteContext
+    | VfsContext
+    | SessionContext
+    | WorkspaceContext
+    | NetworkContext,
 ): Record<string, JsonValue> {
   // A config is data as its writer spelled it: no field it holds is a
   // live handle or a camelCase name.
@@ -340,6 +348,14 @@ export class ScriptPolicy implements Policy, SessionScoped {
     return this.judge('preWorkspace', ctx)
   }
 
+  async preNetwork(ctx: NetworkContext): Promise<(Deny | Ask | Route)[] | null> {
+    return this.judge('preNetwork', ctx)
+  }
+
+  async postNetwork(ctx: NetworkResultContext): Promise<(Deny | Ask | Route)[] | null> {
+    return this.judge('postNetwork', ctx)
+  }
+
   async postExecute(ctx: ExecuteResultContext): Promise<(Deny | Ask | Route)[] | null> {
     return this.judge('postExecute', ctx)
   }
@@ -377,7 +393,7 @@ export class ScriptPolicy implements Policy, SessionScoped {
   async run(
     entry: ProfileScript,
     method: ScriptMethod,
-    ctx: CommandContext | RouteContext | VfsContext | SessionContext,
+    ctx: CommandContext | RouteContext | VfsContext | SessionContext | NetworkContext,
   ): Promise<Deny | Ask | Route | null> {
     const payload = JSON.stringify(scriptContext(ctx))
     try {
@@ -402,7 +418,13 @@ export class ScriptPolicy implements Policy, SessionScoped {
    */
   private async judge(
     method: PolicyMethod,
-    ctx: CommandContext | RouteContext | VfsContext | SessionContext | WorkspaceContext,
+    ctx:
+      | CommandContext
+      | RouteContext
+      | VfsContext
+      | SessionContext
+      | WorkspaceContext
+      | NetworkContext,
   ): Promise<(Deny | Ask | Route)[] | null> {
     const programs =
       this.sessions.scriptsOf('config' in ctx ? '' : (ctx.sessionId ?? ''))[method] ?? []
@@ -429,7 +451,13 @@ export class ScriptPolicy implements Policy, SessionScoped {
    * in a directory that is not there.
    */
   private async cwd(
-    ctx: CommandContext | RouteContext | VfsContext | SessionContext | WorkspaceContext,
+    ctx:
+      | CommandContext
+      | RouteContext
+      | VfsContext
+      | SessionContext
+      | WorkspaceContext
+      | NetworkContext,
   ): Promise<string> {
     if ('config' in ctx) return '/'
     const cwd = ctx.session?.cwd() ?? '/'

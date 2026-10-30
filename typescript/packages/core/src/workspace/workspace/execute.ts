@@ -16,6 +16,7 @@ import { CommandTimeoutError } from '../../errors/types.ts'
 import { LINE_NAME, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
 import { runWithMemory } from '../../io/memory.ts'
+import { runWithEgress } from '../../io/gateway.ts'
 import { runWithNetwork } from '../../io/network.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
@@ -1063,7 +1064,7 @@ async function runParsedLine(
         ? env.router.context(command, effectiveSession, await judged())
         : null
       const runLine = (): ReturnType<typeof runWholeLine> =>
-        runWithNetwork(env.registry.network, () =>
+        runWithEgress(env.registry.networkOf(effectiveSession.network), env.registry.policies, () =>
           runWithMemory(env.registry.memory, () =>
             runWholeLine(
               lineRuntime,
@@ -1214,20 +1215,23 @@ async function runParsedLine(
         // Every object a line builds must fit in what the workspace's
         // max_memory has left, a nested line's too, and every connection it
         // opens must clear the workspace's network.
-        const running = runWithNetwork(env.registry.network, () =>
-          runWithMemory(env.registry.memory, async () =>
-            runCommandTree(
-              deadline === null ? deps : { ...deps, signal: deadline.signal },
-              rootNode,
-              context,
-              stdin,
-              false,
-              options.callStack ?? null,
-              (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
-                ? env.router.context(command, context.session, await judged())
-                : null,
+        const running = runWithEgress(
+          env.registry.networkOf(context.session.network),
+          env.registry.policies,
+          () =>
+            runWithMemory(env.registry.memory, async () =>
+              runCommandTree(
+                deadline === null ? deps : { ...deps, signal: deadline.signal },
+                rootNode,
+                context,
+                stdin,
+                false,
+                options.callStack ?? null,
+                (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
+                  ? env.router.context(command, context.session, await judged())
+                  : null,
+              ),
             ),
-          ),
         ).finally(release)
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.

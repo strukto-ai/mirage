@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from mirage.io.network import NetworkRule, NetworkSetting, network_layer
 from mirage.policy.builtin.output_cap import (
     check_command_limits,
     command_limits_to_json,
@@ -699,6 +700,10 @@ class SessionProfile(BaseModel):
         policy (dict[ScriptMethod, list[ProfilePolicy]] | None): the
             profile's policy: each ``pre_`` method's programs, asked in
             order.
+        network (bool | dict[str, list[str]] | None): where the
+            session's lines may connect, the workspace's ``network``
+            grammar, held besides the workspace's own; None leaves the
+            workspace's alone.
     """
 
     model_config = _DOC
@@ -712,6 +717,20 @@ class SessionProfile(BaseModel):
     policy: dict[ScriptMethod, list[ProfilePolicy]] | None = None
     command_limits: dict[str, Limit] | None = None
     processes: ProcessPermissions | None = None
+    network: bool | dict[str, list[str]] | None = None
+
+    @field_validator("network", mode="before")
+    @classmethod
+    def _v_network(cls, v: Any) -> NetworkSetting | None:
+        if v is None:
+            return v
+        layer = network_layer(v)
+        NetworkRule([layer] if layer is not None else [])
+        return (
+            bool(v)
+            if isinstance(v, bool)
+            else {key: list(entries) for key, entries in v.items()}
+        )
 
     @field_validator("command_limits")
     @classmethod
@@ -979,6 +998,8 @@ class ProfilePolicies:
             bounds.
         processes (ProcessPermissions): whose processes the session may
             stop and how many it may hold.
+        network (NetworkSetting | None): where the session's lines may
+            connect besides the workspace's ``network``.
     """
 
     mount_modes: dict[str, MountMode] | None = None
@@ -986,6 +1007,7 @@ class ProfilePolicies:
     scripts: ProfileScripts = field(default_factory=dict)
     command_limits: Mapping[str, Limit] | None = None
     processes: ProcessPermissions = ProcessPermissions()
+    network: NetworkSetting | None = None
 
 
 @dataclass(frozen=True, slots=True)

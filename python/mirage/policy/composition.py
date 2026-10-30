@@ -24,6 +24,7 @@ from mirage.policy.types import (
     CommandContext,
     CommandRule,
     Deny,
+    NetworkContext,
     Route,
     RouteContext,
     SessionContext,
@@ -36,7 +37,11 @@ from mirage.types import Limit
 
 Answer: TypeAlias = Deny | Ask | Route
 Context: TypeAlias = (
-    CommandContext | RouteContext | VfsContext | SessionContext
+    CommandContext
+    | RouteContext
+    | VfsContext
+    | SessionContext
+    | NetworkContext
 )
 PACKET_BYTES = 8 * 1024 * 1024
 sequence = count(1)

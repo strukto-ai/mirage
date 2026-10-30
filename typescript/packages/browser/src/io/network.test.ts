@@ -30,7 +30,7 @@ describe('the page network watcher', () => {
       return Promise.resolve({ type } as Response)
     })
     watchNetwork()
-    const rule = networkRule({ allow: ['api.test'] })
+    const rule = networkRule({ allowed_domains: ['api.test'] })
     await expect(runWithNetwork(rule, () => fetch('https://api.test/a'))).rejects.toThrow(
       'Failed to fetch',
     )

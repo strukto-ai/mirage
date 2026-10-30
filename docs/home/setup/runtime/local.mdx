@@ -250,6 +250,10 @@ the host interpreter's Python version.
 
 ## Notes
 
+- A workspace whose [`network`](/home/configuration#network) limits
+  anything, or whose policies judge connections, runs nothing here: the
+  program would connect around both. It answers `Permission denied`, exit
+  126.
 - A timeout kills the subprocess. `kill` sends it the signal it names, then
   `KILL` a second later if it is still running. A program that handles the
   signal and exits gives `wait` its own exit status, as in Bash.

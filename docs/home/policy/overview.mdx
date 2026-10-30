@@ -16,6 +16,7 @@ policy is a class with a pair of methods for each thing an agent does, or
 | runs a command or CLI | `pre_command`, `post_command` |
 | uses files: commands, file CLIs, runtime file APIs, file tools, `session.vfs`, FUSE, SFTP | `pre_vfs`, `post_vfs`; see [Lifecycle](/home/policy/policies#lifecycle) |
 | sets a variable: `export`, `X=1`, `unset` | `pre_session`, `post_session` |
+| opens a connection: `curl`, a CLI's API call, a mount's read, an SDK | `pre_network`, `post_network` |
 
 A `pre_` method runs before the action executes; a `post_` method runs afterward
 with the execution result. A policy decision can permit, refuse, [request host approval](/home/policy/policies#asks),

@@ -427,6 +427,40 @@ describe('scriptContext', () => {
 })
 
 describe('ScriptPolicy', () => {
+  it('judges a connection and sees how it ended', async () => {
+    const connection = {
+      host: 'api.example.com',
+      address: '93.184.216.34',
+      port: 443,
+      command: 'curl',
+      program: ['curl'],
+      line: 'curl https://api.example.com/a',
+      sessionId: 's',
+    }
+    const refused = policyWith('preNetwork', new FakeProgram(answer({ kind: 'deny' })))
+    const denied = await refused.preNetwork(connection)
+    expect(denied?.[0]?.kind).toBe('deny')
+    const asked = scriptContext(connection)
+    expect([asked.host, asked.address, asked.port, asked.command, asked.line]).toEqual([
+      'api.example.com',
+      '93.184.216.34',
+      443,
+      'curl',
+      'curl https://api.example.com/a',
+    ])
+    const done = {
+      ...connection,
+      bytesSent: 80,
+      bytesReceived: 512,
+      seconds: 0.5,
+      ended: 'closed' as const,
+    }
+    const held = policyWith('postNetwork', new FakeProgram())
+    expect(await held.postNetwork(done)).toBeNull()
+    const ended = scriptContext(done)
+    expect([ended.bytes_sent, ended.bytes_received, ended.ended]).toEqual([80, 512, 'closed'])
+  })
+
   it('runs nothing at a method without a program', async () => {
     const engine = new FakeProgram(answer({ kind: 'deny' }))
     const policy = policyWith('preCommand', engine)
