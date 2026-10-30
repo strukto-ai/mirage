@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createServer, type Server } from 'node:http'
-import { connect as netConnect } from 'node:net'
+import { type LookupFunction, connect as netConnect, Socket } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
@@ -325,6 +325,102 @@ describe('a workspace network rule', () => {
       'acme deploy',
     ])
     expect(asked?.words?.map((word) => word.text)).toEqual(['acme', 'deploy'])
+  })
+
+  // Reads what a socket the CLI opened brings back before it ends.
+  function drained(socket: Socket): Promise<string> {
+    return new Promise((resolve) => {
+      let got = ''
+      socket.on('data', (chunk: Buffer) => {
+        got += chunk.toString()
+      })
+      socket.once('connect', () => {
+        socket.write('GET / HTTP/1.1\r\nHost: x\r\n\r\n')
+      })
+      socket.once('close', () => {
+        resolve(got)
+      })
+      socket.once('error', () => undefined)
+    })
+  }
+
+  // A workspace with one CLI, `probe`, whose run is `fn`.
+  async function probed(fn: () => Promise<string>, policy: Policy): Promise<string> {
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    ws.registerCli(
+      'probe',
+      new CLI({
+        spec: new CommandSpec({ name: 'probe' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async () => [new TextEncoder().encode(await fn()), new IOResult()],
+          }),
+        },
+      }),
+    )
+    ws.policies.add(policy)
+    try {
+      return new TextDecoder().decode((await ws.shell('probe')).stdout)
+    } finally {
+      await ws.close()
+    }
+  }
+
+  it('judges a positional connect as any other', async () => {
+    const watch = new Watch(['127.0.0.1'])
+    const got = await probed(() => drained(new Socket().connect(port, '127.0.0.1')), watch)
+    expect(got).toBe('')
+    expect(watch.asked.map((ctx) => [ctx.address, ctx.port])).toEqual([['127.0.0.1', port]])
+  })
+
+  it("judges each address a connection falls back to, through the program's own lookup", async () => {
+    const watch = new Watch(['10.255.255.1'])
+    const lookup = ((
+      _host: string,
+      _options: unknown,
+      done: (err: null, addresses: { address: string; family: number }[]) => void,
+    ) => {
+      done(null, [
+        { address: '10.255.255.1', family: 4 },
+        { address: '127.0.0.1', family: 4 },
+      ])
+    }) as unknown as LookupFunction
+    const got = await probed(() => drained(netConnect({ host: 'two.test', port, lookup })), watch)
+    expect(got).toContain('ok')
+    expect(watch.asked.map((ctx) => [ctx.host, ctx.address])).toEqual([
+      ['two.test', '10.255.255.1'],
+      ['two.test', '127.0.0.1'],
+    ])
+    await settled(watch, 1)
+    expect(watch.ended.map((ctx) => [ctx.address, ctx.ended])).toEqual([['127.0.0.1', 'closed']])
+  })
+
+  // A RAM mount whose read asks a server between its two chunks, as a
+  // remote VFS's client fetches the rest of a file.
+  class Streaming extends RAMVFS {
+    override read(): AsyncIterable<Uint8Array> {
+      const at = port
+      return (async function* () {
+        yield new TextEncoder().encode('a')
+        await ask(at)
+        yield new TextEncoder().encode('b')
+      })()
+    }
+  }
+
+  it('keeps a file stream under its egress past the op', async () => {
+    const watch = new Watch()
+    const ws = new Workspace({ '/remote': new Streaming() })
+    ws.policies.add(watch)
+    try {
+      const stream = await ws.vfs.read('/remote/f', { stream: true })
+      let got = ''
+      for await (const chunk of stream) got += new TextDecoder().decode(chunk)
+      expect(got).toBe('ab')
+    } finally {
+      await ws.close()
+    }
+    expect(watch.asked.map((ctx) => [ctx.mount, ctx.port])).toEqual([['/remote', port]])
   })
 
   it('holds each session to its profile network besides the workspace one', async () => {

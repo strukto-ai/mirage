@@ -16,15 +16,16 @@ import asyncio
 import concurrent.futures
 import contextvars
 import errno
+import functools
 import logging
 import os
 import socket
 import struct
 import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import ContextVar
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import Any, TypeVar
 
 from mirage.context.session_context import current_caller
@@ -36,6 +37,8 @@ from mirage.io.network import (
     run_with_network,
     watch_network,
 )
+from mirage.io.types import IOResult
+from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied
 from mirage.policy.policies import (
     Policies,
@@ -132,11 +135,72 @@ def live_egress() -> tuple[Egress, ...]:
     return () if egress is None else (egress,)
 
 
+async def with_egress(
+    it: AsyncIterator[T], egress: Egress | None
+) -> AsyncIterator[T]:
+    """``it`` pulled and closed under ``egress``: a stream a file op
+    returned opens each later connection, whoever pulls it and however
+    late, under the workspace's rule and policies, as ``with_caller``
+    keeps its caller. Mirrors TS's ``withEgress``.
+
+    Args:
+        it (AsyncIterator[T]): the stream.
+        egress (Egress | None): the egress it was made under.
+    """
+
+    async def under(call: Awaitable[T]) -> T:
+        if egress is None:
+            return await call
+        token = _egress.set(egress)
+        try:
+            return await run_with_network(egress.rule, call)
+        finally:
+            _egress.reset(token)
+
+    iterator = it.__aiter__()
+    try:
+        while True:
+            try:
+                item = await under(iterator.__anext__())
+            except StopAsyncIteration:
+                return
+            yield item
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if close is not None:
+            await under(close())
+
+
+async def keep_egress(
+    work: Awaitable[tuple[Any, IOResult]],
+) -> tuple[Any, IOResult]:
+    """``work``'s answer, a stream in it kept under the egress bound
+    here, so a file op's stream pulled after the op returned still opens
+    its connections under the workspace's rule and policies. Nothing is
+    wrapped where neither limits anything. Mirrors TS's ``keepEgress``.
+
+    Args:
+        work (Awaitable[tuple[Any, IOResult]]): the op.
+    """
+    result, io = await work
+    live = live_egress()
+    if (
+        live
+        and isinstance(result, AsyncIterator)
+        and (live[-1].rule is not None or live[-1].hooked)
+    ):
+        result = with_egress(result, live[-1])
+    return result, io
+
+
 @dataclass(frozen=True, slots=True)
 class _Ticket:
     ctx: NetworkContext
     egress: Egress
     context: contextvars.Context
+    # The other addresses the opener's lookup of the host answered, which
+    # the program would have tried had its own connect failed.
+    others: tuple[str, ...]
 
 
 def _opened(address: str, port: int) -> NetworkContext:
@@ -280,70 +344,100 @@ class _Gateway:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        ctx, egress = ticket.ctx, ticket.egress
+        egress, rule = ticket.egress, ticket.egress.rule
         policies = egress.policies
         assert policies is not None
-        started = time.monotonic()
-        try:
-            passed, limit = await _on(
-                egress, ticket.context, lambda: pre_network_gate(policies, ctx)
+        host, port = ticket.ctx.host, ticket.ctx.port
+        others = (
+            address
+            for address in ticket.others
+            if rule is None or rule.lets(host, address, port)
+        )
+        # Each address is a connection of its own: judged before it is
+        # tried, and told how it went, the one reached or the ones that
+        # failed on the way to it.
+        for address in (ticket.ctx.address, *others):
+            ctx = replace(ticket.ctx, address=address)
+            try:
+                passed, limit = await _on(
+                    egress,
+                    ticket.context,
+                    functools.partial(pre_network_gate, policies, ctx),
+                )
+            except PolicyDenied:
+                continue
+            reached = await self._attempt(
+                ticket, policies, ctx, passed, limit, (reader, writer)
             )
-        except PolicyDenied:
-            _reset(writer)
-            return
-        sent_received = [0, 0]
-        ended: NetworkEnd = "error"
-        try:
-            upstream = await _reach(ctx, egress.rule)
-            if upstream is None:
-                _reset(writer)
+            if reached:
                 return
-            ended = await _relay(
-                (reader, writer), upstream, limit, sent_received
-            )
+        _reset(writer)
+
+    async def _attempt(
+        self,
+        ticket: _Ticket,
+        policies: Policies,
+        ctx: NetworkContext,
+        passed: tuple[Policy, ...] | None,
+        limit: Limit | None,
+        client: tuple[asyncio.StreamReader, asyncio.StreamWriter],
+    ) -> bool:
+        """One address tried and, once it answers, relayed under
+        ``limit``, whose seconds count from the attempt; post_network
+        hears how it went either way.
+
+        Args:
+            ticket (_Ticket): the connection.
+            policies (Policies): what judges it.
+            ctx (NetworkContext): this address's context.
+            passed (tuple[Policy, ...] | None): who let it through.
+            limit (Limit | None): what it may carry and for how long.
+            client (tuple): the program's side.
+
+        Returns:
+            bool: whether the address answered.
+        """
+        started = time.monotonic()
+        seconds = limit.timeout_seconds if limit is not None else None
+        deadline = (
+            None
+            if seconds is None
+            else asyncio.get_running_loop().time() + seconds
+        )
+        counts = [0, 0]
+        ended: NetworkEnd = "error"
+        reached = False
+        try:
+            async with asyncio.timeout_at(deadline):
+                upstream = await asyncio.open_connection(ctx.address, ctx.port)
+            reached = True
+            ended = await _relay(client, upstream, limit, counts, deadline)
+        except TimeoutError:
+            ended = "limit"
+            reached = True
+            _reset(client[1])
+        except OSError as exc:
+            logger.debug("gateway: %s unreachable: %s", ctx.address, exc)
         finally:
             seen = {f.name: getattr(ctx, f.name) for f in fields(ctx)}
             result = NetworkResultContext(
                 **seen,
-                bytes_sent=sent_received[0],
-                bytes_received=sent_received[1],
+                bytes_sent=counts[0],
+                bytes_received=counts[1],
                 seconds=time.monotonic() - started,
                 ended=ended,
             )
             try:
                 await _on(
-                    egress,
+                    ticket.egress,
                     ticket.context,
-                    lambda: post_network_gate(policies, result, passed),
+                    functools.partial(
+                        post_network_gate, policies, result, passed
+                    ),
                 )
             except Exception as exc:
                 logger.debug("gateway: post_network failed: %s", exc)
-
-
-async def _reach(
-    ctx: NetworkContext, rule: NetworkRule | None
-) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
-    """The server's side of a connection: the address the program asked
-    for, else each other address its host's lookup answered that the
-    rule lets, as the program would have tried them had its own connect
-    failed; None when none answers.
-
-    Args:
-        ctx (NetworkContext): the connection.
-        rule (NetworkRule | None): the workspace's rule.
-    """
-    others = (
-        address
-        for address in answers(ctx.host, ctx.port)
-        if address != ctx.address
-        and (rule is None or rule.lets(ctx.host, address, ctx.port))
-    )
-    for address in (ctx.address, *(others if ctx.host else ())):
-        try:
-            return await asyncio.open_connection(address, ctx.port)
-        except OSError as exc:
-            logger.debug("gateway: %s unreachable: %s", address, exc)
-    return None
+        return reached
 
 
 async def _relay(
@@ -351,18 +445,20 @@ async def _relay(
     upstream: tuple[asyncio.StreamReader, asyncio.StreamWriter],
     limit: Limit | None,
     counts: list[int],
+    deadline: float | None,
 ) -> NetworkEnd:
     """Copy both ways until both sides end, counting each, and cut the
-    connection with a reset once it passes ``limit``.
+    connection with a reset once it passes ``limit``'s bytes or the
+    deadline its seconds set as the attempt began.
 
     Args:
         client (tuple): the program's side.
         upstream (tuple): the server's side.
-        limit (Limit | None): the bytes and seconds it may take.
+        limit (Limit | None): the bytes it may carry.
         counts (list[int]): bytes sent and received so far, kept here.
+        deadline (float | None): the loop time it must end by.
     """
     cap = limit.max_bytes if limit is not None else None
-    deadline = limit.timeout_seconds if limit is not None else None
 
     async def pump(
         src: asyncio.StreamReader, dst: asyncio.StreamWriter, side: int
@@ -386,7 +482,7 @@ async def _relay(
     ]
     ended: NetworkEnd = "closed"
     try:
-        async with asyncio.timeout(deadline):
+        async with asyncio.timeout_at(deadline):
             for task in asyncio.as_completed(tasks):
                 await task
     except (_Cut, TimeoutError):
@@ -447,14 +543,26 @@ def _through(sock: socket.socket, address: Any) -> Any:
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
     gateway = _started()
     relay = gateway.ports.get(sock.family)
+    # A socket the program already bound, or a family the gateway has no
+    # listener for, cannot be relayed, so a policy could not judge it.
     if relay is None or sock.getsockname()[1] != 0:
-        return address
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
     loopback = _LOOPBACK[sock.family]
     sock.bind((loopback, 0))
+    ctx = _opened(target, port)
     gateway.expect(
         sock.family,
         sock.getsockname()[1],
-        _Ticket(_opened(target, port), egress, contextvars.copy_context()),
+        _Ticket(
+            ctx,
+            egress,
+            contextvars.copy_context(),
+            tuple(
+                address
+                for address in (answers(ctx.host, port) if ctx.host else ())
+                if address != target
+            ),
+        ),
     )
     return (loopback, relay, *address[2:])
 

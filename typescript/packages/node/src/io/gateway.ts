@@ -13,9 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type Egress, liveEgress, opened } from '@struktoai/mirage-core/io/gateway'
-import type { NetworkRule } from '@struktoai/mirage-core/io/network'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
-import { postNetworkGate, preNetworkGate } from '@struktoai/mirage-core/policy/policies'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import {
+  type Policies,
+  postNetworkGate,
+  preNetworkGate,
+} from '@struktoai/mirage-core/policy/policies'
 import type { NetworkContext, NetworkEnd } from '@struktoai/mirage-core/policy/types'
 import type { Limit } from '@struktoai/mirage-core/types'
 import { runLanding } from '@struktoai/mirage-core/context/session_context'
@@ -34,7 +38,8 @@ interface Ticket {
   readonly host: string
   readonly port: number
   readonly egress: Egress
-  readonly started: number
+  // The lookup the program's connect named, which a private name may need.
+  readonly lookup: net.LookupFunction | null
   readonly run: <T>(fn: () => Promise<T>) => Promise<T>
 }
 
@@ -44,48 +49,30 @@ function reset(socket: net.Socket): void {
 }
 
 /**
- * The addresses a connection to `host` may reach, in the order a lookup
- * gives them, each the rule lets; the address itself for a bare one.
- * Mirrors Python's `_reach`, which the program's own lookup feeds.
- */
-async function reach(
-  host: string,
-  port: number,
-  rule: NetworkRule | null,
-): Promise<[string, string[]]> {
-  if (net.isIP(host) !== 0) {
-    return ['', rule === null || rule.lets('', host, port) ? [host] : []]
-  }
-  const found = await dns.lookup(host, { all: true, verbatim: true })
-  return [
-    host,
-    found
-      .map((entry) => entry.address)
-      .filter((address) => rule === null || rule.lets(host, address, port)),
-  ]
-}
-
-/**
  * Copy both ways until both sides end, counting each, and cut the
- * connection with a reset once it passes `limit`. Mirrors Python's `_relay`.
+ * connection with a reset once it passes `limit`'s bytes or the deadline
+ * its seconds set as the attempt began. Mirrors Python's `_relay`.
  */
 function relay(
   client: net.Socket,
   server: net.Socket,
   limit: Limit | null,
   counts: [number, number],
+  deadline: number | null,
 ): Promise<NetworkEnd> {
   const cap = limit?.maxBytes ?? null
-  const deadline = limit?.timeoutSeconds ?? null
   return new Promise((resolve) => {
     let ended = 0
     let settled = false
     const timer =
       deadline === null
         ? null
-        : setTimeout(() => {
-            finish('limit')
-          }, deadline * 1000)
+        : setTimeout(
+            () => {
+              finish('limit')
+            },
+            Math.max(deadline - Date.now(), 0),
+          )
     const finish = (how: NetworkEnd): void => {
       if (settled) return
       settled = true
@@ -187,52 +174,80 @@ class Gateway {
     }
   }
 
-  private async upstream(addresses: readonly string[], port: number): Promise<net.Socket | null> {
-    for (const address of addresses) {
-      const socket = net.connect({ host: address, port })
-      try {
-        await new Promise<void>((resolve, reject) => {
-          socket.once('connect', resolve)
-          socket.once('error', reject)
-        })
-        return socket
-      } catch {
-        socket.destroy()
-      }
-    }
-    return null
+  /**
+   * The addresses a connection to `host` may reach, in the order its lookup
+   * (the program's own, else the system's) gives them, each the rule lets;
+   * the address itself for a bare one.
+   */
+  private async reach(ticket: Ticket): Promise<[string, string[]]> {
+    const { host, port, egress } = ticket
+    const rule = egress.rule
+    if (net.isIP(host) !== 0) return ['', rule === null || rule.lets('', host, port) ? [host] : []]
+    const lookup = ticket.lookup
+    const found: string[] =
+      lookup === null
+        ? (await dns.lookup(host, { all: true, verbatim: true })).map((entry) => entry.address)
+        : await new Promise((resolve, reject) => {
+            lookup(host, { all: true }, (err, address) => {
+              if (err !== null) reject(err)
+              else
+                resolve(Array.isArray(address) ? address.map((entry) => entry.address) : [address])
+            })
+          })
+    return [host, found.filter((address) => rule === null || rule.lets(host, address, port))]
   }
 
-  private async pass(ticket: Ticket, client: net.Socket): Promise<void> {
-    const { egress } = ticket
-    const policies = egress.policies
-    if (policies === null) return
-    const [host, addresses] = await reach(ticket.host, ticket.port, egress.rule)
-    if (addresses.length === 0) {
-      reset(client)
-      return
-    }
-    const ctx: NetworkContext = await ticket.run(() =>
-      Promise.resolve(opened(host, addresses[0] ?? '', ticket.port)),
-    )
-    let passed: Awaited<ReturnType<typeof preNetworkGate>>
-    try {
-      passed = await ticket.run(() => preNetworkGate(policies, ctx))
-    } catch (err) {
-      if (!(err instanceof PolicyDenied)) throw err
-      reset(client)
-      return
-    }
+  /**
+   * One address tried and, once it answers, relayed under `limit`, whose
+   * seconds count from the attempt; postNetwork hears how it went either
+   * way. Mirrors Python's `_Gateway._attempt`.
+   */
+  private async attempt(
+    ticket: Ticket,
+    policies: Policies,
+    ctx: NetworkContext,
+    passed: readonly Policy[] | null,
+    limit: Limit | null,
+    client: net.Socket,
+  ): Promise<boolean> {
+    const started = Date.now()
+    const deadline = limit?.timeoutSeconds == null ? null : started + limit.timeoutSeconds * 1000
     const counts: [number, number] = [0, 0]
     let ended: NetworkEnd = 'error'
+    let reached = false
     try {
-      const server = await this.upstream(addresses, ticket.port)
-      if (server === null) {
-        reset(client)
-        return
+      const server = net.connect({ host: ctx.address, port: ctx.port })
+      const opened = await new Promise<'open' | 'late' | 'failed'>((resolve) => {
+        const timer =
+          deadline === null
+            ? null
+            : setTimeout(
+                () => {
+                  resolve('late')
+                },
+                Math.max(deadline - Date.now(), 0),
+              )
+        server.once('connect', () => {
+          if (timer !== null) clearTimeout(timer)
+          resolve('open')
+        })
+        server.once('error', () => {
+          if (timer !== null) clearTimeout(timer)
+          resolve('failed')
+        })
+      })
+      if (opened !== 'open') {
+        server.destroy()
+        if (opened === 'late') {
+          ended = 'limit'
+          reached = true
+          reset(client)
+        }
+        return reached
       }
+      reached = true
       client.resume()
-      ended = await relay(client, server, passed[1], counts)
+      ended = await relay(client, server, limit, counts, deadline)
     } finally {
       const [sent, received] = counts
       await ticket
@@ -244,10 +259,10 @@ class Gateway {
                 ...ctx,
                 bytesSent: sent,
                 bytesReceived: received,
-                seconds: (Date.now() - ticket.started) / 1000,
+                seconds: (Date.now() - started) / 1000,
                 ended,
               },
-              passed[0],
+              passed,
             ),
           ),
         )
@@ -255,6 +270,32 @@ class Gateway {
           console.debug('gateway: postNetwork failed:', err)
         })
     }
+    return reached
+  }
+
+  /**
+   * Each address the connection may reach is a connection of its own:
+   * judged before it is tried, and told how it went, the one reached or the
+   * ones that failed on the way to it. Mirrors Python's `_Gateway._pass`.
+   */
+  private async pass(ticket: Ticket, client: net.Socket): Promise<void> {
+    const policies = ticket.egress.policies
+    if (policies === null) return
+    const [host, addresses] = await this.reach(ticket)
+    for (const address of addresses) {
+      const ctx: NetworkContext = await ticket.run(() =>
+        Promise.resolve(opened(host, address, ticket.port)),
+      )
+      let passed: Awaited<ReturnType<typeof preNetworkGate>>
+      try {
+        passed = await ticket.run(() => preNetworkGate(policies, ctx))
+      } catch (err) {
+        if (!(err instanceof PolicyDenied)) throw err
+        continue
+      }
+      if (await this.attempt(ticket, policies, ctx, passed[0], passed[1], client)) return
+    }
+    reset(client)
   }
 }
 
@@ -290,10 +331,19 @@ let connect = Reflect.get(net.Socket.prototype, 'connect') as Connect
 let watching = false
 
 function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
+  // net.connect hands over [options, callback] already normalized; a direct
+  // call passes (options, callback) or (port, host, callback).
   const normalized = Array.isArray(args[0]) ? (args[0] as unknown[]) : null
   const first = normalized !== null ? normalized[0] : args[0]
-  if (typeof first !== 'object' || first === null) return Reflect.apply(connect, this, args)
-  const options = first as ConnectOptions
+  const callback = (normalized ?? args).find((arg) => typeof arg === 'function')
+  let options: ConnectOptions
+  if (typeof first === 'object' && first !== null) {
+    options = first as ConnectOptions
+  } else if (typeof first === 'number' || (typeof first === 'string' && /^\d+$/.test(first))) {
+    options = { port: Number(first), ...(typeof args[1] === 'string' ? { host: args[1] } : {}) }
+  } else {
+    return Reflect.apply(connect, this, args)
+  }
   const egress = through(options)
   if (egress === null) return Reflect.apply(connect, this, args)
   const ticket: Ticket = {
@@ -301,10 +351,9 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
     // undici hands the port over as text.
     port: Number(options.port as number | string),
     egress,
-    started: Date.now(),
+    lookup: options.lookup ?? null,
     run: AsyncResource.bind(<T>(fn: () => Promise<T>): Promise<T> => fn()),
   }
-  const callback = normalized !== null ? normalized[1] : args[1]
   const redirect = (made: Gateway): net.Socket => {
     this.once('connect', () => {
       made.expect(this.localPort ?? 0, ticket)

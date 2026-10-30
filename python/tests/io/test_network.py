@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import socket
+from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
@@ -432,6 +434,97 @@ async def test_a_cli_connection_names_its_program_and_words(port):
         "acme deploy",
     )
     assert [w.text for w in asked.words] == ["acme", "deploy"]
+
+
+@pytest.mark.asyncio
+async def test_a_bound_socket_is_refused_while_a_policy_listens(port):
+    async def bound(accessor, paths, texts, ctx):
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        try:
+            sock.connect(("127.0.0.1", port))
+        except PermissionError:
+            return b"refused", IOResult()
+        finally:
+            sock.close()
+        return b"connected", IOResult()
+
+    ws = Workspace({"/data": RAMVFS()})
+    ws.register_cli(
+        "bound",
+        CLI(
+            spec=CommandSpec(name="bound"), handlers={"": CLIHandler(fn=bound)}
+        ),
+    )
+    ws.policies.add(_Watch())
+    try:
+        assert (await ws.shell("bound")).stdout == b"refused"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_each_address_a_connection_falls_back_to_is_judged(
+    port, monkeypatch
+):
+    resolve = network._resolve
+
+    def two(host, *args, **kwargs):
+        name = host.decode() if isinstance(host, bytes) else host
+        if name != "two.test":
+            return resolve(host, *args, **kwargs)
+        first = resolve("127.0.0.1", *args, **kwargs)
+        far = [(*info[:4], ("10.255.255.1", *info[4][1:])) for info in first]
+        return far + first
+
+    monkeypatch.setattr(network, "_resolve", two)
+    watch = _Watch(refused=("10.255.255.1",))
+    line = "curl -sS http://two.test:{port}/"
+    assert await _held(port, line, watch) == 0
+    assert [(c.host, c.address) for c in watch.asked] == [
+        ("two.test", "10.255.255.1"),
+        ("two.test", "127.0.0.1"),
+    ]
+    assert [(e.address, e.ended) for e in watch.ended] == [
+        ("127.0.0.1", "closed")
+    ]
+
+
+class _Streaming(RAMVFS):
+    """A RAM mount whose read asks a server between its two chunks, as a
+    remote VFS's client fetches the rest of a file."""
+
+    def __init__(self, port: int) -> None:
+        super().__init__()
+        self.port = port
+
+    async def _chunks(self) -> AsyncIterator[bytes]:
+        yield b"a"
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.port)
+        writer.write(b"GET / HTTP/1.1\r\nHost: remote\r\n\r\n")
+        await reader.read()
+        writer.close()
+        yield b"b"
+
+    def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        return self._chunks()
+
+
+@pytest.mark.asyncio
+async def test_a_file_stream_keeps_its_egress_past_the_op(port):
+    watch = _Watch()
+    ws = Workspace({"/remote": _Streaming(port)})
+    ws.policies.add(watch)
+    try:
+        stream, _ = await ws.dispatch(
+            "read", PathSpec.from_str_path("/remote/f"), stream=True
+        )
+        assert b"".join([chunk async for chunk in stream]) == b"ab"
+    finally:
+        await ws.close()
+    assert [(c.mount, c.port) for c in watch.asked] == [("/remote", port)]
 
 
 @pytest.mark.asyncio

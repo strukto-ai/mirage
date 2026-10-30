@@ -130,6 +130,19 @@ export function rulePool(key: object, unverified = false): Agent {
   return (held.verified ??= new Agent())
 }
 
+/**
+ * What a fetch's pooled sockets are kept apart by: the rule of the call
+ * making it, else the policies of a workspace that may judge its
+ * connections, so no socket one workspace opened carries another's request
+ * past its rule or its policies; null to share the process's pool.
+ */
+export function poolOwner(): object | null {
+  const bound = liveEgress().at(-1)
+  if (bound === undefined) return networkBound()
+  if (bound.rule !== null) return bound.rule
+  return bound.policies !== null && bound.listening !== false ? bound.policies : null
+}
+
 /** Close the pools a rule or a workspace's policies hold, as the workspace closes. */
 export async function releaseNetwork(key: object): Promise<void> {
   const held = pools.get(key)
@@ -150,8 +163,7 @@ export function watchNetwork(): void {
   net.Socket.prototype.connect = connecting as typeof net.Socket.prototype.connect
   setGlobalDispatcher(
     getGlobalDispatcher().compose((dispatch) => (options, handler) => {
-      const bound = liveEgress().at(-1)
-      const key = bound?.rule ?? (bound?.listening === true ? bound.policies : networkBound())
+      const key = poolOwner()
       if (key === null) return dispatch(options, handler)
       return rulePool(key).dispatch(options, handler)
     }),

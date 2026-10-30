@@ -72,7 +72,7 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
-from mirage.io.gateway import run_with_egress
+from mirage.io.gateway import keep_egress, run_with_egress
 from mirage.io.memory import run_with_memory
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, PipeStream
@@ -1006,8 +1006,11 @@ class Dispatcher:
                 return await run_with_egress(
                     network,
                     policies,
-                    run_with_memory(
-                        memory, self._bound(name, path, caller, report, kwargs)
+                    keep_egress(
+                        run_with_memory(
+                            memory,
+                            self._bound(name, path, caller, report, kwargs),
+                        )
                     ),
                 )
             async with self._admit_write(caller) as held:

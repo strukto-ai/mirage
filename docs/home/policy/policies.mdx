@@ -421,7 +421,11 @@ clean end: `curl` exits 7 for a refusal.
 whose `pre_network` let it through, however it ended: `ended` is `closed`,
 `refused` (by a later policy), `limit` or `error`, with `bytes_sent`,
 `bytes_received` and `seconds`. It observes only. A client that keeps a
-connection open and sends on it again is judged once, as it opens.
+connection open and sends on it again is judged once, as it opens. When the
+address a program asked for does not answer, each other address its lookup
+gave is a connection of its own, judged before it is tried. A socket the
+program bound itself before connecting cannot pass the gateway, so while a
+policy listens it is refused.
 
 Together the two hold a workspace to a byte budget:
 
@@ -468,9 +472,12 @@ const budget: Policy = {
 A runtime that starts a process on this machine (`local`, Sandlock) would
 connect around the gateway, so while a policy judges connections it refuses
 to run. In a browser a page sees no socket: `fetch` is judged by host name with an
-empty `address`, the counts are the body's bytes, and while a policy
-listens for connections a `WebSocket` is refused, since its handshake
-cannot wait for an answer.
+empty `address`, and the counts are the bodies' bytes. While a policy
+listens for connections, a request whose upload passes the Limit, or whose
+size a page cannot know (a form, a stream), is refused before it is sent; a
+redirect the page would follow is refused, since it goes where no policy
+saw; and a `WebSocket` is refused, since its handshake cannot wait for an
+answer.
 
 ### pre_workspace
 

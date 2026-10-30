@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithMemory } from '../../io/memory.ts'
-import { runWithEgress } from '../../io/gateway.ts'
+import { keepEgress, runWithEgress } from '../../io/gateway.ts'
 import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 
@@ -817,13 +817,15 @@ export class Dispatcher {
       // calls reach only here.
       const run = (): ReturnType<DispatchFn> =>
         runWithEgress(this.namespace.network, this.policies, () =>
-          runWithMemory(this.namespace.memory, () =>
-            name === 'read' &&
-            kwargs?.warm !== true &&
-            kwargs?.admit_only !== true &&
-            !('retained' in (kwargs ?? {}))
-              ? this.readRefusingDirs(path, args, kwargs, report)
-              : this.dispatchAdmitted(name, path, args, kwargs, report),
+          keepEgress(
+            runWithMemory(this.namespace.memory, () =>
+              name === 'read' &&
+              kwargs?.warm !== true &&
+              kwargs?.admit_only !== true &&
+              !('retained' in (kwargs ?? {}))
+                ? this.readRefusingDirs(path, args, kwargs, report)
+                : this.dispatchAdmitted(name, path, args, kwargs, report),
+            ),
           ),
         )
       if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()

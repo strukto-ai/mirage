@@ -240,40 +240,47 @@ _resolve = socket.getaddrinfo
 _loop_resolve = asyncio.base_events.BaseEventLoop.getaddrinfo
 _watching = False
 _watch_lock = threading.Lock()
-# The name each address a lookup answered was asked for, with the port
-# it was for (None when it named none), which a connect, naming only its
-# address, reports its host by.
-_named: OrderedDict[tuple[str, int | None], str] = OrderedDict()
-# What each name's last lookup answered for a port, in its order.
-_answers: OrderedDict[tuple[str, int | None], tuple[str, ...]] = OrderedDict()
-_named_lock = threading.Lock()
+# The lookups the running call made, newest last: each name, the port it
+# was looked up for (None when it named none) and the addresses it
+# answered, which a connect, naming only its address, reports its host
+# and its other addresses by. Kept per call, so no other workspace's
+# lookup lends a connection its name.
+_lookups: ContextVar[tuple[tuple[str, int | None, tuple[str, ...]], ...]] = (
+    ContextVar("mirage_lookups", default=())
+)
+# How many of a call's lookups are kept.
+_LOOKUPS_KEPT = 16
 # The listeners the gateway relays from, which a connect may always reach:
 # the gateway judges what is behind them.
 _relays: set[tuple[str, int]] = set()
 
 
 def named(address: str, port: int | None = None) -> str:
-    """The name a lookup was asked for when it answered ``address``, for
-    this port or for none; empty when no lookup did.
+    """The name the running call's lookup was asked for when it answered
+    ``address``, for this port or for none; empty when none did.
 
     Args:
         address (str): the address a connection reaches.
         port (int | None): the port it reaches.
     """
-    with _named_lock:
-        return _named.get((address, port)) or _named.get((address, None), "")
+    for host, wanted, addresses in reversed(_lookups.get()):
+        if address in addresses and wanted in (port, None):
+            return host
+    return ""
 
 
 def answers(host: str, port: int | None = None) -> tuple[str, ...]:
-    """The addresses the last lookup of ``host`` answered, for this port
-    or for none, in the order it gave them.
+    """The addresses the running call's last lookup of ``host`` answered,
+    for this port or for none, in the order it gave them.
 
     Args:
         host (str): the name looked up.
         port (int | None): the port it was looked up for.
     """
-    with _named_lock:
-        return _answers.get((host, port)) or _answers.get((host, None), ())
+    for name, wanted, addresses in reversed(_lookups.get()):
+        if name == host and wanted in (port, None):
+            return addresses
+    return ()
 
 
 def relay_at(host: str, port: int) -> None:
@@ -294,17 +301,8 @@ def _remember(
         return
     name = host.decode() if isinstance(host, bytes) else host
     addresses = tuple(dict.fromkeys(str(info[4][0]) for info in found))
-    with _named_lock:
-        for address in addresses:
-            key = (address, port)
-            _named.pop(key, None)
-            _named[key] = name
-        _answers.pop((name, port), None)
-        _answers[(name, port)] = addresses
-        while len(_named) > _RESOLVED_SIZE:
-            _named.popitem(last=False)
-        while len(_answers) > _RESOLVED_SIZE:
-            _answers.popitem(last=False)
+    kept = _lookups.get()[1 - _LOOKUPS_KEPT :]
+    _lookups.set((*kept, (name, port, addresses)))
 
 
 def _port_of(port: bytes | str | int | None) -> int | None:

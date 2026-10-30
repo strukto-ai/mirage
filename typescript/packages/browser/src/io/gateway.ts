@@ -14,7 +14,11 @@
 
 import { type Egress, liveEgress, opened } from '@struktoai/mirage-core/io/gateway'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
-import { postNetworkGate, preNetworkGate } from '@struktoai/mirage-core/policy/policies'
+import {
+  type Policies,
+  postNetworkGate,
+  preNetworkGate,
+} from '@struktoai/mirage-core/policy/policies'
 import type { NetworkContext, NetworkEnd } from '@struktoai/mirage-core/policy/types'
 import type { Limit } from '@struktoai/mirage-core/types'
 import { REACHING, watchNetwork } from './network.ts'
@@ -29,12 +33,28 @@ interface Ticket {
 }
 
 /**
+ * The bytes a request body holds, null for a form or a stream, whose size a
+ * page cannot know before it sends them.
+ */
+function measured(body: BodyInit | null | undefined): number | null {
+  if (body === null || body === undefined) return 0
+  if (typeof body === 'string') return new TextEncoder().encode(body).byteLength
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) return body.byteLength
+  if (body instanceof Blob) return body.size
+  if (body instanceof URLSearchParams) return new TextEncoder().encode(body.toString()).byteLength
+  return null
+}
+
+/**
  * The page's side of the gateway: each fetch a listening workspace's line
- * makes asks every live egress's preNetwork by host name, since a page
- * resolves no address and cannot tell one task's binding from another's;
- * its body is counted and cut past the tightest Limit; and postNetwork hears
- * how it ended. The counts are the body's bytes, since a page never sees the
- * wire. Mirrors Python's `_Gateway`.
+ * makes asks every live workspace's preNetwork once, by host name, since a
+ * page resolves no address and cannot tell one task's binding from
+ * another's. Its body is counted and cut past the tightest Limit, an upload
+ * past it, or of a size the page cannot know, is refused before it is sent,
+ * and a redirect is refused, since a page cannot see where one goes before
+ * following it. postNetwork hears how it ended, once. The counts are the
+ * bodies' bytes, since a page never sees the wire. Mirrors Python's
+ * `_Gateway`.
  */
 async function through(
   send: typeof fetch,
@@ -43,9 +63,14 @@ async function through(
 ): Promise<Response> {
   const live = liveEgress()
   const answers = await Promise.all(live.map((egress) => egress.hooked))
-  const hooked = live.filter((_, at) => answers[at] === true)
+  // A nested call binds the same workspace's egress again: each workspace
+  // judges a request once.
+  const owners = new Map<Policies, Egress>()
+  live.forEach((egress, at) => {
+    if (answers[at] === true && egress.policies !== null) owners.set(egress.policies, egress)
+  })
   const target = new URL(input instanceof Request ? input.url : input, globalThis.location.href)
-  if (hooked.length === 0 || !REACHING.has(target.protocol)) return send(input, init)
+  if (owners.size === 0 || !REACHING.has(target.protocol)) return send(input, init)
   const host = target.hostname
   // A URL leaves its scheme's own port unwritten.
   const port =
@@ -55,23 +80,25 @@ async function through(
         ? 443
         : 80
   const started = Date.now()
-  const body = init?.body
   const sent =
-    typeof body === 'string'
-      ? new TextEncoder().encode(body).byteLength
-      : body instanceof ArrayBuffer || ArrayBuffer.isView(body)
-        ? body.byteLength
+    init?.body !== undefined
+      ? measured(init.body)
+      : input instanceof Request && input.body !== null
+        ? null
         : 0
   const tickets: Ticket[] = []
-  // Tell every egress that let the request through how it went.
-  const ended = async (how: NetworkEnd, sent: number, received: number): Promise<void> => {
+  let over = false
+  // Tell every workspace that let the request through how it went, once.
+  const ended = async (how: NetworkEnd, received: number): Promise<void> => {
+    if (over) return
+    over = true
     for (const { egress, ctx, passed } of tickets) {
       if (egress.policies === null) continue
       await postNetworkGate(
         egress.policies,
         {
           ...ctx,
-          bytesSent: sent,
+          bytesSent: sent ?? 0,
           bytesReceived: received,
           seconds: (Date.now() - started) / 1000,
           ended: how,
@@ -84,14 +111,13 @@ async function through(
   }
   let cap: number | null = null
   let deadline: number | null = null
-  for (const egress of hooked) {
-    if (egress.policies === null) continue
+  for (const [policies, egress] of owners) {
     const ctx = opened(host, '', port)
     let answer: [readonly Policy[] | null, Limit | null]
     try {
-      answer = await preNetworkGate(egress.policies, ctx)
+      answer = await preNetworkGate(policies, ctx)
     } catch {
-      await ended('refused', 0, 0)
+      await ended('refused', 0)
       throw new TypeError('Failed to fetch')
     }
     tickets.push({ egress, ctx, passed: answer[0] })
@@ -101,6 +127,10 @@ async function through(
       deadline = Math.min(deadline ?? limit.timeoutSeconds, limit.timeoutSeconds)
     }
   }
+  if (cap !== null && (sent === null || sent > cap)) {
+    await ended('limit', 0)
+    throw new TypeError('Failed to fetch')
+  }
   const stop = new AbortController()
   const timer =
     deadline === null
@@ -108,18 +138,31 @@ async function through(
       : setTimeout(() => {
           stop.abort()
         }, deadline * 1000)
-  const signal = init?.signal == null ? stop.signal : AbortSignal.any([init.signal, stop.signal])
+  const asked = init?.signal ?? (input instanceof Request ? input.signal : null)
+  const signal = asked == null ? stop.signal : AbortSignal.any([asked, stop.signal])
+  // A redirect the page would follow goes where no policy saw, so it is not
+  // followed; one the caller handles itself is handed back as fetch gives it.
+  const redirect = init?.redirect ?? (input instanceof Request ? input.redirect : 'follow')
   let response: Response
   try {
-    response = await send(input, { ...init, signal })
+    response = await send(input, {
+      ...init,
+      signal,
+      redirect: redirect === 'follow' ? 'manual' : redirect,
+    })
   } catch (err) {
     if (timer !== null) clearTimeout(timer)
-    await ended(stop.signal.aborted ? 'limit' : 'error', sent, 0)
+    await ended(stop.signal.aborted ? 'limit' : 'error', 0)
     throw err
+  }
+  if (response.type === 'opaqueredirect' && redirect === 'follow') {
+    if (timer !== null) clearTimeout(timer)
+    await ended('refused', 0)
+    throw new TypeError('Failed to fetch')
   }
   if (response.body === null) {
     if (timer !== null) clearTimeout(timer)
-    await ended('closed', sent, 0)
+    await ended('closed', 0)
     return response
   }
   let received = 0
@@ -131,18 +174,18 @@ async function through(
         step = await reader.read()
       } catch (err) {
         if (timer !== null) clearTimeout(timer)
-        await ended(stop.signal.aborted ? 'limit' : 'error', sent, received)
+        await ended(stop.signal.aborted ? 'limit' : 'error', received)
         controller.error(err)
         return
       }
       if (step.done) {
         if (timer !== null) clearTimeout(timer)
-        await ended('closed', sent, received)
+        await ended('closed', received)
         controller.close()
         return
       }
-      if (cap !== null && sent + received + step.value.byteLength > cap) {
-        const left = Math.max(cap - sent - received, 0)
+      if (cap !== null && (sent ?? 0) + received + step.value.byteLength > cap) {
+        const left = Math.max(cap - (sent ?? 0) - received, 0)
         received += left
         controller.enqueue(step.value.subarray(0, left))
         stop.abort()
@@ -150,7 +193,7 @@ async function through(
         await reader.cancel().catch((err: unknown) => {
           console.debug('gateway: body cancel failed:', err)
         })
-        await ended('limit', sent, received)
+        await ended('limit', received)
         controller.error(new TypeError('network error'))
         return
       }
@@ -160,14 +203,20 @@ async function through(
     async cancel(reason) {
       if (timer !== null) clearTimeout(timer)
       await reader.cancel(reason)
-      await ended('closed', sent, received)
+      await ended('closed', received)
     },
   })
-  return new Response(counted, {
+  const relayed = new Response(counted, {
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
   })
+  Object.defineProperties(relayed, {
+    url: { value: response.url },
+    redirected: { value: response.redirected },
+    type: { value: response.type },
+  })
+  return relayed
 }
 
 /**
