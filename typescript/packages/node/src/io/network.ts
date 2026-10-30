@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { liveEgress } from '@struktoai/mirage-core/io/gateway'
-import { networkBound, networkLets } from '@struktoai/mirage-core/io/network'
+import { type NetworkRule, networkBound, networkLets } from '@struktoai/mirage-core/io/network'
+import type { Policies } from '@struktoai/mirage-core/policy/policies'
 import { AsyncResource } from 'node:async_hooks'
 import dns, { type LookupAddress, type LookupOptions } from 'node:dns'
 import net from 'node:net'
@@ -114,13 +115,13 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
 // listen for connections, verified and unverified (curl's -k), so a socket a
 // workspace opened is never reused for a request another workspace's rule
 // never let through or its policies never saw.
-const pools = new WeakMap<object, { verified?: Agent; unverified?: Agent }>()
+const pools = new WeakMap<NetworkRule | Policies, { verified?: Agent; unverified?: Agent }>()
 
 /**
  * The pool a fetch under `key` (a rule, or a workspace's policies) takes,
  * built on first use; `unverified` for curl's -k.
  */
-export function rulePool(key: object, unverified = false): Agent {
+export function rulePool(key: NetworkRule | Policies, unverified = false): Agent {
   let held = pools.get(key)
   if (held === undefined) {
     held = {}
@@ -136,7 +137,7 @@ export function rulePool(key: object, unverified = false): Agent {
  * connections, so no socket one workspace opened carries another's request
  * past its rule or its policies; null to share the process's pool.
  */
-export function poolOwner(): object | null {
+export function poolOwner(): NetworkRule | Policies | null {
   const bound = liveEgress().at(-1)
   if (bound === undefined) return networkBound()
   if (bound.rule !== null) return bound.rule
@@ -144,7 +145,7 @@ export function poolOwner(): object | null {
 }
 
 /** Close the pools a rule or a workspace's policies hold, as the workspace closes. */
-export async function releaseNetwork(key: object): Promise<void> {
+export async function releaseNetwork(key: NetworkRule | Policies): Promise<void> {
   const held = pools.get(key)
   pools.delete(key)
   await Promise.all([held?.verified?.close(), held?.unverified?.close()])

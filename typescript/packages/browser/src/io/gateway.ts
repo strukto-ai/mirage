@@ -116,7 +116,8 @@ async function through(
     let answer: [readonly Policy[] | null, Limit | null]
     try {
       answer = await preNetworkGate(policies, ctx)
-    } catch {
+    } catch (err) {
+      console.debug('gateway: preNetwork failed:', err)
       await ended('refused', 0, 0)
       throw new TypeError('Failed to fetch')
     }
