@@ -1,4 +1,5 @@
 import asyncio
+import errno
 
 import pytest
 
@@ -20,6 +21,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.standard import help_page, version_line
 from mirage.commands.spec.types import FlagValue
 from mirage.core.jq import JqOptions
+from mirage.io.spool import ByteSpool
 from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult, materialize
 from mirage.rs.errors import StreamRefusal
@@ -981,3 +983,43 @@ async def test_an_unknown_request_is_refused_without_reading_input(
     with pytest.raises(ValueError, match="unknown host request"):
         await materialize(source)
     assert reads == 0
+
+
+@pytest.mark.asyncio
+async def test_a_spool_that_fails_still_closes_the_inputs_and_the_stream(
+    monkeypatch,
+):
+    appends = 0
+
+    class Lost(ByteSpool):
+        async def append(self, data: bytes) -> None:
+            nonlocal appends
+            appends += 1
+            if appends >= 3:
+                raise OSError(errno.ENOSPC, "No space left on device")
+            await super().append(data)
+
+    released = []
+    close_stream = jq_module.close_stream
+
+    async def closing(stream):
+        released.append(stream)
+        await close_stream(stream)
+
+    finished = []
+
+    async def endless(path: PathSpec):
+        try:
+            for _ in range(1000):
+                yield b"1 "
+        finally:
+            finished.append(path)
+
+    monkeypatch.setattr(jq_module, "ByteSpool", Lost)
+    monkeypatch.setattr(jq_module, "close_stream", closing)
+    source, _ = await jq([_path("/d/one.json")], ".", stream=endless)
+    with pytest.raises(OSError, match="No space left"):
+        await materialize(source)
+    # The compile check's stream and the run's, and the input.
+    assert len(released) == 2
+    assert len(finished) == 1

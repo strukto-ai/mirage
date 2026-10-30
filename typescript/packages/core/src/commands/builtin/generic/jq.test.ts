@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import * as rs from '../../../rs/stream.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { type JqOptions } from '../../../core/jq/index.ts'
+import { ByteSpool } from '../../../io/spool.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { materialize, type ByteSource, type IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -929,5 +930,37 @@ describe('outputs as a run makes them', () => {
         ' --raw-output0 option\n',
       exitCode: 0,
     })
+  })
+})
+
+describe('jq cleanup', () => {
+  it('closes the inputs and the stream when the stderr spool fails', async () => {
+    let appends = 0
+    const spool = vi.spyOn(ByteSpool.prototype, 'append').mockImplementation(() => {
+      appends += 1
+      if (appends >= 3) return Promise.reject(new Error('No space left on device'))
+      return Promise.resolve()
+    })
+    const release = vi.spyOn(rs, 'closeStream')
+    let finished = 0
+    async function* endless(): AsyncIterable<Uint8Array> {
+      try {
+        for (let i = 0; i < 1000; i++) {
+          await Promise.resolve()
+          yield ENC.encode('1 ')
+        }
+      } finally {
+        finished += 1
+      }
+    }
+    try {
+      await expect(ranOver(['/d/one.json'], '.', {}, endless)).rejects.toThrow('No space left')
+      // The compile check's stream and the run's, and the input.
+      expect(release).toHaveBeenCalledTimes(2)
+      expect(finished).toBe(1)
+    } finally {
+      spool.mockRestore()
+      release.mockRestore()
+    }
   })
 })

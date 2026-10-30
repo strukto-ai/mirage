@@ -55,6 +55,7 @@ from mirage.io.stream import close_quietly, yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import (
+    OpenStream,
     Served,
     close_stream,
     open_stream,
@@ -569,9 +570,29 @@ async def run_outputs(
             yield exc.output
         raise MemoryExhausted() from exc
     finally:
+        await _close_run(stream, inputs, io)
+
+
+async def _close_run(
+    stream: OpenStream, inputs: JqInputs, io: IOResult
+) -> None:
+    """Settle a run's exit status and stderr on ``io``, then close its
+    inputs and its stream, whatever settling raised: a spool that lost a
+    write cannot hand its contents on, and still frees what it holds.
+
+    Args:
+        stream (OpenStream): the run's stream.
+        inputs (JqInputs): its inputs and stderr spool.
+        io (IOResult): the result to settle.
+    """
+    try:
         io.exit_code = stream.status()
         await inputs.errors.append(stream.take_stderr())
         io.stderr = await inputs.errors.output()
+    except BaseException:
+        await inputs.errors.close()
+        raise
+    finally:
         await inputs.close()
         await close_stream(stream)
 

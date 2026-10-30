@@ -702,6 +702,9 @@ struct Main {
     taken: bool,
     wire: Vec<u8>,
     messages: VecDeque<Message>,
+    /// What runs printed behind a queued message, which goes out once the
+    /// message has.
+    held: Vec<u8>,
     stop: Option<Stop>,
     printed: bool,
     falsy: bool,
@@ -721,20 +724,6 @@ struct Main {
 /// error(s)` count.
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = crate::parse_config(config)?;
-    let mut named = serde_json::Map::new();
-    let mut args_named = Vec::with_capacity(config.named.len());
-    for (name, text) in &config.named {
-        named.insert(name.clone(), serde_json::Value::String(text.clone()));
-        args_named.push(format!(
-            "{}:{text}",
-            serde_json::to_string(name).expect("a name encodes")
-        ));
-    }
-    let args = format!(
-        r#"{{"positional":[{}],"named":{{{}}}}}"#,
-        config.positional.join(","),
-        args_named.join(",")
-    );
     let print = serde_json::json!({
         "raw_output": config.raw_output || config.join_output || config.nul_output,
         "join_output": config.join_output,
@@ -756,8 +745,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     });
     let mut eval_config = serde_json::json!({
         "program": config.program,
-        "named": named,
-        "args": args,
+        "named": config.named,
+        "positional": config.positional,
         "env": config.env,
         "zone": config.zone,
         "prog_origin": config.prog_origin,
@@ -784,6 +773,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         taken: false,
         wire: Vec::new(),
         messages: VecDeque::new(),
+        held: Vec::new(),
         stop: None,
         printed: false,
         falsy: false,
@@ -822,7 +812,14 @@ impl Main {
             at += 5 + size;
             match tag {
                 PRINT => {
-                    out.extend_from_slice(&payload[1..]);
+                    // What a run prints after a line `debug` or `stderr`
+                    // wrote waits for that line to reach stderr, so a
+                    // reader that stops at the output leaves it reported.
+                    if self.messages.is_empty() {
+                        out.extend_from_slice(&payload[1..]);
+                    } else {
+                        self.held.extend_from_slice(&payload[1..]);
+                    }
                     self.printed = true;
                     self.falsy = payload[0] == 1;
                 }
@@ -841,6 +838,7 @@ impl Main {
                         .memory
                         .is_some_and(|memory| text == eval::memory_report(memory))
                     {
+                        self.flush(out)?;
                         return Err(StreamError::new(EXHAUSTED));
                     }
                     self.stop = Some(Stop::Error(text, payload[0] & 1 != 0));
@@ -880,12 +878,35 @@ impl Main {
         Ok(Some(true))
     }
 
+    /// Write every queued message whole, then the stdout held behind them,
+    /// for a stream that ends here.
+    fn flush(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        while let Some(message) = self.messages.pop_front() {
+            match message {
+                Message::Text(mut text) => self.stderr.append(&mut text),
+                Message::Debug(mut formatting) => {
+                    let mut budget = u64::MAX;
+                    let printed = formatting.run(&mut budget);
+                    formatting.take(&mut self.stderr);
+                    if let Some(Err(refusal)) = printed {
+                        return Err(refusal);
+                    }
+                }
+            }
+        }
+        out.append(&mut self.held);
+        Ok(())
+    }
+
     /// One bounded unit of the loop's work; whether the slice has room for
     /// another: a run that needs more than one drain of jq_eval hands
     /// control back after each, and one that ends lets the next document
     /// start in the same slice.
     fn step(&mut self, out: &mut Vec<u8>, budget: &mut usize) -> Result<bool, StreamError> {
         if let Some(printed) = self.message()? {
+            if self.messages.is_empty() {
+                out.append(&mut self.held);
+            }
             return Ok(printed);
         }
         match self.task {
@@ -1070,6 +1091,7 @@ impl Stream for Main {
         self.eval.cancel();
         self.reader.discard();
         self.messages.clear();
+        self.held = Vec::new();
         self.asking = None;
         self.task = Task::Done;
         self.cancelled = true;
@@ -1652,6 +1674,52 @@ mod tests {
             ran.out,
             "{\"positional\":[2,[3]],\"named\":{\"b\":1,\"a\":\"x\"}}\n\"x\"\n"
         );
+    }
+
+    #[test]
+    fn a_binding_is_held_once_for_its_name_and_args() {
+        // A 1 MB --rawfile fits in a room that holds it once, read through
+        // its name or through $ARGS.named.
+        let blob = format!("\"{}\"", "x".repeat(1_000_000));
+        for program in ["$blob | length", "$ARGS.named.blob | length"] {
+            let options = serde_json::json!({
+                "null_input": true,
+                "named": [["blob", blob]],
+                "memory": 2_400_000,
+            });
+            let ran = run(program, &[], options);
+            assert_eq!(
+                (ran.out.as_str(), ran.status),
+                ("1000000\n", 0),
+                "{program}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_debug_line_reaches_stderr_before_the_output_after_it() {
+        // A reader that stops at the first output still finds the line
+        // `debug` wrote before it.
+        let config = config(
+            "(1 | debug), until(false; .)",
+            0,
+            serde_json::json!({ "null_input": true }),
+        );
+        let mut stream = open(config.to_string().as_bytes()).unwrap();
+        let mut out = Vec::new();
+        while out.is_empty() {
+            stream.drain(&mut out).unwrap();
+        }
+        let mut err = Vec::new();
+        stream.take_stderr(&mut err);
+        assert_eq!(
+            (out.as_slice(), err.as_slice()),
+            (&b"1\n"[..], &b"[\"DEBUG:\",1]\n"[..])
+        );
+        assert!(stream.cancel());
+        while stream.busy() {
+            stream.drain(&mut Vec::new()).unwrap();
+        }
     }
 
     #[test]

@@ -34,7 +34,13 @@ import {
 import { COMPILE_REPORT } from '../../../core/jq/eval.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
-import { closeStream, openStream, serveRequests, type Served } from '../../../rs/stream.ts'
+import {
+  closeStream,
+  openStream,
+  serveRequests,
+  type OpenStream,
+  type Served,
+} from '../../../rs/stream.ts'
 import { MemoryExhausted } from '../../../io/errors.ts'
 import { memoryRoom } from '../../../io/memory.ts'
 import { ByteSpool } from '../../../io/spool.ts'
@@ -489,9 +495,25 @@ export async function* runOutputs(
     if (error.output.byteLength > 0) yield error.output
     throw new MemoryExhausted()
   } finally {
+    await closeRun(stream, inputs, io)
+  }
+}
+
+/**
+ * Settle a run's exit status and stderr on `io`, then close its inputs and
+ * its stream, whatever settling threw: a spool that lost a write cannot hand
+ * its contents on, and still frees what it holds. Mirrors Python's
+ * _close_run.
+ */
+async function closeRun(stream: OpenStream, inputs: JqInputs, io: IOResult): Promise<void> {
+  try {
     io.exitCode = stream.status()
     await inputs.errors.append(stream.takeStderr())
     io.stderr = await inputs.errors.output()
+  } catch (error) {
+    await inputs.errors.close()
+    throw error
+  } finally {
     await inputs.close()
     await closeStream(stream)
   }

@@ -8,7 +8,7 @@ use super::format::{self, Formatter};
 use super::host::{Host, Message, Reply, Request};
 use super::meter::{self, Charge, Meter};
 use super::time::{Clock, Zone};
-use super::value::{Dumping, Object, Parsing, Value, parse_json};
+use super::value::{Dumping, Key, Object, Parsing, Value, parse_json};
 use super::vm::{Halt, Limits, Next, Program, Raise, Vm};
 
 pub(super) const STEPS: u64 = 1 << 16;
@@ -33,10 +33,15 @@ const PRINT_SLICE: u64 = (format::LIMIT / 64) as u64;
 #[serde(deny_unknown_fields)]
 struct Config {
     program: String,
+    /// The `--arg`, `--argjson`, `--rawfile` and `--slurpfile` bindings as
+    /// name and JSON text, in the order they were bound; each binds `$name`
+    /// when the name is one.
     #[serde(default)]
-    named: HashMap<String, String>,
+    named: Vec<(String, String)>,
+    /// The JSON text of each `$ARGS.positional` value; given, `$ARGS` is
+    /// bound, its `named` sharing the bindings' values.
     #[serde(default)]
-    args: Option<String>,
+    positional: Option<Vec<String>>,
     #[serde(default)]
     env: Option<String>,
     #[serde(default = "steps")]
@@ -331,13 +336,25 @@ pub(super) fn compile(config: &[u8]) -> Result<Eval, StreamError> {
     let meter = Arc::new(Meter::limited(config.memory));
     let _metered = meter::install(&meter);
     let mut globals = HashMap::new();
+    let mut named = config.positional.is_some().then(Object::default);
     for (name, text) in &config.named {
+        let value = json(text)?;
+        if let Some(named) = &mut named {
+            named.insert(Key::from(name.as_str()), value.clone());
+        }
         if is_ident(name) {
-            globals.insert(name.clone(), json(text)?);
+            globals.insert(name.clone(), value);
         }
     }
-    if let Some(args) = &config.args {
-        globals.insert("ARGS".to_string(), json(args)?);
+    if let (Some(positional), Some(named)) = (&config.positional, named) {
+        let positional = positional
+            .iter()
+            .map(|text| json(text))
+            .collect::<Result<_, _>>()?;
+        let mut args = Object::default();
+        args.insert(Key::from("positional"), Value::array(positional));
+        args.insert(Key::from("named"), Value::object(named));
+        globals.insert("ARGS".to_string(), Value::object(args));
     }
     let env = match &config.env {
         Some(text) => json(text)?,
