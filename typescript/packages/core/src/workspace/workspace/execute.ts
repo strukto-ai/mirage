@@ -519,7 +519,7 @@ async function runPreparedLine(
           // that runs it, which the walker binds into the entry point (`withHandOff`),
           // not this line's: a background job's subtree runs on a hand-off of
           // the job's own.
-          const handed: HandOff = options.handed ?? { claimed: [], parent: null, origin: null }
+          const handed: HandOff = options.handed ?? { parent: null, origin: null }
           await env.registry.decisions.begin(effectiveSession.sessionId, handed)
           // The line's commands judged once, for placement and the pass that
           // refuses the line alike.
@@ -640,7 +640,7 @@ async function runPreparedLine(
             if (opts.handed !== undefined) {
               innerOpts.handed =
                 opts.node === undefined
-                  ? { claimed: [], parent: opts.handed, origin: null }
+                  ? { parent: opts.handed, origin: null }
                   : evaluatedFrom(opts.node, opts.handed, opts.span)
             }
             // `command NAME` re-runs the inner line and must forward the pipe

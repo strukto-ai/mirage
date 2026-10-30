@@ -292,12 +292,6 @@ const decisionSchema = z.object({
   scope: z.enum(Scope),
   note: unitSchema,
 })
-const occurrenceSchema = z.object({
-  parent: z.unknown(),
-  source: unitSchema,
-  start: z.number().int().nonnegative(),
-  end: z.number().int().nonnegative(),
-})
 const ledgerSchema = z
   .object({
     version: z.literal(1),
@@ -412,16 +406,6 @@ export function occurrenceWire(occurrence: Occurrence): RecordFields {
   }
 }
 
-export function occurrenceFromWire(value: unknown): Occurrence {
-  const parsed = occurrenceSchema.parse(value)
-  return {
-    parent: parsed.parent === null ? null : occurrenceFromWire(parsed.parent),
-    source: fromUnits(parsed.source),
-    start: parsed.start,
-    end: parsed.end,
-  }
-}
-
 export function resolveWire(
   ctx: CommandContext,
   rules: readonly CommandRule[],
@@ -470,7 +454,6 @@ export class Decisions extends DecisionOwner {
   private readonly bindings = new WeakMap<HandOff, ScopeBinding>()
   private readonly terminal = new WeakSet<HandOff>()
   private readonly pendingScopes = new WeakSet<HandOff>()
-  private readonly readers = new Set<HandOff>()
   private readonly versions = new Map<string, number>()
 
   constructor(
@@ -526,7 +509,6 @@ export class Decisions extends DecisionOwner {
       this.bindings.set(this.root(handed), bound)
       if (!this.versions.has(sessionId)) this.versions.set(sessionId, bound.revision)
     }
-    this.readers.add(handed)
     this.id(handed)
     return bound.incarnation
   }
@@ -551,24 +533,6 @@ export class Decisions extends DecisionOwner {
 
   pending(sessionId = ''): Decision[] {
     return this.list(sessionId).filter((record) => record.outcome === null)
-  }
-
-  private project(sessionId: string): void {
-    const state = ledgerSchema.parse(this.state(sessionId))
-    const records = new Map(state.records.map((record) => [record.id, decisionFromWire(record)]))
-    for (const reader of this.readers) {
-      const bound = this.bindings.get(this.root(reader))
-      if (bound?.sessionId !== sessionId) continue
-      const holder = this.id(reader)
-      const claims = state.claims
-        .filter((claim) => claim.owner === this.owner && claim.holder === holder)
-        .map((claim) => {
-          const decision = records.get(claim.decision)
-          if (decision === undefined) throw new Error('approval claim refers to a missing record')
-          return { occurrence: occurrenceFromWire(claim.occurrence), decision }
-        })
-      reader.claimed.splice(0, reader.claimed.length, ...claims)
-    }
   }
 
   private claimant(claimant: Claimant | null): RecordFields | null {
@@ -640,7 +604,6 @@ export class Decisions extends DecisionOwner {
       throw new ApprovalUnavailable('policy_changed')
     }
     if (result.kind === 'blocked') throw new ApprovalUnavailable(result.status)
-    this.project(sessionId)
     return result
   }
 
@@ -731,7 +694,7 @@ export class Decisions extends DecisionOwner {
     if (hasAborted(signal)) return ABANDONED
     const sessionId = ctx.sessionId ?? ''
     if (claimant === null) {
-      const handed: HandOff = { claimed: [], parent: null, origin: null }
+      const handed: HandOff = { parent: null, origin: null }
       try {
         return await this.resolve(
           ctx,
@@ -933,7 +896,7 @@ export class Decisions extends DecisionOwner {
   async withinCall<T>(sessionId: string, run: (handed: HandOff) => Promise<T>): Promise<T> {
     const outer = asyncContextIsolatesTasks ? getOpCall(this, sessionId) : null
     if (outer !== null) return run(outer)
-    const handed: HandOff = { claimed: [], parent: null, origin: null }
+    const handed: HandOff = { parent: null, origin: null }
     await this.begin(sessionId, handed)
     try {
       return await runWithOpCall(this, handed, sessionId, () => run(handed))
@@ -945,9 +908,8 @@ export class Decisions extends DecisionOwner {
 
   async split(sessionId: string, handed: HandOff, scope: Occurrence): Promise<HandOff> {
     const epoch = await this.begin(sessionId, handed)
-    const job: HandOff = { claimed: [], parent: null, origin: handed.origin }
+    const job: HandOff = { parent: null, origin: handed.origin }
     this.bindings.set(job, { sessionId, incarnation: epoch, revision: this.version?.() ?? 0 })
-    this.readers.add(job)
     try {
       await this.event(
         sessionId,
@@ -970,8 +932,6 @@ export class Decisions extends DecisionOwner {
         )
       } catch (cleanup) {
         logger.debug?.(`unconfirmed job approval cleanup: ${String(cleanup)}`)
-      } finally {
-        this.readers.delete(job)
       }
       throw error
     }
@@ -982,7 +942,6 @@ export class Decisions extends DecisionOwner {
     if (handed.parent === null) throw new Error('a top-level caller has no parent')
     const bound = this.bindings.get(this.root(handed))
     if (bound === undefined) return
-    this.readers.add(handed.parent)
     this.terminal.add(handed)
     try {
       await this.event(
@@ -1002,9 +961,6 @@ export class Decisions extends DecisionOwner {
       )
         throw error
       logger.debug?.(`retired approval cleanup: ${error.status}`)
-      this.project(sessionId)
-    } finally {
-      this.readers.delete(handed)
     }
   }
 
@@ -1025,9 +981,6 @@ export class Decisions extends DecisionOwner {
       )
         throw error
       logger.debug?.(`retired approval cleanup: ${error.status}`)
-      this.project(sessionId)
-    } finally {
-      this.readers.delete(handed)
     }
   }
 

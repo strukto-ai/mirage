@@ -1310,7 +1310,7 @@ export class Workspace {
           session,
           this.registry,
           this.namespace,
-          { claimed: [], parent: null, origin: null },
+          { parent: null, origin: null },
           reparse,
         ),
       )

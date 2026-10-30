@@ -109,7 +109,7 @@ export async function runShellFunction(
   // need a nod and a second call runs on the first's.
   const origin = site?.origin ?? null
   const nested: HandOff | null =
-    handed !== null && origin !== null ? { claimed: [], parent: handed, origin } : null
+    handed !== null && origin !== null ? { parent: handed, origin } : null
   const bodyHanded = nested ?? handed
 
   const run: ExecuteNodeFn =

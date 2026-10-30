@@ -56,7 +56,6 @@ export {
   type Route,
   type RouteContext,
   type Decision,
-  type Claim,
   type Claimant,
   type HandOff,
   type Occurrence,

@@ -292,51 +292,8 @@ export interface Occurrence {
   readonly end: number
 }
 
-/**
- * One grant a reader of a line matched, and the occurrence it matched
- * it for. Mirrors the Python Claim.
- */
-export interface Claim {
-  readonly occurrence: Occurrence
-  readonly decision: Decision
-}
-
-/**
- * The ONCE grants a line's readers matched to its commands, for the
- * line's end to spend.
- *
- * One per line, made by the executor and filled by `Decisions.resolve`
- * as a pass or a gate admits a command: every grant it matches, whether
- * the host gave it inline just now or out of band before the line, is
- * claimed here instead of spent, bound to the occurrence it was judged
- * for. A claimed grant is on offer to that occurrence alone, so two
- * spellings of one command on a line each need a nod of their own, and
- * invisible to every other line of the session while this one lives, so
- * two lines judged at once cannot both run on one nod. Nothing spends a
- * claim while the line runs: a gate the run reaches again at the same
- * place (a loop body) runs on the same nod, and every claim, reached or
- * not, is spent when the line ends (`Decisions.revoke`). A background
- * job the line launches holds a copy of the claims made for the
- * commands inside it on a hand-off of its own (`Decisions.split`),
- * since its gates run after the line has returned and it ends on its
- * own clock; a grant is spent when the last hand-off holding it ends.
- * Compared by identity, because the hand-off is the line.
- *
- * A line the executor evaluates from inside another (`$( )`, `eval`,
- * `source`, `xargs`, the line an alias invocation rewrites to) is a line
- * of its own with a hand-off of its own,
- * linked to the outer line's through `parent` and standing under the
- * node that ran it through `origin`: the outer pass reads into the
- * words it runs, so the grants it claimed for them are the inner line's
- * to run on, at the occurrences the outer pass computed for them, and
- * what the inner line's own gates claim is handed to the outer line
- * when it ends (`Decisions.handUp`), for the next evaluation from the
- * same node to run on and the typed line's end to spend. Mirrors the
- * Python HandOff.
- */
+/** The identity and origin of one execution scope; Rust retains its claims. */
 export interface HandOff {
-  /** The grants matched so far, in the order the commands were judged. */
-  readonly claimed: Claim[]
   /**
    * The hand-off of the line this one was evaluated from, null for a
    * typed line.

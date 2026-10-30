@@ -148,7 +148,7 @@ it('runs the shared approval transition transcripts through Wasm', async () => {
 
 /** A fresh line's hand-off. */
 function fresh(parent: HandOff | null = null): HandOff {
-  return { claimed: [], parent, origin: null }
+  return { parent, origin: null }
 }
 
 /** The reader for one spelling of a command on a line, each its own occurrence. */
@@ -324,23 +324,6 @@ describe('decisions', () => {
     if (result?.kind !== 'deny') throw new Error('Expected an approval refusal')
     expect(result.reason).toContain('policy_changed')
     expect(ledger.list().every((entry) => entry.outcome !== Outcome.ALLOW)).toBe(true)
-    await ledger.revoke('s', line)
-  })
-
-  it('treats public claim projections as data rather than authority', async () => {
-    const ledger = new Decisions()
-    const line = fresh()
-    line.claimed.push({
-      occurrence: at(line).occurrence,
-      decision: record({ outcome: Outcome.ALLOW }),
-    })
-    const question = await ledger.resolve(ctx(), ASK, undefined, at(line))
-    expect(question?.kind).toBe('pending')
-    if (question?.kind !== 'pending') throw new Error('Expected a pending approval')
-    await ledger.answer(question.id, Outcome.ALLOW)
-    expect(await ledger.resolve(ctx(), ASK, undefined, at(line))).toBeNull()
-    line.claimed.splice(0)
-    expect(await ledger.resolve(ctx(), ASK, undefined, at(line))).toBeNull()
     await ledger.revoke('s', line)
   })
 
@@ -540,10 +523,8 @@ describe('decisions', () => {
     const handed: HandOff = fresh()
     expect(await ledger.resolve(ctx(), ASK, undefined, at(handed))).toBeNull()
     expect(ledger.list('s')).toHaveLength(1)
-    expect(handed.claimed.map((c) => c.decision)).toEqual(ledger.list('s'))
     await ledger.revoke('s', handed)
     expect(ledger.list('s')).toEqual([])
-    expect(handed.claimed).toEqual([])
     expect(await ledger.resolve(ctx(), ASK)).toBeNull()
     expect(asked).toBe(2)
   })
@@ -562,7 +543,6 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 0))).toBeNull()
     expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 1))).toBeNull()
     expect(asked).toBe(2)
-    expect(handed.claimed).toHaveLength(2)
     expect(ledger.list('s')).toHaveLength(2)
     // The pass reading either spelling again finds it answered.
     expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, 1))).toBeNull()
@@ -677,8 +657,6 @@ describe('decisions', () => {
       expect(await ledger.resolve(ctx(), ASK, undefined, at(handed, index))).toBeNull()
     }
     const job = await ledger.split('s', handed, { parent: null, source: 'line', start: 1, end: 2 })
-    expect(handed.claimed.map((c) => c.occurrence.start)).toEqual([0, 1])
-    expect(job.claimed.map((c) => c.occurrence.start)).toEqual([1])
     await ledger.release('s', handed)
     // The line's grant is on offer again; the job's is not.
     expect(await ledger.resolve(ctx(), ASK, undefined, at(fresh(), 0))).toBeNull()
@@ -707,7 +685,6 @@ describe('decisions', () => {
       expect(await ledger.resolve(ctx(), ASK, undefined, at(line))).toBeNull()
     }
     expect(asked).toBe(1)
-    expect(line.claimed).toHaveLength(1)
     expect(ledger.list('s')).toHaveLength(1)
     await ledger.revoke('s', line)
     expect(ledger.list('s')).toEqual([])
@@ -762,8 +739,6 @@ describe('decisions', () => {
       expect(asked).toBe(2)
       confirm()
       expect(await running).toBeNull()
-      expect(first.claimed).toHaveLength(1)
-      expect(second.claimed).toHaveLength(1)
       expect(ledger.list('s')).toHaveLength(2)
       await ledger.revoke('s', first)
       await other.revoke('s', second)
@@ -789,12 +764,10 @@ describe('decisions', () => {
     const line: HandOff = fresh()
     expect(await ledger.resolve(ctx(), ASK, undefined, at(line, 0))).toBeNull()
     expect(asked).toBe(1)
-    expect(line.claimed).toHaveLength(1)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(line, 0))).toBeNull()
     expect(asked).toBe(1)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(line, 1))).toBeNull()
     expect(asked).toBe(2)
-    expect(line.claimed).toHaveLength(2)
     expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
     await ledger.revoke('s', line)
     expect(ledger.list('s')).toEqual([])
@@ -816,10 +789,6 @@ describe('decisions', () => {
     expect(await ledger.resolve(ctx(), ASK, undefined, at(nested, 1))).toBeNull()
     const inner = fresh(nested)
     const job = await ledger.split('s', inner, { parent: null, source: 'line', start: 1, end: 2 })
-    expect(outer.claimed.map((c) => c.occurrence.start)).toEqual([0, 1])
-    expect(nested.claimed).toEqual([])
-    expect(inner.claimed).toEqual([])
-    expect(job.claimed.map((c) => c.occurrence.start)).toEqual([1])
     for (const handed of [inner, nested, outer]) await ledger.revoke('s', handed)
     expect(ledger.list('s')).toHaveLength(1)
     expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
@@ -843,8 +812,6 @@ describe('decisions', () => {
     const scope: Occurrence = { parent: null, source: 'line', start: 0, end: 1 }
     const first = await ledger.split('s', line, scope)
     const second = await ledger.split('s', line, scope)
-    expect(first.claimed).toHaveLength(1)
-    expect(second.claimed).toHaveLength(1)
     await ledger.revoke('s', line)
     expect(ledger.list('s')).toHaveLength(1)
     expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
@@ -871,16 +838,12 @@ describe('decisions', () => {
     const first = fresh(outer)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(first))).toBeNull()
     expect(asked).toBe(1)
-    expect(first.claimed).toHaveLength(1)
     await ledger.handUp('s', first)
-    expect(first.claimed).toEqual([])
-    expect(outer.claimed).toHaveLength(1)
     expect((await ledger.held(ctx(), ASK))?.kind).toBe('pending')
     const second = fresh(outer)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
     expect(asked).toBe(1)
     await ledger.handUp('s', second)
-    expect(outer.claimed).toHaveLength(1)
     await ledger.revoke('s', outer)
     expect(ledger.list('s')).toEqual([])
     await expect(ledger.handUp('s', fresh())).rejects.toThrow()
@@ -928,7 +891,6 @@ describe('decisions', () => {
     await ledger.answer(waiting.id, Outcome.ALLOW)
     const handed: HandOff = fresh()
     expect(await ledger.resolve(ctx(), ASK, undefined, at(handed))).toBeNull()
-    expect(handed.claimed).toHaveLength(1)
     await ledger.revoke('s', handed)
     expect(ledger.list('s')).toEqual([])
     expect((await ledger.resolve(ctx(), ASK))?.kind).toBe('pending')

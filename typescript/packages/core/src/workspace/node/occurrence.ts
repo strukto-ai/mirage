@@ -278,7 +278,7 @@ export function evaluatedFrom(
   handed: HandOff,
   span?: readonly [number, number],
 ): HandOff {
-  return { claimed: [], parent: handed, origin: occurrenceOf(node, handed, span) }
+  return { parent: handed, origin: occurrenceOf(node, handed, span) }
 }
 
 /**
