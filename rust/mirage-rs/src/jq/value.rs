@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use super::meter::{self, Charge};
 
@@ -20,12 +20,20 @@ pub(crate) struct TooDeep;
 
 /// A jq number: its double, and the literal it was read from, which jq
 /// 1.8 prints back as written (`1.000`, `1E+2`) until arithmetic
-/// replaces it.
+/// replaces it. A literal the double prints the same is [`PRINTED`].
 #[derive(Clone, Debug)]
 pub(crate) struct Number {
     value: f64,
     literal: Option<Arc<Text>>,
 }
+
+/// The literal of a number its double prints back as written: one shared
+/// empty text, so such a number holds no text of its own. No literal read
+/// from text is empty.
+static PRINTED: LazyLock<Arc<Text>> = LazyLock::new(|| {
+    let _suspended = meter::suspend();
+    Arc::new(Text::new("".into()))
+});
 
 impl Number {
     pub(crate) fn new(value: f64) -> Self {
@@ -37,9 +45,14 @@ impl Number {
 
     /// A number read from `text`, a JSON number literal.
     pub(crate) fn literal(text: &str) -> Self {
+        let literal = if prints_as_written(text) {
+            Arc::clone(&PRINTED)
+        } else {
+            Arc::new(Text::new(canonical(text).into_boxed_str()))
+        };
         Self {
             value: text.parse::<f64>().unwrap_or(f64::NAN),
-            literal: Some(Arc::new(Text::new(canonical(text).into_boxed_str()))),
+            literal: Some(literal),
         }
     }
 
@@ -47,27 +60,74 @@ impl Number {
         self.value
     }
 
+    /// The literal spelled out: the double's own spelling for one that
+    /// prints the same.
+    fn written(&self) -> Option<Arc<Text>> {
+        self.literal.as_ref().map(|text| {
+            if text.is_empty() {
+                Arc::new(Text::new(printed(self.value).into_boxed_str()))
+            } else {
+                Arc::clone(text)
+            }
+        })
+    }
+
     /// decNumber's minus: a literal keeps its digits, and zero its sign
     /// dropped.
     pub(crate) fn negate(&self) -> Self {
-        let literal = self.literal.as_ref().map(|text| {
-            if text
+        let value = -self.value;
+        let literal = self.written().map(|text| {
+            let negated: Box<str> = if text
                 .bytes()
                 .take_while(|byte| *byte != b'E')
                 .all(|byte| matches!(byte, b'-' | b'0' | b'.'))
             {
-                Arc::new(Text::new(text.trim_start_matches('-').into()))
+                text.trim_start_matches('-').into()
             } else if let Some(rest) = text.strip_prefix('-') {
-                Arc::new(Text::new(rest.into()))
+                rest.into()
             } else {
-                Arc::new(Text::new(format!("-{text}").into_boxed_str()))
+                format!("-{text}").into_boxed_str()
+            };
+            if *negated == *printed(value) {
+                Arc::clone(&PRINTED)
+            } else {
+                Arc::new(Text::new(negated))
             }
         });
-        Self {
-            value: -self.value,
-            literal,
-        }
+        Self { value, literal }
     }
+}
+
+/// How jq prints `x` computed.
+fn printed(x: f64) -> String {
+    let mut out = String::new();
+    format_double(x, &mut out);
+    out
+}
+
+/// Whether `text` is how both decNumber and jq's printer spell the double
+/// it reads as: a plain decimal of at most fifteen digits, with no zero
+/// leading its integer part or ending its fraction, and at most three
+/// zeros after the point before the first digit of a fraction under one.
+/// Fifteen digits read back as written, so the double's shortest
+/// spelling is the text.
+fn prints_as_written(text: &str) -> bool {
+    let body = text.strip_prefix('-').unwrap_or(text);
+    let (int, frac) = body.split_once('.').unwrap_or((body, ""));
+    let leading = if int == "0" {
+        frac.bytes().take_while(|b| *b == b'0').count()
+    } else {
+        0
+    };
+    !int.is_empty()
+        && int.bytes().all(|b| b.is_ascii_digit())
+        && (int == "0" || !int.starts_with('0'))
+        && (int.len() == body.len()
+            || (!frac.is_empty()
+                && frac.bytes().all(|b| b.is_ascii_digit())
+                && !frac.ends_with('0')))
+        && leading <= 3
+        && int.len() + frac.len() <= 15
 }
 
 /// decNumber's to-scientific-string of a JSON number literal.
@@ -1085,8 +1145,8 @@ impl Dumping {
                 Value::False => self.out.push_str("false"),
                 Value::True => self.out.push_str("true"),
                 Value::Number(n) => match n.literal {
-                    Some(text) => self.stack.push(Piece::Raw(text, 0)),
-                    None => format_double(n.value, &mut self.out),
+                    Some(text) if !text.is_empty() => self.stack.push(Piece::Raw(text, 0)),
+                    _ => format_double(n.value, &mut self.out),
                 },
                 Value::String(text) => {
                     self.out.push('"');
@@ -1484,7 +1544,11 @@ impl Comparing {
                         if order != Ordering::Equal || a.value.is_nan() {
                             return Ok(Some(order));
                         }
-                        if let (Some(a), Some(b)) = (a.literal, b.literal) {
+                        let printed = |n: &Number| n.literal.as_ref().is_some_and(|t| t.is_empty());
+                        if printed(&a) && printed(&b) {
+                            return Ok(None);
+                        }
+                        if let (Some(a), Some(b)) = (a.written(), b.written()) {
                             self.stack
                                 .push(ComparePiece::Number(Box::new(DecimalComparing {
                                     a: DecimalScan::begin(a),
@@ -2288,6 +2352,96 @@ fn hex4(bytes: &[u8], at: usize) -> Result<u32, String> {
 mod tests {
     use super::super::meter::{self, Meter};
     use super::*;
+
+    #[test]
+    fn a_literal_printed_the_same_is_both_spellings() {
+        let mut texts: Vec<String> = [
+            "0",
+            "-0",
+            "7",
+            "-7",
+            "10",
+            "1600000000",
+            "323.833",
+            "0.5",
+            "0.0001",
+            "0.00012",
+            "123456789012345",
+            "999999999999999",
+            "0.100000000000001",
+            "12.5",
+            "-0.001",
+        ]
+        .iter()
+        .map(|text| text.to_string())
+        .collect();
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        for _ in 0..200_000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let digits = format!("{:020}", state % 100_000_000_000_000_000_000_u128 as u64);
+            let length = 1 + (state >> 3) as usize % 17;
+            let point = (state >> 9) as usize % (length + 2);
+            let zeros = (state >> 15) as usize % 6;
+            let mut text = String::new();
+            if state & 1 == 1 {
+                text.push('-');
+            }
+            let digits = &digits[digits.len() - length..];
+            if point > length {
+                text.push_str("0.");
+                text.extend(std::iter::repeat_n('0', zeros));
+                text.push_str(digits);
+            } else {
+                text.push_str(&digits[..point.max(1)]);
+                if point.max(1) < length {
+                    text.push('.');
+                    text.push_str(&digits[point.max(1)..]);
+                }
+            }
+            texts.push(text);
+        }
+        let mut kept = 0;
+        for text in &texts {
+            if prints_as_written(text) {
+                kept += 1;
+                let value = text.parse::<f64>().unwrap();
+                assert_eq!(printed(value), *text, "printed");
+                assert_eq!(respelled(text), *text, "respelled");
+            }
+        }
+        assert!(kept > 50_000, "{kept}");
+        for text in [
+            "1.0",
+            "0.00001",
+            "1e2",
+            "100000000000000000",
+            "1234567890123456",
+            "01",
+        ] {
+            assert!(!prints_as_written(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_number_printed_the_same_holds_no_text() {
+        let meter = Arc::new(Meter::default());
+        let _installed = meter::install(&meter);
+        let numbers: Vec<Number> = (0..1000)
+            .map(|i| Number::literal(&(1_600_000_000 + i).to_string()))
+            .collect();
+        assert_eq!(meter.live(), 0);
+        assert!(
+            numbers
+                .iter()
+                .all(|n| n.literal.as_ref().is_some_and(|t| t.is_empty()))
+        );
+        let kept = Number::literal("1.000");
+        assert!(meter.live() > 0);
+        drop((numbers, kept));
+        assert_eq!(meter.live(), 0);
+    }
 
     #[test]
     fn a_literal_kept_as_written_is_its_own_spelling() {
