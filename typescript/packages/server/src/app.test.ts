@@ -158,7 +158,7 @@ function sshExec(
 
 describe('buildApp drain', () => {
   it('lets a running line finish before the app closes', async () => {
-    const app = buildApp({ drainSeconds: 5 })
+    const app = buildApp({ gracefulTimeout: 5 })
     const created = await app.inject({
       method: 'POST',
       url: '/v1/workspaces',

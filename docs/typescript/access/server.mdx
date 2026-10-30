@@ -41,7 +41,7 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | `maxSessions` | `MIRAGE_MAX_SESSIONS`, else the `max_sessions` key, else no cap | The most sessions each workspace holds, its default session among them. A new session past it, over HTTP or SSH, answers 429. |
 | `rateLimits` | `MIRAGE_RATE_LIMITS`, else the `rate_limits` key, else none | A list of `{ key, rate }`. See [Rate limits](/home/access/http#rate-limits). |
 | `forwardedAllowIps` | `MIRAGE_FORWARDED_ALLOW_IPS`, else the `forwarded_allow_ips` key, else none | The proxies, addresses or networks, whose `X-Forwarded-For` names the client. `['*']` believes any. |
-| `drainSeconds` | `MIRAGE_DRAIN_SECONDS`, else the `drain_seconds` key, else `0` | How long `app.close()` lets running lines finish. Meanwhile new workspaces answer 503, new lines wait, and `/v1/ready` answers 503; the lines still running then are cancelled. |
+| `gracefulTimeout` | `MIRAGE_GRACEFUL_TIMEOUT`, else the `graceful_timeout` key, else `0` | How long `app.close()` lets running lines finish. Meanwhile new workspaces answer 503, new lines wait, and `/v1/ready` answers 503; the lines still running then are cancelled. |
 | `sshConfig` | from the `ssh_*` settings | The SSH server, opened when the app is ready; off unless a port is set. |
 | `snapshotStore` | none | An `S3Config`: the store a snapshot request may name a key in. Without one, a snapshot only goes back to the caller; the server never writes one to its own disk. |
 | `stateRoot` | under `$MIRAGE_HOME` | Where live state is kept. |

@@ -34,7 +34,12 @@ import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
 import { watchNetwork } from '@struktoai/mirage-node/io/network'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
-import { ENV_DRAIN_SECONDS, ENV_MAX_SESSIONS, ENV_MAX_WORKSPACES, ENV_POLICY_FILE } from './env.ts'
+import {
+  ENV_GRACEFUL_TIMEOUT,
+  ENV_MAX_SESSIONS,
+  ENV_MAX_WORKSPACES,
+  ENV_POLICY_FILE,
+} from './env.ts'
 import { ExecutionTable } from './jobs.ts'
 import { mirageHome } from './paths.ts'
 
@@ -157,27 +162,27 @@ function cap(
 
 /**
  * How long a shutdown lets running lines finish before it cancels them:
- * `drainSeconds` when given, else `$MIRAGE_DRAIN_SECONDS`, else the
- * `drain_seconds` key in config.toml's `[daemon]` table, else 0. Mirrors
- * Python's `resolve_drain_seconds`.
+ * `gracefulTimeout` when given, else `$MIRAGE_GRACEFUL_TIMEOUT`, else the
+ * `graceful_timeout` key in config.toml's `[daemon]` table, else 0. Mirrors
+ * Python's `resolve_graceful_timeout`.
  */
-export function resolveDrainSeconds(
-  drainSeconds?: number | null,
+export function resolveGracefulTimeout(
+  gracefulTimeout?: number | null,
   env: Record<string, string | undefined> = process.env,
 ): number {
-  let value: string | number | undefined = drainSeconds ?? undefined
+  let value: string | number | undefined = gracefulTimeout ?? undefined
   if (value === undefined) {
-    const fromEnv = env[ENV_DRAIN_SECONDS]
+    const fromEnv = env[ENV_GRACEFUL_TIMEOUT]
     value =
       fromEnv !== undefined && fromEnv !== ''
         ? fromEnv
-        : readDaemonTable(mirageHome(env)).drain_seconds
+        : readDaemonTable(mirageHome(env)).graceful_timeout
     if (value === undefined || value === '') return 0
   }
   const seconds = typeof value === 'number' ? value : value.trim() === '' ? NaN : Number(value)
   if (!Number.isFinite(seconds) || seconds < 0) {
     throw new DaemonConfigError(
-      `drain_seconds must be a number of seconds, 0 or more, got ${JSON.stringify(value)}`,
+      `graceful_timeout must be a number of seconds, 0 or more, got ${JSON.stringify(value)}`,
     )
   }
   return seconds

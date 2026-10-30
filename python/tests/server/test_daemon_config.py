@@ -82,8 +82,8 @@ def test_validate_accepts_the_server_operation_keys():
             "rate_limits": "ip=1000/minute",
             "forwarded_allow_ips": "10.0.0.0/8",
             "max_sessions": 16,
-            "drain_seconds": 25,
+            "graceful_timeout": 25,
         }
     )
-    with pytest.raises(DaemonConfigError, match="drain_seconds"):
-        validate_daemon_table({"drain_seconds": "soon"})
+    with pytest.raises(DaemonConfigError, match="graceful_timeout"):
+        validate_daemon_table({"graceful_timeout": "soon"})

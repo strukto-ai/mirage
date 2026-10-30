@@ -22,7 +22,7 @@ from mirage.policy.base import Policy
 from mirage.policy.types import Action, CommandContext, VfsContext
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import (
-    ENV_DRAIN_SECONDS,
+    ENV_GRACEFUL_TIMEOUT,
     ENV_HOME,
     ENV_MAX_SESSIONS,
     ENV_MAX_WORKSPACES,
@@ -31,7 +31,7 @@ from mirage.server.env import (
 from mirage.server.registry import (
     Claim,
     WorkspaceRegistry,
-    resolve_drain_seconds,
+    resolve_graceful_timeout,
     resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
@@ -271,19 +271,19 @@ def test_max_sessions_reads_the_env_then_config(monkeypatch, tmp_path):
         resolve_max_sessions()
 
 
-def test_drain_seconds_reads_the_env_then_config(monkeypatch, tmp_path):
+def test_graceful_timeout_reads_the_env_then_config(monkeypatch, tmp_path):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv(ENV_DRAIN_SECONDS, raising=False)
-    assert resolve_drain_seconds() == 0.0
-    (tmp_path / "config.toml").write_text("[daemon]\ndrain_seconds = 25\n")
-    assert resolve_drain_seconds() == 25.0
-    monkeypatch.setenv(ENV_DRAIN_SECONDS, "2.5")
-    assert resolve_drain_seconds() == 2.5
-    assert resolve_drain_seconds(0) == 0.0
+    monkeypatch.delenv(ENV_GRACEFUL_TIMEOUT, raising=False)
+    assert resolve_graceful_timeout() == 0.0
+    (tmp_path / "config.toml").write_text("[daemon]\ngraceful_timeout = 25\n")
+    assert resolve_graceful_timeout() == 25.0
+    monkeypatch.setenv(ENV_GRACEFUL_TIMEOUT, "2.5")
+    assert resolve_graceful_timeout() == 2.5
+    assert resolve_graceful_timeout(0) == 0.0
     for bad in ("-1", "soon", "inf"):
-        monkeypatch.setenv(ENV_DRAIN_SECONDS, bad)
-        with pytest.raises(DaemonConfigError, match="drain_seconds"):
-            resolve_drain_seconds()
+        monkeypatch.setenv(ENV_GRACEFUL_TIMEOUT, bad)
+        with pytest.raises(DaemonConfigError, match="graceful_timeout"):
+            resolve_graceful_timeout()
 
 
 @pytest.mark.asyncio

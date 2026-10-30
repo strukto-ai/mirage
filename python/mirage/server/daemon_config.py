@@ -33,7 +33,7 @@ ALLOWED_KEYS = frozenset(
         "jwt_authorized_parties",
         "login_client_id",
         "idle_grace_seconds",
-        "drain_seconds",
+        "graceful_timeout",
         "max_workspaces",
         "max_sessions",
         "rate_limits",
@@ -48,7 +48,7 @@ ALLOWED_KEYS = frozenset(
 NUMERIC_KEYS = frozenset(
     {
         "idle_grace_seconds",
-        "drain_seconds",
+        "graceful_timeout",
         "jwt_clock_skew",
         "max_workspaces",
         "max_sessions",

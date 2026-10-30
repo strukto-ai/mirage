@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import signal
 
 import asyncssh
 import pytest
@@ -165,7 +166,7 @@ async def test_a_configured_entry_point_without_asyncssh_fails_the_start(
 
 @pytest.mark.asyncio
 async def test_the_lifespan_lets_a_running_line_finish_before_it_closes():
-    app = build_app(idle_grace_seconds=10.0, drain_seconds=5)
+    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
     async with app.router.lifespan_context(app):
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -187,3 +188,46 @@ async def test_the_lifespan_lets_a_running_line_finish_before_it_closes():
         await asyncio.sleep(0.05)
     assert app.state.registry.draining
     assert (await (await line).stdout_str()) == "done\n"
+
+
+@pytest.mark.asyncio
+async def test_a_signal_drains_before_the_servers_handler_stops_it(
+    monkeypatch,
+):
+    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
+    stopped = []
+    installed = {}
+    monkeypatch.setattr(
+        signal,
+        "getsignal",
+        lambda signum: lambda sig, frame: stopped.append(sig),
+    )
+    monkeypatch.setattr(signal, "signal", installed.__setitem__)
+    wrapped = app_module._drain_on_signals(app)
+    assert set(wrapped) == set(installed) == {signal.SIGTERM, signal.SIGINT}
+    installed[signal.SIGTERM](signal.SIGTERM, None)
+    installed[signal.SIGINT](signal.SIGINT, None)
+    await asyncio.sleep(0)
+    await app.state.drain_task
+    assert app.state.registry.draining
+    assert stopped == [signal.SIGTERM]
+
+
+@pytest.mark.asyncio
+async def test_without_a_graceful_timeout_the_servers_handlers_stay(
+    monkeypatch,
+):
+    app = build_app(idle_grace_seconds=10.0)
+    installed = {}
+    monkeypatch.setattr(signal, "signal", installed.__setitem__)
+    assert app_module._drain_on_signals(app) == {}
+    assert installed == {}
+
+
+@pytest.mark.asyncio
+async def test_the_lifespan_puts_the_servers_handlers_back():
+    before = signal.getsignal(signal.SIGINT)
+    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
+    async with app.router.lifespan_context(app):
+        assert signal.getsignal(signal.SIGINT) is not before
+    assert signal.getsignal(signal.SIGINT) is before

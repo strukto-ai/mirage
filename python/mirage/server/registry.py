@@ -40,7 +40,7 @@ from mirage.policy.types import (
 )
 from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
 from mirage.server.env import (
-    ENV_DRAIN_SECONDS,
+    ENV_GRACEFUL_TIMEOUT,
     ENV_MAX_SESSIONS,
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
@@ -153,24 +153,24 @@ def _cap(given: int | None, env: str, key: str) -> int | None:
     return cap
 
 
-def resolve_drain_seconds(drain_seconds: float | None = None) -> float:
+def resolve_graceful_timeout(graceful_timeout: float | None = None) -> float:
     """How long a shutdown lets running lines finish before it cancels
-    them: ``drain_seconds`` when given, else ``$MIRAGE_DRAIN_SECONDS``,
-    else the ``drain_seconds`` key in config.toml's ``[daemon]`` table,
-    else 0. Mirrors TypeScript's ``resolveDrainSeconds``.
+    them: ``graceful_timeout`` when given, else ``$MIRAGE_GRACEFUL_TIMEOUT``,
+    else the ``graceful_timeout`` key in config.toml's ``[daemon]`` table,
+    else 0. Mirrors TypeScript's ``resolveGracefulTimeout``.
 
     Args:
-        drain_seconds (float | None): the seconds the caller set.
+        graceful_timeout (float | None): the seconds the caller set.
 
     Raises:
         DaemonConfigError: the value is not a number of seconds, 0 or
             more.
     """
-    value: Any = drain_seconds
+    value: Any = graceful_timeout
     if value is None:
-        value = os.environ.get(ENV_DRAIN_SECONDS) or read_daemon_table(
+        value = os.environ.get(ENV_GRACEFUL_TIMEOUT) or read_daemon_table(
             mirage_home()
-        ).get("drain_seconds")
+        ).get("graceful_timeout")
         if value is None or value == "":
             return 0.0
     try:
@@ -179,7 +179,7 @@ def resolve_drain_seconds(drain_seconds: float | None = None) -> float:
         seconds = -1.0
     if not math.isfinite(seconds) or seconds < 0:
         raise DaemonConfigError(
-            f"drain_seconds must be a number of seconds, 0 or more, "
+            f"graceful_timeout must be a number of seconds, 0 or more, "
             f"got {value!r}"
         )
     return seconds

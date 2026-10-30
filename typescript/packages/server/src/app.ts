@@ -18,7 +18,7 @@ import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
 import {
   OWNERS_PREFIX,
-  resolveDrainSeconds,
+  resolveGracefulTimeout,
   resolveMaxSessions,
   resolveMaxWorkspaces,
   resolvePolicyFile,
@@ -111,9 +111,9 @@ export interface BuildAppOptions {
   /**
    * How long closing the app lets running lines finish, holding new ones
    * and refusing new workspaces, before it cancels the rest. Undefined
-   * reads `$MIRAGE_DRAIN_SECONDS` or the `drain_seconds` config key, else 0.
+   * reads `$MIRAGE_GRACEFUL_TIMEOUT` or the `graceful_timeout` config key, else 0.
    */
-  drainSeconds?: number
+  gracefulTimeout?: number
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -140,7 +140,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     programs: resolvePolicyFile(options.policyFile),
     maxSessions: resolveMaxSessions(options.maxSessions),
   })
-  const drainSeconds = resolveDrainSeconds(options.drainSeconds)
+  const gracefulTimeout = resolveGracefulTimeout(options.gracefulTimeout)
   const rateLimits = resolveRateLimits(options.rateLimits)
   const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)
@@ -213,9 +213,9 @@ export function buildApp(options: BuildAppOptions = {}) {
       ssh.listener = await startSSHServer(registry, sshConfig)
     })
   }
-  if (drainSeconds > 0) {
+  if (gracefulTimeout > 0) {
     app.addHook('preClose', async () => {
-      await registry.drain(drainSeconds)
+      await registry.drain(gracefulTimeout)
     })
   }
   app.addHook('onClose', async () => {

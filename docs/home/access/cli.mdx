@@ -322,7 +322,7 @@ mirage login
 | `max_sessions` | `MIRAGE_MAX_SESSIONS` | no cap; past it a new session answers 429 |
 | `rate_limits` | `MIRAGE_RATE_LIMITS` | none; see [Rate limits](/home/access/http#rate-limits) |
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
-| `drain_seconds` | `MIRAGE_DRAIN_SECONDS` | `0`; how long shutdown lets running lines finish |
+| `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; how long shutdown lets running lines finish |
 | `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |

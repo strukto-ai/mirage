@@ -21,10 +21,10 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { DaemonConfigError } from './daemon_config.ts'
-import { ENV_DRAIN_SECONDS, ENV_HOME, ENV_MAX_SESSIONS, ENV_MAX_WORKSPACES } from './env.ts'
+import { ENV_GRACEFUL_TIMEOUT, ENV_HOME, ENV_MAX_SESSIONS, ENV_MAX_WORKSPACES } from './env.ts'
 import {
   Claim,
-  resolveDrainSeconds,
+  resolveGracefulTimeout,
   resolveMaxSessions,
   resolveMaxWorkspaces,
   resolvePolicyFile,
@@ -313,20 +313,20 @@ describe('resolveMaxSessions', () => {
   })
 })
 
-describe('resolveDrainSeconds', () => {
+describe('resolveGracefulTimeout', () => {
   it('reads the env then config', async () => {
     const home = await mkdtemp(join(tmpdir(), 'mir-drain-'))
     try {
-      expect(resolveDrainSeconds(undefined, { [ENV_HOME]: home })).toBe(0)
-      await writeFile(join(home, 'config.toml'), '[daemon]\ndrain_seconds = 25\n')
-      expect(resolveDrainSeconds(undefined, { [ENV_HOME]: home })).toBe(25)
-      expect(resolveDrainSeconds(undefined, { [ENV_HOME]: home, [ENV_DRAIN_SECONDS]: '2.5' })).toBe(
-        2.5,
-      )
-      expect(resolveDrainSeconds(0, { [ENV_DRAIN_SECONDS]: '9' })).toBe(0)
+      expect(resolveGracefulTimeout(undefined, { [ENV_HOME]: home })).toBe(0)
+      await writeFile(join(home, 'config.toml'), '[daemon]\ngraceful_timeout = 25\n')
+      expect(resolveGracefulTimeout(undefined, { [ENV_HOME]: home })).toBe(25)
+      expect(
+        resolveGracefulTimeout(undefined, { [ENV_HOME]: home, [ENV_GRACEFUL_TIMEOUT]: '2.5' }),
+      ).toBe(2.5)
+      expect(resolveGracefulTimeout(0, { [ENV_GRACEFUL_TIMEOUT]: '9' })).toBe(0)
       for (const bad of ['-1', 'soon', 'Infinity']) {
-        expect(() => resolveDrainSeconds(undefined, { [ENV_DRAIN_SECONDS]: bad })).toThrow(
-          /drain_seconds/,
+        expect(() => resolveGracefulTimeout(undefined, { [ENV_GRACEFUL_TIMEOUT]: bad })).toThrow(
+          /graceful_timeout/,
         )
       }
     } finally {

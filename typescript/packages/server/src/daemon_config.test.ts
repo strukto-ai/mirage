@@ -70,12 +70,12 @@ describe('validateDaemonTable', () => {
         rate_limits: 'ip=1000/minute',
         forwarded_allow_ips: '10.0.0.0/8',
         max_sessions: '16',
-        drain_seconds: '25',
+        graceful_timeout: '25',
       })
     }).not.toThrow()
     expect(() => {
-      validateDaemonTable({ drain_seconds: 'soon' })
-    }).toThrow(/drain_seconds/)
+      validateDaemonTable({ graceful_timeout: 'soon' })
+    }).toThrow(/graceful_timeout/)
   })
 
   it('rejects unknown keys naming them', () => {

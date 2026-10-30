@@ -13,15 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import functools
 import importlib
 import logging
 import os
+import signal
+import threading
 import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
+from types import FrameType
+from typing import Any, cast
 
 from fastapi import FastAPI
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -58,7 +62,7 @@ from mirage.server.rate_limit import (
 from mirage.server.registry import (
     OWNERS_PREFIX,
     WorkspaceRegistry,
-    resolve_drain_seconds,
+    resolve_graceful_timeout,
     resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
@@ -151,6 +155,98 @@ async def _start_ssh(app: FastAPI) -> SSHListener | None:
     return await start(app.state.registry, config)
 
 
+def _drain_on_signals(
+    app: FastAPI,
+) -> dict[signal.Signals, Callable[[int, FrameType | None], Any]]:
+    """Have SIGTERM and SIGINT drain the app before the server's own
+    handlers stop it, when ``graceful_timeout`` is set: running lines get
+    that long to finish while new workspaces are refused and
+    ``/v1/ready`` answers 503, then the server stops as it would have.
+    Whatever runs the app (uvicorn, a gunicorn worker, hypercorn) has
+    installed its handlers by the time the lifespan starts. A handler is
+    process-wide and only the main thread may set one, so nothing is
+    wrapped without a timeout or off the main thread.
+
+    Args:
+        app (FastAPI): the app.
+
+    Returns:
+        dict[signal.Signals, Callable[[int, FrameType | None], Any]]: the
+            handlers it wrapped, to put back as the app stops.
+    """
+    app.state.drain_task = None
+    if (
+        app.state.graceful_timeout <= 0
+        or threading.current_thread() is not threading.main_thread()
+    ):
+        return {}
+    loop = asyncio.get_running_loop()
+    wrapped = {}
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        stop = signal.getsignal(signum)
+        if callable(stop):
+            wrapped[signum] = stop
+            signal.signal(
+                signum, functools.partial(_on_signal, app, loop, stop)
+            )
+    return wrapped
+
+
+def _on_signal(
+    app: FastAPI,
+    loop: asyncio.AbstractEventLoop,
+    stop: Callable[[int, FrameType | None], Any],
+    signum: int,
+    frame: FrameType | None,
+) -> None:
+    """Start the drain on the app's loop; a signal handler may only hand
+    work to it.
+
+    Args:
+        app (FastAPI): the app.
+        loop (asyncio.AbstractEventLoop): the app's loop.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+        frame (FrameType | None): the interrupted frame.
+    """
+    loop.call_soon_threadsafe(_start_drain, app, stop, signum)
+
+
+def _start_drain(
+    app: FastAPI, stop: Callable[[int, FrameType | None], Any], signum: int
+) -> None:
+    """Drain once; a signal that arrives while it runs changes nothing.
+
+    Args:
+        app (FastAPI): the app.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+    """
+    if app.state.drain_task is None:
+        app.state.drain_task = asyncio.ensure_future(
+            _drain_then_stop(app, stop, signum)
+        )
+
+
+async def _drain_then_stop(
+    app: FastAPI, stop: Callable[[int, FrameType | None], Any], signum: int
+) -> None:
+    """Drain the app, then hand the signal to the server's handler.
+
+    Args:
+        app (FastAPI): the app.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+    """
+    try:
+        await app.state.registry.drain(app.state.graceful_timeout)
+    finally:
+        stop(signum, None)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     listener = await _start_ssh(app)
@@ -163,16 +259,19 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if on_exit is not None
         else None
     )
+    wrapped = _drain_on_signals(app)
     try:
         yield
     finally:
+        for signum, stop in wrapped.items():
+            signal.signal(signum, stop)
         if exit_task is not None:
             exit_task.cancel()
         if listener is not None:
             listener.close()
             await listener.wait_closed()
-        if app.state.drain_seconds > 0:
-            await app.state.registry.drain(app.state.drain_seconds)
+        if app.state.graceful_timeout > 0:
+            await app.state.registry.drain(app.state.graceful_timeout)
         try:
             await app.state.mcp.close()
             await app.state.jobs.close()
@@ -198,7 +297,7 @@ def build_app(
     rate_limits: Sequence[RateLimit] | None = None,
     forwarded_allow_ips: Sequence[str] | None = None,
     max_sessions: int | None = None,
-    drain_seconds: float | None = None,
+    graceful_timeout: float | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -269,10 +368,11 @@ def build_app(
             holds; past it a new session answers 429. ``None`` (default)
             reads ``$MIRAGE_MAX_SESSIONS`` or the ``max_sessions`` config
             key, else sets no cap.
-        drain_seconds (float | None): how long a shutdown lets running
-            lines finish, holding new ones and refusing new workspaces,
-            before it cancels the rest. ``None`` (default) reads
-            ``$MIRAGE_DRAIN_SECONDS`` or the ``drain_seconds`` config key,
+        graceful_timeout (float | None): how long a shutdown (SIGTERM,
+            SIGINT, or the lifespan ending) lets running lines finish,
+            holding new ones and refusing new workspaces, before it
+            cancels the rest. ``None`` (default) reads
+            ``$MIRAGE_GRACEFUL_TIMEOUT`` or the ``graceful_timeout`` config key,
             else 0, which drains nothing.
 
     Returns:
@@ -314,7 +414,7 @@ def build_app(
         programs=resolve_policy_file(policy_file),
         max_sessions=resolve_max_sessions(max_sessions),
     )
-    app.state.drain_seconds = resolve_drain_seconds(drain_seconds)
+    app.state.graceful_timeout = resolve_graceful_timeout(graceful_timeout)
     app.state.jobs = app.state.registry.jobs
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
