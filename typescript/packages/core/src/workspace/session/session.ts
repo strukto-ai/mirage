@@ -38,16 +38,13 @@ import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
 import type { ShellArray } from '../../shell/array.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
-import type { AdmissionRules, Decision, HideReason, ProfileScripts } from '../../policy/types.ts'
+import type { AdmissionRules, HideReason, ProfileScripts } from '../../policy/types.ts'
 import {
   commandsFromDict,
   commandsToDict,
-  decisionFromDict,
-  decisionToDict,
   scriptsFromDict,
   scriptsToDict,
   type CommandsJSON,
-  type DecisionJSON,
   type ScriptJSON,
 } from './serialize.ts'
 import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types.ts'
@@ -160,7 +157,6 @@ export interface SessionInit {
    * state like functions and cwd, persisted, read and written through
    * the manager by id so a fork shares them, never another session's.
    */
-  decisions?: readonly Decision[]
   approvalState?: RecordFields | null
   incarnation?: string | null
   generation?: number
@@ -542,7 +538,6 @@ export class SessionState {
   processId: number | null
   shellPid: number | null
   processDepth: number
-  decisions: readonly Decision[]
   approvalState: RecordFields | null
   incarnation: string | null
   generation: number
@@ -573,7 +568,6 @@ export class SessionState {
     this.profile = init.profile ?? null
     this.commandLimits = { ...init.commandLimits }
     this.processes = parseProcessPermissions(init.processes ?? DEFAULT_PROCESS_PERMISSIONS)
-    this.decisions = init.decisions ?? []
     this.approvalState = init.approvalState ?? null
     this.incarnation = init.incarnation ?? null
     this.generation = init.generation ?? 0
@@ -648,7 +642,6 @@ export class SessionState {
       processId: overrides.processId ?? this.processId,
       shellPid: overrides.shellPid ?? this.shellPid,
       processDepth: overrides.processDepth ?? this.processDepth,
-      decisions: overrides.decisions ?? this.decisions,
       approvalState: structuredClone(overrides.approvalState ?? this.approvalState),
       incarnation: overrides.incarnation ?? this.incarnation,
       generation: overrides.generation ?? this.generation,
@@ -975,7 +968,6 @@ export class SessionState {
     if (JSON.stringify(this.processes) !== JSON.stringify(DEFAULT_PROCESS_PERMISSIONS))
       data.processes = this.processes
     if (this.profile !== null) data.profile = this.profile
-    if (this.decisions.length > 0) data.decisions = this.decisions.map(decisionToDict)
     if (this.approvalState !== null) data.approval_state = this.approvalState
     if (this.incarnation !== null) data.incarnation = this.incarnation
     return data
@@ -998,7 +990,6 @@ export class SessionState {
     profile?: string | null
     command_limits?: unknown
     processes?: ProcessPermissions
-    decisions?: DecisionJSON[] | null
     approval_state?: RecordFields | null
     incarnation?: string | null
     generation?: number
@@ -1056,7 +1047,6 @@ export class SessionState {
       profile: data.profile ?? null,
       commandLimits: parseCommandLimits(data.command_limits),
       processes,
-      decisions: data.decisions != null ? data.decisions.map(decisionFromDict) : [],
       approvalState: data.approval_state ?? null,
       incarnation: data.incarnation ?? null,
     })

@@ -30,7 +30,7 @@ import {
   type SessionReset,
 } from './approval.ts'
 import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
-import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
+import type { AdmissionRules, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
@@ -45,7 +45,6 @@ function adoptApprovalFields(session: SessionState, fields: RecordFields): void 
   session.approvalState = stored.approvalState
   session.incarnation = stored.incarnation
   session.generation = stored.generation
-  session.decisions = []
   session.commands = stored.commands
   session.scripts = stored.scripts
   session.profile = stored.profile
@@ -244,28 +243,6 @@ export class SessionManager extends SessionOwner {
     return session === undefined
       ? (this.defaultProfileInternal?.policies.scripts ?? {})
       : session.scripts
-  }
-
-  /**
-   * The ledger records one session holds (SessionDecisionsQuery). Read off the
-   * registered session, never a fork, so a line running in a background
-   * copy sees the same answers.
-   */
-  decisionsOf(sessionId: string): readonly Decision[] {
-    return this.get(sessionId).decisions
-  }
-
-  /** Every session id holding ledger records (SessionDecisionsQuery). */
-  decisionSessions(): readonly string[] {
-    return [...this.sessions.entries()].filter(([, s]) => s.decisions.length > 0).map(([id]) => id)
-  }
-
-  /** Replace one session's ledger records (SessionDecisionsQuery); durable at the next flush. */
-  setDecisions(sessionId: string, records: readonly Decision[]): void {
-    const session = this.get(sessionId)
-    if (session.approvalState !== null)
-      throw new Error('approval records require a policy transition')
-    session.decisions = records
   }
 
   approvalFactsOf(sessionId: string): RecordFields {
@@ -496,7 +473,6 @@ export class SessionManager extends SessionOwner {
         // dropped here, an approved line would ask again after a
         // restart and the next flush would erase the grant from the
         // store.
-        dflt.decisions = stored.decisions
         dflt.approvalState = stored.approvalState
         dflt.incarnation = stored.incarnation
         if (stored.incarnation !== null) this.incarnations.set(sid, stored.incarnation)

@@ -742,7 +742,6 @@ async function gateRestoredState(
       const sid = fields.sessionId
       const session = manager.has(sid) ? manager.get(sid) : manager.create(sid)
       narrow(session, narrowingOf(fields))
-      session.decisions = fields.decisions
       setCwd(session, fields.cwd)
       session.vars = fields.vars
     }
