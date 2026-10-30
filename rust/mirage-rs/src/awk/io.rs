@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
-use super::text::{Regexes, take_record};
+use super::text::{RecordSearch, Regexes, take_record};
 use super::value::MAX_LEN;
 use super::vm::no_memory;
 use crate::request::{Opening, Reply, Request, WriteMode, bytes};
@@ -140,6 +140,7 @@ pub(super) struct Reader {
     open: Option<(Vec<u8>, Opening)>,
     pub(super) buf: Vec<u8>,
     start: usize,
+    search: RecordSearch,
     pub(super) ended: bool,
     failed: Option<Vec<u8>>,
     waiting: bool,
@@ -152,6 +153,7 @@ impl Reader {
             open,
             buf: Vec::new(),
             start: 0,
+            search: RecordSearch::default(),
             ended: false,
             failed: None,
             waiting: false,
@@ -159,10 +161,16 @@ impl Reader {
     }
 
     pub(super) fn next(&mut self, rs: &[u8], regexes: &mut Regexes) -> Result<Next, Vec<u8>> {
-        if let Some((start, end, next)) =
-            take_record(&self.buf, self.start, rs, self.ended, regexes)?
-        {
+        if let Some((start, end, next)) = take_record(
+            &self.buf,
+            self.start,
+            rs,
+            self.ended,
+            regexes,
+            &mut self.search,
+        )? {
             self.start = next;
+            self.search.reset(next);
             return Ok(Next::Record(start, end));
         }
         Ok(match (&self.failed, self.ended) {
@@ -204,6 +212,7 @@ impl Reader {
         } else if reply.end {
             self.ended = true;
         } else {
+            self.search.shift(self.start);
             self.buf.drain(..self.start);
             self.start = 0;
             self.buf.extend_from_slice(data);

@@ -99,6 +99,15 @@ fn filter_memory(kind: &str, config: &[u8], begin: &[u8], chunk: &[u8], bytes: u
 
 #[test]
 fn short_records_bound_allocation_volume_and_live_input() {
+    for (kind, config) in [
+        ("wc", br#"{"lines":false,"words":true,"bytes":false,"chars":false,"max_line_length":false}"#.as_slice()),
+        ("cut", br#"{"list":"2","mode":"fields","delimiter":[44],"complement":false,"only_delimited":false,"whitespace":null,"no_partial":false,"output_delimiter":null,"zero_terminated":false}"#),
+        ("uniq", br#"{"count":true,"repeated":false,"unique":false,"skip_fields":0,"skip_chars":0,"check_chars":null,"ignore_case":true,"all_repeated":null,"group":null,"zero_terminated":false}"#),
+    ] { hot_loop_allocations(kind, config, b"alpha,theta,words\n"); }
+    for bytes in [4 * 1024 * 1024, 64 * 1024 * 1024] {
+        scatter_memory(bytes);
+    }
+    shuffle_plan_memory();
     let row = [b"theta,\x80,".as_slice(), &vec![b'x'; 1015], b"\n"].concat();
     let rows = row.repeat(16);
     let unended = vec![255; 16 * 1024];
@@ -288,5 +297,149 @@ fn short_records_bound_allocation_volume_and_live_input() {
     assert!(
         largest < RECORD,
         "CRLF record selection reallocated {largest} bytes for a {RECORD}-byte record",
+    );
+}
+
+fn hot_loop_allocations(kind: &str, config: &[u8], row: &[u8]) {
+    let input = row.repeat(4096);
+    let mut stream = mirage_rs::open(kind, config).unwrap();
+    let mut out = Vec::new();
+    stream
+        .feed(&input[..16384.min(input.len())], &mut out)
+        .unwrap();
+    while stream.busy() {
+        out.clear();
+        stream.drain(&mut out).unwrap();
+    }
+    ALLOCATION_CALLS.store(0, Ordering::Relaxed);
+    for chunk in input.chunks(16384) {
+        out.clear();
+        stream.feed(chunk, &mut out).unwrap();
+        while stream.busy() {
+            out.clear();
+            stream.drain(&mut out).unwrap();
+        }
+    }
+    let allocations = ALLOCATION_CALLS.load(Ordering::Relaxed);
+    assert!(
+        allocations < 100,
+        "{kind}: {allocations} allocations for 4096 records"
+    );
+}
+
+fn scatter_memory(bytes: usize) {
+    let config = format!(r#"{{"mode":"scatter","separator":10,"size":{bytes}}}"#);
+    let mut stream = mirage_rs::open("shuf", config.as_bytes()).unwrap();
+    let chunk = [b"x".repeat(4095), b"\n".to_vec()].concat().repeat(4);
+    let mut out = Vec::new();
+    let mut payload = Vec::new();
+    let mut bucket = 0u64;
+    let mut writes = 0;
+    let mut written = 0;
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    loop {
+        while stream.busy() {
+            out.clear();
+            stream.drain(&mut out).unwrap();
+            assert!(out.is_empty());
+        }
+        payload.clear();
+        let Some(request) = stream.request(&mut payload) else {
+            break;
+        };
+        let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
+        let data = match request["op"].as_str().unwrap() {
+            "read" => chunk.clone(),
+            "random" => (0..request["count"].as_u64().unwrap())
+                .flat_map(|_| {
+                    let next = bucket.to_le_bytes();
+                    bucket = (bucket + 1) % 16;
+                    next
+                })
+                .collect(),
+            "write" => {
+                assert!(payload.len() <= 16 * 1024);
+                writes += 1;
+                written += payload.len();
+                Vec::new()
+            }
+            _ => unreachable!(),
+        };
+        stream.respond(b"{}", &data, &mut out).unwrap();
+    }
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert_eq!(written, bytes);
+    assert_eq!(writes, bytes / (16 * 1024));
+    assert!(
+        peak < 1024 * 1024,
+        "shuf: {peak} live bytes for {bytes} bytes of input"
+    );
+}
+
+fn shuffle_plan_memory() {
+    let record = 17 * 1024 * 1024 + 1usize;
+    let config = serde_json::json!({"mode":"records", "separator":10, "size":2*record, "available":2, "need":1}).to_string();
+    let mut stream = mirage_rs::open("shuf", config.as_bytes()).unwrap();
+    let mut spools = std::collections::HashMap::<u64, Vec<u8>>::from([(0, Vec::new())]);
+    let mut out = Vec::new();
+    let mut payload = Vec::new();
+    let mut emitted = 0;
+    let baseline = LIVE.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    loop {
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+            assert!(out.len() <= 16384);
+            emitted += out.len();
+            out.clear();
+        }
+        payload.clear();
+        let Some(header) = stream.request(&mut payload) else {
+            break;
+        };
+        let request: serde_json::Value = serde_json::from_slice(&header).unwrap();
+        let id = request["spool"].as_u64().unwrap_or(0);
+        let response = match request["op"].as_str().unwrap() {
+            "random" => vec![0; request["count"].as_u64().unwrap() as usize * 8],
+            "write" => {
+                let stored = spools.entry(id).or_default();
+                if payload.iter().any(|byte| !matches!(*byte, b'x' | b'\n')) {
+                    stored.extend_from_slice(&payload);
+                }
+                Vec::new()
+            }
+            "close" => {
+                spools.remove(&id);
+                Vec::new()
+            }
+            "read" => {
+                let offset = request["offset"].as_u64().unwrap() as usize;
+                let size = request["size"].as_u64().unwrap() as usize;
+                let stored = spools.get(&id).unwrap();
+                if stored.is_empty() {
+                    let mut data = vec![b'x'; size];
+                    let first = record - 1 - offset % record;
+                    for at in (first..size).step_by(record) {
+                        data[at] = b'\n';
+                    }
+                    data
+                } else {
+                    stored[offset..offset + size].to_vec()
+                }
+            }
+            _ => unreachable!(),
+        };
+        stream.respond(b"{}", &response, &mut out).unwrap();
+        assert!(out.len() <= 16384);
+        emitted += out.len();
+        out.clear();
+    }
+    assert_eq!(emitted, record);
+    assert!(spools.is_empty());
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+    assert!(
+        peak < 1024 * 1024,
+        "shuf plan: {peak} live bytes for two 17 MiB records"
     );
 }

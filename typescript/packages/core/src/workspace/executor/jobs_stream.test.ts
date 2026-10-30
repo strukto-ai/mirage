@@ -114,7 +114,8 @@ describe('job output reaches the session terminal as it is written', () => {
       await ws.shell('wait'),
       await ws.shell('true'),
     ]
-    expect(lines.map((line) => line.stdoutText).join('')).toBe('a\nb\n')
+    // Independent jobs may finish in either order; neither output may repeat.
+    expect(['a\nb\n', 'b\na\n']).toContain(lines.map((line) => line.stdoutText).join(''))
   })
 
   it('shows a line its jobs in the order they wrote', async () => {

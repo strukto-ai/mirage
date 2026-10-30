@@ -14,16 +14,10 @@ impl Refusal {
 /// How many bytes the unit at `at` takes: a byte, or under UTF-8 a
 /// character, a byte no character starts standing alone.
 pub(super) fn unit(text: &[u8], at: usize, utf8: bool) -> usize {
-    let len = match text[at] {
-        _ if !utf8 => return 1,
-        0xC2..=0xDF => 2,
-        0xE0..=0xEF => 3,
-        0xF0..=0xF4 => 4,
-        _ => return 1,
-    };
-    match text.get(at..at + len).map(std::str::from_utf8) {
-        Some(Ok(_)) => len,
-        _ => 1,
+    if utf8 {
+        crate::utf8::unit_len(&text[at..])
+    } else {
+        1
     }
 }
 

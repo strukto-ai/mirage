@@ -620,6 +620,12 @@ impl Format {
 
 enum Cursor {
     First,
+    Small {
+        next: i64,
+        delta: i64,
+        end: i64,
+        pad: u64,
+    },
     Integers {
         next: BigInt,
         delta: BigInt,
@@ -741,6 +747,22 @@ impl Seq {
                     floor
                 }
             });
+            if pad <= 64 && self.separator.len() <= OUTPUT / 2 {
+                if let (Some(first), Some(delta), Some(end)) = (
+                    first.signed(0).to_i64(),
+                    delta.to_i64(),
+                    end.as_ref().and_then(ToPrimitive::to_i64),
+                ) {
+                    return first
+                        .checked_add(delta)
+                        .map_or(Cursor::Done, |next| Cursor::Small {
+                            next,
+                            delta,
+                            end,
+                            pad,
+                        });
+                }
+            }
             return Cursor::Integers {
                 next: first.signed(0) + &delta,
                 delta,
@@ -771,6 +793,7 @@ impl Seq {
     fn next_line(&mut self, line: &mut Line) -> bool {
         let value = match std::mem::replace(&mut self.cursor, Cursor::Done) {
             Cursor::Done => return false,
+            Cursor::Small { .. } => unreachable!("small integers render directly in window"),
             Cursor::First => {
                 if self.beyond(&self.first) {
                     return false;
@@ -871,6 +894,42 @@ impl Seq {
             }
             if out.len() - start >= OUTPUT {
                 return;
+            }
+            if let Cursor::Small {
+                next,
+                delta,
+                end,
+                pad,
+            } = self.cursor
+            {
+                if if delta < 0 { next < end } else { next > end } {
+                    self.cursor = Cursor::Done;
+                    continue;
+                }
+                let mut storage = [0; 21];
+                let bytes =
+                    crate::integer::decimal_bytes(next.unsigned_abs(), next < 0, &mut storage);
+                let padding = (pad as usize).saturating_sub(bytes.len());
+                if OUTPUT - (out.len() - start) < self.separator.len() + bytes.len() + padding {
+                    return;
+                }
+                if self.printed {
+                    out.extend_from_slice(&self.separator);
+                }
+                let sign = usize::from(next < 0);
+                out.extend_from_slice(&bytes[..sign]);
+                out.resize(out.len() + padding, b'0');
+                out.extend_from_slice(&bytes[sign..]);
+                self.printed = true;
+                self.cursor = next
+                    .checked_add(delta)
+                    .map_or(Cursor::Done, |next| Cursor::Small {
+                        next,
+                        delta,
+                        end,
+                        pad,
+                    });
+                continue;
             }
             let mut line = Line::default();
             if !self.next_line(&mut line) {

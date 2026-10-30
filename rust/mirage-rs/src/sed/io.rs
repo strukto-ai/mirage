@@ -67,6 +67,7 @@ pub(super) struct LineReader {
     pub(super) fd: u32,
     open: Option<(Vec<u8>, Opening)>,
     buf: Vec<u8>,
+    spare: Vec<u8>,
     start: usize,
     scanned: usize,
     ended: bool,
@@ -82,6 +83,7 @@ impl LineReader {
             fd: io.fd(),
             open: Some((name, opening)),
             buf: Vec::new(),
+            spare: Vec::new(),
             start: 0,
             scanned: 0,
             ended: false,
@@ -131,7 +133,8 @@ impl LineReader {
             })));
         }
         if let Some(cut) = cut {
-            let line = self.buf[self.start..cut].to_vec();
+            let mut line = std::mem::take(&mut self.spare);
+            line.extend_from_slice(&self.buf[self.start..cut]);
             self.start = cut + 1;
             self.scanned = self.start;
             return Poll::Ready(Ok(Some((line, true))));
@@ -141,7 +144,8 @@ impl LineReader {
             if self.start >= self.buf.len() {
                 return Poll::Ready(Ok(None));
             }
-            let line = self.buf[self.start..].to_vec();
+            let mut line = std::mem::take(&mut self.spare);
+            line.extend_from_slice(&self.buf[self.start..]);
             self.start = self.buf.len();
             return Poll::Ready(Ok(Some((line, false))));
         }
@@ -150,6 +154,13 @@ impl LineReader {
         }
         self.pull(io);
         Poll::Pending
+    }
+
+    pub(super) fn recycle(&mut self, mut bytes: Vec<u8>) {
+        bytes.clear();
+        if bytes.capacity() <= 64 * 1024 && bytes.capacity() > self.spare.capacity() {
+            self.spare = bytes;
+        }
     }
 
     /// Whether the host still holds the input open.

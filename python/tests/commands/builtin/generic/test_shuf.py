@@ -13,10 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
+import logging
 
 import pytest
 
+import mirage.commands.builtin.generic.shuf as command
 from mirage.commands.builtin.generic.shuf import shuf_generic
+from mirage.io.cooperative import CHUNK_SIZE
+from mirage.io.spool import ByteSpool
+from mirage.io.stream import close_quietly
 from mirage.utils.ids import SeededIdSource
 
 # Pinned by shuf.test.ts too: one seed shuffles the same way on both
@@ -135,3 +140,121 @@ async def test_shuf_replays_past_the_memory_limit(
     assert io.exit_code == 0
     assert await _digest(out) == expected
     assert ids.random_u32() == after
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rows,expected,after",
+    [
+        (
+            1,
+            "0676561be74db478b3b56abfeb7da14cb94e9c535944518dc9c16eedc8919874",
+            2628924735,
+        ),
+        (
+            3,
+            "3e560f541a346a4611f39bc97cf4d8bc0c319f2212288ae8286b95fcfaab7326",
+            227733378,
+        ),
+    ],
+)
+async def test_shuf_replays_oversized_record_buckets(rows, expected, after):
+    data = b"".join(
+        bytes([97 + row]) * (1024 * 1024 + 32) + b"\n" for row in range(rows)
+    )
+    ids = SeededIdSource(5)
+    output, io = await shuf_generic(
+        [], [], read=_read_operand, stdin=_chunks(data, 4096), ids=ids
+    )
+    assert io.exit_code == 0
+    assert await _digest(output) == expected
+    assert ids.random_u32() == after
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "repeat,early", [(False, False), (True, False), (False, True)]
+)
+async def test_shuf_keeps_large_records_spilled_and_closes_spools(
+    monkeypatch, repeat, early
+):
+    stores = []
+
+    class CheckedSpool(ByteSpool):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            stores.append(self)
+
+        async def read(self, offset, size):
+            assert size <= CHUNK_SIZE
+            return await super().read(offset, size)
+
+    monkeypatch.setattr(command, "ByteSpool", CheckedSpool)
+    piece = b"x" * CHUNK_SIZE
+    pieces = 17 * 1024 * 1024 // CHUNK_SIZE
+
+    async def source():
+        for _ in range(2):
+            for _ in range(pieces):
+                yield piece
+            yield b"\n"
+
+    output, io = await shuf_generic(
+        [],
+        [],
+        read=_read_operand,
+        stdin=source(),
+        ids=SeededIdSource(5),
+        count=2,
+        with_replacement=repeat,
+    )
+    total = 0
+    try:
+        async for chunk in output:
+            total += len(chunk)
+            assert len(chunk) <= CHUNK_SIZE
+            if early:
+                break
+    finally:
+        await close_quietly(output)
+    assert io.exit_code == 0
+    assert total == (CHUNK_SIZE if early else 2 * (pieces * CHUNK_SIZE + 1))
+    assert stores and all(store.closed for store in stores)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_at", [0, 1])
+@pytest.mark.parametrize("early", [False, True])
+async def test_shuf_closes_every_spool_after_a_cleanup_failure(
+    monkeypatch, caplog, failed_at, early
+):
+    closed = []
+    original = ByteSpool.close
+    first = OSError("first close failed")
+    later = OSError("later close failed")
+
+    async def failing_close(spool):
+        closed.append(spool)
+        await original(spool)
+        if len(closed) == failed_at + 1:
+            raise first
+        if failed_at == 0 and len(closed) == 3:
+            raise later
+
+    monkeypatch.setattr(ByteSpool, "close", failing_close)
+    caplog.set_level(logging.DEBUG, logger=command.__name__)
+    output, io = await shuf_generic(
+        [], ["a", "b"], read=_read_operand, echo=True, ids=SeededIdSource(5)
+    )
+    assert io.exit_code == 0
+    if early:
+        await close_quietly(output)
+    else:
+        with pytest.raises(OSError) as caught:
+            await _text(output)
+        assert caught.value is first
+    await close_quietly(output)
+    assert len(closed) == 3
+    assert all(spool.closed for spool in closed)
+    if failed_at == 0:
+        assert "later close failed" in caplog.text

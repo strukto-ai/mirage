@@ -12,8 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { specOf } from '../../spec/builtins.ts'
+import { ByteSpool } from '../../../io/spool.ts'
+import { CHUNK_SIZE } from '../../../io/cooperative.ts'
+import { closeQuietly } from '../../../io/stream.ts'
 import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -651,4 +654,130 @@ describe('shuf replays past the memory limit', () => {
     expect(await sha256Hex(out === null ? new Uint8Array() : await materialize(out))).toBe(digest)
     expect(ids.randomU32()).toBe(after)
   })
+})
+
+it.each([
+  [1, '0676561be74db478b3b56abfeb7da14cb94e9c535944518dc9c16eedc8919874', 2628924735],
+  [3, '3e560f541a346a4611f39bc97cf4d8bc0c319f2212288ae8286b95fcfaab7326', 227733378],
+] as const)('replays %i oversized record buckets', async (rows, digest, after) => {
+  const data = ENC.encode(
+    Array.from(
+      { length: rows },
+      (_, row) => `${String.fromCharCode(97 + row).repeat(1024 * 1024 + 32)}\n`,
+    ).join(''),
+  )
+  const ids = new SeededIdSource(5)
+  const ctx = {
+    stdin: chunksOf(data, 4096),
+    flags: {},
+    ids,
+    cwd: PathSpec.fromStrPath('/'),
+    vfs: { kind: 'ram' } as never,
+  } as Context
+  const result = await shufGeneric([], [], ctx, stubStream, stubWrite)
+  if (result?.[0] == null) throw new Error('shuf declined')
+  expect(result[1].exitCode).toBe(0)
+  expect(await sha256Hex(await materialize(result[0]))).toBe(digest)
+  expect(ids.randomU32()).toBe(after)
+})
+
+it.each([
+  [false, false],
+  [true, false],
+  [false, true],
+])('keeps large records spilled and closes spools (repeat %s, early %s)', async (repeat, early) => {
+  const stores = new Set<ByteSpool>()
+  // The spy calls the saved method with its original receiver.
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const read = ByteSpool.prototype.read
+  const spy = vi.spyOn(ByteSpool.prototype, 'read').mockImplementation(async function (
+    this: ByteSpool,
+    offset: number,
+    size: number,
+  ) {
+    stores.add(this)
+    expect(size).toBeLessThanOrEqual(CHUNK_SIZE)
+    return read.call(this, offset, size)
+  })
+  const piece = new Uint8Array(CHUNK_SIZE).fill(120)
+  const pieces = (17 * 1024 * 1024) / CHUNK_SIZE
+  async function* source(): AsyncGenerator<Uint8Array> {
+    await Promise.resolve()
+    for (let record = 0; record < 2; record++) {
+      for (let at = 0; at < pieces; at++) yield piece
+      yield Uint8Array.of(10)
+    }
+  }
+  const ctx = {
+    stdin: source(),
+    flags: { head_count: '2', repeat },
+    ids: new SeededIdSource(5),
+    cwd: PathSpec.fromStrPath('/'),
+    vfs: { kind: 'ram' } as never,
+  } as Context
+  try {
+    const result = await shufGeneric([], [], ctx, stubStream, stubWrite)
+    if (result === null) throw new Error('shuf declined')
+    const [output, io] = result
+    if (output === null || output instanceof Uint8Array) throw new Error('shuf must stream')
+    let total = 0
+    try {
+      for await (const chunk of output) {
+        total += chunk.length
+        expect(chunk.length).toBeLessThanOrEqual(CHUNK_SIZE)
+        if (early) break
+      }
+    } finally {
+      await closeQuietly(output)
+    }
+    expect(io.exitCode).toBe(0)
+    expect(total).toBe(early ? CHUNK_SIZE : 2 * (pieces * CHUNK_SIZE + 1))
+    expect(stores.size).toBeGreaterThan(0)
+    expect([...stores].every((store) => store.closed)).toBe(true)
+  } finally {
+    spy.mockRestore()
+  }
+})
+
+it.each([
+  [0, false],
+  [1, false],
+  [0, true],
+  [1, true],
+] as const)('closes every spool after cleanup failure %i (early %s)', async (failedAt, early) => {
+  const closed: ByteSpool[] = []
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const original = ByteSpool.prototype.close
+  const first = new Error('first close failed')
+  const later = new Error('later close failed')
+  const debug = vi.spyOn(console, 'debug').mockReturnValue(undefined)
+  const close = vi.spyOn(ByteSpool.prototype, 'close').mockImplementation(async function (
+    this: ByteSpool,
+  ) {
+    closed.push(this)
+    await original.call(this)
+    if (closed.length === failedAt + 1) throw first
+    if (failedAt === 0 && closed.length === 3) throw later
+  })
+  const ctx = {
+    flags: { echo: true },
+    stdin: null,
+    ids: new SeededIdSource(5),
+    cwd: PathSpec.fromStrPath('/'),
+    vfs: { kind: 'ram' } as never,
+  } as Context
+  try {
+    const result = await shufGeneric([], ['a', 'b'], ctx, stubStream, stubWrite)
+    if (result?.[0] == null) throw new Error('shuf declined')
+    expect(result[1].exitCode).toBe(0)
+    if (early) await closeQuietly(result[0])
+    else await expect(materialize(result[0])).rejects.toBe(first)
+    await closeQuietly(result[0])
+    expect(closed).toHaveLength(3)
+    expect(closed.every((spool) => spool.closed)).toBe(true)
+    if (failedAt === 0) expect(debug).toHaveBeenCalledWith('shuf cleanup failed:', later)
+  } finally {
+    close.mockRestore()
+    debug.mockRestore()
+  }
 })

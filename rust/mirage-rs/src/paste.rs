@@ -102,7 +102,7 @@ impl Paste {
                 self.done = true;
                 return;
             };
-            let take = self.sources[source].next(self.terminator);
+            let take = self.sources[source].next_span(self.terminator);
             if matches!(take, Take::Wait) {
                 return;
             }
@@ -117,7 +117,7 @@ impl Paste {
             }
             match take {
                 Take::Record(record) if self.serial => {
-                    out.extend_from_slice(&record);
+                    out.extend_from_slice(record);
                     self.count += 1;
                 }
                 Take::End if self.serial => {
@@ -127,7 +127,7 @@ impl Paste {
                 }
                 take => {
                     if let Take::Record(record) = take {
-                        self.row.extend_from_slice(&record);
+                        self.row.extend_from_slice(record);
                         self.any = true;
                     }
                     self.at += 1;

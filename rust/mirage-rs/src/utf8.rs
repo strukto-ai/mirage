@@ -25,6 +25,10 @@ impl Decoder {
         }
     }
 
+    pub(crate) fn pending(&self) -> bool {
+        self.needed != 0
+    }
+
     /// Decode `bytes`, calling `emit` once per code point.
     pub(crate) fn decode(&mut self, bytes: &[u8], mut emit: impl FnMut(u32)) {
         let mut i = 0;
@@ -198,5 +202,134 @@ mod wide_tests {
         assert_eq!(code_points(b"\xc0\xaf"), [INVALID, INVALID]);
         assert_eq!(code_points(b"\xed\xa0\x80"), [INVALID, INVALID, INVALID]);
         assert_eq!(code_points(b"\xf8\x80\x80\x80\x80"), [INVALID; 5]);
+    }
+}
+
+/// The ASCII prefix, testing eight bytes at a time without alignment assumptions.
+pub(crate) fn ascii_run(bytes: &[u8]) -> usize {
+    let mut at = 0;
+    while let Some(chunk) = bytes.get(at..at + 8) {
+        if u64::from_ne_bytes(chunk.try_into().unwrap()) & 0x8080_8080_8080_8080 != 0 {
+            break;
+        }
+        at += 8;
+    }
+    at + bytes[at..]
+        .iter()
+        .take_while(|byte| byte.is_ascii())
+        .count()
+}
+
+/// One Unicode scalar or maximal invalid subpart, using the replacement reading.
+pub(crate) fn scalar(bytes: &[u8]) -> (char, usize) {
+    let first = bytes[0];
+    if first < 0x80 {
+        return (char::from(first), 1);
+    }
+    let (len, low, high) = match first {
+        0xC2..=0xDF => (2, 0x80, 0xBF),
+        0xE0 => (3, 0xA0, 0xBF),
+        0xED => (3, 0x80, 0x9F),
+        0xE1..=0xEF => (3, 0x80, 0xBF),
+        0xF0 => (4, 0x90, 0xBF),
+        0xF4 => (4, 0x80, 0x8F),
+        0xF1..=0xF3 => (4, 0x80, 0xBF),
+        _ => return ('\u{FFFD}', 1),
+    };
+    let mut cp = u32::from(first & (0x7F >> len));
+    for at in 1..len {
+        let Some(&byte) = bytes.get(at) else {
+            return ('\u{FFFD}', at);
+        };
+        let (lo, hi) = if at == 1 { (low, high) } else { (0x80, 0xBF) };
+        if !(lo..=hi).contains(&byte) {
+            return ('\u{FFFD}', at);
+        }
+        cp = cp << 6 | u32::from(byte & 0x3F);
+    }
+    (char::from_u32(cp).expect("validated scalar"), len)
+}
+
+/// Strict scalar width; an invalid byte stands alone.
+pub(crate) fn unit_len(bytes: &[u8]) -> usize {
+    let (ch, len) = scalar(bytes);
+    if ch == '\u{FFFD}' && !bytes.starts_with(b"\xef\xbf\xbd") {
+        1
+    } else {
+        len
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct Validator {
+    pub(crate) left: u8,
+    low: u8,
+    high: u8,
+    pub(crate) invalid: bool,
+}
+impl Validator {
+    pub(crate) fn push(&mut self, byte: u8) {
+        if self.invalid {
+            return;
+        }
+        if self.left > 0 {
+            if byte < self.low || byte > self.high {
+                self.invalid = true;
+                return;
+            }
+            self.left -= 1;
+            self.low = 0x80;
+            self.high = 0xBF;
+            return;
+        }
+        (self.left, self.low, self.high) = match byte {
+            0..=0x7F => (0, 0x80, 0xBF),
+            0xC2..=0xDF => (1, 0x80, 0xBF),
+            0xE0 => (2, 0xA0, 0xBF),
+            0xED => (2, 0x80, 0x9F),
+            0xE1..=0xEF => (2, 0x80, 0xBF),
+            0xF0 => (3, 0x90, 0xBF),
+            0xF1..=0xF3 => (3, 0x80, 0xBF),
+            0xF4 => (3, 0x80, 0x8F),
+            _ => {
+                self.invalid = true;
+                (0, 0x80, 0xBF)
+            }
+        };
+    }
+}
+
+#[cfg(test)]
+mod scalar_tests {
+    use super::*;
+    #[test]
+    fn maximal_subparts_match_the_standard_decoder() {
+        let mut state = 17u64;
+        for width in 1..=4 {
+            for _ in 0..10_000 {
+                let mut bytes = [0u8; 4];
+                for byte in &mut bytes[..width] {
+                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    *byte = (state >> 32) as u8;
+                }
+                let input = &bytes[..width];
+                let mut at = 0;
+                let mut actual = String::new();
+                while at < input.len() {
+                    let (ch, len) = scalar(&input[at..]);
+                    actual.push(ch);
+                    at += len;
+                }
+                assert_eq!(actual, String::from_utf8_lossy(input), "{input:?}");
+                let mut validator = Validator::default();
+                for &byte in input {
+                    validator.push(byte);
+                }
+                assert_eq!(
+                    !validator.invalid && validator.left == 0,
+                    std::str::from_utf8(input).is_ok()
+                );
+            }
+        }
     }
 }
