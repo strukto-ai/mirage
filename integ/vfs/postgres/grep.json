@@ -1,6 +1,19 @@
 {
   "cases": [
     {
+      "id": "pg_grep_ignore_case_keeps_ascii_i_under_turkish_collation",
+      "seq": 612040,
+      "targets": [
+        "postgres"
+      ],
+      "command": "LC_ALL=C.UTF-8 grep -iw tie /pg-contract/contract/tables/turkish/rows.jsonl; LC_ALL=C.UTF-8 grep -iFw tie /pg-contract/contract/tables/turkish/rows.jsonl; LC_ALL=C.UTF-8 grep -iw TIE /pg-contract/contract/tables/turkish/rows.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"body\":\"TIE\"}\n{\"body\":\"TIE\"}\n{\"body\":\"TIE\"}\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "pg_grep_ada",
       "seq": 610050,
       "targets": [

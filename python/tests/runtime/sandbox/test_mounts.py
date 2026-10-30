@@ -15,6 +15,7 @@
 import asyncio
 import io
 import shlex
+import sys
 
 import pytest
 
@@ -28,7 +29,7 @@ from mirage.context import (
 from mirage.io.types import materialize
 from mirage.runtime.sandbox import mounts
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import SSHFS_OPTIONS
+from mirage.runtime.sandbox.constants import PIPE_SERVER_HINT, SSHFS_OPTIONS
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.mounts import mount_table, top_prefixes
 from mirage.runtime.types import RunResult, SandboxPipe
@@ -371,7 +372,7 @@ async def test_a_line_with_its_own_cwd_serves_the_live_session(monkeypatch):
             sessions.append(self.session)
             await super().serve(reader, writer)
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)
     await ws.session("agent", profile="agent")
@@ -393,7 +394,7 @@ async def test_a_server_runs_outside_the_line_that_started_it(monkeypatch):
             )
             await super().serve(reader, writer)
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
@@ -421,7 +422,7 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
             await self.files.write("/data/landed.txt", b"x")
             landed.append((line_running(), await self.run(lent_a_line())))
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(FakeSandbox("ssh"))
     agent = await ws.session("agent", profile="agent")
     line = asyncio.create_task(agent.shell("python3 job.py"))
@@ -455,7 +456,7 @@ async def test_a_line_that_times_out_still_lands_its_writes(monkeypatch):
         async def sync(self):
             synced.append(line_running())
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(
         FakeSandbox("ssh"),
         command_limits={"@line": Limit(timeout_seconds=0.05)},
@@ -524,7 +525,7 @@ async def test_a_server_that_fails_says_why(monkeypatch):
         async def serve(self, reader, writer):
             raise RuntimeError("no server here")
 
-    monkeypatch.setattr(mounts, "PipeServer", Server)
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     sandbox = FakeSandbox("ssh", sshfs_mounts=False)
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
@@ -566,3 +567,18 @@ async def test_a_failed_mount_keeps_pipe_diagnostics_when_the_guest_is_gone():
         assert "helper said: msb refused: sandbox is not running" in said
     finally:
         await ws.close()
+
+
+def test_a_missing_ssh_extra_says_how_to_install_it(monkeypatch):
+    monkeypatch.setitem(sys.modules, "asyncssh", None)
+    monkeypatch.delitem(sys.modules, "mirage.mount.sftp", raising=False)
+    with pytest.raises(ImportError, match=r"mirage-ai\[ssh\]") as raised:
+        mounts.pipe_server()
+    assert str(raised.value) == PIPE_SERVER_HINT
+
+
+def test_a_broken_sftp_module_is_not_blamed_on_the_extra(monkeypatch):
+    monkeypatch.setitem(sys.modules, "mirage.mount.sftp", None)
+    with pytest.raises(ImportError) as raised:
+        mounts.pipe_server()
+    assert str(raised.value) != PIPE_SERVER_HINT

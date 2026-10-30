@@ -914,8 +914,8 @@ export function parseCommand(
         continue
       }
       if (cs.numericDest !== null && NUMERIC_SHORT.test(tok)) {
-        flags[cs.numericDest] = tok.slice(1)
         flagOccurrences(flags).push([cs.numericDest, tok.slice(1)])
+        flags[cs.numericDest] = tok.slice(1)
         i += 1
         continue
       }
@@ -991,9 +991,9 @@ export function parseCommand(
         digitOptions && cs.numericDest !== null ? matchDigitCluster(tok, cs) : null
       if (digitCluster !== null && cs.numericDest !== null) {
         for (const name of digitCluster.bools) setBoolFlag(flags, cs, name)
+        flagOccurrences(flags).push([cs.numericDest, digitCluster.digits])
         Reflect.deleteProperty(flags, cs.numericDest)
         flags[cs.numericDest] = digitCluster.digits
-        flagOccurrences(flags).push([cs.numericDest, digitCluster.digits])
         if (digitCluster.rest === null) {
           i += 1
           continue

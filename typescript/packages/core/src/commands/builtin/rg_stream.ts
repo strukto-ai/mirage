@@ -5,7 +5,7 @@ import { YieldBudget } from '../../io/yield_budget.ts'
 import { StreamRefusal } from '../../rs/errors.ts'
 import type { OpenStream } from '../../rs/stream.ts'
 import { openStream, openStreamSync } from '../../rs/stream.ts'
-import { decodeText, encodeText } from '../../shell/bytes.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import type { JsonValue } from '../../types.ts'
 import { UsageError } from '../errors.ts'
 import { foldsCase, type RgFlags, type Tally, type Totals } from './rg_search.ts'
@@ -158,15 +158,6 @@ export function formatMessage(message: Record<string, JsonValue>): Uint8Array {
   const stream = openStreamSync('rg_format', {})
   try {
     return stream.feed(ENC.encode(JSON.stringify(message)))
-  } finally {
-    stream.close()
-  }
-}
-
-export function encodingFor(label: string): string | null {
-  const stream = openStreamSync('rg_format', {})
-  try {
-    return decodeText(stream.feed(ENC.encode(JSON.stringify({ kind: 'encoding', label })))) || null
   } finally {
     stream.close()
   }

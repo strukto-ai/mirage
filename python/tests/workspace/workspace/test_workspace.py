@@ -16,6 +16,8 @@ import asyncio
 import inspect
 import io
 import itertools
+import subprocess
+import sys
 import uuid
 from typing import Any
 
@@ -871,3 +873,22 @@ async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
         assert box.reaped == [("t1", 15)]
     finally:
         await ws.close()
+
+
+def test_ram_workspace_loads_no_ssh():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import asyncio, sys\n"
+            "from mirage import MountMode, Workspace\n"
+            "from mirage.vfs.ram import RAMVFS\n"
+            "async def main():\n"
+            "    ws = Workspace({'/': RAMVFS()}, mode=MountMode.WRITE)\n"
+            "    r = await ws.shell('echo hi > /a && cat /a')\n"
+            "    assert await r.stdout_str() == 'hi\\n'\n"
+            "asyncio.run(main())\n"
+            "assert 'asyncssh' not in sys.modules\n",
+        ],
+        check=True,
+    )

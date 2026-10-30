@@ -48,6 +48,19 @@ describe('compileGlob', () => {
     expect(compileGlob('*.PY').test('a.py')).toBe(false)
   })
 
+  // ripgrep 14.1.1's --iglob folds A-Z and a-z, nothing past ASCII. Twin of
+  // test_compile_glob_folds_ascii_letters_only.
+  it.each([
+    ['b3.txt', 'B3.TXT', true],
+    ['[a-c]3.txt', 'B3.txt', true],
+    ['[^a].txt', 'A.txt', false],
+    ['sa.txt', '\u017fa.txt', false],
+    ['k1.txt', '\u212a1.txt', false],
+    ['\u00e92.txt', '\u00c92.txt', false],
+  ])('folds %s against %s: %s', (glob, path, hit) => {
+    expect(compileGlob(glob, true).test(path)).toBe(hit)
+  })
+
   it.each([
     ['[', "unclosed character class; missing ']'"],
     ['a{b', "unclosed alternate group; missing '}' (maybe escape '{' with '[{]'?)"],

@@ -1032,6 +1032,10 @@
       "hf": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case, or the prep case it runs after, makes a directory and uses it before any key lands in it (cd, ls, tree, find, ln or a glob into it), so on hf that directory is absent. hf still runs the rest of the file.",
       "hf-prefix": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case, or the prep case it runs after, makes a directory and uses it before any key lands in it (cd, ls, tree, find, ln or a glob into it), so on hf that directory is absent. hf still runs the rest of the file."
     },
+    "integ/unix/rg/glob.json :: rg_iglob_folds_ascii_letters_only": {
+      "nextcloud": "Nextcloud stores file names NFC-normalized, so the Kelvin sign (U+212A, which NFC maps to K) lists as an ASCII K and --iglob k1.txt rightly matches it. The case pins that --iglob folds ASCII letters only, which every backend that keeps the name as typed runs.",
+      "tidb-filesystem": "drive9 stores file names NFC-normalized, so the Kelvin sign (U+212A, which NFC maps to K) lists as an ASCII K and --iglob k1.txt rightly matches it. The case pins that --iglob folds ASCII letters only, which every backend that keeps the name as typed runs."
+    },
     "integ/unix/ls/flags.json :: ls_sort_width_counts_columns": {
       "nextcloud": "Nextcloud stores file names NFC-normalized, so the decomposed e + U+0301 name lists precomposed whenever the listing comes from the server. The row only held while mirage's index still had the name as typed, which depends on what earlier cases left cached.",
       "tidb-filesystem": "drive9 stores file names NFC-normalized, so the decomposed e + U+0301 name lists precomposed (measured against drive9-server 1f1ff16f: a PUT of `e%CC%81x` lists as `éx`). The width sort itself runs on every backend that keeps the name as typed."

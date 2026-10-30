@@ -1,4 +1,4 @@
-import re
+import logging
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
@@ -9,6 +9,7 @@ from collections.abc import (
 from contextlib import aclosing
 from dataclasses import replace
 from functools import partial
+from typing import TypedDict, cast
 
 from mirage.commands.builtin.grep_binary import (
     GrepFlags,
@@ -54,30 +55,25 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
-from mirage.commands.spec.usage import (
-    usage_hint,
-    valid_words_block,
-    word_refusal_line,
-)
-from mirage.commands.spec.word_choice import WordMatch, match_word
+from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, WalkLimitError
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.regex import LineRegex
+from mirage.rs.scan import scanned
 from mirage.shell.bytes import utf8_locale
 from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
 from mirage.view.namespace_view import followed_stat
 
+logger = logging.getLogger(__name__)
+
 # GNU grep with no pattern prints its synopsis and the help hint, exit 2
 # (grep 3.11; the same two lines follow `option requires an argument`).
 GREP_NO_PATTERN = f"Usage: {SYNOPSES['grep']}\n" + usage_hint("grep")
-# What --directories takes; an unambiguous prefix names one too.
-DIRECTORIES = ("read", "recurse", "skip")
-DEVICES = ("read", "skip")
 # The types -D skip passes over; stdin is read whatever it is.
 DEVICE_TYPES = frozenset(
     {
@@ -88,74 +84,83 @@ DEVICE_TYPES = frozenset(
     }
 )
 UNIX_BYTE_OFFSETS = b"grep: warning: --unix-byte-offsets (-u) is obsolete\n"
-# What GNU takes as -m's count: blanks, a sign, then digits.
-MAX_COUNT = re.compile(r"[ \t\n\v\f\r]*[+-]?[0-9]+")
+# The options whose values mirage-rs reads, with the switches that decide
+# among them.
+SCANNED = (
+    "text",
+    "args_I",
+    "binary_files",
+    "after_context",
+    "before_context",
+    "context",
+    "recursive",
+    "dereference_recursive",
+    "directories",
+    "devices",
+)
 
 
-def binary_mode(fl: FlagView) -> str:
-    mode = "binary"
-    for name in fl.typed_order("text", "args_I", "binary_files"):
-        if name == "text" and fl.as_bool("text"):
-            mode = "text"
-        elif name == "args_I" and fl.as_bool("args_I"):
-            mode = "without-match"
-        elif name == "binary_files":
-            value = fl.as_str("binary_files")
-            mode = value if value is not None else "binary"
-            if mode not in ("binary", "text", "without-match"):
-                raise UsageError("grep: unknown binary-files type")
-    return mode
+class GrepValues(TypedDict):
+    """What grep's scan reads: the binary-files mode, the context lengths
+    (-C filling a side -A or -B left unset), the directory action, whether
+    -D skips devices, and the max count (None for no limit, filled only by
+    `max_count`)."""
+
+    binary_mode: str
+    after_context: int | None
+    before_context: int | None
+    directories: str
+    skip_devices: bool
+    max_count: int | None
 
 
-def directories_action(fl: FlagView) -> str:
-    """What grep does with a directory: read, recurse or skip.
+def scan_values(fl: FlagView) -> GrepValues:
+    """grep's option values but -m, read by mirage-rs in a fixed order.
 
-    -r and -R are --directories=recurse, so the last of the three on the
-    line wins (grep 3.11: `grep -r -d skip` skips, `-d skip -r`
-    recurses). A word that names none of the three, whole or as a prefix,
-    comes back as typed; ``check_actions`` refuses it.
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+
+    Raises:
+        UsageError: the first value grep refuses, in its words.
+    """
+    return cast(GrepValues, scanned("grep", fl.texts(*SCANNED)))
+
+
+def max_count(fl: FlagView) -> int | None:
+    """-m as mirage-rs reads it, None for no limit; grep checks it after
+    the matchers, so a bad count yields to conflicting ones.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+
+    Raises:
+        UsageError: grep's refusal of the count.
+    """
+    return cast(GrepValues, scanned("grep", fl.texts("max_count")))[
+        "max_count"
+    ]
+
+
+def recurses(fl: FlagView) -> bool:
+    """Whether grep walks the directories it meets: -r, -R or a -d naming
+    recurse, the last of the three on the line winning (grep 3.11).
+
+    A line whose last of the three is a -d word grep refuses at run time
+    walks nothing.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
     """
-    action = "read"
-    for name in fl.typed_order(
-        "recursive", "dereference_recursive", "directories"
-    ):
-        if name != "directories":
-            if fl.as_bool(name):
-                action = "recurse"
-            continue
-        word = fl.as_str(name) or ""
-        match = match_word(word, DIRECTORIES)
-        action = match.word if isinstance(match, WordMatch) else word
-    return action
-
-
-def check_actions(fl: FlagView) -> None:
-    """Refuse a -d or -D word as GNU does, each one typed and not only
-    the last: its option loop stops at the first bad one.
-
-    A -d word that names no action, whole or as a prefix, gets GNU's
-    invalid or ambiguous argument message, the valid words and grep's
-    usage, exit 1; -D takes only the exact words, exit 2.
-
-    Args:
-        fl (FlagView): spec-validated view over the raw flag kwargs.
-    """
-    for name, value in fl.occurrences("directories", "devices"):
-        word = str(value)
-        if name == "devices":
-            if word not in DEVICES:
-                raise UsageError("grep: unknown devices method")
-            continue
-        match = match_word(word, DIRECTORIES)
-        if not isinstance(match, WordMatch):
-            line = word_refusal_line("grep", "--directories", word, match.kind)
-            raise UsageError(
-                f"{line}\n{valid_words_block(DIRECTORIES)}\n{GREP_NO_PATTERN}",
-                1,
-            )
+    typed = fl.texts("recursive", "dereference_recursive", "directories")
+    if not typed:
+        return False
+    if typed[-1][0] != "directories":
+        return True
+    try:
+        return scanned("grep", typed[-1:])["directories"] == "recurse"
+    except UsageError as exc:
+        logger.debug("grep walks nothing past a refused -d: %s", exc)
+        return False
 
 
 def group_separator(fl: FlagView) -> bytes | None:
@@ -187,40 +192,6 @@ def ignores_case(fl: FlagView) -> bool:
         if fl.as_bool(name)
     ]
     return bool(names) and names[-1] == "ignore_case"
-
-
-def context_length(fl: FlagView, name: str) -> int | None:
-    """One -A/-B/-C value, refused the way GNU refuses it.
-
-    Args:
-        fl (FlagView): spec-validated view over the raw flag kwargs.
-        name (str): the context option to read.
-    """
-    raw = fl.as_str(name)
-    try:
-        value = fl.as_int(name)
-    except ValueError as exc:
-        raise UsageError(
-            f"grep: {raw}: invalid context length argument"
-        ) from exc
-    if value is not None and value < 0:
-        shown = raw if raw is not None else str(value)
-        raise UsageError(f"grep: {shown}: invalid context length argument")
-    return value
-
-
-def max_count(fl: FlagView) -> int | None:
-    """-m as GNU 3.11 reads it: leading blanks and a sign are
-    allowed, a negative count is no limit, and anything else is refused.
-
-    Args:
-        fl (FlagView): spec-validated view over the raw flag kwargs.
-    """
-    raw = fl.as_str("max_count")
-    if raw is not None and MAX_COUNT.fullmatch(raw) is None:
-        raise UsageError("grep: invalid max count")
-    count = int(raw) if raw is not None else fl.as_int("max_count")
-    return None if count is None or count < 0 else count
 
 
 def listing_mode(fl: FlagView) -> tuple[bool, bool]:
@@ -261,23 +232,12 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         never_match (bool): zero-pattern sentinel from resolve_pattern; it is
             a regex, so it suppresses -F.
     """
-    mode = binary_mode(fl)
+    values = scan_values(fl)
+    mode = values["binary_mode"]
     filename = filename_mode(fl)
     files_only, files_without_match = listing_mode(fl)
-    # GNU checks each context option as it is read, so the first bad one
-    # on the line is the one named.
-    contexts = {
-        name: context_length(fl, name)
-        for name in fl.typed_order(
-            "after_context", "before_context", "context"
-        )
-    }
-    a_ctx = contexts.get("after_context")
-    b_ctx = contexts.get("before_context")
-    c_ctx = contexts.get("context")
     label = fl.as_str("label")
-    check_actions(fl)
-    directories = directories_action(fl)
+    directories = values["directories"]
     return GrepFlags(
         ignore_case=ignores_case(fl),
         invert=fl.as_bool("invert_match"),
@@ -300,12 +260,12 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         # it included (grep 3.11).
         dereference=fl.as_bool("dereference_recursive"),
         skip_directories=directories == "skip",
-        skip_devices=fl.as_str("devices") == "skip",
+        skip_devices=values["skip_devices"],
         with_filename=filename is True,
         no_filename=filename is False,
         max_count=max_count(fl),
-        after_context=a_ctx if a_ctx is not None else c_ctx,
-        before_context=b_ctx if b_ctx is not None else c_ctx,
+        after_context=values["after_context"],
+        before_context=values["before_context"],
         binary_mode=mode,
         null_data=fl.as_bool("null_data"),
         null=fl.as_bool("null"),

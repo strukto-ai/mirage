@@ -142,6 +142,39 @@ async def test_post_network_sees_how_each_connection_went(port):
     assert watch.open == 0
 
 
+async def _keep_alive(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    while await reader.readuntil(b"\r\n\r\n"):
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nok\n")
+        await writer.drain()
+
+
+class _Offline(Policy):
+    """Refuses each connection a line naming `offline` opens."""
+
+    async def pre_network(self, ctx: NetworkContext) -> Deny | None:
+        return Deny("offline") if "offline" in ctx.line else None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("setting", [True, {"allowed_domains": ["127.0.0.1"]}])
+async def test_each_line_is_judged_on_a_server_that_keeps_sockets_alive(
+    setting,
+):
+    server = await asyncio.start_server(_keep_alive, "127.0.0.1", 0)
+    url = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}/"
+    ws = Workspace({"/data": RAMVFS()}, network=setting)
+    ws.policies.add(_Offline())
+    try:
+        assert (await ws.shell(f"curl -sS {url}")).exit_code == 0
+        line = f"echo offline >/dev/null; curl -sS {url}"
+        assert (await ws.shell(line)).exit_code == 7
+    finally:
+        await ws.close()
+        server.close()
+
+
 @pytest.mark.asyncio
 async def test_the_lists_refuse_before_any_hook(port):
     watch = _Watch()

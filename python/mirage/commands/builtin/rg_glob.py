@@ -208,7 +208,9 @@ def compile_glob(
         UsageError: the glob does not compile, in ripgrep's words.
     """
     source = _glob_body(glob if shown is None else shown, glob, False)
-    return re.compile(source, re.IGNORECASE if case_insensitive else 0)
+    # globset folds ASCII letters only: `--iglob é` never matches `É`.
+    folding = re.IGNORECASE | re.ASCII if case_insensitive else 0
+    return re.compile(source, folding)
 
 
 @dataclass(frozen=True, slots=True)

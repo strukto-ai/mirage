@@ -1,6 +1,11 @@
 {
  "baseline": 2651,
  "modules": {
+  "commands/builtin/rg_glob": {
+   "typescript_only": {
+    "classPart": "A case-insensitive glob folds ASCII letters only, as globset does: Python compiles it with re.IGNORECASE | re.ASCII, and JavaScript's RegExp has no ASCII-only fold, so TypeScript writes each letter's other case into the class itself."
+   }
+  },
   "workspace/executor/builtins/help/help": {
    "typescript_only": {
     "specOf": "A topic's spec by name: Python indexes SHELL_SPECS and lets a missing name raise KeyError; TypeScript's index type carries undefined, so the lookup that throws lives in this helper."

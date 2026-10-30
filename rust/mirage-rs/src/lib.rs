@@ -44,6 +44,7 @@ mod rg_format;
 mod rg_grapheme;
 mod rg_input;
 mod rg_matcher;
+mod rg_options;
 mod scan;
 mod sed;
 mod seq;

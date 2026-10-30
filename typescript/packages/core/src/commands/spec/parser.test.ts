@@ -1440,6 +1440,16 @@ describe('flag-driven operand kinds', () => {
     expect(flagOccurrences(parseCommand(custom, words, '/', 'jq').flags)).toEqual([])
   })
 
+  it('records a dash number on the tape where it was typed', () => {
+    const p = parseCommand(specOf('grep'), ['-C0', '-2', '-n1', 'x', 'f'], '/', 'grep')
+    expect(flagOccurrences(p.flags)).toEqual([
+      ['--context', '0'],
+      ['--context', '2'],
+      ['--line-number', true],
+      ['--context', '1'],
+    ])
+  })
+
   it('records each operand on the tape among the options', () => {
     const p = parseCommand(specOf('jq'), ['-n', '.', '--args', 'a', '--', '-b'], '/', 'jq')
     expect(flagOccurrences(p.flags)).toEqual([
