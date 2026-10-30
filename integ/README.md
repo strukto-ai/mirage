@@ -246,6 +246,40 @@ filters live in that workflow's `changes` job, and `typescript-build` runs
 whenever a job that downloads the built packages does. `integ-ts` and
 `integ-shared-ts`, which finish last, build the packages in the job instead
 of waiting for it.
+
+The bootstrap artifact carries both `dist` and `core/src/generated`, so
+consumers install dependencies without rerunning core's Rust/WASM prepare
+hook, then run the allowed native dependency's `buildgyp` script directly.
+`pnpm rebuild` skips `@zkochan/fuse-native` because its build is implicit in
+`binding.gyp` rather than an install script; `buildgyp` loads an existing
+native build or compiles it when missing.
+Python-only battery jobs use the same install path because their fake servers
+do not import mirage packages. Jobs that build TypeScript still run prepare.
+
+The existing three shards per host still run every eligible target once with
+four processes each. `ci/shard_seconds.json` uses successful target timings
+from main runs 40976378211 and 40983556220 to rebalance them. Replaying those
+median timings through the four-worker schedule estimates the longest Python
+battery at 1,078 seconds instead of 1,280; this is a scheduling estimate, not
+a measured end-to-end CI result.
+
+`runtime/parallel.sh` overlaps the Python and TypeScript JSON drivers inside
+each existing runtime job. It waits for both even after a failure, then runs
+TypeScript's `backend/mongodb`, whose database Python also drops and seeds,
+and `sandbox/mounts`, which mounts fixed paths in their shared Docker container.
+The `integ/runtime/**` filter covers the driver; the gate selftest checks its
+overlap, exact suite coverage, database and mount serialization, duplicate
+launch detection and failure propagation.
+Job matrices, timeout limits, strict checks and coverage floors are unchanged.
+
+The Nextcloud CI container also lowers its Argon2id memory cost from 8 MiB to
+256 KiB for its public fixture credentials. A local before/after run of the
+same first 1,000 Nextcloud cases passed all 1,000 in both configurations and
+took 56.6 and 50.1 seconds respectively (11.5% less time). Fresh requests with
+wrong passwords still returned 401. This changes only the disposable service
+configuration; all Nextcloud cases remain selected in CI. The local result
+does not measure the full corpus or the end-to-end GitHub Actions savings.
+
 A README under one of the filtered trees is prose that nothing loads, so a
 pull request that changes only README files selects no job; the READMEs
 under `integ/fixtures/` are fixture content and still count.
