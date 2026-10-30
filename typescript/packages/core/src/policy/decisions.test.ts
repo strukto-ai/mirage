@@ -45,7 +45,7 @@ const ledgerSchema = z
     receipts: z.array(z.json()),
     retired: z.array(z.string()).default([]),
   })
-  .passthrough()
+  .loose()
 const approvalCorpusSchema = z.object({
   cases: z.array(
     z.object({
@@ -84,7 +84,7 @@ it('runs the shared approval transition transcripts through Wasm', async () => {
       receipts: [],
     })
     for (const [index, step] of scenario.steps.entries()) {
-      const transition = step.transition ?? `event-${index}`
+      const transition = step.transition ?? `event-${String(index)}`
       const stream = await openStream('policy_decisions', {})
       try {
         stream.feed(
@@ -126,7 +126,7 @@ it('runs the shared approval transition transcripts through Wasm', async () => {
             status: z.string().optional(),
           })
           .parse(JSON.parse(new TextDecoder().decode(stream.finish())))
-        expect(result.kind, `${scenario.name} step ${index}`).toBe(step.kind)
+        expect(result.kind, `${scenario.name} step ${String(index)}`).toBe(step.kind)
         if (step.fresh !== undefined) expect(result.fresh).toBe(step.fresh)
         if (step.matched !== undefined) expect(result.matched).toBe(step.matched)
         if (step.status !== undefined) expect(result.status).toBe(step.status)
@@ -212,15 +212,17 @@ describe('decisions', () => {
   })
 
   it('checks a current deny before applying an inline answer', async () => {
-    const ledger = new Decisions(null, async (question) => ({
-      ...question,
-      outcome: Outcome.ALLOW,
-    }))
+    const ledger = new Decisions(null, (question) =>
+      Promise.resolve({
+        ...question,
+        outcome: Outcome.ALLOW,
+      }),
+    )
     const line = fresh()
     const denied = { kind: 'deny' as const, reason: 'current policy refuses' }
-    expect(await ledger.resolve(ctx(), ASK, undefined, at(line), async () => denied)).toEqual(
-      denied,
-    )
+    expect(
+      await ledger.resolve(ctx(), ASK, undefined, at(line), () => Promise.resolve(denied)),
+    ).toEqual(denied)
     expect(ledger.list().every((entry) => entry.outcome !== Outcome.ALLOW)).toBe(true)
     await ledger.revoke('s', line)
   })
@@ -232,13 +234,13 @@ describe('decisions', () => {
       rule: { ...RULE, reason: 'new sign-off' },
     }
     const questions: Decision[] = []
-    const ledger = new Decisions(null, async (question) => {
+    const ledger = new Decisions(null, (question) => {
       questions.push(question)
-      return { ...question, outcome: Outcome.ALLOW }
+      return Promise.resolve({ ...question, outcome: Outcome.ALLOW })
     })
     const line = fresh()
     expect(
-      await ledger.resolve(ctx(), ASK, undefined, at(line), async () => replacement),
+      await ledger.resolve(ctx(), ASK, undefined, at(line), () => Promise.resolve(replacement)),
     ).toBeNull()
     expect(questions.map((question) => question.reason)).toEqual(['sign-off', 'new sign-off'])
     expect(new Set(questions.map((question) => question.id)).size).toBe(2)
@@ -249,14 +251,14 @@ describe('decisions', () => {
     let revision = 0
     const ledger = new Decisions(
       null,
-      async (question) => {
+      (question) => {
         revision += 1
-        return { ...question, outcome: Outcome.ALLOW }
+        return Promise.resolve({ ...question, outcome: Outcome.ALLOW })
       },
       () => revision,
     )
     const line = fresh()
-    const result = await ledger.resolve(ctx(), ASK, undefined, at(line), async () => ASK)
+    const result = await ledger.resolve(ctx(), ASK, undefined, at(line), () => Promise.resolve(ASK))
     expect(result?.kind).toBe('deny')
     expect(ledger.list().every((entry) => entry.outcome !== Outcome.ALLOW)).toBe(true)
     await ledger.revoke('s', line)
@@ -290,16 +292,15 @@ describe('decisions', () => {
     const manager = new SessionManager('s', new ChangedStore())
     const ledger = new Decisions(
       manager,
-      async (question) => ({ ...question, outcome: Outcome.ALLOW }),
+      (question) => Promise.resolve({ ...question, outcome: Outcome.ALLOW }),
       () => revision,
     )
     const line = fresh()
     const result = await ledger.resolve(ctx(), ASK, undefined, at(line))
     expect(revision).toBeGreaterThan(0)
-    expect(result).toMatchObject({
-      kind: 'deny',
-      reason: expect.stringContaining('policy_changed'),
-    })
+    expect(result?.kind).toBe('deny')
+    if (result?.kind !== 'deny') throw new Error('Expected an approval refusal')
+    expect(result.reason).toContain('policy_changed')
     expect(ledger.list().every((entry) => entry.outcome !== Outcome.ALLOW)).toBe(true)
     await ledger.revoke('s', line)
   })

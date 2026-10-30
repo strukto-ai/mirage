@@ -15,6 +15,7 @@
 import { z } from 'zod'
 import { KeyLock } from '../cache/lock.ts'
 import { authorityId } from '../utils/ids.ts'
+import { hasAborted } from '../utils/abort.ts'
 import { openStreamSync } from '../rs/stream.ts'
 import { units, fromUnits, ruleWire } from '../rs/policy.ts'
 import type { RecordFields } from '../workspace/record/types.ts'
@@ -327,7 +328,7 @@ const ledgerSchema = z
       }),
     ),
   })
-  .passthrough()
+  .loose()
 const resultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('allow') }),
   z.object({ kind: z.literal('pending'), record: decisionSchema, fresh: z.boolean() }),
@@ -588,7 +589,7 @@ export class Decisions extends DecisionOwner {
     if (this.sessions !== null)
       result = resultSchema.parse(await this.sessions.approvalEvent(sessionId, event, epoch))
     else
-      result = await this.locks.withLock(sessionId, async () => {
+      result = await this.locks.withLock(sessionId, () => {
         const stream = openStreamSync('policy_decisions', {})
         const identity = authorityId()
         try {
@@ -620,7 +621,9 @@ export class Decisions extends DecisionOwner {
               new Uint8Array(),
             )
           }
-          return resultSchema.parse(JSON.parse(new TextDecoder().decode(stream.finish())))
+          return Promise.resolve(
+            resultSchema.parse(JSON.parse(new TextDecoder().decode(stream.finish()))),
+          )
         } finally {
           stream.close()
         }
@@ -701,7 +704,7 @@ export class Decisions extends DecisionOwner {
     claimant: Claimant | null = null,
     recheck?: () => Promise<Deny | Ask | null>,
   ): Promise<Deny | Pending | Abandoned | null> {
-    if (Boolean(signal?.aborted)) return ABANDONED
+    if (hasAborted(signal)) return ABANDONED
     const sessionId = ctx.sessionId ?? ''
     try {
       let epoch: string
@@ -740,11 +743,10 @@ export class Decisions extends DecisionOwner {
         if (onAsk === null) return { kind: 'pending', id: record.id, reason: record.reason }
         const said = await answered(() => onAsk(record, signal), signal)
         if (isAbandoned(said)) return said
-        if (said === null || said.outcome === null)
-          return { kind: 'pending', id: record.id, reason: record.reason }
+        if (said?.outcome == null) return { kind: 'pending', id: record.id, reason: record.reason }
         if (said.id !== record.id) throw new ApprovalUnavailable('stale_reply')
         if (said.outcome === Outcome.ASK) throw new Error('ASK is not an answer')
-        if (Boolean(signal?.aborted)) return ABANDONED
+        if (hasAborted(signal)) return ABANDONED
         if (this.sessions !== null) await this.sessions.refreshApproval(sessionId, epoch)
         if (await this.checkVersion(sessionId, epoch)) {
           if (recheck !== undefined) {
@@ -829,23 +831,25 @@ export class Decisions extends DecisionOwner {
     }))
   }
 
-  async held(
+  held(
     ctx: CommandContext,
     ask: Ask,
     claimant: Claimant | null = null,
   ): Promise<Deny | Pending | null> {
-    const rules = ask.rules ?? [askRule(ctx, ask)]
-    const result = inspectApproval(this.state(ctx.sessionId ?? ''), {
-      ...resolveWire(ctx, rules, this.claimant(claimant)),
-      explain: true,
+    return Promise.resolve().then(() => {
+      const rules = ask.rules ?? [askRule(ctx, ask)]
+      const result = inspectApproval(this.state(ctx.sessionId ?? ''), {
+        ...resolveWire(ctx, rules, this.claimant(claimant)),
+        explain: true,
+      })
+      if (result.kind === 'allow') return null
+      if (result.kind === 'deny') return { kind: 'deny', reason: fromUnits(result.reason) }
+      if (result.kind === 'blocked')
+        return { kind: 'deny', reason: `approval unavailable: ${result.status}`, failed: true }
+      if (result.kind !== 'pending') throw new Error('invalid approval inspection')
+      const record = decisionFromWire(result.record)
+      return { kind: 'pending', id: record.id, reason: record.reason }
     })
-    if (result.kind === 'allow') return null
-    if (result.kind === 'deny') return { kind: 'deny', reason: fromUnits(result.reason) }
-    if (result.kind === 'blocked')
-      return { kind: 'deny', reason: `approval unavailable: ${result.status}`, failed: true }
-    if (result.kind !== 'pending') throw new Error('invalid approval inspection')
-    const record = decisionFromWire(result.record)
-    return { kind: 'pending', id: record.id, reason: record.reason }
   }
 
   async resolveOp(
@@ -861,7 +865,7 @@ export class Decisions extends DecisionOwner {
     const call =
       caller !== undefined
         ? callOf(caller, this, sessionId)
-        : asyncContextIsolatesTasks || !('verb' in ctx)
+        : asyncContextIsolatesTasks
           ? getOpCall(this, sessionId)
           : null
     const claimant: Claimant | null =
@@ -1023,8 +1027,8 @@ export function runWithOpCall<T>(
  * The call running in this context under `owner`'s ledger for
  * `sessionId`, null for a bare op, for a call another ledger
  * runs (a host callback reaching a second workspace mid-call) or for
- * another session's call. Without task isolation every live call is in
- * reach, so the newest of this ledger's and session's is taken.
+ * another session's call. Callers without task isolation must pass an
+ * explicit Caller and use callOf instead of inheriting this context.
  */
 export function getOpCall(owner: Decisions, sessionId: string): HandOff | null {
   const call = liveCallers()

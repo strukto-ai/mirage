@@ -92,7 +92,8 @@ export class Router {
     const placed = options.runtime === undefined ? null : this.placed(options.runtime)
     if (!placing || (held !== undefined && (await held()))) return placed ?? this.unplaced()
     const ctx = this.context(command, session, await judged())
-    let [said, route] = await policies.preExecute(ctx, placed !== null)
+    const [said, initialRoute] = await policies.preExecute(ctx, placed !== null)
+    let route = initialRoute
     const action =
       said?.kind === 'ask'
         ? await this.registry.decisions.resolve(

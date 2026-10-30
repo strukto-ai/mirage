@@ -26,7 +26,7 @@ export const logger: { debug?: (message: string) => void } = {}
 
 const stateSchema = z
   .object({ incarnation: z.string().min(1), revision: z.number().int().nonnegative() })
-  .passthrough()
+  .loose()
 const effectSchema = z.object({
   op: z.literal('persist_approvals'),
   evaluation: z.string(),
@@ -50,7 +50,7 @@ const resultSchema = z
       'grants',
     ]),
   })
-  .passthrough()
+  .loose()
 
 const ruleSchema = z
   .object({
@@ -276,7 +276,7 @@ export async function transactApprovals(
       else fields.closed = effect.ledger.closed
       if (effect.authority !== null) {
         for (const [key, value] of Object.entries(effect.authority)) {
-          if (value === null) delete fields[key]
+          if (value === null) Reflect.deleteProperty(fields, key)
           else fields[key] = value
         }
       }

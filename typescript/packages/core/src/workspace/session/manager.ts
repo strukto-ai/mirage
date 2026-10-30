@@ -552,8 +552,7 @@ export class SessionManager extends SessionOwner {
     if (JSON.stringify(session.toDict()) === this.persisted.get(sid)) return
     for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
       const current = await this.sessionStore.get(sid)
-      if (current !== null && current.closed != null)
-        throw new ApprovalUnavailable('session_closed')
+      if (current?.closed != null) throw new ApprovalUnavailable('session_closed')
       if (current !== null) {
         const observed = current.incarnation ?? null
         const known = this.incarnations.get(sid) ?? null
@@ -591,7 +590,7 @@ export class SessionManager extends SessionOwner {
       const fields = session.toDict() as RecordFields
       if (await this.sessionStore.casSet(sid, fields, expected)) {
         this.persisted.set(sid, JSON.stringify(fields))
-        if (session.incarnation !== null) this.incarnations.set(sid, session.incarnation)
+        this.incarnations.set(sid, session.incarnation)
         return
       }
       // Lost the race: adopt the winner's generation and retry our

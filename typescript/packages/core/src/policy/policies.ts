@@ -553,7 +553,8 @@ export async function postExecuteGate(
 ): Promise<[Deny | Pending | null, Limit | null]> {
   if (!(await policies.wantsFor('postExecute', ctx.sessionId))) return [null, null]
   if (claimant !== null) await policies.decisions.validate(ctx.sessionId, claimant.line)
-  let [answer, bound] = await policies.postExecute(ctx)
+  const [answer, initialBound] = await policies.postExecute(ctx)
+  let bound = initialBound
   if (claimant !== null) await policies.decisions.validate(ctx.sessionId, claimant.line)
   if (answer?.kind !== 'ask') return [answer, bound]
   const [asked, keyed] = opQuestion(ctx, answer)
