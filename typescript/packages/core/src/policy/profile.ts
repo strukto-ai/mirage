@@ -645,13 +645,34 @@ export function parseProfilePolicy(raw: unknown, where: string, code = false): P
 export function parseProgram(raw: unknown, at: string, code = false): ProfilePolicySpec {
   const program = asObject(raw, at)
   rejectUnknownKeys(program, PROGRAM_FIELDS, at)
-  const script = program.script
-  if (script === undefined || script === null) {
+  const given = program.script
+  if (given === undefined || given === null) {
     throw new Error(`${at}.script names the policy's program, and is required`)
   }
-  if (!(script instanceof ScriptSource) && typeof script !== 'string') {
+  // A path, a ScriptSource code built, or the {source, language, module} a
+  // JSON profile spells one as, as Python's model reads it.
+  const fields =
+    typeof given === 'object' && !(given instanceof ScriptSource) && !Array.isArray(given)
+      ? (given as Record<string, unknown>)
+      : null
+  if (
+    !(typeof given === 'string' || given instanceof ScriptSource) &&
+    (fields === null ||
+      Object.keys(fields).some((key) => !['source', 'language', 'module'].includes(key)) ||
+      typeof fields.source !== 'string' ||
+      (fields.language !== undefined && fields.language !== 'python' && fields.language !== 'js') ||
+      (fields.module !== undefined && typeof fields.module !== 'boolean'))
+  ) {
     throw new Error(`${at}.script must be a script path or source`)
   }
+  const script =
+    fields === null
+      ? (given as string | ScriptSource)
+      : new ScriptSource(
+          fields.source as string,
+          (fields.language ?? 'python') as Language,
+          fields.module === true,
+        )
   let env = {}
   if (program.env !== undefined) {
     const entries = asObject(program.env, `${at}.env`)
