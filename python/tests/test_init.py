@@ -67,3 +67,23 @@ def test_authoring_surface_is_stable():
         "register_runtime",
         "register_secrets",
     }
+
+
+def test_ram_workspace_loads_no_wasm_or_ssh():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import asyncio, sys\n"
+            "from mirage import MountMode, Workspace\n"
+            "from mirage.vfs.ram import RAMVFS\n"
+            "async def main():\n"
+            "    ws = Workspace({'/': RAMVFS()}, mode=MountMode.WRITE)\n"
+            "    r = await ws.shell('echo hi > /a && cat /a')\n"
+            "    assert await r.stdout_str() == 'hi\\n'\n"
+            "asyncio.run(main())\n"
+            "loaded = {'wasmtime', 'asyncssh', 'cryptography'} & set(sys.modules)\n"
+            "assert not loaded, loaded\n",
+        ],
+        check=True,
+    )
