@@ -524,6 +524,7 @@ export class Decisions extends DecisionOwner {
       }
       bound = { sessionId, incarnation, revision: this.version?.() ?? 0 }
       this.bindings.set(this.root(handed), bound)
+      if (!this.versions.has(sessionId)) this.versions.set(sessionId, bound.revision)
     }
     this.readers.add(handed)
     this.id(handed)

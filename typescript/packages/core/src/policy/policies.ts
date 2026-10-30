@@ -854,10 +854,15 @@ export class Policies {
               await this.decisions.assertCurrent(asked.sessionId ?? '', null, before)
           } catch (error) {
             if (hasAborted(signal)) throw makeAbortError(signal)
-            if (policy === placement) throw error
-            const detail = error instanceof Error ? error.message : String(error)
-            console.error(`${method} policy ${name} raised: ${detail}`)
-            answered = { kind: 'deny', reason: `${name} failed`, policy: name, failed: true }
+            if (error instanceof ApprovalUnavailable) {
+              logger.debug?.(`policy callback refused: ${error.status}`)
+              answered = { kind: 'deny', reason: error.message, policy: name, failed: true }
+            } else {
+              if (policy === placement) throw error
+              const detail = error instanceof Error ? error.message : String(error)
+              console.error(`${method} policy ${name} raised: ${detail}`)
+              answered = { kind: 'deny', reason: `${name} failed`, policy: name, failed: true }
+            }
           }
           pending = Array.isArray(answered) ? answered : [answered]
           cursor = 0
