@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { z } from 'zod'
+import { openStream } from '../rs/stream.ts'
 
 import { Decisions, askRule, covers, decisionId, encloses } from './decisions.ts'
 import { Outcome, Scope } from './types.ts'
@@ -29,6 +32,105 @@ import type {
 
 const RULE: CommandRule = { reason: 'sign-off', commands: ['git push'], paths: [], mount: '' }
 const ASK: Ask = { kind: 'ask', reason: 'sign-off', rule: RULE }
+
+const ledgerSchema = z.object({
+  version: z.number(),
+  incarnation: z.string(),
+  revision: z.number(),
+  records: z.array(z.json()),
+  claims: z.array(z.json()),
+  receipts: z.array(z.json()),
+  retired: z.array(z.string()).default([]),
+})
+const approvalCorpusSchema = z.object({
+  cases: z.array(
+    z.object({
+      name: z.string(),
+      steps: z.array(
+        z.object({
+          event: z.record(z.string(), z.json()),
+          kind: z.string(),
+          transition: z.string().optional(),
+          storage: z.string().optional(),
+          stored: z.boolean().optional(),
+          fresh: z.boolean().optional(),
+          status: z.string().optional(),
+          records: z.number().optional(),
+          claims: z.number().optional(),
+        }),
+      ),
+    }),
+  ),
+})
+
+it('runs the shared approval transition transcripts through Wasm', async () => {
+  const corpus = approvalCorpusSchema.parse(
+    JSON.parse(
+      readFileSync(new URL('../../../../../integ/policy/approvals.json', import.meta.url), 'utf8'),
+    ),
+  )
+  for (const scenario of corpus.cases) {
+    let ledger = ledgerSchema.parse({
+      version: 1,
+      incarnation: 'test-session',
+      revision: 0,
+      records: [],
+      claims: [],
+      receipts: [],
+    })
+    for (const [index, step] of scenario.steps.entries()) {
+      const transition = step.transition ?? `event-${index}`
+      const stream = await openStream('policy_decisions', {})
+      try {
+        stream.feed(
+          new TextEncoder().encode(
+            JSON.stringify({
+              evaluation: 'evaluation',
+              transition,
+              ledger,
+              event: step.event,
+            }),
+          ),
+        )
+        stream.finish()
+        const taken = stream.request()
+        if (taken !== null) {
+          const effect = z.object({ ledger: ledgerSchema }).parse(taken[0])
+          expect(taken[1]).toHaveLength(0)
+          expect(stream.request()).toBeNull()
+          expect(stream.done()).toBe(false)
+          const status = step.storage ?? 'committed'
+          stream.respond(
+            {
+              evaluation: 'evaluation',
+              effect: 1,
+              transition,
+              status,
+              revision: effect.ledger.revision,
+            },
+            new Uint8Array(),
+          )
+          if (status === 'committed' || step.stored === true) ledger = effect.ledger
+        }
+        expect(stream.done()).toBe(true)
+        const result = z
+          .object({
+            kind: z.string(),
+            fresh: z.boolean().optional(),
+            status: z.string().optional(),
+          })
+          .parse(JSON.parse(new TextDecoder().decode(stream.finish())))
+        expect(result.kind, `${scenario.name} step ${index}`).toBe(step.kind)
+        if (step.fresh !== undefined) expect(result.fresh).toBe(step.fresh)
+        if (step.status !== undefined) expect(result.status).toBe(step.status)
+        if (step.records !== undefined) expect(ledger.records).toHaveLength(step.records)
+        if (step.claims !== undefined) expect(ledger.claims).toHaveLength(step.claims)
+      } finally {
+        stream.close()
+      }
+    }
+  }
+})
 
 /** A fresh line's hand-off. */
 function fresh(parent: HandOff | null = null): HandOff {

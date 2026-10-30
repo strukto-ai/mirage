@@ -1,0 +1,207 @@
+{
+  "cases": [
+    {
+      "name": "pending retries reuse one question",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending","fresh":true,"records":1},
+        {"event":{"op":"resolve","question":{"id":"unused","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending","fresh":false,"records":1}
+      ]
+    },
+    {
+      "name": "standalone once answer is consumed by one call",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":null},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"allow","records":0},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending","records":1}
+      ]
+    },
+    {
+      "name": "session answer follows the rule rather than command spelling",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"session","note":[],"claimant":null},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104],[45,45,102,111,114,99,101]],"cwd":[47,111,116,104,101,114],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"allow","records":1},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[111,116,104,101,114,32,114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending","records":2}
+      ]
+    },
+    {
+      "name": "a denial refuses one retry even when session scope was requested",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"deny","scope":"session","note":[],"claimant":null},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"deny","records":0},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending","records":1}
+      ]
+    },
+    {
+      "name": "claims bind an occurrence and repeat until the holder ends",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered","claims":1},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"allow","claims":1},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":1,"end":2}}},"kind":"pending","records":2},
+        {"event":{"op":"revoke","owner":"process","holder":"line"},"kind":"applied","claims":0,"records":1}
+      ]
+    },
+    {
+      "name": "another process cannot borrow a claimed approval",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"other","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"pending","records":2},
+        {"event":{"op":"recover","owner":"process"},"kind":"applied","records":1,"claims":0},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"pending","fresh":false}
+      ]
+    },
+    {
+      "name": "nested readers use and transfer their parent claims",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"child","lineage":["line"],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"allow","claims":1},
+        {"event":{"op":"hand_up","owner":"process","holder":"child","parent":"line"},"kind":"applied","claims":1},
+        {"event":{"op":"revoke","owner":"process","holder":"line"},"kind":"applied","records":0,"claims":0}
+      ]
+    },
+    {
+      "name": "a child can earn a claim and hand it to its parent",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"child","lineage":["line"],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered"},
+        {"event":{"op":"hand_up","owner":"process","holder":"child","parent":"line"},"kind":"applied","claims":1},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"allow"},
+        {"event":{"op":"revoke","owner":"process","holder":"line"},"kind":"applied","records":0}
+      ]
+    },
+    {
+      "name": "background jobs retain approval after the parent exits",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered"},
+        {"event":{"op":"split","owner":"process","lineage":["line"],"job":"job","scope":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}},"kind":"applied","claims":2},
+        {"event":{"op":"revoke","owner":"process","holder":"line"},"kind":"applied","claims":1,"records":1},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"job","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"allow"},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"unrelated","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"pending","records":2},
+        {"event":{"op":"revoke","owner":"process","holder":"job"},"kind":"applied","claims":0,"records":1}
+      ]
+    },
+    {
+      "name": "pending release cannot release a background holder",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered"},
+        {"event":{"op":"split","owner":"process","lineage":["line"],"job":"job","scope":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}},"kind":"applied"},
+        {"event":{"op":"release","owner":"process","holder":"line"},"kind":"applied","claims":1},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"unrelated","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"pending"},
+        {"event":{"op":"revoke","owner":"process","holder":"job"},"kind":"applied","claims":0,"records":1}
+      ]
+    },
+    {
+      "name": "pending release preserves an answer for a retry",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered"},
+        {"event":{"op":"release","owner":"process","holder":"line"},"kind":"applied","claims":0,"records":1},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"retry","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"allow","claims":1},
+        {"event":{"op":"revoke","owner":"process","holder":"retry"},"kind":"applied","records":0}
+      ]
+    },
+    {
+      "name": "all winning rules must be answered",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]},{"reason":[111,116,104,101,114,32,114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":null},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]},{"reason":[111,116,104,101,114,32,114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending","records":2},
+        {"event":{"op":"answer","id":"q2","outcome":"allow","scope":"once","note":[],"claimant":null},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]},{"reason":[111,116,104,101,114,32,114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"allow","records":0}
+      ]
+    },
+    {
+      "name": "explain neither records nor consumes",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null,"explain":true},"kind":"pending","fresh":false,"records":0},
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":null},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null,"explain":true},"kind":"allow","records":1},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"allow","records":0}
+      ]
+    },
+    {
+      "name": "explain respects reservations",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null,"explain":true},"kind":"pending","fresh":false,"records":1,"claims":1},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}},"explain":true},"kind":"allow","claims":1}
+      ]
+    },
+    {
+      "name": "storage unknown never publishes permission",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"blocked","storage":"unknown","status":"unknown","records":0,"claims":0}
+      ]
+    },
+    {
+      "name": "storage not_committed never publishes permission",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"blocked","storage":"not_committed","status":"not_committed","records":0,"claims":0}
+      ]
+    },
+    {
+      "name": "storage conflict never publishes permission",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"blocked","storage":"conflict","status":"conflict","records":0,"claims":0}
+      ]
+    },
+    {
+      "name": "lost acknowledgement reconciles the same transition",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"blocked","storage":"unknown","status":"unknown","stored":true,"records":1,"transition":"pending"},
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending","fresh":true,"records":1,"transition":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"blocked","storage":"unknown","status":"unknown","stored":true,"claims":1,"transition":"answer"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"blocked","storage":"unknown","status":"unknown","stored":true,"claims":1,"transition":"answer"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered","claims":1,"transition":"answer"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"allow","claims":1}
+      ]
+    },
+    {
+      "name": "old request tickets cannot answer replacement questions",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"invalidate"},"kind":"applied","records":0},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":null},"kind":"missing","records":1},
+        {"event":{"op":"answer","id":"q2","outcome":"allow","scope":"once","note":[],"claimant":null},"kind":"answered"}
+      ]
+    },
+    {
+      "name": "rule invalidation removes all authority and live claims",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered"},
+        {"event":{"op":"invalidate"},"kind":"applied","records":0,"claims":0},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"pending"}
+      ]
+    },
+    {
+      "name": "a committed claim with an unknown reply does not admit work or free the grant",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":null},"kind":"answered"},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"blocked","storage":"unknown","stored":true,"status":"unknown","claims":1},
+        {"event":{"op":"resolve","question":{"id":"q3","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"other","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"pending","records":2,"claims":1}
+      ]
+    },
+    {
+      "name": "a receipt cannot authorize a grant after terminal consumption",
+      "steps": [
+        {"event":{"op":"resolve","question":{"id":"q1","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":null},"kind":"pending"},
+        {"event":{"op":"answer","id":"q1","outcome":"allow","scope":"once","note":[],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"answered","claims":1},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"allow","transition":"admission"},
+        {"event":{"op":"revoke","owner":"process","holder":"line"},"kind":"applied","records":0,"claims":0},
+        {"event":{"op":"resolve","question":{"id":"q2","session_id":"s","command":[103,105,116],"argv":[[112,117,115,104]],"cwd":[47,114,101,112,111],"paths":[],"reason":[114,101,118,105,101,119],"rule":{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}},"rules":[{"reason":[114,101,118,105,101,119],"commands":[[103,105,116,32,112,117,115,104]],"paths":[],"mount":[]}],"claimant":{"owner":"process","holder":"line","lineage":[],"occurrence":{"parent":null,"source":[108,105,110,101],"start":0,"end":1}}},"kind":"blocked","status":"superseded","transition":"admission","records":0,"claims":0}
+      ]
+    }
+  ]
+}

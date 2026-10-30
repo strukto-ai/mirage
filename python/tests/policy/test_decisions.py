@@ -14,6 +14,8 @@
 
 import asyncio
 import dataclasses
+import json
+from pathlib import Path
 
 import pytest
 
@@ -40,8 +42,67 @@ from mirage.policy.types import (
     Pending,
     Scope,
 )
+from mirage.rs.stream import open_stream
 
 RULE = CommandRule(reason="sign-off", commands=("git push",))
+
+
+def test_shared_approval_transition_transcripts():
+    corpus = json.loads(
+        (Path(__file__).parents[3] / "integ/policy/approvals.json").read_text()
+    )
+    for case in corpus["cases"]:
+        ledger = {
+            "version": 1,
+            "incarnation": "test-session",
+            "revision": 0,
+            "records": [],
+            "claims": [],
+            "receipts": [],
+        }
+        for index, step in enumerate(case["steps"]):
+            transition = step.get("transition", f"event-{index}")
+            stream = open_stream("policy_decisions", {})
+            stream.feed(
+                json.dumps(
+                    {
+                        "evaluation": "evaluation",
+                        "transition": transition,
+                        "ledger": ledger,
+                        "event": step["event"],
+                    }
+                ).encode()
+            )
+            stream.finish()
+            taken = stream.request()
+            if taken is not None:
+                effect, data = taken
+                assert data == b""
+                assert stream.request() is None
+                assert not stream.done()
+                status = step.get("storage", "committed")
+                proposed = effect["ledger"]
+                stream.respond(
+                    {
+                        "evaluation": "evaluation",
+                        "effect": 1,
+                        "transition": transition,
+                        "status": status,
+                        "revision": proposed["revision"],
+                    },
+                    b"",
+                )
+                if status == "committed" or step.get("stored"):
+                    ledger = proposed
+            assert stream.done()
+            result = json.loads(stream.finish())
+            assert result["kind"] == step["kind"], (case["name"], index)
+            for field in ("fresh", "status"):
+                if field in step:
+                    assert result[field] == step[field]
+            for field in ("records", "claims"):
+                if field in step:
+                    assert len(ledger[field]) == step[field]
 
 
 def _ctx(
