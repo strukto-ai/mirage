@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
+from mirage.concurrency.limiter import run_blocking
 from mirage.execution.types import ExecutionRecord, ExecutionStatus
 from mirage.io.types import ByteSource
 from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
@@ -199,8 +200,9 @@ async def shell(
         raise HTTPException(
             status_code=500, detail=job.error or "shell failed"
         )
+    # A large result is encoded off the server's loop.
     return Response(
-        content=json.dumps(job.result),
+        content=await run_blocking(json.dumps, job.result),
         media_type="application/json",
         status_code=200,
         headers={"X-Mirage-Job-Id": job.id},

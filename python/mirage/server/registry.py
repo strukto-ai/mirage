@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import logging
+import math
 import os
 import time
 from collections.abc import AsyncIterator, Sequence
@@ -37,7 +39,12 @@ from mirage.policy.types import (
     WorkspaceContext,
 )
 from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
-from mirage.server.env import ENV_MAX_WORKSPACES, ENV_POLICY_FILE
+from mirage.server.env import (
+    ENV_DRAIN_SECONDS,
+    ENV_MAX_SESSIONS,
+    ENV_MAX_WORKSPACES,
+    ENV_POLICY_FILE,
+)
 from mirage.server.jobs import ExecutionTable
 from mirage.server.paths import mirage_home
 from mirage.types import JsonValue
@@ -98,11 +105,41 @@ def resolve_max_workspaces(max_workspaces: int | None = None) -> int | None:
     Raises:
         DaemonConfigError: the cap is not a positive whole number.
     """
-    value: Any = max_workspaces
+    return _cap(max_workspaces, ENV_MAX_WORKSPACES, "max_workspaces")
+
+
+def resolve_max_sessions(max_sessions: int | None = None) -> int | None:
+    """The most sessions each workspace holds, its default session among
+    them: ``max_sessions`` when given, else ``$MIRAGE_MAX_SESSIONS``, else
+    the ``max_sessions`` key in config.toml's ``[daemon]`` table, else no
+    cap. Mirrors TypeScript's ``resolveMaxSessions``.
+
+    Args:
+        max_sessions (int | None): the cap the caller set.
+
+    Raises:
+        DaemonConfigError: the cap is not a positive whole number.
+    """
+    return _cap(max_sessions, ENV_MAX_SESSIONS, "max_sessions")
+
+
+def _cap(given: int | None, env: str, key: str) -> int | None:
+    """A positive whole cap: ``given``, else the ``env`` variable, else
+    ``key`` in config.toml's ``[daemon]`` table, else None for no cap.
+
+    Args:
+        given (int | None): the cap the caller set.
+        env (str): the environment variable that sets it.
+        key (str): the ``[daemon]`` key that sets it.
+
+    Raises:
+        DaemonConfigError: the cap is not a positive whole number.
+    """
+    value: Any = given
     if value is None:
-        value = os.environ.get(ENV_MAX_WORKSPACES) or read_daemon_table(
-            mirage_home()
-        ).get("max_workspaces")
+        value = os.environ.get(env) or read_daemon_table(mirage_home()).get(
+            key
+        )
         if value is None or value == "":
             return None
     try:
@@ -111,9 +148,41 @@ def resolve_max_workspaces(max_workspaces: int | None = None) -> int | None:
         cap = 0
     if cap < 1:
         raise DaemonConfigError(
-            f"max_workspaces must be a positive whole number, got {value!r}"
+            f"{key} must be a positive whole number, got {value!r}"
         )
     return cap
+
+
+def resolve_drain_seconds(drain_seconds: float | None = None) -> float:
+    """How long a shutdown lets running lines finish before it cancels
+    them: ``drain_seconds`` when given, else ``$MIRAGE_DRAIN_SECONDS``,
+    else the ``drain_seconds`` key in config.toml's ``[daemon]`` table,
+    else 0. Mirrors TypeScript's ``resolveDrainSeconds``.
+
+    Args:
+        drain_seconds (float | None): the seconds the caller set.
+
+    Raises:
+        DaemonConfigError: the value is not a number of seconds, 0 or
+            more.
+    """
+    value: Any = drain_seconds
+    if value is None:
+        value = os.environ.get(ENV_DRAIN_SECONDS) or read_daemon_table(
+            mirage_home()
+        ).get("drain_seconds")
+        if value is None or value == "":
+            return 0.0
+    try:
+        seconds = float(value) if not isinstance(value, bool) else -1.0
+    except ValueError:
+        seconds = -1.0
+    if not math.isfinite(seconds) or seconds < 0:
+        raise DaemonConfigError(
+            f"drain_seconds must be a number of seconds, 0 or more, "
+            f"got {value!r}"
+        )
+    return seconds
 
 
 def resolve_policy_file(
@@ -171,6 +240,7 @@ class WorkspaceRegistry:
         max_workspaces: int | None = None,
         policies: Sequence[Policy] = (),
         programs: ProfileScripts | None = None,
+        max_sessions: int | None = None,
     ) -> None:
         """Construct an empty registry.
 
@@ -194,9 +264,15 @@ class WorkspaceRegistry:
                 workspace it builds, after the workspace's own.
             programs (ProfileScripts | None): the server's policy
                 programs, by method, which answer the same way.
+            max_sessions (int | None): the most sessions each workspace
+                holds, its default among them; None for no cap.
         """
         self._entries: dict[str, WorkspaceEntry] = {}
         self.max_workspaces = max_workspaces
+        self.max_sessions = max_sessions
+        # Set once a shutdown starts draining: no workspace is built
+        # after it, and readiness answers that the server is going.
+        self.draining = False
         self.policies = tuple(policies)
         self._programs = {
             method: scripts
@@ -318,6 +394,24 @@ class WorkspaceRegistry:
             self.max_workspaces is None
             or len(self._entries.keys() | self._creates.keys())
             <= self.max_workspaces
+        )
+
+    async def drain(self, seconds: float) -> None:
+        """Stop building workspaces and let running lines end.
+
+        Each workspace holds new lines while its running ones finish, up
+        to ``seconds``; the lines still running then are cancelled. The
+        workspaces stay registered for ``close_all`` to stop.
+
+        Args:
+            seconds (float): how long running lines get to finish.
+        """
+        self.draining = True
+        await asyncio.gather(
+            *(
+                _settle(entry, seconds)
+                for entry in list(self._entries.values())
+            )
         )
 
     def removing(self, workspace_id: str) -> bool:
@@ -453,7 +547,7 @@ class WorkspaceRegistry:
 
     def add(
         self,
-        workspace: Workspace,
+        workspace: Workspace | WorkspaceRunner,
         workspace_id: str | None = None,
         owner: str | None = None,
         restored_with: Sequence[Policy] = (),
@@ -461,7 +555,8 @@ class WorkspaceRegistry:
         """Wrap ``workspace`` in a runner and register it.
 
         Args:
-            workspace (Workspace): freshly-constructed workspace.
+            workspace (Workspace | WorkspaceRunner): a freshly built
+                workspace, or a runner that built one on its own loop.
             workspace_id (str | None): explicit id, or None to auto-mint.
             owner (str | None): the creating caller's account.
             restored_with (Sequence[Policy]): the policies ``restoring``
@@ -475,22 +570,28 @@ class WorkspaceRegistry:
             ValueError: ``workspace_id`` is already registered, or still
                 being deleted or closed.
         """
+        if isinstance(workspace, WorkspaceRunner):
+            runner: WorkspaceRunner | None = workspace
+            ws = workspace.ws
+        else:
+            runner, ws = None, workspace
         wid = workspace_id or new_workspace_id()
         if wid in self._entries or wid in self._removals:
             raise ValueError(f"workspace id already exists: {wid!r}")
         for policy in restored_with:
-            workspace.policies.remove(policy)
+            ws.policies.remove(policy)
         for policy in self.policies:
-            workspace.policies.add(policy)
-        workspace.registry.network = self.rule_for(workspace.network)
+            ws.policies.add(policy)
+        ws.registry.network = self.rule_for(ws.network)
         # An account reaches only the workspaces it owns, so every
         # method's caller is the owner's account.
-        workspace.policies.account = owner
-        runner = WorkspaceRunner(workspace)
+        ws.policies.account = owner
+        if runner is None:
+            runner = WorkspaceRunner(ws)
         entry = WorkspaceEntry(wid, runner, owner)
         if self._programs:
             entry.programs = ScriptPolicy(_Programs(self._programs))
-            workspace.policies.add(entry.programs)
+            ws.policies.add(entry.programs)
         self._entries[wid] = entry
         self._cancel_idle_timer()
         return entry
@@ -632,6 +733,32 @@ def _workspace_context(
         account (str | None): the account the request signed in as.
     """
     return WorkspaceContext(config, PolicyCaller(account=account))
+
+
+async def _settle(entry: WorkspaceEntry, seconds: float) -> None:
+    """Let an entry's running lines end within ``seconds``, holding new
+    ones meanwhile, and cancel those still running then.
+
+    Args:
+        entry (WorkspaceEntry): the entry.
+        seconds (float): how long its lines get.
+    """
+    ws = entry.runner.ws
+
+    async def settle() -> None:
+        try:
+            async with ws._quiesced(seconds):
+                return
+        except OSError as exc:
+            if exc.errno != errno.EBUSY:
+                raise
+            logger.debug("drain: cancelling %s's lines: %s", entry.id, exc)
+            await ws.cancel()
+
+    try:
+        await entry.runner.call(settle())
+    except RuntimeError:
+        logger.debug("drain: %s already stopped", entry.id)
 
 
 async def _stop(entry: WorkspaceEntry, delete: bool = False) -> None:

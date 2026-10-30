@@ -12,14 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import gc
 import importlib
+import signal
 import sys
 
 import pytest
 
 from mirage.server import daemon
-from mirage.server.env import ENV_HOME, ENV_IDLE_GRACE_SECONDS
+from mirage.server.env import (
+    ENV_DRAIN_SECONDS,
+    ENV_HOME,
+    ENV_IDLE_GRACE_SECONDS,
+)
 
 
 def test_the_daemon_writes_a_pid_file_and_exits_when_idle(
@@ -48,3 +54,40 @@ async def test_the_daemon_tunes_the_interpreter_before_it_serves(
     async with module.app.router.lifespan_context(module.app):
         assert tuned == ["freeze", young, daemon.SWITCH_INTERVAL]
         assert module.app.state.pid_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_a_signal_drains_before_the_servers_handler_stops_it(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.setenv(ENV_DRAIN_SECONDS, "5")
+    module = importlib.reload(daemon)
+    stopped = []
+    installed = {}
+    monkeypatch.setattr(
+        signal,
+        "getsignal",
+        lambda signum: lambda sig, frame: stopped.append(sig),
+    )
+    monkeypatch.setattr(signal, "signal", installed.__setitem__)
+    module._drain_on_signals(module.app)
+    assert set(installed) == {signal.SIGTERM, signal.SIGINT}
+    installed[signal.SIGTERM](signal.SIGTERM, None)
+    installed[signal.SIGINT](signal.SIGINT, None)
+    await asyncio.sleep(0)
+    await module.app.state.drain_task
+    assert module.app.state.registry.draining
+    assert stopped == [signal.SIGTERM]
+
+
+def test_without_drain_seconds_the_servers_handlers_stay(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.delenv(ENV_DRAIN_SECONDS, raising=False)
+    module = importlib.reload(daemon)
+    installed = {}
+    monkeypatch.setattr(signal, "signal", installed.__setitem__)
+    module._drain_on_signals(module.app)
+    assert installed == {}

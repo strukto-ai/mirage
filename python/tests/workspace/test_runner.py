@@ -128,3 +128,37 @@ async def test_stop_is_idempotent():
     await runner.stop()
     await runner.stop()
     assert not runner._thread.is_alive()
+
+
+@pytest.mark.asyncio
+async def test_build_constructs_the_workspace_on_the_runners_thread():
+    built_on = []
+
+    async def make() -> Workspace:
+        built_on.append(threading.current_thread())
+        return _make_ws()
+
+    runner = await WorkspaceRunner.build(make())
+    try:
+        assert built_on == [runner._thread]
+        result = await runner.call(runner.ws.shell("echo built"))
+        assert (await result.stdout_str()) == "built\n"
+    finally:
+        await runner.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_build_stops_the_thread_it_started():
+    def runners() -> set[threading.Thread]:
+        return {
+            t for t in threading.enumerate() if t.name.startswith("mirage-ws-")
+        }
+
+    before = runners()
+
+    async def make() -> Workspace:
+        raise ValueError("bad config")
+
+    with pytest.raises(ValueError, match="bad config"):
+        await WorkspaceRunner.build(make())
+    assert runners() == before

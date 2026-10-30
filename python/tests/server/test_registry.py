@@ -21,13 +21,22 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.policy.base import Policy
 from mirage.policy.types import Action, CommandContext, VfsContext
 from mirage.server.daemon_config import DaemonConfigError
-from mirage.server.env import ENV_HOME, ENV_MAX_WORKSPACES, ENV_POLICY_FILE
+from mirage.server.env import (
+    ENV_DRAIN_SECONDS,
+    ENV_HOME,
+    ENV_MAX_SESSIONS,
+    ENV_MAX_WORKSPACES,
+    ENV_POLICY_FILE,
+)
 from mirage.server.registry import (
     Claim,
     WorkspaceRegistry,
+    resolve_drain_seconds,
+    resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
 )
+from mirage.utils.abort import MirageAbortError
 from mirage.workspace.record.disk import DiskRecordClient
 
 
@@ -249,3 +258,51 @@ def test_max_workspaces_must_be_a_positive_whole_number(monkeypatch, value):
     monkeypatch.setenv(ENV_MAX_WORKSPACES, value)
     with pytest.raises(DaemonConfigError, match="max_workspaces"):
         resolve_max_workspaces()
+
+
+def test_max_sessions_reads_the_env_then_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.delenv(ENV_MAX_SESSIONS, raising=False)
+    assert resolve_max_sessions() is None
+    (tmp_path / "config.toml").write_text("[daemon]\nmax_sessions = 8\n")
+    assert resolve_max_sessions() == 8
+    monkeypatch.setenv(ENV_MAX_SESSIONS, "0")
+    with pytest.raises(DaemonConfigError, match="max_sessions"):
+        resolve_max_sessions()
+
+
+def test_drain_seconds_reads_the_env_then_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.delenv(ENV_DRAIN_SECONDS, raising=False)
+    assert resolve_drain_seconds() == 0.0
+    (tmp_path / "config.toml").write_text("[daemon]\ndrain_seconds = 25\n")
+    assert resolve_drain_seconds() == 25.0
+    monkeypatch.setenv(ENV_DRAIN_SECONDS, "2.5")
+    assert resolve_drain_seconds() == 2.5
+    assert resolve_drain_seconds(0) == 0.0
+    for bad in ("-1", "soon", "inf"):
+        monkeypatch.setenv(ENV_DRAIN_SECONDS, bad)
+        with pytest.raises(DaemonConfigError, match="drain_seconds"):
+            resolve_drain_seconds()
+
+
+@pytest.mark.asyncio
+async def test_a_drain_lets_running_lines_finish_and_cancels_the_rest():
+    registry = WorkspaceRegistry(idle_grace_seconds=10.0)
+    quick = registry.add(_ws(), "quick")
+    slow = registry.add(_ws(), "slow")
+    short = asyncio.ensure_future(
+        quick.runner.call(quick.runner.ws.shell("sleep 0.2; echo done"))
+    )
+    long = asyncio.ensure_future(
+        slow.runner.call(slow.runner.ws.shell("sleep 30"))
+    )
+    await asyncio.sleep(0.05)
+    started = time.monotonic()
+    await registry.drain(1.0)
+    assert registry.draining
+    assert time.monotonic() - started < 5
+    assert (await (await short).stdout_str()) == "done\n"
+    with pytest.raises(MirageAbortError):
+        await long
+    await registry.close_all()

@@ -131,7 +131,7 @@ A `200` means the server ran the line, not that the line succeeded: check
 | `409` | The id is taken, the workspace is busy, or a file changed since it was read. |
 | `413` | The request is too large. |
 | `422` | The request body is invalid. |
-| `429` | Too many requests. The TypeScript server only; see [its limits](/typescript/access/server#what-is-particular-to-this-server). |
+| `429` | Past a [rate limit](#rate-limits), with `Retry-After` in seconds, or a new session past `max_sessions`. |
 | `499` | The job was canceled. |
 | `500` | The job failed inside the server. |
 | `507` | A file call's write would pass its store's capacity. |
@@ -143,6 +143,81 @@ A `200` means the server ran the line, not that the line succeeded: check
 <Badge color="blue">GET</Badge> `/v1/health`
 
 Returns `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}` without requiring a token.
+
+### Check readiness
+
+<Badge color="blue">GET</Badge> `/v1/ready`
+
+Whether the server takes new workspaces, without requiring a token. Returns
+`{"status": "ready"}` with `200`, or `503` with `{"status": "full"}` at
+`max_workspaces` and `{"status": "draining"}` while it shuts down. Point a load
+balancer's readiness check here and its liveness check at `/v1/health`.
+
+### Read metrics
+
+<Badge color="blue">GET</Badge> `/v1/metrics`
+
+The server's metrics in Prometheus's text format, without requiring a token.
+They are server-wide counts and name no workspace or account.
+
+| Metric | Type | Value |
+| --- | --- | --- |
+| `mirage_uptime_seconds` | gauge | Seconds since the server started. |
+| `mirage_workspaces` | gauge | Workspaces it holds. |
+| `mirage_max_workspaces` | gauge | Its `max_workspaces`, when set. |
+| `mirage_sessions` | gauge | Sessions across its workspaces. |
+| `mirage_jobs_running` | gauge | [Jobs](#jobs) running. |
+| `mirage_draining` | gauge | `1` while it drains for shutdown. |
+| `mirage_http_responses_total{code}` | counter | Responses it sent, by status code, so refusals show as their `403`, `429` and `503`. |
+| `process_resident_memory_bytes` | gauge | Its resident memory; the Python server reports it where `/proc` does. |
+
+### Rate limits
+
+Each limit allows a number of requests per second, minute, hour or day for each
+value of its key, and answers `429` with `Retry-After` past it until the window
+that value's first request opened ends. Set them in `config.toml`:
+
+```toml
+[daemon]
+rate_limits = "ip=1000/minute, account=600/minute, header:x-tenant=50/second"
+forwarded_allow_ips = "10.0.0.0/8"
+```
+
+| Key | Counts requests by |
+| --- | --- |
+| `ip` | The client address. Behind a proxy, list it in `forwarded_allow_ips`, or every client counts as the proxy. |
+| `account` | The signed-in [account](#accounts). |
+| `workspace` | The workspace the path names. |
+| `header:<name>` | That header's value. |
+
+A request with no value for a key (no account, no workspace in its path, no such
+header) is not counted by that limit, and `/v1/health`, `/v1/ready`,
+`/v1/metrics` and WebSocket connections are never counted. In code, a key may also be a function of the
+request that returns the value to count by, or nothing to skip the limit:
+
+<CodeGroup>
+```python Python
+from mirage.server import RateLimit, build_app
+
+app = build_app(
+    rate_limits=[
+        RateLimit("account", "600/minute"),
+        RateLimit(lambda request: request.headers.get("x-tenant"), "50/second"),
+    ]
+)
+```
+
+```ts TypeScript
+import { buildApp } from '@struktoai/mirage-server'
+
+const app = buildApp({
+  rateLimits: [
+    { key: 'account', rate: '600/minute' },
+    { key: (request) => request.headers['x-tenant']?.toString() ?? null, rate: '50/second' },
+  ],
+})
+```
+</CodeGroup>
 
 ### Shut down
 

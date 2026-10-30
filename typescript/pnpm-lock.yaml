@@ -930,9 +930,6 @@ importers:
 
   packages/server:
     dependencies:
-      '@fastify/rate-limit':
-        specifier: ^10.0.0
-        version: 10.3.0
       '@fastify/websocket':
         specifier: ^11.3.3
         version: 11.3.3
@@ -1922,9 +1919,6 @@ packages:
   '@fastify/proxy-addr@5.1.0':
     resolution: {integrity: sha512-INS+6gh91cLUjB+PVHfu1UqcB76Sqtpyp7bnL+FYojhjygvOPA9ctiD/JDKsyD9Xgu4hUhCSJBPig/w7duNajw==}
 
-  '@fastify/rate-limit@10.3.0':
-    resolution: {integrity: sha512-eIGkG9XKQs0nyynatApA3EVrojHOuq4l6fhB4eeCk4PIOeadvOJz9/4w3vGI44Go17uaXOWEcPkaD8kuKm7g6Q==}
-
   '@fastify/websocket@11.3.3':
     resolution: {integrity: sha512-NBJoykKpFwrdX9Ezod1rt30p5NoPFu7vgeuUowSM3JVI5/hFNRPhetqkWMTiF/ifIzctwitbJut1gZ6FDg1mwQ==}
 
@@ -2140,10 +2134,6 @@ packages:
 
   '@lukeed/csprng@1.1.0':
     resolution: {integrity: sha512-Z7C/xXCiGWsg0KuKsHTKJxbWhpI3Vs5GwLfOean7MGyVFGqdRgBbAjOCh6u4bbjPc/8MJ2pZmK/0DLdCbivLDA==}
-    engines: {node: '>=8'}
-
-  '@lukeed/ms@2.0.2':
-    resolution: {integrity: sha512-9I2Zn6+NJLfaGoz9jN3lpwDgAYvfGeNYdbAIjJOqzs4Tpc+VU3Jqq4IofSUBKajiDS8k9fZIg18/z13mpk1bsA==}
     engines: {node: '>=8'}
 
   '@lukeed/uuid@2.0.1':
@@ -4516,9 +4506,6 @@ packages:
 
   fast-xml-validator@1.4.0:
     resolution: {integrity: sha512-GULVy05S3NMGFrRhKge84olosODhSIYbYmIrEigfBR/dXSQRdLh6Oz6rEoYxHFHTyPTaOUuaz2vJXkcHn/e/Tg==}
-
-  fastify-plugin@5.1.0:
-    resolution: {integrity: sha512-FAIDA8eovSt5qcDgcBvDuX/v0Cjz0ohGhENZ/wpc3y+oZCY2afZ9Baqql3g/lC+OHRnciQol4ww7tuthOb9idw==}
 
   fastify-plugin@6.0.0:
     resolution: {integrity: sha512-fZOty7z3O7vOliF6d8bHE3wiEh1KcNnKEQensSgTk9C1DvN6nRLS++XVd86v33Hw/8u9Un8A1zDrQ8ujcQDHEg==}
@@ -8181,12 +8168,6 @@ snapshots:
       '@fastify/forwarded': 3.0.1
       ipaddr.js: 2.3.0
 
-  '@fastify/rate-limit@10.3.0':
-    dependencies:
-      '@lukeed/ms': 2.0.2
-      fastify-plugin: 5.1.0
-      toad-cache: 3.7.0
-
   '@fastify/websocket@11.3.3':
     dependencies:
       duplexify: 4.1.3
@@ -8455,8 +8436,6 @@ snapshots:
   '@langchain/protocol@0.0.20': {}
 
   '@lukeed/csprng@1.1.0': {}
-
-  '@lukeed/ms@2.0.2': {}
 
   '@lukeed/uuid@2.0.1':
     dependencies:
@@ -10912,8 +10891,6 @@ snapshots:
       detailed-xml-validator: 2.2.0
       path-expression-matcher: 1.6.2
       xml-naming: 0.3.0
-
-  fastify-plugin@5.1.0: {}
 
   fastify-plugin@6.0.0: {}
 

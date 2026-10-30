@@ -16,8 +16,10 @@ import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from mirage.server.metrics import CONTENT_TYPE, render_metrics
 from mirage.server.schemas import HealthResponse
 
 router = APIRouter()
@@ -35,6 +37,41 @@ async def health(request: Request) -> HealthResponse:
         status="ok",
         workspaces=len(request.app.state.registry),
         uptime_s=round(time.time() - started_at, 3),
+    )
+
+
+@router.get("/v1/ready")
+async def ready(request: Request) -> JSONResponse:
+    """Whether the server takes new workspaces: 503 while it drains for
+    shutdown or holds ``max_workspaces``, so a load balancer sends new
+    work elsewhere. ``/v1/health`` only says the process is up.
+    """
+    registry = request.app.state.registry
+    status = "ready"
+    if registry.draining:
+        status = "draining"
+    elif (
+        registry.max_workspaces is not None
+        and len(registry) >= registry.max_workspaces
+    ):
+        status = "full"
+    return JSONResponse(
+        {"status": status}, status_code=200 if status == "ready" else 503
+    )
+
+
+@router.get("/v1/metrics")
+async def metrics(request: Request) -> Response:
+    """The server's metrics, in Prometheus's text format."""
+    state = request.app.state
+    return Response(
+        content=render_metrics(
+            state.registry,
+            state.jobs,
+            time.time() - state.started_at,
+            state.responses,
+        ),
+        media_type=CONTENT_TYPE,
     )
 
 

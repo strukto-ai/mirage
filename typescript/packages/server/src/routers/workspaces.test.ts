@@ -136,6 +136,15 @@ describe('workspaces router', () => {
     await app.close()
   })
 
+  it('answers 503 while draining', async () => {
+    const app = buildApp()
+    app.registry.draining = true
+    const r = await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { config: RAM } })
+    expect(r.statusCode).toBe(503)
+    expect(r.json()).toEqual({ detail: 'server is draining' })
+    await app.close()
+  })
+
   it('answers 503 past max_workspaces', async () => {
     const app = buildApp({ maxWorkspaces: 2 })
     const create = (id?: string) =>

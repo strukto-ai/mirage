@@ -21,8 +21,15 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { DaemonConfigError } from './daemon_config.ts'
-import { ENV_HOME, ENV_MAX_WORKSPACES } from './env.ts'
-import { Claim, resolveMaxWorkspaces, resolvePolicyFile, WorkspaceRegistry } from './registry.ts'
+import { ENV_DRAIN_SECONDS, ENV_HOME, ENV_MAX_SESSIONS, ENV_MAX_WORKSPACES } from './env.ts'
+import {
+  Claim,
+  resolveDrainSeconds,
+  resolveMaxSessions,
+  resolveMaxWorkspaces,
+  resolvePolicyFile,
+  WorkspaceRegistry,
+} from './registry.ts'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { CommandContext, VfsContext } from '@struktoai/mirage-core/policy/types'
 
@@ -287,5 +294,64 @@ describe('max_workspaces', () => {
     expect(() => resolveMaxWorkspaces(undefined, { [ENV_MAX_WORKSPACES]: value })).toThrow(
       DaemonConfigError,
     )
+  })
+})
+
+describe('resolveMaxSessions', () => {
+  it('reads the env then config', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mir-sessions-'))
+    try {
+      expect(resolveMaxSessions(undefined, { [ENV_HOME]: home })).toBeNull()
+      await writeFile(join(home, 'config.toml'), '[daemon]\nmax_sessions = 8\n')
+      expect(resolveMaxSessions(undefined, { [ENV_HOME]: home })).toBe(8)
+      expect(() => resolveMaxSessions(undefined, { [ENV_MAX_SESSIONS]: '0' })).toThrow(
+        /max_sessions/,
+      )
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('resolveDrainSeconds', () => {
+  it('reads the env then config', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mir-drain-'))
+    try {
+      expect(resolveDrainSeconds(undefined, { [ENV_HOME]: home })).toBe(0)
+      await writeFile(join(home, 'config.toml'), '[daemon]\ndrain_seconds = 25\n')
+      expect(resolveDrainSeconds(undefined, { [ENV_HOME]: home })).toBe(25)
+      expect(resolveDrainSeconds(undefined, { [ENV_HOME]: home, [ENV_DRAIN_SECONDS]: '2.5' })).toBe(
+        2.5,
+      )
+      expect(resolveDrainSeconds(0, { [ENV_DRAIN_SECONDS]: '9' })).toBe(0)
+      for (const bad of ['-1', 'soon', 'Infinity']) {
+        expect(() => resolveDrainSeconds(undefined, { [ENV_DRAIN_SECONDS]: bad })).toThrow(
+          /drain_seconds/,
+        )
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('drain', () => {
+  it('lets running lines finish and cancels the rest', async () => {
+    const registry = new WorkspaceRegistry({ idleGraceSeconds: 10 })
+    const quick = registry.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 'q')
+    const slow = registry.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }), 's')
+    const short = quick.runner.ws.shell('sleep 0.2; echo done')
+    const long = slow.runner.ws.shell('sleep 30').then(
+      () => 'ended',
+      () => 'cancelled',
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const started = Date.now()
+    await registry.drain(1)
+    expect(registry.draining).toBe(true)
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect((await short).stdoutText).toBe('done\n')
+    expect(await long).toBe('cancelled')
+    await registry.closeAll()
   })
 })

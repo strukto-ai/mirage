@@ -146,15 +146,22 @@ export function loginEntry(
  * else the workspace's default profile; a profile the workspace does not
  * define is refused. The login environment is exported by an unrecorded
  * line, so every name clears the session's `pre_session` gate like any
- * `export` would, and a name the profile already set keeps its value.
+ * `export` would, and a name the profile already set keeps its value. A
+ * workspace at `maxSessions`, the server's cap, refuses it with EAGAIN.
  */
 export async function openSession(
   ws: Workspace,
   sessionId: string,
   env: Record<string, string> = {},
   profile: string | null = null,
+  maxSessions: number | null = null,
 ): Promise<void> {
   await ws.ensureSessionsLoaded()
+  if (maxSessions !== null && ws.listSessions().length >= maxSessions) {
+    throw Object.assign(new Error(`workspace is at max_sessions (${String(maxSessions)})`), {
+      code: 'EAGAIN',
+    })
+  }
   const session = ws.createSession(sessionId, profile === null ? {} : { profile })
   try {
     const missing = Object.entries(env).filter(([name]) => !(name in session.env))
@@ -344,7 +351,13 @@ export async function openLogin(
   }
   const sessionId = newSessionId()
   try {
-    await openSession(entry.runner.ws, sessionId, loginEnv(request), keyProfile(request.profile))
+    await openSession(
+      entry.runner.ws,
+      sessionId,
+      loginEnv(request),
+      keyProfile(request.profile),
+      registry.maxSessions,
+    )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.warn(`${door}: cannot open a session on ${request.username}: ${message}`)

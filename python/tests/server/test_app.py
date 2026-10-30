@@ -161,3 +161,29 @@ async def test_a_configured_entry_point_without_asyncssh_fails_the_start(
         async with app.router.lifespan_context(app):
             pass
     assert not (tmp_path / "daemon.pid").exists()
+
+
+@pytest.mark.asyncio
+async def test_the_lifespan_lets_a_running_line_finish_before_it_closes():
+    app = build_app(idle_grace_seconds=10.0, drain_seconds=5)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                "/v1/workspaces",
+                json={
+                    "id": "d",
+                    "config": {
+                        "mounts": {"/": {"vfs": "ram", "mode": "write"}}
+                    },
+                },
+            )
+            assert r.status_code == 201, r.text
+        runner = app.state.registry.get("d").runner
+        line = asyncio.ensure_future(
+            runner.call(runner.ws.shell("sleep 0.3; echo done"))
+        )
+        await asyncio.sleep(0.05)
+    assert app.state.registry.draining
+    assert (await (await line).stdout_str()) == "done\n"

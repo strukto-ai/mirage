@@ -13,12 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FastifyInstance } from 'fastify'
+import type { ExecutionTable } from '../jobs.ts'
+import { CONTENT_TYPE, renderMetrics } from '../metrics.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 
 export interface HealthDeps {
   registry: WorkspaceRegistry
+  jobs: ExecutionTable
   startedAt: number
   exit: () => void
+  /** The responses the server sent, by status code. */
+  responses: ReadonlyMap<number, number>
 }
 
 export function registerHealthRoutes(app: FastifyInstance, deps: HealthDeps): void {
@@ -27,6 +32,24 @@ export function registerHealthRoutes(app: FastifyInstance, deps: HealthDeps): vo
     workspaces: deps.registry.size(),
     uptime_s: Math.round((Date.now() / 1000 - deps.startedAt) * 1000) / 1000,
   }))
+  // Whether the server takes new workspaces: 503 while it drains for
+  // shutdown or holds maxWorkspaces, so a load balancer sends new work
+  // elsewhere. /v1/health only says the process is up.
+  app.get('/v1/ready', async (_req, reply) => {
+    const { registry } = deps
+    let status = 'ready'
+    if (registry.draining) status = 'draining'
+    else if (registry.maxWorkspaces !== null && registry.size() >= registry.maxWorkspaces) {
+      status = 'full'
+    }
+    return reply.status(status === 'ready' ? 200 : 503).send({ status })
+  })
+  app.get('/v1/metrics', async (_req, reply) => {
+    const uptime = Date.now() / 1000 - deps.startedAt
+    return reply
+      .type(CONTENT_TYPE)
+      .send(renderMetrics(deps.registry, deps.jobs, uptime, deps.responses))
+  })
   // The daemon serves every account, so an account may not stop it.
   app.post('/v1/shutdown', async (req, reply) => {
     if (req.account !== null) {

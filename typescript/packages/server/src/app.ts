@@ -13,18 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import Fastify from 'fastify'
-import rateLimit from '@fastify/rate-limit'
 import { DiskRecordClient } from '@struktoai/mirage-node'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
+import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
 import {
   OWNERS_PREFIX,
+  resolveDrainSeconds,
+  resolveMaxSessions,
   resolveMaxWorkspaces,
   resolvePolicyFile,
   WorkspaceRegistry,
 } from './registry.ts'
 import type { AuthConfig } from './auth/index.ts'
 import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
-import { isCrossOrigin, isHostAllowed, resolveAllowedHosts } from './host_validation.ts'
+import {
+  isCrossOrigin,
+  isHostAllowed,
+  resolveAllowedHosts,
+  resolveForwardedAllowIps,
+} from './host_validation.ts'
 import { registerMcpRoutes } from './mcp/http.ts'
 import { registerRpcRoutes } from './rpc/http.ts'
 import { registerAsksRoutes } from './routers/asks.ts'
@@ -82,6 +89,31 @@ export interface BuildAppOptions {
    * `$MIRAGE_POLICY_FILE` or the `policy_file` config key, else runs none.
    */
   policyFile?: string
+  /**
+   * Limits on the requests the app answers, each keyed on the client
+   * address, the account, the workspace, a header or a function of the
+   * request; past one a request answers 429. Undefined reads
+   * `$MIRAGE_RATE_LIMITS` or the `rate_limits` config key, else sets none.
+   */
+  rateLimits?: readonly RateLimit[]
+  /**
+   * The proxies whose `X-Forwarded-For` names the client, addresses or
+   * networks, `*` for any. Undefined reads `$MIRAGE_FORWARDED_ALLOW_IPS` or
+   * the `forwarded_allow_ips` config key, else believes none.
+   */
+  forwardedAllowIps?: readonly string[]
+  /**
+   * The most sessions each workspace holds; past it a new session answers
+   * 429. Undefined reads `$MIRAGE_MAX_SESSIONS` or the `max_sessions`
+   * config key, else sets no cap.
+   */
+  maxSessions?: number
+  /**
+   * How long closing the app lets running lines finish, holding new ones
+   * and refusing new workspaces, before it cancels the rest. Undefined
+   * reads `$MIRAGE_DRAIN_SECONDS` or the `drain_seconds` config key, else 0.
+   */
+  drainSeconds?: number
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -106,14 +138,24 @@ export function buildApp(options: BuildAppOptions = {}) {
     maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
     policies: options.policies ?? [],
     programs: resolvePolicyFile(options.policyFile),
+    maxSessions: resolveMaxSessions(options.maxSessions),
   })
+  const drainSeconds = resolveDrainSeconds(options.drainSeconds)
+  const rateLimits = resolveRateLimits(options.rateLimits)
   const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)
-  const app = Fastify({ logger: false })
-  void app.register(rateLimit, {
-    global: true,
-    max: 1000,
-    timeWindow: '1 minute',
+  const proxies = resolveForwardedAllowIps(options.forwardedAllowIps)
+  // A drain serves reads and running lines to the end; it refuses new
+  // workspaces and holds new lines itself.
+  const app = Fastify({
+    logger: false,
+    trustProxy: proxies.includes('*') ? true : proxies.length > 0 ? proxies : false,
+    return503OnClosing: false,
+  })
+  const responses = new Map<number, number>()
+  app.addHook('onResponse', (_req, reply, done) => {
+    responses.set(reply.statusCode, (responses.get(reply.statusCode) ?? 0) + 1)
+    done()
   })
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   app.addHook('onRequest', (request, reply, done) => {
@@ -135,10 +177,11 @@ export function buildApp(options: BuildAppOptions = {}) {
     done()
   })
   registerAuth(app, authConfig)
+  registerRateLimits(app, rateLimits)
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
   })
-  registerHealthRoutes(app, { registry, startedAt, exit: exitFn })
+  registerHealthRoutes(app, { registry, jobs, startedAt, exit: exitFn, responses })
   registerOAuthRoutes(app, { auth: authConfig })
   registerWorkspacesRoutes(app, { registry, stateRoot, snapshotStore: options.snapshotStore })
   registerSessionsRoutes(app, { registry })
@@ -168,6 +211,11 @@ export function buildApp(options: BuildAppOptions = {}) {
     app.addHook('onReady', async () => {
       const { startSSHServer } = await import('./ssh/server.ts')
       ssh.listener = await startSSHServer(registry, sshConfig)
+    })
+  }
+  if (drainSeconds > 0) {
+    app.addHook('preClose', async () => {
+      await registry.drain(drainSeconds)
     })
   }
   app.addHook('onClose', async () => {

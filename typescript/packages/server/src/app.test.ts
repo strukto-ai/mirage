@@ -155,3 +155,20 @@ function sshExec(
     client.connect({ host: '127.0.0.1', port, username, privateKey })
   })
 }
+
+describe('buildApp drain', () => {
+  it('lets a running line finish before the app closes', async () => {
+    const app = buildApp({ drainSeconds: 5 })
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { id: 'd', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+    })
+    expect(created.statusCode).toBe(201)
+    const line = app.registry.get('d').runner.ws.shell('sleep 0.3; echo done')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await app.close()
+    expect(app.registry.draining).toBe(true)
+    expect((await line).stdoutText).toBe('done\n')
+  })
+})

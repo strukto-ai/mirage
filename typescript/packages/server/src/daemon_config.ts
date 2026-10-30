@@ -22,6 +22,7 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'auth_token',
   'auth_mode',
   'allowed_hosts',
+  'forwarded_allow_ips',
   'jwt_alg',
   'jwt_issuer',
   'jwt_audience',
@@ -31,7 +32,10 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'jwt_authorized_parties',
   'login_client_id',
   'idle_grace_seconds',
+  'drain_seconds',
   'max_workspaces',
+  'max_sessions',
+  'rate_limits',
   'policy_file',
   'port',
   'ssh_port',
@@ -41,8 +45,10 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
 ])
 export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'idle_grace_seconds',
+  'drain_seconds',
   'jwt_clock_skew',
   'max_workspaces',
+  'max_sessions',
   'port',
   'ssh_port',
 ])

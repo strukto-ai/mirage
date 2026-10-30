@@ -12,12 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import functools
 import gc
 import os
 import signal
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from types import FrameType
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -54,6 +58,84 @@ def _tune_interpreter() -> None:
     sys.setswitchinterval(SWITCH_INTERVAL)
 
 
+def _drain_on_signals(served: FastAPI) -> None:
+    """Have SIGTERM and SIGINT drain the app before the server's own
+    handlers stop it, when ``drain_seconds`` is set: running lines get
+    that long to finish while new workspaces are refused and
+    ``/v1/ready`` answers 503, then the server stops as it would have.
+    A signal handler is process-wide, so only the daemon, a process
+    mirage owns, installs one.
+
+    Args:
+        served (FastAPI): the daemon app.
+    """
+    served.state.drain_task = None
+    if served.state.drain_seconds <= 0:
+        return
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        stop = signal.getsignal(signum)
+        if callable(stop):
+            signal.signal(
+                signum, functools.partial(_on_signal, served, loop, stop)
+            )
+
+
+def _on_signal(
+    served: FastAPI,
+    loop: asyncio.AbstractEventLoop,
+    stop: Callable[[int, FrameType | None], Any],
+    signum: int,
+    frame: FrameType | None,
+) -> None:
+    """Start the drain on the app's loop; a signal handler may only hand
+    work to it.
+
+    Args:
+        served (FastAPI): the daemon app.
+        loop (asyncio.AbstractEventLoop): the app's loop.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+        frame (FrameType | None): the interrupted frame.
+    """
+    loop.call_soon_threadsafe(_start_drain, served, stop, signum)
+
+
+def _start_drain(
+    served: FastAPI, stop: Callable[[int, FrameType | None], Any], signum: int
+) -> None:
+    """Drain once; a signal that arrives while it runs changes nothing.
+
+    Args:
+        served (FastAPI): the daemon app.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+    """
+    if served.state.drain_task is None:
+        served.state.drain_task = asyncio.ensure_future(
+            _drain_then_stop(served, stop, signum)
+        )
+
+
+async def _drain_then_stop(
+    served: FastAPI, stop: Callable[[int, FrameType | None], Any], signum: int
+) -> None:
+    """Drain the app, then hand the signal to the server's handler.
+
+    Args:
+        served (FastAPI): the daemon app.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+    """
+    try:
+        await served.state.registry.drain(served.state.drain_seconds)
+    finally:
+        stop(signum, None)
+
+
 app = build_app(
     idle_grace_seconds=_idle_grace,
     on_idle_exit=_exit,
@@ -71,6 +153,7 @@ async def _lifespan(served: FastAPI) -> AsyncIterator[None]:
     """
     _tune_interpreter()
     async with _serve(served):
+        _drain_on_signals(served)
         yield
 
 

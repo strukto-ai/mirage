@@ -216,6 +216,14 @@ describe('loginEnv', () => {
 })
 
 describe('command channels', () => {
+  it('are refused past max_sessions', async () => {
+    const h = await startHarness()
+    Object.assign(h.registry, { maxSessions: 1 })
+    const run = await exec(await connect(h), 'echo never')
+    expect(run.code).not.toBe(0)
+    expect(run.stderr).toContain('workspace is at max_sessions (1)')
+  })
+
   it('return both streams and the status', async () => {
     const client = await connect(await startHarness())
     expect(await exec(client, 'echo out; echo err >&2; exit 3')).toEqual({

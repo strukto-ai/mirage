@@ -59,10 +59,6 @@ export interface WorkspaceRoutesDeps {
   snapshotStore: S3Config | undefined
 }
 
-const WRITE_RATE_LIMIT = {
-  config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
-}
-
 interface WorkspaceIdParams {
   id: string
 }
@@ -213,6 +209,9 @@ async function claimed(
   id: string,
   build: () => Promise<unknown>,
 ): Promise<unknown> {
+  if (deps.registry.draining) {
+    return answer(reply, 503, { detail: 'server is draining' })
+  }
   if (!deps.registry.hasRoom()) {
     return answer(reply, 503, {
       detail: `server is at max_workspaces (${String(deps.registry.maxWorkspaces)})`,
@@ -412,7 +411,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       .map(makeBrief),
   )
 
-  app.post('/v1/workspaces/load', WRITE_RATE_LIMIT, async (req, reply) => {
+  app.post('/v1/workspaces/load', async (req, reply) => {
     const multipart = (req.headers['content-type'] ?? '').startsWith('multipart/')
     let body: LoadWorkspaceRequest
     let source: string | Uint8Array
@@ -643,31 +642,27 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       .send(Buffer.from(tar.buffer, tar.byteOffset, tar.byteLength))
   })
 
-  app.post<{ Params: WorkspaceIdParams }>(
-    '/v1/workspaces/:id/snapshot',
-    WRITE_RATE_LIMIT,
-    async (req, reply) => {
-      const { id } = req.params
-      const entry = deps.registry.visible(id, req.account)
-      if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
-      const parsed = SnapshotBodySchema.safeParse(req.body)
-      if (!parsed.success) {
-        return reply.status(400).send({ detail: `bad snapshot request: ${parsed.error.message}` })
-      }
-      if (deps.snapshotStore === undefined) return noStore(reply)
-      const { key } = parsed.data
-      const scoped = storeKey(req.account, key)
-      if (scoped === null) {
-        return reply.status(400).send({ detail: `invalid snapshot key: ${key}` })
-      }
-      let size: number
-      try {
-        size = await entry.runner.ws.snapshot(scoped, { s3: deps.snapshotStore })
-      } catch (e) {
-        if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
-        throw e
-      }
-      return reply.status(200).send({ id, key, size })
-    },
-  )
+  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/snapshot', async (req, reply) => {
+    const { id } = req.params
+    const entry = deps.registry.visible(id, req.account)
+    if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+    const parsed = SnapshotBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ detail: `bad snapshot request: ${parsed.error.message}` })
+    }
+    if (deps.snapshotStore === undefined) return noStore(reply)
+    const { key } = parsed.data
+    const scoped = storeKey(req.account, key)
+    if (scoped === null) {
+      return reply.status(400).send({ detail: `invalid snapshot key: ${key}` })
+    }
+    let size: number
+    try {
+      size = await entry.runner.ws.snapshot(scoped, { s3: deps.snapshotStore })
+    } catch (e) {
+      if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
+      throw e
+    }
+    return reply.status(200).send({ id, key, size })
+  })
 }

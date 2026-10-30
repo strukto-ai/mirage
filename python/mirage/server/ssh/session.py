@@ -14,6 +14,7 @@
 
 import asyncio
 import concurrent.futures
+import errno
 import logging
 import secrets
 import shlex
@@ -199,6 +200,7 @@ async def open_session(
     session_id: str,
     env: Mapping[str, str] | None = None,
     profile: str | None = None,
+    max_sessions: int | None = None,
 ) -> None:
     """Create the session a channel runs as.
 
@@ -214,11 +216,18 @@ async def open_session(
         env (Mapping[str, str] | None): the login environment.
         profile (str | None): the profile the login key is bound to;
             None for the workspace default.
+        max_sessions (int | None): the most sessions the workspace
+            holds, the server's cap; None for none.
 
     Raises:
         PolicyError: the workspace has no such profile.
+        OSError: EAGAIN when the workspace is at ``max_sessions``.
     """
     await ws.ensure_sessions_loaded()
+    if max_sessions is not None and len(ws.list_sessions()) >= max_sessions:
+        raise OSError(
+            errno.EAGAIN, f"workspace is at max_sessions ({max_sessions})"
+        )
     session = ws.create_session(session_id, profile=profile)
     try:
         missing = {
@@ -487,7 +496,13 @@ async def open_login(
     try:
         profile = key_profile(process.channel.get_connection())
         await runner.call(
-            open_session(runner.ws, session_id, login_env(process), profile)
+            open_session(
+                runner.ws,
+                session_id,
+                login_env(process),
+                profile,
+                registry.max_sessions,
+            )
         )
     except Exception as exc:
         logger.warning(

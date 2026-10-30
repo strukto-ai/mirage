@@ -60,8 +60,13 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
       const sid = req.body.session_id ?? `sess_${randomBytes(6).toString('hex')}`
       const ws = deps.registry.get(wsId).runner.ws
       await ws.ensureSessionsLoaded()
-      if (ws.listSessions().some((s) => s.sessionId === sid)) {
+      const held = ws.listSessions()
+      if (held.some((s) => s.sessionId === sid)) {
         return reply.status(409).send({ detail: `session id already exists: ${sid}` })
+      }
+      const cap = deps.registry.maxSessions
+      if (cap !== null && held.length >= cap) {
+        return reply.status(429).send({ detail: `workspace is at max_sessions (${String(cap)})` })
       }
       const mounts = req.body.mounts ?? null
       const profile = req.body.profile ?? null

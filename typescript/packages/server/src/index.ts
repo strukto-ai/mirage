@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { buildApp, type BuildAppOptions, type MirageApp } from './app.ts'
+export { type RateLimit } from './rate_limit.ts'
 export {
   absolutizeScripts,
   checkWorkspaceConfig,

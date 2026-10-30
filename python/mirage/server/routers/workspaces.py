@@ -25,7 +25,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
-from mirage import Workspace
+from mirage import Workspace, WorkspaceRunner
 from mirage.concurrency.limiter import run_blocking
 from mirage.config import (
     WorkspaceConfig,
@@ -33,6 +33,7 @@ from mirage.config import (
     resolve_secrets,
 )
 from mirage.io.network import run_with_network
+from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.profile import SessionProfile
 from mirage.secrets.errors import SecretsError
@@ -105,6 +106,8 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
         workspace_id (str): the id being created.
     """
     registry = request.app.state.registry
+    if registry.draining:
+        raise HTTPException(status_code=503, detail="server is draining")
     if not registry.has_room():
         raise HTTPException(
             status_code=503,
@@ -150,6 +153,15 @@ async def _building(
             )
         async with _claimed(request, workspace_id):
             yield
+
+
+async def _construct(kwargs: dict[str, Any]) -> Workspace:
+    """Construct a workspace, on the loop that awaits this.
+
+    Args:
+        kwargs (dict[str, Any]): the workspace's keyword arguments.
+    """
+    return Workspace(**kwargs)
 
 
 def store_key(request: Request, key: str) -> str:
@@ -334,7 +346,7 @@ async def create_workspace(
                 )
                 kwargs["owns_store"] = True
             try:
-                ws = Workspace(**kwargs)
+                runner = await WorkspaceRunner.build(_construct(kwargs))
             except (
                 FileNotFoundError,
                 ImportError,
@@ -351,17 +363,20 @@ async def create_workspace(
                     mountpoint,
                 ) in req.config.kernel_mounts().items():
                     await run_blocking(
-                        ws.add_fuse_mount, prefix, mountpoint, backend=backend
+                        runner.ws.add_fuse_mount,
+                        prefix,
+                        mountpoint,
+                        backend=backend,
                     )
                 entry = registry.add(
-                    ws, workspace_id=wid, owner=request.state.account
+                    runner, workspace_id=wid, owner=request.state.account
                 )
                 entry.config_digest = digest
             except ValueError as e:
-                await ws.close()
+                await runner.stop()
                 raise HTTPException(status_code=409, detail=str(e))
             except Exception:
-                await ws.close()
+                await runner.stop()
                 raise
         return await make_detail(entry)
 
@@ -576,11 +591,15 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             raise HTTPException(
                 status_code=400, detail=f"override build failed: {e}"
             )
-        try:
-            # The snapshot's saved values meet the server's policies as a
-            # live write does, before any of them lands.
+        restored: list[Policy] = []
+
+        # The snapshot's saved values meet the server's policies as a live
+        # write does, before any of them lands; the restore runs on the
+        # loop the workspace will run on.
+        async def restore() -> Workspace:
             async with registry.restoring() as policies:
-                ws = await run_with_network(
+                restored.extend(policies)
+                return await run_with_network(
                     rule,
                     Workspace.load(
                         source,
@@ -592,6 +611,9 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                         policies=policies,
                     ),
                 )
+
+        try:
+            runner = await WorkspaceRunner.build(restore())
         except PolicyDenied as e:
             raise HTTPException(status_code=403, detail=str(e))
         except FileNotFoundError:
@@ -606,13 +628,13 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             raise HTTPException(status_code=400, detail=f"load failed: {e}")
         try:
             entry = registry.add(
-                ws,
+                runner,
                 workspace_id=wid,
                 owner=request.state.account,
-                restored_with=policies,
+                restored_with=restored,
             )
         except ValueError as e:
-            await ws.close()
+            await runner.stop()
             raise HTTPException(status_code=409, detail=str(e))
     return await make_detail(entry)
 

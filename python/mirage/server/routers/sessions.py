@@ -58,9 +58,15 @@ async def create_session(
     # On the workspace's own loop, as every change to its session table
     # is: its thread iterates the table, which must not grow under it.
     async def create() -> SessionState:
-        if any(s.session_id == sid for s in ws.list_sessions()):
+        held = ws.list_sessions()
+        if any(s.session_id == sid for s in held):
             raise HTTPException(
                 status_code=409, detail=f"session id already exists: {sid!r}"
+            )
+        cap = request.app.state.registry.max_sessions
+        if cap is not None and len(held) >= cap:
+            raise HTTPException(
+                status_code=429, detail=f"workspace is at max_sessions ({cap})"
             )
         return ws.create_session(
             sid, mounts=req.mounts or None, profile=req.profile

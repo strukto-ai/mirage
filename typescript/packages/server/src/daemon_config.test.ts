@@ -64,6 +64,20 @@ describe('validateDaemonTable', () => {
     }).not.toThrow()
   })
 
+  it('accepts the server operation keys', () => {
+    expect(() => {
+      validateDaemonTable({
+        rate_limits: 'ip=1000/minute',
+        forwarded_allow_ips: '10.0.0.0/8',
+        max_sessions: '16',
+        drain_seconds: '25',
+      })
+    }).not.toThrow()
+    expect(() => {
+      validateDaemonTable({ drain_seconds: 'soon' })
+    }).toThrow(/drain_seconds/)
+  })
+
   it('rejects unknown keys naming them', () => {
     expect(() => {
       validateDaemonTable({ typo_key: 'x', url: 'http://h:1' })

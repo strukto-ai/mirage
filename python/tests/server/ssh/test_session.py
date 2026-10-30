@@ -400,3 +400,12 @@ async def test_a_key_with_a_bad_profile_is_refused(tmp_path, options, reason):
     assert result.stdout == ""
     assert "cannot open a session" in result.stderr
     assert reason in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_a_login_past_max_sessions_is_refused(ssh):
+    ssh.registry.max_sessions = 1
+    async with ssh.connect() as conn:
+        result = await conn.run("echo never")
+    assert result.exit_status == 1
+    assert "workspace is at max_sessions (1)" in result.stderr

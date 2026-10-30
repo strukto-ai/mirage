@@ -34,7 +34,7 @@ import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
 import { watchNetwork } from '@struktoai/mirage-node/io/network'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
-import { ENV_MAX_WORKSPACES, ENV_POLICY_FILE } from './env.ts'
+import { ENV_DRAIN_SECONDS, ENV_MAX_SESSIONS, ENV_MAX_WORKSPACES, ENV_POLICY_FILE } from './env.ts'
 import { ExecutionTable } from './jobs.ts'
 import { mirageHome } from './paths.ts'
 
@@ -98,6 +98,8 @@ export interface WorkspaceRegistryOptions {
   policies?: readonly Policy[]
   /** The server's policy programs, by method, which answer the same way. */
   programs?: ProfileScripts
+  /** The most sessions each workspace holds, its default among them; null for no cap. */
+  maxSessions?: number | null
 }
 
 /**
@@ -110,22 +112,75 @@ export function resolveMaxWorkspaces(
   maxWorkspaces?: number | null,
   env: Record<string, string | undefined> = process.env,
 ): number | null {
-  let value: string | number | undefined = maxWorkspaces ?? undefined
+  return cap(maxWorkspaces, env, ENV_MAX_WORKSPACES, 'max_workspaces')
+}
+
+/**
+ * The most sessions each workspace holds, its default session among them:
+ * `maxSessions` when given, else `$MIRAGE_MAX_SESSIONS`, else the
+ * `max_sessions` key in config.toml's `[daemon]` table, else no cap.
+ * Mirrors Python's `resolve_max_sessions`.
+ */
+export function resolveMaxSessions(
+  maxSessions?: number | null,
+  env: Record<string, string | undefined> = process.env,
+): number | null {
+  return cap(maxSessions, env, ENV_MAX_SESSIONS, 'max_sessions')
+}
+
+/**
+ * A positive whole cap: `given`, else the `name` variable, else `key` in
+ * config.toml's `[daemon]` table, else null for no cap. Throws
+ * DaemonConfigError for anything but a positive whole number.
+ */
+function cap(
+  given: number | null | undefined,
+  env: Record<string, string | undefined>,
+  name: string,
+  key: string,
+): number | null {
+  let value: string | number | undefined = given ?? undefined
   if (value === undefined) {
-    const fromEnv = env[ENV_MAX_WORKSPACES]
+    const fromEnv = env[name]
+    value =
+      fromEnv !== undefined && fromEnv !== '' ? fromEnv : readDaemonTable(mirageHome(env))[key]
+    if (value === undefined || value === '') return null
+  }
+  const held = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : 0
+  if (!Number.isSafeInteger(held) || held < 1) {
+    throw new DaemonConfigError(
+      `${key} must be a positive whole number, got ${JSON.stringify(value)}`,
+    )
+  }
+  return held
+}
+
+/**
+ * How long a shutdown lets running lines finish before it cancels them:
+ * `drainSeconds` when given, else `$MIRAGE_DRAIN_SECONDS`, else the
+ * `drain_seconds` key in config.toml's `[daemon]` table, else 0. Mirrors
+ * Python's `resolve_drain_seconds`.
+ */
+export function resolveDrainSeconds(
+  drainSeconds?: number | null,
+  env: Record<string, string | undefined> = process.env,
+): number {
+  let value: string | number | undefined = drainSeconds ?? undefined
+  if (value === undefined) {
+    const fromEnv = env[ENV_DRAIN_SECONDS]
     value =
       fromEnv !== undefined && fromEnv !== ''
         ? fromEnv
-        : readDaemonTable(mirageHome(env)).max_workspaces
-    if (value === undefined || value === '') return null
+        : readDaemonTable(mirageHome(env)).drain_seconds
+    if (value === undefined || value === '') return 0
   }
-  const cap = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : 0
-  if (!Number.isSafeInteger(cap) || cap < 1) {
+  const seconds = typeof value === 'number' ? value : value.trim() === '' ? NaN : Number(value)
+  if (!Number.isFinite(seconds) || seconds < 0) {
     throw new DaemonConfigError(
-      `max_workspaces must be a positive whole number, got ${JSON.stringify(value)}`,
+      `drain_seconds must be a number of seconds, 0 or more, got ${JSON.stringify(value)}`,
     )
   }
-  return cap
+  return seconds
 }
 
 /**
@@ -167,6 +222,12 @@ export class WorkspaceRegistry {
   accountsRequired: boolean
   private readonly owners: DiskRecordClient | null
   readonly maxWorkspaces: number | null
+  readonly maxSessions: number | null
+  /**
+   * Set once a shutdown starts draining: no workspace is built after it,
+   * and readiness answers that the server is going.
+   */
+  draining = false
   readonly policies: readonly Policy[]
   private readonly programs: ProfileScripts
   private readonly admissionPrograms: ScriptPolicy
@@ -174,6 +235,7 @@ export class WorkspaceRegistry {
 
   constructor(options: WorkspaceRegistryOptions = {}) {
     this.maxWorkspaces = options.maxWorkspaces ?? null
+    this.maxSessions = options.maxSessions ?? null
     this.policies = [...(options.policies ?? [])]
     this.programs = Object.fromEntries(
       Object.entries(options.programs ?? {}).filter(([method]) => method !== 'preWorkspace'),
@@ -240,6 +302,17 @@ export class WorkspaceRegistry {
     if (this.maxWorkspaces === null) return true
     const ids = new Set([...this.entries.keys(), ...this.creates.keys()])
     return ids.size <= this.maxWorkspaces
+  }
+
+  /**
+   * Stop building workspaces and let running lines end. Each workspace
+   * holds new lines while its running ones finish, up to `seconds`; the
+   * lines still running then are cancelled. The workspaces stay registered
+   * for `closeAll` to stop. Mirrors Python's `drain`.
+   */
+  async drain(seconds: number): Promise<void> {
+    this.draining = true
+    await Promise.all([...this.entries.values()].map((entry) => settle(entry, seconds)))
   }
 
   /**
@@ -515,6 +588,21 @@ function workspaceContext(
  * Stop an entry's runner, closing the runtimes its server policy programs
  * ran on before the workspace goes. Mirrors Python's `_stop`.
  */
+/**
+ * Let an entry's running lines end within `seconds`, holding new ones
+ * meanwhile, and cancel those still running then.
+ */
+async function settle(entry: WorkspaceEntry, seconds: number): Promise<void> {
+  const ws = entry.runner.ws
+  try {
+    await ws.quiesced(() => Promise.resolve(), seconds)
+  } catch (err) {
+    if ((err as { code?: unknown }).code !== 'EBUSY') throw err
+    console.debug(`drain: cancelling ${entry.id}'s lines:`, err)
+    await ws.cancel()
+  }
+}
+
 async function stop(entry: WorkspaceEntry, drop = false): Promise<void> {
   if (entry.programs !== null) {
     try {

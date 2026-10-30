@@ -20,6 +20,7 @@ import json
 import lzma
 import os
 import tarfile
+import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -1063,13 +1064,15 @@ async def test_a_create_waits_out_a_load_of_the_same_id(
     # A slow release still frees the id before the load answers.
     secret = "s" * 32
     app = _jwt_app(secret, tmp_path / "state", snapshot_store=snapshot_store)
-    loading = asyncio.Event()
-    finish = asyncio.Event()
+    # The load runs on the loop its workspace would run on, a thread of its
+    # own, so it is held with thread-safe events.
+    loading = threading.Event()
+    finish = threading.Event()
     release = WorkspaceRegistry.release
 
     async def held_load(*args, **kwargs):
         loading.set()
-        await finish.wait()
+        await asyncio.to_thread(finish.wait)
         raise ValueError("not a snapshot")
 
     async def slow_release(self, workspace_id):
@@ -1082,7 +1085,7 @@ async def test_a_create_waits_out_a_load_of_the_same_id(
         load = asyncio.create_task(
             alice.post("/v1/workspaces/load", json={"key": "s.tar", "id": "w"})
         )
-        await loading.wait()
+        await asyncio.to_thread(loading.wait)
         r = await alice.post(
             "/v1/workspaces", json={**_minimal_config(), "id": "w"}
         )
@@ -1714,3 +1717,15 @@ async def test_clone_with_a_bad_capacity_override_is_a_bad_request():
         )
         assert r.status_code == 400, r.text
         assert "capacity must be a size like 100MB" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_draining_server_refuses_new_workspaces():
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    app.state.registry.draining = True
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+    assert r.status_code == 503
+    assert r.json() == {"detail": "server is draining"}

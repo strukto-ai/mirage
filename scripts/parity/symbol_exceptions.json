@@ -1,6 +1,21 @@
 {
  "baseline": 2653,
  "modules": {
+  "server/metrics": {
+   "python_only": {
+    "MetricsMiddleware": "Starlette counts the responses in an ASGI middleware; Fastify counts them in an onResponse hook buildApp adds.",
+    "_resident_bytes": "Python reads resident memory from /proc, where the system has it; Node reads process.memoryUsage().rss inline."
+   }
+  },
+  "server/rate_limit": {
+   "python_only": {
+    "RateLimitMiddleware": "Starlette answers 429 in an ASGI middleware; Fastify answers it in the onRequest hook registerRateLimits adds."
+   },
+   "typescript_only": {
+    "measure": "A TypeScript RateLimit is a plain object, so its rate is checked by a function; Python's dataclass checks it as it is built.",
+    "registerRateLimits": "Fastify answers 429 in an onRequest hook this registers; Starlette's twin is RateLimitMiddleware."
+   }
+  },
   "workspace/executor/builtins/help/help": {
    "typescript_only": {
     "specOf": "A topic's spec by name: Python indexes SHELL_SPECS and lets a missing name raise KeyError; TypeScript's index type carries undefined, so the lookup that throws lives in this helper."

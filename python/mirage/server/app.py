@@ -17,12 +17,14 @@ import importlib
 import logging
 import os
 import time
+from collections import Counter
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import cast
 
 from fastapi import FastAPI
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from mirage.concurrency.limiter import run_blocking
 from mirage.policy.base import Policy
@@ -39,16 +41,25 @@ from mirage.server.daemon_config import (
 from mirage.server.host_validation import (
     HostHeaderMiddleware,
     resolve_allowed_hosts,
+    resolve_forwarded_allow_ips,
 )
 from mirage.server.mcp.http import register_mcp_routes
+from mirage.server.metrics import MetricsMiddleware
 from mirage.server.paths import (
     mirage_home,
     pid_file_path,
     state_root_path,
 )
+from mirage.server.rate_limit import (
+    RateLimit,
+    RateLimitMiddleware,
+    resolve_rate_limits,
+)
 from mirage.server.registry import (
     OWNERS_PREFIX,
     WorkspaceRegistry,
+    resolve_drain_seconds,
+    resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
 )
@@ -160,6 +171,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if listener is not None:
             listener.close()
             await listener.wait_closed()
+        if app.state.drain_seconds > 0:
+            await app.state.registry.drain(app.state.drain_seconds)
         try:
             await app.state.mcp.close()
             await app.state.jobs.close()
@@ -182,6 +195,10 @@ def build_app(
     max_workspaces: int | None = None,
     policies: Sequence[Policy] = (),
     policy_file: str | Path | None = None,
+    rate_limits: Sequence[RateLimit] | None = None,
+    forwarded_allow_ips: Sequence[str] | None = None,
+    max_sessions: int | None = None,
+    drain_seconds: float | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -237,6 +254,26 @@ def build_app(
             answer the same way. ``None`` (default) reads
             ``$MIRAGE_POLICY_FILE`` or the ``policy_file`` config key,
             else runs none.
+        rate_limits (Sequence[RateLimit] | None): limits on the requests
+            the app answers, each keyed on the client address, the
+            account, the workspace, a header or a function of the
+            request; past one a request answers 429. ``None`` (default)
+            reads ``$MIRAGE_RATE_LIMITS`` or the ``rate_limits`` config
+            key, else sets none.
+        forwarded_allow_ips (Sequence[str] | None): the proxies whose
+            ``X-Forwarded-For`` names the client, addresses or networks,
+            ``*`` for any. ``None`` (default) reads
+            ``$MIRAGE_FORWARDED_ALLOW_IPS`` or the ``forwarded_allow_ips``
+            config key, else believes none.
+        max_sessions (int | None): the most sessions each workspace
+            holds; past it a new session answers 429. ``None`` (default)
+            reads ``$MIRAGE_MAX_SESSIONS`` or the ``max_sessions`` config
+            key, else sets no cap.
+        drain_seconds (float | None): how long a shutdown lets running
+            lines finish, holding new ones and refusing new workspaces,
+            before it cancels the rest. ``None`` (default) reads
+            ``$MIRAGE_DRAIN_SECONDS`` or the ``drain_seconds`` config key,
+            else 0, which drains nothing.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -245,6 +282,9 @@ def build_app(
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
+    limits = resolve_rate_limits(rate_limits)
+    if limits:
+        app.add_middleware(RateLimitMiddleware, rate_limits=limits)
     auth = auth_config if auth_config is not None else resolve_auth_config()
     if auth.mode == AuthMode.LOCAL and auth.local_token is None:
         logger.warning(
@@ -253,6 +293,11 @@ def build_app(
             "MIRAGE_AUTH_MODE to enforce authentication."
         )
     app.add_middleware(AuthMiddleware, config=auth)
+    app.state.responses = Counter()
+    app.add_middleware(MetricsMiddleware, responses=app.state.responses)
+    proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
+    if proxies:
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=proxies)
     app.state.allowed_hosts = hosts
     app.state.auth_config = auth
     app.state.started_at = time.time()
@@ -267,7 +312,9 @@ def build_app(
         max_workspaces=resolve_max_workspaces(max_workspaces),
         policies=policies,
         programs=resolve_policy_file(policy_file),
+        max_sessions=resolve_max_sessions(max_sessions),
     )
+    app.state.drain_seconds = resolve_drain_seconds(drain_seconds)
     app.state.jobs = app.state.registry.jobs
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
