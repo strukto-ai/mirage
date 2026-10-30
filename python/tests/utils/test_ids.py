@@ -15,6 +15,7 @@
 import ast
 import functools
 import importlib.util
+import random
 import re
 import time
 import uuid
@@ -256,6 +257,26 @@ def test_splitmix64_matches_its_published_vector():
 def test_seeded_source_replays_its_words():
     source = SeededIdSource(42)
     assert [source.random_u32() for _ in range(4)] == SEED_42_WORDS
+
+
+def test_seeded_words_continue_the_sequence():
+    source = SeededIdSource(42)
+    words = source.random_words(3)
+    assert [
+        int.from_bytes(words[at : at + 4], "little") for at in range(0, 12, 4)
+    ] == SEED_42_WORDS[:3]
+    assert source.random_u32() == SEED_42_WORDS[3]
+
+
+def test_system_words_lead_with_the_words_random_u32_draws():
+    random.seed(9)
+    expected = [SystemIdSource().random_u32() for _ in range(5)]
+    random.seed(9)
+    words = SystemIdSource().random_words(5)
+    assert len(words) >= 20 and len(words) % 4 == 0
+    assert [
+        int.from_bytes(words[at : at + 4], "little") for at in range(0, 20, 4)
+    ] == expected
 
 
 def test_seeded_sources_with_other_seeds_differ():

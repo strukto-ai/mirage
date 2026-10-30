@@ -7,7 +7,7 @@ use crate::{Stream, StreamError, parse_config};
 
 const WORK: usize = 16 * 1024;
 const MEMORY: u64 = 1024 * 1024;
-const DRAWS: usize = 1024;
+const DRAWS: usize = 16 * 1024;
 const MAX_LINES: u64 = 1_000_000;
 
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -48,6 +48,81 @@ fn decimal_u64<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64,
         .map_err(serde::de::Error::custom)
 }
 
+/// Uniform draws below a limit made from the host's 32-bit words as
+/// `random_below` makes them on both hosts: one word, or two most
+/// significant first past 32 bits, its top bits kept and a value past the
+/// limit drawn again. Words are asked for only as many as the draws left
+/// take with no redraw, so a seeded source, which answers exactly that
+/// many, is left at the word `random_below` would leave next. A platform
+/// source may answer more, which the next draws take.
+#[derive(Default)]
+struct Draws {
+    words: VecDeque<u32>,
+    limit: u64,
+    left: usize,
+    descending: bool,
+}
+
+fn words_for(limit: u64) -> usize {
+    if limit >> 32 == 0 { 1 } else { 2 }
+}
+
+impl Draws {
+    fn start(&mut self, limit: u64, count: usize, descending: bool) {
+        self.limit = limit;
+        self.left = count;
+        self.descending = descending;
+    }
+
+    /// Make the draws the words on hand allow into `into`; the words the
+    /// rest take at the least, 0 once every draw is made.
+    fn make(&mut self, into: &mut VecDeque<u64>) -> usize {
+        while self.left > 0 {
+            let width = words_for(self.limit);
+            if self.words.len() < width {
+                return self.least() - self.words.len();
+            }
+            let mut drawn = 0u64;
+            for _ in 0..width {
+                drawn = (drawn << 32) | u64::from(self.words.pop_front().unwrap());
+            }
+            let value = drawn >> (width as u32 * 32 - (64 - self.limit.leading_zeros()));
+            if value < self.limit {
+                into.push_back(value);
+                self.left -= 1;
+                if self.descending {
+                    self.limit -= 1;
+                }
+            }
+        }
+        0
+    }
+
+    /// The words the draws left take when none is drawn again.
+    fn least(&self) -> usize {
+        let wide = if words_for(self.limit) == 1 {
+            0
+        } else if !self.descending {
+            self.left
+        } else {
+            let lowest = self.limit - (self.left as u64 - 1);
+            (self.limit - lowest.max(1 << 32) + 1) as usize
+        };
+        self.left + wide
+    }
+
+    fn take(&mut self, data: &[u8], count: usize) -> Result<(), StreamError> {
+        if data.len() < count * 4 || data.len() % 4 != 0 {
+            return Err(StreamError::new("shuf: invalid random response"));
+        }
+        self.words.extend(
+            data.chunks_exact(4)
+                .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap())),
+        );
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Phase {
     Load,
@@ -67,11 +142,7 @@ enum Request {
         size: usize,
         index: bool,
     },
-    Random {
-        limit: u64,
-        count: usize,
-        descending: bool,
-    },
+    Words(usize),
     Write(usize),
     Swap {
         left: u64,
@@ -97,6 +168,7 @@ struct Shuf {
     order: Vec<u64>,
     shuffle_left: u64,
     random: VecDeque<u64>,
+    drawing: Draws,
     seen: HashSet<u64>,
     emitted: u64,
     selected: Option<(u64, u64)>,
@@ -146,6 +218,7 @@ fn create(config: Config) -> Shuf {
         order: Vec::new(),
         shuffle_left: 0,
         random: VecDeque::new(),
+        drawing: Draws::default(),
         seen: HashSet::new(),
         emitted: 0,
         selected: None,
@@ -162,11 +235,14 @@ impl Shuf {
         self.taken = false;
     }
     fn draws(&mut self, limit: u64, count: usize, descending: bool) {
-        self.ask(Request::Random {
-            limit,
-            count: count.min(DRAWS),
-            descending,
-        });
+        self.drawing.start(limit, count.min(DRAWS), descending);
+        self.make_draws();
+    }
+    fn make_draws(&mut self) {
+        let words = self.drawing.make(&mut self.random);
+        if words > 0 {
+            self.ask(Request::Words(words));
+        }
     }
     fn indexed(&self) -> bool {
         self.config.mode == Mode::Indexed
@@ -474,13 +550,7 @@ impl Stream for Shuf {
                 size,
                 index,
             } => json!({"op":"read", "offset":offset, "size":size, "index":index}),
-            Request::Random {
-                limit,
-                count,
-                descending,
-            } => {
-                json!({"op":"random", "limit":limit.to_string(), "count":count, "descending":descending})
-            }
+            Request::Words(count) => json!({"op":"words", "count":count}),
             Request::Swap { left, right } => json!({"op":"swap", "left":left, "right":right}),
             Request::Write(bucket) => {
                 let len = self.parts[bucket].len().min(WORK);
@@ -501,14 +571,9 @@ impl Stream for Shuf {
             .take()
             .ok_or_else(|| StreamError::new("shuf: no pending request"))?
         {
-            Request::Random { count, .. } => {
-                if data.len() != count * 8 {
-                    return Err(StreamError::new("shuf: invalid random response"));
-                }
-                self.random.extend(
-                    data.chunks_exact(8)
-                        .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap())),
-                );
+            Request::Words(count) => {
+                self.drawing.take(data, count)?;
+                self.make_draws();
             }
             Request::Read {
                 offset,
@@ -569,7 +634,7 @@ enum Stage {
 }
 
 enum Storage {
-    Random(usize),
+    Words(usize),
     Read {
         spool: u64,
         offset: u64,
@@ -596,6 +661,7 @@ struct Plan {
     pending: Option<Storage>,
     taken: bool,
     payload: Vec<u8>,
+    drawing: Draws,
 }
 
 impl Plan {
@@ -622,6 +688,7 @@ impl Plan {
             pending: None,
             taken: false,
             payload: Vec::new(),
+            drawing: Draws::default(),
         }
     }
     fn spool(&mut self) -> u64 {
@@ -645,6 +712,14 @@ impl Plan {
             low: 0,
             high: 0,
         }));
+    }
+    /// Draw the buckets a record that never scatters would have taken, so
+    /// the source's next word matches a scatter that drew them.
+    fn discard_draws(&mut self) {
+        let words = self.drawing.make(&mut VecDeque::new());
+        if words > 0 {
+            self.ask(Storage::Words(words));
+        }
     }
     fn retire(&mut self) {
         self.close.push(self.task.take().unwrap().spool);
@@ -681,7 +756,8 @@ impl Plan {
                 } else if !self.repeat && task.available == 1 {
                     self.stage = Stage::Copy;
                     if task.depth < 4 {
-                        self.ask(Storage::Random(usize::from(4 - task.depth)));
+                        self.drawing.start(16, usize::from(4 - task.depth), false);
+                        self.discard_draws();
                     }
                 } else if self.repeat || task.depth == 4 {
                     self.index = Some(self.spool());
@@ -788,9 +864,7 @@ impl Stream for Plan {
             }
             self.taken = true;
             let header = match *pending {
-                Storage::Random(count) => {
-                    json!({"op":"random", "limit":"16", "count":count, "descending":false})
-                }
+                Storage::Words(count) => json!({"op":"words", "count":count}),
                 Storage::Read {
                     spool,
                     offset,
@@ -842,7 +916,12 @@ impl Stream for Plan {
                 }
                 Ok(())
             }
-            Some(Storage::Random(_) | Storage::Write(_) | Storage::Close(_)) => Ok(()),
+            Some(Storage::Words(count)) => {
+                self.drawing.take(data, count)?;
+                self.discard_draws();
+                Ok(())
+            }
+            Some(Storage::Write(_) | Storage::Close(_)) => Ok(()),
             None => self
                 .active
                 .as_mut()
@@ -895,7 +974,7 @@ mod tests {
                     let size = request["size"].as_u64().unwrap() as usize;
                     source[offset..offset + size].to_vec()
                 }
-                "random" => vec![0; request["count"].as_u64().unwrap() as usize * 8],
+                "words" => vec![0; request["count"].as_u64().unwrap() as usize * 4],
                 "swap" => {
                     let left = request["left"].as_u64().unwrap() as usize * 16;
                     let right = request["right"].as_u64().unwrap() as usize * 16;
@@ -968,7 +1047,78 @@ mod tests {
         let mut stream = create(serde_json::from_value(config).unwrap());
         stream.drain(&mut Vec::new()).unwrap();
         assert!(stream.order.is_empty());
-        assert!(matches!(stream.request, Some(Request::Random { .. })));
+        assert!(matches!(stream.request, Some(Request::Words(_))));
+    }
+
+    /// The sequential twin of `random_below` in ids.py over a word source.
+    fn random_below(words: &mut impl FnMut() -> u32, limit: u64) -> u64 {
+        let bits = 64 - limit.leading_zeros();
+        let width = words_for(limit) as u32;
+        loop {
+            let mut drawn = 0u64;
+            for _ in 0..width {
+                drawn = (drawn << 32) | u64::from(words());
+            }
+            let value = drawn >> (width * 32 - bits);
+            if value < limit {
+                return value;
+            }
+        }
+    }
+
+    fn source(mut state: u64) -> impl FnMut() -> u32 {
+        move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 16) as u32
+        }
+    }
+
+    #[test]
+    fn draws_take_the_words_random_below_takes_and_keep_a_surplus() {
+        let cases = [
+            (1u64, 40usize, false),
+            (16, 300, false),
+            (1000, 999, true),
+            ((1 << 32) + 5, 12, true),
+            ((1 << 32) - 1, 7, false),
+            (u64::MAX, 9, false),
+            (3 << 40, 50, false),
+        ];
+        for ((limit, count, descending), surplus) in cases.into_iter().zip([0, 3, 0, 1, 0, 64, 9]) {
+            let mut reference = source(limit ^ 0x9e37_79b9);
+            let mut taken = 0usize;
+            let mut counted = || {
+                taken += 1;
+                reference()
+            };
+            let expected: Vec<u64> = (0..count as u64)
+                .map(|at| random_below(&mut counted, if descending { limit - at } else { limit }))
+                .collect();
+            let mut host = source(limit ^ 0x9e37_79b9);
+            let mut draws = Draws::default();
+            draws.start(limit, count, descending);
+            let mut made = VecDeque::new();
+            let mut served = 0usize;
+            loop {
+                let want = draws.make(&mut made);
+                if want == 0 {
+                    break;
+                }
+                let data: Vec<u8> = (0..want + surplus)
+                    .flat_map(|_| host().to_le_bytes())
+                    .collect();
+                draws.take(&data, want).unwrap();
+                served += want + surplus;
+            }
+            assert_eq!(Vec::from(made), expected, "limit {limit}");
+            if surplus == 0 {
+                assert_eq!(served, taken, "limit {limit}");
+            } else {
+                assert_eq!(served - draws.words.len(), taken, "limit {limit}");
+            }
+        }
     }
 
     #[test]

@@ -15,6 +15,5 @@
 export { JqCompileError, loadFailure } from './errors.ts'
 export { Engine, localZone } from './eval.ts'
 export type { Ending } from './eval.ts'
-export { JqParser, decodeUtf8, readTexts, stringText, valueText } from './parse.ts'
-export { DEFAULT_INDENT, JqParseError, NO_VALUE, STDIN_NAME, jqOptions } from './types.ts'
-export type { JqError, JqHalt, JqOptions, JqRun, NoValue } from './types.ts'
+export { STDIN_NAME } from './types.ts'
+export type { JqError, JqHalt, JqRun } from './types.ts'

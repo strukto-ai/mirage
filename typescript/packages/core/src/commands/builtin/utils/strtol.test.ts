@@ -12,15 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
-import {
-  atoi,
-  boundedDecimal,
-  cInt,
-  strtol,
-  strtoul,
-  signedDecimal,
-  unsignedDecimal,
-} from './strtol.ts'
+import { atoi, boundedDecimal, cInt, strtol, strtoul, signedDecimal } from './strtol.ts'
 
 // Mirrors python/tests/commands/builtin/utils/test_strtol.py.
 describe('strtol', () => {
@@ -51,16 +43,15 @@ describe('strtol', () => {
   })
 
   it.each([
-    ['5', 5n, 5n],
-    [' \t+5', 5n, 5n],
-    ['-5', null, -5n],
-    ['5 ', null, null],
-    ['0x5', null, null],
-    ['', null, null],
-    ['+ 5', null, null],
-    ['99999999999999999999', 99999999999999999999n, 99999999999999999999n],
-  ])('whole decimal word %j', (raw, unsigned, signed) => {
-    expect(unsignedDecimal(raw)).toBe(unsigned)
+    ['5', 5n],
+    [' \t+5', 5n],
+    ['-5', -5n],
+    ['5 ', null],
+    ['0x5', null],
+    ['', null],
+    ['+ 5', null],
+    ['99999999999999999999', 99999999999999999999n],
+  ])('whole decimal word %j', (raw, signed) => {
     expect(signedDecimal(raw)).toBe(signed)
   })
 
@@ -74,7 +65,6 @@ describe('strtol', () => {
 describe('a number past any digit limit', () => {
   it('scans exactly or saturates as the C reader does', () => {
     const digits = '9'.repeat(5000)
-    expect(unsignedDecimal(digits)).toBe(10n ** 5000n - 1n)
     expect(signedDecimal(`-${digits}`)).toBe(-(10n ** 5000n - 1n))
     expect(strtol(digits)).toEqual([2n ** 63n - 1n, ''])
     expect(strtoul(digits)).toEqual([2n ** 64n - 1n, ''])

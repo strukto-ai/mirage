@@ -111,6 +111,78 @@
         "f",
         "skip-fields"
       ]
+    },
+    {
+      "id": "uniq_refuses_a_count_typed_before_an_extra_operand",
+      "seq": 19990147,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box",
+        "hf",
+        "hf-prefix",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "uniq -f x a b c; echo rc=$?; uniq a b -f x c; echo rc=$?; uniq -s y -f x a b c",
+      "expect": {
+        "exit": 1,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "uniq: x: invalid number of fields to skip\nuniq: x: invalid number of fields to skip\nuniq: y: invalid number of bytes to skip\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "uniq_refuses_an_extra_operand_typed_before_a_count",
+      "seq": 19990148,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box",
+        "hf",
+        "hf-prefix",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "uniq a b c -f x; echo rc=$?; uniq a b \"c'd\" --group -c; echo rc=$?; uniq -f 1 a b c d",
+      "expect": {
+        "exit": 1,
+        "stdout": "rc=1\nrc=1\n",
+        "stderr": "uniq: extra operand 'c'\nTry 'uniq --help' for more information.\nuniq: extra operand 'c\\'d'\nTry 'uniq --help' for more information.\nuniq: extra operand 'c'\nTry 'uniq --help' for more information.\n"
+      },
+      "flags": []
     }
   ]
 }

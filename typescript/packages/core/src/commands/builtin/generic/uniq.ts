@@ -19,9 +19,10 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { wordRefusalError, extraOperandError } from '../../spec/usage.ts'
+import { wordRefusalError } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
-import { CommandName, type FlagValue, type ParsedFlagValue } from '../../spec/types.ts'
+import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
+import { OPERAND } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { resolveSource } from '../utils/stream.ts'
@@ -35,7 +36,7 @@ export interface UniqFlags {
   count: boolean
   duplicatesOnly: boolean
   uniqueOnly: boolean
-  counts: [string, string][]
+  typed: [string, string][]
   ignoreCase: boolean
   allRepeated: 'none' | 'prepend' | 'separate' | null
   group: 'separate' | 'prepend' | 'append' | 'both' | null
@@ -66,8 +67,12 @@ function optionalMethod(
   return match.word
 }
 
-function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
+function parseFlags(bag: Record<string, FlagValue>, operands: readonly string[]): UniqFlags {
   const fl = new FlagView(bag, specOf('uniq'))
+  const typed = fl.texts(OPERAND, 'skip_fields', 'skip_chars', 'check_chars')
+  if (typed.every(([name]) => name !== OPERAND)) {
+    typed.push(...operands.map((word): [string, string] => [OPERAND, word]))
+  }
   const count = fl.asBool('count')
   const duplicatesOnly = fl.asBool('repeated')
   const uniqueOnly = fl.asBool('unique')
@@ -83,17 +88,11 @@ function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
     GROUP_ARGS,
     'group',
   ) as UniqFlags['group']
-  if (group !== null && (count || duplicatesOnly || uniqueOnly || allRepeated !== null)) {
-    throw new Error('uniq: --group is mutually exclusive with -c/-d/-D/-u')
-  }
-  if (count && allRepeated !== null) {
-    throw new Error('uniq: printing all duplicated lines and repeat counts is meaningless')
-  }
   return {
     count,
     duplicatesOnly,
     uniqueOnly,
-    counts: fl.texts('skip_fields', 'skip_chars', 'check_chars'),
+    typed,
     ignoreCase: fl.asBool('ignore_case'),
     allRepeated,
     group,
@@ -101,14 +100,34 @@ function parseFlags(bag: Record<string, FlagValue>): UniqFlags {
   }
 }
 
+/** The options GNU uniq refuses together once it has read them all. Mirrors
+ * Python's `_conflict`. */
+function conflict(parsed: UniqFlags): string | null {
+  if (
+    parsed.group !== null &&
+    (parsed.count || parsed.duplicatesOnly || parsed.uniqueOnly || parsed.allRepeated !== null)
+  ) {
+    return 'uniq: --group is mutually exclusive with -c/-d/-D/-u'
+  }
+  if (parsed.count && parsed.allRepeated !== null) {
+    return 'uniq: printing all duplicated lines and repeat counts is meaningless'
+  }
+  return null
+}
+
 /**
- * uniq's options, its counts refused by the engine before any operand is
- * resolved: the flags, or uniq's refusal. Mirrors Python's `uniq_flags`.
+ * uniq's options, its counts and operands refused by the engine in the order
+ * typed, before any operand is read: the flags, or uniq's refusal. The flags
+ * carry each operand's glob spread over its matches. Mirrors Python's
+ * `uniq_flags`.
  */
-export function uniqFlags(bag: Record<string, FlagValue>): UniqFlags | IOResult {
+export function uniqFlags(
+  bag: Record<string, FlagValue>,
+  operands: readonly string[] = [],
+): UniqFlags | IOResult {
   let parsed: UniqFlags
   try {
-    parsed = parseFlags(bag)
+    parsed = parseFlags(bag, operands)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return new IOResult({ exitCode: 1, stderr: encodeText(`${message}\n`) })
@@ -119,17 +138,19 @@ export function uniqFlags(bag: Record<string, FlagValue>): UniqFlags | IOResult 
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
   }
+  const refusal = conflict(parsed)
+  if (refusal !== null) return new IOResult({ exitCode: 1, stderr: encodeText(`${refusal}\n`) })
   return parsed
 }
 
-/** The uniq engine's config, the counts as typed. Mirrors Python's
+/** The uniq engine's config, the counts and operands as typed. Mirrors Python's
  * `engine_config`. */
 export function engineConfig(parsed: UniqFlags): Record<string, JsonValue> {
   return {
     count: parsed.count,
     repeated: parsed.duplicatesOnly,
     unique: parsed.uniqueOnly,
-    counts: parsed.counts.map(([name, text]) => [name, byteView(text)]),
+    typed: parsed.typed.map(([name, text]) => [name, byteView(text)]),
     ignore_case: parsed.ignoreCase,
     all_repeated: parsed.allRepeated,
     group: parsed.group,
@@ -146,7 +167,6 @@ export async function uniqGeneric(
   stat?: (p: PathSpec) => Promise<FileStat>,
 ): Promise<CommandFnResult> {
   stream = stdinStream(stream, ctx.stdin)
-  if (paths.length > 2) throw extraOperandError(CommandName.UNIQ, paths[2]?.rawPath ?? '')
   if (paths.length > 0 && stat !== undefined) {
     // The input is stat'ed before the lazy stream starts, so a missing or
     // unreadable one is reported in uniq's own words rather than

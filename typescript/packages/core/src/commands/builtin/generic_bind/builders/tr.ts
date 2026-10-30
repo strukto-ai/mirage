@@ -12,15 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { trGeneric } from '../../generic/tr.ts'
+import { trEngine, trGeneric } from '../../generic/tr.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
 
 const tr: CommandFn = async (_accessor, paths, texts, ctx) => {
-  const files = commandFiles(ctx, paths)
-  const resolved = await resolveOrEmpty(files, paths)
-  return trGeneric(resolved, texts, ctx, files.read)
+  const engine = await trEngine(texts, ctx.flags)
+  if (engine instanceof IOResult) return [null, engine]
+  try {
+    const files = commandFiles(ctx, paths)
+    return trGeneric(engine, await resolveOrEmpty(files, paths), ctx, files.read)
+  } catch (error) {
+    engine.close()
+    throw error
+  }
 }
 
 export const BUILDER: GenericCommand = {

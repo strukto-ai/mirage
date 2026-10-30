@@ -1,4 +1,10 @@
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.operands import split_readable
@@ -10,9 +16,10 @@ from mirage.commands.builtin.utils.stream import (
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandName, FlagValue
-from mirage.commands.spec.usage import extra_operand_error, word_refusal_error
+from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.usage import word_refusal_error
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.io.spool import IO_BUFFER_SIZE, ByteSpool
 from mirage.io.stream import close_quietly
@@ -34,7 +41,7 @@ class UniqFlags:
     count: bool = False
     repeated: bool = False
     unique: bool = False
-    counts: tuple[tuple[str, str], ...] = ()
+    typed: tuple[tuple[str, str], ...] = ()
     ignore_case: bool = False
     all_repeated: str | None = None
     group: str | None = None
@@ -58,8 +65,13 @@ def _method_word(option: str, value: str, allowed: tuple[str, ...]) -> str:
     return match.word
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
+def parse_flags(
+    flags: Mapping[str, FlagValue], operands: Sequence[str] = ()
+) -> UniqFlags:
     fl = FlagView(flags, spec=SPECS["uniq"])
+    typed = fl.texts(OPERAND, "skip_fields", "skip_chars", "check_chars")
+    if all(name != OPERAND for name, _ in typed):
+        typed += [(OPERAND, word) for word in operands]
     raw_all = fl.raw("all_repeated")
     all_repeated: str | None = None
     if fl.as_bool("D") or raw_all is True:
@@ -74,25 +86,11 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
     group = "separate" if raw_group is True else raw_group
     if group is not None:
         group = _method_word("--group", str(group), GROUP_ARGS)
-    count = fl.as_bool("count")
-    repeated = fl.as_bool("repeated")
-    unique = fl.as_bool("unique")
-    if group is not None and (
-        count or repeated or unique or all_repeated is not None
-    ):
-        raise ValueError(
-            "uniq: --group is mutually exclusive with -c/-d/-D/-u"
-        )
-    if count and all_repeated is not None:
-        raise ValueError(
-            "uniq: printing all duplicated lines and repeat "
-            "counts is meaningless"
-        )
     return UniqFlags(
-        count=count,
-        repeated=repeated,
-        unique=unique,
-        counts=tuple(fl.texts("skip_fields", "skip_chars", "check_chars")),
+        count=fl.as_bool("count"),
+        repeated=fl.as_bool("repeated"),
+        unique=fl.as_bool("unique"),
+        typed=tuple(typed),
         ignore_case=fl.as_bool("ignore_case"),
         all_repeated=all_repeated,
         group=group,
@@ -100,33 +98,61 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UniqFlags:
     )
 
 
-def uniq_flags(flags: Mapping[str, FlagValue]) -> UniqFlags | IOResult:
-    """uniq's options, its counts refused by the engine before any operand
-    is resolved.
+def _conflict(parsed: UniqFlags) -> str | None:
+    """The options GNU uniq refuses together once it has read them all.
 
     Args:
-        flags (Mapping[str, FlagValue]): the parsed flags.
+        parsed (UniqFlags): the options.
+    """
+    if parsed.group is not None and (
+        parsed.count
+        or parsed.repeated
+        or parsed.unique
+        or parsed.all_repeated is not None
+    ):
+        return "uniq: --group is mutually exclusive with -c/-d/-D/-u"
+    if parsed.count and parsed.all_repeated is not None:
+        return (
+            "uniq: printing all duplicated lines and repeat counts is "
+            "meaningless"
+        )
+    return None
+
+
+def uniq_flags(
+    flags: Mapping[str, FlagValue], operands: Sequence[str] = ()
+) -> UniqFlags | IOResult:
+    """uniq's options, its counts and operands refused by the engine in
+    the order typed, before any operand is read.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the parsed flags, each operand's
+            glob spread over its matches.
+        operands (Sequence[str]): the operands as typed, glob matches in
+            place; a call whose flags carry no tape reads them after
+            every option.
 
     Returns:
         UniqFlags | IOResult: the flags, or uniq's refusal.
     """
     try:
-        parsed = parse_flags(flags)
+        parsed = parse_flags(flags, operands)
     except UsageError as exc:
         return IOResult(
             exit_code=exc.exit_code, stderr=encode_text(str(exc) + "\n")
         )
-    except ValueError as exc:
-        return IOResult(exit_code=1, stderr=encode_text(str(exc) + "\n"))
     try:
         open_stream("uniq", engine_config(parsed))
     except StreamRefusal as refusal:
         return refused(refusal)
+    conflict = _conflict(parsed)
+    if conflict is not None:
+        return IOResult(exit_code=1, stderr=encode_text(conflict + "\n"))
     return parsed
 
 
 def engine_config(parsed: UniqFlags) -> dict[str, JsonValue]:
-    """The uniq engine's config, the counts as typed.
+    """The uniq engine's config, the counts and operands as typed.
 
     Args:
         parsed (UniqFlags): the options.
@@ -135,7 +161,7 @@ def engine_config(parsed: UniqFlags) -> dict[str, JsonValue]:
         "count": parsed.count,
         "repeated": parsed.repeated,
         "unique": parsed.unique,
-        "counts": [[name, byte_view(text)] for name, text in parsed.counts],
+        "typed": [[name, byte_view(text)] for name, text in parsed.typed],
         "ignore_case": parsed.ignore_case,
         "all_repeated": parsed.all_repeated,
         "group": parsed.group,
@@ -164,10 +190,6 @@ async def uniq_generic(
         stdin (ByteSource | None): the line's input.
         stat (StatFn | None): bound stat.
     """
-    if len(paths) > 2:
-        raise extra_operand_error(
-            CommandName.UNIQ, paths[2].raw_path or paths[2].virtual
-        )
     read_stream = stdin_stream(read_stream, stdin)
     if paths and stat is not None:
         # The input is stat'ed before the lazy stream starts, so a missing

@@ -37,6 +37,7 @@ VARIANT = 0b10
 MAX_SEED = (1 << 53) - 1
 WORD_BITS = 32
 WORD_MASK = (1 << WORD_BITS) - 1
+WORDS_AHEAD = 1024
 SPLITMIX_GAMMA = 0x9E3779B97F4A7C15
 SPLITMIX_MUL1 = 0xBF58476D1CE4E5B9
 SPLITMIX_MUL2 = 0x94D049BB133111EB
@@ -150,6 +151,17 @@ class IdSource(Protocol):
         """A uniform integer in ``[0, 2**32)``."""
         ...
 
+    def random_words(self, count: int) -> bytes:
+        """At least ``count`` of the words ``random_u32`` would answer
+        next, each as four little-endian bytes. A source that replays
+        answers exactly ``count``, so its next word follows the last one
+        taken.
+
+        Args:
+            count (int): how many words, at least.
+        """
+        ...
+
 
 class _Floor:
     """The last id's millisecond and counter, which the next id follows."""
@@ -209,6 +221,20 @@ class SystemIdSource:
     def random_u32(self) -> int:
         """A uniform 32-bit integer from the process generator."""
         return random.getrandbits(WORD_BITS)
+
+    def random_words(self, count: int) -> bytes:
+        """Twice ``count`` platform words, and at least ``WORDS_AHEAD``,
+        in one draw, the first word lowest, as calls of ``random_u32``
+        answer them: a caller drawing below a limit, which redraws up to
+        half its words, seldom has to ask again.
+
+        Args:
+            count (int): how many words, at least.
+        """
+        words = max(2 * count, WORDS_AHEAD)
+        return random.getrandbits(WORD_BITS * words).to_bytes(
+            4 * words, "little"
+        )
 
     def __repr__(self) -> str:
         return f"SystemIdSource(clock={self._clock!r})"
@@ -286,6 +312,17 @@ class SeededIdSource:
         s[2] ^= t
         s[3] = _rotl(s[3], 11)
         return result
+
+    def random_words(self, count: int) -> bytes:
+        """The next ``count`` draws of the seeded sequence, each as four
+        little-endian bytes.
+
+        Args:
+            count (int): how many words.
+        """
+        return b"".join(
+            self.random_u32().to_bytes(4, "little") for _ in range(count)
+        )
 
     def uuid7(self) -> str:
         """The next UUIDv7 of the seeded sequence, stamped from the clock."""

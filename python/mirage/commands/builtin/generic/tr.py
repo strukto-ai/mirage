@@ -1,88 +1,62 @@
 from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.stream import resolve_source, stream_output
-from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import CommandName, FlagValue
-from mirage.commands.spec.usage import (
-    extra_operand_error,
-    missing_operand_error,
-    usage_hint,
-)
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.stream import open_stream
+from mirage.rs.scan import refused
+from mirage.rs.stream import OpenStream, open_stream
 from mirage.shell.bytes import byte_view
-from mirage.types import JsonValue, PathSpec
-
-_TRY_HELP = "\n" + usage_hint("tr")
+from mirage.types import PathSpec
 
 
-@dataclass(frozen=True, slots=True)
-class TrFlags:
-    delete: bool = False
-    squeeze: bool = False
-    complement: bool = False
-    truncate_set1: bool = False
+def tr_engine(
+    texts: list[str], flags: Mapping[str, FlagValue]
+) -> OpenStream | IOResult:
+    """tr's engine over its sets, or tr's refusal of its operands.
 
-
-def parse_flags(flags: Mapping[str, FlagValue]) -> TrFlags:
+    Args:
+        texts (list[str]): STRING1, STRING2 and any extra operand.
+        flags (Mapping[str, FlagValue]): the parsed flags.
+    """
     fl = FlagView(flags, spec=SPECS["tr"])
-    return TrFlags(
-        delete=fl.as_bool("delete"),
-        squeeze=fl.as_bool("squeeze_repeats"),
-        complement=fl.as_bool("C") or fl.as_bool("complement"),
-        truncate_set1=fl.as_bool("truncate_set1"),
-    )
+    try:
+        return open_stream(
+            "tr",
+            {
+                "operands": [byte_view(text) for text in texts],
+                "delete": fl.as_bool("delete"),
+                "squeeze": fl.as_bool("squeeze_repeats"),
+                "complement": fl.as_bool("C") or fl.as_bool("complement"),
+                "truncate_set1": fl.as_bool("truncate_set1"),
+            },
+        )
+    except StreamRefusal as refusal:
+        return refused(refusal)
 
 
-async def tr_generic(
+def tr_generic(
+    engine: OpenStream,
     paths: list[PathSpec],
-    texts: list[str],
     *,
     read_stream: Callable[..., AsyncIterator[bytes]],
     stdin: ByteSource | None = None,
-    flags: Mapping[str, FlagValue] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    if not texts:
-        raise missing_operand_error(CommandName.TR, None)
-    parsed = parse_flags(flags or {})
-    operand_limit = 1 if parsed.delete and not parsed.squeeze else 2
-    if len(texts) > operand_limit:
-        if len(texts) == 2:
-            raise ValueError(
-                f"tr: extra operand '{quote_text(texts[1])}'\n"
-                "Only one string may be given when deleting without "
-                "squeezing repeats." + _TRY_HELP
-            )
-        raise extra_operand_error(CommandName.TR, texts[operand_limit])
-    config: dict[str, JsonValue] = {
-        "set1": byte_view(texts[0]),
-        "set2": byte_view(texts[1]) if len(texts) >= 2 else None,
-        "delete": parsed.delete,
-        "squeeze": parsed.squeeze,
-        "complement": parsed.complement,
-        "truncate_set1": parsed.truncate_set1,
-    }
-    try:
-        engine = open_stream("tr", config)
-    except StreamRefusal as refusal:
-        message = refusal.message
-        if message == "tr: missing translation operand":
-            message = (
-                f"tr: missing operand after '{quote_text(texts[0])}'\n"
-                "Two strings must be given when translating." + _TRY_HELP
-            )
-        raise ValueError(message) from refusal
+    """Run tr's engine over its input.
 
+    Args:
+        engine (OpenStream): what ``tr_engine`` opened.
+        paths (list[PathSpec]): the input, glob-resolved.
+        read_stream (Callable[..., AsyncIterator[bytes]]): bound reader.
+        stdin (ByteSource | None): the line's input.
+    """
     if paths:
         source: AsyncIterator[bytes] = read_stream(paths[0])
     else:
         source = resolve_source(stdin)
-
     return stream_output(engine, source), IOResult()
 
 
-__all__ = ["tr_generic"]
+__all__ = ["tr_engine", "tr_generic"]

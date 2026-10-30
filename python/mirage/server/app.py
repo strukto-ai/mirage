@@ -205,8 +205,9 @@ def build_app(
             ``Host`` header. ``None`` (default) reads
             ``$MIRAGE_ALLOWED_HOSTS`` (CSV) or falls back to
             loopback-only (``127.0.0.1``, ``localhost``, ``::1``).
-            Pass ``["*"]`` to disable enforcement (only safe behind
-            a trusted reverse proxy).
+            Pass ``["*"]`` to skip the Host comparison (only safe
+            behind a trusted reverse proxy). Browser requests from
+            another origin are refused either way.
         auth_config (AuthConfig | None): bearer/JWT auth config.
             ``None`` (default) resolves from ``MIRAGE_AUTH_MODE`` env
             and the mode-specific ``MIRAGE_*`` env vars.
@@ -243,8 +244,7 @@ def build_app(
     validate_daemon_table(read_daemon_table(mirage_home()))
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     hosts = resolve_allowed_hosts(allowed_hosts)
-    if "*" not in hosts:
-        app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
+    app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
     auth = auth_config if auth_config is not None else resolve_auth_config()
     if auth.mode == AuthMode.LOCAL and auth.local_token is None:
         logger.warning(

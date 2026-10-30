@@ -25,18 +25,24 @@ from mirage.types import JsonValue
 def scan(
     command: str, options: Sequence[tuple[str, str]]
 ) -> dict[str, JsonValue]:
-    """A command's typed option values, read by mirage-rs.
+    """A command's typed words, read by mirage-rs before any input is read.
 
-    The host calls it before it resolves any operand, so a value the
-    command refuses never reaches a mount.
+    The tape holds each option as ``(dest, value)`` in the order typed, a
+    switch with an empty value. A grammar that reads its operands also gets
+    each operand as ``(OPERAND, word)`` where it was typed, a glob already
+    expanded into its matches in its place. A value the command refuses
+    never reaches an input.
 
     Args:
         command (str): the command whose grammar reads them.
-        options (Sequence[tuple[str, str]]): each option's name and its
-            value as typed, in the order typed.
+        options (Sequence[tuple[str, str]]): the tape, in order.
+
+    Returns:
+        dict[str, JsonValue]: the values, keyed as the command's grammar
+            answers.
 
     Raises:
-        StreamRefusal: the first value the command refuses, with the
+        StreamRefusal: the first word the command refuses, with the
             command's exit status.
     """
     config: dict[str, JsonValue] = {

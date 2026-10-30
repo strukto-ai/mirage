@@ -12,41 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from enum import Enum, auto
+from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
-DEFAULT_INDENT = 2
-
 # What jq names standard input when it reports where it stands, and what
 # it reports before it has read any input at all.
 STDIN_NAME = "<stdin>"
-
-
-class NoValue(Enum):
-    """jq's `jv_invalid()` where a value could stand: nothing yet, which
-    is not the same as null."""
-
-    TOKEN = auto()
-
-
-NO_VALUE = NoValue.TOKEN
-
-
-@dataclass(frozen=True, slots=True)
-class JqParseError:
-    """jq's parser refusing its input: the message, with the line and the
-    column it had reached, as jq's report words it.
-
-    Args:
-        message (str): e.g. ``Unfinished JSON term at EOF at line 1,
-            column 3``.
-    """
-
-    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,59 +73,3 @@ class JqRun(Generic[T]):
 
     outputs: list[T]
     stop: JqError | JqHalt | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class JqOptions:
-    """One jq invocation's resolved options.
-
-    The command line's implications are already applied by the caller
-    (``-j`` and ``--raw-output0`` imply ``-r``, ``--tab`` and
-    ``--indent`` resolve into one indent width), so every consumer reads
-    plain fields.
-
-    Args:
-        null_input (bool): -n, run the program once against null and
-            never read the inputs as the program's input.
-        raw_input (bool): -R, each input line is a string instead of a
-            JSON document.
-        slurp (bool): -s, collapse the whole input stream into one
-            value (an array of documents, or one string under -R).
-        stream (bool): --stream, replace each input document with its
-            [path, leaf] events, the same ones `tostream` emits.
-        seq (bool): --seq, read and write RFC 7464 JSON text sequences
-            (every value preceded by RS).
-        raw_output (bool): -r, print a string output unquoted.
-        join_output (bool): -j, write no separator after an output.
-        nul_output (bool): --raw-output0, write a NUL after an output.
-        compact (bool): -c, one line of JSON per output.
-        ascii_output (bool): -a, escape every non-ASCII character. jq
-            prints strings quoted under -a even with -r.
-        sort_keys (bool): -S, sort object keys.
-        tab (bool): indent with one tab per level.
-        indent (int): spaces per indent level when not compact.
-        exit_status (bool): -e, derive the exit code from the last
-            output value.
-        named_args (Mapping[str, str]): --arg / --argjson / --rawfile /
-            --slurpfile bindings, each the JSON text of the value $name
-            resolves to.
-        positional_args (tuple[str, ...]): --args / --jsonargs values, in
-            order, as JSON text of what $ARGS.positional reports.
-    """
-
-    null_input: bool = False
-    raw_input: bool = False
-    slurp: bool = False
-    stream: bool = False
-    seq: bool = False
-    raw_output: bool = False
-    join_output: bool = False
-    nul_output: bool = False
-    compact: bool = False
-    ascii_output: bool = False
-    sort_keys: bool = False
-    tab: bool = False
-    indent: int = DEFAULT_INDENT
-    exit_status: bool = False
-    named_args: Mapping[str, str] = field(default_factory=dict)
-    positional_args: tuple[str, ...] = ()
