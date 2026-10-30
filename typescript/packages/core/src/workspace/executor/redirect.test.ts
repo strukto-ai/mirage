@@ -361,10 +361,11 @@ describe('a trailing redirect binds to the command it follows', () => {
     try {
       const [exit, out, err] = await runResult(ws, line)
       // Redirecting cat's input leaves the producer unread. It may finish
-      // before the pipe closes, or receive SIGPIPE, as GNU bash does.
+      // before the pipe closes, or receive SIGPIPE, as GNU bash does,
+      // whether or not cat opened its input.
       const allowed =
-        line.includes('| cat < /data/b.txt') && stdout.includes('ps=0 0 0')
-          ? [stdout, stdout.replace('ps=0 0 0', 'ps=141 0 0')]
+        line.includes('| cat <') && stdout.includes('ps=0 ')
+          ? [stdout, stdout.replace('ps=0 ', 'ps=141 ')]
           : [stdout]
       expect(allowed).toContain(out)
       expect([err, exit]).toEqual([stderr, code])
