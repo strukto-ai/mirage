@@ -158,11 +158,23 @@ jobs:
           path: python/.mypy_cache
           key: ${{ steps.mypy-cache.outputs.cache-primary-key }}
 
+      - name: Start MinIO (S3 conformance)
+        run: |
+          docker run -d --name minio-conformance -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
+            cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/live && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:9000/minio/health/live
+
       - name: Run pytest (main suite)
         working-directory: python
         env:
           REDIS_URL: redis://localhost:6379/0
           MONGODB_URI: mongodb://localhost:27017
+          MIRAGE_S3_CONFORMANCE_MINIO_ENDPOINT: http://127.0.0.1:9000
         run: |
           # worksteal, not loadscope. Measured as sibling jobs at one commit,
           # n=4 each: worksteal 398s median with a 13s spread, loadscope 420s
