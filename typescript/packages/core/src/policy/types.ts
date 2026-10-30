@@ -397,6 +397,7 @@ export interface Abandoned {
 export interface SessionDecisionsQuery {
   approvalSessions(): readonly string[]
   approvalStateOf(sessionId: string): Record<string, unknown> | null
+  approvalFactsOf(sessionId: string): Record<string, unknown>
   incarnationOf(sessionId: string): string | null
   ensureLoaded(): Promise<void>
   activate(sessionId: string): Promise<string>

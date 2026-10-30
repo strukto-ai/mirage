@@ -827,6 +827,13 @@ export class Policies {
               : null
           if (handles !== null) seen = { ...seen, ...handles }
           const asked = seen
+          const before =
+            every ||
+            'config' in asked ||
+            explaining() === DryRun.DECIDING ||
+            Array.isArray(explaining())
+              ? null
+              : this.decisions.facts(asked.sessionId ?? '')
           let answered
           try {
             const ask = async (): Promise<Awaited<ReturnType<typeof fn>>> =>
@@ -843,6 +850,8 @@ export class Policies {
               asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask(),
               signal,
             )
+            if (before !== null && !('config' in asked))
+              await this.decisions.assertCurrent(asked.sessionId ?? '', null, before)
           } catch (error) {
             if (hasAborted(signal)) throw makeAbortError(signal)
             if (policy === placement) throw error

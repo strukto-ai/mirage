@@ -30,7 +30,7 @@ import {
 } from '../context/session_context.ts'
 import { sha256Hex } from '../utils/hash.ts'
 import type { Refusal } from '../types.ts'
-import { ApprovalUnavailable, PolicyDenied } from './errors.ts'
+import { ApprovalUnavailable } from './errors.ts'
 import { DecisionOwner, Outcome } from './types.ts'
 import type {
   Abandoned,
@@ -209,21 +209,6 @@ export function lineage(handed: HandOff | null): HandOff[] {
 }
 
 /**
- * Whether two occurrences are one place: the same span of the same
- * text, under the same node all the way up.
- */
-export function sameOccurrence(a: Occurrence | null, b: Occurrence | null): boolean {
-  let x = a
-  let y = b
-  while (x !== null && y !== null) {
-    if (x.source !== y.source || x.start !== y.start || x.end !== y.end) return false
-    x = x.parent
-    y = y.parent
-  }
-  return x === null && y === null
-}
-
-/**
  * Whether a refusal record is a question the host has not answered yet,
  * which holds the line for its retry rather than ending it. Mirrors the
  * Python `is_pending`.
@@ -319,6 +304,16 @@ const ledgerSchema = z
     incarnation: z.string(),
     revision: z.number().int().nonnegative(),
     records: z.array(decisionSchema),
+    pending_claims: z
+      .array(
+        z.object({
+          owner: z.string(),
+          holder: z.string(),
+          decision: z.string(),
+          occurrence: z.unknown(),
+        }),
+      )
+      .default([]),
     claims: z.array(
       z.object({
         owner: z.string(),
@@ -352,6 +347,7 @@ type DecisionWire = z.infer<typeof decisionSchema>
 interface ScopeBinding {
   sessionId: string
   incarnation: string
+  revision: number
 }
 export const logger: { debug?: (message: string) => void } = {}
 
@@ -361,6 +357,7 @@ export function emptyLedger(incarnation: string): RecordFields {
     incarnation,
     revision: 0,
     records: [],
+    pending_claims: [],
     claims: [],
     holders: [],
     receipts: [],
@@ -472,6 +469,7 @@ export class Decisions extends DecisionOwner {
   private readonly holders = new WeakMap<HandOff, string>()
   private readonly bindings = new WeakMap<HandOff, ScopeBinding>()
   private readonly terminal = new WeakSet<HandOff>()
+  private readonly pendingScopes = new WeakSet<HandOff>()
   private readonly readers = new Set<HandOff>()
   private readonly versions = new Map<string, number>()
 
@@ -509,6 +507,10 @@ export class Decisions extends DecisionOwner {
 
   async begin(sessionId: string, handed: HandOff): Promise<string> {
     let bound = this.binding(sessionId, handed)
+    if (bound !== undefined && bound.revision !== (this.version?.() ?? 0)) {
+      await this.checkVersion(sessionId, bound.incarnation)
+      throw new ApprovalUnavailable('policy_changed')
+    }
     if (bound === undefined) {
       let incarnation: string
       if (this.sessions !== null) incarnation = await this.sessions.activate(sessionId)
@@ -520,7 +522,7 @@ export class Decisions extends DecisionOwner {
         }
         incarnation = ledgerSchema.parse(state).incarnation
       }
-      bound = { sessionId, incarnation }
+      bound = { sessionId, incarnation, revision: this.version?.() ?? 0 }
       this.bindings.set(this.root(handed), bound)
     }
     this.readers.add(handed)
@@ -653,6 +655,29 @@ export class Decisions extends DecisionOwner {
     return false
   }
 
+  facts(sessionId: string): RecordFields {
+    const current = this.sessions?.approvalSessions().includes(sessionId)
+      ? this.sessions.approvalFactsOf(sessionId)
+      : { incarnation: null, fields: {} }
+    return { ...current, revision: this.version?.() ?? 0 }
+  }
+
+  async assertCurrent(
+    sessionId: string,
+    handed: HandOff | null,
+    before: RecordFields,
+  ): Promise<void> {
+    if (handed !== null) await this.validate(sessionId, handed)
+    else if (this.sessions !== null && typeof before.incarnation === 'string')
+      await this.sessions.refreshApproval(sessionId, before.incarnation)
+    const result = inspectApproval(emptyLedger('inspection'), {
+      op: 'inspect',
+      query: { kind: 'facts_equal', left: before, right: this.facts(sessionId) },
+    })
+    if (result.kind !== 'matches') throw new Error('invalid approval facts comparison')
+    if (!result.matched) throw new ApprovalUnavailable('policy_changed')
+  }
+
   async validate(sessionId: string, handed: HandOff): Promise<void> {
     const epoch = await this.begin(sessionId, handed)
     if (this.sessions !== null) await this.sessions.refreshApproval(sessionId, epoch)
@@ -706,20 +731,26 @@ export class Decisions extends DecisionOwner {
   ): Promise<Deny | Pending | Abandoned | null> {
     if (hasAborted(signal)) return ABANDONED
     const sessionId = ctx.sessionId ?? ''
-    try {
-      let epoch: string
-      if (claimant !== null) epoch = await this.begin(sessionId, claimant.line)
-      else if (this.sessions !== null) {
-        await this.sessions.ensureLoaded()
-        epoch = this.sessions.incarnationOf(sessionId) ?? (await this.sessions.activate(sessionId))
-      } else {
-        let state = this.memory.get(sessionId)
-        if (state === undefined) {
-          state = emptyLedger(authorityId())
-          this.memory.set(sessionId, state)
-        }
-        epoch = ledgerSchema.parse(state).incarnation
+    if (claimant === null) {
+      const handed: HandOff = { claimed: [], parent: null, origin: null }
+      try {
+        return await this.resolve(
+          ctx,
+          ask,
+          signal,
+          {
+            line: handed,
+            occurrence: { parent: null, source: ctx.line ?? ctx.command, start: 0, end: 0 },
+          },
+          recheck,
+        )
+      } finally {
+        if (this.pendingScopes.has(handed)) await this.release(sessionId, handed)
+        else await this.revoke(sessionId, handed)
       }
+    }
+    try {
+      const epoch = await this.begin(sessionId, claimant.line)
       await this.checkVersion(sessionId, epoch)
       for (;;) {
         const rules = ask.rules ?? [askRule(ctx, ask)]
@@ -740,10 +771,16 @@ export class Decisions extends DecisionOwner {
         if (result.kind !== 'pending') throw new Error('invalid approval resolution')
         const record = decisionFromWire(result.record)
         const onAsk = this.onAsk
-        if (onAsk === null) return { kind: 'pending', id: record.id, reason: record.reason }
+        if (onAsk === null) {
+          this.pendingScopes.add(claimant.line)
+          return { kind: 'pending', id: record.id, reason: record.reason }
+        }
         const said = await answered(() => onAsk(record, signal), signal)
         if (isAbandoned(said)) return said
-        if (said?.outcome == null) return { kind: 'pending', id: record.id, reason: record.reason }
+        if (said?.outcome == null) {
+          this.pendingScopes.add(claimant.line)
+          return { kind: 'pending', id: record.id, reason: record.reason }
+        }
         if (said.id !== record.id) throw new ApprovalUnavailable('stale_reply')
         if (said.outcome === Outcome.ASK) throw new Error('ASK is not an answer')
         if (hasAborted(signal)) return ABANDONED
@@ -758,7 +795,7 @@ export class Decisions extends DecisionOwner {
         if (recheck !== undefined) {
           const current = await recheck()
           if (current?.kind !== 'ask') {
-            if (current === null && claimant !== null) await this.validate(sessionId, claimant.line)
+            if (current === null) await this.validate(sessionId, claimant.line)
             return current
           }
           ask = current
@@ -901,19 +938,16 @@ export class Decisions extends DecisionOwner {
     await this.begin(sessionId, handed)
     try {
       return await runWithOpCall(this, handed, sessionId, () => run(handed))
-    } catch (error) {
-      if (error instanceof PolicyDenied && isPending(error.refusal))
-        await this.release(sessionId, handed)
-      throw error
     } finally {
-      await this.revoke(sessionId, handed)
+      if (this.pendingScopes.has(handed)) await this.release(sessionId, handed)
+      else await this.revoke(sessionId, handed)
     }
   }
 
   async split(sessionId: string, handed: HandOff, scope: Occurrence): Promise<HandOff> {
     const epoch = await this.begin(sessionId, handed)
     const job: HandOff = { claimed: [], parent: null, origin: handed.origin }
-    this.bindings.set(job, { sessionId, incarnation: epoch })
+    this.bindings.set(job, { sessionId, incarnation: epoch, revision: this.version?.() ?? 0 })
     this.readers.add(job)
     try {
       await this.event(

@@ -42,6 +42,7 @@ const ledgerSchema = z
     revision: z.number(),
     records: z.array(z.json()),
     claims: z.array(z.json()),
+    pending_claims: z.array(z.json()).default([]),
     receipts: z.array(z.json()),
     retired: z.array(z.string()).default([]),
   })
@@ -62,6 +63,8 @@ const approvalCorpusSchema = z.object({
           status: z.string().optional(),
           records: z.number().optional(),
           claims: z.number().optional(),
+          pending_claims: z.number().optional(),
+          record_id: z.string().optional(),
         }),
       ),
     }),
@@ -122,6 +125,7 @@ it('runs the shared approval transition transcripts through Wasm', async () => {
           .object({
             kind: z.string(),
             fresh: z.boolean().optional(),
+            record: z.object({ id: z.string() }).optional(),
             matched: z.boolean().optional(),
             status: z.string().optional(),
           })
@@ -132,6 +136,9 @@ it('runs the shared approval transition transcripts through Wasm', async () => {
         if (step.status !== undefined) expect(result.status).toBe(step.status)
         if (step.records !== undefined) expect(ledger.records).toHaveLength(step.records)
         if (step.claims !== undefined) expect(ledger.claims).toHaveLength(step.claims)
+        if (step.pending_claims !== undefined)
+          expect(ledger.pending_claims).toHaveLength(step.pending_claims)
+        if (step.record_id !== undefined) expect(result.record?.id).toBe(step.record_id)
       } finally {
         stream.close()
       }
@@ -622,11 +629,11 @@ describe('decisions', () => {
     expect((await ledger.resolve(ctx(), ASK, undefined, at(second)))?.kind).toBe('pending')
     expect((await ledger.resolve(ctx(), ASK))?.kind).toBe('pending')
     expect(await ledger.resolve(ctx(), ASK, undefined, at(first))).toBeNull()
-    expect(ledger.pending('s')).toHaveLength(1)
-    expect(ledger.list('s')).toHaveLength(2)
+    expect(ledger.pending('s')).toHaveLength(2)
+    expect(ledger.list('s')).toHaveLength(3)
     // Released at the line's end, a claim no longer hides anything.
     await ledger.revoke('s', first)
-    expect(ledger.list('s')).toHaveLength(1)
+    expect(ledger.list('s')).toHaveLength(2)
     await ledger.answer(ledger.pending('s')[0]?.id ?? '', Outcome.ALLOW)
     expect(await ledger.resolve(ctx(), ASK, undefined, at(second))).toBeNull()
   })
@@ -936,8 +943,8 @@ describe('decisions', () => {
     const asked = ledger.resolve(ctx(), ASK, controller.signal)
     controller.abort()
     expect(await asked).toEqual({ kind: 'abandoned' })
-    // Nobody answered, so the question is still open for whoever asks next.
-    expect(ledger.pending()).toHaveLength(1)
+    // Cancellation retires the ticket, so its late reply cannot authorize a retry.
+    expect(ledger.pending()).toHaveLength(0)
   })
 
   it('puts nothing to a host on behalf of a run already over', async () => {
@@ -972,8 +979,8 @@ describe('decisions', () => {
     await Promise.resolve()
     // Recording it would leave a spent-once grant behind, and the next
     // identical line would take it without anybody being asked.
-    expect(ledger.pending()).toHaveLength(1)
-    expect(ledger.list()[0]?.outcome).toBeNull()
+    expect(ledger.pending()).toHaveLength(0)
+    expect(ledger.list()).toEqual([])
   })
 
   it('swallows a host rejection that arrives after the kill', async () => {
@@ -995,7 +1002,7 @@ describe('decisions', () => {
     // take the host process down with it.
     host.fail?.()
     await Promise.resolve()
-    expect(ledger.pending()).toHaveLength(1)
+    expect(ledger.pending()).toHaveLength(0)
   })
 
   it('lists records per session and across them', async () => {

@@ -42,6 +42,7 @@ import {
   voicedStderr,
 } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { compileProfile } from './session/resolve.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -3065,4 +3066,47 @@ describe('admitted path rules on recursive commands', () => {
     expect(voicedStderr(result)).toContain('/data/src/cache')
     expect(voicedStderr(result)).toContain('Permission denied')
   })
+})
+
+it('rechecks an unprivileged command after a profile changes during a coded policy wait', async () => {
+  let entered = (): void => undefined
+  let resume = (): void => undefined
+  const suspended = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const release = new Promise<void>((resolve) => {
+    resume = resolve
+  })
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          async preCommand(ctx) {
+            if (ctx.command === 'rm') {
+              entered()
+              await release
+            }
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.write('/data/f', 'protected')
+    const running = ws.shell('rm /data/f')
+    await suspended
+    await ws.sessionManager.setProfile(
+      ws.defaultSessionId,
+      compileProfile({ commands: { deny: [{ reason: 'changed', commands: ['rm'] }] } }),
+    )
+    resume()
+    expect((await running).exitCode).toBe(126)
+    expect(await ws.vfs.exists('/data/f')).toBe(true)
+  } finally {
+    resume()
+    await ws.close()
+  }
 })

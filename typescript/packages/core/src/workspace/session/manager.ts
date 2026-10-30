@@ -268,6 +268,14 @@ export class SessionManager extends SessionOwner {
     session.decisions = records
   }
 
+  approvalFactsOf(sessionId: string): RecordFields {
+    const session = this.get(sessionId)
+    return {
+      incarnation: session.incarnation,
+      fields: structuredClone(authorityFields(session.toDict())),
+    }
+  }
+
   approvalStateOf(sessionId: string): RecordFields | null {
     const session = this.sessions.get(sessionId)
     if (session !== undefined) return structuredClone(session.approvalState)
