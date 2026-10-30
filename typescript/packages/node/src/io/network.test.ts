@@ -264,18 +264,21 @@ describe('a workspace network rule', () => {
       preNetwork: (ctx: NetworkContext): Deny | null =>
         ctx.line?.includes('offline') === true ? { kind: 'deny', reason: 'offline' } : null,
     }
-    for (const network of [true, { allowed_domains: ['127.0.0.1'] }] as const) {
-      const ws = new Workspace({ '/data': new RAMVFS() }, { network })
-      ws.policies.add(offline)
-      try {
-        expect((await ws.shell(`curl -sS ${url}`)).exitCode).toBe(0)
-        expect((await ws.shell(`echo offline >/dev/null; curl -sS ${url}`)).exitCode).toBe(7)
-      } finally {
-        await ws.close()
+    try {
+      for (const network of [true, { allowed_domains: ['127.0.0.1'] }] as const) {
+        const ws = new Workspace({ '/data': new RAMVFS() }, { network })
+        ws.policies.add(offline)
+        try {
+          expect((await ws.shell(`curl -sS ${url}`)).exitCode).toBe(0)
+          expect((await ws.shell(`echo offline >/dev/null; curl -sS ${url}`)).exitCode).toBe(7)
+        } finally {
+          await ws.close()
+        }
       }
+    } finally {
+      alive.closeAllConnections()
+      await new Promise((resolve) => alive.close(resolve))
     }
-    alive.closeAllConnections()
-    await new Promise((resolve) => alive.close(resolve))
   })
 
   it('refuses through the lists before any hook', async () => {

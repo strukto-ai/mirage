@@ -145,9 +145,12 @@ async def test_post_network_sees_how_each_connection_went(port):
 async def _keep_alive(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
-    while await reader.readuntil(b"\r\n\r\n"):
-        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nok\n")
-        await writer.drain()
+    try:
+        while await reader.read(1024):
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nok\n")
+            await writer.drain()
+    finally:
+        writer.close()
 
 
 class _Offline(Policy):
