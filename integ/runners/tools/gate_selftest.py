@@ -1559,6 +1559,36 @@ def selftest_shard() -> None:
     """The shard jobs run every target of their facets once, and nothing
     else: a facet that puts no target into the split, a target the host
     cannot run, or a service another job provisions must not ride it."""
+    items = [
+        ([str(i)], weight)
+        for i, weight in enumerate([9, 6, 4, 6, 6, 4, 1, 10, 8, 7, 6, 3])
+    ]
+    parts = shard.split(items, 3, 2)
+    check(
+        "shard: worker-aware placement avoids a fourteen-second tail",
+        max(shard.parallel_seconds(part, 2) for part in parts) == 12,
+        repr(parts),
+    )
+    items = [
+        ([str(i)], weight)
+        for i, weight in enumerate([2, 3, 3, 2, 4, 9, 8, 9, 4, 8, 6, 8])
+    ]
+    parts = shard.split(items, 3, 2, {"0", "1", "2", "3", "4"})
+    check(
+        "shard: retain the weight split when worker placement makes it slower",
+        max(shard.parallel_seconds(part, 2) for part in parts) == 12,
+        repr(parts),
+    )
+    check(
+        "shard: finish time honors the worker count and an empty shard",
+        [
+            shard.parallel_seconds([(["a"], 9), (["b"], 6), (["c"], 4)], p)
+            for p in (1, 2, 4)
+        ]
+        == [19, 10, 9]
+        and shard.parallel_seconds([], 4) == 0,
+        "unexpected worker-pool finish time",
+    )
     manifest = json.loads((ROOT / "targets.json").read_text())
     counts = shard.case_counts(ROOT)
     by_id = {target["id"]: target for target in manifest["targets"]}
@@ -1584,37 +1614,38 @@ def selftest_shard() -> None:
         shared = shard.launched(
             manifest, json.loads(shard.FAKES.read_text()), host
         )
-        for shards in (2, 3):
-            for fakes in (None, shared):
-                parts = shard.split(items, shards, fakes)
-                label = f"{shards} shards" + (
-                    "" if fakes is None else ", fakes first"
-                )
-                spread = [
-                    target_id
-                    for part in parts
-                    for ids, _ in part
-                    for target_id in ids
-                ]
-                check(
-                    f"shard ({host}): {label} partition the split",
-                    sorted(spread) == sorted(ran),
-                    f"{len(spread)} vs {len(ran)}",
-                )
-                check(
-                    f"shard ({host}): {label}, each shard gets a target",
-                    all(parts),
-                    f"{[len(part) for part in parts]}",
-                )
-                check(
-                    f"shard ({host}): {label}, each shard runs largest first",
-                    all(
-                        [w for _, w in part]
-                        == sorted((w for _, w in part), reverse=True)
+        for procs in (1, 4):
+            for shards in (2, 3):
+                for fakes in (None, shared):
+                    parts = shard.split(items, shards, procs, fakes)
+                    label = f"{shards} shards, {procs} workers" + (
+                        "" if fakes is None else ", fakes first"
+                    )
+                    spread = [
+                        target_id
                         for part in parts
-                    ),
-                    f"{[[w for _, w in part] for part in parts]}",
-                )
+                        for ids, _ in part
+                        for target_id in ids
+                    ]
+                    check(
+                        f"shard ({host}): {label} partition the split",
+                        sorted(spread) == sorted(ran),
+                        f"{len(spread)} vs {len(ran)}",
+                    )
+                    check(
+                        f"shard ({host}): {label}, each shard gets a target",
+                        all(parts),
+                        f"{[len(part) for part in parts]}",
+                    )
+                    check(
+                        f"shard ({host}): {label}, each shard runs largest first",
+                        all(
+                            [w for _, w in part]
+                            == sorted((w for _, w in part), reverse=True)
+                            for part in parts
+                        ),
+                        f"{[[w for _, w in part] for part in parts]}",
+                    )
         check(
             f"shard ({host}): the launcher serves box and sharepoint, not s3",
             {"box", "sharepoint"} <= shared and not {"ram", "s3"} & shared,
@@ -1638,7 +1669,7 @@ def selftest_shard() -> None:
         )
         fake_load = [
             sum(weight for ids, weight in part if shared & set(ids))
-            for part in shard.split(items, 3, shared)
+            for part in shard.split(items, 3, 4, shared)
         ]
         heaviest = max(w for ids, w in items if shared & set(ids))
         check(

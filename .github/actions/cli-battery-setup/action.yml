@@ -51,13 +51,23 @@ runs:
     # `integ` is a pnpm workspace member, so this install is what creates
     # integ/node_modules: state_store.sh and index_store.sh need `pnpm exec tsx`
     # from it, and the ref batteries resolve @struktoai/mirage-{core,node}
-    # through it. The downloaded artifact carries compiled JS only, never
+    # through it. The artifact carries dist and generated sources, never
     # node_modules, so it is not a substitute. --frozen-lockfile=false matches
     # what the cross job used; the build jobs deliberately use the strict form.
     - name: Install TypeScript dependencies
+      if: ${{ inputs.build-typescript == 'true' }}
       working-directory: typescript
       shell: bash
       run: pnpm install --frozen-lockfile=false
+
+    - name: Install dependencies without rebuilding mirage
+      if: ${{ inputs.build-typescript != 'true' }}
+      working-directory: typescript
+      shell: bash
+      run: |
+        pnpm install --frozen-lockfile=false --ignore-scripts
+        # pnpm rebuild misses fuse-native's implicit binding.gyp install.
+        pnpm --dir packages/node/node_modules/@zkochan/fuse-native run buildgyp
 
     - name: Download TypeScript build outputs
       if: ${{ inputs.build-typescript != 'true' }}
