@@ -565,6 +565,9 @@ class CacheManager:
     def observe_miss(self, path: PathSpec, caller: Caller) -> None:
         """Record that ``caller``'s session found no file at ``path``.
 
+        It lifts a refusal the running line marked on ``path`` earlier,
+        as a read that finds the file does.
+
         Args:
             path (PathSpec): the path a read or stat found missing.
             caller (Caller): the session that looked.
@@ -582,6 +585,9 @@ class CacheManager:
             "/" + mount_key(path.virtual, self._prefix),
             OwnRead.ABSENT,
         )
+        if caller.recorder is not None:
+            lost = caller.recorder.lost
+            lost.lift(path.virtual, lost.count)
 
     def observe(self, rec: OpRecord, caller: Caller | None = None) -> None:
         """Record this session's result, never another session's cache entry.

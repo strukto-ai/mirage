@@ -31,7 +31,7 @@ from mirage.mount.core import MountCore
 from mirage.observe.context import mark_lost
 from mirage.runtime.handles.mode import open_mode
 from mirage.runtime.types import ScriptSource
-from mirage.types import PathSpec
+from mirage.types import PathSpec, ReadPolicy, ReadSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
@@ -382,6 +382,41 @@ async def test_an_op_finding_a_read_file_gone_refuses_before_writing(
                 await ws.vfs.pwrite("/s3/f", arg, 0)
     assert _mutations(fake) == []
     assert "f" not in fake.buckets["b"]
+
+
+@pytest.mark.asyncio
+async def test_a_miss_later_on_the_line_lifts_its_refusal(fake, workspaces):
+    ws = workspaces()
+    await _run(ws, "cat /s3/f")
+    del fake.buckets["b"]["f"]
+    fake.ledger.clear()
+    line = "echo a > /s3/f; cat /s3/f; echo b > /s3/f; echo $?"
+    _, out, err = await _run(ws, line)
+    assert (out, err.count(STALE)) == ("0\n", 1), err
+    assert fake.buckets["b"]["f"] == b"b\n"
+    assert _sent(fake, PUT)[-1] == {"IfNoneMatch": "*"}
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_reread_that_finds_no_file_lets_a_create_through(
+    fake, workspaces
+):
+    # The cached copy's freshness check is what finds the file gone.
+    fresh = Mount(
+        S3VFS(S3Config(bucket="b", region="us-east-1")),
+        mode=MountMode.WRITE,
+        write=WritePolicy.CONDITIONAL,
+        read=ReadSpec(policy=ReadPolicy.FRESH, ttl=600),
+    )
+    ws = workspaces(**{"/s3": fresh})
+    await ws.vfs.read("/s3/f")
+    del fake.buckets["b"]["f"]
+    with pytest.raises(FileNotFoundError):
+        await ws.vfs.read("/s3/f")
+    fake.ledger.clear()
+    await ws.vfs.write("/s3/f", b"z\n")
+    assert fake.buckets["b"]["f"] == b"z\n"
+    assert _sent(fake, PUT) == [{"IfNoneMatch": "*"}]
 
 
 @pytest.mark.asyncio

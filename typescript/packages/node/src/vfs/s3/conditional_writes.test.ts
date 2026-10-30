@@ -453,6 +453,17 @@ describe('conditional writes on an S3 mount', () => {
     },
   )
 
+  it('lifts a refusal when a later read on the line finds no file', async () => {
+    const ws = workspace()
+    await run(ws, 'cat /s3/f')
+    mock.store.delete('b', 'f')
+    mock.ledger.length = 0
+    const [, out, err] = await run(ws, 'echo a > /s3/f; cat /s3/f; echo b > /s3/f; echo $?')
+    expect([out, err.split(STALE).length - 1], err).toEqual(['0\n', 1])
+    expect(object('f')).toBe('b\n')
+    expect(sent('PutObject').at(-1)).toEqual({ IfNoneMatch: '*' })
+  })
+
   it('keeps asking for absence after a refused create', async () => {
     // The append saw no file; a peer's create beats it, and the retry too.
     const ws = workspace()

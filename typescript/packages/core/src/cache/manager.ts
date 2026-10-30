@@ -483,8 +483,10 @@ export class CacheManager {
 
   /**
    * Record that `caller`'s session found no file at `path` on a read or stat.
-   * A miss no one session owns (overlapping sessions on the fallback storage)
-   * is recorded nowhere, so the next write goes as it would have.
+   * It lifts a refusal the running line marked on `path` earlier, as a read
+   * that finds the file does. A miss no one session owns (overlapping
+   * sessions on the fallback storage) is recorded nowhere, so the next write
+   * goes as it would have. Mirrors Python's `observe_miss`.
    */
   observeMiss(path: PathSpec, caller: Caller | undefined): void {
     const session = caller?.versionReads === true ? caller.session : null
@@ -494,6 +496,8 @@ export class CacheManager {
       '/' + mountKey(path.virtual, this.prefix),
       OwnRead.ABSENT,
     )
+    const lost = lostPaths(caller?.recording?.records)
+    lost?.lift(path.virtual, lost.count)
   }
 
   /** Record this session's exact result, never a peer's cached token. */
