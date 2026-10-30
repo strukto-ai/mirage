@@ -136,32 +136,37 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: cli-typescript-dist
-          path: typescript/packages/*/dist
+          path: |
+            typescript/packages/*/dist
+            typescript/packages/core/src/generated
           if-no-files-found: error
           retention-days: 1
 
-  python:
-    needs: changes
+  # Both CLI smoke checks ride jobs that already install both toolchains.
+  # The eleven CLI batteries split four ways. Each runs as its own process and
+  # nearly every one sets its own MIRAGE_HOME, so the only thing the split
+  # changes is which runner they land on. cli_fuse.sh is the exception among the
+  # daemon-driving batteries, which is what the guard on cross-ref-fuse is for.
+  # Grouped by what the runner has to provide, and balanced so parity, which
+  # drives the most CLI invocations of any battery, sits alone on its own leg.
+  cross-parity:
+    needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: Python CLI
+    name: CLI feature parity
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
+      # libfuse: parity.sh's FUSE_YAML carries `backend: fuse`, and creating
+      # that workspace is a real kernel mount on both hosts, not a config-parse
+      # check. The script header's "no fuse kernel deps" predates that case.
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
         with:
-          python-version: "3.12"
+          libfuse: "true"
 
-      - name: Install uv
-        uses: ./.github/actions/setup-uv
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: uv sync --all-extras
-
-      - name: Smoke test exit code propagation
+      - name: Smoke test Python CLI exit codes and authentication
         working-directory: python
         shell: bash
         run: |
@@ -436,7 +441,7 @@ jobs:
             -H "Authorization: Bearer opaque-not-a-jwt" http://127.0.0.1:8765/v1/workspaces
           curl_check "/v1/health bypass => 200" 200 http://127.0.0.1:8765/v1/health
           kill $JWT_PID 2>/dev/null || true
-          sleep 2
+          wait_down
 
           if [ "$fail" != "0" ]; then
             echo
@@ -444,34 +449,139 @@ jobs:
             exit 1
           fi
 
-  typescript:
+      - name: Fast RAM snapshot interop (no services or daemon)
+        run: ./python/.venv/bin/python integ/snapshot_smoke.py
+
+      - name: Run CLI feature parity (subshell, sessions, session modes, workspaces, fuse)
+        run: |
+          bash integ/parity.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+
+  # Every access (in-app, HTTP, the CLI, MCP, RPC, SSH) gives the in-app
+  # answer for every case, on both hosts, under one deployment per leg:
+  # the CLI's own daemon, a token server and a JWT server. The dev leg adds
+  # the CLI's lifecycle and config and the CLI command gate.
+  access:
+    # In run 37896684397 the bootstrap queued for 4m08s, built for 1m44s,
+    # then these jobs queued again. Build locally on these longest legs.
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: Access (${{ matrix.deployment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        deployment: [dev, token, jwt]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
+        with:
+          build-typescript: "true"
+
+      - name: Run every access on both hosts
+        run: ./python/.venv/bin/python integ/access/run.py --deployment ${{ matrix.deployment }} --host-jobs 2 --suite-jobs 3
+
+  cross-snapshot:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: TypeScript CLI
+    name: Cross-language snapshot and store interop
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379/0
+      S3_BUCKET: mirage-cross
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: minio123
+      CROSS_DISK_ROOT: /tmp/mirage-cross-disk
+      CROSS_REDIS_PREFIX: mirage-cross/
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
+
+      - name: Start MinIO
+        run: |
+          for i in $(seq 1 5); do
+            docker pull cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
+            cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 1
+          done
+
+      # BOTH buckets, always. mirage-cross is cross.yaml's /minio mount and
+      # mirage-state is the state_store S3 round. cross.sh compares writer
+      # output against READER output rather than a literal and never checks an
+      # exit code, and S3VFS does no network I/O at construction, so a
+      # missing mirage-cross reads as '' on both sides and the battery passes
+      # having tested nothing.
+      - name: Create MinIO buckets
+        run: |
+          for i in $(seq 1 5); do
+            docker pull cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 && break
+            echo "docker pull failed (attempt $i), retrying"; sleep 10
+          done
+          docker run --rm --network container:minio \
+            -e MC_HOST_local="http://minio:minio123@localhost:9000" \
+            cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 \
+            mb --ignore-existing local/mirage-cross local/mirage-state
+
+      - name: Run cross-language snapshot interop (both directions)
+        run: |
+          bash integ/cross.sh \
+            "python/.venv/bin/mirage" \
+            "node typescript/packages/cli/dist/bin/mirage.js"
+
+      # STORE_S3 gates the whole second round inside the script
+      # (`if [ "${STORE_S3:-0}" == "1" ]`), and without it the battery still
+      # prints OK and exits 0. It has to stay on this step.
+      - name: Run cross-language state store interop (both directions)
+        run: bash integ/state_store.sh
+        env:
+          STORE_S3: "1"
+          STORE_S3_ENDPOINT: http://localhost:9000
+          STORE_S3_BUCKET: mirage-state
+
+      - name: Run cross-language index store interop (both directions)
+        run: bash integ/index_store.sh
+
+  cross-ref-fuse:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
+    name: CLI, VFS and runtime ref, env and FUSE batteries
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Node and pnpm
-        uses: ./.github/actions/setup-node-pnpm
+      - name: CLI battery toolchain
+        uses: ./.github/actions/cli-battery-setup
         with:
-          node-version: "24"
+          libfuse: "true"
 
-      - name: Install node-gyp
-        run: npm install -g node-gyp
-
-      - name: Install TypeScript dependencies
-        working-directory: typescript
-        run: pnpm install --frozen-lockfile
-
-      - name: Download TypeScript build outputs
-        uses: actions/download-artifact@v8
-        with:
-          name: cli-typescript-dist
-          path: typescript/packages
-
-      - name: Smoke test exit code propagation
+      - name: Smoke test TypeScript CLI exit codes and authentication
         working-directory: typescript
         shell: bash
         run: |
@@ -739,168 +849,13 @@ jobs:
             -H "Authorization: Bearer opaque-not-a-jwt" http://127.0.0.1:8765/v1/workspaces
           curl_check "/v1/health bypass => 200" 200 http://127.0.0.1:8765/v1/health
           kill $JWT_PID 2>/dev/null || true
-          sleep 2
+          wait_down
 
           if [ "$fail" != "0" ]; then
             echo
             echo "One or more checks failed."
             exit 1
           fi
-
-  # The eleven CLI batteries split four ways. Each runs as its own process and
-  # nearly every one sets its own MIRAGE_HOME, so the only thing the split
-  # changes is which runner they land on. cli_fuse.sh is the exception among the
-  # daemon-driving batteries, which is what the guard on cross-ref-fuse is for.
-  # Grouped by what the runner has to provide, and balanced so parity, which
-  # drives the most CLI invocations of any battery, sits alone on its own leg.
-  cross-parity:
-    needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: CLI feature parity
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      # libfuse: parity.sh's FUSE_YAML carries `backend: fuse`, and creating
-      # that workspace is a real kernel mount on both hosts, not a config-parse
-      # check. The script header's "no fuse kernel deps" predates that case.
-      - name: CLI battery toolchain
-        uses: ./.github/actions/cli-battery-setup
-        with:
-          libfuse: "true"
-
-      - name: Fast RAM snapshot interop (no services or daemon)
-        run: ./python/.venv/bin/python integ/snapshot_smoke.py
-
-      - name: Run CLI feature parity (subshell, sessions, session modes, workspaces, fuse)
-        run: |
-          bash integ/parity.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js"
-
-
-  # Every access (in-app, HTTP, the CLI, MCP, RPC, SSH) gives the in-app
-  # answer for every case, on both hosts, under one deployment per leg:
-  # the CLI's own daemon, a token server and a JWT server. The dev leg adds
-  # the CLI's lifecycle and config and the CLI command gate.
-  access:
-    # In run 37896684397 the bootstrap queued for 4m08s, built for 1m44s,
-    # then these jobs queued again. Build locally on these longest legs.
-    needs: changes
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: Access (${{ matrix.deployment }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        deployment: [dev, token, jwt]
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: CLI battery toolchain
-        uses: ./.github/actions/cli-battery-setup
-        with:
-          build-typescript: "true"
-
-      - name: Run every access on both hosts
-        run: ./python/.venv/bin/python integ/access/run.py --deployment ${{ matrix.deployment }} --host-jobs 2 --suite-jobs 3
-
-  cross-snapshot:
-    needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: Cross-language snapshot and store interop
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      REDIS_URL: redis://localhost:6379/0
-      S3_BUCKET: mirage-cross
-      S3_ENDPOINT: http://localhost:9000
-      S3_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: minio
-      AWS_SECRET_ACCESS_KEY: minio123
-      CROSS_DISK_ROOT: /tmp/mirage-cross-disk
-      CROSS_REDIS_PREFIX: mirage-cross/
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: CLI battery toolchain
-        uses: ./.github/actions/cli-battery-setup
-
-      - name: Start MinIO
-        run: |
-          for i in $(seq 1 5); do
-            docker pull cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 && break
-            echo "docker pull failed (attempt $i), retrying"; sleep 10
-          done
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-            cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data
-          for i in $(seq 1 30); do
-            curl -sf http://localhost:9000/minio/health/live && break
-            sleep 1
-          done
-
-      # BOTH buckets, always. mirage-cross is cross.yaml's /minio mount and
-      # mirage-state is the state_store S3 round. cross.sh compares writer
-      # output against READER output rather than a literal and never checks an
-      # exit code, and S3VFS does no network I/O at construction, so a
-      # missing mirage-cross reads as '' on both sides and the battery passes
-      # having tested nothing.
-      - name: Create MinIO buckets
-        run: |
-          for i in $(seq 1 5); do
-            docker pull cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 && break
-            echo "docker pull failed (attempt $i), retrying"; sleep 10
-          done
-          docker run --rm --network container:minio \
-            -e MC_HOST_local="http://minio:minio123@localhost:9000" \
-            cgr.dev/chainguard/minio-client@sha256:b8b144ab34694ecea25aa352c4be9de4c26ee2a02701521dce02ee5593c57338 \
-            mb --ignore-existing local/mirage-cross local/mirage-state
-
-      - name: Run cross-language snapshot interop (both directions)
-        run: |
-          bash integ/cross.sh \
-            "python/.venv/bin/mirage" \
-            "node typescript/packages/cli/dist/bin/mirage.js"
-
-      # STORE_S3 gates the whole second round inside the script
-      # (`if [ "${STORE_S3:-0}" == "1" ]`), and without it the battery still
-      # prints OK and exits 0. It has to stay on this step.
-      - name: Run cross-language state store interop (both directions)
-        run: bash integ/state_store.sh
-        env:
-          STORE_S3: "1"
-          STORE_S3_ENDPOINT: http://localhost:9000
-          STORE_S3_BUCKET: mirage-state
-
-      - name: Run cross-language index store interop (both directions)
-        run: bash integ/index_store.sh
-
-  cross-ref-fuse:
-    needs: [changes, typescript-build]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
-    name: CLI, VFS and runtime ref, env and FUSE batteries
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: CLI battery toolchain
-        uses: ./.github/actions/cli-battery-setup
-        with:
-          libfuse: "true"
 
       - name: Run CLI ref battery (a program tree installed from a file)
         run: |
@@ -947,7 +902,7 @@ jobs:
     name: cli-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, typescript-build, python, typescript, cross-parity, access, cross-snapshot, cross-ref-fuse]
+    needs: [changes, typescript-build, cross-parity, access, cross-snapshot, cross-ref-fuse]
     if: always()
     steps:
       - name: Check required jobs
