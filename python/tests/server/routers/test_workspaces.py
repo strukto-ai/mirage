@@ -452,13 +452,13 @@ async def listening() -> AsyncIterator[int]:
     await server.wait_closed()
 
 
-async def _curl_from(app: FastAPI, port: int) -> int:
+async def _curl_from(app: FastAPI, port: int, network: bool) -> int:
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport, base_url="http://test"
     ) as client:
         body = _minimal_config()
-        body["config"]["network"] = True
+        body["config"]["network"] = network
         r = await client.post("/v1/workspaces", json=body)
         wid = r.json()["id"]
         r = await client.post(
@@ -470,11 +470,10 @@ async def _curl_from(app: FastAPI, port: int) -> int:
 
 
 @pytest.mark.asyncio
-async def test_the_server_network_holds_every_workspace(listening):
-    held = build_app(idle_grace_seconds=10.0, network=False)
-    free = build_app(idle_grace_seconds=10.0)
-    assert await _curl_from(free, listening) == 0
-    assert await _curl_from(held, listening) == 7
+async def test_a_posted_network_holds_its_workspace(listening):
+    app = build_app(idle_grace_seconds=10.0)
+    assert await _curl_from(app, listening, True) == 0
+    assert await _curl_from(app, listening, False) == 7
 
 
 @pytest.mark.asyncio

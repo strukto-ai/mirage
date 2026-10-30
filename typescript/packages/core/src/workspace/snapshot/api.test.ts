@@ -139,7 +139,7 @@ describe('Workspace.snapshot', () => {
     }
   })
 
-  it.each([false, { allow: ['10.0.0.0/8'] }])(
+  it.each([false, { allowed_domains: ['10.0.0.0/8'] }])(
     'keeps network %o across a round trip',
     async (network) => {
       const src = new Workspace({ '/m': new RAMVFS() }, { network })
@@ -158,13 +158,13 @@ describe('Workspace.snapshot', () => {
     const src = new Workspace({ '/m': new RAMVFS(), '/live': new Live() })
     const addressed = new Workspace(
       { '/m': new RAMVFS(), '/live': new Live() },
-      { network: { allow: ['10.0.0.5'] } },
+      { network: { allowed_domains: ['10.0.0.5'] } },
     )
     try {
       await expect(src.copy({ network: false })).rejects.toThrow(
         "copy: /live/ keep this workspace's connections",
       )
-      await expect(addressed.copy({ network: { allow: ['10.0.0.5.'] } })).rejects.toThrow(
+      await expect(addressed.copy({ network: { allowed_domains: ['10.0.0.5.'] } })).rejects.toThrow(
         "copy: /live/ keep this workspace's connections",
       )
       const same = await src.copy({ network: true })
@@ -176,8 +176,12 @@ describe('Workspace.snapshot', () => {
   })
 
   it.each([
-    [{ allow: ['a.example', 'b.example'] }, { allow: ['b.example', 'a.example', 'a.example'] }],
-    [false, { allow: [] }],
+    [
+      { allowed_domains: ['a.example', 'b.example'] },
+      { allowed_domains: ['b.example', 'a.example', 'a.example'] },
+    ],
+    [false, { allowed_domains: [] }],
+    [{ denied_domains: ['*:22'] }, { denied_domains: ['*:22', '*:22'] }],
   ])('copies over a live mount under an equal network: %o', async (held, asked) => {
     class Live extends BaseVFS {
       override readonly name = 'live'

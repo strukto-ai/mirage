@@ -1,0 +1,24 @@
+# A runtime Mirage does not ship, named from yaml by file and class. The
+# path is relative to this file. Programs Mirage does not run itself go to
+# the execution service at EXEC_URL; cat, grep, pipes and redirects stay in
+# the workspace.
+#
+#   pnpm -C examples/typescript exec tsx runtime/custom/custom_runtime.ts
+
+mode: WRITE
+
+mounts:
+  /work:
+    vfs: ram
+  /archive:
+    vfs: disk
+    mode: read
+    config:
+      root: ${ARCHIVE_DIR}
+
+runtimes:
+  - name: ./remote_runtime.mjs:RemoteRuntime
+    config:
+      url: ${EXEC_URL}
+      token: ${EXEC_TOKEN}
+  - workspace

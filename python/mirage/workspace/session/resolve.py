@@ -272,6 +272,10 @@ def with_inline(
         raise PolicyError(
             "command_limits belong on the profile, not inline permissions"
         )
+    if inline.network is not None:
+        raise PolicyError(
+            "network belongs on the profile, not inline permissions"
+        )
     if inline.policy is not None:
         raise PolicyError(
             "inline permissions may add ask and deny rules, "
@@ -305,6 +309,7 @@ def with_inline(
         policy=base.policy,
         command_limits=base.command_limits,
         processes=processes,
+        network=base.network,
     )
 
 
@@ -371,6 +376,7 @@ def compile_profile(
             scripts=compile_scripts(effective, name),
             command_limits=effective.command_limits,
             processes=processes,
+            network=effective.network,
         ),
         hide_reasons=tuple(_reason_from(v) for v in value["hide_reasons"]),
         profile=name or None,
@@ -404,6 +410,7 @@ def narrow(session: SessionState, compiled: CompiledProfile) -> None:
     session.profile = compiled.profile
     session.command_limits = dict(policies.command_limits or {})
     session.processes = policies.processes
+    session.network = policies.network
 
 
 def narrowing_of(session: SessionState) -> CompiledProfile:
@@ -422,6 +429,7 @@ def narrowing_of(session: SessionState) -> CompiledProfile:
             scripts=session.scripts,
             command_limits=session.command_limits,
             processes=session.processes,
+            network=session.network,
         ),
         hide_reasons=session.hide_reasons,
         profile=session.profile,

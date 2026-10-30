@@ -26,6 +26,7 @@ from mirage.io.network import (
     network_lets,
     run_with_network,
 )
+from mirage.policy.profile import SessionProfile
 from mirage.vfs.ram import RAMVFS
 
 
@@ -34,7 +35,12 @@ from mirage.vfs.ram import RAMVFS
     [
         (True, None),
         (False, {"allow": []}),
-        ({"allow": ["a.com"]}, {"allow": ["a.com"]}),
+        ({"allowed_domains": ["a.com"]}, {"allow": ["a.com"]}),
+        ({"denied_domains": ["*:22"]}, {"deny": ["*:22"]}),
+        (
+            {"allowed_domains": ["*"], "denied_domains": ["evil.test"]},
+            {"allow": ["*"], "deny": ["evil.test"]},
+        ),
     ],
 )
 def test_a_setting_adds_its_layer(setting, layer):
@@ -42,7 +48,14 @@ def test_a_setting_adds_its_layer(setting, layer):
 
 
 @pytest.mark.parametrize(
-    "setting", ["off", {"deny": ["a.com"]}, {"allow": "a.com"}]
+    "setting",
+    [
+        "off",
+        {},
+        {"allow": ["a.com"]},
+        {"deny": ["a.com"]},
+        {"allowed_domains": "a.com"},
+    ],
 )
 def test_a_bad_setting_is_refused(setting):
     with pytest.raises(ValueError, match="network is true, false or"):
@@ -104,9 +117,11 @@ async def _curl(port: int, network, host: str = "127.0.0.1") -> int:
     ("network", "exit_code"),
     [
         (True, 0),
-        ({"allow": ["127.0.0.0/8"]}, 0),
+        ({"allowed_domains": ["127.0.0.0/8"]}, 0),
         (False, 7),
-        ({"allow": ["example.com"]}, 7),
+        ({"allowed_domains": ["example.com"]}, 7),
+        ({"denied_domains": ["127.0.0.0/8"]}, 7),
+        ({"allowed_domains": ["*"], "denied_domains": ["127.0.0.1"]}, 7),
     ],
 )
 async def test_curl_clears_the_workspace_rule(port, network, exit_code):
@@ -114,9 +129,31 @@ async def test_curl_clears_the_workspace_rule(port, network, exit_code):
 
 
 @pytest.mark.asyncio
+async def test_an_entry_can_hold_a_connection_to_one_port(port):
+    assert await _curl(port, {"allowed_domains": [f"127.0.0.1:{port}"]}) == 0
+    assert await _curl(port, {"allowed_domains": ["127.0.0.1:1"]}) == 7
+    assert await _curl(port, {"denied_domains": [f"*:{port}"]}) == 7
+    named = {"allowed_domains": [f"localhost:{port}"]}
+    assert await _curl(port, named, "localhost") == 0
+    named = {"allowed_domains": ["localhost:1"]}
+    assert await _curl(port, named, "localhost") == 7
+
+
+@pytest.mark.asyncio
 async def test_a_name_is_judged_by_the_host_it_was_asked_for(port):
-    assert await _curl(port, {"allow": ["localhost"]}, "localhost") == 0
-    assert await _curl(port, {"allow": ["example.com"]}, "localhost") == 7
+    allowed = {"allowed_domains": ["localhost"]}
+    assert await _curl(port, allowed, "localhost") == 0
+    other = {"allowed_domains": ["example.com"]}
+    assert await _curl(port, other, "localhost") == 7
+
+
+def test_names_sharing_an_address_keep_their_own_ports():
+    rule = NetworkRule([{"allow": ["a.test:443", "b.test:8443"]}])
+    assert rule.resolved("a.test", "10.1.1.1", 443)
+    assert rule.resolved("b.test", "10.1.1.1", 8443)
+    assert rule.connects("10.1.1.1", 443)
+    assert rule.connects("10.1.1.1", 8443)
+    assert not rule.connects("10.1.1.1", 22)
 
 
 @pytest.mark.asyncio
@@ -129,8 +166,12 @@ async def test_a_name_lends_its_address_to_no_other_name(port, monkeypatch):
         return resolve("127.0.0.1" if named else host, *args, **kwargs)
 
     monkeypatch.setattr(network, "_resolve", local)
-    held = Workspace({"/data": RAMVFS()}, network={"allow": ["allowed.test"]})
-    other = Workspace({"/data": RAMVFS()}, network={"allow": ["other.test"]})
+    held = Workspace(
+        {"/data": RAMVFS()}, network={"allowed_domains": ["allowed.test"]}
+    )
+    other = Workspace(
+        {"/data": RAMVFS()}, network={"allowed_domains": ["other.test"]}
+    )
     try:
         for ws, host, exit_code in [
             (held, "allowed.test", 0),
@@ -143,3 +184,37 @@ async def test_a_name_lends_its_address_to_no_other_name(port, monkeypatch):
     finally:
         await held.close()
         await other.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_narrows_its_sessions_network(port):
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        network={"denied_domains": ["10.0.0.0/8"]},
+        profiles={
+            "agent": {"network": {"allowed_domains": [f"127.0.0.1:{port}"]}},
+            "review": {"network": False},
+            "wide": {"network": True},
+        },
+    )
+    ws.create_session("a", profile="agent")
+    ws.create_session("r", profile="review")
+    ws.create_session("w", profile="wide")
+    line = f"curl -sS http://127.0.0.1:{port}/"
+    try:
+        for session_id, exit_code in [("a", 0), ("r", 7), ("w", 0)]:
+            io = await ws.shell(line, session_id=session_id)
+            assert io.exit_code == exit_code, session_id
+        assert ws.registry.network_of(
+            {"allowed_domains": [f"127.0.0.1:{port}"]}
+        ) is ws.registry.network_of({"allowed_domains": [f"127.0.0.1:{port}"]})
+        assert ws.registry.network_of(None) is ws.registry.network
+    finally:
+        await ws.close()
+
+
+def test_a_profile_network_must_be_a_setting():
+    with pytest.raises(ValueError, match="network is true, false or"):
+        SessionProfile(network={"allow": ["a.com"]})
+    with pytest.raises(ValueError, match="is not an address, a range"):
+        SessionProfile(network={"denied_domains": ["10.0.0.0/33"]})

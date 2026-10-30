@@ -1,0 +1,279 @@
+---
+title: Custom runtime
+description: Run programs somewhere Mirage does not ship, such as your own execution service, by writing a runtime in Python or TypeScript and naming it from YAML.
+icon: code
+---
+
+A runtime decides where a program runs. Write one when the agent's programs
+should run somewhere Mirage does not ship: your team's job runner, a GPU
+machine or a build farm. A runtime is a class that extends `Runtime`, names
+the programs it captures and implements one entry point. You ship it as a file
+next to your workspace YAML and name it by file and class:
+
+```yaml
+runtimes:
+  - name: ./remote_runtime.py:RemoteRuntime     # TypeScript: ./remote_runtime.mjs:RemoteRuntime
+    config:
+      url: ${EXEC_URL}
+      token: ${EXEC_TOKEN}
+  - workspace
+```
+
+The part before the colon is a file path, relative to the YAML file, or an
+importable module (`mypkg.runtimes:RemoteRuntime`). The part after it is the
+class. Mirage loads the file, checks that the class is a `Runtime` subclass and
+builds it with the entry's `captures` and `config`, like a runtime it ships.
+Loading runs the file's top-level code in the Mirage process, so name only
+code you trust.
+
+## Runtime or CLI?
+
+A [CLI](/python/cli/custom) is a command Mirage implements: its spec, help and
+exit codes live in Mirage, and its handler calls a service through an accessor.
+A runtime is where Mirage hands off programs it does not implement: code the
+agent writes, or any binary. It answers "where does this run", not "what does
+this command do". To give the agent one command with a known interface, such as
+`deploy` or `tickets`, write a CLI. To choose where `python3`, `node` or any
+other program runs, write a runtime.
+
+## Choose an entry point
+
+| Implement | Receives | For |
+| --- | --- | --- |
+| `run_process` / `runProcess`, with `ProcessExecutorMixin` / `[PROCESS_EXECUTOR]` | one program's argv, as words | a service or machine that runs one program at a time |
+| `run_line` / `runLine`, with `LineExecutorMixin` / `[LINE_EXECUTOR]` | a whole shell line in `ctx.flags["c"]` | a shell of its own: a container, a VM, an SSH machine |
+| `interpret`, on a `LanguageRuntime` subclass | the code of a `python3` or `node` program | an interpreter Mirage calls with the program's source |
+
+A runtime captures the program names you give it. `@external` captures every
+program no builtin, CLI or other runtime claims, and `@line` takes every line.
+Interpreter names (`python3`, `python`, `node`, `js`) are never left over, so
+capture the ones you want by name. Only a line executor can take `@line`, and only a line or process
+executor can take `@external`.
+
+## Reach files through `ctx.vfs`
+
+The machine your runtime sends a program to cannot see a mount. Read and write
+workspace files through `ctx.vfs`, the session's files. Each call goes through
+the workspace dispatcher, so mount modes, profiles, policy and the cache apply
+to it as they apply to `cp`. A runtime that opens host paths directly skips all
+of them.
+
+Read with `raw` when you copy a file out to write it back: it returns the
+stored bytes, not a form a `filetype` registration renders.
+
+## Example: an execution service
+
+This runtime sends each program to an HTTP execution service with a copy of the
+session's working directory, then writes back the files the program created or
+changed. The service runs the program in a scratch directory and answers with
+its output, exit code and changed files. The full example includes a small
+stand-in service, so it runs on one machine.
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python remote_runtime.py
+    import base64
+    import posixpath
+    from dataclasses import dataclass
+
+    import aiohttp
+
+    from mirage import Context, ProcessExecutorMixin, RunResult, Runtime, RuntimeConfig
+    from mirage.runtime.constants import EXTERNAL_COMMANDS
+
+
+    @dataclass(frozen=True, slots=True)
+    class RemoteConfig(RuntimeConfig):
+        url: str = ""
+        token: str = ""
+        max_bytes: int = 16 * 1024 * 1024
+
+
+    class RemoteRuntime(Runtime[aiohttp.ClientSession], ProcessExecutorMixin[aiohttp.ClientSession]):
+        name = "remote"
+        captures = ("python3", "python", "node", EXTERNAL_COMMANDS)
+        reach = "remote"
+        config_cls = RemoteConfig
+        config: RemoteConfig
+
+        async def open_engine(self) -> aiohttp.ClientSession:
+            return aiohttp.ClientSession()
+
+        async def close_engine(self, engine: aiohttp.ClientSession) -> None:
+            await engine.close()
+
+        async def run_process(self, engine, paths, texts, ctx: Context, output=None, errors=None) -> RunResult:
+            cwd = ctx.cwd.virtual
+            files = await self._snapshot(ctx, cwd)
+            stdin = await self._stdin(ctx)  # up to max_bytes, within the memory budget; see the full example
+            request = {
+                "argv": texts,
+                "stdin": base64.b64encode(stdin).decode(),
+                "files": {rel: base64.b64encode(data).decode() for rel, data in files.items()},
+            }
+            headers = {"Authorization": f"Bearer {self.config.token}"}
+            async with engine.post(self.config.url, json=request, headers=headers) as resp:
+                resp.raise_for_status()
+                answer = await resp.json()
+            for rel, data in answer["files"].items():
+                # The full example also creates missing folders first.
+                await ctx.vfs.write(posixpath.join(cwd, rel), base64.b64decode(data))
+            return RunResult(
+                stdout=base64.b64decode(answer["stdout"]),
+                stderr=base64.b64decode(answer["stderr"]) or None,
+                exit_code=answer["exit_code"],
+            )
+
+        async def _snapshot(self, ctx: Context, cwd: str) -> dict[str, bytes]:
+            files, total, pending = {}, 0, [cwd]
+            mount = ctx.vfs.mount_of(cwd)
+            while pending:
+                for entry in await ctx.vfs.readdir(pending.pop()):
+                    if ctx.vfs.mount_of(entry) != mount:
+                        continue
+                    if await ctx.vfs.is_dir(entry):
+                        pending.append(entry)
+                        continue
+                    data = await ctx.vfs.read(entry, raw=True)
+                    total += len(data)
+                    if total > self.config.max_bytes:
+                        raise ValueError(f"working directory is over {self.config.max_bytes} bytes")
+                    files[posixpath.relpath(entry, cwd)] = data
+            return files
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```javascript remote_runtime.mjs
+    import { posix } from 'node:path'
+    import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-node'
+
+    export class RemoteRuntime extends Runtime {
+      [PROCESS_EXECUTOR] = true
+      name = 'remote'
+      reach = 'remote'
+
+      constructor(options = {}) {
+        super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], ['url', 'token', 'maxBytes'])
+      }
+
+      /** @param {import('@struktoai/mirage-node').Context} ctx */
+      async runProcess(_engine, _paths, texts, ctx) {
+        const cwd = ctx.cwd.virtual
+        const maxBytes = this.config.maxBytes ?? 16 * 1024 * 1024
+        const files = await snapshot(ctx, cwd, maxBytes)
+        const resp = await fetch(this.config.url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${this.config.token}` },
+          body: JSON.stringify({
+            argv: texts,
+            stdin: b64(await collect(ctx.stdin, maxBytes)),
+            files: Object.fromEntries(Object.entries(files).map(([rel, data]) => [rel, b64(data)])),
+          }),
+          signal: ctx.signal,
+        })
+        if (!resp.ok) throw new Error(`execution service answered ${resp.status}`)
+        const answer = await resp.json()
+        for (const [rel, data] of Object.entries(answer.files)) {
+          // The full example also creates missing folders first.
+          await ctx.vfs.write(posix.join(cwd, rel), unb64(data))
+        }
+        const stderr = unb64(answer.stderr)
+        return { stdout: unb64(answer.stdout), stderr: stderr.length > 0 ? stderr : null, exitCode: answer.exit_code }
+      }
+    }
+
+    // snapshot() walks ctx.vfs.readdir from cwd within its mount and reads
+    // each file with { raw: true }; collect() reads stdin up to maxBytes;
+    // b64() and unb64() convert. All four are in the full example.
+    ```
+  </Tab>
+</Tabs>
+
+The Python runtime opens one `aiohttp` session as its engine: `open_engine` runs
+once, at the first program, and `close_engine` when the workspace closes. The
+TypeScript one needs no engine, because `fetch` is global. In TypeScript the
+third constructor argument lists the config keys the runtime accepts, and they
+arrive in camelCase (`max_bytes` in the YAML is `maxBytes`); in Python the config
+class's fields do. Either way, an unknown key in the YAML fails when the
+workspace loads.
+
+With `/work` a writable RAM mount and `/archive` a read-only disk folder, each
+holding `report.py` and `orders.csv`:
+
+```bash
+$ cd /work && python3 report.py
+wrote summary.txt on the service: total 245
+$ cat /work/summary.txt
+3 orders, total 245
+$ cd /work && python3 report.py | grep -o 'total [0-9]*'
+total 245
+$ echo 'print(6 * 7)' | python3 -
+42
+$ cd /archive && python3 report.py
+python3: [Errno 30] Read-only file system: '/archive/summary.txt'
+$ timeout 1 python3 -c 'import time; time.sleep(30)'
+$ echo $?
+124
+```
+
+`python3` runs on the service while `cat`, `grep` and the pipe stay in the
+workspace. The output file comes back into the mount, stdin reaches the
+program, and the read-only mount refuses the write-back. The refusal's wording
+is the host's: TypeScript prints `python3: mount /archive/ is read-only`.
+
+The complete examples, with the YAML, the stand-in service and a script that
+runs these lines, are in
+[`examples/python/runtime/custom`](https://github.com/strukto-ai/mirage/tree/main/examples/python/runtime/custom)
+and
+[`examples/typescript/runtime/custom`](https://github.com/strukto-ai/mirage/tree/main/examples/typescript/runtime/custom).
+
+The stand-in service accepts work only with the token it was started with, and
+your real service should authenticate callers too: it runs whatever program it
+is sent.
+
+## Stop when the run stops
+
+`timeout`, a closed session or a reader that stops early cancels the run. In
+Python the cancellation arrives as `asyncio.CancelledError` in your coroutine;
+in TypeScript, `ctx.signal` aborts. Pass the cancellation on to whatever runs
+the program, and make sure that stops it:
+
+- The example's request is cancelled with the run (`ctx.signal` in TypeScript),
+  and the service kills the program when the connection drops. It starts each
+  program in its own process group and kills the group, so children the
+  program started stop too.
+- A runtime that spawns a process itself kills it and waits for it before it
+  removes the process's files.
+- A process that exits without reading its input closes the pipe. In Node, give
+  the child's `stdin` an `error` listener that treats `EPIPE` as that, not as a
+  failure; without one, the stream error stops the host.
+
+## What the copy holds
+
+The example sends the working directory's own mount, never a mount below it,
+so a run from `/` does not try to copy `/dev` or every other mount. It sends
+stdin whole too, because the service takes a run's input up front; it stops
+reading at `max_bytes`, so an endless producer fails the run with
+`stdin is over ... bytes` instead of hanging it. A service that streams input
+would feed stdin as it arrives instead.
+
+The example copies files out and writes them back whole. Two runs that change
+the same file at the same time each write back their own copy, and the later
+write replaces the earlier one. That is fine for one agent's sequential
+commands. A runtime shared by concurrent sessions should check that a file is
+unchanged before writing it back, or lock it for the run.
+
+## Reach
+
+A runtime declares `reach`: `workspace` when `ctx.vfs` is its only way to
+files, `process` or `remote` when its code can act around that gate. The
+example declares `remote`: the program runs on another machine and can reach
+whatever that machine can. The default is `process`, so a runtime that does not
+declare its reach claims no promise. Embedders read it to decide whether
+"agent code cannot bypass mount modes and policy" holds for the workspace.
+
+## Next
+
+[Routing](/home/setup/runtime/overview#routing) orders your runtime among the
+others, and [Route Runtime](/home/policy/route-runtime) picks one per command
+line.

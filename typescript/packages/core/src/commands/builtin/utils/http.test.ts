@@ -14,6 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpConnectError, HttpTimeoutError } from '../errors.ts'
+import { materialize } from '../../../io/types.ts'
 import { httpFormRequest, httpRequest, isHttpError, registerInsecureFetch } from './http.ts'
 import { CookieJar } from './cookie.ts'
 import { runWithEvaluation } from '../../../context/session_context.ts'
@@ -84,7 +85,7 @@ describe('http requests', () => {
     const resp = await httpRequest('https://example.com/x')
     expect(resp.status).toBe(502)
     expect(isHttpError(resp)).toBe(true)
-    expect(new TextDecoder().decode(resp.body)).toBe('nope')
+    expect(new TextDecoder().decode(await materialize(resp.body))).toBe('nope')
   })
 
   it('wraps a transport failure as HttpConnectError with host and port', async () => {
@@ -145,7 +146,7 @@ describe('http deadlines', () => {
     const pending = httpRequest('http://127.0.0.1:1/x', { timeoutMs: null })
     await vi.advanceTimersByTimeAsync(120_000)
     const resp = await pending
-    expect(new TextDecoder().decode(resp.body)).toBe('late')
+    expect(new TextDecoder().decode(await materialize(resp.body))).toBe('late')
   })
 })
 
@@ -181,7 +182,9 @@ describe('redirect history', () => {
     expect(resp.history.map((h) => [h.status, h.url, new Map(h.headers).get('location')])).toEqual([
       [302, 'http://x.test/redirect', '/hello'],
     ])
-    expect(new TextDecoder().decode(resp.history[0]?.body)).toBe('302: Found')
+    expect(new TextDecoder().decode(await materialize(resp.history[0]?.body ?? null))).toBe(
+      '302: Found',
+    )
     expect(urlsCalled(mock)).toEqual(['http://x.test/redirect', 'http://x.test/hello'])
     // Every hop is asked for by hand, so the platform never hides one.
     expect(mock.mock.calls.map((call) => call[1]?.redirect)).toEqual(['manual', 'manual'])
@@ -268,9 +271,9 @@ describe('insecure fetch', () => {
     const skipped = await httpRequest('https://example.com/x', { verify: false })
     const checked = await httpRequest('https://example.com/x')
     const form = await httpFormRequest('https://example.com/f', { verify: false })
-    expect(new TextDecoder().decode(skipped.body)).toBe('unverified')
-    expect(new TextDecoder().decode(checked.body)).toBe('verified')
-    expect(new TextDecoder().decode(form.body)).toBe('unverified')
+    expect(new TextDecoder().decode(await materialize(skipped.body))).toBe('unverified')
+    expect(new TextDecoder().decode(await materialize(checked.body))).toBe('verified')
+    expect(new TextDecoder().decode(await materialize(form.body))).toBe('unverified')
     expect(urlsCalled(insecure)).toEqual(['https://example.com/x', 'https://example.com/f'])
     expect(urlsCalled(fetchMock)).toEqual(['https://example.com/x'])
   })
@@ -279,7 +282,7 @@ describe('insecure fetch', () => {
     const fetchMock = makeFetchMock('verified')
     vi.stubGlobal('fetch', fetchMock)
     const resp = await httpRequest('https://example.com/x', { verify: false })
-    expect(new TextDecoder().decode(resp.body)).toBe('verified')
+    expect(new TextDecoder().decode(await materialize(resp.body))).toBe('verified')
   })
 })
 

@@ -35,6 +35,7 @@ import type {
   Deny,
   ExecuteResultContext,
   HandOff,
+  NetworkContext,
   Occurrence,
   VfsContext,
   Pending,
@@ -129,11 +130,19 @@ export async function decisionId(
  * this".
  */
 export function askRule(
-  ctx: CommandContext | RouteContext | VfsContext | ExecuteResultContext | SessionContext,
+  ctx:
+    | CommandContext
+    | RouteContext
+    | VfsContext
+    | ExecuteResultContext
+    | SessionContext
+    | NetworkContext,
   ask: Ask,
 ): CommandRule {
   if (ask.rule != null) return ask.rule
   if ('verb' in ctx) return { reason: ask.reason, commands: [ctx.key] }
+  if ('address' in ctx)
+    return { reason: ask.reason, commands: [ctx.host === '' ? ctx.address : ctx.host] }
   if ('call' in ctx) return { reason: ask.reason, paths: [ctx.path.virtual] }
   if ('commands' in ctx) return { reason: ask.reason, commands: [ctx.line] }
   const program = (ctx.program ?? [ctx.command]).join(' ')

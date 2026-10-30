@@ -29,6 +29,7 @@ function mockFetch(): void {
       status: 200,
       statusText: 'OK',
       arrayBuffer: () => Promise.resolve(PAYLOAD.buffer.slice(0)),
+      body: new Response(PAYLOAD).body,
       text: () => Promise.resolve(DEC.decode(PAYLOAD)),
       headers: new Headers(),
     } as unknown as Response),

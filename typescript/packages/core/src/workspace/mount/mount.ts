@@ -20,6 +20,7 @@ import { activePipe, pipeBelow } from '../../core/dev/device.ts'
 import type { DevicePipe } from '../../core/dev/pipe.ts'
 import { norm } from '../../utils/path.ts'
 import {
+  awaitsAs,
   type Caller,
   currentCaller,
   effectiveMountMode,
@@ -58,18 +59,14 @@ import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
+import { type Egress, withEgress } from '../../io/gateway.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
-import { closeQuietly, rechunk } from '../../io/stream.ts'
+import { OutputStream, closeQuietly, rechunk } from '../../io/stream.ts'
 import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
-import {
-  publishRead,
-  readVersioned,
-  runWithWriteContext,
-  requireSupported,
-} from '../../cache/context.ts'
+import { publishRead, readVersioned, requireSupported } from '../../cache/context.ts'
 import { latestFingerprint } from '../../cache/file/io.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { type WriteContext } from '../../cache/types.ts'
@@ -86,9 +83,7 @@ import { callerSignal } from '../../context/session_context.ts'
 import {
   activeRecords,
   commandRecords,
-  runWithMountContext,
   runWithRecording,
-  runWithRevisions,
   withMountContext,
 } from '../../observe/context.ts'
 import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
@@ -1760,21 +1755,14 @@ export class MountEntry {
   readStream(scope: PathSpec, access?: SessionAccess): AsyncIterable<Uint8Array> {
     const vfs = this.viewFor(access)
     if (this.retiring) throw ebusy(this.prefix)
-    const revisions = this.revisions.size > 0 ? this.revisions : null
-    const bound = currentCaller()
-    const caller: Caller = {
-      ...bound,
-      recording: bound.recording === null ? null : { ...bound.recording, mountId: this.mountId },
-      write: { prefix: this.prefix, context: this.writeContext() },
-      revisions: { map: revisions },
-    }
+    const caller = this.onMount(currentCaller())
     const signal = callerSignal()
     const stream =
       this.wants('read').length > 0 || vfs.read.constructor.name === 'AsyncFunction'
         ? this.streamed(vfs, scope, this.index, signal)
         : asStream(runWithCaller(caller, async () => vfs.read(scope, {}, 0, null, signal)))
     return this.activity.hold(
-      withCaller(this.observeStream(scope, this.index, stream), caller),
+      withEgress(withCaller(this.observeStream(scope, this.index, stream), caller)),
     ) as AsyncIterable<Uint8Array>
   }
 
@@ -1838,13 +1826,19 @@ export class MountEntry {
   }
 
   /**
-   * The dispatcher's revision pins and write context, one scope. Public for
-   * the dispatcher, which calls ops itself rather than through the command entry point.
+   * `caller` running on this mount: its records name this mount, its writes
+   * are checked against this mount's write context, its reads keep this
+   * mount's revision pins and a connection it opens names this mount.
+   * Mirrors Python's `MountEntry._on_mount`.
    */
-  runWithWriteRevisions<T>(fn: () => Promise<T>): Promise<T> {
-    return runWithWriteContext(this.prefix, this.writeContext(), () =>
-      Promise.resolve(runWithRevisions(this.revisions.size > 0 ? this.revisions : null, fn)),
-    )
+  private onMount(caller: Caller): Caller {
+    return {
+      ...caller,
+      recording: caller.recording === null ? null : { ...caller.recording, mountId: this.mountId },
+      write: { prefix: this.prefix, context: this.writeContext() },
+      revisions: { map: this.revisions.size > 0 ? this.revisions : null },
+      vfsMount: this.prefix,
+    }
   }
 
   async runCommand(
@@ -2036,11 +2030,8 @@ export class MountEntry {
     const outer = currentCaller()
     return runWithCaller(
       {
-        ...outer,
-        recording: outer.recording === null ? null : { ...outer.recording, mountId: this.mountId },
-        revisions: { map: this.revisions.size > 0 ? this.revisions : null },
+        ...this.onMount(outer),
         cache: { manager: this.cacheManager },
-        write: { prefix: this.prefix, context: this.writeContext() },
         mount: [this.prefix, this.mode],
         walkProbe: probe === null ? outer.walkProbe : [this.prefix, probe],
       },
@@ -2274,15 +2265,8 @@ export class MountEntry {
         ...kwargs,
         ...(kwargs.index === undefined ? { index: this.index } : {}),
       }
-      return runWithMountContext(
-        () =>
-          this.runWithWriteRevisions(async () => {
-            const result = await this.callKeyed(name, scope, args, effectiveKwargs, access)
-            return result === null || result === undefined
-              ? null
-              : wrapStream(result, this.mountId, this.activity)
-          }),
-        this.mountId,
+      return this.framed(
+        async () => (await this.callKeyed(name, scope, args, effectiveKwargs, access)) ?? null,
       )
     })
   }
@@ -2361,11 +2345,16 @@ export class MountEntry {
   }
 
   /**
-   * Run one backend call as `call` frames its own: in this mount's recording
-   * and write contexts. Mirrors Python's `_framed`.
+   * Run one backend call as `call` frames its own: as the caller on this
+   * mount (`onMount`), an answer that streams wrapped to keep that frame and
+   * `owner`'s egress. Public for the dispatcher, which keys and calls its ops
+   * itself. Mirrors Python's `_framed`.
    */
-  private framed<T>(work: () => Promise<T>): Promise<T> {
-    return runWithMountContext(() => this.runWithWriteRevisions(work), this.mountId)
+  framed<T>(work: () => Promise<T>, owner?: Egress | null): Promise<T> {
+    return runWithCaller(
+      this.onMount(currentCaller()),
+      async () => wrapStream(await work(), this.mountId, this.activity, owner) as T,
+    )
   }
 
   /**
@@ -2411,10 +2400,36 @@ export class MountEntry {
   }
 }
 
-/** Preserve a streaming operation's recording owner after its dispatch frame exits. */
-export function wrapStream(result: unknown, mountId: string, activity: Activity): unknown {
+/**
+ * Preserve a streaming operation's recording owner, caller and egress after
+ * its dispatch frame exits.
+ */
+function wrapStream(
+  result: unknown,
+  mountId: string,
+  activity: Activity,
+  owner?: Egress | null,
+): unknown {
   if (result !== null && typeof result === 'object' && Symbol.asyncIterator in result) {
-    return activity.hold(withMountContext(result as AsyncIterable<Uint8Array>, mountId))
+    // The backend's own iterator, which the close reaches first: a pull
+    // waiting inside it ends only once it is told.
+    const iterator = (result as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const caller = currentCaller()
+    const kept = withCaller(
+      withMountContext({ [Symbol.asyncIterator]: () => iterator }, mountId),
+      caller,
+    )
+    // The close, a cleanup request it may send among it, runs as the
+    // stream's own caller, whoever closes it and however late.
+    return activity.hold(
+      withEgress(
+        new OutputStream(
+          kept[Symbol.asyncIterator](),
+          awaitsAs(caller, () => closeQuietly(iterator)),
+        ),
+        owner,
+      ),
+    )
   }
   return result
 }

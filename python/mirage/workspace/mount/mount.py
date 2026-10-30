@@ -91,7 +91,7 @@ from mirage.context import (
     session_visibility,
     strongest_mode_under,
 )
-from mirage.context.session_context import with_caller
+from mirage.context.session_context import awaits_as, with_caller
 from mirage.core.dev.device import active_pipe, pipe_below
 from mirage.core.dev.pipe import DevicePipe
 from mirage.core.generic.rewrite import (
@@ -102,6 +102,7 @@ from mirage.core.generic.rewrite import (
     truncate_by_rewrite,
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
+from mirage.io.gateway import with_egress
 from mirage.io.memory import check_memory
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
@@ -201,7 +202,8 @@ def _wrap_mount_streams(
 
 
 def _wrap_stream(result: Any, mount_id: str, activity: Activity) -> Any:
-    """Hold the host-I/O bypass around an op result that streams.
+    """Hold the host-I/O bypass, and the op's caller and egress, around an
+    op result that streams.
 
     An op that returns an async iterator has not run its body yet: the
     backend opens the file on the first ``__anext__``, after the frame
@@ -217,10 +219,21 @@ def _wrap_stream(result: Any, mount_id: str, activity: Activity) -> Any:
         mount_id (str): identity of the serving mount.
     """
     if hasattr(result, "__aiter__"):
+        caller = current_caller()
+        # The close, a cleanup request it may send among it, runs as the
+        # stream's own caller, whoever closes it and however late.
         return activity.hold(
-            OutputStream(
-                with_host_io(with_mount_context(result, mount_id)),
-                functools.partial(close_quietly, result),
+            with_egress(
+                OutputStream(
+                    with_host_io(
+                        with_caller(
+                            with_mount_context(result, mount_id), caller
+                        )
+                    ),
+                    functools.partial(
+                        awaits_as(caller, close_quietly), result
+                    ),
+                )
             )
         )
     return result
@@ -2734,6 +2747,7 @@ class MountEntry:
                     caller.recorder, mount_id=self.mount_id
                 ),
                 "write_context": self.write_context(),
+                "vfs_mount": self.prefix,
             }
         )
 
@@ -2971,11 +2985,13 @@ class MountEntry:
         return cast(
             AsyncIterator[bytes],
             self.activity.hold(
-                with_caller(
-                    with_host_io(
-                        self._observe_stream(scope, self.index, source)
-                    ),
-                    caller,
+                with_egress(
+                    with_caller(
+                        with_host_io(
+                            self._observe_stream(scope, self.index, source)
+                        ),
+                        caller,
+                    )
                 )
             ),
         )

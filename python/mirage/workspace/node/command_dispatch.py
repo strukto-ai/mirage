@@ -874,6 +874,7 @@ async def _run_argv(
                 outer,
                 gate=admitted if admitted is not None else outer.gate,
                 command=argv.name,
+                invocation=admitted.ctx if admitted is not None else None,
                 declared=None,
             )
         )

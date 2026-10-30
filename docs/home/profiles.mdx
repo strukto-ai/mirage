@@ -22,9 +22,10 @@ workspace while seeing different files and using different commands.
 | `vars.hide` | Make matching variable names, or globs over names, read as unset. |
 | `processes` | Set whose processes `ps` lists and `kill` stops, and cap the live processes. |
 | `command_limits` | Override [output and execution limits](/home/core/output-limits) for the session. |
+| `network` | Narrow where the session's lines may connect, besides the workspace's [`network`](/home/configuration#network). |
 | `policy` | Run [policy scripts](/home/policy/scripts) at the `pre_` and `post_` methods. |
 
-Each of the last four keys takes this shape:
+Each of the last five keys takes this shape:
 
 ```yaml
 profiles:
@@ -37,6 +38,8 @@ profiles:
       max: 8
     command_limits:
       grep: {max_lines: 200}
+    network:
+      allowed_domains: ["*.github.com"]
     policy:
       pre_command:
         - {script: ./guard.py, runtime: monty}
@@ -48,6 +51,11 @@ every [instance](/home/core/shell#jobs-across-instances) of the workspace.
 `kill` cannot reach past `list`, and a bare scope such as
 `processes: workspace` sets both. Starting a process past `max` fails with
 `Resource temporarily unavailable`.
+
+`network` takes the workspace's grammar, and a session's lines are held to
+both: the profile can narrow where they connect, never widen it. A mount
+still connects under the workspace's `network`, since it serves every
+session.
 
 ## Example: a research agent
 

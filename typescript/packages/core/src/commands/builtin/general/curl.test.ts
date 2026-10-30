@@ -14,7 +14,7 @@
 
 import { PathSpec } from '../../../types.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { GENERAL_CURL, responseLines as renderResponseLines } from './curl.ts'
 import { enoent } from '../../../errors/fs.ts'
@@ -44,6 +44,7 @@ function mockFetch(respBody: string, status = 200): FetchCall[] {
       status,
       statusText: 'OK',
       arrayBuffer: () => Promise.resolve(ENC.encode(respBody).buffer),
+      body: new Response(respBody).body,
       text: () => Promise.resolve(respBody),
       headers: new Headers(RESPONSE_HEADERS),
     } as unknown as Response)
@@ -68,6 +69,7 @@ function mockRedirect(): FetchCall[] {
       status: hop.status,
       statusText: hop.statusText,
       arrayBuffer: () => Promise.resolve(ENC.encode(hop.body).buffer),
+      body: new Response(hop.body).body,
       text: () => Promise.resolve(hop.body),
       headers: new Headers(hop.headers as [string, string][]),
     } as unknown as Response)
@@ -103,10 +105,10 @@ async function runCurl(
   if (cmd === undefined) throw new Error('curl not registered')
   // What each write sent through the dispatcher, by path.
   const writes: Record<string, Uint8Array> = {}
-  const dispatch: DispatchFn = (_op, path, args) => {
-    if (refuse !== undefined) return Promise.reject(refuse)
-    writes[path.virtual] = args?.[0] as Uint8Array
-    return Promise.resolve([null, new IOResult()])
+  const dispatch: DispatchFn = async (_op, path, args) => {
+    if (refuse !== undefined) throw refuse
+    writes[path.virtual] = await materialize(args?.[0] as ByteSource)
+    return [null, new IOResult()]
   }
   const result = await cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], texts, {
     stdin: null,
@@ -373,6 +375,7 @@ describe('curl option surface (#1065)', () => {
                 status: 200,
                 statusText: 'OK',
                 arrayBuffer: () => Promise.resolve(ENC.encode('late').buffer),
+                body: new Response('late').body,
                 headers: new Headers(RESPONSE_HEADERS),
               } as unknown as Response)
             }, 60_000)
@@ -758,6 +761,29 @@ describe('curl -b and -c', () => {
       [undefined, 'h=1'],
       [undefined, undefined],
     ])
+  })
+
+  it('-c writes the jar when the reader lets the body go', async () => {
+    serve([{ body: 'body\n', headers: [['Set-Cookie', 'z=1']] }])
+    const cmd = GENERAL_CURL[0]
+    if (cmd === undefined) throw new Error('curl not registered')
+    const files: Record<string, string> = {}
+    const dispatch: DispatchFn = (_op, path, args) => {
+      files[path.virtual] = DEC.decode(args?.[0] as Uint8Array)
+      return Promise.resolve([null, new IOResult()])
+    }
+    const result = await cmd.fn(null as never, [], ['http://127.0.0.1:8080/jar/x'], {
+      stdin: null,
+      flags: { cookie_jar: '/data/jar' },
+      cwd: PathSpec.fromStrPath('/'),
+      vfs: new Files(dispatch, null, null, { ledger: false }),
+    })
+    if (result === null) throw new Error('no result')
+    const body = (result[0] as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()
+    const first = await body.next()
+    await body.return?.()
+    expect(DEC.decode(first.value as Uint8Array)).toBe('body\n')
+    expect(files['/data/jar']).toBe(`${JAR}127.0.0.1\tFALSE\t/jar/\tFALSE\t0\tz\t1\n`)
   })
 
   it('-c - writes the jar to stdout after the body and -w', async () => {

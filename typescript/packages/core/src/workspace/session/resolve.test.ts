@@ -337,6 +337,7 @@ describe('compileProfile', () => {
         scripts: {},
         commandLimits: null,
         processes: DEFAULT_PROCESS_PERMISSIONS,
+        network: null,
       },
       hideReasons: [],
       profile: null,

@@ -48,6 +48,8 @@ from mirage.policy.types import (
     CommandResultContext,
     Deny,
     ExecuteResultContext,
+    NetworkContext,
+    NetworkResultContext,
     PolicyCaller,
     ProfileScript,
     Route,
@@ -141,7 +143,8 @@ def script_context(
     | RouteContext
     | VfsContext
     | SessionContext
-    | WorkspaceContext,
+    | WorkspaceContext
+    | NetworkContext,
 ) -> dict[str, JsonValue]:
     """A policy context as a program reads it: every field a coded
     policy reads, under the same name, as plain data.
@@ -349,6 +352,16 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     ) -> tuple[Deny | Ask | Route, ...] | None:
         return await self._judge("pre_session", ctx)
 
+    async def pre_network(
+        self, ctx: NetworkContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
+        return await self._judge("pre_network", ctx)
+
+    async def post_network(
+        self, ctx: NetworkResultContext
+    ) -> tuple[Deny | Ask | Route, ...] | None:
+        return await self._judge("post_network", ctx)
+
     async def post_execute(
         self, ctx: ExecuteResultContext
     ) -> tuple[Deny | Ask | Route, ...] | None:
@@ -428,7 +441,8 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         | RouteContext
         | VfsContext
         | SessionContext
-        | WorkspaceContext,
+        | WorkspaceContext
+        | NetworkContext,
     ) -> tuple[Deny | Ask | Route, ...] | None:
         """Every program the session's profile names at one method, each
         answer in order, up to the first deny.
@@ -464,7 +478,8 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         | RouteContext
         | VfsContext
         | SessionContext
-        | WorkspaceContext,
+        | WorkspaceContext
+        | NetworkContext,
     ) -> str:
         """The directory a program starts in: the session's, or ``/``
         once the session's has gone, since a runtime that enters it

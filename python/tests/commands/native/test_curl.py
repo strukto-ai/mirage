@@ -27,7 +27,7 @@ from mirage.commands.builtin.general.curl import curl
 from mirage.commands.builtin.utils.http import HttpResponse
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, materialize
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
 
@@ -58,6 +58,7 @@ def _stub(monkeypatch, resp=None, exc=None) -> list[dict]:
         follow_redirects=False,
         verify=True,
         cookies=None,
+        stream=False,
     ):
         calls.append(
             {
@@ -86,10 +87,12 @@ def _run(
     spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
     vfs = Files(dispatch, ledger=False) if dispatch is not None else None
     ctx = Context(vfs=vfs, cwd=spec, flags=flags)
-    body, io = asyncio.run(curl(NOOPAccessor(), [], list(texts), ctx))
-    if body is None:
-        return b"", io
-    return bytes(body), io
+
+    async def run() -> tuple[bytes, IOResult]:
+        body, io = await curl(NOOPAccessor(), [], list(texts), ctx)
+        return await materialize(body), io
+
+    return asyncio.run(run())
 
 
 def _run_writing(
@@ -99,7 +102,7 @@ def _run_writing(
     written: dict[str, bytes] = {}
 
     async def dispatch(op, scope, **kwargs):
-        written[scope.virtual] = kwargs["data"]
+        written[scope.virtual] = await materialize(kwargs["data"])
 
     body, io = _run(*texts, dispatch=dispatch, **flags)
     return body, io, written
@@ -267,6 +270,7 @@ def test_form_field_uses_the_form_helper(monkeypatch):
         follow_redirects=False,
         verify=True,
         cookies=None,
+        stream=False,
     ):
         calls.append({"url": url, "method": method, "form_data": form_data})
         return _ok(b"form ok")
@@ -690,7 +694,7 @@ def _run_jar(
             return held[scope.virtual].encode(), IOResult()
         if refuse:
             raise FileNotFoundError(scope.virtual)
-        held[scope.virtual] = kwargs["data"].decode()
+        held[scope.virtual] = (await materialize(kwargs["data"])).decode()
         return None, IOResult()
 
     body, io = _run(JAR_URL, dispatch=dispatch, **flags)
@@ -744,6 +748,35 @@ def test_a_redirect_cookie_crosses_only_with_the_jar_on(
     flags = {"location": True} | ({} if engine is None else {"cookie": engine})
     _run_jar(**flags)
     assert _cookies_sent(httpx_mock) == [None, after]
+
+
+def test_c_writes_the_jar_when_the_reader_lets_the_body_go(httpx_mock):
+    httpx_mock.add_response(
+        url=JAR_URL, text="body\n", headers=[("Set-Cookie", "z=1")]
+    )
+    held: dict[str, str] = {}
+
+    async def dispatch(op, scope, **kwargs):
+        held[scope.virtual] = (await materialize(kwargs["data"])).decode()
+        return None, IOResult()
+
+    spec = PathSpec(virtual="/", directory="/", vfs_path="", resolved=False)
+    ctx = Context(
+        vfs=Files(dispatch, ledger=False),
+        cwd=spec,
+        flags={"cookie_jar": "/data/jar"},
+    )
+
+    async def run() -> bytes:
+        body, _ = await curl(NOOPAccessor(), [], [JAR_URL], ctx)
+        first = await anext(aiter(body))
+        await body.aclose()
+        return first
+
+    assert asyncio.run(run()) == b"body\n"
+    assert (
+        held["/data/jar"] == f"{JAR}127.0.0.1\tFALSE\t/jar/\tFALSE\t0\tz\t1\n"
+    )
 
 
 def test_c_dash_writes_the_jar_to_stdout_after_the_body_and_w(httpx_mock):

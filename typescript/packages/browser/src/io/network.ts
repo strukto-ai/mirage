@@ -15,13 +15,25 @@
 import { networkBound, networkLets } from '@struktoai/mirage-core/io/network'
 
 // The schemes that reach a host; data:, blob: and the like never leave the page.
-const REACHING = new Set(['http:', 'https:', 'ws:', 'wss:'])
+export const REACHING = new Set(['http:', 'https:', 'ws:', 'wss:'])
 
 let watching = false
 
 function lets(url: string | URL): boolean {
   const target = new URL(url, globalThis.location.href)
-  return !REACHING.has(target.protocol) || networkLets(target.hostname, '')
+  return (
+    !REACHING.has(target.protocol) ||
+    networkLets(
+      target.hostname,
+      '',
+      // A URL leaves its scheme's own port unwritten.
+      target.port !== ''
+        ? Number(target.port)
+        : target.protocol === 'https:' || target.protocol === 'wss:'
+          ? 443
+          : 80,
+    )
+  )
 }
 
 /**
