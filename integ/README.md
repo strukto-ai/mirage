@@ -256,9 +256,11 @@ a measured end-to-end CI result.
 
 `runtime/parallel.sh` overlaps the Python and TypeScript JSON drivers inside
 each existing runtime job. It waits for both even after a failure, then runs
-TypeScript's `backend/mongodb`, whose database Python also drops and seeds.
+TypeScript's `backend/mongodb`, whose database Python also drops and seeds,
+and `sandbox/mounts`, which mounts fixed paths in their shared Docker container.
 The `integ/runtime/**` filter covers the driver; the gate selftest checks its
-overlap, exact suite coverage, database serialization and failure propagation.
+overlap, exact suite coverage, database and mount serialization, duplicate
+launch detection and failure propagation.
 Job matrices, timeout limits, strict checks and coverage floors are unchanged.
 
 The Nextcloud CI container also lowers its Argon2id memory cost from 8 MiB to

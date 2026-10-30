@@ -1856,12 +1856,16 @@ from pathlib import Path
 root = Path(os.environ["RUNNER_TEMP"])
 host = "python" if Path(sys.argv[0]).name == "python" else "typescript"
 suites = sys.argv[2:] if host == "python" else sys.argv[4:]
-name = "mongodb" if host == "typescript" and suites == ["backend/mongodb"] else host
-(root / f"{name}.json").write_text(json.dumps([[host, suite] for suite in suites]))
+shared = set(suites) & {"backend/mongodb", "sandbox/mounts"}
+serial = host == "typescript" and bool(shared)
+name = suites[0].replace("/", "-") if serial and len(suites) == 1 else host
+(root / f"{name}-{os.getpid()}-{time.time_ns()}.json").write_text(
+    json.dumps([[host, suite] for suite in suites])
+)
+if serial:
+    assert (root / "python.done").exists(), f"{shared} raced Python"
 (root / f"{name}.started").touch()
-if name == "mongodb":
-    assert (root / "python.done").exists(), "MongoDB raced Python"
-elif os.environ["EXPECT_OVERLAP"] == "1":
+if not serial and os.environ["EXPECT_OVERLAP"] == "1":
     peer = "typescript" if host == "python" else "python"
     deadline = time.monotonic() + 3
     while not (root / f"{peer}.started").exists():
@@ -1875,13 +1879,17 @@ sys.exit(1 if os.environ["FAIL_DRIVER"] == name else 0)
 def selftest_runtime_parallel() -> None:
     """Run the CI driver against barriers and deliberate host failures."""
     driver = ROOT / "runtime" / "parallel.sh"
-    mixed = "write/append backend/mongodb path/stat"
+    mixed = "write/append backend/mongodb sandbox/mounts path/stat"
+    shared = {"backend/mongodb", "sandbox/mounts"}
     for suites, failing in (
         (mixed, ""),
         (mixed, "python"),
         (mixed, "typescript"),
-        (mixed, "mongodb"),
+        (mixed, "backend-mongodb"),
+        (mixed, "sandbox-mounts"),
         ("backend/mongodb", ""),
+        ("sandbox/mounts", ""),
+        ("backend/mongodb sandbox/mounts", "backend-mongodb"),
         ("write/append path/stat", ""),
     ):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1902,7 +1910,7 @@ def selftest_runtime_parallel() -> None:
                 "RUNNER_TEMP": tmp,
                 "SUITES": suites,
                 "FAIL_DRIVER": failing,
-                "EXPECT_OVERLAP": "0" if suites == "backend/mongodb" else "1",
+                "EXPECT_OVERLAP": "1" if set(suites.split()) - shared else "0",
             }
             started = subprocess.run(
                 ["bash", str(driver), "start"],
@@ -1936,14 +1944,14 @@ def selftest_runtime_parallel() -> None:
                 started.returncode == 0
                 and done.returncode == bool(failing)
                 and (base / "python.done").exists()
+                and all(
+                    (base / f"{suite.replace('/', '-')}.done").exists()
+                    for suite in set(suites.split()) & shared
+                )
                 and (
-                    base
-                    / (
-                        "mongodb.done"
-                        if suites == "backend/mongodb"
-                        else "typescript.done"
-                    )
-                ).exists(),
+                    not set(suites.split()) - shared
+                    or (base / "typescript.done").exists()
+                ),
                 started.stdout + started.stderr + done.stdout + done.stderr,
             )
             check(
@@ -1951,6 +1959,29 @@ def selftest_runtime_parallel() -> None:
                 sorted(rows) == sorted(want),
                 repr(rows),
             )
+            if suites == mixed and not failing:
+                repeated = [
+                    subprocess.run(
+                        ["bash", str(driver), action],
+                        cwd=base,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    for action in ("start", "wait")
+                ]
+                duplicate_rows = [
+                    row
+                    for path in base.glob("*.json")
+                    for row in json.loads(path.read_text())
+                ]
+                check(
+                    "runtime drivers: duplicate launches remain visible",
+                    all(proc.returncode == 0 for proc in repeated)
+                    and sorted(duplicate_rows) == sorted(want * 2),
+                    repr(duplicate_rows),
+                )
 
 
 def main() -> None:

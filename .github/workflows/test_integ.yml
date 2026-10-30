@@ -2133,7 +2133,7 @@ jobs:
           done
 
       # Keep both JSON hosts busy behind the CLI battery. The driver waits
-      # for both, then runs the one suite that reseeds their shared database.
+      # for both, then runs suites that share database or sandbox mount state.
       - name: Start every runtime through the JSON suites (background)
         run: bash integ/runtime/parallel.sh start
 
@@ -2144,7 +2144,7 @@ jobs:
             "node typescript/packages/cli/dist/bin/mirage.js" \
             $SUITES
 
-      - name: Collect both runtime JSON drivers and the shared MongoDB suite
+      - name: Collect both runtime JSON drivers and the serialized suites
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: bash integ/runtime/parallel.sh wait
