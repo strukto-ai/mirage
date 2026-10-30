@@ -72,6 +72,41 @@
         "stdout": "no trailing newline\n 00 01 24 0a 02 03 24 0a\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "cat_E_crlf",
+      "seq": 19990102,
+      "command": "printf 'a\\r\\nb\\rX\\r\\nlast\\r' | cat -E",
+      "expect": {
+        "exit": 0,
+        "stdout": "a^M$\nb\rX^M$\nlast\r",
+        "stderr": ""
+      },
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ]
     }
   ]
 }

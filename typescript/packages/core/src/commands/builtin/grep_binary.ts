@@ -68,14 +68,3 @@ export function groupLine(f: FlagSet): string {
 export function nameEnd(f: FlagSet): string {
   return f.null === true ? '\0' : '\n'
 }
-
-/** Whether every byte of `data` belongs to a UTF-8 character. */
-export function validUtf8(data: Uint8Array): boolean {
-  try {
-    new TextDecoder('utf-8', { fatal: true }).decode(data)
-    return true
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error
-    return false
-  }
-}
