@@ -12,10 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.runtime.python.base import PythonRuntime
-from mirage.runtime.python.local import LocalRuntime
-from mirage.runtime.python.monty import MontyRuntime
-from mirage.runtime.python.wasi import WasiRuntime
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.runtime.python.base import PythonRuntime
+    from mirage.runtime.python.local import LocalRuntime
+    from mirage.runtime.python.monty import MontyRuntime
+    from mirage.runtime.python.wasi import WasiRuntime
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.runtime.python.base": ("PythonRuntime",),
+    "mirage.runtime.python.local": ("LocalRuntime",),
+    "mirage.runtime.python.monty": ("MontyRuntime",),
+    "mirage.runtime.python.wasi": ("WasiRuntime",),
+}
 
 __all__ = [
     "LocalRuntime",
@@ -23,3 +35,5 @@ __all__ = [
     "MontyRuntime",
     "WasiRuntime",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)
