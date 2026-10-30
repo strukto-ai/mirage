@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -240,6 +242,46 @@ def test_a_redis_block_without_a_prefix_is_its_workspaces_own():
         assert ws._cache._data_prefix == f"mirage:cache:{workspace_id}:data:"
         index = ws.mount("/m/").index_store
         assert index._key_prefix == f"mirage:index:{workspace_id}:"
+
+
+@pytest.mark.parametrize(
+    "block, hint",
+    [
+        ({"cache": {"type": "redis"}}, "RedisCacheConfig requires"),
+        ({"index": {"type": "redis"}}, "RedisIndexConfig requires"),
+        ({"store": {"type": "redis"}}, "A redis store requires"),
+        (
+            {"store": {"type": "ram", "jobs": {"type": "redis"}}},
+            "A redis store requires",
+        ),
+    ],
+    ids=["cache", "index", "store", "store-group"],
+)
+def test_a_redis_block_without_the_extra_names_it(monkeypatch, block, hint):
+    monkeypatch.setitem(sys.modules, "redis", None)
+    cfg = load_config({**block, "mounts": {"/m": {"vfs": "ram"}}})
+    with pytest.raises(
+        ImportError,
+        match=f"^{hint} the 'redis' extra. "
+        r"Install with: pip install mirage-ai\[redis\]$",
+    ):
+        Workspace(**cfg.to_workspace_kwargs())
+
+
+def test_a_ram_config_loads_no_redis():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "from mirage import Workspace\n"
+            "from mirage.config import load_config\n"
+            "cfg = load_config({'mounts': {'/': {'vfs': 'ram'}}})\n"
+            "Workspace(**cfg.to_workspace_kwargs())\n"
+            "assert 'redis' not in sys.modules\n",
+        ],
+        check=True,
+    )
 
 
 @pytest.mark.asyncio

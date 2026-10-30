@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import importlib
+import importlib.util
 from typing import TYPE_CHECKING
 
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
@@ -21,17 +23,7 @@ from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.utils.clock import Clock
 
 if TYPE_CHECKING:
-    from mirage.cache.file.redis import RedisFileCacheStore as RedisStore
-
-RedisFileCacheStore: "type[RedisStore] | None"
-try:
-    from mirage.cache.file.redis import (
-        RedisFileCacheStore as _RedisFileCacheStore,
-    )
-except ImportError:
-    RedisFileCacheStore = None
-else:
-    RedisFileCacheStore = _RedisFileCacheStore
+    from mirage.cache.file.redis import RedisFileCacheStore
 
 
 def build_file_cache(
@@ -58,12 +50,15 @@ def build_file_cache(
         ImportError: a Redis cache was asked for without the extra.
     """
     if isinstance(cache, RedisCacheConfig):
-        if RedisFileCacheStore is None:
+        if importlib.util.find_spec("redis") is None:
             raise ImportError(
                 "RedisCacheConfig requires the 'redis' extra. "
                 "Install with: pip install mirage-ai[redis]"
             )
-        return RedisFileCacheStore(
+        redis_store: type[RedisFileCacheStore] = importlib.import_module(
+            "mirage.cache.file.redis"
+        ).RedisFileCacheStore
+        return redis_store(
             cache_limit=cache.limit,
             url=cache.url,
             key_prefix=(

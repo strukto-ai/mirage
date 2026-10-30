@@ -1,5 +1,5 @@
 {
- "baseline": 2668,
+ "baseline": 2667,
  "modules": {
   "workspace/executor/builtins/help/help": {
    "typescript_only": {
@@ -637,7 +637,6 @@
   },
   "config": {
    "python_only": {
-    "RedisWorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker.",
     "S3WorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker."
    },
    "typescript_only": {
