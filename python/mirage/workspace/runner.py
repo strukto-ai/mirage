@@ -82,10 +82,22 @@ class WorkspaceRunner:
         """
         runner = cls.__new__(cls)
         runner._start(f"mirage-ws-{id(runner):x}")
+
+        # The workspace is held as soon as it is built, so a caller
+        # cancelled while the result comes back still closes it.
+        async def keep() -> None:
+            runner.ws = await make
+
         try:
-            runner.ws = await on_loop(make, runner.loop)
+            await on_loop(keep(), runner.loop)
         except BaseException:
             runner._stopped = True
+            built: Workspace | None = getattr(runner, "ws", None)
+            if built is not None:
+                try:
+                    await on_loop(built.close(), runner.loop)
+                except Exception:
+                    logger.exception("closing a workspace whose build failed")
             runner.loop.call_soon_threadsafe(runner.loop.stop)
             await asyncio.to_thread(runner._thread.join)
             runner.loop.close()

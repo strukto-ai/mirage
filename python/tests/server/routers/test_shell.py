@@ -792,3 +792,19 @@ async def test_shell_stream_sends_prefix_before_completion_and_cancels_on_discon
         )
         assert waited.json()["status"] == "canceled"
         assert waited.json()["finished_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_a_server_shutting_down_refuses_a_new_line():
+    app = build_app(idle_grace_seconds=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        app.state.registry.draining = True
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", json={"command": "echo late"}
+        )
+    assert r.status_code == 503
+    assert r.json() == {"detail": "server is shutting down"}
+    await app.state.registry.close_all()

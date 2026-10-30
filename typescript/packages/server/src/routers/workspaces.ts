@@ -211,8 +211,8 @@ async function claimed(
   build: () => Promise<unknown>,
 ): Promise<unknown> {
   if (deps.registry.draining) {
-    refused('draining')
-    return answer(reply, 503, { detail: 'server is draining' })
+    refused('shutting_down')
+    return answer(reply, 503, { detail: 'server is shutting down' })
   }
   if (!deps.registry.hasRoom()) {
     refused('max_workspaces')

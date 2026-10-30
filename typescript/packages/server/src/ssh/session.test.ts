@@ -216,6 +216,14 @@ describe('loginEnv', () => {
 })
 
 describe('command channels', () => {
+  it('are refused while the server shuts down', async () => {
+    const h = await startHarness()
+    h.registry.draining = true
+    const run = await exec(await connect(h), 'echo never')
+    expect(run.code).not.toBe(0)
+    expect(run.stderr).toContain('server is shutting down')
+  })
+
   it('are refused past max_sessions', async () => {
     const h = await startHarness()
     Object.assign(h.registry, { maxSessions: 1 })

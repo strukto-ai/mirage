@@ -48,11 +48,8 @@ async def ready(request: Request) -> JSONResponse:
     registry = request.app.state.registry
     status = "ready"
     if registry.draining:
-        status = "draining"
-    elif (
-        registry.max_workspaces is not None
-        and len(registry) >= registry.max_workspaces
-    ):
+        status = "shutting_down"
+    elif not registry.has_room(own=False):
         status = "full"
     return JSONResponse(
         {"status": status}, status_code=200 if status == "ready" else 503

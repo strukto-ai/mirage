@@ -957,7 +957,7 @@ export async function serveCodexSocket(
     sessionId,
     {},
     null,
-    registry.maxSessions,
+    registry,
   ).then(
     () =>
       new CodexChannel(

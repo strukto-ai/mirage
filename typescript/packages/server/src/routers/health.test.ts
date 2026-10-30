@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
 
 describe('health router', () => {
-  it('answers ready 503 while full or draining', async () => {
+  it('answers ready 503 while full or shutting down', async () => {
     const app = buildApp({ maxWorkspaces: 1 })
     const ready = () => app.inject({ method: 'GET', url: '/v1/ready' })
     let r = await ready()
@@ -31,8 +31,20 @@ describe('health router', () => {
     expect([r.statusCode, r.json()]).toEqual([503, { status: 'full' }])
     await app.registry.drain(0)
     r = await ready()
-    expect([r.statusCode, r.json()]).toEqual([503, { status: 'draining' }])
+    expect([r.statusCode, r.json()]).toEqual([503, { status: 'shutting_down' }])
     expect((await app.inject({ method: 'GET', url: '/v1/health' })).statusCode).toBe(200)
+    await app.close()
+  })
+
+  it('counts a workspace still being built', async () => {
+    const app = buildApp({ maxWorkspaces: 1 })
+    const ready = () => app.inject({ method: 'GET', url: '/v1/ready' })
+    await app.registry.creating('w', 'config', async () => {
+      const r = await ready()
+      expect([r.statusCode, r.json()]).toEqual([503, { status: 'full' }])
+    })
+    const r = await ready()
+    expect([r.statusCode, r.json()]).toEqual([200, { status: 'ready' }])
     await app.close()
   })
 })

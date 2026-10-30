@@ -1159,9 +1159,7 @@ async def serve_codex_socket(
     runner = entry.runner
     try:
         await runner.call(
-            open_session(
-                runner.ws, session_id, max_sessions=registry.max_sessions
-            )
+            open_session(runner.ws, session_id, registry=registry)
         )
     except Exception as exc:
         logger.warning("codex: cannot open a session on %s: %r", entry.id, exc)

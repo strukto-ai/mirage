@@ -20,6 +20,13 @@ import pytest
 
 from mirage import MountMode, Workspace, WorkspaceRunner
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace import runner as runner_module
+
+
+def _runners() -> set[threading.Thread]:
+    return {
+        t for t in threading.enumerate() if t.name.startswith("mirage-ws-")
+    }
 
 
 def _make_ws() -> Workspace:
@@ -149,16 +156,42 @@ async def test_build_constructs_the_workspace_on_the_runners_thread():
 
 @pytest.mark.asyncio
 async def test_a_failed_build_stops_the_thread_it_started():
-    def runners() -> set[threading.Thread]:
-        return {
-            t for t in threading.enumerate() if t.name.startswith("mirage-ws-")
-        }
-
-    before = runners()
+    before = _runners()
 
     async def make() -> Workspace:
         raise ValueError("bad config")
 
     with pytest.raises(ValueError, match="bad config"):
         await WorkspaceRunner.build(make())
-    assert runners() == before
+    assert _runners() == before
+
+
+@pytest.mark.asyncio
+async def test_a_caller_cancelled_after_the_build_still_closes_it(monkeypatch):
+    closed: list[Workspace] = []
+    real_close = Workspace.close
+    real_on_loop = runner_module.on_loop
+    calls = 0
+
+    async def spy(self: Workspace) -> None:
+        closed.append(self)
+        await real_close(self)
+
+    async def cancelled_once_built(work, loop):
+        nonlocal calls
+        calls += 1
+        result = await real_on_loop(work, loop)
+        if calls == 1:
+            raise asyncio.CancelledError()
+        return result
+
+    async def make() -> Workspace:
+        return _make_ws()
+
+    monkeypatch.setattr(Workspace, "close", spy)
+    monkeypatch.setattr(runner_module, "on_loop", cancelled_once_built)
+    before = _runners()
+    with pytest.raises(asyncio.CancelledError):
+        await WorkspaceRunner.build(make())
+    assert len(closed) == 1
+    assert _runners() == before

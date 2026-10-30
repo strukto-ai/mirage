@@ -382,8 +382,7 @@ def build_app(
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
     limits = resolve_rate_limits(rate_limits)
-    if limits:
-        app.add_middleware(RateLimitMiddleware, rate_limits=limits)
+    app.add_middleware(RateLimitMiddleware, rate_limits=limits, signed_in=True)
     auth = auth_config if auth_config is not None else resolve_auth_config()
     if auth.mode == AuthMode.LOCAL and auth.local_token is None:
         logger.warning(
@@ -392,6 +391,7 @@ def build_app(
             "MIRAGE_AUTH_MODE to enforce authentication."
         )
     app.add_middleware(AuthMiddleware, config=auth)
+    app.add_middleware(RateLimitMiddleware, rate_limits=limits)
     proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
     if proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=proxies)

@@ -173,8 +173,9 @@ export function buildApp(options: BuildAppOptions = {}) {
     }
     done()
   })
-  registerAuth(app, authConfig)
   registerRateLimits(app, rateLimits)
+  registerAuth(app, authConfig)
+  registerRateLimits(app, rateLimits, true)
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
   })

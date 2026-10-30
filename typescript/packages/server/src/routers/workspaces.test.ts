@@ -136,12 +136,12 @@ describe('workspaces router', () => {
     await app.close()
   })
 
-  it('answers 503 while draining', async () => {
+  it('answers 503 while shutting down', async () => {
     const app = buildApp()
     app.registry.draining = true
     const r = await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { config: RAM } })
     expect(r.statusCode).toBe(503)
-    expect(r.json()).toEqual({ detail: 'server is draining' })
+    expect(r.json()).toEqual({ detail: 'server is shutting down' })
     await app.close()
   })
 

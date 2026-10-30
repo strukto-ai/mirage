@@ -594,14 +594,16 @@ async def test_concurrent_creates_of_one_config_build_it_once(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_create_of_another_config_does_not_wait_behind_a_stuck_one():
-    entered = asyncio.Event()
-    release = asyncio.Event()
+    # The secret is read on the loop the workspace will run on, a thread of
+    # its own, so it is held with thread-safe events.
+    entered = threading.Event()
+    release = threading.Event()
 
     async def gated_token(
         config: HeldSourceConfig, ref: str
     ) -> ResolvedSecret:
         entered.set()
-        await release.wait()
+        await asyncio.to_thread(release.wait)
         return ResolvedSecret(fields={"credential": f"xoxb-{ref}"})
 
     register_secrets("gated-src", HeldSourceConfig, gated_token)
@@ -620,7 +622,7 @@ async def test_a_create_of_another_config_does_not_wait_behind_a_stuck_one():
                 "/v1/workspaces", json=_slack_body("gated-src", "stuck")
             )
         )
-        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert await asyncio.to_thread(entered.wait, 5)
         refused = await asyncio.wait_for(
             client.post("/v1/workspaces", json=other), timeout=5
         )
@@ -1720,7 +1722,7 @@ async def test_clone_with_a_bad_capacity_override_is_a_bad_request():
 
 
 @pytest.mark.asyncio
-async def test_a_draining_server_refuses_new_workspaces():
+async def test_a_server_shutting_down_refuses_new_workspaces():
     app, _ = _make_app_with_short_grace(grace=10.0)
     app.state.registry.draining = True
     async with AsyncClient(
@@ -1728,4 +1730,4 @@ async def test_a_draining_server_refuses_new_workspaces():
     ) as client:
         r = await client.post("/v1/workspaces", json=_minimal_config())
     assert r.status_code == 503
-    assert r.json() == {"detail": "server is draining"}
+    assert r.json() == {"detail": "server is shutting down"}

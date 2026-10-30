@@ -16,7 +16,7 @@ import { type Counter, type Meter, metrics, type ObservableResult } from '@opent
 import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import type { WorkspaceRegistry } from './registry.ts'
 
-export const METER_NAME = 'mirage.server'
+const METER_NAME = 'mirage.server'
 
 const RUNNING: ReadonlySet<ExecutionStatus> = new Set([
   ExecutionStatus.RUNNING,
@@ -43,7 +43,7 @@ export function registerMetrics(registry: WorkspaceRegistry): () => void {
 
 /**
  * Count a request the server refused for one of its own limits:
- * rate_limit, max_sessions, max_workspaces or draining.
+ * rate_limit, max_sessions, max_workspaces or shutting_down.
  */
 export function refused(reason: string): void {
   instruments().add(1, { reason })
@@ -82,11 +82,11 @@ export function create(meter: Meter): Counter {
     })
     .addCallback(running)
   meter
-    .createObservableGauge('mirage.server.draining', {
+    .createObservableGauge('mirage.server.shutting_down', {
       unit: '1',
-      description: '1 while the server drains for shutdown, else 0.',
+      description: '1 while the server shuts down, else 0.',
     })
-    .addCallback(draining)
+    .addCallback(shuttingDown)
   return meter.createCounter('mirage.request.refused', {
     unit: '{request}',
     description: 'Requests refused for a server limit, by reason.',
@@ -117,12 +117,12 @@ function sessions(result: ObservableResult): void {
 function running(result: ObservableResult): void {
   let count = 0
   for (const registry of registries) {
-    count += registry.jobs.list().filter((job) => RUNNING.has(job.status)).length
+    count += registry.jobs.list(undefined, false).filter((job) => RUNNING.has(job.status)).length
   }
   result.observe(count)
 }
 
-/** 1 while a server drains. */
-function draining(result: ObservableResult): void {
+/** 1 while a server shuts down. */
+function shuttingDown(result: ObservableResult): void {
   result.observe([...registries].some((r) => r.draining) ? 1 : 0)
 }

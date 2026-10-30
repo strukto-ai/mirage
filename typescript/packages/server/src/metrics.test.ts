@@ -62,10 +62,10 @@ describe('metrics', () => {
     expect(got['mirage.workspace.limit']).toEqual([[{}, 4]])
     expect(got['mirage.session.count']).toEqual([[{}, 1]])
     expect(got['mirage.job.running']).toEqual([[{}, 0]])
-    expect(got['mirage.server.draining']).toEqual([[{}, 0]])
+    expect(got['mirage.server.shutting_down']).toEqual([[{}, 0]])
     expect(got['mirage.request.refused']).toEqual([[{ reason: 'rate_limit' }, 1]])
     await registry.drain(0)
-    expect((await read(reader))['mirage.server.draining']).toEqual([[{}, 1]])
+    expect((await read(reader))['mirage.server.shutting_down']).toEqual([[{}, 1]])
     unregister()
     expect((await read(reader))['mirage.workspace.count']).toEqual([[{}, 0]])
     await registry.closeAll()
@@ -112,7 +112,7 @@ describe('metrics', () => {
     expect(
       (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: config })).statusCode,
     ).toBe(503)
-    expect(reasons).toEqual(['rate_limit', 'max_workspaces', 'max_sessions', 'draining'])
+    expect(reasons).toEqual(['rate_limit', 'max_workspaces', 'max_sessions', 'shutting_down'])
     await app.close()
   })
 })

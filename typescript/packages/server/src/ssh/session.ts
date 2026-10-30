@@ -148,19 +148,25 @@ export function loginEntry(
  * define is refused. The login environment is exported by an unrecorded
  * line, so every name clears the session's `pre_session` gate like any
  * `export` would, and a name the profile already set keeps its value. A
- * workspace at `maxSessions`, the server's cap, refuses it with EAGAIN.
+ * server shutting down, or a workspace at the server's `maxSessions`,
+ * refuses it with EAGAIN.
  */
 export async function openSession(
   ws: Workspace,
   sessionId: string,
   env: Record<string, string> = {},
   profile: string | null = null,
-  maxSessions: number | null = null,
+  registry: WorkspaceRegistry | null = null,
 ): Promise<void> {
   await ws.ensureSessionsLoaded()
-  if (maxSessions !== null && ws.listSessions().length >= maxSessions) {
+  if (registry?.draining === true) {
+    refused('shutting_down')
+    throw Object.assign(new Error('server is shutting down'), { code: 'EAGAIN' })
+  }
+  const cap = registry?.maxSessions ?? null
+  if (cap !== null && ws.listSessions().length >= cap) {
     refused('max_sessions')
-    throw Object.assign(new Error(`workspace is at max_sessions (${String(maxSessions)})`), {
+    throw Object.assign(new Error(`workspace is at max_sessions (${String(cap)})`), {
       code: 'EAGAIN',
     })
   }
@@ -358,7 +364,7 @@ export async function openLogin(
       sessionId,
       loginEnv(request),
       keyProfile(request.profile),
-      registry.maxSessions,
+      registry,
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

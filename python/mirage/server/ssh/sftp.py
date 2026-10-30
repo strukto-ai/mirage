@@ -58,7 +58,7 @@ def serve_sftp(
                 ws,
                 session_id,
                 profile=key_profile(conn),
-                max_sessions=registry.max_sessions,
+                registry=registry,
             )
         )
         entry = found

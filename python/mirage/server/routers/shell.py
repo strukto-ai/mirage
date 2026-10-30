@@ -27,6 +27,7 @@ from mirage.execution.types import ExecutionRecord, ExecutionStatus
 from mirage.io.types import ByteSource
 from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
 from mirage.server.jobs import ExecutionTable
+from mirage.server.metrics import refused
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
 from mirage.server.routers.vfs import require_entry, session_of
@@ -166,9 +167,14 @@ async def shell(
 
     if background and upload is not None:
         await upload
-    if not entry.accepting_jobs:
+    if jobs.draining or not entry.accepting_jobs:
         if upload is not None:
             await _finish_upload(upload, part)
+        if jobs.draining:
+            refused("shutting_down")
+            raise HTTPException(
+                status_code=503, detail="server is shutting down"
+            )
         raise HTTPException(status_code=404, detail="workspace not found")
     job = jobs.submit(
         workspace_id=workspace_id,

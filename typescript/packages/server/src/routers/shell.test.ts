@@ -704,3 +704,19 @@ it('streams a prefix before completion and joins cancellation after disconnect',
     await app.close()
   }
 })
+
+describe('shutdown', () => {
+  it('refuses a new line while the server shuts down', async () => {
+    const app = buildApp()
+    await createWs(app, 'late')
+    app.registry.draining = true
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/late/shell',
+      payload: { command: 'echo late' },
+    })
+    expect(r.statusCode).toBe(503)
+    expect(r.json()).toEqual({ detail: 'server is shutting down' })
+    await app.close()
+  })
+})

@@ -62,10 +62,10 @@ async def test_the_instruments_read_the_registered_registries(monkeypatch):
     assert got["mirage.workspace.limit"] == [({}, 4)]
     assert got["mirage.session.count"] == [({}, 1)]
     assert got["mirage.job.running"] == [({}, 0)]
-    assert got["mirage.server.draining"] == [({}, 0)]
+    assert got["mirage.server.shutting_down"] == [({}, 0)]
     assert got["mirage.request.refused"] == [({"reason": "rate_limit"}, 1)]
     await registry.drain(0)
-    assert _read(reader)["mirage.server.draining"] == [({}, 1)]
+    assert _read(reader)["mirage.server.shutting_down"] == [({}, 1)]
     await registry.close_all()
 
 
@@ -105,6 +105,6 @@ async def test_the_server_counts_what_it_refuses(monkeypatch):
         "rate_limit",
         "max_workspaces",
         "max_sessions",
-        "draining",
+        "shutting_down",
     ]
     await app.state.registry.close_all()

@@ -32,7 +32,7 @@ from mirage.config import (
     _load_profile_policy,
     resolve_secrets,
 )
-from mirage.io.network import run_with_network
+from mirage.io.network import NetworkRule, run_with_network
 from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.profile import SessionProfile
@@ -108,8 +108,8 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
     """
     registry = request.app.state.registry
     if registry.draining:
-        refused("draining")
-        raise HTTPException(status_code=503, detail="server is draining")
+        refused("shutting_down")
+        raise HTTPException(status_code=503, detail="server is shutting down")
     if not registry.has_room():
         refused("max_workspaces")
         raise HTTPException(
@@ -158,12 +158,35 @@ async def _building(
             yield
 
 
-async def _construct(kwargs: dict[str, Any]) -> Workspace:
-    """Construct a workspace, on the loop that awaits this.
+async def _construct(
+    config: WorkspaceConfig,
+    rule: NetworkRule | None,
+    workspace_id: str,
+    state_root: str,
+) -> Workspace:
+    """Build a workspace from its config, on the loop that awaits this:
+    its secrets are read, its mounts and runtimes constructed and their
+    backends imported there, not on the server's loop.
+
+    Map runtime entries construct their instances here, so a bad entry
+    fails the create like any other config mistake. A secret the config
+    names is read under the network the workspace will be held to. The
+    server's default store is disk, so a created workspace survives a
+    restart with no infrastructure; a config's own ``store:`` block wins.
 
     Args:
-        kwargs (dict[str, Any]): the workspace's keyword arguments.
+        config (WorkspaceConfig): the posted config.
+        rule (NetworkRule | None): the network the workspace is held to.
+        workspace_id (str): the id it is created under.
+        state_root (str): where the default disk store keeps its state.
     """
+    kwargs = (
+        await run_with_network(rule, resolve_secrets(config))
+    ).to_workspace_kwargs()
+    kwargs["workspace_id"] = workspace_id
+    if "store" not in kwargs:
+        kwargs["store"] = DiskWorkspaceStateStore(state_root)
+        kwargs["owns_store"] = True
     return Workspace(**kwargs)
 
 
@@ -320,17 +343,14 @@ async def create_workspace(
         await _admit(request, written)
         async with _claimed(request, wid):
             try:
-                # Map runtime entries construct their instances here, so a bad
-                # entry (a wasi build dir that does not exist, an unknown
-                # option) fails the create like any other config mistake. A
-                # secret the config names is read under the network the
-                # workspace will be held to.
-                kwargs = (
-                    await run_with_network(
+                runner = await WorkspaceRunner.build(
+                    _construct(
+                        req.config,
                         registry.rule_for(req.config.network),
-                        resolve_secrets(req.config),
+                        wid,
+                        str(request.app.state.state_root),
                     )
-                ).to_workspace_kwargs()
+                )
             except (
                 FileNotFoundError,
                 ImportError,
@@ -338,27 +358,10 @@ async def create_workspace(
                 ValueError,
                 TypeError,
             ) as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            kwargs["workspace_id"] = wid
-            # Daemon default is disk (a created workspace survives restart with
-            # zero infrastructure, like git init); the library default stays ram.
-            # A config with an explicit store: block always wins.
-            if "store" not in kwargs:
-                kwargs["store"] = DiskWorkspaceStateStore(
-                    str(request.app.state.state_root)
-                )
-                kwargs["owns_store"] = True
-            try:
-                runner = await WorkspaceRunner.build(_construct(kwargs))
-            except (
-                FileNotFoundError,
-                ImportError,
-                SecretsError,
-                ValueError,
-            ) as e:
-                # Construction failures (a wasi build dir that does not exist, a
-                # missing runtime extra, a `secrets:` block naming a source the
-                # host cannot resolve) are the caller's to fix, not a 500.
+                # Config mistakes (a wasi build dir that does not exist, an
+                # unknown runtime option, a missing runtime extra, a
+                # `secrets:` block naming a source the host cannot resolve)
+                # are the caller's to fix, not a 500.
                 raise HTTPException(status_code=400, detail=str(e))
             try:
                 for prefix, (

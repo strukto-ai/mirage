@@ -33,10 +33,8 @@ export function registerHealthRoutes(app: FastifyInstance, deps: HealthDeps): vo
   app.get('/v1/ready', async (_req, reply) => {
     const { registry } = deps
     let status = 'ready'
-    if (registry.draining) status = 'draining'
-    else if (registry.maxWorkspaces !== null && registry.size() >= registry.maxWorkspaces) {
-      status = 'full'
-    }
+    if (registry.draining) status = 'shutting_down'
+    else if (!registry.hasRoom(false)) status = 'full'
     return reply.status(status === 'ready' ? 200 : 503).send({ status })
   })
   // The daemon serves every account, so an account may not stop it.

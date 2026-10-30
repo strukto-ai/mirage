@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildApp, type BuildAppOptions } from './app.ts'
+import { AuthMode } from './auth/index.ts'
 import { DaemonConfigError } from './daemon_config.ts'
 import { ENV_HOME, ENV_RATE_LIMITS } from './env.ts'
 import { parseRateLimits, type RateLimit, resolveRateLimits } from './rate_limit.ts'
@@ -134,5 +135,31 @@ describe('registerRateLimits', () => {
       200, 200,
     ])
     expect(await statuses({ rateLimits: limits }, forwarded)).toEqual([200, 429])
+  })
+})
+
+describe('registerRateLimits around sign-in', () => {
+  it('counts a bad token by address before authentication', async () => {
+    const app = buildApp({
+      authConfig: { mode: AuthMode.Local, localToken: 'right' },
+      rateLimits: [
+        { key: 'ip', rate: '1/minute' },
+        { key: 'account', rate: '1/minute' },
+      ],
+    })
+    const wrong = { authorization: 'Bearer wrong' }
+    const get = () => app.inject({ method: 'GET', url: '/v1/workspaces', headers: wrong })
+    expect((await get()).statusCode).toBe(401)
+    expect((await get()).statusCode).toBe(429)
+    await app.close()
+  })
+
+  it('still counts a request with a bare Upgrade header', async () => {
+    expect(
+      await statuses({ rateLimits: [{ key: 'ip', rate: '1/minute' }] }, [
+        { url: '/v1/workspaces', headers: { upgrade: 'websocket' } },
+        { url: '/v1/workspaces', headers: { upgrade: 'websocket' } },
+      ]),
+    ).toEqual([200, 429])
   })
 })

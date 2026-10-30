@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { refused } from '../metrics.ts'
 import { Buffer } from 'node:buffer'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
@@ -299,11 +300,15 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
       const { body, stdin } = upload
       await entry.runner.ws.ensureSessionsLoaded()
       const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
-      if (!entry.acceptingJobs) {
+      if (deps.jobs.draining || !entry.acceptingJobs) {
         try {
           await upload.finish()
         } catch (error) {
           return refuse(req, reply, error)
+        }
+        if (deps.jobs.draining) {
+          refused('shutting_down')
+          return reply.status(503).send({ detail: 'server is shutting down' })
         }
         return reply.status(404).send({ detail: 'workspace not found' })
       }

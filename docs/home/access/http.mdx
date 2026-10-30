@@ -134,6 +134,7 @@ A `200` means the server ran the line, not that the line succeeded: check
 | `429` | Past a [rate limit](#rate-limits), with `Retry-After` in seconds, or a new session past `max_sessions`. |
 | `499` | The job was canceled. |
 | `500` | The job failed inside the server. |
+| `503` | The server is at `max_workspaces`, or shutting down. |
 | `507` | A file call's write would pass its store's capacity. |
 
 ## Server
@@ -150,7 +151,7 @@ Returns `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}` without requiring 
 
 Whether the server takes new workspaces, without requiring a token. Returns
 `{"status": "ready"}` with `200`, or `503` with `{"status": "full"}` at
-`max_workspaces` and `{"status": "draining"}` while it shuts down. Point a load
+`max_workspaces` and `{"status": "shutting_down"}` while it shuts down. Point a load
 balancer's readiness check here and its liveness check at `/v1/health`.
 
 ### Metrics
@@ -168,8 +169,8 @@ account.
 | `mirage.workspace.limit` | up-down counter | Its `max_workspaces`, when set. |
 | `mirage.session.count` | up-down counter | Sessions across its workspaces. |
 | `mirage.job.running` | up-down counter | [Jobs](#jobs) running. |
-| `mirage.server.draining` | gauge | `1` while it drains for shutdown. |
-| `mirage.request.refused` | counter | Requests refused for a server limit, by `reason`: `rate_limit`, `max_sessions`, `max_workspaces` or `draining`. |
+| `mirage.server.shutting_down` | gauge | `1` while it shuts down. |
+| `mirage.request.refused` | counter | Requests refused for a server limit, by `reason`: `rate_limit`, `max_sessions`, `max_workspaces` or `shutting_down`. |
 
 In Python, run the app under `opentelemetry-instrument`, which also records
 each HTTP request:

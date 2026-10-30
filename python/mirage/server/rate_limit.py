@@ -178,25 +178,42 @@ def _value(
 class RateLimitMiddleware:
     """ASGI middleware answering 429 past the server's rate limits.
 
-    It runs after authentication, so a limit keyed on the account counts
-    the signed-in one; the public paths and WebSocket connections are not
-    counted.
+    The server runs it twice: before authentication for the limits keyed
+    on the address, the workspace or a header, so a caller with a bad
+    token is counted too, and after it, with ``signed_in``, for those
+    keyed on the account or a function, which may read the signed-in
+    account. The public paths and WebSocket connections are not counted.
 
     Args:
         app (ASGIApp): downstream ASGI app.
         rate_limits (Sequence[RateLimit]): the limits, each counted on
             its own.
+        signed_in (bool): count the limits that need the signed-in
+            caller, instead of the others.
     """
 
-    def __init__(self, app: ASGIApp, rate_limits: Sequence[RateLimit]) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        rate_limits: Sequence[RateLimit],
+        signed_in: bool = False,
+    ) -> None:
         self.app = app
-        self.rate_limits = tuple(rate_limits)
+        self.rate_limits = tuple(
+            limit
+            for limit in rate_limits
+            if (callable(limit.key) or limit.key == "account") == signed_in
+        )
         self._limiter = FixedWindowRateLimiter(MemoryStorage())
 
     async def __call__(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        if scope["type"] != "http" or scope["path"] in PUBLIC_PATHS:
+        if (
+            not self.rate_limits
+            or scope["type"] != "http"
+            or scope["path"] in PUBLIC_PATHS
+        ):
             await self.app(scope, receive, send)
             return
         request = Request(scope)

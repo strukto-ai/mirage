@@ -720,6 +720,12 @@ async def server_checks(server: Server, report: Report) -> None:
             (await http.get("/v1/health")).status_code,
             want["health_without_token"],
         )
+        ready = await http.get("/v1/ready")
+        report.check(
+            f"{server.key} server.ready_without_token",
+            [ready.status_code, ready.json()],
+            want["ready_without_token"],
+        )
         evil = await http.get("/v1/health", headers={"Host": "evil.example"})
         report.check(
             f"{server.key} server.unknown_host",

@@ -409,3 +409,12 @@ async def test_a_login_past_max_sessions_is_refused(ssh):
         result = await conn.run("echo never")
     assert result.exit_status == 1
     assert "workspace is at max_sessions (1)" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_a_login_while_the_server_shuts_down_is_refused(ssh):
+    ssh.registry.draining = True
+    async with ssh.connect() as conn:
+        result = await conn.run("echo never")
+    assert result.exit_status == 1
+    assert "server is shutting down" in result.stderr

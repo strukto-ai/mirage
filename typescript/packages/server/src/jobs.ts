@@ -34,6 +34,11 @@ interface Run {
  * Finished records are kept for an hour, the newest 1024 of them.
  */
 export class ExecutionTable {
+  /**
+   * Set once the server starts shutting down: every door that submits a
+   * line refuses a new one.
+   */
+  draining = false
   private runs = new Map<string, Run>()
   private closed = false
   private closing: Promise<void> | undefined
@@ -43,8 +48,12 @@ export class ExecutionTable {
     return this.runs.get(id)?.record ?? null
   }
 
-  list(workspaceId?: string): ExecutionRecord[] {
-    this.prune()
+  /**
+   * The executions held, a workspace's when one is named. `prune` drops
+   * finished executions past retention first; a metrics read passes false.
+   */
+  list(workspaceId?: string, prune = true): ExecutionRecord[] {
+    if (prune) this.prune()
     return [...this.runs.values()]
       .map((run) => run.record)
       .filter((record) => workspaceId === undefined || record.workspaceId === workspaceId)

@@ -270,9 +270,6 @@ class WorkspaceRegistry:
         self._entries: dict[str, WorkspaceEntry] = {}
         self.max_workspaces = max_workspaces
         self.max_sessions = max_sessions
-        # Set once a shutdown starts draining: no workspace is built
-        # after it, and readiness answers that the server is going.
-        self.draining = False
         self.policies = tuple(policies)
         self._programs = {
             method: scripts
@@ -385,14 +382,31 @@ class WorkspaceRegistry:
             del self._creates[workspace_id]
             done.set_result(None)
 
-    def has_room(self) -> bool:
-        """Whether a workspace being built fits under ``max_workspaces``,
-        counting those registered and every build in flight, its own
-        among them, so builds racing each other cannot pass it. A build
-        that registered and still answers its request counts once."""
+    @property
+    def draining(self) -> bool:
+        """Whether the server is shutting down: no workspace is built and
+        no line starts after it, and readiness answers that it is going.
+        The flag lives on the job table, which every door that starts a
+        line holds."""
+        return self.jobs.draining
+
+    @draining.setter
+    def draining(self, value: bool) -> None:
+        self.jobs.draining = value
+
+    def has_room(self, own: bool = True) -> bool:
+        """Whether a workspace fits under ``max_workspaces``, counting
+        those registered and every build in flight, so builds racing each
+        other cannot pass it. A build that registered and still answers
+        its request counts once.
+
+        Args:
+            own (bool): the caller's own build is among those in flight;
+                False asks whether one more would fit, as readiness does.
+        """
         return (
             self.max_workspaces is None
-            or len(self._entries.keys() | self._creates.keys())
+            or len(self._entries.keys() | self._creates.keys()) + (not own)
             <= self.max_workspaces
         )
 

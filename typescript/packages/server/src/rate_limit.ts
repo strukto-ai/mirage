@@ -133,29 +133,41 @@ function value(key: RateLimit['key'], request: FastifyRequest): string | null {
 
 /**
  * Answer 429 past the server's rate limits, each counted on its own. The
- * hook runs after authentication, so a limit keyed on the account counts
- * the signed-in one; the public paths and WebSocket upgrades are not
- * counted. Mirrors Python's
+ * server registers it twice: before authentication for the limits keyed on
+ * the address, the workspace or a header, so a caller with a bad token is
+ * counted too, and after it, with `signedIn`, for those keyed on the account
+ * or a function, which may read the signed-in account. The public paths and
+ * WebSocket connections are not counted. Mirrors Python's
+ * `RateLimitMiddleware`. Mirrors Python's
  * `RateLimitMiddleware`.
  */
-export function registerRateLimits(app: FastifyInstance, rateLimits: readonly RateLimit[]): void {
-  if (rateLimits.length === 0) return
-  const limiters = rateLimits.map((limit) => {
+export function registerRateLimits(
+  app: FastifyInstance,
+  rateLimits: readonly RateLimit[],
+  signedIn = false,
+): void {
+  const counted = rateLimits.filter(
+    (limit) => (typeof limit.key === 'function' || limit.key === 'account') === signedIn,
+  )
+  if (counted.length === 0) return
+  const limiters = counted.map((limit) => {
     const [points, duration] = measure(limit)
     return { key: limit.key, limiter: new RateLimiterMemory({ points, duration }) }
   })
   app.addHook('onRequest', async (req, reply) => {
     if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
-    if (req.headers.upgrade?.toLowerCase() === 'websocket') return
+    // Node marks a request upgraded only when the connection really is,
+    // so a bare Upgrade header does not skip the limits.
+    if ((req.raw as { upgrade?: boolean }).upgrade === true) return
     for (const { key, limiter } of limiters) {
-      const counted = value(key, req)
-      if (counted === null) continue
+      const by = value(key, req)
+      if (by === null) continue
       try {
-        await limiter.consume(counted)
+        await limiter.consume(by)
       } catch (e) {
         if (!(e instanceof RateLimiterRes)) throw e
         reply.header('Retry-After', String(Math.max(1, Math.ceil(e.msBeforeNext / 1000))))
-        console.warn(`rate-limiting request from ${counted}`)
+        console.warn(`rate-limiting request from ${by}`)
         refused('rate_limit')
         await reply.code(429).send({ detail: 'Too Many Requests' })
         return

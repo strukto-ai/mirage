@@ -228,11 +228,6 @@ export class WorkspaceRegistry {
   private readonly owners: DiskRecordClient | null
   readonly maxWorkspaces: number | null
   readonly maxSessions: number | null
-  /**
-   * Set once a shutdown starts draining: no workspace is built after it,
-   * and readiness answers that the server is going.
-   */
-  draining = false
   readonly policies: readonly Policy[]
   private readonly programs: ProfileScripts
   private readonly admissionPrograms: ScriptPolicy
@@ -301,12 +296,26 @@ export class WorkspaceRegistry {
    * Whether a workspace being built fits under `maxWorkspaces`, counting
    * those registered and every build in flight, its own among them, so
    * builds racing each other cannot pass it. A build that registered and
-   * still answers its request counts once. Mirrors Python's `has_room`.
+   * still answers its request counts once. `own` false asks whether one
+   * more would fit, as readiness does. Mirrors Python's `has_room`.
    */
-  hasRoom(): boolean {
+  hasRoom(own = true): boolean {
     if (this.maxWorkspaces === null) return true
     const ids = new Set([...this.entries.keys(), ...this.creates.keys()])
-    return ids.size <= this.maxWorkspaces
+    return ids.size + (own ? 0 : 1) <= this.maxWorkspaces
+  }
+
+  /**
+   * Whether the server is shutting down: no workspace is built and no line
+   * starts after it, and readiness answers that it is going. The flag lives
+   * on the job table, which every door that starts a line holds.
+   */
+  get draining(): boolean {
+    return this.jobs.draining
+  }
+
+  set draining(value: boolean) {
+    this.jobs.draining = value
   }
 
   /**

@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
 
 from mirage.server import build_app
+from mirage.server.auth import AuthConfig
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import ENV_RATE_LIMITS
 from mirage.server.rate_limit import (
@@ -158,3 +159,39 @@ def test_an_account_key_counts_the_signed_in_account():
     }
     assert _value("account", Request(scope)) == "alice"
     assert _value("account", Request({**scope, "state": {}})) is None
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
+async def test_an_ip_limit_counts_requests_a_bad_token_brings():
+    app = build_app(
+        idle_grace_seconds=10.0,
+        auth_config=AuthConfig(mode="local", local_token="right"),
+        rate_limits=[
+            RateLimit("ip", "1/minute"),
+            RateLimit("account", "1/minute"),
+        ],
+    )
+    wrong = {"Authorization": "Bearer wrong"}
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (
+            await client.get("/v1/workspaces", headers=wrong)
+        ).status_code == 401
+        assert (
+            await client.get("/v1/workspaces", headers=wrong)
+        ).status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_a_bare_upgrade_header_is_still_counted():
+    limits = [RateLimit("ip", "1/minute")]
+    upgrade = {"upgrade": "websocket"}
+    async with _client(rate_limits=limits) as client:
+        assert (
+            await client.get("/v1/workspaces", headers=upgrade)
+        ).status_code == 200
+        assert (
+            await client.get("/v1/workspaces", headers=upgrade)
+        ).status_code == 429

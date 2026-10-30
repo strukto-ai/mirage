@@ -48,7 +48,7 @@ def refused(reason: str) -> None:
 
     Args:
         reason (str): rate_limit, max_sessions, max_workspaces or
-            draining.
+            shutting_down.
     """
     _instruments().add(1, {"reason": reason})
 
@@ -94,10 +94,10 @@ def _create(meter: Meter) -> Counter:
         description="Lines the server's API is running.",
     )
     meter.create_observable_gauge(
-        "mirage.server.draining",
-        callbacks=[_draining],
+        "mirage.server.shutting_down",
+        callbacks=[_shutting_down],
         unit="1",
-        description="1 while the server drains for shutdown, else 0.",
+        description="1 while the server shuts down, else 0.",
     )
     return meter.create_counter(
         "mirage.request.refused",
@@ -151,14 +151,14 @@ def _running(options: CallbackOptions) -> Iterable[Observation]:
         sum(
             1
             for registry in _registries
-            for job in registry.jobs.list()
+            for job in registry.jobs.list(prune=False)
             if job.status in _RUNNING
         )
     )
 
 
-def _draining(options: CallbackOptions) -> Iterable[Observation]:
-    """1 while a server drains.
+def _shutting_down(options: CallbackOptions) -> Iterable[Observation]:
+    """1 while a server shuts down.
 
     Args:
         options (CallbackOptions): the collection's options.
