@@ -53,16 +53,18 @@ T = TypeVar("T")
 
 
 def pipe_server() -> Any:
-    """The SFTP pipe server class, imported on the first sandbox mount:
-    asyncssh costs about 40 MB, so a process that never mounts into a
-    sandbox does not load it, as the runtime table defers a provider.
+    """The SFTP pipe server class, imported on the first sandbox mount so
+    a process that never mounts into a sandbox does not load asyncssh,
+    as the runtime table defers a provider.
 
     Raises:
         ImportError: the `ssh` extra (asyncssh) is not installed.
     """
     try:
         return importlib.import_module("mirage.mount.sftp").PipeServer
-    except ImportError as exc:
+    except ModuleNotFoundError as exc:
+        if exc.name != "asyncssh":
+            raise
         raise ImportError(PIPE_SERVER_HINT) from exc
 
 
