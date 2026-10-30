@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import builtins
 import dataclasses
 import hashlib
 import json
@@ -54,7 +55,7 @@ from mirage.policy.types import (
 from mirage.rs.policy import from_units, rule_wire, units
 from mirage.rs.stream import close_stream, open_stream
 from mirage.types import PathSpec, Refusal
-from mirage.utils.ids import uuid7
+from mirage.utils.ids import authority_id
 
 logger = logging.getLogger(__name__)
 
@@ -188,11 +189,24 @@ def covers(
         argv (tuple[str, ...]): the line's words, name first.
         cwd (str): the session working directory.
     """
-    if record.outcome is None or record.rule != rule:
-        return False
-    if record.scope is Scope.SESSION:
-        return record.outcome is Outcome.ALLOW
-    return (record.command, *record.argv) == argv and record.cwd == cwd
+    question = dataclasses.replace(
+        record, command=argv[0], argv=argv[1:], cwd=cwd
+    )
+    result = inspect_approval(
+        empty_ledger("inspection"),
+        {
+            "op": "inspect",
+            "query": {
+                "kind": "covers",
+                "record": decision_wire(record),
+                "rule": rule_wire(rule),
+                "question": decision_wire(question),
+            },
+        },
+    )
+    if result["kind"] != "matches":
+        raise RuntimeError("invalid approval comparison")
+    return bool(result["matched"])
 
 
 def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
@@ -217,12 +231,20 @@ def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
         scope (Occurrence): the enclosing node, a background job's.
         occurrence (Occurrence): the command's place.
     """
-    within: Occurrence | None = occurrence
-    while within is not None:
-        if within.parent == scope.parent and within.source == scope.source:
-            return scope.start <= within.start and within.end <= scope.end
-        within = within.parent
-    return False
+    result = inspect_approval(
+        empty_ledger("inspection"),
+        {
+            "op": "inspect",
+            "query": {
+                "kind": "encloses",
+                "scope": occurrence_wire(scope),
+                "occurrence": occurrence_wire(occurrence),
+            },
+        },
+    )
+    if result["kind"] != "matches":
+        raise RuntimeError("invalid approval comparison")
+    return bool(result["matched"])
 
 
 def is_pending(refusal: Refusal | None) -> bool:
@@ -351,7 +373,7 @@ def resolve_wire(
     claimant: dict[str, Any] | None,
 ) -> dict[str, Any]:
     record = Decision(
-        uuid7(),
+        authority_id(),
         ctx.session_id,
         ctx.command,
         tuple(ctx.argv),
@@ -373,7 +395,7 @@ def inspect_approval(
 ) -> dict[str, Any]:
     stream = open_stream("policy_decisions", {})
     try:
-        identity = uuid7()
+        identity = authority_id()
         stream.feed(
             json.dumps(
                 {
@@ -387,7 +409,8 @@ def inspect_approval(
         stream.finish()
         if stream.request() is not None:
             raise RuntimeError("approval inspection requested a write")
-        return json.loads(stream.finish())
+        result: dict[str, Any] = json.loads(stream.finish())
+        return result
     finally:
         stream.cancel()
 
@@ -399,29 +422,33 @@ class Decisions(DecisionOwner):
         self,
         sessions: SessionDecisionsQuery | None = None,
         on_ask: AskHandler | None = None,
+        version: Callable[[], int] | None = None,
     ) -> None:
         self._sessions = sessions
         self._on_ask = on_ask
-        self._owner = uuid7()
+        self._version = version
+        self._versions: dict[str, int] = {}
+        self._owner = authority_id()
         self._memory: dict[str, dict[str, Any]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._holders: WeakKeyDictionary[HandOff, str] = WeakKeyDictionary()
-        self._bindings: WeakKeyDictionary[HandOff, tuple[str, str]] = (
+        self._bindings: WeakKeyDictionary[HandOff, tuple[str, str, int]] = (
             WeakKeyDictionary()
         )
         self._terminal: WeakSet[HandOff] = WeakSet()
+        self._pending_scopes: WeakSet[HandOff] = WeakSet()
         self._readers: set[HandOff] = set()
 
     def _id(self, handed: HandOff) -> str:
         found = self._holders.get(handed)
         if found is None:
-            found = uuid7()
+            found = authority_id()
             self._holders[handed] = found
         return found
 
     def _binding(
         self, session_id: str, handed: HandOff
-    ) -> tuple[str, str] | None:
+    ) -> tuple[str, str, int] | None:
         family = lineage(handed)
         if any(reader in self._terminal for reader in family):
             raise ApprovalUnavailable("stale_holder")
@@ -438,18 +465,24 @@ class Decisions(DecisionOwner):
             handed (HandOff): the new line or direct operation.
         """
         bound = self._binding(session_id, handed)
+        revision = 0 if self._version is None else self._version()
+        if bound is not None and bound[2] != revision:
+            await self._event(session_id, {"op": "invalidate"}, bound[1])
+            self._versions[session_id] = revision
+            raise ApprovalUnavailable("policy_changed")
         if bound is None:
             if self._sessions is not None:
                 epoch = await self._sessions.activate(session_id)
             else:
                 state = self._memory.setdefault(
-                    session_id, empty_ledger(uuid7())
+                    session_id, empty_ledger(authority_id())
                 )
                 epoch = state["incarnation"]
-            bound = (session_id, epoch)
+            bound = (session_id, epoch, revision)
             self._bindings[lineage(handed)[-1]] = bound
         self._readers.add(handed)
         self._id(handed)
+        self._versions.setdefault(session_id, revision)
         return bound[1]
 
     def _state(self, session_id: str) -> dict[str, Any]:
@@ -521,6 +554,7 @@ class Decisions(DecisionOwner):
     async def _event(
         self, session_id: str, event: dict[str, Any], epoch: str
     ) -> dict[str, Any]:
+        revision = 0 if self._version is None else self._version()
         if self._sessions is not None:
             result = await self._sessions.approval_event(
                 session_id, event, epoch
@@ -529,7 +563,7 @@ class Decisions(DecisionOwner):
             lock = self._locks.setdefault(session_id, asyncio.Lock())
             async with lock:
                 stream = open_stream("policy_decisions", {})
-                identity = uuid7()
+                identity = authority_id()
                 try:
                     stream.feed(
                         json.dumps(
@@ -550,24 +584,89 @@ class Decisions(DecisionOwner):
                             raise RuntimeError(
                                 "invalid approval storage effect"
                             )
-                        self._memory[session_id] = effect["ledger"]
+                        ledger = effect["ledger"]
+                        if not isinstance(ledger, dict):
+                            raise RuntimeError("invalid approval ledger")
+                        self._memory[session_id] = ledger
                         stream.respond(
                             {
                                 "evaluation": identity,
                                 "transition": identity,
                                 "effect": 1,
                                 "status": "committed",
-                                "revision": effect["ledger"]["revision"],
+                                "revision": ledger["revision"],
                             },
                             b"",
                         )
                     result = json.loads(stream.finish())
                 finally:
                     await close_stream(stream)
+        if revision != (
+            0 if self._version is None else self._version()
+        ) and event["op"] in {
+            "resolve",
+            "answer",
+            "validate",
+            "session_grants",
+        }:
+            await self._event(session_id, {"op": "invalidate"}, epoch)
+            self._versions[session_id] = (
+                0 if self._version is None else self._version()
+            )
+            raise ApprovalUnavailable("policy_changed")
         if result["kind"] == "blocked":
             raise ApprovalUnavailable(result["status"])
         self._project(session_id)
         return result
+
+    async def _check_version(self, session_id: str, epoch: str) -> bool:
+        current = 0 if self._version is None else self._version()
+        previous = self._versions.get(session_id)
+        if previous is not None and previous != current:
+            await self._event(session_id, {"op": "invalidate"}, epoch)
+            self._versions[session_id] = current
+            return True
+        self._versions[session_id] = current
+        return False
+
+    def facts(self, session_id: str) -> dict[str, Any]:
+        facts = (
+            self._sessions.approval_facts_of(session_id)
+            if self._sessions is not None
+            else {
+                "incarnation": self._state(session_id)["incarnation"],
+                "fields": {},
+            }
+        )
+        return {
+            **facts,
+            "revision": 0 if self._version is None else self._version(),
+        }
+
+    async def assert_current(
+        self, session_id: str, handed: HandOff | None, before: dict[str, Any]
+    ) -> None:
+        if handed is not None:
+            await self.validate(session_id, handed)
+        elif self._sessions is not None and before["incarnation"] is not None:
+            await self._sessions.refresh_approval(
+                session_id, before["incarnation"]
+            )
+        result = inspect_approval(
+            empty_ledger("inspection"),
+            {
+                "op": "inspect",
+                "query": {
+                    "kind": "facts_equal",
+                    "left": before,
+                    "right": self.facts(session_id),
+                },
+            },
+        )
+        if result["kind"] != "matches":
+            raise RuntimeError("invalid approval comparison")
+        if not result["matched"]:
+            raise ApprovalUnavailable("policy_changed")
 
     async def validate(self, session_id: str, handed: HandOff) -> None:
         """Confirm an existing caller before its next dynamic gate.
@@ -579,6 +678,7 @@ class Decisions(DecisionOwner):
         epoch = await self.begin(session_id, handed)
         if self._sessions is not None:
             await self._sessions.refresh_approval(session_id, epoch)
+        await self._check_version(session_id, epoch)
         await self._event(
             session_id,
             {
@@ -600,10 +700,6 @@ class Decisions(DecisionOwner):
             raise ValueError("ASK is not an answer")
         if self._sessions is not None:
             await self._sessions.ensure_loaded()
-            for sid in self._keys():
-                epoch = self._sessions.incarnation_of(sid)
-                if epoch is not None:
-                    await self._sessions.refresh_approval(sid, epoch)
         record = next(
             (item for item in self.pending() if item.id == decision_id), None
         )
@@ -616,6 +712,13 @@ class Decisions(DecisionOwner):
         )
         if epoch is None:
             raise ApprovalUnavailable("session_invalid")
+        if self._sessions is not None:
+            await self._sessions.refresh_approval(record.session_id, epoch)
+        await self._check_version(record.session_id, epoch)
+        if not any(
+            item.id == decision_id for item in self.pending(record.session_id)
+        ):
+            raise KeyError(decision_id)
         result = await self._event(
             record.session_id,
             {
@@ -641,19 +744,30 @@ class Decisions(DecisionOwner):
     ) -> Deny | Pending | Abandoned | None:
         if cancel is not None and cancel.is_set():
             return ABANDONED
-        try:
-            if claimant is not None:
-                epoch = await self.begin(ctx.session_id, claimant.line)
-            elif self._sessions is not None:
-                await self._sessions.ensure_loaded()
-                epoch = self._sessions.incarnation_of(ctx.session_id)
-                if epoch is None:
-                    epoch = await self._sessions.activate(ctx.session_id)
-            else:
-                state = self._memory.setdefault(
-                    ctx.session_id, empty_ledger(uuid7())
+        if claimant is None:
+            handed = HandOff()
+            pending = False
+            try:
+                resolved = await self.resolve(
+                    ctx,
+                    ask,
+                    cancel,
+                    Claimant(
+                        handed,
+                        Occurrence(None, ctx.command, 0, len(ctx.command)),
+                    ),
+                    recheck,
                 )
-                epoch = state["incarnation"]
+                pending = isinstance(resolved, Pending)
+                return resolved
+            finally:
+                if pending:
+                    await self.release(ctx.session_id, handed)
+                else:
+                    await self.revoke(ctx.session_id, handed)
+        try:
+            epoch = await self.begin(ctx.session_id, claimant.line)
+            await self._check_version(ctx.session_id, epoch)
             while True:
                 rules = ask.rules or (ask_rule(ctx, ask),)
                 result = await self._event(
@@ -661,6 +775,8 @@ class Decisions(DecisionOwner):
                     resolve_wire(ctx, rules, self._claimant(claimant)),
                     epoch,
                 )
+                if await self._check_version(ctx.session_id, epoch):
+                    raise ApprovalUnavailable("policy_changed")
                 if result["kind"] == "allow":
                     return None
                 if result["kind"] == "deny":
@@ -668,17 +784,52 @@ class Decisions(DecisionOwner):
                 if result["kind"] != "pending":
                     raise RuntimeError("invalid approval resolution")
                 record = decision_from_wire(result["record"])
-                if self._on_ask is None:
+                on_ask = self._on_ask
+                if on_ask is None:
+                    self._pending_scopes.add(claimant.line)
                     return Pending(record.id, record.reason)
-                said = await answered(lambda: self._on_ask(record), cancel)
+                said = await answered(lambda: on_ask(record), cancel)
                 if isinstance(said, Abandoned):
                     return said
                 if said is None or said.outcome is None:
+                    self._pending_scopes.add(claimant.line)
                     return Pending(record.id, record.reason)
                 if said.id != record.id:
                     raise ApprovalUnavailable("stale_reply")
                 if said.outcome is Outcome.ASK:
                     raise ValueError("ASK is not an answer")
+                if cancel is not None and cancel.is_set():
+                    return ABANDONED
+                if self._sessions is not None:
+                    await self._sessions.refresh_approval(
+                        ctx.session_id, epoch
+                    )
+                if await self._check_version(ctx.session_id, epoch):
+                    raise ApprovalUnavailable("policy_changed")
+                if recheck is not None:
+                    current = await recheck()
+                    if not isinstance(current, Ask):
+                        if current is None:
+                            await self.validate(ctx.session_id, claimant.line)
+                        return current
+                    ask = current
+                    checked = await self._event(
+                        ctx.session_id,
+                        resolve_wire(
+                            ctx,
+                            ask.rules or (ask_rule(ctx, ask),),
+                            self._claimant(claimant),
+                        ),
+                        epoch,
+                    )
+                    if checked["kind"] == "allow":
+                        return None
+                    if checked["kind"] == "deny":
+                        return Deny(from_units(checked["reason"]))
+                    if checked["kind"] != "pending":
+                        raise RuntimeError("invalid approval recheck")
+                    if checked["record"]["id"] != record.id:
+                        continue
                 settled = await self._event(
                     ctx.session_id,
                     {
@@ -695,18 +846,55 @@ class Decisions(DecisionOwner):
                     raise ApprovalUnavailable("stale_reply")
                 if said.outcome is Outcome.DENY:
                     return Deny(record.reason)
-                if recheck is not None:
-                    if self._sessions is not None:
-                        await self._sessions.refresh_approval(
-                            ctx.session_id, epoch
-                        )
-                    current = await recheck()
-                    if not isinstance(current, Ask):
-                        return current
-                    ask = current
         except ApprovalUnavailable as exc:
             logger.debug("approval admission refused: %s", exc.status)
             return Deny(str(exc), failed=True)
+
+    async def session_grants(
+        self, ctx: CommandContext, claimant: Claimant | None = None
+    ) -> builtins.list[CommandRule]:
+        call = (
+            claimant.line
+            if claimant is not None
+            else get_op_call(self, ctx.session_id)
+        )
+        if claimant is None and call is not None:
+            claimant = Claimant(
+                call, Occurrence(call.origin, ctx.command, 0, len(ctx.command))
+            )
+        if claimant is not None:
+            epoch = await self.begin(ctx.session_id, claimant.line)
+        elif self._sessions is not None:
+            epoch = await self._sessions.activate(ctx.session_id)
+        else:
+            state = self._memory.setdefault(
+                ctx.session_id, empty_ledger(authority_id())
+            )
+            epoch = state["incarnation"]
+        if self._sessions is not None:
+            await self._sessions.refresh_approval(ctx.session_id, epoch)
+        await self._check_version(ctx.session_id, epoch)
+        reader = (
+            None
+            if claimant is None
+            else Claimant(claimant.line, Occurrence(None, "", 0, 0))
+        )
+        result = await self._event(
+            ctx.session_id,
+            {"op": "session_grants", "claimant": self._claimant(reader)},
+            epoch,
+        )
+        if result["kind"] != "grants":
+            raise RuntimeError("invalid session approval grants")
+        return [
+            CommandRule(
+                reason=from_units(rule["reason"]),
+                commands=tuple(from_units(word) for word in rule["commands"]),
+                paths=tuple(from_units(path) for path in rule["paths"]),
+                mount=from_units(rule["mount"] or []),
+            )
+            for rule in result["rules"]
+        ]
 
     def held(
         self, ctx: CommandContext, ask: Ask, claimant: Claimant | None = None
@@ -731,6 +919,7 @@ class Decisions(DecisionOwner):
         ctx: VfsContext | SessionContext,
         ask: Ask,
         caller: Caller | None = None,
+        recheck: Callable[[], Awaitable[Deny | Ask | None]] | None = None,
     ) -> Deny | Pending | None:
         caller = current_caller() if caller is None else caller
         if caller.explaining is DryRun.DECIDING:
@@ -742,7 +931,23 @@ class Decisions(DecisionOwner):
             if call is not None
             else None
         )
-        said = await self.resolve(asked, keyed, claimant=claimant)
+
+        async def checked() -> Deny | Ask | None:
+            if recheck is None:
+                return keyed
+            current = await recheck()
+            return (
+                op_question(ctx, current)[1]
+                if isinstance(current, Ask)
+                else current
+            )
+
+        said = await self.resolve(
+            asked,
+            keyed,
+            claimant=claimant,
+            recheck=None if recheck is None else checked,
+        )
         return Deny(ask.reason) if isinstance(said, Abandoned) else said
 
     def held_op(
@@ -763,18 +968,25 @@ class Decisions(DecisionOwner):
             return await run(handed)
         except PolicyDenied as exc:
             if is_pending(exc.refusal):
-                await self.release(session_id, handed)
+                self._pending_scopes.add(handed)
             raise
         finally:
             reset_op_call(token)
-            await self.revoke(session_id, handed)
+            if handed in self._pending_scopes:
+                await self.release(session_id, handed)
+            else:
+                await self.revoke(session_id, handed)
 
     async def split(
         self, session_id: str, handed: HandOff, scope: Occurrence
     ) -> HandOff:
         epoch = await self.begin(session_id, handed)
         job = HandOff(origin=handed.origin)
-        self._bindings[job] = (session_id, epoch)
+        self._bindings[job] = (
+            session_id,
+            epoch,
+            0 if self._version is None else self._version(),
+        )
         self._readers.add(job)
         try:
             await self._event(
@@ -828,6 +1040,14 @@ class Decisions(DecisionOwner):
                 },
                 bound[1],
             )
+        except ApprovalUnavailable as exc:
+            if exc.status not in {
+                "session_replaced",
+                "session_closed",
+                "stale_incarnation",
+            }:
+                raise
+            logger.debug("approval cleanup fenced: %s", exc.status)
         finally:
             self._readers.discard(handed)
 
@@ -842,6 +1062,14 @@ class Decisions(DecisionOwner):
                 {"op": op, "owner": self._owner, "holder": self._id(handed)},
                 bound[1],
             )
+        except ApprovalUnavailable as exc:
+            if exc.status not in {
+                "session_replaced",
+                "session_closed",
+                "stale_incarnation",
+            }:
+                raise
+            logger.debug("approval cleanup fenced: %s", exc.status)
         finally:
             self._readers.discard(handed)
 

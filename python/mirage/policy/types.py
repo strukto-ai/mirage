@@ -497,12 +497,9 @@ class Abandoned:
     """The question was abandoned: the run that raised it was killed
     while the host was still deciding, so the ledger stopped waiting.
 
-    The record is left waiting, and whatever the host eventually answers
-    is dropped rather than recorded — an answer banked against a run
-    that no longer exists would be taken by the next identical line with
-    nobody asked. The entry point turns this into the same abort every other
-    killed wait raises; the ledger states the fact in its own vocabulary
-    because execution is not its to know about.
+    The caller's cleanup retires its pending ticket, and a late answer
+    cannot become authority for another run. The entry point turns this
+    into the same abort every other killed wait raises.
     """
 
 
@@ -512,6 +509,8 @@ class SessionDecisionsQuery(Protocol):
     def approval_sessions(self) -> tuple[str, ...]: ...
 
     def approval_state_of(self, session_id: str) -> dict[str, Any] | None: ...
+
+    def approval_facts_of(self, session_id: str) -> dict[str, Any]: ...
 
     def incarnation_of(self, session_id: str) -> str | None: ...
 

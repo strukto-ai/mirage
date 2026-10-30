@@ -331,6 +331,15 @@ class SessionManager(SessionOwner):
     def approval_sessions(self) -> tuple[str, ...]:
         return tuple(self._sessions)
 
+    def approval_facts_of(self, session_id: str) -> RecordFields:
+        session = self._sessions.get(session_id)
+        return {
+            "incarnation": None if session is None else session.incarnation,
+            "fields": {}
+            if session is None
+            else copy.deepcopy(authority_fields(session.to_dict())),
+        }
+
     def incarnation_of(self, session_id: str) -> str | None:
         """The cached session identity an entry point binds to its caller.
 

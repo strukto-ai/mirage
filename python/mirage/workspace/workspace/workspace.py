@@ -477,7 +477,7 @@ class Workspace:
         # records the question when none is wired) and reads
         # `ws.decisions`.
         self._registry.policies.decisions = Decisions(
-            self._session_mgr, on_ask
+            self._session_mgr, on_ask, lambda: self._registry.policies.revision
         )
 
         # What every method sees of its session: the one its context was

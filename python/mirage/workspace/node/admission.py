@@ -33,15 +33,14 @@ from mirage.policy import (
     CommandWord,
     Deny,
     Pending,
-    Scope,
     ask_rule,
     policy_denied,
     refusal_of,
     render_command_deny,
 )
 from mirage.policy.builtin.permissions import PermissionsPolicy
+from mirage.policy.errors import ApprovalUnavailable
 from mirage.policy.match import (
-    Outcome,
     io_reach,
     io_refusal,
     line_tokens,
@@ -692,7 +691,21 @@ async def resolved(
     """
     if not isinstance(asked, Ask):
         return asked
-    action = await registry.decisions.resolve(ctx, asked, cancel, claimant)
+
+    async def recheck() -> Deny | Ask | None:
+        return settled(
+            tuple(
+                answer
+                for answer in await registry.policies.answers(
+                    "pre_command", ctx
+                )
+                if isinstance(answer, (Deny, Ask))
+            )
+        )
+
+    action = await registry.decisions.resolve(
+        ctx, asked, cancel, claimant, recheck
+    )
     if isinstance(action, Abandoned):
         raise MirageAbortError()
     return action
@@ -760,6 +773,22 @@ async def admit(
         rules_only (bool): ask the profile's rules alone, as ``gate``
             takes it.
     """
+    if claimant is not None:
+        try:
+            await registry.decisions.validate(
+                session.session_id, claimant.line
+            )
+        except ApprovalUnavailable as exc:
+            deny = Deny(str(exc), failed=True)
+            ctx = CommandContext(
+                command=name,
+                argv=tuple(args),
+                cwd=session.cwd,
+                paths=(),
+                session_id=session.session_id,
+            )
+            err, code = await render_command_deny(name, deny, ctx)
+            return Refused(err, code, refusal_of(deny))
     gated = await gate(
         name,
         args,
@@ -777,11 +806,7 @@ async def admit(
     ctx, asked, _ = gated
     action = await resolved(ctx, asked, registry, cancel, claimant)
     if action is None:
-        granted = [
-            r.rule
-            for r in session.decisions
-            if r.scope is Scope.SESSION and r.outcome is Outcome.ALLOW
-        ]
+        granted = await registry.decisions.session_grants(ctx, claimant)
         if isinstance(asked, Ask):
             granted[:0] = asked.rules or (ask_rule(ctx, asked),)
         return Admitted(

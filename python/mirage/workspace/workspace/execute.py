@@ -798,6 +798,7 @@ async def run_prepared_line(
         # job's subtree runs on a hand-off of the job's own.
         if handed is None:
             handed = HandOff()
+        await ws.registry.decisions.begin(effective_session.session_id, handed)
         line_handed = handed
         # The line's own layer of the caller, bound before placement, so
         # an op a policy script makes while the line is judged is inside

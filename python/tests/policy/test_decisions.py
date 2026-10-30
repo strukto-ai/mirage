@@ -102,7 +102,9 @@ def test_shared_approval_transition_transcripts():
             for field in ("fresh", "status", "matched"):
                 if field in step:
                     assert result[field] == step[field]
-            for field in ("records", "claims"):
+            if "record_id" in step:
+                assert result["record"]["id"] == step["record_id"]
+            for field in ("records", "claims", "pending_claims"):
                 if field in step:
                     assert len(ledger[field]) == step[field]
 
@@ -198,6 +200,93 @@ async def test_a_question_is_recorded_once_and_answered_once():
     assert await ledger.resolve(ctx, ask) is None
     # ONCE is consumed by the line it answered, so the next asks again.
     assert isinstance(await ledger.resolve(ctx, ask), Pending)
+
+
+@pytest.mark.asyncio
+async def test_an_inline_answer_rechecks_the_policy_before_it_is_recorded():
+    checks = 0
+
+    async def allow(record):
+        return dataclasses.replace(record, outcome=Outcome.ALLOW)
+
+    async def recheck():
+        nonlocal checks
+        checks += 1
+        return Deny("changed during prompt")
+
+    ledger = Decisions(on_ask=allow)
+    result = await ledger.resolve(
+        _ctx(), Ask("sign-off", rule=RULE), recheck=recheck
+    )
+    assert isinstance(result, Deny)
+    assert result.reason == "changed during prompt"
+    assert checks == 1
+    assert ledger.list() == ()
+
+
+@pytest.mark.asyncio
+async def test_a_changed_ask_requires_its_own_inline_answer():
+    asked = []
+    changed = CommandRule(reason="new review", commands=("git push",))
+
+    async def allow(record):
+        asked.append(record)
+        return dataclasses.replace(record, outcome=Outcome.ALLOW)
+
+    async def recheck():
+        return Ask("new review", rule=changed)
+
+    ledger = Decisions(on_ask=allow)
+    assert (
+        await ledger.resolve(
+            _ctx(), Ask("sign-off", rule=RULE), recheck=recheck
+        )
+        is None
+    )
+    assert [record.rule for record in asked] == [RULE, changed]
+    assert asked[0].id != asked[1].id
+    assert ledger.list() == ()
+
+
+@pytest.mark.asyncio
+async def test_a_swallowed_pending_refusal_keeps_its_ticket_for_the_next_call():
+    ledger = Decisions()
+
+    async def run(handed):
+        result = await ledger.resolve(
+            _ctx(), Ask("sign-off", rule=RULE), claimant=_at(handed)
+        )
+        assert isinstance(result, Pending)
+        return result.id
+
+    ticket = await ledger.within_call("s", run)
+    assert [record.id for record in ledger.pending()] == [ticket]
+    await ledger.answer(ticket, Outcome.ALLOW)
+
+    async def retry(handed):
+        return await ledger.resolve(
+            _ctx(), Ask("sign-off", rule=RULE), claimant=_at(handed)
+        )
+
+    assert await ledger.within_call("s", retry) is None
+    assert ledger.list() == ()
+
+
+@pytest.mark.asyncio
+async def test_answering_a_ticket_ignores_an_unrelated_closed_cached_session():
+    store = RAMNamespaceStore()
+    manager = SessionManager("s", store)
+    manager.create("other")
+    first = Decisions(manager)
+    pending = await first.resolve(_ctx(), Ask("sign-off", rule=RULE))
+    assert isinstance(pending, Pending)
+    await first.resolve(_ctx(session_id="other"), Ask("sign-off", rule=RULE))
+    cached = SessionManager("s", store)
+    await cached.ensure_loaded()
+    ledger = Decisions(cached)
+    await manager.close("other")
+    await ledger.answer(pending.id, Outcome.ALLOW)
+    assert await ledger.resolve(_ctx(), Ask("sign-off", rule=RULE)) is None
 
 
 @pytest.mark.asyncio
@@ -424,17 +513,18 @@ async def test_a_grant_one_line_claimed_is_not_on_offer_to_another():
     await ledger.answer(waiting.id, Outcome.ALLOW)
     first, second = HandOff(), HandOff()
     assert await ledger.resolve(_ctx(), ask, None, _at(first)) is None
-    assert isinstance(
-        await ledger.resolve(_ctx(), ask, None, _at(second)), Pending
-    )
-    assert isinstance(await ledger.resolve(_ctx(), ask), Pending)
+    second_ticket = await ledger.resolve(_ctx(), ask, None, _at(second))
+    assert isinstance(second_ticket, Pending)
+    other_ticket = await ledger.resolve(_ctx(), ask)
+    assert isinstance(other_ticket, Pending)
+    assert second_ticket.id != other_ticket.id
     assert await ledger.resolve(_ctx(), ask, None, _at(first)) is None
-    assert len(ledger.pending("s")) == 1
-    assert len(ledger.list("s")) == 2
+    assert len(ledger.pending("s")) == 2
+    assert len(ledger.list("s")) == 3
     # Released at the line's end, a claim no longer hides anything.
     await ledger.revoke("s", first)
-    assert len(ledger.list("s")) == 1
-    await ledger.answer(ledger.pending("s")[0].id, Outcome.ALLOW)
+    assert len(ledger.list("s")) == 2
+    await ledger.answer(second_ticket.id, Outcome.ALLOW)
     assert await ledger.resolve(_ctx(), ask, None, _at(second)) is None
 
 
@@ -629,8 +719,7 @@ async def test_the_ledger_stops_waiting_when_the_run_is_killed():
     await started.wait()
     cancel.set()
     assert isinstance(await asked, Abandoned)
-    # Nobody answered, so the question is still open for whoever asks next.
-    assert len(ledger.pending()) == 1
+    assert ledger.pending() == ()
 
 
 @pytest.mark.asyncio
@@ -671,10 +760,8 @@ async def test_an_answer_after_the_kill_is_dropped_not_recorded():
     cancel.set()
     assert isinstance(await asked, Abandoned)
     await asyncio.sleep(0.3)
-    # Recording it would leave a spent-once grant behind, and the next
-    # identical line would take it without anybody being asked.
-    assert len(ledger.pending()) == 1
-    assert ledger.list()[0].outcome is None
+    assert ledger.pending() == ()
+    assert ledger.list() == ()
 
 
 @pytest.mark.asyncio
