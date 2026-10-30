@@ -67,6 +67,39 @@ class Verdict:
     lost: list[LostUpdate] = field(default_factory=list)
     blind: int = 0
     unjudged: list[Served] = field(default_factory=list)
+    false_refusals: list[StepRef] = field(default_factory=list)
+
+
+class _Timeline:
+    """Each key's committed states, in commit order, for one trace."""
+
+    def __init__(self, trace: Trace) -> None:
+        self._changes: dict[str, list[tuple[float, Change]]] = {}
+        for served in trace.served():
+            for change in served.changes:
+                self._changes.setdefault(change.key, []).append(
+                    (served.at, change)
+                )
+
+    def held(self, key: str, start: float, end: float, basis: State) -> bool:
+        """Whether ``key`` held ``basis`` from ``start`` to ``end``.
+
+        A key no line ever commits held its first state throughout, the
+        one any basis on it was observed from.
+
+        Args:
+            key (str): the key.
+            start (float): the window's start, exclusive.
+            end (float): the window's end, inclusive.
+            basis (State): the state the actor last observed.
+        """
+        changes = self._changes.get(key, [])
+        if any(start < at <= end for at, _ in changes):
+            return False
+        before = [change for at, change in changes if at <= start]
+        if before:
+            return before[-1].after == basis
+        return not changes or changes[0][1].before == basis
 
 
 def _judge(
@@ -94,6 +127,9 @@ def no_lost_update(trace: Trace) -> Verdict:
       and counted.
 
     A commit is lost when the state it replaced is not its basis. A
+    write or remove that failed while its key held the actor's basis
+    for the whole line is a false refusal: nothing it could lose
+    changed. A
     line that commits in two requests is judged on its first. States
     are content digests; modeled writes are stamped, so no two of them
     store equal bytes. A commit no modeled line on its key accounts for
@@ -103,6 +139,8 @@ def no_lost_update(trace: Trace) -> Verdict:
         trace (Trace): the run.
     """
     verdict = Verdict()
+    timeline = _Timeline(trace)
+    ended: dict[str, float] = {}
     basis: dict[tuple[str, str], State] = {}
     commits: dict[tuple[StepRef | None, str], list[Change]] = {}
     for served in trace.served():
@@ -110,6 +148,8 @@ def no_lost_update(trace: Trace) -> Verdict:
             commits.setdefault((served.step, change.key), []).append(change)
     judged: set[tuple[StepRef, str]] = set()
     for line in trace.lines():
+        start = ended.get(line.step.actor, -1.0)
+        ended[line.step.actor] = line.at
         if line.key is None or line.intent is Intent.RAW:
             continue
         slot = (line.step.actor, line.key)
@@ -129,6 +169,13 @@ def no_lost_update(trace: Trace) -> Verdict:
             basis[slot] = made[-1].after
         elif line.intent is Intent.REMOVES and line.exit_code == 0:
             basis[slot] = ABSENT
+        elif (
+            line.exit_code != 0
+            and slot in basis
+            and not (line.intent is Intent.REMOVES and basis[slot] is ABSENT)
+            and timeline.held(line.key, start, line.at, basis[slot])
+        ):
+            verdict.false_refusals.append(line.step)
     verdict.unjudged = [
         served
         for served in trace.served()

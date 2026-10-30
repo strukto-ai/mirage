@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BoxAccessor } from '../../accessor/box.ts'
-import { nativeCondition, stale, writeCondition } from '../../cache/context.ts'
+import { conditionVersion, nativeCondition, stale, writeCondition } from '../../cache/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
@@ -61,8 +61,8 @@ export async function replaceFile(
 }
 
 /**
- * The refusal for a copy or move whose cleared destination came back. The held
- * version stays held; a folder or web link there keeps none. Mirrors Python's
+ * The refusal for a copy or move whose cleared destination came back. The
+ * condition the op sent stays held, whatever took the name. Mirrors Python's
  * `retaken`.
  */
 export async function retaken(
@@ -71,14 +71,8 @@ export async function retaken(
   dst: PathSpec,
 ): Promise<StaleWriteError | null> {
   if (cond === null || !(err instanceof BoxApiError) || err.status !== CONFLICT_STATUS) return null
-  if (
-    cond.kind === 'match' &&
-    cond.version !== '' &&
-    (err.conflict === null || err.conflict === 'file')
-  ) {
-    return stale(dst, { version: cond.version })
-  }
-  return stale(dst, { gone: true })
+  const held = conditionVersion(cond)
+  return stale(dst, { version: held === '' ? null : held })
 }
 
 /**

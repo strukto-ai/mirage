@@ -55,20 +55,13 @@ describe('runtime table', () => {
     expect([...new MontyRuntime({ captures: ['only'] }).captures]).toEqual(['only'])
   })
 
-  it('default entries end with the workspace runtime', () => {
-    expect(DEFAULT_ENTRIES[DEFAULT_ENTRIES.length - 1]).toBe('workspace')
-  })
-
   it('the default world is monty, quickjs and workspace', () => {
     expect(DEFAULT_ENTRIES).toEqual(['monty', 'quickjs', 'workspace'])
     expect(buildRuntime('monty')).toBeInstanceOf(MontyRuntime)
   })
 
-  it.each<[string, new (...args: never[]) => Runtime]>([
-    ['pyodide', PyodideRuntime],
-    ['monty', MontyRuntime],
-  ])('buildRuntime builds %s by name', (name, kind) => {
-    expect(buildRuntime(name)).toBeInstanceOf(kind)
+  it('buildRuntime builds pyodide by name', () => {
+    expect(buildRuntime('pyodide')).toBeInstanceOf(PyodideRuntime)
   })
 
   it.each<[string, RegExp]>([

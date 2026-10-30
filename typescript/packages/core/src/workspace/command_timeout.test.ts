@@ -25,6 +25,7 @@ import { Workspace } from './workspace/workspace.ts'
 import { programs } from './lookup/lookup.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { CHUNK_SIZE } from '../io/cooperative.ts'
 import { PipeRecorder } from './executor/redirect.ts'
 import { Channel } from '../shell/console/index.ts'
 import type * as Brace from './expand/brace.ts'
@@ -387,41 +388,72 @@ describe('large in-memory commands', () => {
     'wc /big',
     'grep -c line /big',
     'cat /big | wc',
-    `cat -s${' /blank'.repeat(100)}`,
+    'cat -s /blank',
     'head -n -2500000 /blank',
     'uniq /big',
   ])('honors a caller abort during %s', async (command) => {
     const ram = new RAMVFS()
     ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
     ram.store.files.set('/blank', new TextEncoder().encode('\n'.repeat(2_500_000)))
-    const abort = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let fired = false
-    let now = performance.now()
-    const clock = vi.spyOn(performance, 'now')
-    const read = ram.read.bind(ram)
-    // Arm cancellation at the first read and spend each yield budget,
-    // so a fast command cannot finish before a wall-clock timer is due.
-    const reads = vi.spyOn(ram, 'read').mockImplementation((...args) => {
-      if (timer === undefined) {
-        clock.mockImplementation(() => (now += 10))
-        timer = setTimeout(() => {
-          fired = true
-          abort.abort()
-        }, 0)
-      }
-      return read(...args)
-    })
     const ws = new Workspace({ '/': ram })
+    const abort = new AbortController()
+    let now = 0
+    let timer: ReturnType<typeof setImmediate> | undefined
+    let fired = false
+    let consumed = 0
+    let available = 0
+    let progress: [number, number] | undefined
+    const originalRead = ram.read.bind(ram)
+    function stop(): void {
+      fired = true
+      progress = [consumed, available]
+      abort.abort()
+    }
+    class ScannedBytes extends Uint8Array {
+      override indexOf(searchElement: number, fromIndex = 0): number {
+        const result = super.indexOf(searchElement, fromIndex)
+        if (result === -1) {
+          consumed += this.byteLength
+          timer ??= setImmediate(stop)
+        }
+        return result
+      }
+    }
+    async function* read(...args: Parameters<RAMVFS['read']>): AsyncGenerator<Uint8Array> {
+      const source = await originalRead(...args)
+      if (!(source instanceof Uint8Array)) throw new Error('RAM input must be bytes')
+      available += source.byteLength
+      if (command.startsWith('head ')) {
+        // Keep one whole blob so the inner line scan must yield the abort
+        // after it finishes counting its first bounded slice.
+        yield new ScannedBytes(source)
+        return
+      }
+      yield source.subarray(0, CHUNK_SIZE)
+      consumed += CHUNK_SIZE
+      timer ??= setImmediate(stop)
+      yield source.subarray(CHUNK_SIZE)
+      consumed += source.byteLength - CHUNK_SIZE
+    }
+    const reading = vi.spyOn(ram, 'read').mockImplementation(read)
+    // Keep the remaining RAM input ready, and let elapsed budget time
+    // offer the abort callback a real loop turn.
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => {
+      if (timer !== undefined) now += 20
+      return now
+    })
     try {
       await expect(ws.shell(command, { signal: abort.signal })).rejects.toMatchObject({
         name: 'AbortError',
       })
+      expect(reading).toHaveBeenCalled()
       expect(fired).toBe(true)
+      expect(progress?.[0]).toBeGreaterThan(0)
+      expect(progress?.[0]).toBeLessThan(progress?.[1] ?? 0)
     } finally {
-      clearTimeout(timer)
-      reads.mockRestore()
+      clearImmediate(timer)
       clock.mockRestore()
+      reading.mockRestore()
       await ws.close()
     }
   })

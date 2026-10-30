@@ -126,10 +126,6 @@ jobs:
         working-directory: python
         run: uv sync --all-extras
 
-      - name: Install package
-        working-directory: python
-        run: uv pip install .
-
       # Only main saves: the key moves with every source change, so a store
       # saved from a pull request was a 25 MB entry that only that pull
       # request could read. Pull requests restore main's newest store.
@@ -299,24 +295,20 @@ jobs:
         working-directory: python
         run: uv sync --extra wasi --extra quickjs --extra monty
 
-      - name: Run wasi runtime tests
-        working-directory: python
-        env:
-          MIRAGE_WASI_HOME: /tmp/cpython-wasi
-        run: uv run pytest tests/runtime/python/wasi/ -v --no-cov
-
-      - name: Run quickjs runtime tests
-        working-directory: python
-        env:
-          MIRAGE_QUICKJS_HOME: /tmp/quickjs
-        run: uv run pytest tests/runtime/js/ -v --no-cov
-
-      - name: Run the runtime conformance suite
+      # Main runs every ordinary case already. This pass owns only the
+      # variants that need these downloads; keep their mock-only and Monty
+      # siblings in the unfiltered main pass.
+      - name: Run runtime tests requiring interpreter builds
         working-directory: python
         env:
           MIRAGE_WASI_HOME: /tmp/cpython-wasi
           MIRAGE_QUICKJS_HOME: /tmp/quickjs
-        run: uv run pytest tests/runtime/test_conformance.py tests/runtime/test_binding.py -v --no-cov
+        run: |
+          test -f "$MIRAGE_WASI_HOME/python.wasm"
+          test -f "$MIRAGE_QUICKJS_HOME/qjs-wasi.wasm"
+          uv run pytest tests/runtime/python/wasi/ tests/runtime/js/ \
+            tests/runtime/test_conformance.py tests/runtime/test_binding.py \
+            -m runtime_assets -v --no-cov
 
       - name: Install base package without the monty extra
         working-directory: python

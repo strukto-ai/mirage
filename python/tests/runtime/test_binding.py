@@ -238,7 +238,14 @@ async def test_command_execution_supplies_its_active_workspace_context():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["monty", "quickjs", "wasi"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "monty",
+        pytest.param("quickjs", marks=pytest.mark.runtime_assets),
+        pytest.param("wasi", marks=pytest.mark.runtime_assets),
+    ],
+)
 async def test_adapters_use_each_execution_context_for_filesystem_callbacks(
     name,
 ):

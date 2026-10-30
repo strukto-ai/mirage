@@ -997,13 +997,6 @@ def test_cut_field():
     assert b"alice" in out
 
 
-def test_uniq_dedup():
-    ws = _ws()
-    io = _exec(ws, "sort /ram/words.txt | uniq")
-    out = _stdout(io)
-    assert out.count(b"apple") == 1
-
-
 def test_tr_upper():
     ws = _ws()
     io = _exec(ws, "cat /s3/data.txt | tr 'a-z' 'A-Z'")

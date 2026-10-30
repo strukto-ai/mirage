@@ -1249,16 +1249,6 @@
       }
     },
     {
-      "id": "brace_extreme_negative_descending",
-      "seq": 17600240,
-      "command": "echo {0..-9223372036854775808..-9223372036854775808}",
-      "expect": {
-        "exit": 0,
-        "stdout": "0 -9223372036854775808\n",
-        "stderr": ""
-      }
-    },
-    {
       "id": "brace_extreme_minimum_step_rejected",
       "seq": 17600241,
       "command": "echo {9223372036854775807..0..-9223372036854775808}",

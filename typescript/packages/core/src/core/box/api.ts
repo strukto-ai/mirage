@@ -46,9 +46,8 @@ export async function refused(
   etag: string | null,
 ): Promise<StaleWriteError | null> {
   if (etag === null || etag === '' || !(err instanceof BoxApiError)) return null
-  if (err.status === LOST_STATUS) return stale(path, { version: conditionVersion(cond) })
-  if (err.status === GONE_STATUS) return stale(path, { gone: true })
-  return null
+  if (err.status !== LOST_STATUS && err.status !== GONE_STATUS) return null
+  return stale(path, { version: conditionVersion(cond) })
 }
 
 /** The header that conditions a request on `etag`, empty to go plain. */

@@ -45,7 +45,7 @@ export const MD5_ETAG_STORES: ReadonlySet<string> = new Set([
 
 export const CONDITION_SUPPORT: ConditionSupport = {
   put: ['absent', 'match'],
-  copy: ['match'],
+  copy: ['absent', 'match'],
   delete: ['match'],
 }
 export const CUSTOM_CONDITION_SUPPORT: ConditionSupport = { put: ['absent', 'match'] }

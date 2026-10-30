@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.cache.types import OwnRead
 from mirage.cache.versions import VersionHistory, VersionScope
 from mirage.observe.record import OpRecord
 from mirage.workspace.session.session import SessionState
@@ -46,14 +47,21 @@ def test_stream_stamps_and_unknown_reads():
 
 
 @pytest.mark.parametrize(
-    "op", ["unlink", "rename", "copy", "append", "pwrite"]
+    "op, left",
+    [
+        ("unlink", OwnRead.ABSENT),
+        ("rename", None),
+        ("copy", None),
+        ("append", None),
+        ("pwrite", None),
+    ],
 )
-def test_point_mutation_does_not_retract_children(op):
+def test_point_mutation_does_not_retract_children(op, left):
     history, scope = VersionHistory(), VersionScope()
     history.observe(scope, "/f", record())
     history.observe(scope, "/f/child", record())
     history.observe(scope, "/f", record(op))
-    assert history.read(scope, "/f") is None
+    assert history.read(scope, "/f") is left
     assert history.read(scope, "/f/child") == "v1"
 
 
@@ -63,9 +71,9 @@ def test_subtree_refusal_and_replay_pins():
     history.observe(scope, "/d/a", record())
     history.observe(scope, "/dog", record())
     history.observe(scope, "/d", record("rm_r"))
+    assert history.read(scope, "/d/pinned") is OwnRead.ABSENT
     history.keep(scope, "/d/a", "v1")
     assert history.read(scope, "/d/a") == "v1"
-    assert history.read(scope, "/d/pinned") is None
     assert history.read(scope, "/dog") == "v1"
     history.keep(scope, "/d/a", None)
     assert history.read(scope, "/d/a") is None

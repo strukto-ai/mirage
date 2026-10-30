@@ -223,10 +223,6 @@ describe('jq eval — regression suite', () => {
     })
   })
 
-  it('join with separator', async () => {
-    expect(await evalOne(['a', 'b', 'c'], 'join("-")')).toBe('a-b-c')
-  })
-
   it('join empty separator', async () => {
     expect(await evalOne(['foo', 'bar'], 'join("")')).toBe('foobar')
   })

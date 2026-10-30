@@ -96,30 +96,37 @@ class WriteContext:
         vfs (str): the backend's name, for a refusal.
         conditions (frozenset[WriteKind]): the ops the backend can condition
             (put, copy, delete).
-        read_version (Callable[[PathSpec], Awaitable[str | None]]): the
-            version the live session observed, or the mount's version
-            without a session; None when no version is known.
-        read_versions (Callable[[list[PathSpec]], Awaitable[list[str |
-            None]]]): ``read_version`` for many paths at once.
+        read_version (Callable[[PathSpec], Awaitable[Measured | None]]):
+            the version the live session observed, ABSENT when it found no
+            file, or the mount's version without a session; None when no
+            version is known.
+        read_versions (Callable[[list[PathSpec]], Awaitable[list[Measured
+            | None]]]): ``read_version`` for many paths at once.
         drop (Callable[[PathSpec], Awaitable[None]]): drops the mount's
             cached copy of a path, so the read a refusal asks for really
             fetches.
-        keep (Callable[[PathSpec, str], Awaitable[None]]): keeps a version
-            for a path without bytes, the one a refused write lost on.
+        keep (Callable[[PathSpec, Measured], Awaitable[None]]): keeps a
+            version for a path without bytes, the one a refused write lost
+            on.
         observe (Callable[[OpRecord], None] | None): record a caller's
             own read or mutation result.
         lose (Callable[[PathSpec, str | None], None] | None): retain a
-            refused token, or clear it when the backend confirms absence.
+            refused token.
+        creates (frozenset[WriteKind]): the ops the backend can condition
+            on the file not existing.
     """
 
     vfs: str
     conditions: frozenset[WriteKind]
-    read_version: Callable[[PathSpec], Awaitable[str | None]]
-    read_versions: Callable[[list[PathSpec]], Awaitable[list[str | None]]]
+    read_version: Callable[[PathSpec], Awaitable["Measured | None"]]
+    read_versions: Callable[
+        [list[PathSpec]], Awaitable[list["Measured | None"]]
+    ]
     drop: Callable[[PathSpec], Awaitable[None]]
-    keep: Callable[[PathSpec, str], Awaitable[None]]
+    keep: Callable[[PathSpec, "Measured"], Awaitable[None]]
     observe: Callable[["OpRecord"], None] | None = None
     lose: Callable[[PathSpec, str | None], None] | None = None
+    creates: frozenset[WriteKind] = frozenset()
 
 
 # The version the mount saw for each of a walk's keys that it saw one for.

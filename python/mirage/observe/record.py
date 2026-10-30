@@ -66,6 +66,8 @@ RETRACT_FINGERPRINT_OPS = frozenset(
         "copy_prefix",
     }
 )
+# The subset that leaves no file at the path: the session saw it gone.
+REMOVAL_OPS = frozenset({"unlink", "rm_r", "rmdir"})
 # Stamps name the bytes at a path; retracts mean the line no longer knows them.
 VERSION_OPS = STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS
 # The subset that moved a whole prefix, and so takes every pin beneath

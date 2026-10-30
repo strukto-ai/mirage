@@ -277,12 +277,14 @@ class Sim:
         write: WritePolicy = WritePolicy.CONDITIONAL,
         *,
         mounts: Mapping[str, Mount] | None = None,
+        cache_limit: int | str = "512MB",
     ) -> SimWorkspace:
         """A new workspace with mounts.
 
         Args:
             write (WritePolicy): the S3 mount's write policy.
             mounts (Mapping[str, Mount] | None): explicit mounts map.
+            cache_limit (int | str): the workspace file cache's capacity.
         """
         clock = SimClock(self.loop)
         ids_seed = u64(self.seed, "ids", len(self._workspaces)) >> 11
@@ -352,6 +354,7 @@ class Sim:
         workspace = Workspace(
             mount_map,
             mode=MountMode.WRITE,
+            cache_limit=cache_limit,
             clock=clock,
             ids=SeededIdSource(ids_seed, clock),
         )

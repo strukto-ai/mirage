@@ -52,7 +52,7 @@ async def _retaken(
 ) -> StaleWriteError | None:
     """The refusal for a copy or move whose cleared destination came back.
 
-    The held version stays held; a folder there keeps none.
+    The condition the op sent stays held, whatever took the name.
 
     Args:
         exc (DropboxApiError): Dropbox's answer to the retry.
@@ -61,9 +61,7 @@ async def _retaken(
     """
     if cond is None or not exc.summary.startswith(TAKEN):
         return None
-    if condition_version(cond) and not exc.summary.startswith(TAKEN_BY_FOLDER):
-        return await stale(dst, version=condition_version(cond))
-    return await stale(dst, gone=True)
+    return await stale(dst, version=condition_version(cond))
 
 
 async def replace_onto(
@@ -112,7 +110,7 @@ async def replace_onto(
             ):
                 raise
         elif exc.summary.startswith(TAKEN_BY_FOLDER):
-            raise await stale(dst, gone=True) from exc
+            raise await stale(dst) from exc
         try:
             await delete_path(tm, to_path, rev)
         except DropboxApiError as err:

@@ -60,6 +60,13 @@ export const DISPATCH_READ_OPS: ReadonlySet<string> = new Set(
     (name) => !READ_SHORTCUT_OPS.has(name),
   ),
 )
+// The calls whose ENOENT tells a session the file is not there, so its next
+// write on a conditional mount asks that it still not be.
+export const MISS_OPS: ReadonlySet<string> = new Set([
+  ...DISPATCH_READ_OPS,
+  ...READ_SHORTCUT_OPS,
+  'stat',
+])
 
 // The calls that stand in for a whole read of a file. The cache stage answers
 // each null for a file the read cache holds, so its caller reads the file
