@@ -1846,6 +1846,113 @@ def selftest_saved_skips() -> None:
             )
 
 
+RUNTIME_DRIVER_PROBE = r"""
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+root = Path(os.environ["RUNNER_TEMP"])
+host = "python" if Path(sys.argv[0]).name == "python" else "typescript"
+suites = sys.argv[2:] if host == "python" else sys.argv[4:]
+name = "mongodb" if host == "typescript" and suites == ["backend/mongodb"] else host
+(root / f"{name}.json").write_text(json.dumps([[host, suite] for suite in suites]))
+(root / f"{name}.started").touch()
+if name == "mongodb":
+    assert (root / "python.done").exists(), "MongoDB raced Python"
+elif os.environ["EXPECT_OVERLAP"] == "1":
+    peer = "typescript" if host == "python" else "python"
+    deadline = time.monotonic() + 3
+    while not (root / f"{peer}.started").exists():
+        assert time.monotonic() < deadline, "drivers did not overlap"
+        time.sleep(0.01)
+(root / f"{name}.done").touch()
+sys.exit(1 if os.environ["FAIL_DRIVER"] == name else 0)
+"""
+
+
+def selftest_runtime_parallel() -> None:
+    """Run the CI driver against barriers and deliberate host failures."""
+    driver = ROOT / "runtime" / "parallel.sh"
+    mixed = "write/append backend/mongodb path/stat"
+    for suites, failing in (
+        (mixed, ""),
+        (mixed, "python"),
+        (mixed, "typescript"),
+        (mixed, "mongodb"),
+        ("backend/mongodb", ""),
+        ("write/append path/stat", ""),
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            scripts = base / "integ" / "scripts"
+            scripts.mkdir(parents=True)
+            (scripts / "background.sh").symlink_to(
+                ROOT / "scripts" / "background.sh"
+            )
+            for relative in ("python/.venv/bin/python", "bin/pnpm"):
+                stub = base / relative
+                stub.parent.mkdir(parents=True, exist_ok=True)
+                stub.write_text(f"#!{sys.executable}\n" + RUNTIME_DRIVER_PROBE)
+                stub.chmod(0o755)
+            env = {
+                **os.environ,
+                "PATH": f"{base / 'bin'}{os.pathsep}{os.environ['PATH']}",
+                "RUNNER_TEMP": tmp,
+                "SUITES": suites,
+                "FAIL_DRIVER": failing,
+                "EXPECT_OVERLAP": "0" if suites == "backend/mongodb" else "1",
+            }
+            started = subprocess.run(
+                ["bash", str(driver), "start"],
+                cwd=base,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            done = subprocess.run(
+                ["bash", str(driver), "wait"],
+                cwd=base,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            rows = [
+                row
+                for path in base.glob("*.json")
+                for row in json.loads(path.read_text())
+            ]
+            want = [
+                [host, suite]
+                for host in ("python", "typescript")
+                for suite in suites.split()
+            ]
+            label = f"{suites}, fail={failing or 'none'}"
+            check(
+                f"runtime drivers: overlap and failure propagation ({label})",
+                started.returncode == 0
+                and done.returncode == bool(failing)
+                and (base / "python.done").exists()
+                and (
+                    base
+                    / (
+                        "mongodb.done"
+                        if suites == "backend/mongodb"
+                        else "typescript.done"
+                    )
+                ).exists(),
+                started.stdout + started.stderr + done.stdout + done.stderr,
+            )
+            check(
+                f"runtime drivers: every host/suite runs exactly once ({label})",
+                sorted(rows) == sorted(want),
+                repr(rows),
+            )
+
+
 def main() -> None:
     selftest_services_table()
     selftest_case_validation()
@@ -1859,6 +1966,7 @@ def main() -> None:
     selftest_pool_runtime()
     selftest_case_targets()
     selftest_shard()
+    selftest_runtime_parallel()
     selftest_non_root_targets()
     selftest_saved_skips()
     selftest_typescript_gates("--require-ts" in sys.argv)

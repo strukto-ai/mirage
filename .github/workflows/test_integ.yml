@@ -311,7 +311,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: integ-typescript-dist
-          path: typescript/packages/*/dist
+          path: |
+            typescript/packages/*/dist
+            typescript/packages/core/src/generated
           if-no-files-found: error
           retention-days: 1
 
@@ -352,7 +354,12 @@ jobs:
           node-version: '24'
       - name: Install TypeScript dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # The current run's artifact supplies dist and generated sources.
+        # Keep the allowed native dependency's install hook; core's prepare
+        # would compile the same Rust WASM again before downloading it.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm rebuild @zkochan/fuse-native
       - uses: actions/download-artifact@v8
         with:
           name: integ-typescript-dist
@@ -1125,7 +1132,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # The current run's artifact supplies dist and generated sources.
+        # Keep the allowed native dependency's install hook; core's prepare
+        # would compile the same Rust WASM again before downloading it.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm rebuild @zkochan/fuse-native
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -1593,7 +1605,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # The current run's artifact supplies dist and generated sources.
+        # Keep the allowed native dependency's install hook; core's prepare
+        # would compile the same Rust WASM again before downloading it.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm rebuild @zkochan/fuse-native
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2012,7 +2029,12 @@ jobs:
 
       - name: Install TypeScript dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # The current run's artifact supplies dist and generated sources.
+        # Keep the allowed native dependency's install hook; core's prepare
+        # would compile the same Rust WASM again before downloading it.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm rebuild @zkochan/fuse-native
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2110,19 +2132,10 @@ jobs:
             sleep 1
           done
 
-      # The JSON drivers run behind the CLI step, on the cores it leaves. They
-      # share nothing with it: run ids scope the MinIO prefixes, the sandbox
-      # suites send stateless commands, no driver binds a fixed port, and the
-      # CLI never reaches MongoDB. They do share MongoDB with each other: each
-      # drops and reseeds the bridge suite's database, so they run in turn,
-      # and the second still runs when the first fails.
+      # Keep both JSON hosts busy behind the CLI battery. The driver waits
+      # for both, then runs the one suite that reseeds their shared database.
       - name: Start every runtime through the JSON suites (background)
-        run: |
-          integ/scripts/background.sh start json '
-            status=0
-            ./python/.venv/bin/python integ/runtime/run.py $SUITES || status=1
-            (cd integ && pnpm exec tsx runtime/run.ts $SUITES) || status=1
-            exit $status'
+        run: bash integ/runtime/parallel.sh start
 
       - name: Run every runtime through the CLI and both daemons
         run: |
@@ -2131,10 +2144,10 @@ jobs:
             "node typescript/packages/cli/dist/bin/mirage.js" \
             $SUITES
 
-      - name: Run every runtime through the JSON suites (python, then typescript)
+      - name: Collect both runtime JSON drivers and the shared MongoDB suite
         if: ${{ !cancelled() }}
         timeout-minutes: 15
-        run: integ/scripts/background.sh wait json
+        run: bash integ/runtime/parallel.sh wait
 
       - name: Verify the oldest supported Pyodide
         if: ${{ !cancelled() && contains(env.SUITES, 'pyodide/network') }}
@@ -2198,7 +2211,12 @@ jobs:
 
       - name: Install TypeScript dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # The current run's artifact supplies dist and generated sources.
+        # Keep the allowed native dependency's install hook; core's prepare
+        # would compile the same Rust WASM again before downloading it.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm rebuild @zkochan/fuse-native
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2296,7 +2314,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # The current run's artifact supplies dist and generated sources.
+        # Keep the allowed native dependency's install hook; core's prepare
+        # would compile the same Rust WASM again before downloading it.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm rebuild @zkochan/fuse-native
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
@@ -2389,7 +2412,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: typescript
-        run: pnpm install --frozen-lockfile=false
+        # The current run's artifact supplies dist and generated sources.
+        # Keep the allowed native dependency's install hook; core's prepare
+        # would compile the same Rust WASM again before downloading it.
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm rebuild @zkochan/fuse-native
 
       - name: Download TypeScript build outputs
         uses: actions/download-artifact@v8
