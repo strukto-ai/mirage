@@ -23,18 +23,26 @@ export class RAMNamespaceStore extends NamespaceStore {
 
   load(): Promise<Map<string, RecordFields>> {
     const out = new Map<string, RecordFields>()
-    for (const [key, fields] of this.entries) out.set(key, { ...fields })
+    for (const [key, fields] of this.entries) out.set(key, structuredClone(fields))
     return Promise.resolve(out)
   }
 
+  override get(key: string): Promise<RecordFields | null> {
+    return Promise.resolve(structuredClone(this.entries.get(key) ?? null))
+  }
+
+  override approvalGuarantee(): Promise<void> {
+    return Promise.resolve()
+  }
+
   set(key: string, fields: RecordFields): Promise<void> {
-    this.entries.set(key, { ...fields })
+    this.entries.set(key, structuredClone(fields))
     return Promise.resolve()
   }
 
   casSet(key: string, fields: RecordFields, expectedGeneration: number): Promise<boolean> {
     if (generationOf(this.entries.get(key)) !== expectedGeneration) return Promise.resolve(false)
-    this.entries.set(key, { ...fields })
+    this.entries.set(key, structuredClone(fields))
     return Promise.resolve(true)
   }
 
@@ -45,7 +53,7 @@ export class RAMNamespaceStore extends NamespaceStore {
 
   replaceAll(entries: Map<string, RecordFields>): Promise<void> {
     this.entries.clear()
-    for (const [key, fields] of entries) this.entries.set(key, { ...fields })
+    for (const [key, fields] of entries) this.entries.set(key, structuredClone(fields))
     return Promise.resolve()
   }
 

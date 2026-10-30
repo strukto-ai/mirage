@@ -329,13 +329,13 @@ describe('SessionManager with a session table', () => {
     expect(entries.get('agent')?.mount_modes).toEqual({ '/s3': 'read' })
   })
 
-  it('close deletes the session from the store', async () => {
+  it('close retains a terminal fence in the store', async () => {
     const store = new RAMNamespaceStore()
     const m = new SessionManager('def', store)
     m.create('gone')
     await m.flush()
     await m.close('gone')
-    expect((await store.load()).has('gone')).toBe(false)
+    expect((await store.get('gone'))?.closed).toEqual(expect.any(String))
   })
 })
 
@@ -760,10 +760,13 @@ it.each([false, true])(
       resume = resolve
     })
     const casSet = store.casSet.bind(store)
+    let firstWrite = true
     const spy = vi.spyOn(store, 'casSet').mockImplementation(async (...args) => {
+      const first = firstWrite
+      firstWrite = false
       enter()
       await release
-      if (failure) throw new Error('store unavailable')
+      if (failure && first) throw new Error('store unavailable')
       return casSet(...args)
     })
     const updating = manager
@@ -782,7 +785,7 @@ it.each([false, true])(
       await updating
       await closing
       expect(() => manager.get('agent')).toThrow('unknown session')
-      expect((await store.load()).has('agent')).toBe(false)
+      expect((await store.get('agent'))?.closed).toEqual(expect.any(String))
     } finally {
       resume()
       await updating
@@ -799,5 +802,5 @@ it('a final flush after session deletion does not recreate it', async () => {
   await manager.flush('gone')
   await manager.close('gone')
   await manager.flush('gone')
-  expect((await store.load()).has('gone')).toBe(false)
+  expect((await store.get('gone'))?.closed).toEqual(expect.any(String))
 })

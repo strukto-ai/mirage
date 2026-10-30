@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
@@ -61,6 +62,7 @@ from mirage.types import (
 )
 from mirage.utils.clock import SystemClock
 from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.workspace.record.types import RecordFields
 from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     STARTUP_VALUES,
@@ -373,6 +375,8 @@ class SessionState:
     # state like functions and cwd, persisted, read and written through
     # the manager by id so a fork shares them, never another session's.
     decisions: tuple[Decision, ...] = ()
+    incarnation: str | None = None
+    approval_state: RecordFields | None = None
     generation: int = 0
     last_bg_job_id: int | None = None
     positional_args: list[str] = field(default_factory=list)
@@ -655,6 +659,10 @@ class SessionState:
             data["profile"] = self.profile
         if self.decisions:
             data["decisions"] = [decision_to_dict(d) for d in self.decisions]
+        if self.approval_state is not None:
+            data["approval_state"] = self.approval_state
+        if self.incarnation is not None:
+            data["incarnation"] = self.incarnation
         return data
 
     @classmethod
@@ -902,6 +910,7 @@ class SessionState:
         defaults: dict[str, Any] = {
             name: copy_state(getattr(self, name)) for name in INHERITED_FIELDS
         }
+        defaults["approval_state"] = copy.deepcopy(self.approval_state)
         defaults.update(overrides)
         if "cwd" in overrides and "logical_cwd" not in overrides:
             defaults["logical_cwd"] = None

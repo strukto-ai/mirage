@@ -75,6 +75,73 @@ fn resolving() -> Value {
     })
 }
 
+fn commit(input: &Value) -> (Value, Value) {
+    let mut engine = initialized(input);
+    let mut ledger = input["ledger"].clone();
+    if let Some(request) = engine.request(&mut Vec::new()) {
+        let request: Value = serde_json::from_slice(&request).unwrap();
+        ledger = request["ledger"].clone();
+        engine
+            .respond(
+                &serde_json::to_vec(&json!({
+                    "evaluation":input["evaluation"], "transition":input["transition"],
+                    "effect":1, "status":"committed", "revision":ledger["revision"]
+                }))
+                .unwrap(),
+                &[],
+                &mut Vec::new(),
+            )
+            .unwrap();
+    }
+    let mut out = Vec::new();
+    engine.finish(&mut out).unwrap();
+    (serde_json::from_slice(&out).unwrap(), ledger)
+}
+
+#[test]
+fn stale_policy_facts_never_create_or_authorize_a_question() {
+    let mut input = resolving();
+    input["facts"] =
+        json!({"expected":{"commands":{"deny":[]}},"current":{"commands":{"deny":["all"]}}});
+    let mut engine = initialized(&input);
+    assert!(engine.request(&mut Vec::new()).is_none());
+    let mut out = Vec::new();
+    engine.finish(&mut out).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&out).unwrap(),
+        json!({"kind":"blocked","status":"stale_facts"})
+    );
+}
+
+#[test]
+fn session_writes_preserve_newer_restrictions_and_invalidate_explicit_changes() {
+    let (pending, mut ledger) = commit(&resolving());
+    assert_eq!(pending["kind"], "pending");
+    let mut input = resolving();
+    input["ledger"] = ledger.clone();
+    input["transition"] = json!("answer");
+    input["event"] = json!({"op":"answer","id":input["event"]["question"]["id"],"outcome":"allow","scope":"session","note":[],"claimant":null});
+    (_, ledger) = commit(&input);
+    let older = json!({"commands":{"allow":null,"deny":[],"ask":[]}});
+    let newer = json!({"commands":{"allow":[],"deny":[],"ask":[]}});
+    input["ledger"] = ledger;
+    input["transition"] = json!("stale-normal-flush");
+    input["facts"] = json!({"expected":older,"current":newer});
+    input["event"] = json!({"op":"session_write","baseline":older,"local":older});
+    let (result, ledger) = commit(&input);
+    assert_eq!(result["kind"], "rebased");
+    assert_eq!(result["authority"]["commands"], newer["commands"]);
+    assert_eq!(ledger["records"].as_array().unwrap().len(), 1);
+    input["ledger"] = ledger;
+    input["transition"] = json!("explicit-profile-replacement");
+    input["event"]["local"] = json!({"commands":{"allow":["cat"],"deny":[],"ask":[]}});
+    let (result, ledger) = commit(&input);
+    assert_eq!(result["authority"]["commands"]["allow"], json!(["cat"]));
+    assert!(ledger["records"].as_array().unwrap().is_empty());
+    assert!(ledger["claims"].as_array().unwrap().is_empty());
+    assert_eq!(ledger["retired"].as_array().unwrap().len(), 1);
+}
+
 #[test]
 fn storage_acknowledgement_is_required_and_bound_to_the_transition() {
     for change in [
@@ -147,4 +214,45 @@ fn malformed_or_oversized_state_cannot_authorize() {
             .is_err()
     );
     assert!(engine.done());
+}
+
+#[test]
+fn close_and_restore_rotate_authority_and_keep_the_storage_requirement() {
+    let (_, ledger) = commit(&resolving());
+    let mut input = resolving();
+    input["ledger"] = ledger;
+    input["expected_incarnation"] = json!("s");
+    input["transition"] = json!("close");
+    input["event"] = json!({"op":"reset","incarnation":"closed-identity","closed":"closure-token"});
+    let (_, closed) = commit(&input);
+    assert_eq!(closed["incarnation"], "closed-identity");
+    assert_eq!(closed["closed"], "closure-token");
+    assert_eq!(closed["protected"], true);
+    assert_eq!(closed["records"], json!([]));
+    input["ledger"] = closed.clone();
+    input["transition"] = json!("old-command");
+    input["event"] = resolving()["event"].clone();
+    let (result, _) = commit(&input);
+    assert_eq!(result, json!({"kind":"blocked","status":"session_closed"}));
+    input["event"] = json!({"op":"reset","incarnation":"restored-identity","closed":null});
+    input["transition"] = json!("restore");
+    let (result, _) = commit(&input);
+    assert_eq!(
+        result,
+        json!({"kind":"blocked","status":"stale_incarnation"})
+    );
+    input["expected_incarnation"] = json!("closed-identity");
+    let (result, restored) = commit(&input);
+    assert_eq!(result["kind"], "applied");
+    assert_eq!(restored["incarnation"], "restored-identity");
+    assert!(restored["closed"].is_null());
+    assert_eq!(restored["protected"], true);
+    input["ledger"] = restored;
+    input["event"] = resolving()["event"].clone();
+    input["transition"] = json!("late-answer");
+    let (result, _) = commit(&input);
+    assert_eq!(
+        result,
+        json!({"kind":"blocked","status":"stale_incarnation"})
+    );
 }

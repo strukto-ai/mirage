@@ -296,7 +296,103 @@ async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
     await client.put("k", {"generation": 0})
     body = len(json.dumps({"generation": 0}))
     record = os.stat(client.path("k")).st_ino
-    assert steps == [(how, body, record), ("replace", body, record)]
+    directory = os.stat(tmp_path)
+    assert steps == [
+        (how, body, record),
+        ("replace", body, record),
+        ("fsync", directory.st_size, directory.st_ino),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_old_lock_of_a_live_process_is_not_reclaimed(tmp_path):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 1})
+    lock = Path(client.path("k") + ".lock")
+    lock.write_text(str(os.getpid()))
+    past = time.time() - 100
+    os.utime(lock, (past, past))
+    waiting = asyncio.create_task(client.cas_put("k", {"generation": 2}, 1))
+    await asyncio.sleep(0.025)
+    assert not waiting.done()
+    assert lock.read_text() == str(os.getpid())
+    assert (await client.get("k"))[0] == {"generation": 1}
+    await client.put("k", {"generation": 2, "owner": "holder"})
+    lock.unlink()
+    assert not await waiting
+    assert (await client.get("k"))[0] == {"generation": 2, "owner": "holder"}
+
+
+@pytest.mark.asyncio
+async def test_cancellation_joins_publication_before_releasing_cas_lock(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    replace = aiofiles.os.replace
+
+    async def delayed(source, target):
+        entered.set()
+        await release.wait()
+        await replace(source, target)
+
+    monkeypatch.setattr(aiofiles.os, "replace", delayed)
+    task = asyncio.create_task(client.cas_put("k", {"generation": 1}, 0))
+    await entered.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0.01)
+    try:
+        assert not task.done()
+        assert Path(client.path("k") + ".lock").exists()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (await client.get("k"))[0] == {"generation": 1}
+    assert not Path(client.path("k") + ".lock").exists()
+
+
+@pytest.mark.asyncio
+async def test_directory_sync_failure_is_not_a_commit_acknowledgement(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+
+    def fail_directory_sync(path):
+        raise OSError(errno.EIO, "directory sync failed")
+
+    monkeypatch.setattr(disk, "sync_directory", fail_directory_sync)
+    with pytest.raises(OSError, match="directory sync failed"):
+        await client.cas_put("k", {"generation": 1}, 0)
+    assert (await client.get("k"))[0] == {"generation": 1}
+    assert not await client.cas_put("k", {"generation": 1}, 0)
+
+
+@pytest.mark.asyncio
+async def test_file_sync_io_failure_is_not_retried_as_weaker_sync(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+
+    def fail_file_sync(fd, command):
+        raise OSError(errno.EIO, "file sync failed")
+
+    monkeypatch.setattr(disk.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        disk,
+        "fcntl",
+        SimpleNamespace(F_FULLFSYNC=51, fcntl=fail_file_sync),
+        raising=False,
+    )
+    with pytest.raises(OSError, match="file sync failed"):
+        await client.cas_put("k", {"generation": 1}, 0)
+    assert (await client.get("k"))[0] == {"generation": 0}
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,27 @@ from mirage.workspace.mount.namespace.store import NamespaceStore
 
 
 @pytest.mark.asyncio
+async def test_nested_approval_state_cannot_change_outside_a_store_write():
+    store = RAMNamespaceStore()
+    record = {"generation": 1, "approval": {"claims": ["owner"]}}
+    await store.set("s", record)
+    record["approval"]["claims"].clear()
+    assert await store.get("s") == {
+        "generation": 1,
+        "approval": {"claims": ["owner"]},
+    }
+    found = await store.get("s")
+    assert found is not None
+    found["approval"]["claims"].clear()
+    loaded = await store.load()
+    loaded["s"]["approval"]["claims"].append("other")
+    assert await store.get("s") == {
+        "generation": 1,
+        "approval": {"claims": ["owner"]},
+    }
+
+
+@pytest.mark.asyncio
 async def test_set_load_roundtrip():
     store = RAMNamespaceStore()
     await store.set("/data/f.txt", {"mode": 0o601, "uid": 500})

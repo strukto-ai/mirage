@@ -18,19 +18,27 @@ from typing import Any
 
 from mirage.context.session_context import SessionOwner
 from mirage.io.async_line_iterator import release_inputs
+from mirage.policy.errors import ApprovalUnavailable
 from mirage.policy.profile import CompiledProfile
 from mirage.policy.types import AdmissionRules, Decision, ProfileScripts
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
 from mirage.utils.clock import Clock, SystemClock
-from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.utils.ids import IdSource, SystemIdSource, uuid7
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
     CAS_MAX_RETRIES,
     RecordFields,
     generation_of,
+)
+from mirage.workspace.session.approval import (
+    SessionReset,
+    approval_session,
+    authority_fields,
+    plan_reset,
+    transact_approvals,
 )
 from mirage.workspace.session.resolve import apply_profile, narrow
 from mirage.workspace.session.session import (
@@ -48,6 +56,30 @@ def _holds_managed(session: SessionState) -> bool:
         session (SessionState): the session to scan.
     """
     return any(var.managed is not None for var in session.vars.values())
+
+
+def _adopt_approval_fields(
+    session: SessionState, fields: RecordFields
+) -> None:
+    """Refresh policy facts without replacing a live shell's scratch state.
+
+    Args:
+        session (SessionState): the host's registered session.
+        fields (RecordFields): the confirmed stored session record.
+    """
+    stored = approval_session(fields)
+    session.approval_state = stored.approval_state
+    session.incarnation = stored.incarnation
+    session.generation = stored.generation
+    session.decisions = ()
+    session.commands = stored.commands
+    session.scripts = stored.scripts
+    session.profile = stored.profile
+    session.command_limits = stored.command_limits
+    session.mount_modes = stored.mount_modes
+    session.visibility = stored.visibility
+    session.hide_reasons = stored.hide_reasons
+    session.processes = stored.processes
 
 
 def _merge_seed_vars(
@@ -115,6 +147,9 @@ class SessionManager(SessionOwner):
         # compares against this to skip clean sessions without a
         # network read, and to avoid clobbering other writers.
         self._persisted: dict[str, RecordFields] = {}
+        self._incarnations: dict[str, str] = {}
+        self._closed_records: dict[str, RecordFields] = {}
+        self._resets: dict[str, SessionReset] = {}
         # The workspace's env block, translated: seeded onto the
         # default session now and copied into every created session as
         # its template. The records are frozen, so sharing them across
@@ -269,7 +304,64 @@ class SessionManager(SessionOwner):
             session_id (str): the session.
             records (tuple[Decision, ...]): the new list.
         """
-        self.get(session_id).decisions = records
+        session = self.get(session_id)
+        if session.approval_state is not None:
+            raise RuntimeError("approval records require a policy transition")
+        session.decisions = records
+
+    def approval_state_of(self, session_id: str) -> RecordFields | None:
+        """Read the registered session's cached Rust approval snapshot.
+
+        Args:
+            session_id (str): the registered session identity.
+        """
+        return copy.deepcopy(self.get(session_id).approval_state)
+
+    def incarnation_of(self, session_id: str) -> str | None:
+        """The cached session identity an entry point binds to its caller.
+
+        Args:
+            session_id (str): the registered session identity.
+        """
+        return self.get(session_id).incarnation
+
+    async def approval_event(
+        self,
+        session_id: str,
+        event: RecordFields,
+        incarnation: str | None = None,
+    ) -> RecordFields:
+        """Run one acknowledged approval transition outside any UI wait.
+
+        Args:
+            session_id (str): the registered session identity.
+            event (RecordFields): the policy event in its wire shape.
+            incarnation (str | None): the caller's captured session incarnation.
+        """
+        await self.ensure_loaded()
+        async with self._locks[session_id]:
+            session = self.get(session_id)
+            if session_id in self._resets:
+                raise ApprovalUnavailable("session_transition_pending")
+            try:
+                reply = await transact_approvals(
+                    self._store,
+                    session.to_dict(),
+                    event,
+                    incarnation,
+                )
+            except ApprovalUnavailable as exc:
+                if exc.status == "stale_facts":
+                    fields = await self._store.get(session_id)
+                    if fields is not None and fields.get("closed") is None:
+                        _adopt_approval_fields(session, fields)
+                        self._persisted[session_id] = copy.deepcopy(fields)
+                raise
+            _adopt_approval_fields(session, reply.fields)
+            if session.incarnation is not None:
+                self._incarnations[session_id] = session.incarnation
+            self._persisted[session_id] = copy.deepcopy(reply.fields)
+            return reply.result
 
     @property
     def default_id(self) -> str:
@@ -341,6 +433,9 @@ class SessionManager(SessionOwner):
                 return
             entries = await self._store.load()
             for sid, fields in entries.items():
+                if fields.get("closed") is not None:
+                    self._closed_records[sid] = copy.deepcopy(fields)
+                    continue
                 if sid == self._default_id:
                     stored = SessionState.from_dict(fields)
                     default = self._sessions[self._default_id]
@@ -365,6 +460,10 @@ class SessionManager(SessionOwner):
                     # ask again after a restart and the next flush
                     # would erase the record from the store.
                     default.decisions = stored.decisions
+                    default.approval_state = stored.approval_state
+                    default.incarnation = stored.incarnation
+                    if stored.incarnation is not None:
+                        self._incarnations[sid] = stored.incarnation
                     default.generation = stored.generation
                     # Hydrated sessions start clean: baseline what the
                     # store holds so the next flush skips them.
@@ -386,6 +485,8 @@ class SessionManager(SessionOwner):
                 session = SessionState.from_dict(fields)
                 session.ids = self._ids
                 self._sessions[sid] = session
+                if session.incarnation is not None:
+                    self._incarnations[sid] = session.incarnation
                 self._locks[sid] = asyncio.Lock()
                 self._persisted[sid] = copy.deepcopy(session.to_dict())
                 _merge_seed_vars(session, self._seed_vars)
@@ -422,9 +523,56 @@ class SessionManager(SessionOwner):
     async def _flush_one(self, session: SessionState) -> None:
         """Persist one session, retrying when another writer races us."""
         sid = session.session_id
+        if sid in self._closed_records and sid not in self._resets:
+            self._resets[sid] = plan_reset(
+                session.to_dict(), self._closed_records[sid], close=False
+            )
+        if sid in self._resets:
+            if self._resets[sid].event["closed"] is not None:
+                raise ApprovalUnavailable("session_transition_pending")
+            await self._commit_reset(session)
+            return
         if session.to_dict() == self._persisted.get(sid):
             return  # clean: the store already has exactly this state
         for _ in range(CAS_MAX_RETRIES):
+            current = await self._store.get(sid)
+            if current is not None and current.get("closed") is not None:
+                raise ApprovalUnavailable("session_closed")
+            if current is not None:
+                observed = current.get("incarnation")
+                known = self._incarnations.get(sid)
+                if observed != known and not (
+                    known is None and observed == session.incarnation
+                ):
+                    raise ApprovalUnavailable("session_replaced")
+            if current is None and (
+                session.generation > 0 or sid in self._persisted
+            ):
+                raise ApprovalUnavailable("session_disappeared")
+            if session.approval_state is not None or (
+                current is not None
+                and current.get("approval_state") is not None
+            ):
+                fields = session.to_dict()
+                reply = await transact_approvals(
+                    self._store,
+                    fields,
+                    {
+                        "op": "session_write",
+                        "baseline": authority_fields(
+                            self._persisted.get(sid, fields)
+                        ),
+                        "local": authority_fields(fields),
+                    },
+                    session.incarnation,
+                )
+                _adopt_approval_fields(session, reply.fields)
+                if session.incarnation is not None:
+                    self._incarnations[sid] = session.incarnation
+                self._persisted[sid] = copy.deepcopy(reply.fields)
+                return
+            if session.incarnation is None:
+                session.incarnation = uuid7()
             expected = session.generation
             session.generation = expected + 1
             fields = session.to_dict()
@@ -453,12 +601,14 @@ class SessionManager(SessionOwner):
                 # may go on to mutate, and the baseline this is compared
                 # against must stay frozen at what was written.
                 self._persisted[sid] = copy.deepcopy(fields)
+                if session.incarnation is not None:
+                    self._incarnations[sid] = session.incarnation
                 return
             # Lost the race: adopt the winner's generation and retry
             # our content on top (last-writer-wins until a merge
             # policy exists).
             session.generation = expected
-            stored = (await self._store.load()).get(sid)
+            stored = await self._store.get(sid)
             if stored is not None:
                 session.generation = generation_of(stored)
         raise RuntimeError(
@@ -468,18 +618,45 @@ class SessionManager(SessionOwner):
     async def replace_from_snapshot(
         self, sessions: list[SessionState]
     ) -> None:
-        """Adopt a snapshot's session table and replace the store.
-
-        The snapshot wins over prior store contents, mirroring
-        ``Namespace.replace_nodes``.
-        """
+        """Restore session payloads with fresh approval incarnations."""
         self._loaded = True
-        entries = {s.session_id: s.to_dict() for s in self._sessions.values()}
+        entries = dict(self._sessions)
         for session in sessions:
-            entries[session.session_id] = session.to_dict()
+            entries[session.session_id] = session
             self._has_managed = self._has_managed or _holds_managed(session)
-        await self._store.replace_all(entries)
-        self._persisted = copy.deepcopy(entries)
+        for sid, session in entries.items():
+            lock = self._locks.setdefault(sid, asyncio.Lock())
+            async with lock:
+                if sid not in self._resets:
+                    current = await self._store.get(sid)
+                    self._resets[sid] = plan_reset(
+                        session.to_dict(), current, close=False
+                    )
+                elif self._resets[sid].event["closed"] is not None:
+                    raise ApprovalUnavailable("session_transition_pending")
+                await self._commit_reset(session)
+                self._sessions[sid] = session
+
+    async def _commit_reset(self, session: SessionState) -> None:
+        sid = session.session_id
+        plan = self._resets[sid]
+        reply = await transact_approvals(
+            self._store,
+            plan.fields,
+            plan.event,
+            plan.expected_epoch,
+            plan.expected_closed,
+            plan.transition,
+        )
+        if reply.fields.get("closed") is None:
+            _adopt_approval_fields(session, reply.fields)
+            self._closed_records.pop(sid, None)
+            self._persisted[sid] = copy.deepcopy(reply.fields)
+            if session.incarnation is not None:
+                self._incarnations[sid] = session.incarnation
+        else:
+            self._closed_records[sid] = copy.deepcopy(reply.fields)
+        del self._resets[sid]
 
     def create(
         self,
@@ -541,6 +718,8 @@ class SessionManager(SessionOwner):
             await self._flush_one(candidate)
             narrow(session, compiled)
             session.generation = candidate.generation
+            session.approval_state = candidate.approval_state
+            session.incarnation = candidate.incarnation
             if session_id == self._default_id:
                 self._default_profile = compiled
             return session
@@ -555,6 +734,26 @@ class SessionManager(SessionOwner):
             raise KeyError(session_id)
         async with self._locks[session_id]:
             closing = self._sessions[session_id]
+            if (
+                session_id in self._resets
+                and self._resets[session_id].event["closed"] is None
+            ):
+                await self._commit_reset(closing)
+            if session_id not in self._resets:
+                current = await self._store.get(session_id)
+                if (
+                    current is not None
+                    and current.get("incarnation") != closing.incarnation
+                ):
+                    raise ApprovalUnavailable("session_replaced")
+                fields = {
+                    "session_id": session_id,
+                    "generation": closing.generation,
+                }
+                self._resets[session_id] = plan_reset(
+                    fields, current, close=True
+                )
+            await self._commit_reset(closing)
             keep = [
                 source
                 for key, session in self._sessions.items()
@@ -566,7 +765,7 @@ class SessionManager(SessionOwner):
         del self._locks[session_id]
         self._line_locks.pop(session_id, None)
         self._persisted.pop(session_id, None)
-        await self._store.delete([session_id])
+        self._incarnations.pop(session_id, None)
 
     def line_lock_for(self, session_id: str) -> asyncio.Lock:
         """The lock a top-level line on ``session_id`` holds while it runs.

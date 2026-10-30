@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { releaseInputs } from '../../io/async_line_iterator.ts'
+import { z } from 'zod'
 import { SessionOwner } from '../../context/session_context.ts'
 import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
@@ -20,6 +21,14 @@ import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { applyProfile, narrow } from './resolve.ts'
+import { ApprovalUnavailable } from '../../policy/errors.ts'
+import {
+  approvalSession,
+  authorityFields,
+  planReset,
+  transactApprovals,
+  type SessionReset,
+} from './approval.ts'
 import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
 import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
@@ -27,9 +36,25 @@ import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
-import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
+import { SystemIdSource, uuid7, type IdSource } from '../../utils/ids.ts'
 
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
+
+function adoptApprovalFields(session: SessionState, fields: RecordFields): void {
+  const stored = approvalSession(fields)
+  session.approvalState = stored.approvalState
+  session.incarnation = stored.incarnation
+  session.generation = stored.generation
+  session.decisions = []
+  session.commands = stored.commands
+  session.scripts = stored.scripts
+  session.profile = stored.profile
+  session.commandLimits = stored.commandLimits
+  session.mountModes = stored.mountModes
+  session.visibility = stored.visibility
+  session.hideReasons = stored.hideReasons
+  session.processes = stored.processes
+}
 
 /** Whether any of the session's variables carries a pointer. */
 function holdsManaged(session: SessionState): boolean {
@@ -76,6 +101,9 @@ export class SessionManager extends SessionOwner {
   // avoid clobbering other writers. Kept as JSON strings: a string
   // cannot alias the live session (Python needs a deep copy instead).
   private readonly persisted = new Map<string, string>()
+  private readonly incarnations = new Map<string, string>()
+  private readonly closedRecords = new Map<string, RecordFields>()
+  private readonly resets = new Map<string, SessionReset>()
 
   private defaultProfileInternal: CompiledProfile | null = null
 
@@ -183,6 +211,8 @@ export class SessionManager extends SessionOwner {
       await this.flushOne(candidate)
       narrow(session, compiled)
       session.generation = candidate.generation
+      session.approvalState = candidate.approvalState
+      session.incarnation = candidate.incarnation
       if (sessionId === this.defaultId) this.defaultProfileInternal = compiled
       return session
     })
@@ -232,7 +262,51 @@ export class SessionManager extends SessionOwner {
 
   /** Replace one session's ledger records (SessionDecisionsQuery); durable at the next flush. */
   setDecisions(sessionId: string, records: readonly Decision[]): void {
-    this.get(sessionId).decisions = records
+    const session = this.get(sessionId)
+    if (session.approvalState !== null)
+      throw new Error('approval records require a policy transition')
+    session.decisions = records
+  }
+
+  approvalStateOf(sessionId: string): RecordFields | null {
+    return structuredClone(this.get(sessionId).approvalState)
+  }
+
+  incarnationOf(sessionId: string): string | null {
+    return this.get(sessionId).incarnation
+  }
+
+  async approvalEvent(
+    sessionId: string,
+    event: RecordFields,
+    incarnation: string | null = null,
+  ): Promise<RecordFields> {
+    await this.ensureLoaded()
+    return this.persistLock.withLock(sessionId, async () => {
+      const session = this.get(sessionId)
+      if (this.resets.has(sessionId)) throw new ApprovalUnavailable('session_transition_pending')
+      try {
+        const reply = await transactApprovals(
+          this.sessionStore,
+          session.toDict(),
+          event,
+          incarnation,
+        )
+        adoptApprovalFields(session, reply.fields)
+        if (session.incarnation !== null) this.incarnations.set(sessionId, session.incarnation)
+        this.persisted.set(sessionId, JSON.stringify(reply.fields))
+        return reply.result
+      } catch (error) {
+        if (error instanceof ApprovalUnavailable && error.status === 'stale_facts') {
+          const fields = await this.sessionStore.get(sessionId)
+          if (fields !== null && fields.closed == null) {
+            adoptApprovalFields(session, fields)
+            this.persisted.set(sessionId, JSON.stringify(fields))
+          }
+        }
+        throw error
+      }
+    })
   }
 
   get store(): NamespaceStore {
@@ -300,6 +374,10 @@ export class SessionManager extends SessionOwner {
   private async hydrate(): Promise<void> {
     const entries = await this.sessionStore.load()
     for (const [sid, fields] of entries) {
+      if (fields.closed != null) {
+        this.closedRecords.set(sid, structuredClone(fields))
+        continue
+      }
       const stored = SessionState.fromDict(fields as StoredSession)
       if (sid === this.defaultId) {
         const dflt = this.defaultSession()
@@ -324,6 +402,9 @@ export class SessionManager extends SessionOwner {
         // restart and the next flush would erase the grant from the
         // store.
         dflt.decisions = stored.decisions
+        dflt.approvalState = stored.approvalState
+        dflt.incarnation = stored.incarnation
+        if (stored.incarnation !== null) this.incarnations.set(sid, stored.incarnation)
         dflt.generation = stored.generation
         // Hydrated sessions start clean: baseline what the store
         // holds so the next flush skips them.
@@ -341,6 +422,7 @@ export class SessionManager extends SessionOwner {
       if (this.sessions.has(sid)) continue
       stored.ids = this.ids
       this.sessions.set(sid, stored)
+      if (stored.incarnation !== null) this.incarnations.set(sid, stored.incarnation)
       this.persisted.set(sid, JSON.stringify(stored.toDict()))
       mergeSeedVars(stored, this.seedVarsInternal)
       this.hasManaged = this.hasManaged || holdsManaged(stored)
@@ -370,21 +452,66 @@ export class SessionManager extends SessionOwner {
   /** Persist one session, retrying when another writer races us. */
   private async flushOne(session: SessionState): Promise<void> {
     const sid = session.sessionId
+    const closed = this.closedRecords.get(sid)
+    if (closed !== undefined && !this.resets.has(sid))
+      this.resets.set(sid, planReset(session.toDict(), closed, false))
+    const reset = this.resets.get(sid)
+    if (reset !== undefined) {
+      if (reset.event.closed != null) throw new ApprovalUnavailable('session_transition_pending')
+      await this.commitReset(session)
+      return
+    }
     // Clean: the store already has exactly this state.
     if (JSON.stringify(session.toDict()) === this.persisted.get(sid)) return
     for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
+      const current = await this.sessionStore.get(sid)
+      if (current !== null && current.closed != null)
+        throw new ApprovalUnavailable('session_closed')
+      if (current !== null) {
+        const observed = current.incarnation ?? null
+        const known = this.incarnations.get(sid) ?? null
+        if (observed !== known && !(known === null && observed === session.incarnation)) {
+          throw new ApprovalUnavailable('session_replaced')
+        }
+      }
+      if (current === null && (session.generation > 0 || this.persisted.has(sid)))
+        throw new ApprovalUnavailable('session_disappeared')
+      if (session.approvalState !== null || current?.approval_state != null) {
+        const fields = session.toDict()
+        const before = this.persisted.get(sid)
+        const baseline =
+          before === undefined
+            ? fields
+            : z.record(z.string(), z.unknown()).parse(JSON.parse(before))
+        const reply = await transactApprovals(
+          this.sessionStore,
+          fields,
+          {
+            op: 'session_write',
+            baseline: authorityFields(baseline),
+            local: authorityFields(fields),
+          },
+          session.incarnation,
+        )
+        adoptApprovalFields(session, reply.fields)
+        if (session.incarnation !== null) this.incarnations.set(sid, session.incarnation)
+        this.persisted.set(sid, JSON.stringify(reply.fields))
+        return
+      }
+      session.incarnation ??= uuid7()
       const expected = session.generation
       session.generation = expected + 1
       const fields = session.toDict() as RecordFields
       if (await this.sessionStore.casSet(sid, fields, expected)) {
         this.persisted.set(sid, JSON.stringify(fields))
+        if (session.incarnation !== null) this.incarnations.set(sid, session.incarnation)
         return
       }
       // Lost the race: adopt the winner's generation and retry our
       // content on top (last-writer-wins until a merge policy exists).
       session.generation = expected
-      const stored = (await this.sessionStore.load()).get(sid)
-      if (stored !== undefined) {
+      const stored = await this.sessionStore.get(sid)
+      if (stored !== null) {
         session.generation = generationOf(stored)
       }
     }
@@ -399,15 +526,46 @@ export class SessionManager extends SessionOwner {
   async replaceFromSnapshot(sessions: readonly SessionState[]): Promise<void> {
     this.loaded = true
     this.loadPromise = Promise.resolve()
-    const entries = new Map<string, RecordFields>()
-    for (const s of this.sessions.values()) entries.set(s.sessionId, s.toDict() as RecordFields)
+    const entries = new Map(this.sessions)
     for (const s of sessions) {
-      entries.set(s.sessionId, s.toDict() as RecordFields)
+      entries.set(s.sessionId, s)
       this.hasManaged = this.hasManaged || holdsManaged(s)
     }
-    await this.sessionStore.replaceAll(entries)
-    this.persisted.clear()
-    for (const [sid, fields] of entries) this.persisted.set(sid, JSON.stringify(fields))
+    for (const [sid, session] of entries) {
+      await this.persistLock.withLock(sid, async () => {
+        const reset = this.resets.get(sid)
+        if (reset === undefined) {
+          this.resets.set(sid, planReset(session.toDict(), await this.sessionStore.get(sid), false))
+        } else if (reset.event.closed != null) {
+          throw new ApprovalUnavailable('session_transition_pending')
+        }
+        await this.commitReset(session)
+        this.sessions.set(sid, session)
+      })
+    }
+  }
+
+  private async commitReset(session: SessionState): Promise<void> {
+    const sid = session.sessionId
+    const plan = this.resets.get(sid)
+    if (plan === undefined) throw new Error('missing session replacement')
+    const reply = await transactApprovals(
+      this.sessionStore,
+      plan.fields,
+      plan.event,
+      plan.expectedEpoch,
+      plan.expectedClosed,
+      plan.transition,
+    )
+    if (reply.fields.closed == null) {
+      adoptApprovalFields(session, reply.fields)
+      this.closedRecords.delete(sid)
+      this.persisted.set(sid, JSON.stringify(reply.fields))
+      if (session.incarnation !== null) this.incarnations.set(sid, session.incarnation)
+    } else {
+      this.closedRecords.set(sid, structuredClone(reply.fields))
+    }
+    this.resets.delete(sid)
   }
 
   /**
@@ -466,6 +624,19 @@ export class SessionManager extends SessionOwner {
       if (session === undefined) {
         throw new Error(`unknown session: ${sessionId}`)
       }
+      const reset = this.resets.get(sessionId)
+      if (reset !== undefined && reset.event.closed == null) await this.commitReset(session)
+      if (!this.resets.has(sessionId)) {
+        const current = await this.sessionStore.get(sessionId)
+        if (current !== null && (current.incarnation ?? null) !== session.incarnation) {
+          throw new ApprovalUnavailable('session_replaced')
+        }
+        this.resets.set(
+          sessionId,
+          planReset({ session_id: sessionId, generation: session.generation }, current, true),
+        )
+      }
+      await this.commitReset(session)
 
       const keep = [...this.sessions.entries()]
         .filter(([id]) => id !== sessionId)
@@ -473,7 +644,7 @@ export class SessionManager extends SessionOwner {
       await releaseInputs(session.openInputs(), keep)
       this.sessions.delete(sessionId)
       this.persisted.delete(sessionId)
-      await this.sessionStore.delete([sessionId])
+      this.incarnations.delete(sessionId)
     })
   }
 

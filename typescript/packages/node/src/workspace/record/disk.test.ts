@@ -225,7 +225,52 @@ describe('DiskRecordClient lock reclaim and release', () => {
     await client.put('k', { generation: 0 })
     const body = BigInt(JSON.stringify({ generation: 0 }).length)
     const record = (await real.stat(client.path('k'), { bigint: true })).ino
-    expect(steps).toEqual([['sync', body, record], ['close'], ['rename', body, record]])
+    const directory = await real.stat(root, { bigint: true })
+    expect(steps).toEqual([
+      ['sync', body, record],
+      ['close'],
+      ['rename', body, record],
+      ['sync', directory.size, directory.ino],
+      ['close'],
+    ])
+  })
+
+  it('does not reclaim an old lock of a live process', async () => {
+    const client = new DiskRecordClient(root, '')
+    await client.put('k', { generation: 1 })
+    const lock = `${client.path('k')}.lock`
+    writeFileSync(lock, String(process.pid))
+    const past = (Date.now() - 100_000) / 1000
+    utimesSync(lock, past, past)
+    let settled = false
+    const waiting = client.casPut('k', { generation: 2 }, 1).finally(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(settled).toBe(false)
+    expect(readFileSync(lock, 'utf8')).toBe(String(process.pid))
+    expect((await client.get('k'))[0]).toEqual({ generation: 1 })
+    await client.put('k', { generation: 2, owner: 'holder' })
+    rmSync(lock)
+    expect(await waiting).toBe(false)
+    expect((await client.get('k'))[0]).toEqual({ generation: 2, owner: 'holder' })
+  })
+
+  it('does not acknowledge publication when directory sync fails', async () => {
+    const client = new DiskRecordClient(root, '')
+    await client.put('k', { generation: 0 })
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      const handle = await real.open(...args)
+      if (String(args[0]) === root) {
+        handle.sync = async () => {
+          throw new Error('directory sync failed')
+        }
+      }
+      return handle
+    }) as typeof fs.open)
+    await expect(client.casPut('k', { generation: 1 }, 0)).rejects.toThrow('directory sync failed')
+    expect((await client.get('k'))[0]).toEqual({ generation: 1 })
+    expect(await client.casPut('k', { generation: 1 }, 0)).toBe(false)
   })
 })
 
@@ -316,13 +361,18 @@ describe('RecordNamespaceStore over DiskRecordClient', () => {
     expect(await store.casSet('s', { session_id: 's', generation: 1 }, 0)).toBe(true)
   })
 
-  it('loses to a live lock and wins after release', async () => {
+  it('waits for a busy lock and wins after release', async () => {
     await store.set('s', { session_id: 's', generation: 1 })
     const lock = join(root, 'sessions', 's.json.lock')
     writeFileSync(lock, '9999999')
-    expect(await store.casSet('s', { session_id: 's', generation: 2 }, 1)).toBe(false)
+    let settled = false
+    const waiting = store.casSet('s', { session_id: 's', generation: 2 }, 1).finally(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    expect(settled).toBe(false)
     rmSync(lock)
-    expect(await store.casSet('s', { session_id: 's', generation: 2 }, 1)).toBe(true)
+    expect(await waiting).toBe(true)
   })
 
   it('reclaims a stale lock', async () => {

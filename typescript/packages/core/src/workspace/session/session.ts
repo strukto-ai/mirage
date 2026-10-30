@@ -24,6 +24,7 @@ import {
   type ProcessPermissions,
 } from '../../process/config.ts'
 import type { Limit } from '../../types.ts'
+import type { RecordFields } from '../record/types.ts'
 import { type SharedInput, releaseInputs } from '../../io/async_line_iterator.ts'
 import { parseCommandLimits, commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
 import {
@@ -160,6 +161,8 @@ export interface SessionInit {
    * the manager by id so a fork shares them, never another session's.
    */
   decisions?: readonly Decision[]
+  approvalState?: RecordFields | null
+  incarnation?: string | null
   generation?: number
   lastBgJobId?: number | null
 }
@@ -540,6 +543,8 @@ export class SessionState {
   shellPid: number | null
   processDepth: number
   decisions: readonly Decision[]
+  approvalState: RecordFields | null
+  incarnation: string | null
   generation: number
   lastBgJobId: number | null
 
@@ -569,6 +574,8 @@ export class SessionState {
     this.commandLimits = { ...init.commandLimits }
     this.processes = parseProcessPermissions(init.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     this.decisions = init.decisions ?? []
+    this.approvalState = init.approvalState ?? null
+    this.incarnation = init.incarnation ?? null
     this.generation = init.generation ?? 0
     this.lastBgJobId = init.lastBgJobId ?? null
     // bash exports $PWD from startup, so a session that has never run
@@ -642,6 +649,8 @@ export class SessionState {
       shellPid: overrides.shellPid ?? this.shellPid,
       processDepth: overrides.processDepth ?? this.processDepth,
       decisions: overrides.decisions ?? this.decisions,
+      approvalState: structuredClone(overrides.approvalState ?? this.approvalState),
+      incarnation: overrides.incarnation ?? this.incarnation,
       generation: overrides.generation ?? this.generation,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
@@ -967,6 +976,8 @@ export class SessionState {
       data.processes = this.processes
     if (this.profile !== null) data.profile = this.profile
     if (this.decisions.length > 0) data.decisions = this.decisions.map(decisionToDict)
+    if (this.approvalState !== null) data.approval_state = this.approvalState
+    if (this.incarnation !== null) data.incarnation = this.incarnation
     return data
   }
 
@@ -988,6 +999,8 @@ export class SessionState {
     command_limits?: unknown
     processes?: ProcessPermissions
     decisions?: DecisionJSON[] | null
+    approval_state?: RecordFields | null
+    incarnation?: string | null
     generation?: number
     functions?: Record<string, string>
     readonly_functions?: string[]
@@ -1044,6 +1057,8 @@ export class SessionState {
       commandLimits: parseCommandLimits(data.command_limits),
       processes,
       decisions: data.decisions != null ? data.decisions.map(decisionFromDict) : [],
+      approvalState: data.approval_state ?? null,
+      incarnation: data.incarnation ?? null,
     })
     // A recorded session comes back as it was written, so a startup
     // variable it had unset stays unset rather than being seeded again; a

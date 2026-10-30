@@ -55,6 +55,8 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "shell_pid",
     "process_depth",
     "decisions",
+    "approval_state",
+    "incarnation",
     "generation",
     "last_bg_job_id",
     "positional_args",

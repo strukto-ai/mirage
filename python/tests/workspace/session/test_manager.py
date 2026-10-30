@@ -426,13 +426,13 @@ async def test_manager_flush_writes_through():
 
 
 @pytest.mark.asyncio
-async def test_manager_close_deletes_from_store():
+async def test_manager_close_retains_a_terminal_fence():
     store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     mgr.create("gone")
     await mgr.flush()
     await mgr.close("gone")
-    assert "gone" not in await store.load()
+    assert (await store.get("gone"))["closed"]
 
 
 @pytest.mark.asyncio
@@ -831,10 +831,15 @@ async def test_session_close_waits_for_profile_persistence(
     entered, release = asyncio.Event(), asyncio.Event()
     cas_set = store.cas_set
 
+    first_write = True
+
     async def delayed_write(*args):
+        nonlocal first_write
+        first = first_write
+        first_write = False
         entered.set()
         await release.wait()
-        if failure:
+        if failure and first:
             raise RuntimeError("store unavailable")
         return await cas_set(*args)
 
@@ -852,7 +857,7 @@ async def test_session_close_waits_for_profile_persistence(
         await closing
         with pytest.raises(KeyError):
             mgr.get("agent")
-        assert "agent" not in await store.load()
+        assert (await store.get("agent"))["closed"]
     finally:
         release.set()
         await asyncio.gather(updating, return_exceptions=True)
@@ -948,4 +953,4 @@ async def test_flush_of_closed_session_does_not_recreate_it():
     await manager.flush("gone")
     await manager.close("gone")
     await manager.flush("gone")
-    assert "gone" not in await manager.store.load()
+    assert (await manager.store.get("gone"))["closed"]

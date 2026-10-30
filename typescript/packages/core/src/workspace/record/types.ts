@@ -33,6 +33,7 @@ export const CAS_MAX_RETRIES = 3
  */
 export interface RecordClient {
   get(name: string): Promise<[RecordFields | null, string]>
+  approvalGuarantee(): Promise<void>
   put(name: string, fields: RecordFields): Promise<void>
   casPut(name: string, fields: RecordFields, expectedGeneration: number): Promise<boolean>
   listNames(): Promise<string[]>

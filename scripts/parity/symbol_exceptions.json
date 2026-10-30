@@ -1,6 +1,16 @@
 {
  "baseline": 2700,
  "modules": {
+  "workspace/session/approval": {
+   "typescript_only": {
+    "approvalSessionSchema": "Zod validates the serialized session boundary before TypeScript constructs SessionState; Python's from_dict constructs these fields directly.",
+    "effectSchema": "Zod validates the unknown JSON storage-effect packet; Python checks the decoded packet before storage.",
+    "pathScopeSchema": "A Zod boundary schema shared by the TypeScript session decoder's path fields.",
+    "resultSchema": "Zod validates the unknown JSON transition result; Python decodes the Rust result directly.",
+    "ruleSchema": "A Zod boundary schema used by the TypeScript session decoder's admission-rule fields.",
+    "stateSchema": "Zod validates the opaque Rust ledger envelope before TypeScript reads its incarnation and revision."
+   }
+  },
   "workspace/executor/builtins/help/help": {
    "typescript_only": {
     "specOf": "A topic's spec by name: Python indexes SHELL_SPECS and lets a missing name raise KeyError; TypeScript's index type carries undefined, so the lookup that throws lives in this helper."

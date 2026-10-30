@@ -16,6 +16,25 @@ import { describe, expect, it } from 'vitest'
 import { RAMNamespaceStore } from './ram.ts'
 
 describe('RAMNamespaceStore', () => {
+  it('keeps nested approval state unchanged outside store writes', async () => {
+    const store = new RAMNamespaceStore()
+    const record = { generation: 1, approval: { claims: ['owner'] } }
+    await store.set('s', record)
+    record.approval.claims.length = 0
+    const expected = { generation: 1, approval: { claims: ['owner'] } }
+    expect(await store.get('s')).toEqual(expected)
+    const found = (await store.get('s'))?.approval
+    if (
+      typeof found !== 'object' ||
+      found === null ||
+      !('claims' in found) ||
+      !Array.isArray(found.claims)
+    ) {
+      throw new Error('missing approval claims')
+    }
+    found.claims.length = 0
+    expect(await store.get('s')).toEqual(expected)
+  })
   it('set/load roundtrip', async () => {
     const store = new RAMNamespaceStore()
     await store.set('/data/f.txt', { mode: 0o601, uid: 500 })

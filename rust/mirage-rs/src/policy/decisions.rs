@@ -6,6 +6,18 @@ use crate::{Stream, StreamError, parse_config};
 
 const PACKET_BYTES: usize = 8 * 1024 * 1024;
 const ENTRY_LIMIT: usize = 65536;
+const AUTHORITY_FIELDS: &[&str] = &[
+    "commands",
+    "scripts",
+    "profile",
+    "mount_modes",
+    "hidden_paths",
+    "shown_paths",
+    "hide_reasons",
+    "hidden_vars",
+    "processes",
+    "command_limits",
+];
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
@@ -96,12 +108,24 @@ struct Claim {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum ResultValue {
     Allow,
-    Pending { record: Record, fresh: bool },
-    Deny { reason: Text },
-    Answered { record: Record },
+    Pending {
+        record: Record,
+        fresh: bool,
+    },
+    Deny {
+        reason: Text,
+    },
+    Answered {
+        record: Record,
+    },
     Applied,
     Missing,
-    Blocked { status: String },
+    Blocked {
+        status: String,
+    },
+    Rebased {
+        authority: serde_json::Map<String, serde_json::Value>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -119,6 +143,10 @@ struct Ledger {
     version: u32,
     incarnation: Incarnation,
     revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    closed: Option<String>,
+    #[serde(default)]
+    protected: bool,
     #[serde(default)]
     records: Vec<Record>,
     #[serde(default)]
@@ -169,6 +197,14 @@ enum Event {
         owner: Owner,
     },
     Invalidate,
+    SessionWrite {
+        baseline: serde_json::Map<String, serde_json::Value>,
+        local: serde_json::Map<String, serde_json::Value>,
+    },
+    Reset {
+        incarnation: Incarnation,
+        closed: Option<String>,
+    },
 }
 
 #[derive(Deserialize)]
@@ -178,6 +214,17 @@ struct Input {
     transition: TransitionId,
     ledger: Ledger,
     event: Event,
+    #[serde(default)]
+    facts: Option<Facts>,
+    #[serde(default)]
+    expected_incarnation: Option<Incarnation>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Facts {
+    expected: serde_json::Value,
+    current: serde_json::Value,
 }
 
 fn error(message: &str) -> StreamError {
@@ -269,7 +316,19 @@ fn retire(ledger: &mut Ledger, ids: &[Ticket]) {
     ledger.retired.extend(removed);
 }
 
-fn apply(ledger: &mut Ledger, event: &Event) -> Result<ResultValue, StreamError> {
+fn invalidate(ledger: &mut Ledger) {
+    ledger
+        .retired
+        .extend(ledger.records.iter().map(|r| r.id.clone()));
+    ledger.records.clear();
+    ledger.claims.clear();
+}
+
+fn apply(
+    ledger: &mut Ledger,
+    event: &Event,
+    current_facts: Option<&serde_json::Value>,
+) -> Result<ResultValue, StreamError> {
     match event {
         Event::Resolve {
             question,
@@ -461,12 +520,62 @@ fn apply(ledger: &mut Ledger, event: &Event) -> Result<ResultValue, StreamError>
             Ok(ResultValue::Applied)
         }
         Event::Invalidate => {
-            ledger
-                .retired
-                .extend(ledger.records.iter().map(|r| r.id.clone()));
-            ledger.records.clear();
-            ledger.claims.clear();
+            invalidate(ledger);
             Ok(ResultValue::Applied)
+        }
+        Event::Reset {
+            incarnation,
+            closed,
+        } => {
+            if incarnation.0.is_empty() || *incarnation == ledger.incarnation {
+                return Err(error("replacement requires a new incarnation"));
+            }
+            *ledger = Ledger {
+                version: 1,
+                incarnation: incarnation.clone(),
+                revision: 0,
+                closed: closed.clone(),
+                protected: ledger.protected,
+                records: Vec::new(),
+                claims: Vec::new(),
+                receipts: Vec::new(),
+                retired: Vec::new(),
+            };
+            Ok(ResultValue::Applied)
+        }
+        Event::SessionWrite { baseline, local } => {
+            let current = current_facts
+                .and_then(serde_json::Value::as_object)
+                .ok_or_else(|| error("session write requires current policy facts"))?;
+            if baseline
+                .keys()
+                .chain(local.keys())
+                .chain(current.keys())
+                .any(|key| !AUTHORITY_FIELDS.contains(&key.as_str()))
+            {
+                return Err(error("unknown session authority field"));
+            }
+            let mut authority = serde_json::Map::new();
+            for key in AUTHORITY_FIELDS {
+                let previous = baseline.get(*key).unwrap_or(&serde_json::Value::Null);
+                let proposed = local.get(*key).unwrap_or(&serde_json::Value::Null);
+                let stored = current.get(*key).unwrap_or(&serde_json::Value::Null);
+                authority.insert(
+                    (*key).to_owned(),
+                    if previous == proposed {
+                        stored
+                    } else {
+                        proposed
+                    }
+                    .clone(),
+                );
+            }
+            if AUTHORITY_FIELDS.iter().any(|key| {
+                authority.get(*key) != Some(current.get(*key).unwrap_or(&serde_json::Value::Null))
+            }) {
+                invalidate(ledger);
+            }
+            Ok(ResultValue::Rebased { authority })
         }
     }
 }
@@ -504,7 +613,7 @@ enum State {
     Waiting {
         evaluation: EvaluationId,
         transition: TransitionId,
-        ledger: Ledger,
+        ledger: Box<Ledger>,
         result: ResultValue,
         delivered: bool,
     },
@@ -534,8 +643,37 @@ impl Decisions {
             transition,
             mut ledger,
             event,
+            facts,
+            expected_incarnation,
         } = serde_json::from_slice(bytes).map_err(|_| error("invalid event"))?;
         validate(&ledger)?;
+        ledger.protected |=
+            !ledger.records.is_empty() || !ledger.claims.is_empty() || !ledger.retired.is_empty();
+        if matches!(&event, Event::Resolve { rules, explain: false, .. } if !rules.is_empty()) {
+            ledger.protected = true;
+        }
+        if ledger.closed.is_some() && !matches!(event, Event::Reset { .. }) {
+            self.state = State::Complete(ResultValue::Blocked {
+                status: "session_closed".into(),
+            });
+            return Ok(());
+        }
+        if expected_incarnation.is_some_and(|expected| ledger.incarnation != expected) {
+            self.state = State::Complete(ResultValue::Blocked {
+                status: "stale_incarnation".into(),
+            });
+            return Ok(());
+        }
+        if matches!(event, Event::Resolve { .. })
+            && facts
+                .as_ref()
+                .is_some_and(|facts| facts.expected != facts.current)
+        {
+            self.state = State::Complete(ResultValue::Blocked {
+                status: "stale_facts".into(),
+            });
+            return Ok(());
+        }
         if evaluation.0.is_empty() || transition.0.is_empty() {
             return Err(error("empty event identity"));
         }
@@ -551,7 +689,7 @@ impl Decisions {
                     evaluation,
                     transition,
                     result: receipt.result.clone(),
-                    ledger,
+                    ledger: Box::new(ledger),
                     delivered: false,
                 }
             } else {
@@ -561,7 +699,11 @@ impl Decisions {
             };
             return Ok(());
         }
-        let result = apply(&mut ledger, &event)?;
+        let result = apply(
+            &mut ledger,
+            &event,
+            facts.as_ref().map(|facts| &facts.current),
+        )?;
         if matches!(event, Event::Resolve { explain: true, .. }) {
             self.state = State::Complete(result);
             return Ok(());
@@ -587,7 +729,7 @@ impl Decisions {
         self.state = State::Waiting {
             evaluation,
             transition,
-            ledger,
+            ledger: Box::new(ledger),
             result,
             delivered: false,
         };
@@ -628,7 +770,7 @@ impl Stream for Decisions {
             transition,
             ledger,
             delivered,
-            ..
+            result,
         } = &mut self.state
         else {
             return None;
@@ -637,10 +779,15 @@ impl Stream for Decisions {
             return None;
         }
         *delivered = true;
+        let authority = match result {
+            ResultValue::Rebased { authority } => Some(authority),
+            _ => None,
+        };
         Some(
             serde_json::to_vec(&serde_json::json!({
                 "op":"persist_approvals", "evaluation":evaluation, "effect":1,
-                "transition":transition, "ledger":ledger
+                "transition":transition, "ledger":ledger, "authority":authority,
+                "approval_required":ledger.protected
             }))
             .expect("serializable policy state"),
         )
