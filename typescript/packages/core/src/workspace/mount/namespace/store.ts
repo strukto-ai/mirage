@@ -35,8 +35,8 @@ export abstract class NamespaceStore {
   async get(key: string): Promise<RecordFields | null> {
     return (await this.load()).get(key) ?? null
   }
-  async approvalGuarantee(): Promise<void> {
-    throw new Error('store does not provide confirmed approval persistence')
+  approvalGuarantee(): Promise<void> {
+    return Promise.reject(new Error('store does not provide confirmed approval persistence'))
   }
   // Upsert one record (a virtual path or a session id) with its full field set.
   abstract set(key: string, fields: RecordFields): Promise<void>

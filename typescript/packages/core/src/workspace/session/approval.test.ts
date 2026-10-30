@@ -142,7 +142,8 @@ describe('acknowledged approval storage', () => {
     await manager.approvalEvent('s', question(), manager.incarnationOf('s'))
     const old = new SessionManager('s', store)
     await old.ensureLoaded()
-    const current = (await store.get('s'))!
+    const current = await store.get('s')
+    if (!current) throw new Error('session was not persisted')
     const newer = {
       ...structuredClone(current),
       generation: Number(current.generation) + 1,
@@ -180,8 +181,8 @@ describe('acknowledged approval storage', () => {
 
   it('refuses approval authority on an unqualified store', async () => {
     class UnqualifiedStore extends RAMNamespaceStore {
-      override async approvalGuarantee(): Promise<void> {
-        throw new Error('unsupported durability')
+      override approvalGuarantee(): Promise<void> {
+        return Promise.reject(new Error('unsupported durability'))
       }
     }
     const store = new UnqualifiedStore()
