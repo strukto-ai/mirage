@@ -40,10 +40,9 @@ def classify_pattern(
 
 
 _MIN_SEARCH_LITERAL = 3
-# The ASCII letters a non-ASCII character matches under Unicode case
-# folding (the Kelvin sign for k, `ſ` for s): a lowercased search for a
-# word holding one could miss a line.
-UNICODE_FOLDED = frozenset("ks")
+# Backend folding may miss grep's Unicode matches for k and s, or pair
+# ASCII I with dotless ı instead of i under a Turkish collation.
+UNICODE_FOLDED = frozenset("iks")
 
 
 def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
@@ -117,9 +116,9 @@ def search_terms(
     Literals under -w or -x are asked as whole words, which a word index
     can answer; any other pattern is narrowed on the needles one of which
     every match contains, asked anywhere. Under -i a literal with a
-    non-ASCII letter, or with k or s when case folds by Unicode (``ſ``
-    matches ``s``), is left to the scan, since a mount's case folding need
-    not be grep's.
+    non-ASCII letter, or with i, k or s when case folds by Unicode, is left
+    to the scan: a mount may miss Unicode pairs (``ſ`` and ``s``) or even
+    ASCII pairs (``I`` and ``i`` under a Turkish collation).
 
     Args:
         pattern (str | None): the newline-joined patterns.

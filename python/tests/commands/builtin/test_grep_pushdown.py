@@ -77,7 +77,10 @@ def test_whole_word_literals_union_only_complete_alternatives(
         ("ada", re.I, True, True, (("ada",), True)),
         ("sun", re.I, True, True, None),
         ("sun", re.I | re.ASCII, True, True, (("sun",), True)),
-        ("tie", re.I, True, True, (("tie",), True)),
+        ("tie", re.I, True, True, None),
+        ("TIE", re.I, True, True, None),
+        ("ada\ntie", re.I, True, True, None),
+        ("tie", 0, True, False, (("tie",), True)),
         ("tie", re.I | re.ASCII, True, True, (("tie",), True)),
     ],
 )
@@ -86,9 +89,9 @@ def test_search_terms_ask_words_or_the_text_every_match_holds(
 ):
     # Whole-word literals go as words; any other pattern as the needles
     # every match holds, never shorter than three characters. Under -i a
-    # needle or word with s or k is dropped when case folds by Unicode
-    # (the long s folds to s), and a mount's folding of a non-ASCII
-    # literal is not trusted.
+    # needle or word with i, s or k is dropped when case folds by Unicode:
+    # the long s folds to s, and Turkish backends need not pair I with i.
+    # A mount's folding of a non-ASCII literal is not trusted.
     matcher = LineRegex(
         pattern.split("\n"),
         "extended",

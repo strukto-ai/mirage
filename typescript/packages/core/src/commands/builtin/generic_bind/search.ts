@@ -47,7 +47,7 @@ type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
 /**
  * What a grep line asks the mount's search; null when it must read every
  * file: -v, -f, or no plain text of three characters every match holds (under
- * -i, a word with a non-ASCII letter, or with k or s when case folds by
+ * -i, a word with a non-ASCII letter, or with i, k or s when case folds by
  * Unicode, counts as none). `f` is the line's flags, parsed. Throws the
  * refusal grep itself would print for a bad pattern. Mirrors Python's
  * `grep_terms`.

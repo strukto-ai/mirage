@@ -61,7 +61,7 @@ def grep_terms(
 ) -> SearchTerms | None:
     """What a grep line asks the mount's search; None when it must read
     every file: -v, -f, or no plain text of three characters every match
-    holds (under -i, a word with a non-ASCII letter, or with k or s
+    holds (under -i, a word with a non-ASCII letter, or with i, k or s
     when case folds by Unicode, counts as none).
 
     Args:

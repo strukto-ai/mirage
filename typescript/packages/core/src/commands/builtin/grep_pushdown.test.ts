@@ -80,14 +80,17 @@ describe('searchTerms', () => {
     ['ada', 'iu', true, true, [['ada'], true]],
     ['sun', 'iu', true, true, null],
     ['sun', 'i', true, true, [['sun'], true]],
-    ['tie', 'iu', true, true, [['tie'], true]],
+    ['tie', 'iu', true, true, null],
+    ['TIE', 'iu', true, true, null],
+    ['ada\ntie', 'iu', true, true, null],
+    ['tie', '', true, false, [['tie'], true]],
     ['tie', 'i', true, true, [['tie'], true]],
   ])('asks %j (flags %j)', (pattern, flags, w, i, expected) => {
     // Whole-word literals go as words; any other pattern as the needles every
     // match holds, never shorter than three characters. Under -i a needle or
-    // word with s or k is dropped when case folds by Unicode (the long s
-    // folds to s), and a mount's folding of a non-ASCII literal is not
-    // trusted.
+    // word with i, s or k is dropped when case folds by Unicode: the long s
+    // folds to s, and Turkish backends need not pair I with i. A mount's
+    // folding of a non-ASCII literal is not trusted.
     const matcher = new LineRegex(pattern.split('\n'), 'extended', i, flags.includes('u'))
     expect(searchTerms(pattern, matcher.needles, matcher.unicodeFolds, false, w, false, i)).toEqual(
       expected,
