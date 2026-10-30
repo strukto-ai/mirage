@@ -94,14 +94,14 @@ SCANNED = (
     "dereference_recursive",
     "directories",
     "devices",
-    "max_count",
 )
 
 
 class GrepValues(TypedDict):
     """What grep's scan reads: the binary-files mode, the context lengths
     (-C filling a side -A or -B left unset), the directory action, whether
-    -D skips devices, and the max count (None for no limit)."""
+    -D skips devices, and the max count (None for no limit, filled only by
+    `max_count`)."""
 
     binary_mode: str
     after_context: int | None
@@ -112,7 +112,7 @@ class GrepValues(TypedDict):
 
 
 def scan_values(fl: FlagView) -> GrepValues:
-    """grep's option values, read by mirage-rs as grep 3.11 checks them.
+    """grep's option values but -m, read by mirage-rs in a fixed order.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
@@ -123,24 +123,38 @@ def scan_values(fl: FlagView) -> GrepValues:
     return cast(GrepValues, scanned("grep", fl.texts(*SCANNED)))
 
 
+def max_count(fl: FlagView) -> int | None:
+    """-m as mirage-rs reads it, None for no limit; grep checks it after
+    the matchers, so a bad count yields to conflicting ones.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+
+    Raises:
+        UsageError: grep's refusal of the count.
+    """
+    return cast(GrepValues, scanned("grep", fl.texts("max_count")))[
+        "max_count"
+    ]
+
+
 def recurses(fl: FlagView) -> bool:
     """Whether grep walks the directories it meets: -r, -R or a -d naming
     recurse, the last of the three on the line winning (grep 3.11).
 
-    Only the last -d word decides, so a line whose last word grep refuses
-    at run time walks nothing.
+    A line whose last of the three is a -d word grep refuses at run time
+    walks nothing.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
     """
     typed = fl.texts("recursive", "dereference_recursive", "directories")
-    last = [
-        (name, text)
-        for at, (name, text) in enumerate(typed)
-        if all(name != later for later, _ in typed[at + 1 :])
-    ]
+    if not typed:
+        return False
+    if typed[-1][0] != "directories":
+        return True
     try:
-        return scanned("grep", last)["directories"] == "recurse"
+        return scanned("grep", typed[-1:])["directories"] == "recurse"
     except UsageError:
         return False
 
@@ -245,7 +259,7 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
         skip_devices=values["skip_devices"],
         with_filename=filename is True,
         no_filename=filename is False,
-        max_count=values["max_count"],
+        max_count=max_count(fl),
         after_context=values["after_context"],
         before_context=values["before_context"],
         binary_mode=mode,

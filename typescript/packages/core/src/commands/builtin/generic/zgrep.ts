@@ -24,8 +24,7 @@ import { GREP_STDIN_LABEL, STDIN_OPERAND } from '../utils/constants.ts'
 import { linkResolver } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import { decompressInputs } from './decompress.ts'
-import { listingMode, type GrepValues } from './grep.ts'
-import { scanned } from '../../../rs/scan.ts'
+import { listingMode, maxCount } from './grep.ts'
 import type { FlagSet } from '../grep_binary.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { openGrep, streamConfig, streamInput } from '../grep_stream.ts'
@@ -37,7 +36,7 @@ const ZGREP_NO_PATTERN = "zgrep: missing pattern; try `zgrep --help' for help"
 
 function parseFlags(fl: FlagView, neverMatch: boolean): FlagSet {
   const [filesOnly, filesWithoutMatch] = listingMode(fl)
-  const count = (scanned('grep', fl.texts('max_count')) as unknown as GrepValues).max_count
+  const count = maxCount(fl)
   return {
     ignoreCase: fl.asBool('ignore_case'),
     invert: fl.asBool('invert_match'),

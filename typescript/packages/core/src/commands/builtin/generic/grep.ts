@@ -71,7 +71,6 @@ const SCANNED = [
   'dereference_recursive',
   'directories',
   'devices',
-  'max_count',
 ]
 type Stat = (p: PathSpec) => Promise<FileStat>
 type Readdir = (p: PathSpec) => Promise<string[]>
@@ -80,8 +79,8 @@ type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 /**
  * What grep's scan reads: the binary-files mode, the context lengths (-C
  * filling a side -A or -B left unset), the directory action, whether -D skips
- * devices, and the max count (null for no limit). Mirrors Python's
- * `GrepValues`.
+ * devices, and the max count (null for no limit, filled only by `maxCount`).
+ * Mirrors Python's `GrepValues`.
  */
 export interface GrepValues {
   readonly binary_mode: string
@@ -93,7 +92,7 @@ export interface GrepValues {
 }
 
 /**
- * grep's option values, read by mirage-rs as grep 3.11 checks them; throws
+ * grep's option values but -m, read by mirage-rs in a fixed order; throws
  * UsageError for the first value grep refuses, in its words. Mirrors
  * Python's `scan_values`.
  */
@@ -102,16 +101,26 @@ export function scanValues(fl: FlagView): GrepValues {
 }
 
 /**
+ * -m as mirage-rs reads it, null for no limit; grep checks it after the
+ * matchers, so a bad count yields to conflicting ones. Throws UsageError
+ * with grep's refusal. Mirrors Python's `max_count`.
+ */
+export function maxCount(fl: FlagView): number | null {
+  return (scanned('grep', fl.texts('max_count')) as unknown as GrepValues).max_count
+}
+
+/**
  * Whether grep walks the directories it meets: -r, -R or a -d naming
- * recurse, the last of the three on the line winning (grep 3.11). Only the
- * last -d word decides, so a line whose last word grep refuses at run time
- * walks nothing. Mirrors Python's `recurses`.
+ * recurse, the last of the three on the line winning (grep 3.11). A line
+ * whose last of the three is a -d word grep refuses at run time walks
+ * nothing. Mirrors Python's `recurses`.
  */
 export function recurses(fl: FlagView): boolean {
-  const typed = fl.texts('recursive', 'dereference_recursive', 'directories')
-  const last = typed.filter(([name], at) => typed.slice(at + 1).every(([later]) => later !== name))
+  const last = fl.texts('recursive', 'dereference_recursive', 'directories').at(-1)
+  if (last === undefined) return false
+  if (last[0] !== 'directories') return true
   try {
-    return (scanned('grep', last) as unknown as GrepValues).directories === 'recurse'
+    return (scanned('grep', [last]) as unknown as GrepValues).directories === 'recurse'
   } catch (err) {
     if (!(err instanceof UsageError)) throw err
     return false
@@ -206,7 +215,7 @@ export function parseFlags(fl: FlagView): FlagSet {
     // for the default explicitly.
     syntax: matcherSyntax(fl),
     onlyMatching: fl.asBool('only_matching'),
-    maxCount: values.max_count,
+    maxCount: maxCount(fl),
     quiet: fl.asBool('quiet'),
     noMessages: fl.asBool('no_messages'),
     withFilename: filename === true,

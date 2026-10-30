@@ -194,9 +194,9 @@ const BINARY_FILES: [&str; 3] = ["binary", "text", "without-match"];
 const USAGE: &str =
     "Usage: grep [OPTION]... PATTERNS [FILE]...\nTry 'grep --help' for more information.";
 
-/// grep's and zgrep's option values, read in the order grep 3.11 checks
-/// them: the binary-files mode, each context length, each `-d` and `-D`
-/// word, then the max count. A scalar option typed twice is read at its
+/// grep's and zgrep's option values, checked in a fixed order: the
+/// binary-files mode, each context length, each `-d` and `-D` word, then
+/// the max count, which the hosts send alone after their matcher check. A scalar option typed twice is read at its
 /// last occurrence, except that every `-d` and `-D` word is checked.
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     let latest = scan::latest(options);
