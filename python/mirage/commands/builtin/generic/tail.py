@@ -453,7 +453,7 @@ async def _tail_file(
     from_end = counts.from_line is None and counts.from_byte is None
     if not is_stdin(path) and from_end:
         if counts.byte_count is None and last_lines is not None:
-            answer = await last_lines(path, n)
+            answer = await last_lines(path, abs(n))
             if answer is not None:
                 async for part in chunks(answer):
                     yield part
@@ -490,6 +490,12 @@ async def _tail_file(
                         break
                     if end == size and data.endswith(b"\n"):
                         wanted += 1
+                    found = data.count(b"\n")
+                    if found < wanted and start > 0:
+                        wanted -= found
+                        end = start
+                        window = min(window * 2, 1 << 20)
+                        continue
                     at = len(data)
                     while wanted:
                         at = data.rfind(b"\n", 0, at)

@@ -11,8 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
+import * as stream from '../../../rs/stream.ts'
 import { yieldBytes } from '../../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
@@ -138,4 +139,19 @@ it('shares bytes-valued stdin across repeated operands', async () => {
   if (result === null) throw new Error('no result')
   expect(DEC.decode(await materialize(result[0]))).toBe('x\n')
   expect(result[1].exitCode).toBe(0)
+})
+
+it('does not retain many empty scripts in the write cache', () => {
+  const open = vi.spyOn(stream, 'openStreamSync')
+  try {
+    const scripts = Array<string>(5000).fill('')
+    expect(sedWrites({ e: scripts }, [])).toBe(false)
+    expect(sedWrites({ e: scripts }, [])).toBe(false)
+    expect(open).toHaveBeenCalledTimes(2)
+    expect(sedWrites({ e: ['# small cache test'] }, [])).toBe(false)
+    expect(sedWrites({ e: ['# small cache test'] }, [])).toBe(false)
+    expect(open).toHaveBeenCalledTimes(3)
+  } finally {
+    open.mockRestore()
+  }
 })

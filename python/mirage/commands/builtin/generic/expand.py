@@ -20,6 +20,7 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import close_stream, open_stream
+from mirage.shell.bytes import byte_view
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
 
@@ -70,7 +71,10 @@ async def expand_generic(
         parsed = parse_flags(ctx.flags)
         engine = open_stream(
             "expand",
-            {"tabs": list(parsed.tabs), "initial_only": parsed.initial_only},
+            {
+                "tabs": [byte_view(tab) for tab in parsed.tabs],
+                "initial_only": parsed.initial_only,
+            },
         )
     except (ValueError, StreamRefusal) as exc:
         return None, IOResult(exit_code=1, stderr=f"{exc}\n".encode())

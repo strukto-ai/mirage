@@ -112,7 +112,7 @@ export function sedWrites(bag: Record<string, FlagValue>, texts: readonly string
 
 const writeChecks = new Map<string, boolean>()
 function scriptWrites(scripts: readonly string[], extended: boolean): boolean {
-  const cacheable = scripts.reduce((size, script) => size + script.length, 0) <= 4096
+  const cacheable = scripts.reduce((size, script) => size + script.length + 1, 0) <= 4096
   const key = cacheable ? JSON.stringify([scripts, extended]) : null
   if (key !== null) {
     const known = writeChecks.get(key)

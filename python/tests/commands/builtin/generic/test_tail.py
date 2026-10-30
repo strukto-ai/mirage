@@ -985,7 +985,13 @@ async def test_follow_infinite_interval_never_polls():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "flags, asked",
-    [({}, 10), ({"n": "2"}, 2), ({"n": "+2"}, None), ({"c": "2"}, None)],
+    [
+        ({}, 10),
+        ({"n": "2"}, 2),
+        ({"n": "-2"}, 2),
+        ({"n": "+2"}, None),
+        ({"c": "2"}, None),
+    ],
 )
 async def test_tail_asks_last_lines_for_a_count_from_the_end(flags, asked):
     fs = _Growing({"/d/log": b"a\nb\nc\n"})

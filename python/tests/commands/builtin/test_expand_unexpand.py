@@ -21,6 +21,7 @@ import pytest
 
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import open_stream
+from mirage.shell.bytes import byte_view
 from tests.commands.builtin.conftest import output_bytes as _bytes
 from tests.commands.builtin.conftest import ram_workspace as _ws
 from tests.commands.builtin.conftest import run_raw as _run_raw
@@ -36,7 +37,11 @@ class TabStops:
 def read_tab_stops(occurrences: list[str], prog: str = "expand") -> TabStops:
     try:
         engine = open_stream(
-            "expand", {"tabs": occurrences, "initial_only": False}
+            "expand",
+            {
+                "tabs": [byte_view(tab) for tab in occurrences],
+                "initial_only": False,
+            },
         )
     except StreamRefusal as exc:
         raise ValueError(exc.message) from exc
@@ -588,3 +593,17 @@ def test_expand_an_invalid_character_does_end_the_scan(raw, message):
     with pytest.raises(ValueError) as refusal:
         read_tab_stops([raw])
     assert str(refusal.value) == message
+
+
+@pytest.mark.parametrize("command", ["expand", "unexpand"])
+def test_tab_error_quotes_raw_argument_bytes(command):
+    ws, _ = _ws()
+    stdout, io = _run_raw(ws, command + r" -t $'\377'")
+    assert io.exit_code == 1
+    assert (
+        io.stderr
+        == (
+            command + ": tab size contains invalid character(s): '\\377'\n"
+        ).encode()
+    )
+    assert not stdout

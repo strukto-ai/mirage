@@ -346,6 +346,22 @@ async function mergeSpools(
   }
 }
 
+async function addRun(
+  levels: ByteSpool[][],
+  initial: ByteSpool,
+  config: Readonly<Record<string, JsonValue>>,
+  signal?: AbortSignal,
+): Promise<void> {
+  let run = initial
+  for (let level = 0; ; level++) {
+    const group = levels[level] ?? (levels[level] = [])
+    group.push(run)
+    if (group.length < MERGE_FAN_IN) return
+    levels[level] = []
+    run = await mergeSpools(group, config, signal)
+  }
+}
+
 async function mergeOperands(
   paths: PathSpec[],
   read: (path: PathSpec) => AsyncIterable<Uint8Array>,
@@ -355,7 +371,7 @@ async function mergeOperands(
 ): Promise<ByteSpool | Uint8Array> {
   const stream = stdinStream(read, stdin)
   const state: { refused: [InputStage, Uint8Array] | null } = { refused: null }
-  const runs: ByteSpool[] = []
+  const levels: ByteSpool[][] = [[]]
   async function* source(path: PathSpec | null): AsyncGenerator<Uint8Array> {
     try {
       yield* chunks(path === null ? (stdin ?? new Uint8Array()) : stream(path), signal)
@@ -376,7 +392,6 @@ async function mergeOperands(
       const group = operands.slice(start, start + MERGE_FAN_IN)
       const engine = await openStream('sort', { ...config, mode: 'merge', inputs: group.length })
       const output = new ByteSpool()
-      runs.push(output)
       try {
         await output.fill(
           chainOutput(
@@ -385,19 +400,28 @@ async function mergeOperands(
             signal,
           ),
         )
+        await addRun(levels, output, config, signal)
+      } catch (error) {
+        await output.close()
+        throw error
       } finally {
         await closeStream(engine)
       }
     }
     if (state.refused !== null) return state.refused[1]
+    const runs = [...levels].reverse().flat()
     while (runs.length > 1) {
       const group = runs.slice(0, MERGE_FAN_IN)
       const merged = await mergeSpools(group, config, signal)
+      levels.push([merged])
       runs.splice(0, group.length, merged)
     }
-    return runs.pop() ?? new ByteSpool()
+    const output = runs.pop() ?? new ByteSpool()
+    for (const level of levels) for (const run of level) if (run !== output) await run.close()
+    levels.length = 0
+    return output
   } finally {
-    for (const run of runs) await run.close()
+    for (const level of levels) for (const run of level) await run.close()
   }
 }
 
@@ -416,16 +440,6 @@ async function externalRecords(
   let refused: [InputStage, Uint8Array] | null = null
   const budget = new YieldBudget(signal)
   const sorter = await openStream('sort', { ...config, mode: 'sort', run_bytes: SORT_RUN_BYTES })
-  async function addRun(initial: ByteSpool): Promise<void> {
-    let run = initial
-    for (let level = 0; ; level++) {
-      const group = levels[level] ?? (levels[level] = [])
-      group.push(run)
-      if (group.length < MERGE_FAN_IN) return
-      levels[level] = []
-      run = await mergeSpools(group, config, signal)
-    }
-  }
   // While the stream is busy each drain is one bounded step of a run and
   // what it writes belongs to that run, so the loop yields between steps; a
   // feed of no bytes then starts a run already buffered.
@@ -438,7 +452,7 @@ async function externalRecords(
           if (piece.byteLength > 0) await run.append(piece)
           await budget.run()
         }
-        await addRun(run)
+        await addRun(levels, run, config, signal)
       } catch (error) {
         await run.close()
         throw error

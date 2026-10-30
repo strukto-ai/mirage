@@ -230,7 +230,7 @@ async function* tailFile(
   const fromEnd = counts.fromLine === null && counts.fromByte === null
   if (!isStdin(path) && fromEnd) {
     if (counts.byteCount === null && lastLines !== undefined) {
-      const answer = await lastLines(path, n)
+      const answer = await lastLines(path, Math.abs(n))
       if (answer !== null) {
         yield* chunks(answer)
         return
@@ -255,6 +255,14 @@ async function* tailFile(
           const data = await materialize(readRange(path, start, end - start))
           if (data.byteLength !== end - start) break
           if (end === size && data.at(-1) === 10) wanted++
+          let found = 0
+          for (let at = data.indexOf(10); at >= 0; at = data.indexOf(10, at + 1)) found++
+          if (found < wanted && start > 0) {
+            wanted -= found
+            end = start
+            window = Math.min(window * 2, 1 << 20)
+            continue
+          }
           let at = data.length
           while (wanted > 0) {
             at = at === 0 ? -1 : data.lastIndexOf(10, at - 1)

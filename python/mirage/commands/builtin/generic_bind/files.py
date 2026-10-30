@@ -552,7 +552,7 @@ def file_size(
             return None
         if revision_for(path.virtual) is not None:
             return None
-        if not opened and await files.is_warm(path):
+        if await files.is_warm(path):
             return None
         st = await _stat_refusing_dirs(files, ctx, path)
         if st.type != FileType.FILE or (

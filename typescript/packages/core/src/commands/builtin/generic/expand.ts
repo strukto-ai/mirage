@@ -22,6 +22,7 @@ import { stdinStream, streamOutput } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { openStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 
 interface ExpandFlags {
@@ -45,7 +46,7 @@ export async function expandGeneric(
   let engine
   try {
     engine = await openStream('expand', {
-      tabs: [...parsed.tabs],
+      tabs: parsed.tabs.map((tab) => byteView(tab)),
       initial_only: parsed.initialOnly,
     })
   } catch (error) {

@@ -342,6 +342,23 @@ async def _merge_spools(
             await run.close()
 
 
+async def _add_run(
+    levels: list[list[ByteSpool]],
+    run: ByteSpool,
+    config: Mapping[str, JsonValue],
+) -> None:
+    level = 0
+    while True:
+        if level == len(levels):
+            levels.append([])
+        levels[level].append(run)
+        if len(levels[level]) < MERGE_FAN_IN:
+            return
+        group, levels[level] = levels[level], []
+        run = await _merge_spools(group, config)
+        level += 1
+
+
 async def _merge_operands(
     paths: list[PathSpec],
     read: PolymorphicReadFn,
@@ -350,7 +367,7 @@ async def _merge_operands(
 ) -> ByteSpool | bytes:
     stream = stdin_stream(read, stdin)
     refused: tuple[InputStage, bytes] | None = None
-    runs: list[ByteSpool] = []
+    levels: list[list[ByteSpool]] = [[]]
 
     async def source(path: PathSpec | None) -> AsyncIterator[bytes]:
         nonlocal refused
@@ -379,20 +396,33 @@ async def _merge_operands(
                 "sort", {**config, "mode": "merge", "inputs": len(group)}
             )
             output = ByteSpool()
-            runs.append(output)
-            await output.fill(
-                chain_output(engine, [source(path) for path in group])
-            )
+            try:
+                await output.fill(
+                    chain_output(engine, [source(path) for path in group])
+                )
+                await _add_run(levels, output, config)
+            except BaseException:
+                await output.close()
+                raise
         if refused is not None:
             return refused[1]
+        runs = [run for level in reversed(levels) for run in level]
         while len(runs) > 1:
             merging = runs[:MERGE_FAN_IN]
             merged = await _merge_spools(merging, config)
+            levels.append([merged])
             runs[: len(merging)] = [merged]
-        return runs.pop()
+        output = runs.pop()
+        for level in levels:
+            for run in level:
+                if run is not output:
+                    await run.close()
+        levels.clear()
+        return output
     finally:
-        for run in runs:
-            await run.close()
+        for level in levels:
+            for run in level:
+                await run.close()
 
 
 async def _external_records(
@@ -414,18 +444,6 @@ async def _external_records(
     )
     budget = YieldBudget()
 
-    async def add_run(run: ByteSpool) -> None:
-        level = 0
-        while True:
-            if level == len(levels):
-                levels.append([])
-            levels[level].append(run)
-            if len(levels[level]) < MERGE_FAN_IN:
-                return
-            group, levels[level] = levels[level], []
-            run = await _merge_spools(group, config)
-            level += 1
-
     async def add_sorted(stream: OpenStream) -> None:
         # While the stream is busy each drain is one bounded step of a run
         # and what it writes belongs to that run, so the loop yields between
@@ -437,7 +455,7 @@ async def _external_records(
                     if piece := stream.drain():
                         await run.append(piece)
                     await budget.run()
-                await add_run(run)
+                await _add_run(levels, run, config)
             except BaseException:
                 await run.close()
                 raise

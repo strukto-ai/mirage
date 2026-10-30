@@ -421,7 +421,7 @@ export function fileSize(
   return async (p) => {
     if (READINGS.get(ctx)?.stream != null || (opened && crossesMounts(ctx))) return null
     if (revisionFor(p.virtual) !== null) return null
-    if (!opened && (await files.isWarm(p))) return null
+    if (await files.isWarm(p)) return null
     const st = await statRefusingDirs(files, ctx, p)
     if (st.type !== FileType.FILE || (st.mode !== null && (!opened || st.size === 0))) return null
     if (ctx.vfs === undefined) return st.size

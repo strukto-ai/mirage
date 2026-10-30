@@ -22,6 +22,7 @@ import { stdinStream, streamOutput } from '../utils/stream.ts'
 import { reportedStream } from '../utils/operands.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import { openStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 
 interface UnexpandFlags {
@@ -44,7 +45,10 @@ export async function unexpandGeneric(
   const parsed = parseFlags(ctx.flags)
   let engine
   try {
-    engine = await openStream('unexpand', { tabs: [...parsed.tabs], all: parsed.allSpaces })
+    engine = await openStream('unexpand', {
+      tabs: parsed.tabs.map((tab) => byteView(tab)),
+      all: parsed.allSpaces,
+    })
   } catch (error) {
     if (!(error instanceof StreamRefusal)) throw error
     return [

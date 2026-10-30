@@ -87,7 +87,7 @@ _write_checks: dict[tuple[tuple[str, ...], bool], bool] = {}
 
 
 def _script_writes(scripts: tuple[str, ...], extended: bool) -> bool:
-    cacheable = sum(len(script) for script in scripts) <= 4096
+    cacheable = sum(len(script) + 1 for script in scripts) <= 4096
     key = (scripts, extended)
     if cacheable and (known := _write_checks.get(key)) is not None:
         del _write_checks[key]

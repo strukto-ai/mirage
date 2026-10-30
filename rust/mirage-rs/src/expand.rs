@@ -33,7 +33,7 @@ fn stops<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<u64>, 
 #[serde(untagged)]
 enum TabInput {
     Stops(Tabs),
-    Lists(Vec<String>),
+    Lists(#[serde(deserialize_with = "crate::latin1_list")] Vec<Vec<u8>>),
 }
 
 impl TabInput {
@@ -46,10 +46,9 @@ impl TabInput {
 }
 
 impl Tabs {
-    fn parse(lists: &[String], prog: &str) -> Result<Self, StreamError> {
+    fn parse(lists: &[Vec<u8>], prog: &str) -> Result<Self, StreamError> {
         let mut tabs = Self::default();
         for raw in lists {
-            let raw = raw.as_bytes();
             let mut at = 0;
             let mut waiting = Vec::new();
             let mut given = None;

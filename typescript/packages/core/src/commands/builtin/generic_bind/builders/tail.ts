@@ -16,17 +16,24 @@ import { headerAggregate } from '../../aggregators.ts'
 import { tailGeneric } from '../../generic/tail.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
-import { commandFiles, dirAwareStat, dirAwareStream, resolveOrEmpty } from '../files.ts'
+import { commandFiles, dirAwareStat, dirAwareStream, fileSize, resolveOrEmpty } from '../files.ts'
+import type { FileStat, PathSpec } from '../../../../types.ts'
 
 const tail: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
+  const backendStat = dirAwareStat(files, ctx)
+  const readSize = fileSize(files, ctx, true)
+  async function stat(path: PathSpec): Promise<FileStat> {
+    const row = await backendStat(path)
+    return row.with({ size: await readSize(path) })
+  }
   return tailGeneric(
     resolved,
     texts,
     ctx,
     dirAwareStream(files, ctx),
-    dirAwareStat(files, ctx),
+    stat,
     files.answers('read_range') ? files.read : null,
     files.answers('last_lines') ? files.lastLines : undefined,
     files.answers('follow') ? files.follow : undefined,

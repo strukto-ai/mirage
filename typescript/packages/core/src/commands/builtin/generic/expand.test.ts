@@ -21,6 +21,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { parseCommand, parseToKwargs } from '../../spec/parser.ts'
 import { expandGeneric } from './expand.ts'
 import { openStream } from '../../../rs/stream.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 
 const ENC = new TextEncoder()
@@ -120,7 +121,10 @@ interface TabStops {
 
 async function readTabStops(occurrences: readonly string[]): Promise<TabStops | string> {
   try {
-    const engine = await openStream('expand', { tabs: [...occurrences], initial_only: false })
+    const engine = await openStream('expand', {
+      tabs: occurrences.map((tab) => byteView(tab)),
+      initial_only: false,
+    })
     try {
       return JSON.parse(new TextDecoder().decode(engine.metadata())) as TabStops
     } finally {
@@ -501,4 +505,10 @@ describe('a misplaced specifier does not end the scan', () => {
   ])('-t %j ends it', async (list, message) => {
     expect(await readTabStops([list])).toBe(message)
   })
+})
+
+it('quotes a raw byte in the tab argument', async () => {
+  const result = await run({ flags: { tabs: ['\udcff'] } })
+  expect(result.exit).toBe(1)
+  expect(result.stderr).toBe("expand: tab size contains invalid character(s): '\\377'\n")
 })

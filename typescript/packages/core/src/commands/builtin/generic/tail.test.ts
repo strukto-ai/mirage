@@ -832,6 +832,7 @@ describe('tail asks the mount for the last lines', () => {
   it.each([
     [{}, 10],
     [{ n: '2' }, 2],
+    [{ n: '-2' }, 2],
     [{ n: '+2' }, null],
     [{ c: '2' }, null],
   ] as const)('with %j asks for %s', async (flags, asked) => {
