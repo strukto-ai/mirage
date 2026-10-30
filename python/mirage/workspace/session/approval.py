@@ -5,7 +5,7 @@ from typing import NamedTuple
 
 from mirage.policy.errors import ApprovalUnavailable
 from mirage.rs.stream import close_stream, open_stream
-from mirage.utils.ids import uuid7
+from mirage.utils.ids import authority_id
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
     CAS_MAX_RETRIES,
@@ -53,16 +53,20 @@ def plan_reset(
         current (RecordFields | None): the authoritative record just read.
         close (bool): whether the replacement is a terminal marker.
     """
+    payload = copy.deepcopy(fields)
+    payload["generation"] = generation_of(current)
+    payload.pop("incarnation", None)
+    payload.pop("approval_state", None)
     return SessionReset(
-        copy.deepcopy(fields),
+        payload,
         {
             "op": "reset",
-            "incarnation": uuid7(),
-            "closed": uuid7() if close else None,
+            "incarnation": authority_id(),
+            "closed": authority_id() if close else None,
         },
         None if current is None else current.get("incarnation"),
         None if current is None else current.get("closed"),
-        uuid7(),
+        authority_id(),
     )
 
 
@@ -102,7 +106,7 @@ def empty_approvals(incarnation: str | None = None) -> RecordFields:
     """Create a fresh approval incarnation without importing legacy grants."""
     return {
         "version": 1,
-        "incarnation": uuid7() if incarnation is None else incarnation,
+        "incarnation": authority_id() if incarnation is None else incarnation,
         "revision": 0,
         "records": [],
         "claims": [],
@@ -131,7 +135,7 @@ async def transact_approvals(
     """
     baseline = copy.deepcopy(baseline)
     session_id = baseline["session_id"]
-    transition = uuid7() if transition_id is None else transition_id
+    transition = authority_id() if transition_id is None else transition_id
     initial = empty_approvals(expected_epoch)
     own_epoch = (
         event["incarnation"]

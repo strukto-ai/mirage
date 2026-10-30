@@ -2095,7 +2095,7 @@ async def test_a_session_grant_covers_the_rule_and_a_deny_is_never_reopened():
         # The answer is session state: on the record, and not another
         # session's.
         default = ws._session_mgr.get(ws._session_mgr.default_id)
-        stored = default.to_dict()["decisions"][0]
+        stored = default.to_dict()["approval_state"]["records"][0]
         assert (stored["outcome"], stored["scope"]) == ("allow", "session")
         ws.create_session("other")
         await ws.shell("touch /scratch/w", session_id="other")

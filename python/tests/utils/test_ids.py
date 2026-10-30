@@ -29,12 +29,30 @@ from mirage.utils.ids import (
     SeededIdSource,
     SystemIdSource,
     _splitmix64,
+    authority_id,
     new_session_id,
     new_workspace_id,
     random_below,
     shuffle,
     uuid7,
 )
+
+
+def test_authority_ids_do_not_consume_the_workspace_id_source(monkeypatch):
+    drawn = False
+
+    def refuse(self):
+        nonlocal drawn
+        drawn = True
+        raise AssertionError("authority identity used the workspace source")
+
+    monkeypatch.setattr(SystemIdSource, "uuid7", refuse)
+    first, second = authority_id(), authority_id()
+    assert not drawn
+    assert first != second
+    assert str(uuid.UUID(first)) == first
+    assert uuid.UUID(first).version == 4
+
 
 # Pinned by the TypeScript twin too (utils/ids.test.ts): one seed draws
 # one sequence on both hosts.

@@ -856,9 +856,7 @@ async def _restore_sessions(
     # tools, so none keeps what was read before.
     ws._forget_reads()
     if default_sid is not None:
-        # The snapshot's default session identity wins over the live
-        # one, and the discovery record's pointer follows it.
-        await ws._adopt_default_session(default_sid)
+        await ws._session_mgr.restore_default(default_sid)
     restored: list[Any] = []
     for fields in tables:
         sid = fields.session_id
@@ -894,6 +892,8 @@ async def _restore_sessions(
     # The snapshot's session table wins over prior store contents,
     # mirroring Namespace.replace_nodes.
     await ws._session_mgr.replace_from_snapshot(restored)
+    if default_sid is not None:
+        await ws._adopt_default_session(default_sid)
 
 
 def _restore_cache(ws: WorkspaceLike, state: dict[str, Any]) -> None:

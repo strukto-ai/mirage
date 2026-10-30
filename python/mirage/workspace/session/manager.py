@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import copy
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from typing import Any
 
 from mirage.context.session_context import SessionOwner
@@ -25,7 +26,7 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
 from mirage.utils.clock import Clock, SystemClock
-from mirage.utils.ids import IdSource, SystemIdSource, uuid7
+from mirage.utils.ids import IdSource, SystemIdSource, authority_id
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
@@ -115,9 +116,9 @@ class SessionManager(SessionOwner):
     per workspace: sessions are worked on in memory (creation stays
     synchronous), the store hydrates once at the first async entry
     point, and durable fields flush back at async boundaries (end of
-    execute, snapshot, explicit persist). ``close``
-    deletes from the store — closing a session revokes it everywhere —
-    while process shutdown leaves stored sessions in place.
+    execute, snapshot, explicit persist). ``close`` stores a terminal
+    marker that revokes the session everywhere, while process shutdown
+    leaves stored sessions in place.
 
     Args:
         default_session_id (str): the id of the session made now.
@@ -319,7 +320,13 @@ class SessionManager(SessionOwner):
         Args:
             session_id (str): the registered session identity.
         """
-        return copy.deepcopy(self.get(session_id).approval_state)
+        session = self._sessions.get(session_id)
+        state = (
+            self._closed_records[session_id].get("approval_state")
+            if session is None
+            else session.approval_state
+        )
+        return copy.deepcopy(state)
 
     def approval_sessions(self) -> tuple[str, ...]:
         return tuple(self._sessions)
@@ -339,8 +346,9 @@ class SessionManager(SessionOwner):
             session_id (str): the session the new caller will use.
         """
         await self.ensure_loaded()
-        async with self._locks[session_id]:
-            session = self.get(session_id)
+        async with self._approval_session(session_id) as session:
+            if session is None:
+                raise ApprovalUnavailable("session_closed")
             await self._flush_one(session)
             incarnation = session.incarnation
             if incarnation is None:
@@ -358,8 +366,26 @@ class SessionManager(SessionOwner):
             incarnation (str): the caller's immutable session identity.
         """
         await self.ensure_loaded()
-        async with self._locks[session_id]:
-            await self._refresh_approval(self.get(session_id), incarnation)
+        async with self._approval_session(session_id) as session:
+            if session is None:
+                raise ApprovalUnavailable("session_closed")
+            await self._refresh_approval(session, incarnation)
+
+    @asynccontextmanager
+    async def _approval_session(
+        self, session_id: str
+    ) -> AsyncIterator[SessionState | None]:
+        lock = self._locks.get(session_id)
+        if lock is None:
+            if session_id not in self._closed_records:
+                raise ApprovalUnavailable("session_disappeared")
+            yield None
+            return
+        async with lock:
+            session = self._sessions.get(session_id)
+            if session is None and session_id not in self._closed_records:
+                raise ApprovalUnavailable("session_disappeared")
+            yield session
 
     async def _refresh_approval(
         self, session: SessionState, incarnation: str
@@ -411,8 +437,11 @@ class SessionManager(SessionOwner):
             incarnation (str | None): the caller's captured session incarnation.
         """
         await self.ensure_loaded()
-        async with self._locks[session_id]:
-            session = self.get(session_id)
+        async with self._approval_session(session_id) as session:
+            if session is None:
+                if event.get("op") in {"release", "revoke", "hand_up"}:
+                    return {"kind": "applied"}
+                raise ApprovalUnavailable("session_closed")
             if session_id in self._resets:
                 raise ApprovalUnavailable("session_transition_pending")
             try:
@@ -463,12 +492,9 @@ class SessionManager(SessionOwner):
     def adopt_default(self, session_id: str) -> None:
         """Re-key the default session to an externally decided id.
 
-        Two callers: attach (the discovery record already names a
-        default session, so the freshly minted placeholder re-keys
-        before hydration lands the stored durable fields on it) and
-        snapshot restore (the snapshot's default identity wins). The
-        store itself is untouched; the next flush or snapshot replace
-        writes the new key.
+        Attach uses this before hydration lands the existing durable
+        fields on the placeholder. Snapshot restore uses restore_default
+        to retire a live prior identity before changing the key.
 
         Args:
             session_id (str): the default session id to adopt.
@@ -489,6 +515,20 @@ class SessionManager(SessionOwner):
             if held is not None:
                 self._line_locks[session_id] = held
         self._default_id = session_id
+
+    async def restore_default(self, session_id: str) -> None:
+        """Retire the live default identity before a snapshot replaces its key.
+
+        Args:
+            session_id (str): the snapshot's default session identity.
+        """
+        if session_id == self._default_id:
+            return
+        previous_id = self._default_id
+        async with self._locks[previous_id]:
+            await self._close_record(self.get(previous_id))
+            self.adopt_default(session_id)
+        self._incarnations.pop(previous_id, None)
 
     async def ensure_loaded(self) -> None:
         """Hydrate sessions from the store once.
@@ -644,7 +684,7 @@ class SessionManager(SessionOwner):
                 self._persisted[sid] = copy.deepcopy(reply.fields)
                 return
             if session.incarnation is None:
-                session.incarnation = uuid7()
+                session.incarnation = authority_id()
             expected = session.generation
             session.generation = expected + 1
             fields = session.to_dict()
@@ -806,26 +846,7 @@ class SessionManager(SessionOwner):
             raise KeyError(session_id)
         async with self._locks[session_id]:
             closing = self._sessions[session_id]
-            if (
-                session_id in self._resets
-                and self._resets[session_id].event["closed"] is None
-            ):
-                await self._commit_reset(closing)
-            if session_id not in self._resets:
-                current = await self._store.get(session_id)
-                if (
-                    current is not None
-                    and current.get("incarnation") != closing.incarnation
-                ):
-                    raise ApprovalUnavailable("session_replaced")
-                fields = {
-                    "session_id": session_id,
-                    "generation": closing.generation,
-                }
-                self._resets[session_id] = plan_reset(
-                    fields, current, close=True
-                )
-            await self._commit_reset(closing)
+            await self._close_record(closing)
             keep = [
                 source
                 for key, session in self._sessions.items()
@@ -838,6 +859,22 @@ class SessionManager(SessionOwner):
         self._line_locks.pop(session_id, None)
         self._persisted.pop(session_id, None)
         self._incarnations.pop(session_id, None)
+
+    async def _close_record(self, session: SessionState) -> None:
+        sid = session.session_id
+        if sid in self._resets and self._resets[sid].event["closed"] is None:
+            await self._commit_reset(session)
+        if sid not in self._resets:
+            current = await self._store.get(sid)
+            if (
+                current is not None
+                and current.get("incarnation") != session.incarnation
+            ):
+                raise ApprovalUnavailable("session_replaced")
+            self._resets[sid] = plan_reset(
+                {"session_id": sid}, current, close=True
+            )
+        await self._commit_reset(session)
 
     def line_lock_for(self, session_id: str) -> asyncio.Lock:
         """The lock a top-level line on ``session_id`` holds while it runs.

@@ -13,6 +13,8 @@ from mirage.workspace.mount.namespace.store import RecordNamespaceStore
 from mirage.workspace.record.disk import DiskRecordClient
 from mirage.workspace.session.approval import (
     approval_session,
+    empty_approvals,
+    plan_reset,
     transact_approvals,
 )
 from mirage.workspace.session.manager import SessionManager
@@ -331,6 +333,33 @@ async def test_unknown_closure_remains_blocked_until_reconfirmed():
     assert confirmed["generation"] > marker["generation"]
 
 
+@pytest.mark.asyncio
+async def test_unknown_default_retirement_keeps_the_old_key_until_reconfirmed():
+    store = LostClosureStore()
+    manager = SessionManager("s", store)
+    epoch = await manager.activate("s")
+    store.lose_replies = True
+    with pytest.raises(ApprovalUnavailable, match="storage_unconfirmed"):
+        await manager.restore_default("restored")
+    assert manager.default_id == "s"
+    assert manager.incarnation_of("s") == epoch
+    assert not manager.has("restored")
+    with pytest.raises(
+        ApprovalUnavailable, match="session_transition_pending"
+    ):
+        await manager.approval_event(
+            "s", {"op": "revoke", "owner": "old", "holder": "old"}, epoch
+        )
+    marker = await store.get("s")
+    store.lose_replies = False
+    await manager.restore_default("restored")
+    assert manager.default_id == "restored"
+    assert not manager.has("s")
+    confirmed = await store.get("s")
+    assert confirmed["incarnation"] == marker["incarnation"]
+    assert confirmed["generation"] > marker["generation"]
+
+
 APPROVAL_CHILD = """
 import asyncio
 import json
@@ -453,3 +482,80 @@ async def test_process_death_after_consumption_cannot_reopen_the_answer(
     )
     assert resumed.result["kind"] == "pending"
     assert "request" in resumed.fields["approval_state"]["retired"]
+
+
+@pytest.mark.asyncio
+async def test_reset_of_a_missing_destination_discards_source_storage_metadata():
+    store = RAMNamespaceStore()
+    source = SessionState(session_id="s", incarnation="source", generation=9)
+    source.approval_state = empty_approvals("source")
+    plan = plan_reset(source.to_dict(), None, close=False)
+    assert plan.fields["generation"] == 0
+    assert "incarnation" not in plan.fields
+    assert "approval_state" not in plan.fields
+    reply = await transact_approvals(
+        store,
+        plan.fields,
+        plan.event,
+        plan.expected_epoch,
+        plan.expected_closed,
+        plan.transition,
+    )
+    assert reply.fields["generation"] == 1
+    assert reply.fields["incarnation"] != "source"
+    assert reply.fields["approval_state"]["records"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_new_destination_identity_blocks_an_earlier_reset_plan():
+    store = RAMNamespaceStore()
+    plan = plan_reset(
+        SessionState(session_id="s", generation=9).to_dict(), None, close=False
+    )
+    other = SessionManager("s", store)
+    await other.activate("s")
+    before = await store.get("s")
+    with pytest.raises(ApprovalUnavailable, match="session_replaced"):
+        await transact_approvals(
+            store,
+            plan.fields,
+            plan.event,
+            plan.expected_epoch,
+            plan.expected_closed,
+            plan.transition,
+        )
+    assert await store.get("s") == before
+
+
+@pytest.mark.asyncio
+async def test_restoring_a_different_default_fences_the_old_key_and_late_cleanup():
+    store = RAMNamespaceStore()
+    manager = SessionManager("s", store)
+    epoch = await manager.activate("s")
+    await manager.approval_event("s", question(), epoch)
+    stale = SessionManager("s", store)
+    await stale.ensure_loaded()
+    await manager.restore_default("restored")
+    await manager.replace_from_snapshot([manager.get("restored")])
+    marker = await store.get("s")
+    assert marker["closed"]
+    assert marker["approval_state"]["records"] == []
+    assert manager.incarnation_of("restored") != epoch
+    seed_var(stale.get("s"), "STALE", "refused")
+    with pytest.raises(ApprovalUnavailable, match="session_closed"):
+        await stale.flush("s")
+    with pytest.raises(ApprovalUnavailable, match="session_closed"):
+        await stale.approval_event("s", question("late"), epoch)
+    with pytest.raises(ApprovalUnavailable, match="session_closed"):
+        await manager.refresh_approval("s", epoch)
+    assert await manager.approval_event(
+        "s",
+        {
+            "op": "revoke",
+            "owner": "old-owner",
+            "holder": "old-holder",
+        },
+        epoch,
+    ) == {"kind": "applied"}
+    assert manager.approval_state_of("s")["closed"] == marker["closed"]
+    assert await store.get("s") == marker
