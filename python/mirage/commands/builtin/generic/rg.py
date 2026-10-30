@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 import time
 from collections.abc import (
     AsyncIterator,
@@ -10,8 +9,8 @@ from collections.abc import (
     Sequence,
 )
 from functools import partial
+from typing import TypedDict, cast
 
-from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.grep_pattern import resolve_pattern
 from mirage.commands.builtin.grep_scan import exit_code_for
 from mirage.commands.builtin.rg_filetypes import FileTypes, type_listing
@@ -39,7 +38,6 @@ from mirage.commands.builtin.rg_search import (
 )
 from mirage.commands.builtin.rg_stream import (
     RgProgram,
-    encoding_for,
     format_message,
     format_output,
     latin1,
@@ -74,9 +72,9 @@ from mirage.errors.fs import walk_refusal
 from mirage.errors.types import WalkLimitError
 from mirage.io.stream import close_quietly, yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import scanned
 from mirage.runtime.types import DispatchFn, ShellFn
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import decode_text, encode_text, text_view
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.join import shell_join
 from mirage.types import (
@@ -109,24 +107,66 @@ STDIN_NAME = "<stdin>"
 # The synthetic cwd operand's spelling (routing.CWD_DEFAULT_RAW["rg"]):
 # a line that named no path at all.
 IMPLICIT_CWD = ""
-SORT_KEYS = ("path", "modified", "accessed", "created", "none")
-COLOR_CHOICES = ("never", "auto", "always", "ansi")
-# --engine's values (ripgrep 14.1.1).
-ENGINES = ("default", "pcre2", "auto")
-# The numeric options, each named as ripgrep names it in a refusal. The
-# bag keeps no record of which spelling the line typed, so a long one
-# is refused under its short name.
-NUMBER_SPELLINGS = {
-    "max_count": "-m",
-    "after_context": "-A",
-    "before_context": "-B",
-    "context": "-C",
-    "max_depth": "-d",
-    "threads": "-j",
-    "max_columns": "-M",
-}
-_ESCAPES = {"t": "\t", "n": "\n", "r": "\r", "0": "\0", "\\": "\\"}
-_HEX_ESCAPE = re.compile(r"\\x([0-9A-Fa-f]{2})")
+# The options whose values mirage-rs reads, with the switches that decide
+# among them.
+SCANNED = (
+    "threads",
+    "encoding",
+    "no_encoding",
+    "color",
+    "colors",
+    "hyperlink_format",
+    "dfa_size_limit",
+    "regex_size_limit",
+    "passthru",
+    "passthrough",
+    "after_context",
+    "before_context",
+    "context",
+    "sort",
+    "sortr",
+    "sort_files",
+    "no_sort_files",
+    "pcre2",
+    "no_pcre2",
+    "engine",
+    "auto_hybrid_regex",
+    "no_auto_hybrid_regex",
+    "max_columns",
+    "path_separator",
+    "max_count",
+    "max_depth",
+    "max_filesize",
+    "context_separator",
+    "no_context_separator",
+    "field_match_separator",
+    "field_context_separator",
+)
+
+
+class RgValues(TypedDict):
+    """What rg's scan reads, every value checked as ripgrep 14.1.1 checks
+    it. The separators are byte views, and None where the line asks for
+    none (--no-context-separator) or for ripgrep's own."""
+
+    threads: int | None
+    encoding: str
+    dfa_size_limit: int | None
+    regex_size_limit: int | None
+    passthru: bool
+    context_before: int
+    context_after: int
+    sort: str | None
+    sort_reverse: bool
+    engine: str
+    max_columns: int | None
+    path_separator: str | None
+    max_count: int | None
+    max_depth: int | None
+    max_filesize: int | None
+    context_separator: str | None
+    field_match_separator: str
+    field_context_separator: str
 
 
 def operand_name(p: PathSpec) -> str:
@@ -139,157 +179,6 @@ def operand_name(p: PathSpec) -> str:
         p (PathSpec): the operand.
     """
     return STDIN_NAME if p.raw_path == "-" else p.raw_path
-
-
-def _flag_error(spelling: str, reason: str) -> UsageError:
-    """ripgrep's refusal of an option value it cannot parse, exit 2.
-
-    Args:
-        spelling (str): the option as ripgrep names it (``-E``,
-            ``--colors``).
-        reason (str): why the value is refused.
-    """
-    return UsageError(f"rg: error parsing flag {spelling}: {reason}")
-
-
-def number_flag(fl: FlagView, dest: str) -> int | None:
-    """One numeric option's value, refused in ripgrep's words.
-
-    ripgrep reads every count as an unsigned 64-bit integer, so a sign,
-    a fraction or anything past 2**64-1 is refused, exit 2 (14.1.1).
-
-    Args:
-        fl (FlagView): the flag view.
-        dest (str): the option's dest.
-
-    Raises:
-        UsageError: the value is not an unsigned integer.
-    """
-    raw = fl.raw(dest)
-    if raw is None or isinstance(raw, bool):
-        return None
-    value = str(raw)
-    reason = None
-    digits = value[1:] if value.startswith("+") else value
-    if not value:
-        reason = "cannot parse integer from empty string"
-    elif not digits or not (digits.isascii() and digits.isdigit()):
-        reason = "invalid digit found in string"
-    elif int(digits) > UINTMAX:
-        reason = "number too large to fit in target type"
-    if reason is not None:
-        raise _flag_error(
-            NUMBER_SPELLINGS[dest], f"value is not a valid number: {reason}"
-        )
-    return int(digits)
-
-
-def encoding_flag(fl: FlagView) -> str:
-    """-E resolved in line order: auto, none, or the WHATWG encoding a
-    label names, --no-encoding going back to auto. ripgrep checks every
-    label as it reads it, so an earlier bad one is refused too (14.1.1).
-
-    Args:
-        fl (FlagView): the flag view.
-
-    Raises:
-        UsageError: a label that names no encoding.
-    """
-    found = "auto"
-    for name, value in fl.occurrences("encoding", "no_encoding"):
-        if name == "no_encoding":
-            found = "auto" if value else found
-            continue
-        label = str(value)
-        named = label if label in ("auto", "none") else encoding_for(label)
-        if named is None:
-            raise _flag_error(
-                "-E", f"grep config error: unknown encoding: {label}"
-            )
-        found = named
-    return found
-
-
-def size_flag(fl: FlagView, dest: str) -> int | None:
-    sizes: list[JsonValue] = [
-        [dest, str(value)] for _, value in fl.occurrences(dest)
-    ]
-    return _validated({"sizes": sizes}).get(dest)
-
-
-def _validated(options: dict[str, JsonValue]) -> dict[str, int]:
-    if not any(options.values()):
-        return {}
-    try:
-        return {
-            name: int(value)
-            for name, value in json.loads(
-                format_message({"kind": "options", **options})
-            ).items()
-        }
-    except StreamRefusal as exc:
-        raise UsageError(exc.message) from exc
-
-
-def check_display_flags(fl: FlagView) -> None:
-    _validated(
-        {
-            "colors": [spec for spec in fl.as_list("colors")],
-            "hyperlinks": [
-                str(value) for _, value in fl.occurrences("hyperlink_format")
-            ],
-            "sizes": [
-                [dest, str(value)]
-                for dest in ("dfa_size_limit", "regex_size_limit")
-                for _, value in fl.occurrences(dest)
-            ],
-        }
-    )
-
-
-def _choice(
-    fl: FlagView, dest: str, spelling: str, choices: Sequence[str]
-) -> str | None:
-    """A value from a fixed set, refused in ripgrep's words.
-
-    Args:
-        fl (FlagView): the flag view.
-        dest (str): the option's dest.
-        spelling (str): the option's spelling in the refusal.
-        choices (Sequence[str]): the accepted values.
-    """
-    value = fl.as_str(dest)
-    if value is not None and value not in choices:
-        raise _flag_error(spelling, f"choice '{value}' is unrecognized")
-    return value
-
-
-def unescape(value: str) -> str:
-    """A separator's escapes read as ripgrep reads them (``\\t``, ``\\n``,
-    ``\\r``, ``\\0``, ``\\\\`` and ``\\xHH``).
-
-    Args:
-        value (str): the separator as typed.
-    """
-    out: list[str] = []
-    i = 0
-    while i < len(value):
-        hexed = _HEX_ESCAPE.match(value, i)
-        if hexed is not None:
-            out.append(chr(int(hexed.group(1), 16)))
-            i = hexed.end()
-            continue
-        if (
-            value[i] == "\\"
-            and i + 1 < len(value)
-            and value[i + 1] in _ESCAPES
-        ):
-            out.append(_ESCAPES[value[i + 1]])
-            i += 2
-            continue
-        out.append(value[i])
-        i += 1
-    return "".join(out)
 
 
 def _last(fl: FlagView, *names: str) -> str | None:
@@ -319,41 +208,6 @@ def filename_flag(fl: FlagView) -> str | None:
     return _last(fl, "with_filename", "no_filename")
 
 
-def _context_of(fl: FlagView) -> tuple[bool, int, int]:
-    """--passthru and -A/-B/-C resolved in line order, as ripgrep's
-    ContextMode resolves them.
-
-    --passthru replaces every context option before it, and a context
-    option after it replaces it and starts afresh. -A and -B, even at 0,
-    outrank -C for their own side.
-
-    Args:
-        fl (FlagView): the flag view.
-
-    Returns:
-        tuple[bool, int, int]: --passthru, and the before and after counts.
-    """
-    passthru = False
-    counts: dict[str, int | None] = {}
-    for name in fl.typed_order(
-        "passthru", "passthrough", "after_context", "before_context", "context"
-    ):
-        if name in ("passthru", "passthrough"):
-            passthru = True
-            counts = {}
-            continue
-        passthru = False
-        counts[name] = number_flag(fl, name)
-    both = counts.get("context")
-    before = counts.get("before_context")
-    after = counts.get("after_context")
-    return (
-        passthru,
-        before if before is not None else both or 0,
-        after if after is not None else both or 0,
-    )
-
-
 def _binary_mode_of(fl: FlagView, unrestricted: int) -> str:
     """How rg treats a binary file: the last word of its group decides.
 
@@ -378,32 +232,6 @@ def _binary_mode_of(fl: FlagView, unrestricted: int) -> str:
     return mode
 
 
-def path_separator(fl: FlagView) -> str | None:
-    """--path-separator's one byte, None for ripgrep's own ``/``.
-
-    Args:
-        fl (FlagView): the flag view.
-
-    Raises:
-        UsageError: the separator is not exactly one byte (an empty one
-            is the default).
-    """
-    value = fl.as_str("path_separator")
-    if value is None:
-        return None
-    raw = encode_text(unescape(value))
-    if not raw:
-        return None
-    if len(raw) != 1:
-        raise _flag_error(
-            "--path-separator",
-            "A path separator must be exactly one byte, but the given "
-            f"separator is {len(raw)} bytes: {value}\nIn some shells on "
-            "Windows '/' is automatically expanded. Use '//' instead.",
-        )
-    return decode_text(raw)
-
-
 def parse_flags(fl: FlagView) -> RgFlags:
     """Convert the raw flag bag into RgFlags, the only string-keyed reads.
 
@@ -415,8 +243,9 @@ def parse_flags(fl: FlagView) -> RgFlags:
     --sort/--sortr/--sort-files/--no-sort-files, and
     --context-separator/--no-context-separator.
 
-    Unlike ripgrep 14.1.1, creation-time sorting is refused: FileStat
-    has no birth timestamp, so accepting it would silently do nothing.
+    Every value is read by mirage-rs (``RgValues``). Unlike ripgrep
+    14.1.1, creation-time sorting is refused: FileStat has no birth
+    timestamp, so accepting it would silently do nothing.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
@@ -424,10 +253,7 @@ def parse_flags(fl: FlagView) -> RgFlags:
     Raises:
         UsageError: a value ripgrep refuses, in its words.
     """
-    threads = number_flag(fl, "threads")
-    encoding = encoding_flag(fl)
-    _choice(fl, "color", "--color", COLOR_CHOICES)
-    check_display_flags(fl)
+    values = cast(RgValues, scanned("rg", fl.texts(*SCANNED)))
     case = _last(fl, "ignore_case", "case_sensitive", "smart_case")
     bounds = _last(fl, "word_regexp", "line_regexp")
     listing = _last(
@@ -442,7 +268,6 @@ def parse_flags(fl: FlagView) -> RgFlags:
     vimgrep = fl.as_bool("vimgrep")
     columns = _last(fl, "column", "no_column")
     column = columns == "column" if columns is not None else vimgrep
-    passthru, context_before, context_after = _context_of(fl)
     # --json prints its own records: no heading or separators, and line
     # numbers unless -N turned them off.
     json_records = _last(fl, "json", "no_json") == "json"
@@ -456,22 +281,8 @@ def parse_flags(fl: FlagView) -> RgFlags:
             hidden = not fl.as_bool(name) and hidden
         elif unrestricted >= 2:
             hidden = True
-    sort_flag = _last(fl, "sort", "sortr", "sort_files", "no_sort_files")
-    sort = None
-    if sort_flag == "sort_files":
-        sort = "path"
-    elif sort_flag in ("sort", "sortr"):
-        sort = _choice(fl, sort_flag, f"--{sort_flag}", SORT_KEYS)
-    separator = _last(fl, "context_separator", "no_context_separator")
-    typed_separator = fl.as_str("context_separator")
-    # An empty field separator is a value: ripgrep runs the fields together.
-    match_separator = fl.as_str("field_match_separator")
-    context_field_separator = fl.as_str("field_context_separator")
-    if sort == "created":
-        raise UsageError(
-            "rg: sorting by creation time is not supported by the virtual "
-            "filesystem"
-        )
+    separator = values["context_separator"]
+    path_separator = values["path_separator"]
     selections = [
         (value, name == "type_not")
         for name, value in fl.occurrences("type", "type_not")
@@ -483,7 +294,7 @@ def parse_flags(fl: FlagView) -> RgFlags:
         if isinstance(value, str)
     ]
     return RgFlags(
-        engine=engine_flag(fl),
+        engine=values["engine"],
         unicode=_last(
             fl, "unicode", "no_unicode", "pcre2_unicode", "no_pcre2_unicode"
         )
@@ -505,7 +316,7 @@ def parse_flags(fl: FlagView) -> RgFlags:
         only_matching=fl.as_bool("only_matching"),
         replace=fl.as_str("replace"),
         trim=_last(fl, "trim", "no_trim") == "trim",
-        max_columns=number_flag(fl, "max_columns"),
+        max_columns=values["max_columns"],
         max_columns_preview=_last(
             fl, "max_columns_preview", "no_max_columns_preview"
         )
@@ -526,7 +337,9 @@ def parse_flags(fl: FlagView) -> RgFlags:
         json=json_records,
         multiline_dotall=_last(fl, "multiline_dotall", "no_multiline_dotall")
         == "multiline_dotall",
-        path_separator=path_separator(fl),
+        path_separator=None
+        if path_separator is None
+        else text_view(path_separator),
         quiet=fl.as_bool("quiet"),
         count_only=listing == "count",
         count_matches=listing == "count_matches",
@@ -543,25 +356,17 @@ def parse_flags(fl: FlagView) -> RgFlags:
         in ("heading", "pretty")
         and not vimgrep
         and not json_records,
-        passthru=passthru,
-        max_count=number_flag(fl, "max_count"),
+        passthru=values["passthru"],
+        max_count=values["max_count"],
         stop_on_nonmatch=_last(fl, "stop_on_nonmatch", "multiline")
         == "stop_on_nonmatch",
-        context_after=context_after,
-        context_before=context_before,
-        context_separator=(
-            None
-            if separator == "no_context_separator" or json_records
-            else unescape(typed_separator)
-            if typed_separator is not None
-            else "--"
-        ),
-        field_match_separator=unescape(
-            ":" if match_separator is None else match_separator
-        ),
-        field_context_separator=unescape(
-            "-" if context_field_separator is None else context_field_separator
-        ),
+        context_after=values["context_after"],
+        context_before=values["context_before"],
+        context_separator=None
+        if separator is None or json_records
+        else text_view(separator),
+        field_match_separator=text_view(values["field_match_separator"]),
+        field_context_separator=text_view(values["field_context_separator"]),
         globs=tuple(fl.as_list("glob")),
         iglobs=tuple(fl.as_list("iglob")),
         glob_case_insensitive=_last(
@@ -571,52 +376,21 @@ def parse_flags(fl: FlagView) -> RgFlags:
         type_changes=tuple(changes),
         type_selections=tuple(selections),
         hidden=hidden,
-        max_depth=number_flag(fl, "max_depth"),
-        max_filesize=size_flag(fl, "max_filesize"),
+        max_depth=values["max_depth"],
+        max_filesize=values["max_filesize"],
         follow=_last(fl, "follow", "no_follow") == "follow",
         one_file_system=_last(fl, "one_file_system", "no_one_file_system")
         == "one_file_system",
         binary=binary_mode != "auto",
-        sort=sort,
-        sort_reverse=sort_flag == "sortr",
+        sort=values["sort"],
+        sort_reverse=values["sort_reverse"],
         no_messages=_last(fl, "no_messages", "messages") == "no_messages",
-        threads=threads,
+        threads=values["threads"],
         text=binary_mode == "text",
-        encoding=encoding,
+        encoding=values["encoding"],
+        regex_size_limit=values["regex_size_limit"],
+        dfa_size_limit=values["dfa_size_limit"],
     )
-
-
-def engine_flag(fl: FlagView) -> str:
-    """The regex engine the line asks for, the last of -P, --no-pcre2,
-    --engine and the deprecated --auto-hybrid-regex pair winning
-    (ripgrep 14.1.1: `rg -P --no-pcre2` is the default engine, `rg
-    --no-pcre2 -P` is PCRE2, and --no-auto-hybrid-regex selects the
-    default engine as --auto-hybrid-regex selects auto).
-
-    Args:
-        fl (FlagView): the flag view.
-
-    Raises:
-        UsageError: --engine names no engine ripgrep has.
-    """
-    chosen = _last(
-        fl,
-        "pcre2",
-        "no_pcre2",
-        "engine",
-        "auto_hybrid_regex",
-        "no_auto_hybrid_regex",
-    )
-    if chosen == "pcre2":
-        return "pcre2"
-    if chosen == "auto_hybrid_regex":
-        return "auto"
-    if chosen != "engine":
-        return "default"
-    value = fl.as_str("engine") or ""
-    if value not in ENGINES:
-        raise _flag_error("--engine", f"unrecognized regex engine '{value}'")
-    return value
 
 
 def walk_filter(
@@ -807,8 +581,8 @@ async def rg_generic(
             pattern,
             never_match,
             f,
-            size_flag(fl, "regex_size_limit"),
-            size_flag(fl, "dfa_size_limit"),
+            f.regex_size_limit,
+            f.dfa_size_limit,
         )
 
     if not paths:

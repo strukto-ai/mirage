@@ -67,6 +67,9 @@ async def _search(
         ("a{2}", False, True),
         (r"\x41", False, False),
         ("H.llo", True, False),
+        ("\u2102|a", False, False),
+        ("\U0001d400", True, False),
+        ("\u01c5", True, True),
     ],
 )
 def test_smart_case_folds_only_an_all_lowercase_pattern(pattern, fixed, folds):

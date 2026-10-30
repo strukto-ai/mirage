@@ -29,10 +29,11 @@ import { WalkLimitError } from '../../../errors/types.ts'
 import type { LinkView, MountView } from '../../../view/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import type { FlagValue } from '../../spec/types.ts'
 
-import { directoriesAction, parseFlags as parseGrepFlags } from '../generic/grep.ts'
-import { encodingFlag, parseFlags as parseRgFlags } from '../generic/rg.ts'
+import { parseFlags as parseGrepFlags } from '../generic/grep.ts'
+import type { FlagSet } from '../grep_binary.ts'
+import { UsageError } from '../../errors.ts'
+import { parseFlags as parseRgFlags, type RgFlags } from '../generic/rg.ts'
 import { searchTerms } from '../grep_pushdown.ts'
 import { foldsCase } from '../rg_search.ts'
 import { compiledTerms, openRg, type Compiled } from '../rg_stream.ts'
@@ -47,16 +48,16 @@ type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
  * What a grep line asks the mount's search; null when it must read every
  * file: -v, -f, or no plain text of three characters every match holds (under
  * -i, a word with a non-ASCII letter, or with i, k or s when case folds by
- * Unicode, counts as none). Throws the refusal grep itself would print for a
- * bad flag or pattern. Mirrors Python's `grep_terms`.
+ * Unicode, counts as none). `f` is the line's flags, parsed. Throws the
+ * refusal grep itself would print for a bad pattern. Mirrors Python's
+ * `grep_terms`.
  */
 export function grepTerms(
-  bag: Record<string, FlagValue>,
+  f: FlagSet,
+  fl: FlagView,
   texts: string[],
   utf8: boolean,
 ): SearchTerms | null {
-  const fl = new FlagView(bag, specOf('grep'))
-  const f = parseGrepFlags(fl)
   const pattern = patternArg(texts, fl)
   if (f.invert) return null
   if (pattern === null || fl.raw('file') !== undefined) return null
@@ -99,15 +100,14 @@ export function grepTerms(
  * -v or --passthru, a listing of files that do not match
  * (--files-without-match, -c or --count-matches with --include-zero, without
  * -q; --stats, --json), -L, -z, --pre, -E naming an encoding, -f, or no plain
- * text every match holds. Throws the refusal rg itself would print for a bad
- * flag or pattern. Mirrors Python's `rg_terms`.
+ * text every match holds. `f` is the line's flags, parsed. Throws the refusal
+ * rg itself would print for a bad pattern. Mirrors Python's `rg_terms`.
  */
 export async function rgTerms(
-  bag: Record<string, FlagValue>,
+  f: RgFlags,
+  fl: FlagView,
   texts: string[],
 ): Promise<SearchTerms | null> {
-  const fl = new FlagView(bag, specOf('rg'))
-  const f = parseRgFlags(fl)
   const pattern = patternArg(texts, fl)
   if (f.invert || f.passthru) return null
   if (!f.quiet && (f.filesWithoutMatch || (f.includeZero && (f.countOnly || f.countMatches)))) {
@@ -359,7 +359,17 @@ export async function searchReads(
   if (first === undefined || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
     return files.read
   }
-  const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
+  let grep: FlagSet | null = null
+  if (name === 'grep') {
+    try {
+      grep = parseGrepFlags(fl)
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err
+      console.debug(`grep search left to the scan: ${err.message}`)
+      return files.read
+    }
+  }
+  const walked = grep === null || grep.recursive
   const mounts = mountsOf(ctx)
   const [stream, charge] = cappedReads(files.read, walked ? paths : [], mounts)
   const narrows = files.answers('files_containing')
@@ -369,11 +379,13 @@ export async function searchReads(
   const links = linksOf(ctx)
   const home = mountRoot(ctx)
   let terms: SearchTerms | null
+  let rg: RgFlags | null = null
   try {
-    terms =
-      name === 'rg'
-        ? await rgTerms(ctx.flags, texts)
-        : grepTerms(ctx.flags, texts, utf8Locale(ctx.env))
+    if (grep !== null) terms = grepTerms(grep, fl, texts, utf8Locale(ctx.env))
+    else {
+      rg = parseRgFlags(fl)
+      terms = await rgTerms(rg, fl, texts)
+    }
   } catch (err) {
     if (!(err instanceof Error)) throw err
     console.debug(`${name} search left to the scan: ${err.message}`)
@@ -382,7 +394,7 @@ export async function searchReads(
   const dirs = walked ? await directories(files, paths) : []
   if (terms === null) return stream
   const asked = terms
-  const dropsMark = name === 'rg' && encodingFlag(fl) !== 'none'
+  const dropsMark = rg !== null && rg.encoding !== 'none'
   let hits: Set<string> | null = null
   if (narrows && dirs.length > 0) {
     const answers = await Promise.all(

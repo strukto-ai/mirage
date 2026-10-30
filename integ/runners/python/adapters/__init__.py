@@ -2483,6 +2483,13 @@ class PostgresService:
             await conn.execute("DROP SCHEMA IF EXISTS contract CASCADE")
             await conn.execute("CREATE SCHEMA contract")
             await conn.execute(
+                'CREATE TABLE contract.turkish (body text COLLATE "tr-x-icu")'
+            )
+            await conn.execute(
+                "INSERT INTO contract.turkish VALUES ('TIE'), ('unrelated')"
+            )
+            await conn.execute("ANALYZE contract.turkish")
+            await conn.execute(
                 "CREATE TABLE contract.probes "
                 "(id int PRIMARY KEY, body text, active boolean)"
             )

@@ -60,6 +60,23 @@ def test_compile_glob_folds_case_on_request():
 
 
 @pytest.mark.parametrize(
+    "glob, path, hit",
+    [
+        ("b3.txt", "B3.TXT", True),
+        ("[a-c]3.txt", "B3.txt", True),
+        ("[^a].txt", "A.txt", False),
+        ("sa.txt", "\u017fa.txt", False),
+        ("k1.txt", "\u212a1.txt", False),
+        ("\u00e92.txt", "\u00c92.txt", False),
+    ],
+)
+def test_compile_glob_folds_ascii_letters_only(glob, path, hit):
+    # ripgrep 14.1.1's --iglob folds A-Z and a-z, nothing past ASCII.
+    matcher = compile_glob(glob, case_insensitive=True)
+    assert (matcher.fullmatch(path) is not None) is hit
+
+
+@pytest.mark.parametrize(
     "glob, reason",
     [
         ("[", "unclosed character class; missing ']'"),

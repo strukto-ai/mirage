@@ -138,6 +138,38 @@
         "no_glob_case_insensitive",
         "iglob"
       ]
+    },
+    {
+      "id": "rg_iglob_folds_ascii_letters_only",
+      "seq": 19019003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "box"
+      ],
+      "command": "mkdir -p /data/igA && printf 'x\\n' > /data/igA/$'\\xc5\\xbf'a.txt && printf 'x\\n' > /data/igA/$'\\xe2\\x84\\xaa'1.txt && printf 'x\\n' > /data/igA/$'\\xc3\\x89'2.txt && printf 'x\\n' > /data/igA/B3.TXT && rg -l --sort path --iglob sa.txt --iglob k1.txt --iglob $'\\xc3\\xa9'2.txt --iglob b3.txt x /data/igA; rm -rf /data/igA",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/igA/B3.TXT\n",
+        "stderr": ""
+      },
+      "flags": [
+        "iglob"
+      ]
     }
   ]
 }
