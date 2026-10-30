@@ -232,9 +232,10 @@ enum TokenKind {
         valid: bool,
         decimal: Decimal,
         effective: Option<usize>,
-        /// Under values, a literal longer than a page, charged while it is
-        /// read, and its reading.
-        reading: Option<(Vec<u8>, Charge, NumberReading)>,
+        /// Under values, a literal longer than a page: its text gathered a
+        /// budget at a time to the length read, charged while it is held,
+        /// and its reading.
+        reading: Option<(Vec<u8>, usize, Charge, NumberReading)>,
     },
     String {
         decoded: Captured,
@@ -406,8 +407,17 @@ impl Token {
                 effective,
                 reading,
             } => loop {
-                if let Some((text, _, number)) = reading {
-                    while *budget > 0 {
+                if let Some((text, length, _, number)) = reading {
+                    while text.len() < *length && *budget > 0 {
+                        let run = self.bytes.run_at(text.len());
+                        let taken = run.len().min(*length - text.len()).min(*budget);
+                        if taken == 0 {
+                            return Some(Err("Invalid numeric literal"));
+                        }
+                        text.extend_from_slice(&run[..taken]);
+                        *budget -= taken;
+                    }
+                    while text.len() == *length && *budget > 0 {
                         *budget -= 1;
                         match number.step(text) {
                             Ok(Some(value)) => return Some(Ok(Leaf::Value(value))),
@@ -464,14 +474,9 @@ impl Token {
                             .ok_or("Invalid numeric literal"),
                     );
                 }
-                let mut text = Vec::with_capacity(length);
-                while text.len() < length {
-                    let run = self.bytes.run_at(text.len());
-                    text.extend_from_slice(&run[..run.len().min(length - text.len())]);
-                }
-                *budget = budget.saturating_sub(length / 64);
+                let text = Vec::with_capacity(length);
                 let charge = Charge::open(text.capacity());
-                *reading = Some((text, charge, NumberReading::begin(0, length)));
+                *reading = Some((text, length, charge, NumberReading::begin(0, length)));
             },
             TokenKind::String {
                 decoded,
@@ -2641,6 +2646,47 @@ mod tests {
             drop(scanner);
             assert_eq!(meter.live(), 0);
         }
+    }
+
+    /// How much of a long literal's text the scanner has gathered.
+    fn gathered(scanner: &Scanner) -> Option<usize> {
+        match scanner.task.as_ref().map(|task| &task.kind) {
+            Some(TokenKind::Literal {
+                reading: Some((text, ..)),
+                ..
+            }) => Some(text.len()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_long_literal_is_gathered_a_slice_at_a_time() {
+        let mut scanner = Scanner::values(false, false);
+        let text = format!("{} ", "1".repeat(200_000));
+        let mut sizes = Vec::new();
+        let mut read = Vec::new();
+        for input in text.as_bytes().chunks(4095) {
+            scanner.feed(input, &mut Vec::new()).unwrap();
+            sizes.extend(gathered(&scanner));
+            read.extend(scanner.take());
+            while scanner.busy() {
+                scanner.drain(&mut Vec::new()).unwrap();
+                sizes.extend(gathered(&scanner));
+                read.extend(scanner.take());
+            }
+        }
+        assert!(
+            sizes.iter().any(|size| *size > 0 && *size < 200_000),
+            "{sizes:?}"
+        );
+        assert!(
+            sizes.windows(2).all(|pair| pair[1] - pair[0] <= WORK),
+            "{sizes:?}"
+        );
+        let [Scanned::Value(value)] = read.as_slice() else {
+            panic!("one number");
+        };
+        assert_eq!(value.dump(), "1".repeat(200_000));
     }
 
     #[test]
