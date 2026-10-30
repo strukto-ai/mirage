@@ -14,6 +14,7 @@
 
 import type { Context } from '../commands/config.ts'
 import { runWithCaller } from '../context/session_context.ts'
+import { liveEgress } from '../io/gateway.ts'
 import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
 import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
@@ -137,6 +138,15 @@ export abstract class Runtime<E = unknown> {
       const restricted = capture?.restrictedMounts ?? []
       if (this.reach !== 'workspace' && restricted.length > 0 && !this.servesSession(restricted))
         return refusedRun(this.name, "runtime cannot enforce this session's file restrictions")
+      // A process on this machine opens its connections around the gateway,
+      // so a workspace whose network is limited, or whose policies judge
+      // each connection, runs none.
+      if (this.reach === 'process') {
+        for (const egress of liveEgress()) {
+          if (egress.rule !== null || (await egress.hooked))
+            return refusedRun(this.name, "runtime cannot enforce this workspace's network")
+        }
+      }
       const engine = await this.engine()
       if (capture === undefined)
         return await this.runAs(kind, engine, [...paths], [...texts], ctx, opts.output, opts.errors)

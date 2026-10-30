@@ -141,9 +141,12 @@ some YAML readers take as false. A workspace's policies can also judge each
 connection the lists let through, and cap how much it carries, at
 [`pre_network`](/home/policy/policies#pre_network-and-post_network). In a browser, `fetch` and
 `WebSocket` are judged by host name, and a limited workspace follows no
-redirect, since a page cannot see where one goes. A connection another process opens,
-such as one under the `local` runtime or a sandbox, follows that process's
-own network rules.
+redirect, since a page cannot see where one goes. A runtime that starts a
+process on this machine (`local`, Sandlock) opens its connections where
+Mirage cannot judge them, so while `network` limits anything, or a policy
+judges connections, it refuses to run: `Permission denied`, exit 126. A
+sandbox runtime connects from its own machine, under that sandbox's own
+network settings.
 
 ## Read and write policies
 

@@ -173,7 +173,7 @@ Routes that return a workspace yield this object:
 
 <Badge color="green">POST</Badge> `/v1/workspaces`
 
-<ParamField body="config" type="object" required>The workspace YAML as JSON.</ParamField>
+<ParamField body="config" type="object" required>The workspace YAML as JSON: its `mounts`, [`network`](/home/configuration#network), `profiles` and the rest of [Workspace configuration](/home/configuration).</ParamField>
 <ParamField body="id" type="string">The workspace id. A fresh one when absent.</ParamField>
 <ParamField query="explain" type="boolean">Return what the [server policies](#server-policies) say of the config instead, and create nothing.</ParamField>
 

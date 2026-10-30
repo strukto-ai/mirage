@@ -402,6 +402,46 @@ async def test_native_runtime_refused_before_running_with_hidden_files():
         )
 
 
+class _Listening(Policy):
+    async def pre_network(self, ctx):
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "network,listening,refused",
+    [
+        (True, False, False),
+        (False, False, True),
+        ({"allowed_domains": ["example.com"]}, False, True),
+        (True, True, True),
+    ],
+)
+async def test_native_runtime_refused_where_the_network_is_judged(
+    network, listening, refused
+):
+    runtime = ShellProbe(captures=["@line"])
+    with Workspace(
+        {"/data": RAMVFS()},
+        runtimes=[runtime],
+        mode=MountMode.EXEC,
+        network=network,
+    ) as ws:
+        if listening:
+            ws.policies.add(_Listening())
+        result = await ws.shell("echo ran")
+    if not refused:
+        assert (result.exit_code, result.stdout) == (0, b"echo ran:/")
+        return
+    assert result.exit_code == 126
+    assert result.stdout == b""
+    assert result.stderr == b"shell-probe: Permission denied\n"
+    assert result.refusal is not None
+    assert result.refusal.reason == (
+        "runtime cannot enforce this workspace's network"
+    )
+
+
 @pytest.mark.parametrize(
     "hidden,expected",
     [

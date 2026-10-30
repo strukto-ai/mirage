@@ -465,7 +465,9 @@ const budget: Policy = {
 
 </CodeGroup>
 
-In a browser a page sees no socket: `fetch` is judged by host name with an
+A runtime that starts a process on this machine (`local`, Sandlock) would
+connect around the gateway, so while a policy judges connections it refuses
+to run. In a browser a page sees no socket: `fetch` is judged by host name with an
 empty `address`, the counts are the body's bytes, and while a policy
 listens for connections a `WebSocket` is refused, since its handshake
 cannot wait for an answer.
