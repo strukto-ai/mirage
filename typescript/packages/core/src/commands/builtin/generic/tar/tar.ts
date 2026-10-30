@@ -21,14 +21,6 @@ import { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { byteView } from '../../../../shell/bytes.ts'
-import {
-  CREATE_ERROR_EXIT,
-  MODE_CONFLICT,
-  MULTIPLE_ARCHIVES,
-  NO_MODE,
-  USAGE_HINT,
-} from './constants.ts'
-import { UsageError } from '../../../errors.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import { checkDirectories, planCreate, type DirProbe, type StatFn, type WalkFn } from './create.ts'
 import { fsStrerror, walkRefusal } from '../../../../errors/fs.ts'
@@ -74,7 +66,7 @@ export interface TarFlags {
   toStdout: boolean
   archive: PathSpec | null
   directories: PathSpec[]
-  stripComponents: string[]
+  typed: [string, string][]
   exclude: string | null
   oneFileSystem: boolean
 }
@@ -82,36 +74,24 @@ export interface TarFlags {
 const MODES = ['create', 'extract', 'list'] as const
 const CODECS = ['gzip', 'bzip2', 'xz'] as const
 
+/** The options the tar engine reads, each text as a byte view. Mirrors
+ * Python's `_typed`. */
+function typedConfig(typed: readonly [string, string][]): util.JSONType[] {
+  return typed.map(([name, text]) => [name, byteView(text)])
+}
+
 /**
- * tar's flags as argp reads them, refusing what tar refuses. argp meets the
- * options in line order and stops at the first it refuses: a second main
- * operation where one is already set, or a --strip-components value that is
- * no count, which the tar engine reads, so only the values typed before a
- * conflict reach it. After the scan, more than one archive is refused without
- * -M, which mirage does not have (tar 1.35). The flags, or the engine's
- * refusal, exit 2; tar's other refusals throw. Mirrors Python's parse_flags.
+ * tar's flags, refused by the tar engine as argp refuses them: the flags, or
+ * tar's refusal, exit 2. Mirrors Python's parse_flags.
  */
 export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult {
   const fl = new FlagView(bag, specOf('tar'))
-  let mode: string | null = null
-  const stripComponents: string[] = []
-  let conflict = false
-  for (const [name, text] of fl.texts(...MODES, 'strip_components')) {
-    if (name === 'strip_components') stripComponents.push(text)
-    else if (mode !== null && name !== mode) {
-      conflict = true
-      break
-    } else mode = name
-  }
+  const typed = fl.texts(...MODES, 'strip_components', 'file')
   try {
-    openStreamSync('tar', { strip: stripComponents.map((text) => byteView(text)) }).close()
+    openStreamSync('tar', { typed: typedConfig(typed) }).close()
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
-  }
-  if (conflict) throw new UsageError(`${MODE_CONFLICT}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
-  if (fl.occurrences('file').length > 1) {
-    throw new UsageError(`${MULTIPLE_ARCHIVES}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
   }
   return {
     create: fl.asBool('create'),
@@ -123,7 +103,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TarFlags | IOResult 
     toStdout: fl.asBool('to_stdout'),
     archive: fl.asPath('file') ?? null,
     directories: fl.asPaths('directory'),
-    stripComponents,
+    typed,
     exclude: fl.asStr('exclude') ?? null,
     oneFileSystem: fl.asBool('one_file_system'),
   }
@@ -213,20 +193,18 @@ export async function tarGeneric(
       status: plan.exitCode,
     })
     host = new StreamHost(reads, deps.stream, ctx, false)
-  } else if (flags.list || flags.extract) {
+  } else {
     const refusal = await checkDirectories(directories, deps.isDir, deps.stat)
     Object.assign(config, {
       mode: flags.list ? 'list' : 'extract',
       probe: archive.walkError === null,
       selectors: texts.map((selector) => byteView(selector)),
-      strip: flags.stripComponents.map((text) => byteView(text)),
+      typed: typedConfig(flags.typed),
       to_stdout: flags.toStdout,
       base: byteView(rstripSlash(extractDest(directories.at(-1) ?? null, ctx.cwd.virtual))),
       refusal: refusal.map((line) => byteView(line)),
     })
     host = new StreamHost([archive], deps.stream, ctx, false)
-  } else {
-    throw new UsageError(`${NO_MODE}\n${USAGE_HINT}`, CREATE_ERROR_EXIT)
   }
   const io = new IOResult()
   return [hostedStream('tar', config, host, io, ctx.signal), io]

@@ -14,6 +14,7 @@
 
 import asyncio
 import ctypes
+import functools
 import logging
 import os
 import stat
@@ -41,6 +42,16 @@ def open_flags(flags: int, path: str, _mode: int) -> int:
     return os.open(path, flags, 0o666)
 
 
+@functools.cache
+def _libc() -> ctypes.CDLL:
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.realpath.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+    libc.realpath.restype = ctypes.c_void_p
+    libc.free.argtypes = [ctypes.c_void_p]
+    libc.free.restype = None
+    return libc
+
+
 def native_realpath(path: str) -> str:
     """Ask the host for a canonical path without Python's POSIX emulation.
 
@@ -49,11 +60,7 @@ def native_realpath(path: str) -> str:
     """
     if sys.platform != "darwin":
         return os.path.realpath(path, strict=True)
-    libc = ctypes.CDLL(None, use_errno=True)
-    libc.realpath.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
-    libc.realpath.restype = ctypes.c_void_p
-    libc.free.argtypes = [ctypes.c_void_p]
-    libc.free.restype = None
+    libc = _libc()
     resolved = libc.realpath(os.fsencode(path), None)
     if not resolved:
         code = ctypes.get_errno()
@@ -65,12 +72,19 @@ def native_realpath(path: str) -> str:
 
 
 def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
-    """Prove a fresh native spelling or inspect the parent's actual names.
+    """Prove the requested spelling is the entry's own, listing the
+    parent's names only when nothing cheaper proves it.
 
-    Native realpath may preserve its input on some filesystems. Trust it
-    only when a different-case, non-link spelling of the same entry resolves
-    to the identical full path whose leaf has exactly the requested name.
-    No path names or directory versions are cached.
+    An ASCII name has one spelling unless the directory folds case, and
+    the name with one letter's case flipped tells: absent, a link or
+    another entry means the directory keeps case apart, so the name that
+    resolved is exact. Where it folds, native realpath may preserve its
+    input on some filesystems, so it is trusted only when the flipped,
+    non-link spelling resolves to the identical full path whose leaf has
+    exactly the requested name. A name past ASCII may also fold or
+    normalize in ways one probe cannot see. Every proof that skips the
+    listing still opens the parent, so permissions stay uniform. No path
+    names or directory versions are cached.
 
     Args:
         parent (str): already checked host parent.
@@ -80,27 +94,43 @@ def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
     index = next(
         (i for i, c in enumerate(part) if c.isascii() and c.isalpha()), None
     )
-    if sys.platform in ("darwin", "win32") and index is not None:
+    alternate = None
+    folds = False
+    if index is not None:
         other = part[:index] + part[index].swapcase() + part[index + 1 :]
         alternate = os.path.join(parent, other)
         try:
             alias = os.lstat(alternate)
-            if not stat.S_ISLNK(alias.st_mode) and os.path.samestat(
+            folds = not stat.S_ISLNK(alias.st_mode) and os.path.samestat(
                 info, alias
+            )
+        except (FileNotFoundError, NotADirectoryError):
+            folds = False
+        except OSError:
+            logger.debug("Disk spelling probe unavailable", exc_info=True)
+            return part in os.listdir(parent)
+    if part.isascii() and not folds:
+        _open_parent(parent)
+        return True
+    if folds and alternate and sys.platform in ("darwin", "win32"):
+        try:
+            canonical = native_realpath(os.path.join(parent, part))
+            if (
+                os.path.basename(canonical) == part
+                and native_realpath(alternate) == canonical
             ):
-                canonical = native_realpath(os.path.join(parent, part))
-                if (
-                    os.path.basename(canonical) == part
-                    and native_realpath(alternate) == canonical
-                ):
-                    with os.scandir(parent) as entries:
-                        next(entries, None)
-                    return True
+                _open_parent(parent)
+                return True
         except OSError:
             logger.debug(
                 "Native disk spelling proof unavailable", exc_info=True
             )
     return part in os.listdir(parent)
+
+
+def _open_parent(parent: str) -> None:
+    with os.scandir(parent) as entries:
+        next(entries, None)
 
 
 def resolve_inside_sync(

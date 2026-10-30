@@ -37,22 +37,6 @@ ERANGE_REASON = "Numerical result out of range"
 EOVERFLOW_REASON = "Value too large for defined data type"
 
 
-def unsigned_decimal(text: str) -> int | None:
-    """``text`` as an unsigned decimal operand, as GNU's counts read.
-
-    A minus, any other byte, or a blank after the digits makes it no
-    number. The value is exact, so a caller's range check also catches
-    one that overflows ``uintmax_t``.
-
-    Args:
-        text (str): the operand as typed.
-    """
-    match = DECIMAL.fullmatch(text)
-    if match is None or match.group(1) == "-":
-        return None
-    return decimal_value(match.group(2))
-
-
 def signed_decimal(text: str) -> int | None:
     """``text`` as a signed decimal operand, as GNU's counts read.
 
@@ -157,5 +141,4 @@ __all__ = [
     "signed_decimal",
     "strtol",
     "strtoul",
-    "unsigned_decimal",
 ]

@@ -260,7 +260,7 @@ describe('serveRequests', () => {
 
 describe('mergeOutput', () => {
   it('stops its work loop once the signal aborts', async () => {
-    const stream = await openStream('tsort', { name: '-' })
+    const stream = await openStream('tsort', { operands: [] })
     const controller = new AbortController()
     controller.abort()
     const run = async (): Promise<void> => {

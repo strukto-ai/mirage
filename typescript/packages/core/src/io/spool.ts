@@ -4,7 +4,7 @@ import { concat } from '../utils/bytes.ts'
 import type { ByteSource } from './types.ts'
 
 export const MEMORY_LIMIT = 1024 * 1024
-const IO_BUFFER_SIZE = 256 * 1024
+export const IO_BUFFER_SIZE = 256 * 1024
 
 export interface SpoolStore {
   write(offset: number, data: Uint8Array): Promise<void>
@@ -191,10 +191,15 @@ export class ByteSpool {
     return result
   }
 
-  async *stream(offset = 0, size?: number): AsyncGenerator<Uint8Array> {
+  /**
+   * The spool's bytes from `offset`, `piece` bytes at a time: a bounded reader
+   * keeps `CHUNK_SIZE`, a writer of the whole spool takes `IO_BUFFER_SIZE`,
+   * one store read per step.
+   */
+  async *stream(offset = 0, size?: number, piece = CHUNK_SIZE): AsyncGenerator<Uint8Array> {
     const end = size === undefined ? this.size : Math.min(this.size, offset + size)
     while (offset < end) {
-      const data = await this.read(offset, Math.min(CHUNK_SIZE, end - offset))
+      const data = await this.read(offset, Math.min(piece, end - offset))
       if (data.length === 0) return
       offset += data.length
       yield data
@@ -207,7 +212,7 @@ export class ByteSpool {
       await this.close()
       return data
     }
-    return new OutputStream(this.stream(), () => this.close())
+    return new OutputStream(this.stream(0, undefined, IO_BUFFER_SIZE), () => this.close())
   }
 
   body(kind: 'fetch' | 'sdk'): Promise<Uint8Array | Blob | AsyncIterable<Uint8Array>> {

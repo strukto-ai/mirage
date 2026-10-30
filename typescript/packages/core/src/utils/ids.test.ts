@@ -187,6 +187,14 @@ describe('SeededIdSource', () => {
     expect(Array.from({ length: 4 }, () => source.randomU32())).toEqual(SEED_42_WORDS)
   })
 
+  it('hands out words that continue the sequence', () => {
+    const source = new SeededIdSource(42)
+    const view = new DataView(source.randomWords(3).buffer)
+    expect([0, 4, 8].map((at) => view.getUint32(at, true))).toEqual(SEED_42_WORDS.slice(0, 3))
+    expect(source.randomU32()).toBe(SEED_42_WORDS[3])
+    expect(source.randomWords(0).byteLength).toBe(0)
+  })
+
   it('draws another sequence for another seed', () => {
     const first = new SeededIdSource(1)
     const second = new SeededIdSource(2)

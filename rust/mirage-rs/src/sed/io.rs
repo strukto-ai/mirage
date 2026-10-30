@@ -139,10 +139,7 @@ impl LineReader {
             })));
         }
         if let Some(cut) = cut {
-            let mut line = std::mem::take(&mut self.spare);
-            line.extend_from_slice(&self.buf[self.start..cut]);
-            self.start = cut + 1;
-            self.scanned = self.start;
+            let line = self.take(cut, cut + 1);
             return Poll::Ready(Ok(Some((line, true))));
         }
         self.scanned = self.buf.len();
@@ -150,9 +147,8 @@ impl LineReader {
             if self.start >= self.buf.len() {
                 return Poll::Ready(Ok(None));
             }
-            let mut line = std::mem::take(&mut self.spare);
-            line.extend_from_slice(&self.buf[self.start..]);
-            self.start = self.buf.len();
+            let end = self.buf.len();
+            let line = self.take(end, end);
             return Poll::Ready(Ok(Some((line, false))));
         }
         if let Some(failure) = self.failed.take() {
@@ -160,6 +156,26 @@ impl LineReader {
         }
         self.pull(io);
         Poll::Pending
+    }
+
+    /// The bytes from `start` to `cut` as a line, the reader going on at
+    /// `next`. A long line that begins the buffer and leaves little after it
+    /// takes the buffer itself, what follows moving to a fresh one, so the
+    /// line is never held twice.
+    fn take(&mut self, cut: usize, next: usize) -> Vec<u8> {
+        const SHORT: usize = 64 * 1024;
+        if self.start == 0 && cut > SHORT && self.buf.len() - next <= SHORT {
+            let rest = self.buf[next..].to_vec();
+            let mut line = std::mem::replace(&mut self.buf, rest);
+            line.truncate(cut);
+            self.scanned = 0;
+            return line;
+        }
+        let mut line = std::mem::take(&mut self.spare);
+        line.extend_from_slice(&self.buf[self.start..cut]);
+        self.start = next;
+        self.scanned = next;
+        line
     }
 
     pub(super) fn recycle(&mut self, mut bytes: Vec<u8>) {

@@ -33,7 +33,7 @@ from mirage.rs.stream import (
     serve_requests,
 )
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
-from mirage.utils.ids import IdSource, SystemIdSource, random_below
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.key_prefix import mount_key
 
 logger = logging.getLogger(__name__)
@@ -371,19 +371,10 @@ class ShufHost:
         self, request: Mapping[str, JsonValue], data: bytes
     ) -> Served:
         op = request["op"]
-        if op == "random":
-            limit, count = request["limit"], request["count"]
-            assert isinstance(limit, str) and isinstance(count, int)
-            bound = int(limit)
-            descending = request["descending"] is True
-            values = bytearray()
-            for at in range(count):
-                values.extend(
-                    random_below(
-                        self.ids, bound - at if descending else bound
-                    ).to_bytes(8, "little")
-                )
-            return Served({}, bytes(values))
+        if op == "words":
+            count = request["count"]
+            assert isinstance(count, int)
+            return Served({}, self.ids.random_words(count))
         spool = request.get(
             "spool", int(op == "swap" or request.get("index") is True)
         )

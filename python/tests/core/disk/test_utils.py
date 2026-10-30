@@ -270,4 +270,69 @@ def test_native_proof_requires_convergence_and_same_nonlink_entry(
             disk_utils.exact_name(str(tree), "file.txt", info)
     else:
         assert disk_utils.exact_name(str(tree), "file.txt", info)
-    assert len(scans) == (0 if proof == "canonical" else 1)
+    assert len(scans) == (
+        0 if proof in ("canonical", "symlink", "inode") else 1
+    )
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_a_case_probe_proves_ascii_names_without_listing(
+    tree, monkeypatch, platform
+):
+    for i in range(30):
+        (tree / "lib" / str(i)).write_text("x")
+    scans = []
+    original_listdir = os.listdir
+    original_lstat = os.lstat
+
+    def listing(path):
+        scans.append(path)
+        return original_listdir(path)
+
+    def kept_case(path, *args, **kwargs):
+        if os.path.basename(path) in ("LIB", "Lib", "A.txt"):
+            raise FileNotFoundError(errno.ENOENT, "absent", path)
+        return original_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(disk_utils, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(disk_utils.os, "listdir", listing)
+    monkeypatch.setattr(disk_utils.os, "lstat", kept_case)
+    for key in ("/lib/a.txt", "/lib/7", "/lib/29"):
+        assert resolve_inside_sync(tree, PathSpec.from_str_path(key)) == (
+            tree / key.lstrip("/")
+        )
+    assert scans == []
+
+
+def test_a_name_past_ascii_still_lists_its_parent(tree, monkeypatch):
+    (tree / "lib" / "caf\u00e9").write_text("x")
+    scans = []
+    original = os.listdir
+
+    def listing(path):
+        scans.append(path)
+        return original(path)
+
+    monkeypatch.setattr(disk_utils, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(disk_utils.os, "listdir", listing)
+    key = "/lib/caf\u00e9"
+    assert resolve_inside_sync(tree, PathSpec.from_str_path(key)) == (
+        tree / key.lstrip("/")
+    )
+    assert scans[-1] == str(tree / "lib")
+
+
+def test_a_probed_name_still_needs_a_readable_parent(tree, monkeypatch):
+    (tree / "lib" / "7").write_text("x")
+    original = os.scandir
+
+    def denied(path):
+        if str(path) == str(tree / "lib"):
+            raise PermissionError(errno.EACCES, "denied")
+        return original(path)
+
+    monkeypatch.setattr(disk_utils, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(disk_utils.os, "scandir", denied)
+    with pytest.raises(PermissionError) as caught:
+        resolve_inside_sync(tree, PathSpec.from_str_path("/lib/7"))
+    assert caught.value.filename == "/lib/7"

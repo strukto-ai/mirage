@@ -1,14 +1,24 @@
-//! The `scan` stream: a command's typed option values read once, here,
-//! before its host touches an operand. The host sends the command and the
-//! options it was given, each as typed and in the order typed; `open`
-//! fails with the first value the command refuses, in its words and with
-//! its exit status, and otherwise `finish` writes every value as one JSON
-//! object keyed by option.
+//! The `scan` stream: a command's typed words read once, here, before its
+//! host reads any input. The host sends the command and a tape of
+//! `[name, text]` pairs, each text one character per byte:
+//!
+//! - each option as `[name, value]` in the order typed, a switch with an
+//!   empty value;
+//! - for a grammar that reads its operands, each operand as
+//!   `[OPERAND, word]` where it was typed, a glob already expanded into
+//!   its matches in its place, as the shell does before exec.
+//!
+//! `open` fails with the first word the command refuses, in its words and
+//! with its exit status. Otherwise `finish` writes one JSON object, keyed
+//! as that command's grammar answers.
 
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
 
 use crate::{Stream, StreamError, latin1_bytes, parse_config};
+
+/// The tape name of an operand. No option's dest is empty.
+pub(crate) const OPERAND: &str = "";
 
 /// One option as typed: its name and its value's bytes.
 pub(crate) type Typed = (String, Vec<u8>);
@@ -38,9 +48,9 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         })
         .collect::<Result<Vec<Typed>, StreamError>>()?;
     let values = grammar(&command)?(&typed)?;
-    Ok(Box::new(Scanned {
-        values: serde_json::to_vec(&Json::Object(values)).unwrap_or_default(),
-    }))
+    let values = serde_json::to_vec(&Json::Object(values))
+        .map_err(|e| StreamError::new(format!("scan: {command}'s values: {e}")))?;
+    Ok(Box::new(Scanned { values }))
 }
 
 /// The grammar that reads `command`'s options.
@@ -52,6 +62,7 @@ fn grammar(command: &str) -> Result<Grammar, StreamError> {
         "fold" => crate::fold::scan,
         "grep" => crate::grep::scan,
         "rg" => crate::rg_options::scan,
+        "sort" => crate::sort::options::scan,
         "xxd" => crate::xxd::scan,
         _ => return Err(StreamError::new(format!("scan: no grammar for {command}"))),
     })

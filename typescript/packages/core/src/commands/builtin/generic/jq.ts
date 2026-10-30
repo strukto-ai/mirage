@@ -12,28 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The option loop, main loop and exit statuses follow jq 1.8.2's
-// src/main.c (MIT; see licenses/third_party/jq.txt).
+// The program file and the exit statuses follow jq 1.8.2's src/main.c (MIT;
+// see licenses/third_party/jq.txt).
 
 import { specOf } from '../../spec/builtins.ts'
 import { OPERAND, REFUSED } from '../../spec/constants.ts'
-import { FlagView } from '../../spec/flag_view.ts'
-import {
-  DEFAULT_INDENT,
-  NO_VALUE,
-  STDIN_NAME,
-  decodeUtf8,
-  jqOptions,
-  loadFailure,
-  localZone,
-  readTexts,
-  stringText,
-  valueText,
-  type JqOptions,
-} from '../../../core/jq/index.ts'
+import { FlagView, specFlagNames } from '../../spec/flag_view.ts'
+import { STDIN_NAME, localZone } from '../../../core/jq/index.ts'
 import { COMPILE_REPORT } from '../../../core/jq/eval.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused } from '../../../rs/scan.ts'
 import {
   closeStream,
   openStream,
@@ -48,11 +37,12 @@ import { chunks } from '../../../io/cooperative.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec, type JsonValue } from '../../../types.ts'
-import { fsStrerror, isFsError } from '../../../errors/fs.ts'
+import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
+import { byteView } from '../../../shell/bytes.ts'
 import { parent } from '../../../utils/path.ts'
 import { type CommandFnResult, type Context } from '../../config.ts'
 import { helpPage, versionLine } from '../../spec/standard.ts'
-import { UsageError } from '../../errors.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { programFileRefusal, readProgramFile } from './program.ts'
 
@@ -61,306 +51,160 @@ type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 // Text jq writes as it is, a leading byte order mark included.
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 const ENC = new TextEncoder()
-const INDENT_MIN = -1
-const INDENT_MAX = 7
-// A width in jq's range has at most one significant digit; the sign and
-// leading zeroes keep strtol's decimal spelling without a large conversion.
-const INDENT_WORD = /^([+-]?)0*([0-7])$/
 
-// The options whose order decides what they do: the layout options, which
-// reset one another, the bindings, where the first of a name wins, and the
-// modes, which file the operands typed after them.
-const LAYOUT = ['compact_output', 'tab', 'indent'] as const
-const BINDINGS = ['arg', 'argjson', 'rawfile', 'slurpfile'] as const
-const MODES = ['args', 'jsonargs'] as const
-// The options jq answers where its loop reaches them, and then exits.
-const STANDARD = ['help', 'version'] as const
-type Binding = (typeof BINDINGS)[number]
-type Mode = (typeof MODES)[number]
+// The bindings, whose name and value the bag keeps as typed, and those whose
+// value is a file the option loop asks for.
+const BINDINGS: ReadonlySet<string> = new Set(['arg', 'argjson', 'rawfile', 'slurpfile'])
+const FILE_BINDINGS: ReadonlySet<string> = new Set(['rawfile', 'slurpfile'])
 
-// jq's exit status when it refuses the program itself, and when it could not
-// read one of its inputs, whatever the runs answered.
+// jq's exit status when it refuses the program itself, and when the program
+// file holds a NUL byte.
 const ERROR_COMPILE = 3
 const ERROR_SYSTEM = 2
 
-const USAGE_HINT =
-  'Use jq --help for help with command-line options,\n' +
-  'or see the jq manpage, or online docs at https://jqlang.org'
-
-// What jq says for an option the line ends before the values of (main.c).
-const TAKES: Readonly<Record<string, string>> = {
-  '--arg': '--arg takes two parameters (e.g. --arg varname value)',
-  '--argjson': '--argjson takes two parameters (e.g. --argjson varname text)',
-  '--rawfile': '--rawfile takes two parameters (e.g. --rawfile varname filename)',
-  '--slurpfile': '--slurpfile takes two parameters (e.g. --slurpfile varname filename)',
-  '--indent': '--indent takes one parameter',
-}
-
-// jq's -f is a switch that makes the program operand a file, so an -f the
-// line ends at leaves jq no program, and it prints usage(2, 1), its short
-// usage, to stderr.
-const SHORT_USAGE =
-  'jq - commandline JSON processor [version 1.8.2]\n\n' +
-  'Usage:\tjq [options] <jq filter> [file...]\n' +
-  '\tjq [options] --args <jq filter> [strings...]\n' +
-  '\tjq [options] --jsonargs <jq filter> [JSON_TEXTS...]\n\n' +
-  'jq is a tool for processing JSON inputs, applying the given filter to\n' +
-  "its JSON text inputs and producing the filter's results as JSON on\n" +
-  'standard output.\n\n' +
-  "The simplest filter is ., which copies jq's input to its output\n" +
-  'unmodified except for formatting. For more advanced filters see\n' +
-  'the jq(1) manpage ("man jq") and/or https://jqlang.org/.\n\n' +
-  'Example:\n\n' +
-  '\t$ echo \'{"foo": 0}\' | jq .\n' +
-  '\t{\n' +
-  '\t  "foo": 0\n' +
-  '\t}\n\n' +
-  'For listing the command options, use jq --help.'
-
 /**
- * jq's refusal of one option its loop cannot take. `word` is the option as
- * the parser left it on the tape: a word jq does not know, or an option the
- * line ends before the values of.
+ * The words one binding option holds, in the order typed: each name, then
+ * the value it binds, or for a file binding the file. Mirrors Python's
+ * _bound_words.
  */
-export function optionRefusal(word: string): UsageError {
-  if (word === '-f' || word === '--from-file') return new UsageError(SHORT_USAGE, 2)
-  const line = TAKES[word] ?? `Unknown option ${word}`
-  return new UsageError(`jq: ${line}\n${USAGE_HINT}`, 2)
-}
-
-function pairArgs(values: readonly string[]): [string, string][] {
-  const pairs: [string, string][] = []
-  for (let i = 0; i + 1 < values.length; i += 2) {
-    pairs.push([values[i] ?? '', values[i + 1] ?? ''])
-  }
-  return pairs
-}
-
-/**
- * The JSON text one operand gives `$ARGS.positional`: the string it spells
- * after --args, and after --jsonargs the one JSON value it spells, as jq's own
- * parser reads it. `mode` is the last of the two typed before it. A --jsonargs
- * operand that is not one JSON value is refused in jq's words.
- */
-export async function positionalValue(mode: Mode, word: string): Promise<string> {
-  if (mode === 'args') return stringText(word)
-  const text = await valueText(ENC.encode(word))
-  if (text === NO_VALUE) {
-    throw new UsageError(`jq: invalid JSON text passed to --jsonargs\n${USAGE_HINT}`, 2)
-  }
-  return text
-}
-
-/**
- * A path pair option's [name, file] pairs, each file the PathSpec of the
- * word that spelled it, or one built from its resolved path.
- */
-function pathPairs(fl: FlagView, option: string): [string, PathSpec][] {
-  const raw = fl.raw(option)
-  if (!Array.isArray(raw)) return []
-  const items: readonly (string | PathSpec)[] = raw
-  const pairs: [string, PathSpec][] = []
-  for (let i = 0; i + 1 < items.length; i += 2) {
-    const name = items[i]
-    const file = items[i + 1]
-    if (typeof name !== 'string' || file === undefined) continue
-    pairs.push([name, file instanceof PathSpec ? file : PathSpec.fromStrPath(file)])
-  }
-  return pairs
-}
-
-/**
- * The JSON text one binding gives its name: --arg a string, --argjson one
- * JSON value, --rawfile a file's text, and --slurpfile the array of
- * documents in a file, which is the same difference -R draws on the input
- * stream. `value` is the word --arg or --argjson binds, or the file
- * --rawfile or --slurpfile reads. Both files are read the way jq reads its
- * inputs. An --argjson value that is not one JSON value as jq's own parser
- * reads it, a file that cannot be read, and a --slurpfile holding bad JSON
- * are refused in jq's words.
- */
-async function binding(
-  dest: Binding,
-  name: string,
-  value: string | PathSpec,
-  read: (path: PathSpec) => Promise<Uint8Array>,
-): Promise<string> {
-  if (typeof value === 'string') {
-    if (dest === 'arg') return stringText(value)
-    const text = await valueText(ENC.encode(value))
-    if (text === NO_VALUE) {
-      throw new UsageError(`jq: invalid JSON text passed to --argjson\n${USAGE_HINT}`, 2)
-    }
-    return text
-  }
-  const data = await loadFile(read, dest, name, value)
-  if (dest === 'rawfile') return stringText(await decodeUtf8(data))
-  const shown = flagFileName(value)
-  const [texts, failure] = await readTexts(data)
-  if (failure !== null) {
-    throw new UsageError(
-      `jq: Bad JSON in --slurpfile ${name} ${shown}: ${failure.message}`,
-      ERROR_SYSTEM,
-    )
-  }
-  return `[${texts.join(',')}]`
-}
-
-/**
- * One --rawfile or --slurpfile file's bytes. One that cannot be read is
- * refused in the words jq has for it, which call it bad JSON too.
- */
-async function loadFile(
-  read: (path: PathSpec) => Promise<Uint8Array>,
-  option: string,
-  name: string,
-  path: PathSpec,
-): Promise<Uint8Array> {
-  try {
-    return await read(path)
-  } catch (error) {
-    if (!isFsError(error)) throw error
-    const shown = flagFileName(path)
-    throw new UsageError(
-      `jq: Bad JSON in --${option} ${name} ${shown}: ${loadFailure(shown, error)}`,
-      ERROR_SYSTEM,
-    )
+function* boundWords(fl: FlagView, dest: string): Generator<string | PathSpec, void> {
+  const raw = fl.raw(dest)
+  const words: readonly (string | PathSpec)[] = Array.isArray(raw) ? raw : []
+  for (const [at, word] of words.entries()) {
+    yield at % 2 === 1 && FILE_BINDINGS.has(dest) ? fileOf(word) : word
   }
 }
 
 /**
- * The width an --indent word names, read as jq 1.8.2's strtol reads it: a
- * sign and decimal digits and nothing else, no blank before and no text
- * after, from -1 to 7. Only the significant digit is converted, so the
- * width never depends on the host's handling of arbitrary-length numbers.
- * Any other word is refused in jq's words.
+ * The file a flag names: the PathSpec of the word typed, or one built from the
+ * resolved path the flag arrived as. Mirrors Python's _file_of.
  */
-export function indentWidth(word: string): number {
-  const match = INDENT_WORD.exec(word)
-  const width =
-    match !== null && match[0] === word ? Number(match[2]) * (match[1] === '-' ? -1 : 1) : NaN
-  if (!(width >= INDENT_MIN && width <= INDENT_MAX)) {
-    throw new UsageError(
-      `jq: --indent takes a number between ${String(INDENT_MIN)} and ` +
-        `${String(INDENT_MAX)}\n${USAGE_HINT}`,
-      2,
-    )
-  }
-  return width === 0 ? 0 : width
+function fileOf(word: FlagValue | undefined): PathSpec {
+  if (word instanceof PathSpec) return word
+  if (typeof word === 'string') return PathSpec.fromStrPath(word)
+  throw new Error(`jq: a flag names no file: ${JSON.stringify(word)}`)
 }
 
 /**
- * Read the jq flags whose order does not matter into a frozen struct: the
- * layout stays jq's default and nothing is bound, which readOptions reads in
- * the order typed.
+ * jq's words in the order typed, as mirage-rs's option loop reads them, and
+ * the file at each place on them that names one. The bag's tape keeps where
+ * each word was typed, and the bag what it was: a binding's name and value,
+ * and the file -f names, which the tape holds resolved. A file is named as
+ * the word typed. Operands the bag has no tape for (a plain record) come
+ * after every option.
+ * Mirrors Python's option_tape.
  */
-export function parseFlags(fl: FlagView): JqOptions {
-  const joinOutput = fl.asBool('join_output')
-  const nulOutput = fl.asBool('raw_output0')
-  return jqOptions({
-    nullInput: fl.asBool('null_input'),
-    rawInput: fl.asBool('raw_input'),
-    slurp: fl.asBool('slurp'),
-    stream: fl.asBool('stream'),
-    seq: fl.asBool('seq'),
-    // -j and --raw-output0 are -r plus a different separator.
-    rawOutput: fl.asBool('raw_output') || joinOutput || nulOutput,
-    joinOutput,
-    nulOutput,
-    asciiOutput: fl.asBool('ascii_output'),
-    sortKeys: fl.asBool('sort_keys'),
-    exitStatus: fl.asBool('exit_status'),
-  })
-}
-
-/**
- * Read the jq flags, and the operands --args and --jsonargs file, into a
- * frozen struct the way jq's option loop (main.c) reads them: one word at a
- * time, in the order typed.
- *
- * The layout options reset one another, so the last of `-c`, `--tab` and
- * `--indent` decides (`--indent -1` is `--tab`). A binding takes its name
- * only while the name is free: the first `--arg`, `--argjson`, `--rawfile`
- * or `--slurpfile` of a name wins, as `$name` and in `$ARGS.named`, which
- * lists the names in the order they were bound. A later binding of the name
- * is never read, so its JSON is not parsed and its file is not opened. The
- * program is the first operand, whatever the mode. Every operand after it is
- * filed by the last of `--args` and `--jsonargs` typed before it: a string,
- * or one JSON value parsed right then. One typed before either is an input
- * file, which the parser left a path. An option jq refuses stops the loop
- * where it stands, so the refusal reported is the first one typed, a
- * `--jsonargs` operand's included. Operands the bag has no tape for (a plain
- * record) come after every option. `texts` are the text operands, program
- * first unless -f gave it (`hasProgramFile`), and `read` is the byte reader
- * for a --rawfile or --slurpfile.
- */
-export async function readOptions(
+export function optionTape(
   fl: FlagView,
   texts: readonly string[],
-  hasProgramFile: boolean,
-  read: (path: PathSpec) => Promise<Uint8Array>,
-): Promise<JqOptions | Uint8Array> {
-  let compact = false
-  let tab = false
-  let indent = DEFAULT_INDENT
-  const named = new Map<string, string>()
-  const positional: string[] = []
-  let mode: Mode | null = null
-  let program = !hasProgramFile
-  const words = (program ? texts.slice(1) : texts).values()
-  const pairs = {
-    arg: pairArgs(fl.asList('arg')).values(),
-    argjson: pairArgs(fl.asList('argjson')).values(),
-    rawfile: pathPairs(fl, 'rawfile').values(),
-    slurpfile: pathPairs(fl, 'slurpfile').values(),
-  }
-  const tape = fl
-    .occurrences(...LAYOUT, ...BINDINGS, ...MODES, ...STANDARD, OPERAND, REFUSED)
-    .values()
-  for (const [dest, value] of tape) {
-    if (dest === REFUSED) throw optionRefusal(String(value))
-    if (dest === 'help') return ENC.encode(helpPage('jq', specOf('jq')))
-    if (dest === 'version') return ENC.encode(versionLine('jq'))
-    if (dest === OPERAND) {
-      if (program) {
-        program = false
-      } else if (mode !== null) {
-        const word = words.next()
-        if (word.done !== true) positional.push(await positionalValue(mode, word.value))
-      }
-    } else if (dest === 'args' || dest === 'jsonargs') {
-      mode = dest
-    } else if (dest === 'compact_output') {
-      compact = true
-      tab = false
-    } else if (dest === 'tab') {
-      compact = false
-      tab = true
-    } else if (dest === 'indent') {
-      const width = indentWidth(String(value))
-      compact = false
-      tab = width === INDENT_MIN
-      indent = tab ? DEFAULT_INDENT : width
-    } else {
-      // A binding is two words on the tape, its name and what it binds, and
-      // the bag keeps each pair as typed.
-      tape.next()
-      const kind = dest as Binding
-      const pair = pairs[kind].next()
-      if (pair.done === true) continue
-      const [name, bound] = pair.value
-      if (!named.has(name)) named.set(name, await binding(kind, name, bound, read))
+): [[string, string][], Map<number, PathSpec>] {
+  const bound = new Map([...BINDINGS].map((dest) => [dest, boundWords(fl, dest)]))
+  const tape: [string, string][] = []
+  const files = new Map<number, PathSpec>()
+  for (const [dest, value] of fl.occurrences(...specFlagNames(specOf('jq')), OPERAND, REFUSED)) {
+    const step = bound.get(dest)?.next()
+    let word: FlagValue = value
+    if (step !== undefined) word = step.done === true ? '' : step.value
+    else if (dest === 'from_file') word = fileOf(fl.raw(dest))
+    if (word instanceof PathSpec) {
+      files.set(tape.length, word)
+      tape.push([dest, flagFileName(word)])
+    } else if (typeof word === 'string') {
+      tape.push([dest, word])
+    } else if (word === true) {
+      tape.push([dest, ''])
+    } else if (word !== false) {
+      throw new Error(`jq: ${dest} holds no word: ${JSON.stringify(word)}`)
     }
   }
-  if (mode !== null) for (const word of words) positional.push(await positionalValue(mode, word))
-  return jqOptions({
-    ...parseFlags(fl),
-    compact,
-    tab,
-    indent,
-    namedArgs: named,
-    positionalArgs: positional,
-  })
+  if (!tape.some(([dest]) => dest === OPERAND)) {
+    for (const word of texts) tape.push([OPERAND, word])
+  }
+  return [tape, files]
+}
+
+/**
+ * Serves the files the option loop asks for: each --rawfile and --slurpfile
+ * it reaches, read the way jq reads its inputs. `files` holds the file at
+ * each place on the tape (optionTape). Mirrors Python's FlagFiles.
+ */
+class FlagFiles {
+  readonly errors = new ByteSpool()
+
+  constructor(
+    private readonly files: ReadonlyMap<number, PathSpec>,
+    private readonly read: (path: PathSpec) => Promise<Uint8Array>,
+  ) {}
+
+  /** Read one file, or say why it could not be read. */
+  async serve(request: Readonly<Record<string, JsonValue>>): Promise<Served> {
+    const file = typeof request.at === 'number' ? this.files.get(request.at) : undefined
+    if (request.op !== 'read' || file === undefined)
+      throw new Error(`jq: unknown option loop request ${JSON.stringify(request)}`)
+    try {
+      return { reply: { kind: 'data' }, data: await this.read(file) }
+    } catch (error) {
+      if (!isFsError(error)) throw error
+      return {
+        reply: { kind: 'error', message: fsStrerror(error) ?? '', directory: isEisdir(error) },
+      }
+    }
+  }
+}
+
+/**
+ * What jq's option loop decided for a run: the run config the options
+ * decide, and the program, as the operand typed or the file -f names.
+ * Mirrors Python's OptionPlan.
+ */
+export interface OptionPlan {
+  readonly config: Readonly<Record<string, JsonValue>>
+  readonly program: string | PathSpec
+}
+
+/**
+ * jq's option loop in mirage-rs: the run it decides, what --help or
+ * --version prints where the loop reaches one, or the first word it refuses
+ * as the command's result, in jq's words. `tape` and `files` are
+ * optionTape's, and `read` the byte reader for a --rawfile or --slurpfile.
+ * Throws for a reply that lacks what the loop always answers. Mirrors
+ * Python's read_options.
+ */
+export async function readOptions(
+  tape: readonly (readonly [string, string])[],
+  files: ReadonlyMap<number, PathSpec>,
+  read: (path: PathSpec) => Promise<Uint8Array>,
+): Promise<OptionPlan | Uint8Array | IOResult> {
+  let stream: OpenStream
+  try {
+    stream = await openStream('jq_options', {
+      options: tape.map(([name, text]) => [name, byteView(text)]),
+    })
+  } catch (error) {
+    if (error instanceof StreamRefusal) return refused(error)
+    throw error
+  }
+  const host = new FlagFiles(files, read)
+  let reply: Uint8Array
+  try {
+    reply = await materialize(serveRequests(stream, host))
+  } catch (error) {
+    if (error instanceof StreamRefusal) return refused(error)
+    throw error
+  } finally {
+    await host.errors.close()
+    await closeStream(stream)
+  }
+  const plan = JSON.parse(DEC.decode(reply)) as Record<string, JsonValue>
+  if (plan.answer === 'help') return ENC.encode(helpPage('jq', specOf('jq')))
+  if (plan.answer === 'version') return ENC.encode(versionLine('jq'))
+  const { config, program_file: at } = plan
+  const answered = new Error(`jq: the option loop answered ${JSON.stringify(plan)}`)
+  if (typeof config !== 'object' || config === null || Array.isArray(config)) throw answered
+  if (at === null && typeof config.program === 'string') return { config, program: config.program }
+  const file = typeof at === 'number' ? files.get(at) : undefined
+  if (file === undefined) throw answered
+  return { config, program: file }
 }
 
 /**
@@ -434,14 +278,15 @@ export class JqInputs {
 }
 
 /**
- * What mirage-rs's jq takes for one invocation: the program, the options,
- * `env` (JSON text) as `$ENV` and `env`, `zone` (localZone) as the `TZ` local
- * time reads, `origin` as the directory `get_prog_origin` answers, and the
- * inputs' names as jq reports them. Mirrors Python's run_config.
+ * What mirage-rs's jq takes for one invocation: the program, what the option
+ * loop decided (readOptions), `env` (JSON text) as `$ENV` and `env`, `zone`
+ * (localZone) as the `TZ` local time reads, `origin` as the directory
+ * `get_prog_origin` answers, and the inputs' names as jq reports them.
+ * Mirrors Python's run_config.
  */
 export function runConfig(
   expr: string,
-  opts: JqOptions,
+  options: Readonly<Record<string, JsonValue>>,
   env: string,
   zone: string,
   origin: string | null,
@@ -449,28 +294,13 @@ export function runConfig(
 ): Record<string, JsonValue> {
   const limit = memoryRoom()
   return {
+    ...options,
     program: expr,
-    named: [...opts.namedArgs].map(([name, text]) => [name, text]),
-    positional: [...opts.positionalArgs],
     env,
     zone,
     prog_origin: origin,
     ...(limit === null ? {} : { memory: limit }),
     inputs: [...inputs],
-    null_input: opts.nullInput,
-    raw_input: opts.rawInput,
-    slurp: opts.slurp,
-    stream: opts.stream,
-    seq: opts.seq,
-    exit_status: opts.exitStatus,
-    raw_output: opts.rawOutput,
-    join_output: opts.joinOutput,
-    nul_output: opts.nulOutput,
-    ascii_output: opts.asciiOutput,
-    sort_keys: opts.sortKeys,
-    compact: opts.compact,
-    tab: opts.tab,
-    indent: opts.indent,
   }
 }
 
@@ -519,16 +349,6 @@ async function closeRun(stream: OpenStream, inputs: JqInputs, io: IOResult): Pro
   }
 }
 
-/**
- * The file -f names, as the word typed when the bag kept it, else built from
- * the resolved virtual path the flag arrived as.
- */
-function programFileOf(fl: FlagView): PathSpec | null {
-  const raw = fl.raw('from_file')
-  if (raw instanceof PathSpec) return raw
-  return typeof raw === 'string' ? PathSpec.fromStrPath(raw) : null
-}
-
 export async function jqGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -537,7 +357,6 @@ export async function jqGeneric(
 ): Promise<CommandFnResult> {
   const readInput = stdinStream(stream, ctx.stdin)
   const fl = new FlagView(ctx.flags, specOf('jq'))
-  const programFile = programFileOf(fl)
   // -f, --rawfile and --slurpfile route nothing (the executor's FILE_KEYS and
   // DISPATCH_FLAG_KEYS), so a file may sit on another mount than the operands: it
   // is read through the dispatcher. jq opens it by name, so /dev/stdin is the
@@ -549,10 +368,12 @@ export async function jqGeneric(
   }
   // jq reads its options before its program, so a refused option is reported
   // before an -f file is read.
-  const jq = await readOptions(fl, texts, programFile !== null, readFlagFile)
-  if (jq instanceof Uint8Array) return [jq, new IOResult()]
-  // jq defaults the filter to "." when no expression is given.
-  let expression = texts[0] ?? '.'
+  const plan = await readOptions(...optionTape(fl, texts), readFlagFile)
+  if (plan instanceof IOResult) return [null, plan]
+  if (plan instanceof Uint8Array) return [plan, new IOResult()]
+  const { config: options, program } = plan
+  const programFile = program instanceof PathSpec ? program : null
+  let expression = typeof program === 'string' ? program : ''
   if (programFile !== null) {
     let data: Uint8Array
     try {
@@ -590,7 +411,7 @@ export async function jqGeneric(
     // reading the program as typed, so its lines and columns are jq's. The
     // run compiles it again when it starts, so nothing is held open for a
     // stream no one reads.
-    const checked = await openStream('jq', runConfig(expression, jq, env, zone, origin, names))
+    const checked = await openStream('jq', runConfig(expression, options, env, zone, origin, names))
     await closeStream(checked)
   } catch (error) {
     if (!(error instanceof StreamRefusal) || !COMPILE_REPORT.test(error.message)) throw error
@@ -599,7 +420,7 @@ export async function jqGeneric(
       new IOResult({ exitCode: ERROR_COMPILE, stderr: ENC.encode(`${error.message}\n`) }),
     ]
   }
-  const config = runConfig(expression.trim(), jq, env, zone, origin, names)
+  const config = runConfig(expression.trim(), options, env, zone, origin, names)
   // Each input opens when the loop first reads it, as jq opens its files one
   // after another, so -n never opens one its program does not read.
   const inputs = new JqInputs(

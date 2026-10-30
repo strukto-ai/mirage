@@ -66,12 +66,7 @@ import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
-import {
-  publishRead,
-  readVersioned,
-  runWithWriteContext,
-  requireSupported,
-} from '../../cache/context.ts'
+import { publishRead, readVersioned, requireSupported } from '../../cache/context.ts'
 import { latestFingerprint } from '../../cache/file/io.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { type WriteContext } from '../../cache/types.ts'
@@ -88,9 +83,7 @@ import { callerSignal } from '../../context/session_context.ts'
 import {
   activeRecords,
   commandRecords,
-  runWithMountContext,
   runWithRecording,
-  runWithRevisions,
   withMountContext,
 } from '../../observe/context.ts'
 import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
@@ -1762,15 +1755,7 @@ export class MountEntry {
   readStream(scope: PathSpec, access?: SessionAccess): AsyncIterable<Uint8Array> {
     const vfs = this.viewFor(access)
     if (this.retiring) throw ebusy(this.prefix)
-    const revisions = this.revisions.size > 0 ? this.revisions : null
-    const bound = currentCaller()
-    const caller: Caller = {
-      ...bound,
-      recording: bound.recording === null ? null : { ...bound.recording, mountId: this.mountId },
-      write: { prefix: this.prefix, context: this.writeContext() },
-      revisions: { map: revisions },
-      vfsMount: this.prefix,
-    }
+    const caller = this.onMount(currentCaller())
     const signal = callerSignal()
     const stream =
       this.wants('read').length > 0 || vfs.read.constructor.name === 'AsyncFunction'
@@ -1841,13 +1826,19 @@ export class MountEntry {
   }
 
   /**
-   * The dispatcher's revision pins and write context, one scope. Public for
-   * the dispatcher, which calls ops itself rather than through the command entry point.
+   * `caller` running on this mount: its records name this mount, its writes
+   * are checked against this mount's write context, its reads keep this
+   * mount's revision pins and a connection it opens names this mount.
+   * Mirrors Python's `MountEntry._on_mount`.
    */
-  runWithWriteRevisions<T>(fn: () => Promise<T>): Promise<T> {
-    return runWithWriteContext(this.prefix, this.writeContext(), () =>
-      Promise.resolve(runWithRevisions(this.revisions.size > 0 ? this.revisions : null, fn)),
-    )
+  private onMount(caller: Caller): Caller {
+    return {
+      ...caller,
+      recording: caller.recording === null ? null : { ...caller.recording, mountId: this.mountId },
+      write: { prefix: this.prefix, context: this.writeContext() },
+      revisions: { map: this.revisions.size > 0 ? this.revisions : null },
+      vfsMount: this.prefix,
+    }
   }
 
   async runCommand(
@@ -2039,12 +2030,8 @@ export class MountEntry {
     const outer = currentCaller()
     return runWithCaller(
       {
-        ...outer,
-        recording: outer.recording === null ? null : { ...outer.recording, mountId: this.mountId },
-        revisions: { map: this.revisions.size > 0 ? this.revisions : null },
+        ...this.onMount(outer),
         cache: { manager: this.cacheManager },
-        write: { prefix: this.prefix, context: this.writeContext() },
-        vfsMount: this.prefix,
         mount: [this.prefix, this.mode],
         walkProbe: probe === null ? outer.walkProbe : [this.prefix, probe],
       },
@@ -2278,17 +2265,8 @@ export class MountEntry {
         ...kwargs,
         ...(kwargs.index === undefined ? { index: this.index } : {}),
       }
-      return runWithCaller({ ...currentCaller(), vfsMount: this.prefix }, () =>
-        runWithMountContext(
-          () =>
-            this.runWithWriteRevisions(async () => {
-              const result = await this.callKeyed(name, scope, args, effectiveKwargs, access)
-              return result === null || result === undefined
-                ? null
-                : wrapStream(result, this.mountId, this.activity)
-            }),
-          this.mountId,
-        ),
+      return this.framed(
+        async () => (await this.callKeyed(name, scope, args, effectiveKwargs, access)) ?? null,
       )
     })
   }
@@ -2367,12 +2345,15 @@ export class MountEntry {
   }
 
   /**
-   * Run one backend call as `call` frames its own: in this mount's recording
-   * and write contexts. Mirrors Python's `_framed`.
+   * Run one backend call as `call` frames its own: as the caller on this
+   * mount (`onMount`), an answer that streams wrapped to keep that frame and
+   * `owner`'s egress. Public for the dispatcher, which keys and calls its ops
+   * itself. Mirrors Python's `_framed`.
    */
-  private framed<T>(work: () => Promise<T>): Promise<T> {
-    return runWithCaller({ ...currentCaller(), vfsMount: this.prefix }, () =>
-      runWithMountContext(() => this.runWithWriteRevisions(work), this.mountId),
+  framed<T>(work: () => Promise<T>, owner?: Egress | null): Promise<T> {
+    return runWithCaller(
+      this.onMount(currentCaller()),
+      async () => wrapStream(await work(), this.mountId, this.activity, owner) as T,
     )
   }
 
@@ -2423,7 +2404,7 @@ export class MountEntry {
  * Preserve a streaming operation's recording owner, caller and egress after
  * its dispatch frame exits.
  */
-export function wrapStream(
+function wrapStream(
   result: unknown,
   mountId: string,
   activity: Activity,
