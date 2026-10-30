@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
-import importlib.util
 import os
 import re
 from pathlib import Path
@@ -59,7 +57,7 @@ from mirage.types import (
     WritePolicy,
     parse_mount_mode,
 )
-from mirage.utils.loader import load_attr
+from mirage.utils.loader import load_attr, optional_attr
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
 from mirage.vfs.registry import build_vfs
@@ -914,14 +912,11 @@ def _build_index_config(block: RamIndexBlock | RedisIndexBlock) -> IndexConfig:
 
 
 def _redis_state_store() -> "type[_RedisStore]":
-    if importlib.util.find_spec("redis") is None:
-        raise ImportError(
-            "A redis store requires the 'redis' extra. "
-            "Install with: pip install mirage-ai[redis]"
-        )
-    store: type[_RedisStore] = importlib.import_module(
-        "mirage.workspace.store.redis"
-    ).RedisWorkspaceStateStore
+    store: type[_RedisStore] = optional_attr(
+        "mirage.workspace.store.redis:RedisWorkspaceStateStore",
+        "redis",
+        "A redis store",
+    )
     return store
 
 
