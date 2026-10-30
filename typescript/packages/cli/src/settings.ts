@@ -21,9 +21,13 @@ import { defaultTokenFile, readTokenFile } from '@struktoai/mirage-server/auth/s
 import {
   ENV_ALLOWED_HOSTS,
   ENV_DAEMON_PORT,
+  ENV_FORWARDED_ALLOW_IPS,
+  ENV_GRACEFUL_TIMEOUT,
   ENV_IDLE_GRACE_SECONDS,
+  ENV_MAX_SESSIONS,
   ENV_MAX_WORKSPACES,
   ENV_POLICY_FILE,
+  ENV_RATE_LIMITS,
 } from '@struktoai/mirage-server/env'
 import {
   ALLOWED_KEYS,
@@ -123,10 +127,14 @@ function configPath(env: Record<string, string | undefined> = process.env): stri
 const ENV_FOR_KEY: Record<string, string> = {
   url: ENV_DAEMON_URL,
   allowed_hosts: ENV_ALLOWED_HOSTS,
+  forwarded_allow_ips: ENV_FORWARDED_ALLOW_IPS,
   ...CONFIG_ENV_KEYS,
   auth_token: ENV_TOKEN,
   idle_grace_seconds: ENV_IDLE_GRACE_SECONDS,
+  graceful_timeout: ENV_GRACEFUL_TIMEOUT,
   max_workspaces: ENV_MAX_WORKSPACES,
+  max_sessions: ENV_MAX_SESSIONS,
+  rate_limits: ENV_RATE_LIMITS,
   policy_file: ENV_POLICY_FILE,
   port: ENV_DAEMON_PORT,
   ...SSH_ENV_KEYS,
@@ -136,6 +144,7 @@ function defaultForKey(key: string, home: string): string {
   const defaults: Record<string, string> = {
     url: DEFAULT_DAEMON_URL,
     allowed_hosts: DEFAULT_ALLOWED_HOSTS.join(','),
+    forwarded_allow_ips: '',
     auth_mode: 'local',
     jwt_alg: '',
     jwt_issuer: '',
@@ -148,7 +157,10 @@ function defaultForKey(key: string, home: string): string {
     socket: '',
     auth_token: '',
     idle_grace_seconds: '30',
+    graceful_timeout: '0',
     max_workspaces: '',
+    max_sessions: '',
+    rate_limits: '',
     policy_file: '',
     port: '8765',
     ssh_port: '',

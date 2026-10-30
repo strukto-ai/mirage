@@ -32,9 +32,13 @@ from mirage.server.daemon_config import (
 from mirage.server.env import (
     ENV_ALLOWED_HOSTS,
     ENV_DAEMON_PORT,
+    ENV_FORWARDED_ALLOW_IPS,
+    ENV_GRACEFUL_TIMEOUT,
     ENV_IDLE_GRACE_SECONDS,
+    ENV_MAX_SESSIONS,
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
+    ENV_RATE_LIMITS,
 )
 from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
 from mirage.server.paths import mirage_home
@@ -51,10 +55,14 @@ DEFAULT_DAEMON_URL = "http://127.0.0.1:8765"
 _ENV_FOR_KEY = {
     "url": ENV_DAEMON_URL,
     "allowed_hosts": ENV_ALLOWED_HOSTS,
+    "forwarded_allow_ips": ENV_FORWARDED_ALLOW_IPS,
     **CONFIG_ENV_KEYS,
     "auth_token": ENV_TOKEN,
     "idle_grace_seconds": ENV_IDLE_GRACE_SECONDS,
+    "graceful_timeout": ENV_GRACEFUL_TIMEOUT,
     "max_workspaces": ENV_MAX_WORKSPACES,
+    "max_sessions": ENV_MAX_SESSIONS,
+    "rate_limits": ENV_RATE_LIMITS,
     "policy_file": ENV_POLICY_FILE,
     "port": ENV_DAEMON_PORT,
     **SSH_ENV_KEYS,
@@ -148,6 +156,7 @@ def _default_for_key(key: str) -> str:
     defaults = {
         "url": DEFAULT_DAEMON_URL,
         "allowed_hosts": ",".join(DEFAULT_ALLOWED_HOSTS),
+        "forwarded_allow_ips": "",
         "auth_mode": "local",
         "jwt_alg": "",
         "jwt_issuer": "",
@@ -160,7 +169,10 @@ def _default_for_key(key: str) -> str:
         "socket": "",
         "auth_token": "",
         "idle_grace_seconds": "30",
+        "graceful_timeout": "0",
         "max_workspaces": "",
+        "max_sessions": "",
+        "rate_limits": "",
         "policy_file": "",
         "port": "8765",
         "ssh_port": "",
