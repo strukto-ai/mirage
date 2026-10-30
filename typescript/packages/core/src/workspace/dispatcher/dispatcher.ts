@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithMemory } from '../../io/memory.ts'
-import { runWithNetwork } from '../../io/network.ts'
+import { type Egress, liveEgress, runWithEgress } from '../../io/gateway.ts'
 import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 
@@ -536,6 +536,11 @@ function followOrLoop(
  */
 interface Call {
   readonly caller: Caller | undefined
+  /**
+   * The egress the op runs under, taken as it starts, before any other call
+   * can bind its own: a stream it hands back opens its connections there.
+   */
+  egress: Egress | null
   readRecords: OpRecord[]
   readonly name: string
   /** The op's path: walked, then followed. */
@@ -817,7 +822,7 @@ export class Dispatcher {
       // Under the workspace's max_memory and network, which FUSE and ws.vfs
       // calls reach only here.
       const run = (): ReturnType<DispatchFn> =>
-        runWithNetwork(this.namespace.network, () =>
+        runWithEgress(this.namespace.network, this.policies, () =>
           runWithMemory(this.namespace.memory, () =>
             name === 'read' &&
             kwargs?.warm !== true &&
@@ -859,6 +864,7 @@ export class Dispatcher {
   }
 
   private dispatchAdmitted: DispatchFn = async (name, path, args, kwargs, report) => {
+    const egressOwner = liveEgress().at(-1) ?? null
     const caller = this.readCaller()
     // The caller's own mark on the op, lifted before any gate fires so
     // each one is told whose op it judges.
@@ -949,6 +955,7 @@ export class Dispatcher {
       caller,
       name === 'stat' && fresh === true,
     )
+    call.egress = egressOwner
     call.stream = name === 'read' && stream === true
     call.direct = name === 'read' && direct === true
     call.warm = isWarm
@@ -1690,6 +1697,7 @@ export class Dispatcher {
       fresh: false,
       walked: null,
       caller,
+      egress: null,
       readRecords: [],
     }
   }
@@ -2398,22 +2406,26 @@ export class Dispatcher {
         return [await recorded(() => this.openStream(call, mount, scope, filler)), dst, fullArgs]
       }
       const run = (opKwargs: OpKwargs, onCall?: (call: Promise<unknown>) => void) =>
-        mount.use(async () => {
-          const answer = await runWithMountContext(
-            () =>
-              mount.runWithWriteRevisions(async () => {
-                const pending = Promise.resolve(
-                  name === 'setattr'
-                    ? this.applySetattr(mount, scope, p, opKwargs)
-                    : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
-                )
-                onCall?.(pending)
-                return pending
-              }),
-            mount.mountId,
-          )
-          return wrapStream(answer, mount.mountId, mount.activity)
-        })
+        mount.use(async () =>
+          // On the mount, as Python's `_on_mount` binds an op: a connection
+          // the backend opens names the mount it serves.
+          runWithCaller({ ...currentCaller(), vfsMount: mount.prefix }, async () => {
+            const answer = await runWithMountContext(
+              () =>
+                mount.runWithWriteRevisions(async () => {
+                  const pending = Promise.resolve(
+                    name === 'setattr'
+                      ? this.applySetattr(mount, scope, p, opKwargs)
+                      : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
+                  )
+                  onCall?.(pending)
+                  return pending
+                }),
+              mount.mountId,
+            )
+            return wrapStream(answer, mount.mountId, mount.activity, call.egress)
+          }),
+        )
       if (filler !== null) {
         const kept = await recorded(() =>
           filler.fill(

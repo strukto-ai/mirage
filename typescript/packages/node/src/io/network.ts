@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { networkBound, networkLets, type NetworkRule } from '@struktoai/mirage-core/io/network'
+import { liveEgress } from '@struktoai/mirage-core/io/gateway'
+import { type NetworkRule, networkBound, networkLets } from '@struktoai/mirage-core/io/network'
+import type { Policies } from '@struktoai/mirage-core/policy/policies'
 import { AsyncResource } from 'node:async_hooks'
 import dns, { type LookupAddress, type LookupOptions } from 'node:dns'
 import net from 'node:net'
@@ -22,13 +24,24 @@ import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici'
 type Found = string | LookupAddress[]
 type LookupDone = (err: NodeJS.ErrnoException | null, address: Found, family?: number) => void
 type Lookup = (hostname: string, options: LookupOptions, callback: LookupDone) => void
-type ConnectOptions = net.TcpSocketConnectOpts & { path?: string }
+export type ConnectOptions = net.TcpSocketConnectOpts & { path?: string }
 
 const connect = Reflect.get(net.Socket.prototype, 'connect') as (
   this: net.Socket,
   ...args: unknown[]
 ) => net.Socket
 let watching = false
+// The listeners the gateway relays from, which a connect may always reach:
+// the gateway judges what is behind them.
+const relays = new Set<string>()
+
+/**
+ * Let connections to a gateway listener through the connect hook, which
+ * judges each one behind it. Mirrors Python's `relay_at`.
+ */
+export function relayAt(host: string, port: number): void {
+  relays.add(`${host}:${String(port)}`)
+}
 
 /** What a refused connection fails with, as Node's own connect errors read. */
 function refusal(host: string, port: number): NodeJS.ErrnoException {
@@ -53,10 +66,10 @@ function judged(options: ConnectOptions, lets: typeof networkLets): ConnectOptio
       if (err !== null) {
         callback(err, address, family)
       } else if (Array.isArray(address)) {
-        const left = address.filter((entry) => lets(hostname, entry.address))
+        const left = address.filter((entry) => lets(hostname, entry.address, port))
         if (left.length === 0) callback(refusal(hostname, port), [])
         else callback(null, left)
-      } else if (lets(hostname, address)) {
+      } else if (lets(hostname, address, port)) {
         callback(null, address, family)
       } else {
         callback(refusal(hostname, port), address, family)
@@ -86,8 +99,9 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
   // asks the rule of the call that opened the connection.
   const lets = AsyncResource.bind(networkLets)
   const host = options.host ?? 'localhost'
+  if (relays.has(`${host}:${String(options.port)}`)) return Reflect.apply(connect, this, args)
   if (net.isIP(host) !== 0) {
-    if (lets('', host)) return Reflect.apply(connect, this, args)
+    if (lets('', host, options.port)) return Reflect.apply(connect, this, args)
     process.nextTick(() => this.destroy(refusal(host, options.port)))
     return this
   }
@@ -97,26 +111,43 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
   return Reflect.apply(connect, this, args)
 }
 
-// The pools fetch keeps for each rule, verified and unverified (curl's -k),
-// so a socket a workspace opened is never reused for a request another
-// workspace's rule never let through.
-const pools = new WeakMap<NetworkRule, { verified?: Agent; unverified?: Agent }>()
+// The pools fetch keeps for each rule, and for each workspace whose policies
+// listen for connections, verified and unverified (curl's -k), so a socket a
+// workspace opened is never reused for a request another workspace's rule
+// never let through or its policies never saw.
+const pools = new WeakMap<NetworkRule | Policies, { verified?: Agent; unverified?: Agent }>()
 
-/** The pool a fetch under `rule` takes, built on first use; `unverified` for curl's -k. */
-export function rulePool(rule: NetworkRule, unverified = false): Agent {
-  let held = pools.get(rule)
+/**
+ * The pool a fetch under `key` (a rule, or a workspace's policies) takes,
+ * built on first use; `unverified` for curl's -k.
+ */
+export function rulePool(key: NetworkRule | Policies, unverified = false): Agent {
+  let held = pools.get(key)
   if (held === undefined) {
     held = {}
-    pools.set(rule, held)
+    pools.set(key, held)
   }
   if (unverified) return (held.unverified ??= new Agent({ connect: { rejectUnauthorized: false } }))
   return (held.verified ??= new Agent())
 }
 
-/** Close the pools a rule holds, as the workspace it judges closes. */
-export async function releaseNetwork(rule: NetworkRule): Promise<void> {
-  const held = pools.get(rule)
-  pools.delete(rule)
+/**
+ * What a fetch's pooled sockets are kept apart by: the rule of the call
+ * making it, else the policies of a workspace that may judge its
+ * connections, so no socket one workspace opened carries another's request
+ * past its rule or its policies; null to share the process's pool.
+ */
+export function poolOwner(): NetworkRule | Policies | null {
+  const bound = liveEgress().at(-1)
+  if (bound === undefined) return networkBound()
+  if (bound.rule !== null) return bound.rule
+  return bound.policies !== null && bound.listening !== false ? bound.policies : null
+}
+
+/** Close the pools a rule or a workspace's policies hold, as the workspace closes. */
+export async function releaseNetwork(key: NetworkRule | Policies): Promise<void> {
+  const held = pools.get(key)
+  pools.delete(key)
   await Promise.all([held?.verified?.close(), held?.unverified?.close()])
 }
 
@@ -133,9 +164,9 @@ export function watchNetwork(): void {
   net.Socket.prototype.connect = connecting as typeof net.Socket.prototype.connect
   setGlobalDispatcher(
     getGlobalDispatcher().compose((dispatch) => (options, handler) => {
-      const rule = networkBound()
-      if (rule === null) return dispatch(options, handler)
-      return rulePool(rule).dispatch(options, handler)
+      const key = poolOwner()
+      if (key === null) return dispatch(options, handler)
+      return rulePool(key).dispatch(options, handler)
     }),
   )
 }

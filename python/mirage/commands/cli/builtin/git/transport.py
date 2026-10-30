@@ -41,6 +41,7 @@ from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.util import require_vfs
 from mirage.commands.config import Context
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 logger = logging.getLogger(__name__)
@@ -360,7 +361,7 @@ class HttpTransport:
             if _origin(moved) != _origin(self._url):
                 self._credentials = {}
             self._url = moved
-        return resp.body
+        return await materialize(resp.body)
 
     async def advertise(self) -> Advertisement:
         """GET ``info/refs`` for upload-pack and read what it lists."""

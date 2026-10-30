@@ -19,6 +19,7 @@ import git, { Errors } from 'isomorphic-git'
 
 import { HttpConnectError } from '../../../builtin/errors.ts'
 import { httpRequest } from '../../../builtin/utils/http.ts'
+import { materialize } from '../../../../io/types.ts'
 import type { Context } from '../../../config.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { discover } from './discover.ts'
@@ -316,7 +317,7 @@ export class HttpTransport implements Transport {
       if (new URL(moved).origin !== new URL(this.url).origin) this.credentials = {}
       this.url = moved
     }
-    return resp.body
+    return await materialize(resp.body)
   }
 
   /** GET `info/refs` for upload-pack and read what it lists. */

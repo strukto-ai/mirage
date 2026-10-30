@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.general.curl import said
@@ -25,7 +27,13 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.stream import (
+    OutputStream,
+    close_quietly,
+    drain,
+    ensure_stream,
+)
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 
 # Exit codes GNU wget uses for the failures mirage can hit. Unlike curl, wget
@@ -77,6 +85,7 @@ async def wget(
             timeout=(
                 HTTP_TIMEOUT_SECONDS if timeout is None else (timeout or None)
             ),
+            stream=True,
         )
     except HttpConnectError as exc:
         reason = (
@@ -87,9 +96,38 @@ async def wget(
         line = f"Connecting to {exc.host}:{exc.port}... failed: {reason}.\n"
         return None, IOResult(exit_code=EXIT_NETWORK, stderr=said(q, line))
 
+    # The body bytes read so far, and the failure that cut the transfer
+    # short, which the status reports once it ends.
+    received = [0]
+    cut: list[HttpConnectError] = []
+
+    async def delivered() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in ensure_stream(resp.body):
+                received[0] += len(chunk)
+                yield chunk
+        except HttpConnectError as exc:
+            cut.append(exc)
+
+    # Closing it lets the connection go, whether or not it was ever read.
+    body = OutputStream(delivered(), lambda: close_quietly(resp.body))
+
+    async def broke(io: IOResult) -> None:
+        if not cut:
+            return
+        reason = (
+            "Connection timed out"
+            if isinstance(cut[0], HttpTimeoutError)
+            else "Connection reset by peer"
+        )
+        line = f"Read error at byte {received[0]} ({reason}). Giving up.\n"
+        io.exit_code = EXIT_NETWORK
+        io.stderr = (await materialize(io.stderr)) + said(q, line)
+
     # --spider reports its verdict on stderr, not stdout, and inherits the
     # same exit 8 an error status gives a real download.
     if spider:
+        await close_quietly(body)
         if resp.is_error:
             err = said(q, "Remote file does not exist -- broken link!!!\n")
             return None, IOResult(exit_code=EXIT_SERVER_ERROR, stderr=err)
@@ -100,14 +138,18 @@ async def wget(
         isinstance(args_O, PathSpec) and args_O.raw_path == "-"
     )
     if stdout or (resp.is_error and not explicit_output):
-        err = (
-            said(q, f"ERROR {resp.status}: {resp.reason}.\n")
-            if resp.is_error
-            else b""
-        )
-        return (None if resp.is_error else resp.body), IOResult(
-            exit_code=EXIT_SERVER_ERROR if resp.is_error else 0, stderr=err
-        )
+        if resp.is_error:
+            await close_quietly(body)
+            err = said(q, f"ERROR {resp.status}: {resp.reason}.\n")
+            return None, IOResult(exit_code=EXIT_SERVER_ERROR, stderr=err)
+        io = IOResult()
+
+        async def out() -> AsyncIterator[bytes]:
+            async for chunk in body:
+                yield chunk
+            await broke(io)
+
+        return OutputStream(out(), lambda: close_quietly(body)), io
 
     dest_raw: str | PathSpec
     if isinstance(args_O, (str, PathSpec)) and args_O:
@@ -120,8 +162,13 @@ async def wget(
 
     # An error status still creates the destination, empty, the way GNU wget
     # truncates the -O target before it learns the response code.
-    data = b"" if resp.is_error else resp.body
-    if dispatch is not None:
+    data: ByteSource = body
+    if resp.is_error:
+        await close_quietly(body)
+        data = b""
+    if dispatch is None:
+        await drain(data)
+    else:
         scope = resolve_target(dest_raw, ctx.cwd)
         try:
             await dispatch("write", scope, data=data)
@@ -137,9 +184,16 @@ async def wget(
             detail = fs_strerror(exc) or str(exc)
             line = f"{dest_str}: {detail}\n"
             return None, IOResult(exit_code=EXIT_GENERIC, stderr=line.encode())
+        finally:
+            await close_quietly(body)
     if resp.is_error:
         err = said(q, f"ERROR {resp.status}: {resp.reason}.\n")
         return None, IOResult(exit_code=EXIT_SERVER_ERROR, stderr=err)
+    io = IOResult()
+    if cut:
+        await broke(io)
+        return None, io
     # Real wget puts its progress report on stderr and nothing on stdout.
-    saved = f"'{dest_str}' saved [{len(data)}/{len(data)}]\n"
-    return None, IOResult(stderr=said(q, saved))
+    saved = f"'{dest_str}' saved [{received[0]}/{received[0]}]\n"
+    io.stderr = said(q, saved)
+    return None, io

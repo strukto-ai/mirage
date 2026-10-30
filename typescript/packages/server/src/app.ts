@@ -15,12 +15,10 @@
 import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import { DiskRecordClient } from '@struktoai/mirage-node'
-import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import {
   OWNERS_PREFIX,
   resolveMaxWorkspaces,
-  resolveNetwork,
   resolvePolicyFile,
   WorkspaceRegistry,
 } from './registry.ts'
@@ -84,12 +82,6 @@ export interface BuildAppOptions {
    * `$MIRAGE_POLICY_FILE` or the `policy_file` config key, else runs none.
    */
   policyFile?: string
-  /**
-   * What every workspace's connections are held to besides its own
-   * `network`. Undefined reads the `network` config key, else sets no
-   * limit. In jwt mode the cloud metadata addresses are refused too.
-   */
-  network?: NetworkSetting
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -114,7 +106,6 @@ export function buildApp(options: BuildAppOptions = {}) {
     maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
     policies: options.policies ?? [],
     programs: resolvePolicyFile(options.policyFile),
-    network: resolveNetwork(options.network),
   })
   const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)

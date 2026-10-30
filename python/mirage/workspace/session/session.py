@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.cache.versions import VersionHistory
 from mirage.io.async_line_iterator import SharedInput, release_inputs
+from mirage.io.network import NetworkSetting
 from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.policy.types import (
     AdmissionRules,
@@ -364,6 +365,9 @@ class SessionState:
     # the group. Stamped by the profile like script, so it persists.
     profile: str | None = None
     command_limits: dict[str, Limit] = field(default_factory=dict)
+    # Where the session's lines may connect besides the workspace's
+    # network, from its profile. A durable restriction like commands.
+    network: NetworkSetting | None = None
     terminal_output: bool = True
     processes: ProcessPermissions = ProcessPermissions()
     process_id: int | None = None
@@ -649,6 +653,8 @@ class SessionState:
             data["command_limits"] = command_limits_to_json(
                 self.command_limits
             )
+        if self.network is not None:
+            data["network"] = self.network
         if self.processes != ProcessPermissions():
             data["processes"] = self.processes.model_dump()
         if self.profile is not None:

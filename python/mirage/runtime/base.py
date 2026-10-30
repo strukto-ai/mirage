@@ -22,6 +22,7 @@ from typing import Any, Callable, ClassVar, Generic, cast
 
 from mirage.commands.config import Context
 from mirage.context.session_context import bind_caller, reset_caller
+from mirage.io.gateway import live_egress
 from mirage.runtime.binding import WorkspaceBinding, refused_run
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
@@ -184,6 +185,17 @@ class Runtime(ABC, Generic[E]):
                 return refused_run(
                     self.name,
                     "runtime cannot enforce this session's file restrictions",
+                )
+            # A process on this machine opens its connections around the
+            # gateway, so a workspace whose network is limited, or whose
+            # policies judge each connection, runs none.
+            if self.reach == "process" and any(
+                egress.rule is not None or egress.hooked
+                for egress in live_egress()
+            ):
+                return refused_run(
+                    self.name,
+                    "runtime cannot enforce this workspace's network",
                 )
             engine = await self.engine()
             if capture is None:

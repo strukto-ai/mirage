@@ -30,8 +30,12 @@ from mirage.types import JsonValue
 T = TypeVar("T")
 
 # A workspace's `network`: True for no limit, False for none at all, or
-# the hosts and ranges it may reach, `{"allow": [...]}`.
+# the hosts and ranges it may and may not reach,
+# `{"allowed_domains": [...], "denied_domains": [...]}`.
 NetworkSetting: TypeAlias = bool | Mapping[str, Sequence[str]]
+
+# Each list a `network` mapping takes, and the rule layer it fills.
+_LISTS = {"allowed_domains": "allow", "denied_domains": "deny"}
 
 # The audit events a connection raises, its address their second argument.
 _CONNECTING = frozenset({"socket.connect", "socket.sendto"})
@@ -67,57 +71,76 @@ class NetworkRule:
             self._stream = Stream("network", json.dumps(config).encode())
         except StreamError as exc:
             raise ValueError(str(exc)) from exc
+        # What it was built from, which a narrower rule builds on.
+        self.layers = tuple(dict(layer) for layer in layers)
+        self.metadata = metadata
         # The audit hook asks from any thread, and a test runs with the
         # GIL released: one test goes through the stream at a time.
         self._lock = threading.Lock()
-        # The addresses a lookup this rule let answered, which a connect,
-        # naming only its address, may open to.
-        self._resolved: OrderedDict[str, None] = OrderedDict()
+        # Each address a lookup this rule let answered, with the port the
+        # lookup was for (None when it named none) and the name it was
+        # asked for, which a connect, naming only its address, is judged
+        # by. Keyed by the port too, so two names sharing an address keep
+        # their own ports.
+        self._resolved: OrderedDict[tuple[str, int | None], str] = (
+            OrderedDict()
+        )
 
-    def lets(self, host: str, address: str) -> bool:
+    def lets(self, host: str, address: str, port: int | None = None) -> bool:
         """Whether a connection to ``address``, resolved for ``host``, opens.
 
         Args:
             host (str): the name it was resolved for, empty when unknown.
             address (str): the address it connects to, empty when unknown.
+            port (int | None): the port it connects to, None when unknown.
         """
+        subject = f"{host}\0{address}\0{'' if port is None else port}"
         with self._lock:
-            return self._stream.test(f"{host}\0{address}".encode())
+            return self._stream.test(subject.encode())
 
-    def resolved(self, host: str, address: str) -> bool:
+    def resolved(
+        self, host: str, address: str, port: int | None = None
+    ) -> bool:
         """Whether a lookup of ``host`` may answer ``address``; one that
-        may lets this rule's connects open to it.
+        may lets this rule's connects to it at the port it was for, and
+        the name it was asked for judges the rest.
 
         Args:
             host (str): the name looked up.
             address (str): one address it resolved to.
+            port (int | None): the port it was looked up for, None when
+                unknown.
         """
-        if not self.lets(host, address):
+        if not self.lets(host, address, port):
             return False
         with self._lock:
-            self._resolved.pop(address, None)
-            self._resolved[address] = None
+            self._resolved.pop((address, port), None)
+            self._resolved[(address, port)] = host
             while len(self._resolved) > _RESOLVED_SIZE:
                 self._resolved.popitem(last=False)
         return True
 
-    def connects(self, address: str) -> bool:
+    def connects(self, address: str, port: int | None = None) -> bool:
         """Whether a connection to ``address`` opens: one a lookup this
-        rule let answered, or one the rule lets by its address alone.
+        rule let answered for this port, else one judged by the name a
+        lookup that named no port answered it for, else by its address
+        alone.
 
         Args:
             address (str): the address it connects to.
+            port (int | None): the port it connects to.
         """
         with self._lock:
-            if address in self._resolved:
+            if (address, port) in self._resolved:
                 return True
-        return self.lets("", address)
+            host = self._resolved.get((address, None), "")
+        return self.lets(host, address, port)
 
 
 def network_layer(setting: NetworkSetting) -> dict[str, JsonValue] | None:
     """The layer a ``network`` setting adds: none for True, one that lets
-    nothing for False, and its allow list for a mapping. Mirrors TS's
-    ``networkLayer``.
+    nothing for False, and its allowed and denied lists for a mapping.
+    Mirrors TS's ``networkLayer``.
 
     Args:
         setting (NetworkSetting): the setting as written.
@@ -131,43 +154,41 @@ def network_layer(setting: NetworkSetting) -> dict[str, JsonValue] | None:
         return {"allow": []}
     if (
         isinstance(setting, Mapping)
-        and set(setting) == {"allow"}
-        and isinstance(setting["allow"], Sequence)
-        and not isinstance(setting["allow"], str)
-        and all(isinstance(entry, str) for entry in setting["allow"])
+        and setting
+        and set(setting) <= set(_LISTS)
+        and all(
+            isinstance(entries, Sequence)
+            and not isinstance(entries, str)
+            and all(isinstance(entry, str) for entry in entries)
+            for entries in setting.values()
+        )
     ):
-        return {"allow": list(setting["allow"])}
+        return {_LISTS[key]: list(entries) for key, entries in setting.items()}
     raise ValueError(
-        "network is true, false or {allow: [hosts and ranges]}, "
+        "network is true, false or {allowed_domains: [...], "
+        "denied_domains: [...]}, "
         f"not {setting!r}"
     )
 
 
 def network_rule(
-    setting: NetworkSetting = True,
-    ceiling: NetworkSetting = True,
-    metadata: bool = False,
+    setting: NetworkSetting = True, metadata: bool = False
 ) -> NetworkRule | None:
-    """The rule a workspace's connections are judged by: its own setting
-    and the ceiling of the server that built it, each a layer, with the
-    cloud metadata addresses refused when ``metadata`` is set; None when
-    nothing limits it. The first rule built starts watching the process's
-    connections. Mirrors TS's ``networkRule``.
+    """The rule a workspace's connections are judged by: its ``network``,
+    with the cloud metadata addresses refused when ``metadata`` is set;
+    None when nothing limits it. The first rule built starts watching the
+    process's connections. Mirrors TS's ``networkRule``.
 
     Args:
         setting (NetworkSetting): the workspace's ``network``.
-        ceiling (NetworkSetting): what its server holds every workspace to.
         metadata (bool): refuse the addresses clouds serve a machine its
             credentials at.
 
     Raises:
-        ValueError: a setting or one of its entries is not valid.
+        ValueError: the setting or one of its entries is not valid.
     """
-    layers = [
-        layer
-        for layer in (network_layer(ceiling), network_layer(setting))
-        if layer is not None
-    ]
+    layer = network_layer(setting)
+    layers = [] if layer is None else [layer]
     if not layers and not metadata:
         return None
     rule = NetworkRule(layers, metadata)
@@ -196,16 +217,17 @@ async def run_with_network(rule: NetworkRule | None, call: Awaitable[T]) -> T:
         _rule.reset(token)
 
 
-def network_lets(host: str, address: str) -> bool:
+def network_lets(host: str, address: str, port: int | None = None) -> bool:
     """Whether the workspace a call runs for may open a connection to
     ``address``, resolved for ``host``. Mirrors TS's ``networkLets``.
 
     Args:
         host (str): the name it was resolved for, empty when unknown.
         address (str): the address it connects to, empty when unknown.
+        port (int | None): the port it connects to, None when unknown.
     """
     rule = _rule.get()
-    return rule is None or rule.lets(host, address)
+    return rule is None or rule.lets(host, address, port)
 
 
 def network_bound() -> NetworkRule | None:
@@ -218,10 +240,83 @@ _resolve = socket.getaddrinfo
 _loop_resolve = asyncio.base_events.BaseEventLoop.getaddrinfo
 _watching = False
 _watch_lock = threading.Lock()
+# The lookups the running call made, newest last: each name, the port it
+# was looked up for (None when it named none) and the addresses it
+# answered, which a connect, naming only its address, reports its host
+# and its other addresses by. Kept per call, so no other workspace's
+# lookup lends a connection its name.
+_lookups: ContextVar[tuple[tuple[str, int | None, tuple[str, ...]], ...]] = (
+    ContextVar("mirage_lookups", default=())
+)
+# How many of a call's lookups are kept.
+_LOOKUPS_KEPT = 16
+# The listeners the gateway relays from, which a connect may always reach:
+# the gateway judges what is behind them.
+_relays: set[tuple[str, int]] = set()
+
+
+def named(address: str, port: int | None = None) -> str:
+    """The name the running call's lookup was asked for when it answered
+    ``address``, for this port or for none; empty when none did.
+
+    Args:
+        address (str): the address a connection reaches.
+        port (int | None): the port it reaches.
+    """
+    for host, wanted, addresses in reversed(_lookups.get()):
+        if address in addresses and wanted in (port, None):
+            return host
+    return ""
+
+
+def answers(host: str, port: int | None = None) -> tuple[str, ...]:
+    """The addresses the running call's last lookup of ``host`` answered,
+    for this port or for none, in the order it gave them.
+
+    Args:
+        host (str): the name looked up.
+        port (int | None): the port it was looked up for.
+    """
+    for name, wanted, addresses in reversed(_lookups.get()):
+        if name == host and wanted in (port, None):
+            return addresses
+    return ()
+
+
+def relay_at(host: str, port: int) -> None:
+    """Let connections to a gateway listener through the connect hook,
+    which judges each one behind it.
+
+    Args:
+        host (str): the listener's address.
+        port (int): its port.
+    """
+    _relays.add((host, port))
+
+
+def _remember(
+    host: bytes | str | None, port: int | None, found: list[Any]
+) -> None:
+    if not host:
+        return
+    name = host.decode() if isinstance(host, bytes) else host
+    addresses = tuple(dict.fromkeys(str(info[4][0]) for info in found))
+    kept = _lookups.get()[1 - _LOOKUPS_KEPT :]
+    _lookups.set((*kept, (name, port, addresses)))
+
+
+def _port_of(port: bytes | str | int | None) -> int | None:
+    text = port.decode() if isinstance(port, bytes) else port
+    if isinstance(text, int):
+        return text
+    return int(text) if text is not None and text.isdigit() else None
 
 
 def _judged(
-    rule: NetworkRule, host: bytes | str | None, found: list[Any]
+    rule: NetworkRule,
+    host: bytes | str | None,
+    port: bytes | str | int | None,
+    found: list[Any],
 ) -> list[Any]:
     """The answers of a lookup a rule lets, each judged by the name it
     was asked for; refused when it lets none.
@@ -229,6 +324,7 @@ def _judged(
     Args:
         rule (NetworkRule): the rule bound to the lookup.
         host (bytes | str | None): the name looked up.
+        port (bytes | str | int | None): the port it was looked up for.
         found (list[Any]): what ``getaddrinfo`` answered.
 
     Raises:
@@ -237,7 +333,11 @@ def _judged(
     if not host:
         return found
     name = host.decode() if isinstance(host, bytes) else host
-    let = [info for info in found if rule.resolved(name, str(info[4][0]))]
+    # A service name or none at all leaves the port to the connect.
+    wanted = _port_of(port)
+    let = [
+        info for info in found if rule.resolved(name, str(info[4][0]), wanted)
+    ]
     if found and not let:
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
     return let
@@ -251,7 +351,9 @@ def _getaddrinfo(
 ) -> list[Any]:
     found = _resolve(host, port, *args, **kwargs)
     rule = _rule.get()
-    return found if rule is None else _judged(rule, host, found)
+    let = found if rule is None else _judged(rule, host, port, found)
+    _remember(host, _port_of(port), let)
+    return let
 
 
 async def _loop_getaddrinfo(
@@ -263,7 +365,9 @@ async def _loop_getaddrinfo(
 ) -> list[Any]:
     found = await _loop_resolve(loop, host, port, *args, **kwargs)
     rule = _rule.get()
-    return found if rule is None else _judged(rule, host, found)
+    let = found if rule is None else _judged(rule, host, port, found)
+    _remember(host, _port_of(port), let)
+    return let
 
 
 def _connecting(event: str, args: tuple[Any, ...]) -> None:
@@ -275,7 +379,12 @@ def _connecting(event: str, args: tuple[Any, ...]) -> None:
     target = args[1]
     if not isinstance(target, tuple) or not isinstance(target[0], str):
         return
-    if not rule.connects(target[0]):
+    port = (
+        target[1] if len(target) > 1 and isinstance(target[1], int) else None
+    )
+    if port is not None and (target[0], port) in _relays:
+        return
+    if not rule.connects(target[0], port):
         raise PermissionError(errno.EACCES, os.strerror(errno.EACCES))
 
 

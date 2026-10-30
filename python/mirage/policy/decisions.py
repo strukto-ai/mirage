@@ -40,6 +40,7 @@ from mirage.policy.types import (
     DryRun,
     ExecuteResultContext,
     HandOff,
+    NetworkContext,
     Occurrence,
     Pending,
     RouteContext,
@@ -137,7 +138,8 @@ def ask_rule(
     | RouteContext
     | VfsContext
     | ExecuteResultContext
-    | SessionContext,
+    | SessionContext
+    | NetworkContext,
     ask: Ask,
 ) -> CommandRule:
     """The rule an Ask is keyed on: the document's, or for a coded Ask
@@ -147,7 +149,8 @@ def ask_rule(
 
     Args:
         ctx (CommandContext | RouteContext | VfsContext |
-            ExecuteResultContext | SessionContext): what the method saw.
+            ExecuteResultContext | SessionContext | NetworkContext): what
+            the method saw.
         ask (Ask): the policy's answer.
     """
     if ask.rule is not None:
@@ -159,6 +162,10 @@ def ask_rule(
         return CommandRule(reason=ask.reason, paths=(ctx.path.virtual,))
     if isinstance(ctx, SessionContext):
         return CommandRule(reason=ask.reason, commands=(ctx.key,))
+    if isinstance(ctx, NetworkContext):
+        return CommandRule(
+            reason=ask.reason, commands=(ctx.host or ctx.address,)
+        )
     return CommandRule(reason=ask.reason, commands=(ctx.line,))
 
 

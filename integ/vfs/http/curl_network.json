@@ -1,0 +1,367 @@
+{
+  "cases": [
+    {
+      "id": "curl_network_range_lets_the_fixture_through",
+      "seq": 330500,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-0",
+      "session_profiles": {
+        "net-0": {
+          "network": {
+            "allowed_domains": [
+              "127.0.0.0/8"
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_network_false_refuses_as_a_closed_port",
+      "seq": 330501,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-1",
+      "session_profiles": {
+        "net-1": {
+          "network": false
+        }
+      },
+      "command": "curl -s {http}/hello; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_network_denied_address_wins_over_every_host",
+      "seq": 330502,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-2",
+      "session_profiles": {
+        "net-2": {
+          "network": {
+            "allowed_domains": [
+              "*"
+            ],
+            "denied_domains": [
+              "127.0.0.1"
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_network_denied_port_leaves_other_ports",
+      "seq": 330503,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-3",
+      "session_profiles": {
+        "net-3": {
+          "network": {
+            "allowed_domains": [
+              "*"
+            ],
+            "denied_domains": [
+              "*:9"
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_network_another_host_only_refuses",
+      "seq": 330504,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-4",
+      "session_profiles": {
+        "net-4": {
+          "network": {
+            "allowed_domains": [
+              "example.com"
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "wget_network_false_refuses_with_exit_4",
+      "seq": 330505,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-5",
+      "session_profiles": {
+        "net-5": {
+          "network": false
+        }
+      },
+      "command": "wget -q -O - {http}/hello; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=4\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_network_refusal_lets_the_line_run_on",
+      "seq": 330506,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-6",
+      "session_profiles": {
+        "net-6": {
+          "network": false
+        }
+      },
+      "command": "curl -s {http}/hello; echo after",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_pre_network_program_refuses_by_command",
+      "seq": 330507,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-7",
+      "session_profiles": {
+        "net-7": {
+          "policy": {
+            "pre_network": [
+              {
+                "script": {
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'curl':\n    print(json.dumps({'kind': 'deny', 'reason': 'no curl'}))\n",
+                  "language": "python"
+                },
+                "runtime": "monty"
+              }
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello; echo \"rc=$?\"; wget -q -O - {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\nhello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_pre_network_program_refuses_by_the_whole_line",
+      "seq": 330508,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-8",
+      "session_profiles": {
+        "net-8": {
+          "policy": {
+            "pre_network": [
+              {
+                "script": {
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif 'offline' in ctx['line']:\n    print(json.dumps({'kind': 'deny', 'reason': 'the line is offline'}))\n",
+                  "language": "python"
+                },
+                "runtime": "monty"
+              }
+            ]
+          }
+        }
+      },
+      "command": "echo offline >/dev/null; curl -s {http}/hello; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_pre_network_program_refuses_by_word",
+      "seq": 330509,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-9",
+      "session_profiles": {
+        "net-9": {
+          "policy": {
+            "pre_network": [
+              {
+                "script": {
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif '--location' in [w['text'] for w in ctx['words']]:\n    print(json.dumps({'kind': 'deny', 'reason': 'no redirects'}))\n",
+                  "language": "python"
+                },
+                "runtime": "monty"
+              }
+            ]
+          }
+        }
+      },
+      "command": "curl -s --location {http}/redirect; echo \"rc=$?\"; curl -s {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\nhello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_pre_network_program_refuses_by_address",
+      "seq": 330510,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-10",
+      "session_profiles": {
+        "net-10": {
+          "policy": {
+            "pre_network": [
+              {
+                "script": {
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['address'] == '127.0.0.1' and ctx['port'] > 0:\n    print(json.dumps({'kind': 'deny', 'reason': 'no loopback'}))\n",
+                  "language": "python"
+                },
+                "runtime": "monty"
+              }
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_pre_network_silent_program_lets_it_through",
+      "seq": 330511,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-11",
+      "session_profiles": {
+        "net-11": {
+          "policy": {
+            "pre_network": [
+              {
+                "script": {
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\n",
+                  "language": "python"
+                },
+                "runtime": "monty"
+              }
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_network_list_judges_before_any_program",
+      "seq": 330512,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-12",
+      "session_profiles": {
+        "net-12": {
+          "network": {
+            "allowed_domains": [
+              "example.com"
+            ]
+          },
+          "policy": {
+            "pre_network": [
+              {
+                "script": {
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif True:\n    print(json.dumps({'kind': 'deny', 'reason': 'program saw it'}))\n",
+                  "language": "python"
+                },
+                "runtime": "monty"
+              }
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_post_network_program_answer_changes_nothing",
+      "seq": 330513,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-13",
+      "session_profiles": {
+        "net-13": {
+          "policy": {
+            "post_network": [
+              {
+                "script": {
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif True:\n    print(json.dumps({'kind': 'deny', 'reason': 'too late'}))\n",
+                  "language": "python"
+                },
+                "runtime": "monty"
+              }
+            ]
+          }
+        }
+      },
+      "command": "curl -s {http}/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -17,7 +17,7 @@ import { createServer } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { PathSpec } from '../../../types.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { Context } from '../../config.ts'
 import { GENERAL_CURL } from './curl.ts'
@@ -58,9 +58,9 @@ async function runWget(
   if (cmd === undefined) throw new Error('wget not registered')
   // What each write sent through the dispatcher.
   const writes: Uint8Array[] = []
-  const dispatch: DispatchFn = (_op, _path, args) => {
-    writes.push(args?.[0] as Uint8Array)
-    return Promise.resolve([null, new IOResult()])
+  const dispatch: DispatchFn = async (_op, _path, args) => {
+    writes.push(await materialize(args?.[0] as ByteSource))
+    return [null, new IOResult()]
   }
   const result = await cmd.fn(vfs.accessor, [] as PathSpec[], [url], {
     ...ctx({ flags }),

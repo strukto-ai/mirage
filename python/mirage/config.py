@@ -772,7 +772,11 @@ class WorkspaceConfig(BaseModel):
     def _v_network(cls, v: Any) -> NetworkSetting:
         layer = network_layer(v)
         NetworkRule([layer] if layer is not None else [])
-        return bool(v) if isinstance(v, bool) else {"allow": list(v["allow"])}
+        return (
+            bool(v)
+            if isinstance(v, bool)
+            else {key: list(entries) for key, entries in v.items()}
+        )
 
     @model_validator(mode="after")
     def _v_profile(self) -> "WorkspaceConfig":

@@ -72,8 +72,8 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
+from mirage.io.gateway import run_with_egress
 from mirage.io.memory import run_with_memory
-from mirage.io.network import run_with_network
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, PipeStream
 from mirage.io.yield_budget import task_turn
@@ -999,19 +999,22 @@ class Dispatcher:
         await task_turn()
         memory = self._namespace.registry.memory
         network = self._namespace.registry.network
+        policies = self._namespace.registry.policies
         try:
             if caller is None:
                 caller = current_caller()
             if self._admit_write is None or name not in POLICY_WRITE_OPS:
-                return await run_with_network(
+                return await run_with_egress(
                     network,
+                    policies,
                     run_with_memory(
                         memory, self._bound(name, path, caller, report, kwargs)
                     ),
                 )
             async with self._admit_write(caller) as held:
-                return await run_with_network(
+                return await run_with_egress(
                     network,
+                    policies,
                     run_with_memory(
                         memory, self._bound(name, path, held, report, kwargs)
                     ),

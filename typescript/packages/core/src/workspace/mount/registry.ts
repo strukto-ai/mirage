@@ -16,7 +16,7 @@ import type { DiffComputer } from '../../rs/diff_types.ts'
 import type { SessionAccess } from '../../view/types.ts'
 import { IOConfig } from '../../io/config.ts'
 import type { MemoryBudget } from '../../io/memory.ts'
-import type { NetworkRule } from '../../io/network.ts'
+import { NetworkRule, networkLayer, type NetworkSetting } from '../../io/network.ts'
 import { backendCommands } from './backends.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { ProcessView } from '../../process/view.ts'
@@ -160,6 +160,12 @@ export class MountRegistry {
   memory: MemoryBudget | null = null
   // The rule the workspace's connections are judged by; null for no limit.
   network: NetworkRule | null = null
+  // The rule each profile's `network` narrows it to, by the layer it adds,
+  // with the rule it narrowed.
+  private readonly narrowed = new Map<string, [NetworkRule | null, NetworkRule]>()
+  // What starts judging the process's connections, which the host sets: a
+  // profile can narrow a workspace that limits nothing itself.
+  private watch: (() => void) | null = null
   // Command admission policies. Policies itself is a bare mechanism;
   // the registry seeds the POSIX mount-root rule (mount-root semantics
   // are mount semantics) and the document's deny rules, then user
@@ -230,6 +236,35 @@ export class MountRegistry {
   async settle(runtime: Runtime): Promise<void> {
     await runtime.settle()
     if (!runtime.fileEffectsDispatched) await this.dropCaches()
+  }
+
+  /**
+   * The rule a session's lines are held to: the workspace's, narrowed by the
+   * `network` its profile states, built once per setting. Mirrors Python's
+   * `MountRegistry.network_of`.
+   */
+  networkOf(setting: NetworkSetting | null): NetworkRule | null {
+    const layer = setting === null ? null : networkLayer(setting)
+    if (layer === null) return this.network
+    const key = JSON.stringify(layer)
+    let held = this.narrowed.get(key)
+    if (held?.[0] !== this.network) {
+      const base = this.network
+      held = [base, new NetworkRule([...(base?.layers ?? []), layer], base?.metadata ?? false)]
+      this.narrowed.set(key, held)
+      this.watch?.()
+    }
+    return held[1]
+  }
+
+  /** Set what starts judging the process's connections, once a rule needs it. */
+  setNetworkWatch(watch: () => void): void {
+    this.watch = watch
+  }
+
+  /** The rules `networkOf` built, whose connections close with the workspace. */
+  narrowedNetworks(): NetworkRule[] {
+    return [...this.narrowed.values()].map(([, rule]) => rule)
   }
 
   setReconciler(reconciler: ReadReconciler): void {
