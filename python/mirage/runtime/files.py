@@ -119,14 +119,6 @@ class Descriptor:
         inode (str): where the links on ``opened`` led as it opened, which
             names its inode however the file is renamed or the link
             changed since; "" names it by ``opened``.
-        late (list[tuple[int, bytes]]): writes a garbage collection held
-            back (``write``), at the offsets they were made at.
-        late_end (bool): an appending write a collection held back left
-            the position at an end only landing learns; a relative seek
-            before then is refused, an absolute one keeps its place.
-        landing (bool): held writes are landing now; a call of theirs
-            that reaches ``landed`` again (a drain of put-off work) leaves
-            them to it, so they land in order.
     """
 
     files: "RuntimeFiles"
@@ -136,9 +128,6 @@ class Descriptor:
     directory: bool = False
     pos: int = 0
     inode: str = ""
-    late: list[tuple[int, bytes]] = dataclasses.field(default_factory=list)
-    late_end: bool = False
-    landing: bool = False
 
     @property
     def path(self) -> str:
@@ -148,29 +137,7 @@ class Descriptor:
     @property
     def size(self) -> int:
         """The file's length as the handle holds it, its writes counted."""
-        self.landed()
         return self.files.fstat(self.fh).size
-
-    def landed(self) -> None:
-        """Write what a garbage collection held back, in order, once it is
-        over: before anything else reaches the handle, or at the loop's
-        next call from outside (``RuntimeFiles.defer``)."""
-        if self.files.held or self.landing:
-            return
-        self.landing = True
-        try:
-            # A collection during these calls may hold more back, or seek.
-            while self.late:
-                late, self.late = self.late, []
-                for offset, data in late:
-                    self.files.pwrite(self.fh, offset, data)
-                if self.late_end and not self.late:
-                    end = self.files.fstat(self.fh).size
-                    if self.late_end and not self.late:
-                        self.pos = end
-                        self.late_end = False
-        finally:
-            self.landing = False
 
     def pread(self, offset: int, size: int) -> bytes:
         """Read at an explicit offset without moving the position.
@@ -181,7 +148,6 @@ class Descriptor:
         """
         if size <= 0:
             return b""
-        self.landed()
         return self.files.pread(self.fh, offset, size)
 
     def read(self, size: int | None = None) -> bytes:
@@ -191,7 +157,6 @@ class Descriptor:
             size (int | None): byte budget; None or negative reads to the
                 end, a chunk at a time.
         """
-        self.landed()
         if size is not None and size >= 0:
             chunk = self.pread(self.pos, size)
             self.pos += len(chunk)
@@ -211,7 +176,6 @@ class Descriptor:
             data (bytes): the payload.
         """
         if data:
-            self.landed()
             self.files.pwrite(self.fh, offset, data)
 
     def write(self, data: bytes) -> None:
@@ -221,18 +185,6 @@ class Descriptor:
         Args:
             data (bytes): the payload.
         """
-        if self.files.held:
-            # Inside a collection, which may have interrupted a drive of
-            # the loop, the bytes wait (``landed``); the position moves
-            # now, so a later call on the handle writes after them.
-            if not self.late:
-                self.files.defer(self.landed)
-            self.late.append((self.pos, data))
-            if self.mode.append:
-                self.late_end = True
-            else:
-                self.pos += len(data)
-            return
         # The end first, as O_APPEND moves to it: a write that fails to
         # find it leaves nothing written.
         if self.mode.append and data:
@@ -250,20 +202,15 @@ class Descriptor:
 
         Returns:
             int | None: the new position, or None when the whence is
-            unknown, the target would be negative, or it counts from a
-            position a held append left unknown (the position is then
-            untouched).
+            unknown or the target would be negative (the position is
+            then untouched).
         """
-        self.landed()
-        if whence == 1 and self.late_end:
-            return None
         if whence == 2:
             base: int | None = self.size
         else:
             base = {0: 0, 1: self.pos}.get(whence)
         if base is None or base + offset < 0:
             return None
-        self.late_end = False
         self.pos = base + offset
         return self.pos
 
@@ -273,17 +220,14 @@ class Descriptor:
         Args:
             size (int): the new length.
         """
-        self.landed()
         self.files.ftruncate(self.fh, size)
 
     def land(self) -> None:
         """Land what it wrote, as fsync(2) does."""
-        self.landed()
         self.files.fsync(self.fh)
 
     def close(self) -> None:
         """Land what it wrote and let the core's handle go."""
-        self.landed()
         self.files.close(self.fh)
 
 
@@ -501,13 +445,18 @@ class RuntimeFiles:
             if renumbered is exc:
                 raise
             raise renumbered from exc
+        except RuntimeError:
+            # A refused call (a closed loop, a collection) closes only
+            # the wrapper it was handed; the op inside never started.
+            pending.close()
+            raise
 
     @property
     def held(self) -> bool:
-        """Whether a call made now must be put off (``defer``): the
-        garbage collector runs on this thread, and the calls drive a
-        shared loop it may have interrupted. With no shared loop each call
-        runs on a loop of its own, which nothing else is driving."""
+        """Whether a call made now must wait (``defer``): the garbage
+        collector runs on this thread, and the calls drive a shared loop
+        it may have interrupted. With no shared loop each call runs on a
+        loop of its own, which nothing else is driving."""
         return self._loop is not None and collecting()
 
     def defer(self, work: Callable[[], None]) -> None:

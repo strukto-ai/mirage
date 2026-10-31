@@ -28,7 +28,7 @@ from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
-from mirage.runtime.python.host.fs import HostFs
+from mirage.runtime.python.host.fs import HostFs, os_routing
 from mirage.runtime.python.host.open import make_open
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -421,20 +421,9 @@ async def _one_turn() -> int:
     return 1
 
 
-class _WritesWhenCollected:
-    """Writes to a live stream from its finalizer, in a cycle of its own."""
-
-    def __init__(self, stream) -> None:
-        self.stream = stream
-        self.cycle = self
-
-    def __del__(self) -> None:
-        self.stream.write(b"during-")
-
-
 class _Finalizes:
     """Makes calls on a live stream from its finalizer, in a cycle of its
-    own, and keeps what each answered, or the errno it raised."""
+    own, and keeps what each answered, or the class of what it raised."""
 
     def __init__(self, stream, calls, seen) -> None:
         self.stream = stream
@@ -446,15 +435,16 @@ class _Finalizes:
         for name, *args in self.calls:
             try:
                 self.seen.append(getattr(self.stream, name)(*args))
-            except OSError as exc:
-                self.seen.append(exc.errno)
+            except Exception as exc:
+                self.seen.append(type(exc).__name__)
 
 
-def _collected(build) -> None:
+def _collected(build=None) -> None:
     enabled = gc.isenabled()
     gc.disable()
     try:
-        build()
+        if build is not None:
+            build()
         gc.collect()
     finally:
         if enabled:
@@ -466,15 +456,22 @@ def _drop_in_cycle(stream) -> None:
     cycle.append(cycle)
 
 
+def _host(ws, loop):
+    """The routed ``os`` calls and ``open`` a program reaches."""
+    router = HostFs(ws.vfs, loop)
+    return os_routing(router), make_open(ws.vfs, loop, router)
+
+
 @pytest.mark.parametrize(
-    "mode,buffering,seed,landed",
+    "mode,buffering,seed,payload,landed",
     [
-        ("wb", 0, b"", b"landed"),
-        ("ab", -1, b"kept-", b"kept-landed"),
+        ("wb", 0, b"", b"landed", b"landed"),
+        ("ab", -1, b"kept-", b"landed", b"kept-landed"),
+        ("w", -1, b"", "landed", b"landed"),
     ],
 )
-def test_a_stream_the_collector_closes_lands_at_its_loops_next_drive(
-    monkeypatch, mode, buffering, seed, landed
+def test_a_stream_the_collector_closes_lands_at_its_loops_next_call(
+    monkeypatch, mode, buffering, seed, payload, landed
 ):
     # The collection runs where run_forever has not yet marked the loop
     # running, after run_until_complete registered its stop: a close
@@ -483,7 +480,7 @@ def test_a_stream_the_collector_closes_lands_at_its_loops_next_drive(
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     loop = asyncio.new_event_loop()
     loop.run_until_complete(ws.vfs.write("/data/f", seed))
-    opener = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))
+    _, opener = _host(ws, loop)
     hooks = sys.get_asyncgen_hooks
     armed, driven = threading.Event(), threading.Event()
     dropped: list[weakref.ref] = []
@@ -499,11 +496,10 @@ def test_a_stream_the_collector_closes_lands_at_its_loops_next_drive(
 
     def program() -> None:
         stream = opener("/data/f", mode, buffering=buffering)
-        stream.write(b"landed")
+        stream.write(payload)
         dropped.append(weakref.ref(stream))
-        cycle = [stream]
-        cycle.append(cycle)
-        del stream, cycle
+        _drop_in_cycle(stream)
+        del stream
         collected.append(dropped[0]() is None)
         armed.set()
         assert run_async_from_sync(_one_turn(), loop) == 1
@@ -550,196 +546,95 @@ def test_a_collected_stream_with_no_shared_loop_closes_in_place():
     stream.write(b"landed")
     _drop_in_cycle(stream)
     del stream
-    enabled = gc.isenabled()
-    gc.disable()
-    try:
-        gc.collect()
-    finally:
-        if enabled:
-            gc.enable()
+    _collected()
     assert asyncio.run(ws.vfs.read("/data/f")) == b"landed"
 
 
-def test_writes_a_collection_makes_to_a_live_stream_land_in_order():
+def test_a_collected_stream_over_a_shared_fd_lands_before_its_next_write():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     loop = asyncio.new_event_loop()
-    log = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
-        "/data/log", "wb", buffering=0
+    routed, opener = _host(ws, loop)
+    fd = routed["open"]("/data/log", os.O_WRONLY | os.O_CREAT)
+    routed["write"](fd, b"before-")
+    stream = opener(fd, "wb", closefd=False)
+    stream.write(b"during-")
+    _drop_in_cycle(stream)
+    del stream
+    _collected()
+    routed["write"](fd, b"after")
+    routed["close"](fd)
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during-after"
     )
-    log.write(b"before-")
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_stream_collected_during_a_call_lands_as_the_call_ends(
+    monkeypatch,
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, opener = _host(ws, loop)
+    stream = opener("/data/dropped", "wb")
+    stream.write(b"landed")
+    _drop_in_cycle(stream)
+    del stream
+    hooks = sys.get_asyncgen_hooks
+    armed = threading.Event()
+
+    def collecting_hooks():
+        if armed.is_set():
+            armed.clear()
+            gc.collect()
+        return hooks()
+
     enabled = gc.isenabled()
     gc.disable()
+    monkeypatch.setattr(sys, "get_asyncgen_hooks", collecting_hooks)
     try:
-        _WritesWhenCollected(log)
-        gc.collect()
+        armed.set()
+        routed["mkdir"]("/data/d")
     finally:
+        monkeypatch.undo()
         if enabled:
             gc.enable()
+    assert loop.run_until_complete(ws.vfs.read("/data/dropped")) == b"landed"
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_finalizer_cannot_reach_the_loop_through_a_live_stream():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    _, opener = _host(ws, loop)
+    log = opener("/data/log", "wb", buffering=0)
+    log.write(b"before-")
+    seen = []
+    _collected(lambda: _Finalizes(log, [("write", b"during-")], seen))
+    assert seen == ["RuntimeError"]
+    log.write(b"after")
+    log.close()
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-after"
+    )
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_finalizer_writes_into_a_live_streams_buffer():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    _, opener = _host(ws, loop)
+    log = opener("/data/log", "wb")
+    log.write(b"before-")
+    seen = []
+    _collected(lambda: _Finalizes(log, [("write", b"during-")], seen))
+    assert seen == [7]
     log.write(b"after")
     log.close()
     assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
         b"before-during-after"
-    )
-    loop.run_until_complete(ws.close())
-    loop.close()
-
-
-def test_a_descriptor_writes_after_what_a_collection_held_back():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    loop = asyncio.new_event_loop()
-    router = HostFs(ws.vfs, loop)
-    fd = router.open("/data/log", os.O_WRONLY | os.O_CREAT)
-    router.write(fd, b"before-")
-    stream = make_open(ws.vfs, loop, router)(
-        fd, "wb", buffering=0, closefd=False
-    )
-    enabled = gc.isenabled()
-    gc.disable()
-    try:
-        _WritesWhenCollected(stream)
-        gc.collect()
-    finally:
-        if enabled:
-            gc.enable()
-    router.write(fd, b"after")
-    router.close(fd)
-    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
-        b"before-during-after"
-    )
-    loop.run_until_complete(ws.close())
-    loop.close()
-
-
-def test_an_append_stream_moves_to_the_end_of_what_a_collection_held():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    loop = asyncio.new_event_loop()
-    log = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
-        "/data/log", "ab", buffering=0
-    )
-    log.write(b"before-")
-    enabled = gc.isenabled()
-    gc.disable()
-    try:
-        _WritesWhenCollected(log)
-        gc.collect()
-    finally:
-        if enabled:
-            gc.enable()
-    log.flush()
-    assert log.tell() == len(b"before-during-")
-    log.truncate()
-    log.write(b"after")
-    log.close()
-    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
-        b"before-during-after"
-    )
-    loop.run_until_complete(ws.close())
-    loop.close()
-
-
-def test_an_fd_read_after_a_held_append_starts_at_the_new_end():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    loop = asyncio.new_event_loop()
-    router = HostFs(ws.vfs, loop)
-    fd = router.open("/data/log", os.O_RDWR | os.O_APPEND | os.O_CREAT)
-    router.write(fd, b"before-")
-    stream = make_open(ws.vfs, loop, router)(
-        fd, "ab", buffering=0, closefd=False
-    )
-    _collected(lambda: _WritesWhenCollected(stream))
-    assert router.read(fd, 1) == b""
-    router.lseek(fd, 0, os.SEEK_SET)
-    assert router.read(fd, 100) == b"before-during-"
-    router.close(fd)
-    loop.run_until_complete(ws.close())
-    loop.close()
-
-
-def _append_stream(ws, loop):
-    stream = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
-        "/data/log", "a+b", buffering=0
-    )
-    stream.write(b"before-")
-    return stream
-
-
-def test_a_seek_after_a_held_append_is_kept():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    loop = asyncio.new_event_loop()
-    stream = _append_stream(ws, loop)
-    seen = []
-    calls = [("write", b"during-"), ("seek", 0)]
-    _collected(lambda: _Finalizes(stream, calls, seen))
-    assert seen == [7, 0]
-    assert stream.read() == b"before-during-"
-    stream.close()
-    loop.run_until_complete(ws.close())
-    loop.close()
-
-
-def test_a_relative_seek_from_a_held_append_is_refused():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    loop = asyncio.new_event_loop()
-    stream = _append_stream(ws, loop)
-    seen = []
-    calls = [("write", b"during-"), ("seek", -1, os.SEEK_CUR)]
-    _collected(lambda: _Finalizes(stream, calls, seen))
-    assert seen == [7, errno.EINVAL]
-    assert stream.tell() == len(b"before-during-")
-    stream.truncate()
-    stream.close()
-    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
-        b"before-during-"
-    )
-    loop.run_until_complete(ws.close())
-    loop.close()
-
-
-def test_a_seek_made_while_held_appends_land_is_kept(monkeypatch):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    loop = asyncio.new_event_loop()
-    stream = _append_stream(ws, loop)
-    seen = []
-    write = [("write", b"during-")]
-    _collected(lambda: _Finalizes(stream, write, seen))
-    files = stream._handle.files
-    fstat = files.fstat
-    rewind = [("seek", 0)]
-
-    def collecting_fstat(fh):
-        monkeypatch.setattr(files, "fstat", fstat)
-        _collected(lambda: _Finalizes(stream, rewind, seen))
-        return fstat(fh)
-
-    monkeypatch.setattr(files, "fstat", collecting_fstat)
-    assert stream.read() == b"before-during-"
-    assert seen == [7, 0]
-    stream.close()
-    loop.run_until_complete(ws.close())
-    loop.close()
-
-
-def test_appends_a_collection_holds_while_others_land_land_too(monkeypatch):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    loop = asyncio.new_event_loop()
-    stream = _append_stream(ws, loop)
-    seen = []
-    _collected(lambda: _Finalizes(stream, [("write", b"during-")], seen))
-    files = stream._handle.files
-    pwrite = files.pwrite
-    more = [("write", b"more-")]
-
-    def collecting_pwrite(fh, offset, data):
-        monkeypatch.setattr(files, "pwrite", pwrite)
-        _collected(lambda: _Finalizes(stream, more, seen))
-        return pwrite(fh, offset, data)
-
-    monkeypatch.setattr(files, "pwrite", collecting_pwrite)
-    stream.truncate()
-    stream.close()
-    assert seen == [7, 5]
-    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
-        b"before-during-more-"
     )
     loop.run_until_complete(ws.close())
     loop.close()

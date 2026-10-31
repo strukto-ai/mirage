@@ -37,18 +37,17 @@ BLOCKED: WeakSet[asyncio.AbstractEventLoop] = WeakSet()
 # Whether the garbage collector is running on this thread now, which
 # ``gc.callbacks`` reports at a collection's start and stop.
 COLLECTING = threading.local()
-# What a collection put off on each loop (``defer``), in order.
+# Per thread: how deep it is in host file operations (``operation``),
+# the loops it has called into, and the loops it is draining.
+CALLER = threading.local()
+# What a collection put off on each loop (``defer``), in order, and the
+# lock one drain of it holds at a time.
 DEFERRED: WeakKeyDictionary[
     asyncio.AbstractEventLoop, deque[Callable[[], None]]
 ] = WeakKeyDictionary()
-# One drain of a loop's put-off work at a time: a caller on another
-# thread waits for the one running, whose work may still be landing.
 DRAIN_LOCKS: WeakKeyDictionary[asyncio.AbstractEventLoop, threading.Lock] = (
     WeakKeyDictionary()
 )
-# The loops this thread is draining now: the work's own calls reach
-# ``run_deferred`` again, which must not start over.
-DRAINING = threading.local()
 
 
 def _on_collection(phase: str, info: dict[str, int]) -> None:
@@ -68,22 +67,31 @@ def collecting() -> bool:
     return bool(getattr(COLLECTING, "now", False))
 
 
+def _caller(name: str) -> WeakSet[asyncio.AbstractEventLoop]:
+    loops = CALLER.__dict__.get(name)
+    if loops is None:
+        loops = CALLER.__dict__[name] = WeakSet()
+    return loops
+
+
 def defer(loop: asyncio.AbstractEventLoop, work: Callable[[], None]) -> None:
-    """Put off synchronous work that drives ``loop`` until something
-    outside any drive of it runs ``run_deferred``: the next call
-    ``run_async_from_sync`` makes for it, or the workspace's close.
+    """Put off synchronous work that drives ``loop`` (a close a finalizer
+    could not make) until it can run where nothing is under way: before
+    the next host file operation on a thread that uses the loop, or the
+    next call for the loop from outside one, or the workspace's close.
 
     Args:
         loop (asyncio.AbstractEventLoop): the loop the work drives.
-        work (Callable[[], None]): what a finalizer could not do in place.
+        work (Callable[[], None]): what was put off.
     """
     DEFERRED.setdefault(loop, deque()).append(work)
 
 
 def run_deferred(loop: asyncio.AbstractEventLoop) -> None:
-    """Run what was put off on ``loop``, in order, from a thread that is
-    not driving it, after any drain another thread is running finishes.
-    A failure is logged and the rest still run.
+    """Run what was put off on ``loop``, in order, after any drain another
+    thread is running. Inside a collection nothing runs, and work that
+    reaches here again from inside a drain leaves it to that drain. A
+    failure is logged and the rest still run.
 
     Args:
         loop (asyncio.AbstractEventLoop): the loop the work drives.
@@ -91,10 +99,8 @@ def run_deferred(loop: asyncio.AbstractEventLoop) -> None:
     lock = DRAIN_LOCKS.get(loop)
     if not DEFERRED.get(loop) and (lock is None or not lock.locked()):
         return
-    draining: set[asyncio.AbstractEventLoop] = DRAINING.__dict__.setdefault(
-        "loops", set()
-    )
-    if loop in draining:
+    draining = _caller("draining")
+    if collecting() or loop in draining:
         return
     if lock is None:
         lock = DRAIN_LOCKS.setdefault(loop, threading.Lock())
@@ -107,11 +113,32 @@ def run_deferred(loop: asyncio.AbstractEventLoop) -> None:
                 try:
                     work()
                 except Exception:
-                    logger.debug(
-                        "work put off by a collection failed", exc_info=True
-                    )
+                    logger.debug("put-off work failed", exc_info=True)
         finally:
             draining.discard(loop)
+
+
+@contextmanager
+def operation() -> Iterator[None]:
+    """Run one host file operation, which may call a loop more than once
+    and reads state between its calls (a descriptor's position).
+
+    Work put off on the loops this thread calls into runs before the
+    outermost operation starts and once it ends, never inside it, where
+    it would move that state under the operation.
+    """
+    depth = getattr(CALLER, "depth", 0)
+    if not depth:
+        for loop in list(_caller("loops")):
+            run_deferred(loop)
+    CALLER.depth = depth + 1
+    try:
+        yield
+    finally:
+        CALLER.depth = depth
+        if not depth:
+            for loop in list(_caller("loops")):
+                run_deferred(loop)
 
 
 @contextmanager
@@ -164,8 +191,8 @@ def run_async_from_sync(
     refused: the collection may have interrupted a drive of that same
     loop, which driving it again from inside would end early (the nested
     run takes its stop), and waiting on it can block on itself. A file's
-    finalizer puts its close off instead (``defer``), and the next call
-    for that loop from outside it runs what was put off first.
+    finalizer puts its close off instead (``defer``); a call from outside
+    any host file operation runs what was put off on its loop first.
 
     Args:
         awaitable (Awaitable[T]): The asynchronous operation to run.
@@ -191,14 +218,15 @@ def run_async_from_sync(
         )
 
     if loop is not None and loop is not running_loop:
-        if loop.is_running():
+        _caller("loops").add(loop)
+        if not getattr(CALLER, "depth", 0):
             run_deferred(loop)
+        if loop.is_running():
             future = asyncio.run_coroutine_threadsafe(
                 _await_result(awaitable), loop
             )
             return future.result()
         if running_loop is None:
-            run_deferred(loop)
             return loop.run_until_complete(_await_result(awaitable))
         with concurrent.futures.ThreadPoolExecutor(1) as pool:
             return pool.submit(

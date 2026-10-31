@@ -1730,8 +1730,8 @@ class Workspace:
             *(execution.aclose() for execution in executions),
             return_exceptions=True,
         )
-        # A file the garbage collector closed put its writes off to the
-        # loop's next drive; they land before teardown closes the mounts.
+        # A stream the garbage collector closed put its close off
+        # (``mirage.bridge.sync.defer``); it lands before the mounts go.
         loop = asyncio.get_running_loop()
         if DEFERRED.get(loop):
             await run_blocking(run_deferred, loop)

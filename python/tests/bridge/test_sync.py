@@ -14,6 +14,7 @@ from mirage.bridge.sync import (
     blocking,
     defer,
     on_auxiliary_loop,
+    operation,
     run_async_from_sync,
 )
 from mirage.core.api.client import SessionPool
@@ -477,3 +478,19 @@ def test_a_drain_another_thread_is_running_is_waited_for():
     owner.join(5)
     loop.close()
     assert order == ["first", "first done", "second", 1]
+
+
+def test_an_operation_runs_put_off_work_around_it_never_inside():
+    loop = asyncio.new_event_loop()
+    events = []
+    try:
+        run_async_from_sync(_one_turn(), loop)
+        defer(loop, lambda: events.append("before"))
+        with operation():
+            events.append("started")
+            defer(loop, lambda: events.append("after"))
+            events.append(run_async_from_sync(_one_turn(), loop))
+        events.append("ended")
+    finally:
+        loop.close()
+    assert events == ["before", "started", 1, "after", "ended"]
