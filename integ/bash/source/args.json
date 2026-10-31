@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'echo argc=$# a1=$1 a2=$2\\n' > /data/sa.sh && source /data/sa.sh AA BB && rm /data/sa.sh; printf 'break\\n' > /data/sd.sh; for sdi in 1 2; do . /data/sd.sh; echo no; done; echo \"sdi=$sdi\"; printf 'echo \"fn=[${FUNCNAME[*]}]\"; return 5; echo no\\n' > /data/se.sh; sdf() { . /data/se.sh; echo \"r=$?\"; }; sdf; . /data/se.sh; echo \"top=$?\"; rm /data/sd.sh /data/se.sh",
+      "command": "printf 'echo argc=$# a1=$1 a2=$2\\n' > /data/sa.sh && source /data/sa.sh AA BB && rm /data/sa.sh; printf 'break\\n' > /data/sd.sh; for sdi in 1 2; do . /data/sd.sh; echo no; done; echo \"sdi=$sdi\"; printf 'echo \"fn=[${FUNCNAME[*]}]\"; return 5; echo no\\n' > /data/se.sh; sdf() { . /data/se.sh; echo \"r=$?\"; }; sdf; . /data/se.sh; echo \"top=$?\"; printf '. /data/sr.sh\\n' > /data/sr.sh; . /data/sr.sh; echo \"deep=$?\"; rm /data/sd.sh /data/se.sh /data/sr.sh",
       "expect": {
         "exit": 0,
-        "stdout": "argc=2 a1=AA a2=BB\nsdi=1\nfn=[source sdf]\nr=5\nfn=[]\ntop=5\n",
-        "stderr": ""
+        "stdout": "argc=2 a1=AA a2=BB\nsdi=1\nfn=[source sdf]\nr=5\nfn=[]\ntop=5\ndeep=1\n",
+        "stderr": "bash: .: maximum nesting level exceeded (32)\n"
       }
     },
     {

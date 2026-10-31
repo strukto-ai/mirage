@@ -17,6 +17,8 @@ import { parseFunction } from '../../../shell/helpers.ts'
 import type { ParseScope } from '../../../shell/parse/scope.ts'
 
 import type { ShellVar } from '../../../shell/variable.ts'
+import { encodeText } from '../../../shell/bytes.ts'
+import { NESTING_MAX } from '../../../shell/constants.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { CallStack } from '../../../shell/call_stack.ts'
@@ -32,13 +34,27 @@ import type { JobTable } from '../../../shell/job_table/index.ts'
 
 import type { HandOff } from '../../../policy/types.ts'
 import type { Decisions } from '../../../policy/decisions.ts'
-import { ExitSignal, ReturnSignal } from '../../../shell/errors.ts'
+import { DiscardSignal, ExitSignal, ReturnSignal } from '../../../shell/errors.ts'
 import { executeBody, returning } from '../control.ts'
 import { liftFunctionTraps, restoreFunctionTraps } from '../traps.ts'
 import type { ExecuteStringFn } from '../builtins/types.ts'
 import { runAsShell } from '../../../context/session_context.ts'
 import { bodyAliases } from '../builtins/alias/alias.ts'
+import { isCountWord } from '../builtins/shared.ts'
+import type { SessionState } from '../../session/session.ts'
 import type { Result } from './types.ts'
+
+/**
+ * How many functions may run nested: `FUNCNEST` when it is a number from 1
+ * to `NESTING_MAX`, `NESTING_MAX` otherwise, where bash would set no
+ * limit.
+ */
+function funcnestLimit(session: SessionState): number {
+  const value = session.env.FUNCNEST
+  if (value === undefined || !isCountWord(value)) return NESTING_MAX
+  const limit = Number(value.trim())
+  return limit > 0 && limit < NESTING_MAX ? limit : NESTING_MAX
+}
 
 export async function runShellFunction(
   executeNode: ExecuteNodeFn,
@@ -59,6 +75,16 @@ export async function runShellFunction(
   executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
+  const cs = callStack ?? new CallStack()
+  // bash refuses the call before it enters the function, and abandons the
+  // rest of the line as it does after an expansion error.
+  const limit = funcnestLimit(session)
+  if (cs.functionDepth >= limit) {
+    throw new DiscardSignal(
+      encodeText(`bash: ${cmdName}: maximum function nesting level exceeded (${String(limit)})\n`),
+    )
+  }
+  cs.admit(cmdName)
   // The body's statements read the caller's stdin in turn.
   const scope = parser.fork()
   let body
@@ -70,7 +96,6 @@ export async function runShellFunction(
     throw error
   }
   const bodyStdin = share(stdin)
-  const cs = callStack ?? new CallStack()
   // Positional args carry the word as typed ($1 stays sub/a.txt).
   const textArgs = restParts.map(wordText)
   cs.push(textArgs, cmdName)

@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(sleep 5 & jobs | grep -c sleep; kill $!) 2>/dev/null",
+      "command": "(sleep 5 & s=$!; jobs | grep -c sleep; { jobs | grep -c sleep; } & wait $!; kill $s) 2>/dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "1\n0\n",
         "stderr": ""
       }
     },

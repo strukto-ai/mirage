@@ -160,6 +160,7 @@ export interface SessionInit {
   processId?: number | null
   shellPid?: number | null
   processDepth?: number
+  shellNesting?: number
   /**
    * The host's standing answers to asked lines (design 3.9): session
    * state like functions and cwd, persisted, read and written through
@@ -546,6 +547,10 @@ export class SessionState {
   processId: number | null
   shellPid: number | null
   processDepth: number
+  // How deep the shell this session runs is nested: the levels the shells
+  // that started it had re-entered, which its call stack counts on from
+  // (`CallStack.nesting`).
+  shellNesting: number
   decisions: readonly Decision[]
   generation: number
   lastBgJobId: number | null
@@ -572,6 +577,7 @@ export class SessionState {
     this.processId = init.processId ?? null
     this.shellPid = init.shellPid ?? null
     this.processDepth = init.processDepth ?? 0
+    this.shellNesting = init.shellNesting ?? 0
     this.profile = init.profile ?? null
     this.commandLimits = { ...init.commandLimits }
     this.network = init.network ?? null
@@ -650,6 +656,7 @@ export class SessionState {
       processId: overrides.processId ?? this.processId,
       shellPid: overrides.shellPid ?? this.shellPid,
       processDepth: overrides.processDepth ?? this.processDepth,
+      shellNesting: overrides.shellNesting ?? this.shellNesting,
       decisions: overrides.decisions ?? this.decisions,
       generation: overrides.generation ?? this.generation,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,

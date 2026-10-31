@@ -27,6 +27,7 @@ from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
+from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.shell.job_table import JobTable
@@ -103,6 +104,7 @@ async def handle_exec_path(
     stdin: ByteSource | None = None,
     sink: JobConsole | None = None,
     job_table: JobTable | None = None,
+    call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a slash-carrying head word as a program, bash's loader rule.
 
@@ -136,6 +138,8 @@ async def handle_exec_path(
             they finish, None to return them.
         job_table (JobTable | None): the caller's jobs, which a shell
             script starts a table of its own beside.
+        call_stack (CallStack | None): the caller's frames, whose nesting
+            a shell script counts on from.
     """
     session = context.session
     try:
@@ -194,6 +198,7 @@ async def handle_exec_path(
             interp,
             sink,
             job_table,
+            call_stack,
         )
     line = shell_join([*words, path, *args])
     io = await execute_fn(

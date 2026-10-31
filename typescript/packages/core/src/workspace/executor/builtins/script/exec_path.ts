@@ -22,6 +22,7 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import { handleCommandBuiltin } from '../command/command.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
+import type { CallStack } from '../../../../shell/call_stack.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -114,6 +115,8 @@ export async function handleExecPath(
   stdin: ByteSource | null = null,
   sink?: JobConsole,
   jobTable?: JobTable,
+  // The caller's frames, whose nesting a shell script counts on from.
+  callStack: CallStack | null = null,
 ): Promise<Result> {
   let session = context.session
   let data: Uint8Array
@@ -160,6 +163,7 @@ export async function handleExecPath(
       interp,
       sink,
       jobTable,
+      callStack,
     )
   }
   const line = [...words, path, ...args].map(quoteWord).join(' ')

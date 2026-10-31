@@ -81,6 +81,16 @@ export const ARITH_PRECEDENCE: ReadonlyMap<string, number> = new Map([
 // and 1023 agree modulo 12).
 export const ARITH_MAX_DEPTH = 27
 
+// How deep the shell may re-enter itself: function calls, sourced files,
+// `eval` lines and nested shells (`bash -c`, a script) together. bash limits
+// none of them unless FUNCNEST names a limit on functions; mirage serves every
+// session from one process, where `f(){ echo $(f); }; f` or a file sourcing
+// itself would take the memory they all share, so a re-entry this deep is
+// refused, and FUNCNEST may only lower the limit on functions. Python's stack
+// holds a body nesting three compound commands (about 30 frames a level) this
+// deep.
+export const NESTING_MAX = 32
+
 // The descriptors the shell models: stdin, stdout and stderr, and no
 // table above them. A redirect naming any other number is refused before
 // it does anything (`shell/descriptors.ts`), because the old fall-through

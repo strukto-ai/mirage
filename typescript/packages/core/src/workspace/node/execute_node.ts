@@ -87,6 +87,7 @@ import {
   handleSelect,
   handleWhile,
   isUnwinding,
+  LoopSignal,
   trailed,
 } from '../executor/control.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -176,6 +177,7 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
   if (opts.sink !== undefined) next.sink = opts.sink
   if (opts.signal !== undefined) next.signal = opts.signal
   if (opts.executionScope !== undefined) next.executionScope = opts.executionScope
+  if (opts.jobTable !== undefined) next.jobTable = opts.jobTable
   if (opts.handed !== undefined) next = withHandOff(next, opts.handed)
   return next
 }
@@ -1005,7 +1007,7 @@ async function executeNodeBody(
   // A root run on a caller's frames is the caller's own line (eval,
   // source, an alias, `$( )`); one given none is a shell of its own.
   const inline = callStack !== null
-  callStack ??= new CallStack()
+  callStack ??= new CallStack(session.shellNesting)
 
   // The statements a construct runs all read one descriptor, as bash's
   // do: `read` takes its line and the command after it gets the rest, in
@@ -1042,24 +1044,38 @@ async function executeNodeBody(
 
   if (kind === NodeKind.TIMED) {
     const started = performance.now()
-    const inner = node.namedChildren[0]
-    const [stdout, io, execNode] =
-      inner === undefined
-        ? [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
-        : await stream(inner, context, stdin, callStack).then(
-            async ([body, ran, ranNode]) =>
-              [await applyBarrier(body, ran, BarrierPolicy.VALUE), ran, ranNode] as const,
-          )
     const portable = timedBy(node)
-    if (portable !== null) {
+    const reported = (stderr: Uint8Array, timed: boolean): Uint8Array => {
       const elapsed = (performance.now() - started) / 1000
-      const stderr = await io.materializeStderr()
-      const report = timingReport(elapsed, portable, session.env.TIMEFORMAT)
+      const report = timingReport(elapsed, timed, session.env.TIMEFORMAT)
       const merged = new Uint8Array(stderr.length + report.length)
       merged.set(stderr)
       merged.set(report, stderr.length)
-      io.stderr = merged
+      return merged
     }
+    const inner = node.namedChildren[0]
+    let ran: readonly [ByteSource | null, IOResult, ExecutionNode]
+    try {
+      ran =
+        inner === undefined
+          ? [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
+          : await stream(inner, context, stdin, callStack).then(
+              async ([body, out, ranNode]) =>
+                [await applyBarrier(body, out, BarrierPolicy.VALUE), out, ranNode] as const,
+            )
+    } catch (err) {
+      // bash reports the time of a pipeline that `exit`, `break`, `continue`
+      // or an error discarding the line leaves, though not of one `return`
+      // leaves.
+      if (portable !== null) {
+        if (err instanceof ExitSignal) err.stderr = reported(err.stderr, portable)
+        else if (err instanceof LoopSignal)
+          err.io.stderr = reported(await err.io.materializeStderr(), portable)
+      }
+      throw err
+    }
+    const [stdout, io, execNode] = ran
+    if (portable !== null) io.stderr = reported(await io.materializeStderr(), portable)
     return [stdout, io, execNode]
   }
 

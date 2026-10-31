@@ -373,6 +373,10 @@ class SessionState:
     process_id: int | None = None
     shell_pid: int | None = None
     process_depth: int = 0
+    # How deep the shell this session runs is nested: the levels the shells
+    # that started it had re-entered, which its call stack counts on from
+    # (``CallStack.nesting``).
+    shell_nesting: int = 0
     # The host's standing answers to asked lines (design 3.9): session
     # state like functions and cwd, persisted, read and written through
     # the manager by id so a fork shares them, never another session's.

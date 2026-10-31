@@ -22,9 +22,11 @@ from mirage.io.async_line_iterator import share
 from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
+from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
-from mirage.shell.errors import ExitSignal, ReturnSignal
+from mirage.shell.constants import NESTING_MAX
+from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
@@ -32,14 +34,31 @@ from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.alias.alias import body_aliases
+from mirage.workspace.executor.builtins.shared import is_count_word
 from mirage.workspace.executor.command.types import ExecuteNodeFn
 from mirage.workspace.executor.control import execute_body, returning
 from mirage.workspace.executor.traps import (
     lift_function_traps,
     restore_function_traps,
 )
+from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
+
+
+def _funcnest_limit(session: SessionState) -> int:
+    """How many functions may run nested: ``FUNCNEST`` when it is a
+    number from 1 to ``NESTING_MAX``, ``NESTING_MAX`` otherwise, where
+    bash would set no limit.
+
+    Args:
+        session (SessionState): the session whose ``FUNCNEST`` counts.
+    """
+    value = session.env.get("FUNCNEST")
+    if value is None or not is_count_word(value):
+        return NESTING_MAX
+    limit = int(value)
+    return limit if 0 < limit < NESTING_MAX else NESTING_MAX
 
 
 async def run_shell_function(
@@ -84,6 +103,18 @@ async def run_shell_function(
             line of the shell; None where nothing can run one.
     """
     session = context.session
+    cs = call_stack if call_stack is not None else CallStack()
+    # bash refuses the call before it enters the function, and abandons
+    # the rest of the line as it does after an expansion error.
+    limit = _funcnest_limit(session)
+    if cs.function_depth >= limit:
+        raise DiscardSignal(
+            encode_text(
+                f"bash: {cmd_name}: maximum function nesting level "
+                f"exceeded ({limit})\n"
+            )
+        )
+    cs.admit(cmd_name)
     scope = ParseScope()
     try:
         func_body = parse_function(
@@ -97,7 +128,6 @@ async def run_shell_function(
         execute_node = partial(execute_node, sink=sink)
     # The body's statements read the caller's stdin in turn.
     stdin = share(stdin)
-    cs = call_stack if call_stack is not None else CallStack()
     # Positional args carry the word as typed ($1 stays sub/a.txt).
     text_args = [word_text(p) for p in parts[1:]]
     cs.push(text_args, function_name=cmd_name)

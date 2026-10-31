@@ -47,14 +47,16 @@ async def handle_eval(
         call_stack (CallStack | None): the caller's frames.
     """
     script = " ".join(args)
+    cs = call_stack if call_stack is not None else CallStack()
     try:
-        io = await execute_fn(
-            script,
-            session_id=session.session_id,
-            stdin=stdin,
-            sink=sink,
-            call_stack=call_stack,
-        )
+        with cs.nested("eval"):
+            io = await execute_fn(
+                script,
+                session_id=session.session_id,
+                stdin=stdin,
+                sink=sink,
+                call_stack=cs,
+            )
     except ExitSignal as sig:
         sig.sourced = True
         raise

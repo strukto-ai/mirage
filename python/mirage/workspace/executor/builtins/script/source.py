@@ -97,6 +97,7 @@ async def handle_source(
             "bash", f"{raw}: {fs_strerror(exc)}", 1, f"source {raw}"
         )
     cs = call_stack if call_stack is not None else CallStack()
+    cs.admit(name)
     cs.push(args or list(positional_params(session, cs)), "source", True)
     outer_names = session.function_names
     if outer_names is not None:

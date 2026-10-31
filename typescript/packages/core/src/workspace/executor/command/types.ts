@@ -21,6 +21,7 @@ import type { ExecutionScope } from '../../execution.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { HandOff } from '../../../policy/types.ts'
+import type { JobTable } from '../../../shell/job_table/index.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import type { TSNodeLike } from '../../../shell/types.ts'
 
@@ -71,6 +72,12 @@ export interface ExecuteNodeOpts {
   signal?: AbortSignal
   /** The hand-off the subtree runs on: a background job's own. */
   handed?: HandOff
+  /**
+   * The job list the subtree runs on: a background job's own, as bash's
+   * forked job starts with none of its shell's, so a bare `wait` in it never
+   * waits on itself.
+   */
+  jobTable?: JobTable
   /**
    * The node is the whole of a child shell (a background job), which runs
    * its EXIT action when the node ends.

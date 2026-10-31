@@ -38,11 +38,11 @@
         "opfs",
         "disk"
       ],
-      "command": "TIMEFORMAT=timed; time false",
+      "command": "TIMEFORMAT=timed; (time { exit 4; }); echo \"exit=$?\"; for i in 1 2; do time break; done; for i in 1 2; do time continue; done; eval 'time { echo $((1/0)); }'; echo \"discard=$?\"; time false",
       "expect": {
         "exit": 1,
-        "stdout": "",
-        "stderr": "timed\n"
+        "stdout": "exit=4\ndiscard=1\n",
+        "stderr": "timed\ntimed\ntimed\ntimed\nbash: 1/0: division by 0 (error token is \"0\")\ntimed\ntimed\n"
       }
     },
     {
@@ -68,10 +68,10 @@
         "opfs",
         "disk"
       ],
-      "command": "TIMEFORMAT=timed; f() { echo hi; }; time f",
+      "command": "TIMEFORMAT=timed; f() { echo hi; }; time f; f() { time return 3; echo no; }; f; echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "hi\n",
+        "stdout": "hi\nrc=3\n",
         "stderr": "timed\n"
       }
     },

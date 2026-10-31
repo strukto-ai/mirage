@@ -12,7 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.shell.call_stack import CallStack
+from mirage.shell.constants import NESTING_MAX
+from mirage.shell.errors import DiscardSignal
 
 
 def test_initial_frame():
@@ -107,3 +111,45 @@ def test_fork_copies_every_frame_without_sharing_mutable_state():
     child.current.positional.append("child")
     assert parent.get_local("x") == "outer"
     assert parent.get_all_positional() == ["outer"]
+
+
+def test_function_depth_counts_function_frames_a_fork_keeps():
+    cs = CallStack()
+    cs.push([], function_name="f")
+    cs.push([], function_name="source", sourced=True)
+    cs.push([], function_name="g")
+    assert cs.depth == 4
+    assert cs.function_depth == 2
+    assert cs.fork().function_depth == 2
+
+
+def test_nesting_counts_frames_and_levels_a_fork_keeps():
+    cs = CallStack()
+    cs.push([], function_name="f")
+    cs.push([], function_name="source", sourced=True)
+    with cs.nested("eval"):
+        assert cs.nesting == 3
+        assert cs.fork().nesting == 3
+    assert cs.nesting == 2
+
+
+def test_a_stack_starts_at_the_nesting_it_is_given():
+    cs = CallStack(3)
+    assert cs.depth == 1
+    assert cs.function_depth == 0
+    assert cs.nesting == 3
+    assert cs.fork().nesting == 3
+
+
+def test_admit_refuses_past_the_limit_and_leaves_the_count():
+    cs = CallStack()
+    cs.levels = NESTING_MAX - 1
+    cs.admit("eval")
+    cs.levels = NESTING_MAX
+    with pytest.raises(DiscardSignal) as refused:
+        with cs.nested("eval"):
+            pass
+    assert refused.value.stderr == (
+        b"bash: eval: maximum nesting level exceeded (32)\n"
+    )
+    assert cs.levels == NESTING_MAX

@@ -84,6 +84,15 @@ ARITH_SIGN = 1 << 63
 # and 1023 agree modulo 12).
 ARITH_MAX_DEPTH = 27
 
+# How deep the shell may re-enter itself: function calls, sourced files, `eval`
+# lines and nested shells (`bash -c`, a script) together. bash limits none of
+# them unless FUNCNEST names a limit on functions; mirage serves every session
+# from one process, where `f(){ echo $(f); }; f` or a file sourcing itself
+# would take the memory they all share, so a re-entry this deep is refused, and
+# FUNCNEST may only lower the limit on functions. Python's stack holds a body
+# nesting three compound commands (about 30 frames a level) this deep.
+NESTING_MAX = 32
+
 # What the shell calls itself when no script is running, bash's "bash".
 # A nested `bash`/`sh` overrides it through SessionState.script_name, and
 # `SessionState.argv0` is the one place the two are folded together.
