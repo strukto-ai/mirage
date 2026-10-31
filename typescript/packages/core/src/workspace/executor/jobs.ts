@@ -312,6 +312,7 @@ export async function handleBackground(
           signal: AbortSignal.any([abort.signal, expiry.signal]),
           executionScope: new ExecutionScope(undefined, job.executionId ?? undefined),
           endsShell: true,
+          jobTable: jobTable.child(),
         }
         if (jobHanded !== null) opts.handed = jobHanded
         ;[stdout, io, execNode] = await executeNode(left, childEvaluation, null, bgCallStack, opts)

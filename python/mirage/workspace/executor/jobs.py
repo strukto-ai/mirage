@@ -368,6 +368,7 @@ async def handle_background(
                         execution_id=job.execution_id
                     ),
                     ends_shell=True,
+                    jobs=job_table.child(),
                 )
             except ExitSignal as sig:
                 # A background job is its own shell: exit ends the job

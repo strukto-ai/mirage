@@ -37,12 +37,14 @@ export async function handleEval(
   const script = args.join(' ')
   let io: IOResult
   try {
-    io = await executeFn(script, {
-      sessionId: session.sessionId,
-      stdin,
-      callStack,
-      ...(sink === undefined ? {} : { sink }),
-    })
+    io = await callStack.nested('eval', () =>
+      executeFn(script, {
+        sessionId: session.sessionId,
+        stdin,
+        callStack,
+        ...(sink === undefined ? {} : { sink }),
+      }),
+    )
   } catch (err) {
     if (err instanceof ExitSignal) err.sourced = true
     throw err

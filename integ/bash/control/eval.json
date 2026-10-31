@@ -98,11 +98,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "eval 'false'; echo $?; ef() { eval 'echo a; return 3'; echo no; }; ef; echo rc=$?; eg() { local x=1; eval 'echo $x $1 $#; shift; local evy=2'; echo after=$1 evy=$evy; eval 'eval \"return 5\"'; echo no; }; eg a b; echo rc=$? evy=$evy; for i in 1 2 3; do eval 'echo $i; [ $i = 2 ] && break; continue'; echo no; done; (eval 'echo b; exit 4'; echo no); echo rc=$?",
+      "command": "eval 'false'; echo $?; ef() { eval 'echo a; return 3'; echo no; }; ef; echo rc=$?; eg() { local x=1; eval 'echo $x $1 $#; shift; local evy=2'; echo after=$1 evy=$evy; eval 'eval \"return 5\"'; echo no; }; eg a b; echo rc=$? evy=$evy; for i in 1 2 3; do eval 'echo $i; [ $i = 2 ] && break; continue'; echo no; done; (eval 'echo b; exit 4'; echo no); echo rc=$?; evr='eval \"$evr\"'; eval \"$evr\"; echo rc=$?; unset evr",
       "expect": {
         "exit": 0,
-        "stdout": "1\na\nrc=3\n1 a 2\nafter=b evy=2\nrc=5 evy=\n1\n2\nb\nrc=4\n",
-        "stderr": ""
+        "stdout": "1\na\nrc=3\n1 a 2\nafter=b evy=2\nrc=5 evy=\n1\n2\nb\nrc=4\nrc=1\n",
+        "stderr": "bash: eval: maximum nesting level exceeded (32)\n"
       }
     },
     {

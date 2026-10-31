@@ -1053,6 +1053,7 @@ async def _route_argv(
             stdin,
             sink,
             job_table,
+            call_stack,
         )
 
     # ── unsupported bash builtins ──────────────

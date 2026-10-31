@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { encodeText } from './bytes.ts'
+import { NESTING_MAX } from './constants.ts'
+import { DiscardSignal } from './errors.ts'
+
 export interface CallFrameInit {
   positional?: string[]
   locals?: Record<string, string>
@@ -48,6 +52,17 @@ export class CallStack {
   // A `( )` subshell, a compound command forked as a stage or job, or a
   // fork of one: a refused `${var:=word}` ends it with 2.
   paren = false
+  // The `eval` lines and nested shells the stack runs inside, which push no
+  // frame but count toward its nesting.
+  levels: number
+
+  /**
+   * A stack with only the shell's own frame, starting at `levels` of
+   * nesting: a nested shell's (`SessionState.shellNesting`).
+   */
+  constructor(levels = 0) {
+    this.levels = levels
+  }
 
   /**
    * The stack a child shell runs on, a copy of every frame. `loops` keeps
@@ -57,7 +72,7 @@ export class CallStack {
    * false for a substitution, and null keeps the caller's.
    */
   fork(loops = true, paren: boolean | null = null): CallStack {
-    const child = new CallStack()
+    const child = new CallStack(this.levels)
     child.frames.splice(
       0,
       child.frames.length,
@@ -109,6 +124,43 @@ export class CallStack {
 
   get depth(): number {
     return this.frames.length
+  }
+
+  /** How many function calls are running, a sourced file aside: the nesting `FUNCNEST` limits. */
+  get functionDepth(): number {
+    return this.frames.slice(1).filter((frame) => !frame.sourced).length
+  }
+
+  /**
+   * How deep the shell has re-entered itself: its functions, sourced files,
+   * `eval` lines and nested shells.
+   */
+  get nesting(): number {
+    return this.frames.length - 1 + this.levels
+  }
+
+  /**
+   * Refuse to re-enter the shell past `NESTING_MAX`, abandoning the rest of
+   * the line as bash does past `FUNCNEST`. `name` is what would be entered:
+   * a function, `source`, `eval` or the shell's name.
+   */
+  admit(name: string): void {
+    if (this.nesting >= NESTING_MAX) {
+      throw new DiscardSignal(
+        encodeText(`bash: ${name}: maximum nesting level exceeded (${String(NESTING_MAX)})\n`),
+      )
+    }
+  }
+
+  /** Count a line `eval` (`name`) runs on this stack, once admitted. */
+  async nested<T>(name: string, run: () => Promise<T>): Promise<T> {
+    this.admit(name)
+    this.levels++
+    try {
+      return await run()
+    } finally {
+      this.levels--
+    }
   }
 
   /** Whether a function or sourced file is running for `return` to leave. */

@@ -18,6 +18,7 @@ import { runAsShell } from '../../../../context/session_context.ts'
 import { materialize, IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
+import { CallStack } from '../../../../shell/call_stack.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
@@ -144,6 +145,8 @@ export async function handleBash(
   name = 'bash',
   sink?: JobConsole,
   jobTable?: JobTable,
+  // The caller's frames, whose nesting the nested shell counts on from.
+  callStack: CallStack | null = null,
 ): Promise<Result> {
   let session = context.session
   const parsed = parseBashArgs(args)
@@ -190,8 +193,11 @@ export async function handleBash(
   if (script === null) {
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
+  const cs = callStack ?? new CallStack()
+  cs.admit(name)
   context = new EvaluationContext(session.newShell(), context.frame.fork(), context)
   session = context.session
+  session.shellNesting = cs.nesting + 1
   clearTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.positionalArgs = positional
@@ -239,5 +245,6 @@ export async function bashBuiltin(call: BuiltinCall): Promise<Result> {
     call.argv.name,
     call.sink,
     call.jobTable,
+    call.callStack,
   )
 }

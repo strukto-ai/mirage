@@ -29,6 +29,7 @@ from mirage.io.stream import materialize, yield_bytes
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
+from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import SET_OPTION_NAMES
 from mirage.shell.job_table import JobTable
@@ -138,6 +139,7 @@ async def handle_bash(
     name: str = "bash",
     sink: JobConsole | None = None,
     job_table: JobTable | None = None,
+    call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a nested shell: inline text from ``-c``, or a script file.
 
@@ -163,6 +165,8 @@ async def handle_bash(
             as they finish, None to return them.
         job_table (JobTable | None): the caller's jobs, which the nested
             shell starts a table of its own beside.
+        call_stack (CallStack | None): the caller's frames, whose nesting
+            the nested shell counts on from.
     """
     session = context.session
     parsed = parse_bash_args(args)
@@ -211,10 +215,13 @@ async def handle_bash(
             stdin = None
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
+    cs = call_stack if call_stack is not None else CallStack()
+    cs.admit(name)
     context = EvaluationContext(
         context.session.new_shell(), context.frame.fork(), context
     )
     session = context.session
+    session.shell_nesting = cs.nesting + 1
     child_token = set_current_evaluation(context)
     clear_traps(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
@@ -262,4 +269,5 @@ async def bash_builtin(call: BuiltinCall) -> Result:
         str(call.argv.name),
         call.sink,
         call.job_table,
+        call.call_stack,
     )

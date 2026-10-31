@@ -16,6 +16,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 
+from mirage.shell.bytes import encode_text
+from mirage.shell.constants import NESTING_MAX
+from mirage.shell.errors import DiscardSignal
+
 
 @dataclass
 class CallFrame:
@@ -28,7 +32,13 @@ class CallFrame:
 
 
 class CallStack:
-    def __init__(self) -> None:
+    def __init__(self, levels: int = 0) -> None:
+        """A stack with only the shell's own frame.
+
+        Args:
+            levels (int): the nesting it starts at: a nested shell's
+                (``SessionState.shell_nesting``).
+        """
         self._frames: list[CallFrame] = [CallFrame()]
         # A fork is a child shell's stack: an error that discards the
         # rest of the line ends the child instead of resuming.
@@ -36,6 +46,9 @@ class CallStack:
         # A `( )` subshell, a compound command forked as a stage or job,
         # or a fork of one: a refused `${var:=word}` ends it with 2.
         self.paren = False
+        # The `eval` lines and nested shells the stack runs inside, which
+        # push no frame but count toward its nesting.
+        self.levels = levels
 
     def fork(
         self, loops: bool = True, paren: bool | None = None
@@ -50,7 +63,7 @@ class CallStack:
                 command (True) or a substitution (False); None keeps the
                 caller's.
         """
-        child = CallStack()
+        child = CallStack(self.levels)
         child._frames = [
             replace(
                 frame,
@@ -101,6 +114,48 @@ class CallStack:
     @property
     def depth(self) -> int:
         return len(self._frames)
+
+    @property
+    def function_depth(self) -> int:
+        """How many function calls are running, a sourced file aside:
+        the nesting ``FUNCNEST`` limits."""
+        return sum(not frame.sourced for frame in self._frames[1:])
+
+    @property
+    def nesting(self) -> int:
+        """How deep the shell has re-entered itself: its functions,
+        sourced files, ``eval`` lines and nested shells."""
+        return len(self._frames) - 1 + self.levels
+
+    def admit(self, name: str) -> None:
+        """Refuse to re-enter the shell past ``NESTING_MAX``, abandoning
+        the rest of the line as bash does past ``FUNCNEST``.
+
+        Args:
+            name (str): what would be entered: a function, ``source``,
+                ``eval`` or the shell's name.
+        """
+        if self.nesting >= NESTING_MAX:
+            raise DiscardSignal(
+                encode_text(
+                    f"bash: {name}: maximum nesting level exceeded "
+                    f"({NESTING_MAX})\n"
+                )
+            )
+
+    @contextmanager
+    def nested(self, name: str) -> Iterator[None]:
+        """Count a line ``eval`` runs on this stack, once admitted.
+
+        Args:
+            name (str): the builtin running it.
+        """
+        self.admit(name)
+        self.levels += 1
+        try:
+            yield
+        finally:
+            self.levels -= 1
 
     @property
     def returnable(self) -> bool:

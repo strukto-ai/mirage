@@ -100,6 +100,7 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.control import (
     UNWINDING,
+    LoopSignal,
     execute_body,
     handle_case,
     handle_cfor,
@@ -930,8 +931,14 @@ async def execute_node(
     execution_scope: ExecutionScope | None = None,
     ends_shell: bool = False,
     own_diagnostics: bool = True,
+    jobs: JobTable | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
+    # The job list the subtree runs on in place of the bound one: a
+    # background job's own, as bash's forked job starts with none of its
+    # shell's, so a bare `wait` in it never waits on itself.
+    if jobs is not None:
+        job_table = jobs
     execution_scope = execution_scope or ExecutionScope(
         execution_id=new_execution_id(registry.ids)
     )
@@ -1094,7 +1101,11 @@ async def _execute_node(
     )
     if session.shell_options.get("noexec"):
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
-    cs = call_stack if call_stack is not None else CallStack()
+    cs = (
+        call_stack
+        if call_stack is not None
+        else CallStack(session.shell_nesting)
+    )
     session.errexit_immune = False
     execute_fn = partial(
         execute_fn,
@@ -1154,21 +1165,39 @@ async def _execute_node(
 
     if kind == NodeKind.TIMED:
         started = time.monotonic()
-        body = node.named_children
-        if body:
-            stdout, io, exec_node = await stream(body[0], context, stdin, cs)
-            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-        else:
-            stdout, io = None, IOResult()
-            exec_node = ExecutionNode(command="", exit_code=0)
         portable = timed_by(node)
-        if portable is not None:
-            report = timing_report(
+
+        def report(portable: bool) -> bytes:
+            return timing_report(
                 time.monotonic() - started,
                 portable,
                 session.env.get("TIMEFORMAT"),
             )
-            io.stderr = (await io.materialize_stderr()) + report
+
+        body = node.named_children
+        try:
+            if body:
+                stdout, io, exec_node = await stream(
+                    body[0], context, stdin, cs
+                )
+                stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+            else:
+                stdout, io = None, IOResult()
+                exec_node = ExecutionNode(command="", exit_code=0)
+        except (ExitSignal, LoopSignal) as sig:
+            # bash reports the time of a pipeline that `exit`, `break`,
+            # `continue` or an error discarding the line leaves, though
+            # not of one `return` leaves.
+            if portable is not None:
+                if isinstance(sig, ExitSignal):
+                    sig.stderr += report(portable)
+                else:
+                    sig.io.stderr = (
+                        await sig.io.materialize_stderr()
+                    ) + report(portable)
+            raise
+        if portable is not None:
+            io.stderr = (await io.materialize_stderr()) + report(portable)
         return stdout, io, exec_node
 
     if kind == NodeKind.COMMENT:

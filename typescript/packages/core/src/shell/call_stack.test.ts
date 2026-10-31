@@ -14,6 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { CallFrame, CallStack } from './call_stack.ts'
+import { NESTING_MAX } from './constants.ts'
+import { DiscardSignal } from './errors.ts'
 
 describe('CallFrame', () => {
   it('defaults to empty positional + locals + no function name', () => {
@@ -81,4 +83,47 @@ it('fork copies every frame without sharing mutable state', () => {
   child.current.positional.push('child')
   expect(parent.getLocal('x')).toBe('outer')
   expect(parent.getAllPositional()).toEqual(['outer'])
+})
+
+it('functionDepth counts the function frames, which a fork keeps', () => {
+  const cs = new CallStack()
+  cs.push([], 'f')
+  cs.push([], 'source', true)
+  cs.push([], 'g')
+  expect(cs.depth).toBe(4)
+  expect(cs.functionDepth).toBe(2)
+  expect(cs.fork().functionDepth).toBe(2)
+})
+
+it('nesting counts frames and levels, which a fork keeps', async () => {
+  const cs = new CallStack()
+  cs.push([], 'f')
+  cs.push([], 'source', true)
+  await cs.nested('eval', () => {
+    expect(cs.nesting).toBe(3)
+    expect(cs.fork().nesting).toBe(3)
+    return Promise.resolve()
+  })
+  expect(cs.nesting).toBe(2)
+})
+
+it('a stack starts at the nesting it is given', () => {
+  const cs = new CallStack(3)
+  expect(cs.depth).toBe(1)
+  expect(cs.functionDepth).toBe(0)
+  expect(cs.nesting).toBe(3)
+  expect(cs.fork().nesting).toBe(3)
+})
+
+it('admit refuses past the limit and leaves the count', async () => {
+  const cs = new CallStack()
+  cs.levels = NESTING_MAX - 1
+  cs.admit('eval')
+  cs.levels = NESTING_MAX
+  const refused = await cs.nested('eval', () => Promise.resolve()).catch((err: unknown) => err)
+  expect(refused).toBeInstanceOf(DiscardSignal)
+  expect(new TextDecoder().decode((refused as DiscardSignal).stderr)).toBe(
+    'bash: eval: maximum nesting level exceeded (32)\n',
+  )
+  expect(cs.levels).toBe(NESTING_MAX)
 })

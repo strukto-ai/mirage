@@ -65,6 +65,7 @@ export async function handleSource(
     return scriptError('bash', `${raw}: ${strerror}`, 1, `source ${raw}`)
   }
   const cs = callStack ?? new CallStack()
+  cs.admit(name)
   cs.push(args.length > 0 ? args : [...positionalParams(session, cs)], 'source', true)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()

@@ -419,6 +419,76 @@
         "stdout": "f () \n{ \n    echo OK;\n    echo OK;\n    :;\n    echo there after > /dev/null\n}\n",
         "stderr": "there after\n"
       }
+    },
+    {
+      "id": "cmd_function_past_funcnest_abandons_the_line",
+      "seq": 940167,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "FUNCNEST=3; fnest() { echo \"d$1\"; fnest $(($1+1)); echo back; }; fnest 1 || echo or; echo same-line\necho \"next $?\"; fsub() { echo \"s$1\"; echo $(fsub $(($1+1))); }; fsub 1; echo \"after $?\"; ( fnest 1 ) >/dev/null; echo \"paren=$?\"; fnest 1 | cat >/dev/null; echo \"pipe=$?\"\nunset -f fnest fsub; unset FUNCNEST",
+      "expect": {
+        "exit": 0,
+        "stdout": "d1\nd2\nd3\nnext 1\ns1\ns2 s3\nafter 0\nparen=1\npipe=0\n",
+        "stderr": "bash: fnest: maximum function nesting level exceeded (3)\nbash: fsub: maximum function nesting level exceeded (3)\nbash: fnest: maximum function nesting level exceeded (3)\nbash: fnest: maximum function nesting level exceeded (3)\n"
+      }
+    },
+    {
+      "id": "cmd_function_nesting_has_a_ceiling",
+      "seq": 940168,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "fdef() { echo $(fdef); }; fdef; echo \"after $?\"; FUNCNEST=100; fdef() { fdef; }; fdef\necho \"next $?\"\nunset -f fdef; unset FUNCNEST",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nafter 0\nnext 1\n",
+        "stderr": "bash: fdef: maximum function nesting level exceeded (32)\nbash: fdef: maximum function nesting level exceeded (32)\n"
+      }
     }
   ]
 }

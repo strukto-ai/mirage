@@ -965,6 +965,7 @@ async function routeArgv(
       stdin,
       sink,
       jobTable ?? undefined,
+      callStack,
     )
   }
 
