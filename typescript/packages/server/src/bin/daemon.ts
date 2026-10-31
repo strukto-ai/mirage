@@ -23,7 +23,9 @@ import { resolveAllowedHosts, resolveForwardedAllowIps } from '../host_validatio
 import { pidFilePath, mirageHome } from '../paths.ts'
 import { resolveGracefulTimeout, resolveMaxWorkspaces } from '../registry.ts'
 import { resolveSSHConfig } from '../ssh/config.ts'
-import { buildWorkerProxy, resolveWorkers, resolveWorkerType, WorkerPool } from '../workers.ts'
+import { resolveWorkers, resolveWorkerType } from '../workers/config.ts'
+import { WorkerPool } from '../workers/pool.ts'
+import { buildWorkerProxy } from '../workers/proxy.ts'
 
 const DEFAULT_PORT = 8765
 

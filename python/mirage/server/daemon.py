@@ -36,12 +36,9 @@ from mirage.server.registry import (
     resolve_max_workspaces,
 )
 from mirage.server.ssh.config import resolve_ssh_config
-from mirage.server.workers import (
-    WorkerPool,
-    build_worker_proxy,
-    resolve_worker_type,
-    resolve_workers,
-)
+from mirage.server.workers.config import resolve_worker_type, resolve_workers
+from mirage.server.workers.pool import WorkerPool
+from mirage.server.workers.proxy import build_worker_proxy
 
 GC_YOUNG_THRESHOLD = 10_000
 SWITCH_INTERVAL = 0.001
