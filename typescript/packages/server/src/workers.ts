@@ -123,7 +123,7 @@ export interface WorkerOptions {
    * Node's flags for the worker; undefined takes the daemon's. A thread
    * cannot take V8 flags such as `--max-old-space-size` here.
    */
-  execArgv?: readonly string[]
+  execArgv?: readonly string[] | undefined
   env: Record<string, string | undefined>
   /** A Host the worker accepts, for its health check. */
   host: string
