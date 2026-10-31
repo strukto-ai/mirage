@@ -163,6 +163,7 @@ async def test_a_configured_entry_point_without_asyncssh_fails_the_start(
         async with app.router.lifespan_context(app):
             pass
     assert not (tmp_path / "daemon.pid").exists()
+    assert app.state.registry not in metrics_module._registries
 
 
 @pytest.mark.asyncio

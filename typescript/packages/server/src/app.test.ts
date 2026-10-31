@@ -19,6 +19,7 @@ import ssh2 from 'ssh2'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import { DaemonConfigError } from './daemon_config.ts'
+import * as metrics from './metrics.ts'
 import type { SSHConfig } from './ssh/config.ts'
 import { mintKeyPair } from './ssh/keys.ts'
 
@@ -68,6 +69,7 @@ describe('buildApp ssh entry point', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.doUnmock('ssh2')
+    vi.restoreAllMocks()
   })
 
   function sshConfigIn(dir: string, publicKey: string): SSHConfig {
@@ -122,8 +124,10 @@ describe('buildApp ssh entry point', () => {
     vi.doMock('ssh2', () => {
       throw new Error("Cannot find package 'ssh2'")
     })
+    const registered = vi.spyOn(metrics, 'registerMetrics')
     const app = buildApp({ pidFile: join(dir, 'daemon.pid'), sshConfig: sshConfigIn(dir, 'x') })
     await expect(app.ready()).rejects.toThrow(/needs ssh2/)
+    expect(registered).not.toHaveBeenCalled()
   })
 })
 

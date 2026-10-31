@@ -163,6 +163,7 @@ async def _construct(
     rule: NetworkRule | None,
     workspace_id: str,
     state_root: str,
+    max_sessions: int | None,
 ) -> Workspace:
     """Build a workspace from its config, on the loop that awaits this:
     its secrets are read, its mounts and runtimes constructed and their
@@ -173,12 +174,18 @@ async def _construct(
     names is read under the network the workspace will be held to. The
     server's default store is disk, so a created workspace survives a
     restart with no infrastructure; a config's own ``store:`` block wins.
+    Under ``max_sessions`` the sessions its store saved are loaded, and
+    more than the cap refuse the create.
 
     Args:
         config (WorkspaceConfig): the posted config.
         rule (NetworkRule | None): the network the workspace is held to.
         workspace_id (str): the id it is created under.
         state_root (str): where the default disk store keeps its state.
+        max_sessions (int | None): the server's session cap.
+
+    Raises:
+        ValueError: the saved sessions are past the cap.
     """
     kwargs = (
         await run_with_network(rule, resolve_secrets(config))
@@ -187,7 +194,36 @@ async def _construct(
     if "store" not in kwargs:
         kwargs["store"] = DiskWorkspaceStateStore(state_root)
         kwargs["owns_store"] = True
-    return Workspace(**kwargs)
+    ws = Workspace(**kwargs)
+    if max_sessions is None:
+        return ws
+    try:
+        await ws.ensure_sessions_loaded()
+        past = _past_session_cap(ws, max_sessions, "the saved workspace")
+        if past is not None:
+            raise ValueError(past)
+    except BaseException:
+        await ws.close()
+        raise
+    return ws
+
+
+def _past_session_cap(
+    ws: Workspace, cap: int | None, holder: str
+) -> str | None:
+    """Why ``ws`` holds too many sessions for the server, None when it
+    does not; a refusal is counted.
+
+    Args:
+        ws (Workspace): the workspace built.
+        cap (int | None): the server's ``max_sessions``.
+        holder (str): what the sessions came from, for the refusal.
+    """
+    held = len(ws.list_sessions())
+    if cap is None or held <= cap:
+        return None
+    refused("max_sessions")
+    return f"{holder} holds {held} sessions, past max_sessions ({cap})"
 
 
 def store_key(request: Request, key: str) -> str:
@@ -349,6 +385,7 @@ async def create_workspace(
                         registry.rule_for(req.config.network),
                         wid,
                         str(request.app.state.state_root),
+                        registry.max_sessions,
                     )
                 )
             except (
@@ -619,14 +656,10 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                         policies=policies,
                     ),
                 )
-            held = len(ws.list_sessions())
-            cap = registry.max_sessions
-            if cap is not None and held > cap:
+            past = _past_session_cap(ws, registry.max_sessions, "the snapshot")
+            if past is not None:
                 await ws.close()
-                raise ValueError(
-                    f"the snapshot holds {held} sessions, past max_sessions "
-                    f"({cap})"
-                )
+                raise ValueError(past)
             return ws
 
         try:

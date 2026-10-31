@@ -144,7 +144,6 @@ export function buildApp(options: BuildAppOptions = {}) {
   const gracefulTimeout = resolveGracefulTimeout(options.gracefulTimeout)
   const rateLimits = resolveRateLimits(options.rateLimits)
   const jobs = registry.jobs
-  const unregisterMetrics = registerMetrics(registry)
   const pidFile = pidFilePath(options.pidFile)
   const proxies = resolveForwardedAllowIps(options.forwardedAllowIps)
   // A drain serves reads and running lines to the end; it refuses new
@@ -211,6 +210,12 @@ export function buildApp(options: BuildAppOptions = {}) {
       ssh.listener = await startSSHServer(registry, sshConfig)
     })
   }
+  // Reported once the app is up, so one whose setup fails never is.
+  let unregisterMetrics = noop
+  app.addHook('onReady', (done) => {
+    unregisterMetrics = registerMetrics(registry)
+    done()
+  })
   app.addHook('preClose', async () => {
     registry.draining = true
     if (gracefulTimeout > 0) await registry.drain(gracefulTimeout)

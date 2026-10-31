@@ -254,6 +254,18 @@ function building(
   })
 }
 
+/**
+ * Why `ws` holds too many sessions for the server, null when it does not;
+ * a refusal is counted. `holder` names what the sessions came from.
+ * Mirrors Python's `_past_session_cap`.
+ */
+function pastSessionCap(ws: Workspace, cap: number | null, holder: string): string | null {
+  const held = ws.listSessions().length
+  if (cap === null || held <= cap) return null
+  refused('max_sessions')
+  return `${holder} holds ${String(held)} sessions, past max_sessions (${String(cap)})`
+}
+
 /** Refuse an id that would name the state root, not a workspace. */
 function refuseDotId(reply: FastifyReply, id: string): FastifyReply {
   return reply.status(400).send({ detail: `invalid workspace id: ${id}` })
@@ -390,6 +402,23 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           } catch (e) {
             return answer(reply, 400, { detail: (e as Error).message })
           }
+          // Under max_sessions the sessions its store saved are loaded, and
+          // more than the cap refuse the create.
+          const cap = deps.registry.maxSessions
+          if (cap !== null) {
+            let past: string | null
+            try {
+              await ws.ensureSessionsLoaded()
+              past = pastSessionCap(ws, cap, 'the saved workspace')
+            } catch (e) {
+              await ws.close()
+              throw e
+            }
+            if (past !== null) {
+              await ws.close()
+              return answer(reply, 400, { detail: past })
+            }
+          }
           let entry
           try {
             for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
@@ -492,13 +521,10 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         }
         return answer(reply, 400, { detail: `load failed: ${(e as Error).message}` })
       }
-      const held = ws.listSessions().length
-      const cap = deps.registry.maxSessions
-      if (cap !== null && held > cap) {
+      const past = pastSessionCap(ws, deps.registry.maxSessions, 'the snapshot')
+      if (past !== null) {
         await ws.close()
-        return answer(reply, 400, {
-          detail: `load failed: the snapshot holds ${String(held)} sessions, past max_sessions (${String(cap)})`,
-        })
+        return answer(reply, 400, { detail: `load failed: ${past}` })
       }
       let entry
       try {

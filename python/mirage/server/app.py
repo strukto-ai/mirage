@@ -259,6 +259,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         else None
     )
     wrapped = _drain_on_signals(app)
+    forget = register_metrics(app.state.registry)
     try:
         yield
     finally:
@@ -279,7 +280,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             try:
                 await app.state.registry.close_all()
             finally:
-                app.state.unregister_metrics()
+                forget()
             if app.state.pid_file is not None:
                 await run_blocking(_remove_pid_file, app.state.pid_file)
 
@@ -417,7 +418,6 @@ def build_app(
     )
     app.state.graceful_timeout = resolve_graceful_timeout(graceful_timeout)
     app.state.jobs = app.state.registry.jobs
-    app.state.unregister_metrics = register_metrics(app.state.registry)
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )

@@ -1734,7 +1734,9 @@ async def test_a_server_shutting_down_refuses_new_workspaces():
 
 
 @pytest.mark.asyncio
-async def test_a_load_past_max_sessions_is_refused():
+async def test_a_load_past_max_sessions_is_refused(monkeypatch):
+    seen: list[str] = []
+    monkeypatch.setattr(workspaces_router, "refused", seen.append)
     free, _ = _make_app_with_short_grace(grace=10.0)
     capped = build_app(idle_grace_seconds=10.0, max_sessions=2)
     async with AsyncClient(
@@ -1757,8 +1759,45 @@ async def test_a_load_past_max_sessions_is_refused():
     assert r.json()["detail"] == (
         "load failed: the snapshot holds 3 sessions, past max_sessions (2)"
     )
+    assert seen == ["max_sessions"]
     assert len(capped.state.registry) == 0
     await free.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_reopen_past_max_sessions_is_refused(monkeypatch, tmp_path):
+    seen: list[str] = []
+    monkeypatch.setattr(workspaces_router, "refused", seen.append)
+    state = tmp_path / "state"
+    free = build_app(idle_grace_seconds=10.0, state_root=state)
+    capped = build_app(
+        idle_grace_seconds=10.0, state_root=state, max_sessions=2
+    )
+    body = {**_minimal_config(), "id": "keep"}
+    async with AsyncClient(
+        transport=ASGITransport(app=free), base_url="http://test"
+    ) as client:
+        assert (
+            await client.post("/v1/workspaces", json=body)
+        ).status_code == 201
+        for sid in ("a", "b"):
+            r = await client.post(
+                "/v1/workspaces/keep/sessions", json={"session_id": sid}
+            )
+            assert r.status_code == 201, r.text
+        assert (
+            await client.post("/v1/workspaces/keep/close")
+        ).status_code == 200
+    async with AsyncClient(
+        transport=ASGITransport(app=capped), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=body)
+    assert r.status_code == 400
+    assert r.json()["detail"] == (
+        "the saved workspace holds 3 sessions, past max_sessions (2)"
+    )
+    assert seen == ["max_sessions"]
+    assert len(capped.state.registry) == 0
 
 
 @pytest.mark.asyncio
