@@ -121,8 +121,10 @@ export class GCalVFS extends BaseVFS {
   readonly config: GCalConfig
   override readonly accessor: GCalAccessor
 
-  constructor(config: GCalConfig) {
+  // A config built by hand skips the schema, so its default is applied here.
+  constructor(options: Omit<GCalConfig, 'bucketDays'> & Partial<Pick<GCalConfig, 'bucketDays'>>) {
     super()
+    const config: GCalConfig = { ...options, bucketDays: options.bucketDays ?? 1 }
     this.config = config
     const tm = new TokenManager(config)
     this.accessor = new GCalAccessor({
