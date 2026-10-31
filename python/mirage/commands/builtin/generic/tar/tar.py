@@ -244,10 +244,17 @@ async def tar_generic(
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     """A tar line hands a link operand to its planner as given, which
-    reads ``-h`` itself, and reads below what it archives under ``-c``.
+    reads ``-h`` itself, reads below what it archives under ``-c``, and
+    writes to create or extract, not to list or extract to stdout.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
         operands (Sequence[str | PathSpec]): the line's operands.
     """
-    return LineFacts(follows=Follow.NONE, reads_subtree=fl.as_bool("create"))
+    create = fl.as_bool("create")
+    return LineFacts(
+        follows=Follow.NONE,
+        reads_subtree=create,
+        writes=create
+        or (fl.as_bool("extract") and not fl.as_bool("to_stdout")),
+    )

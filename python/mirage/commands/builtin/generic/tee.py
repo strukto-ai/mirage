@@ -1,6 +1,12 @@
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from contextlib import aclosing
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -25,7 +31,7 @@ from mirage.io.types import ByteSource, ClosedPipe, IOResult, materialize
 from mirage.io.writer import ByteWriter
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SIGPIPE_STATUS
-from mirage.types import PathSpec, StatFn
+from mirage.types import LineFacts, PathSpec, StatFn
 from mirage.utils.key_prefix import mount_key
 
 logger = logging.getLogger(__name__)
@@ -523,7 +529,18 @@ def _closed_stdout(parsed: TeeFlags) -> ClosedPipe | None:
     )
 
 
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A tee line writes the files it names.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(writes=len(operands) > 0)
+
+
 __all__ = [
+    "facts",
     "tee_generic",
     "parse_flags",
     "TeeFlags",

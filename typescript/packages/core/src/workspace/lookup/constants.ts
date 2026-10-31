@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { linkMode } from '../../commands/builtin/generic/ls.ts'
-import { sedWrites } from '../../commands/builtin/generic/sed.ts'
 import { declaredFacts } from '../../commands/builtin/generic_bind/factory.ts'
 import { FlagView, SPECS, WordKind, parseCommand } from '../../commands/spec/index.ts'
 import { parseToKwargs } from '../../commands/spec/parser.ts'
@@ -21,7 +20,7 @@ import type { FlagValue } from '../../commands/spec/types.ts'
 import { compileSpec } from '../../commands/spec/compile.ts'
 import { BUILTIN_GROUP } from '../../shell/constants.ts'
 import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
-import { Follow, LineFacts, type LsLinkMode, PathSpec } from '../../types.ts'
+import { Follow, LineFacts, type LsLinkMode, type PathSpec } from '../../types.ts'
 
 // Bash builtins the parser accepts but the executor cannot honor; they
 // still lookup to the shell layer so the error names a capability gap.
@@ -146,70 +145,6 @@ export function lineFlags(
   return parseToKwargs(parseCommand(spec, first === undefined ? argv : [first, ...argv], '/', runs))
 }
 
-// The builtins whose declared write `changesFiles` narrows by line.
-const NARROWED_WRITES: ReadonlySet<string> = new Set([
-  'sort',
-  'shuf',
-  'iconv',
-  'uniq',
-  'xxd',
-  'tee',
-  'mktemp',
-  'tar',
-  'unzip',
-  'gzip',
-  'gunzip',
-  'sed',
-])
-
-/**
- * Whether this run of a builtin may change files, read off its words: the
- * narrowing of a builtin's declared `write` that its options make. `sort
- * -o`, `shuf -o` and `iconv -o` write their output file and `uniq` and
- * `xxd` their second operand, which a pattern operand may name; `sed` writes under `-i`, a `w` file in its
- * script or a script file (unread here, so assumed to); `tar` writes to
- * create or extract, not to list or to extract to stdout; `unzip` writes
- * unless it lists, tests or pipes; `gzip` and `gunzip` write a file operand
- * unless `-c` or `-t`; `tee` writes the files it names; `mktemp -u` creates
- * nothing. Every other name may write whenever its handler declares so.
- * An operand classified as a path carries whether it is a pattern still to
- * expand. Mirrors Python's changes_files.
- */
-export function changesFiles(name: string, words: readonly (string | PathSpec)[]): boolean {
-  const spec = SPECS[name]
-  if (!NARROWED_WRITES.has(name) || spec === undefined) return true
-  const argv = words.slice(1).map((w) => (typeof w === 'string' ? w : w.rawPath))
-  const parsed = parseCommand(spec, argv, '/', name)
-  const bag = parseToKwargs(parsed)
-  const fl = new FlagView(bag, spec)
-  const operands = parsed.args.length
-  switch (name) {
-    case 'sort':
-    case 'shuf':
-    case 'iconv':
-      return fl.raw('output') !== undefined
-    case 'uniq':
-    case 'xxd':
-      // A pattern the backend expands may name the output file too; a quoted
-      // name is no pattern.
-      return operands > 1 || words.slice(1).some((w) => w instanceof PathSpec && w.pattern !== null)
-    case 'tee':
-      return operands > 0
-    case 'mktemp':
-      return !fl.asBool('dry_run')
-    case 'tar':
-      return fl.asBool('create') || (fl.asBool('extract') && !fl.asBool('to_stdout'))
-    case 'unzip':
-      return !['args_l', 't', 'v', 'p', 'Z'].some((d) => fl.asBool(d))
-    case 'gzip':
-      return operands > 0 && !fl.asBool('c')
-    case 'gunzip':
-      return operands > 0 && !(fl.asBool('c') || fl.asBool('t'))
-    default:
-      return sedWrites(bag, parsed.texts())
-  }
-}
-
 // Commands the router must not resolve the last component for, even
 // under a trailing slash, because none of them acts on the link's
 // target and each says so in its own words. GNU tar strips the slash
@@ -302,9 +237,14 @@ export function factsOf(
  * `grep -d recurse` walk, `grep -ephrase` does not. A command that decides
  * its operand's last component itself (`SELF_RESOLVING`) follows no link.
  * An operand classified as a path carries whether it is a pattern still to
- * expand. Mirrors Python's `line_facts`.
+ * expand; `cwd` is what a path option's value (`mv -t`) resolves against.
+ * Mirrors Python's `line_facts`.
  */
-export function lineFacts(name: string, words: readonly (string | PathSpec)[]): LineFacts {
+export function lineFacts(
+  name: string,
+  words: readonly (string | PathSpec)[],
+  cwd: string,
+): LineFacts {
   const [runs, first] = EXEC_WRAPPERS.get(name) ?? [name, undefined]
   const spec = SPECS[runs]
   if (spec === undefined || (runs !== 'ls' && declaredFacts(runs) instanceof LineFacts)) {
@@ -312,7 +252,7 @@ export function lineFacts(name: string, words: readonly (string | PathSpec)[]): 
   }
   const typed = first === undefined ? words.slice(1) : [first, ...words.slice(1)]
   const argv = typed.map((w) => (typeof w === 'string' ? w : w.rawPath))
-  const parsed = parseCommand(spec, argv, '/', runs)
+  const parsed = parseCommand(spec, argv, cwd, runs)
   const operands = typed.filter((_, i) => parsed.wordRoles[i] === WordKind.OPERAND)
   return factsOf(name, parseToKwargs(parsed), operands)
 }

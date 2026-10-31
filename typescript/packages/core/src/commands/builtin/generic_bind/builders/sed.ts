@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOResult } from '../../../../io/types.ts'
-import { sedGeneric, positionalAsPaths } from '../../generic/sed.ts'
+import { facts, sedGeneric, positionalAsPaths } from '../../generic/sed.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { type GenericCommand } from '../adapter.ts'
@@ -23,6 +23,7 @@ const ENC = new TextEncoder()
 
 export const BUILDER: GenericCommand = {
   name: 'sed',
+  facts: facts,
   write: true,
   read: true,
   fn: async (_accessor, paths, texts, ctx) => {

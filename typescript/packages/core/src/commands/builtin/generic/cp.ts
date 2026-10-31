@@ -1835,10 +1835,12 @@ export async function cpGeneric(
 
 /**
  * A cp line reads below its sources when it copies recursively (`-r`, `-R`,
- * `-a`). Mirrors Python's `facts`.
+ * `-a`), and copies into the directory `-t` names if it names one. Mirrors
+ * Python's `facts`.
  */
 export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
   return new LineFacts({
     readsSubtree: ['r', 'recursive', 'archive'].some((dest) => fl.asBool(dest)),
+    moveTarget: fl.asStr('target_directory') ?? null,
   })
 }

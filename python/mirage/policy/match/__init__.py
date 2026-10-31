@@ -23,7 +23,6 @@ from mirage.policy.match.rule import (
     operand_paths,
     posix_level,
     skipped_at_dispatch,
-    target_directory,
 )
 from mirage.policy.types import Outcome, Ruling
 
@@ -45,5 +44,4 @@ __all__ = [
     "scopes_paths",
     "skipped_at_dispatch",
     "split_pattern",
-    "target_directory",
 ]

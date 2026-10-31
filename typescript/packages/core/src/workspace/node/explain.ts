@@ -378,8 +378,8 @@ async function explained(
  * force nothing is refused on this account: the words are admitted as
  * typed, which is all a coded policy ever saw. `words` are the words after
  * the name and the statement's redirect targets, as the gate read them;
- * `operands` the words after the name, classified. Mirrors the Python
- * `_line_refusal`.
+ * `operands` the words after the name, classified; `cwd` the working
+ * directory the line runs in. Mirrors the Python `_line_refusal`.
  */
 function lineRefusal(
   name: string,
@@ -391,9 +391,10 @@ function lineRefusal(
   rules: AdmissionRules | null,
   open: boolean,
   lost: boolean,
+  cwd: string,
 ): string | null {
   if (scopesPaths(rules, name)) {
-    if (lineFacts(name, [name, ...args]).readsSubtree) {
+    if (lineFacts(name, [name, ...args], cwd).readsSubtree) {
       return 'walks a tree the gate cannot follow'
     }
     const globby = [...operands, ...redirects].some(
@@ -520,6 +521,7 @@ async function* judgeWords(
           rules,
           open,
           lost,
+          session.cwd,
         )
       : null
   if (refused !== null) {

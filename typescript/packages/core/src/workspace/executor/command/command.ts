@@ -382,7 +382,7 @@ export async function handleCommand(
 
   const follow =
     namespace !== undefined
-      ? operandFollow(namespace.sessionLinks(session), dispatch, cmdName, parts)
+      ? operandFollow(namespace.sessionLinks(session), dispatch, cmdName, parts, session.cwd)
       : undefined
   const files = commandFiles(follow ?? null)
   const runCtx: RunOnMountCtx = {
@@ -641,7 +641,7 @@ export async function handleCommand(
           session.cwd,
           (path) => pathStat(dispatch, path),
           namespace ?? null,
-          lineFacts(cmdName, parts).follows !== Follow.NONE,
+          lineFacts(cmdName, parts, session.cwd).follows !== Follow.NONE,
         )
         if (refErr !== null) {
           return [

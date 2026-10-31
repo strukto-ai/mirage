@@ -51,7 +51,7 @@ import {
   WritePolicy,
 } from '../../types.ts'
 import { CLIRegistry } from '../cli/registry.ts'
-import { changesFiles } from '../lookup/constants.ts'
+import { lineFacts } from '../lookup/constants.ts'
 import {
   effectivePathMode,
   sessionVisibility,
@@ -905,7 +905,7 @@ export class MountRegistry {
     const candidates = this.commandCandidates(cmdName, pathScopes, cwd, access)
     const first = candidates[0] ?? null
     if (candidates.length < 2 || first === null) return [candidates, first]
-    const builtins = changesFiles(cmdName, [cmdName, ...argv])
+    const builtins = lineFacts(cmdName, [cmdName, ...argv], cwd).writes
     const readers: MountEntry[] = []
     const writable: MountEntry[] = []
     const subcommands = new Set<MountEntry>()

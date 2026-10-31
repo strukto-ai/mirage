@@ -15,8 +15,8 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
+from mirage.commands.builtin.generic.mv import facts, parse_flags
 from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
-from mirage.commands.builtin.generic.mv import parse_flags
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -30,7 +30,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import Follow, LineFacts, NativeMove, PathSpec
+from mirage.types import NativeMove, PathSpec
 
 
 async def mv(
@@ -72,6 +72,4 @@ async def mv(
     )
 
 
-BUILDER = GenericCommand(
-    "mv", mv, write=True, facts=LineFacts(follows=Follow.NONE)
-)
+BUILDER = GenericCommand("mv", mv, write=True, facts=facts)

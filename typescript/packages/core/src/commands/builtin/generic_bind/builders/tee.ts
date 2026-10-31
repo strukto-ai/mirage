@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { teeGeneric } from '../../generic/tee.ts'
+import { facts, teeGeneric } from '../../generic/tee.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -35,6 +35,7 @@ const tee: CommandFn = async (_accessor, paths, texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'tee',
+  facts: facts,
   write: true,
   fn: tee,
 }

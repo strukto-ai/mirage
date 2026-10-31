@@ -348,7 +348,11 @@ async def handle_command(
     )
     follow = (
         operand_follow(
-            namespace.session_links(session), dispatch, cmd_name, parts
+            namespace.session_links(session),
+            dispatch,
+            cmd_name,
+            parts,
+            session.cwd,
         )
         if namespace is not None
         else None
@@ -713,7 +717,8 @@ async def handle_command(
                     session.cwd,
                     functools.partial(path_stat, dispatch),
                     namespace,
-                    line_facts(cmd_name, parts).follows is not Follow.NONE,
+                    line_facts(cmd_name, parts, session.cwd).follows
+                    is not Follow.NONE,
                 )
                 if ref_err is not None:
                     return (

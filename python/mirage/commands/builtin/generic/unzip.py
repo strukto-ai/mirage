@@ -1,7 +1,7 @@
 # Refusal wording and exit codes from Info-ZIP UnZip 6.00 (Info-ZIP
 # license; see licenses/third_party/info-zip.txt).
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -20,7 +20,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
-from mirage.types import JsonValue, PathSpec, ReadStreamFn
+from mirage.types import JsonValue, LineFacts, PathSpec, ReadStreamFn
 
 # Info-ZIP answers an option it does not know with its usage block and
 # exit 10; -1, -2, -s, -m and -h are zipinfo's letters and mean nothing to
@@ -156,4 +156,19 @@ async def unzip_generic(
     return hosted_stream("unzip", config, host, io), io
 
 
-__all__ = ["unzip_generic"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """An unzip line writes unless it lists, tests or pipes (``-l``,
+    ``-t``, ``-v``, ``-p``, ``-Z``).
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(
+        writes=not any(
+            fl.as_bool(dest) for dest in ("args_l", "t", "v", "p", "Z")
+        )
+    )
+
+
+__all__ = ["facts", "unzip_generic"]

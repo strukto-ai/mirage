@@ -212,9 +212,14 @@ export async function tarGeneric(
 
 /**
  * A tar line hands a link operand to its planner as given, which reads `-h`
- * itself, and reads below what it archives under `-c`. Mirrors Python's
- * `facts`.
+ * itself, reads below what it archives under `-c`, and writes to create or
+ * extract, not to list or extract to stdout. Mirrors Python's `facts`.
  */
 export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
-  return new LineFacts({ follows: Follow.NONE, readsSubtree: fl.asBool('create') })
+  const create = fl.asBool('create')
+  return new LineFacts({
+    follows: Follow.NONE,
+    readsSubtree: create,
+    writes: create || (fl.asBool('extract') && !fl.asBool('to_stdout')),
+  })
 }

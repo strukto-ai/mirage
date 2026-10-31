@@ -166,7 +166,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'rm',
-  facts: new LineFacts({ follows: Follow.NONE }),
+  facts: new LineFacts({ follows: Follow.NONE, subtree: true }),
   write: true,
   fn: rm,
 }

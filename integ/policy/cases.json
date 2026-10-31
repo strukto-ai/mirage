@@ -648,6 +648,28 @@
     {"op": "exec", "session": "agent", "command": "du -L /data/pub/l", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "du: cannot access '/data/pub/l': Permission denied\n", "refusal": "sealed"}}},
     {"op": "exec", "session": "agent", "command": "du -L -P /data/pub/l | cut -f2", "expect": {"value": {"exit_code": 0, "stdout": "/data/pub/l\n", "stderr": "", "refusal": null}}}
    ]
+  },
+  {
+   "id": "a_policy_sees_whether_a_line_writes_and_what_it_moves",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}, "runtimes": ["monty", "workspace"]},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"policy": {"pre_command": [{"script": {"source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\ndef answer():\n    if ctx['command'] in ('mv', 'rm'):\n        return {'kind': 'deny', 'reason': 'subtree ' + str(ctx['subtree']) + ' into ' + str(ctx['move_target'])}\n    if ctx['write']:\n        return {'kind': 'deny', 'reason': 'writes'}\n    return None\n\nprint(json.dumps(answer()))\n", "language": "python"}, "runtime": "monty"}]}}},
+    {"op": "exec", "command": "mkdir /data/sub && printf 'b\\na\\n' > /data/a && cd /data && tar -cf t.tar a", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "sort /data/a", "expect": {"value": {"exit_code": 0, "stdout": "a\nb\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "sort -o /data/o /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "sort: Permission denied\n", "refusal": "writes"}}},
+    {"op": "exec", "session": "agent", "command": "sed -n p /data/a", "expect": {"value": {"exit_code": 0, "stdout": "b\na\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "sed -i p /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "sed: Permission denied\n", "refusal": "writes"}}},
+    {"op": "exec", "session": "agent", "command": "tar -tf /data/t.tar", "expect": {"value": {"exit_code": 0, "stdout": "a\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "tar -xf /data/t.tar", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "tar: Permission denied\n", "refusal": "writes"}}},
+    {"op": "exec", "session": "agent", "command": "gzip -c /data/a > /dev/null", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "mktemp -u > /dev/null", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "uniq /data/a", "expect": {"value": {"exit_code": 0, "stdout": "b\na\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "uniq /data/a /data/u", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "uniq: Permission denied\n", "refusal": "writes"}}},
+    {"op": "exec", "session": "agent", "command": "cat /data/a | tee", "expect": {"value": {"exit_code": 0, "stdout": "b\na\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd /data && mv -t sub a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "mv: Permission denied\n", "refusal": "subtree True into /data/sub"}}},
+    {"op": "exec", "session": "agent", "command": "mv /data/a /data/b", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "mv: Permission denied\n", "refusal": "subtree True into None"}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/a", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "refusal": "subtree True into None"}}}
+   ]
   }
- ]
+]
 }

@@ -204,5 +204,8 @@ async def rmdir(
 
 
 BUILDER = GenericCommand(
-    "rmdir", rmdir, write=True, facts=LineFacts(follows=Follow.NONE)
+    "rmdir",
+    rmdir,
+    write=True,
+    facts=LineFacts(follows=Follow.NONE, subtree=True),
 )

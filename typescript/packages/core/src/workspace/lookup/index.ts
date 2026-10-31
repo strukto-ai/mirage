@@ -17,7 +17,6 @@ export {
   SHELL_NAMES,
   SLASH_KEEPS_LAST,
   UNSUPPORTED_BUILTINS,
-  changesFiles,
   endOptionsAfterProgram,
   factsOf,
   lineFacts,

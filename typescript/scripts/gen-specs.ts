@@ -29,6 +29,9 @@ import type { Argument, CommandSpec } from '@struktoai/mirage-core/commands/spec
 import { SHELL_SPECS } from '@struktoai/mirage-core/commands/spec/shell'
 import { SHELL_SYNOPSES, SYNOPSES } from '@struktoai/mirage-core/commands/spec/synopsis'
 import type { Command } from '@struktoai/mirage-core/commands/config'
+import { declaredFacts } from '@struktoai/mirage-core/commands/builtin/generic_bind/factory'
+import { LineFacts } from '@struktoai/mirage-core/types'
+import { lineFacts } from '@struktoai/mirage-core/workspace/lookup/constants'
 
 import {
   type Capabilities,
@@ -43,6 +46,8 @@ const SPEC_ROOT = resolve(
   'typescript',
 )
 const PACKAGES = resolve(__dirname, '..', 'packages')
+const FACT_LINES = resolve(__dirname, '..', '..', 'scripts', 'parity', 'fact_lines.json')
+const FACT_CWD = '/home'
 
 // Bespoke Google Workspace API passthroughs. They register command names that
 // are not in SPECS, so they contribute nothing to the spec dump and stay
@@ -324,6 +329,39 @@ function sortedStringify(value: unknown): string {
 // ten-minute-stale listings of a live postgres schema because its
 // `index_ttl` kept the 600 s default where typescript pinned 0, and box's
 // `du` was defined on one side and absent on the other.
+function factsPayload(facts: LineFacts): Record<string, unknown> {
+  return {
+    follows: facts.follows,
+    walks: facts.walks,
+    reads_subtree: facts.readsSubtree,
+    writes: facts.writes,
+    subtree: facts.subtree,
+    move_target: facts.moveTarget,
+  }
+}
+
+// What each command declares a line of it does, and what each line of the
+// shared fixture does, so the parity gate sees a host that reads a command's
+// options differently. Mirrors `_facts` in scripts/gen_specs.py.
+function factsDump(): Record<string, unknown> {
+  const declared = Object.fromEntries(
+    Object.keys(SPECS)
+      .sort(compareCodePoints)
+      .map((cmd) => {
+        const facts = declaredFacts(cmd)
+        return [cmd, facts instanceof LineFacts ? factsPayload(facts) : 'per_line']
+      }),
+  )
+  const fixture = JSON.parse(readFileSync(FACT_LINES, 'utf8')) as string[][]
+  const lines = Object.fromEntries(
+    fixture.map((words) => [
+      words.join(' '),
+      factsPayload(lineFacts(words[0] as string, words, FACT_CWD)),
+    ]),
+  )
+  return { declared, lines }
+}
+
 function emitVfsNames(
   name: string,
   knownVfsNames: string[],
@@ -351,6 +389,7 @@ function emitVfsNames(
         ]),
     ),
     synopses: { programs: { ...SYNOPSES }, shell: { ...SHELL_SYNOPSES } },
+    facts: factsDump(),
   }
   const path = resolve(SPEC_ROOT, name, 'vfs.json')
   writeFileSync(path, sortedStringify(payload) + '\n')

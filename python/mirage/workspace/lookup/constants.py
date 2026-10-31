@@ -16,7 +16,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from mirage.commands.builtin.generic.ls import link_mode
-from mirage.commands.builtin.generic.sed import sed_writes
 from mirage.commands.builtin.generic_bind.factory import declared_facts
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.compile import compile_spec
@@ -368,79 +367,6 @@ def line_flags(
     return parse_to_kwargs(parse_command(spec, [*first, *argv], "/", runs))
 
 
-# The builtins whose declared write ``changes_files`` narrows by line.
-_NARROWED_WRITES = frozenset(
-    {
-        "sort",
-        "shuf",
-        "iconv",
-        "uniq",
-        "xxd",
-        "tee",
-        "mktemp",
-        "tar",
-        "unzip",
-        "gzip",
-        "gunzip",
-        "sed",
-    }
-)
-
-
-def changes_files(name: str, words: Sequence[str | PathSpec]) -> bool:
-    """Whether this run of a builtin may change files, read off its
-    words: the narrowing of a builtin's declared ``write`` that its
-    options make. ``sort -o``, ``shuf -o`` and ``iconv -o`` write their
-    output file and ``uniq`` and ``xxd`` their second operand, which a
-    pattern operand may name; ``sed``
-    writes under ``-i``, a ``w`` file in its script or a script file
-    (unread here, so assumed to); ``tar`` writes to create or extract,
-    not to list or to extract to stdout; ``unzip`` writes unless it
-    lists, tests or pipes; ``gzip`` and ``gunzip`` write a file operand
-    unless ``-c`` or ``-t``; ``tee`` writes the files it names;
-    ``mktemp -u`` creates nothing. Every other name may write whenever
-    its handler declares so.
-
-    Args:
-        name (str): command name.
-        words (Sequence[str | PathSpec]): the command's words, name
-            first; an operand classified as a path carries whether it is
-            a pattern still to expand.
-    """
-    if name not in _NARROWED_WRITES:
-        return True
-    spec = SPECS[name]
-    argv = [w if isinstance(w, str) else w.raw_path for w in words[1:]]
-    parsed = parse_command(spec, argv, "/", name)
-    flags = parse_to_kwargs(parsed)
-    fl = FlagView(flags, spec=spec)
-    operands = len(parsed.args)
-    if name in ("sort", "shuf", "iconv"):
-        return fl.raw("output") is not None
-    if name in ("uniq", "xxd"):
-        # A pattern the backend expands may name the output file too; a
-        # quoted name is no pattern.
-        return operands > 1 or any(
-            isinstance(w, PathSpec) and w.pattern is not None
-            for w in words[1:]
-        )
-    if name == "tee":
-        return operands > 0
-    if name == "mktemp":
-        return not fl.as_bool("dry_run")
-    if name == "tar":
-        return fl.as_bool("create") or (
-            fl.as_bool("extract") and not fl.as_bool("to_stdout")
-        )
-    if name == "unzip":
-        return not any(fl.as_bool(d) for d in ("args_l", "t", "v", "p", "Z"))
-    if name == "gzip":
-        return operands > 0 and not fl.as_bool("c")
-    if name == "gunzip":
-        return operands > 0 and not (fl.as_bool("c") or fl.as_bool("t"))
-    return sed_writes(flags, parsed.texts())
-
-
 # Commands the router must not resolve the last component for, even
 # under a trailing slash, because none of them acts on the link's
 # target and each says so in its own words. GNU tar strips the slash
@@ -531,7 +457,9 @@ def facts_of(
     return facts
 
 
-def line_facts(name: str, words: Sequence[str | PathSpec]) -> LineFacts:
+def line_facts(
+    name: str, words: Sequence[str | PathSpec], cwd: str
+) -> LineFacts:
     """What a command line does, read off its words by the command's own
     grammar and facts (``facts_of``), so an abbreviation, a long
     spelling and an option's attached value read as the handler will
@@ -544,6 +472,8 @@ def line_facts(name: str, words: Sequence[str | PathSpec]) -> LineFacts:
         words (Sequence[str | PathSpec]): the command's words, name
             first; an operand classified as a path carries whether it is
             a pattern still to expand.
+        cwd (str): the working directory a path option's value
+            (``mv -t``) resolves against.
     """
     runs, *first = EXEC_WRAPPERS.get(name, (name,))
     spec = SPECS.get(runs)
@@ -553,7 +483,7 @@ def line_facts(name: str, words: Sequence[str | PathSpec]) -> LineFacts:
         return facts_of(name, {}, ())
     typed = [*first, *words[1:]]
     argv = [w if isinstance(w, str) else w.raw_path for w in typed]
-    parsed = parse_command(spec, argv, "/", runs)
+    parsed = parse_command(spec, argv, cwd, runs)
     operands = [
         typed[i]
         for i, role in enumerate(parsed.word_roles)

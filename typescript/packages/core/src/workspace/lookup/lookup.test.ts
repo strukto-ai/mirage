@@ -31,7 +31,6 @@ import { Effect } from '../../vfs/types.ts'
 import {
   Consumer,
   SHELL_CONSUMERS,
-  changesFiles,
   execs,
   lineFacts,
   lookup,
@@ -189,7 +188,7 @@ describe('lookupAll', () => {
 })
 
 const follows = (words: readonly (string | PathSpec)[]): Follow =>
-  lineFacts(wordText(words[0] ?? ''), words).follows
+  lineFacts(wordText(words[0] ?? ''), words, '/').follows
 
 describe('lineFacts follows', () => {
   // coreutils 9.7, file 5.46, findutils 4.10: lstat by default for these,
@@ -300,7 +299,7 @@ describe('walkers and subtree readers', () => {
     [['cat', '/data/x'], false],
     [['tar', '-cf', '/out.tar', '/data'], false],
   ] as const)('reads %j as walking: %s', (words, walking) => {
-    expect(lineFacts(words[0], words).walks).toBe(walking)
+    expect(lineFacts(words[0], words, '/').walks).toBe(walking)
   })
 
   // tar -c (dashless too), zip -r and cp -r or -a read below their operands
@@ -325,11 +324,11 @@ describe('walkers and subtree readers', () => {
     [['find', '/data'], true],
     [['ls', '-l', '/data'], false],
   ] as const)('reads %j as reading below: %s', (words, reads) => {
-    expect(lineFacts(words[0], words).readsSubtree).toBe(reads)
+    expect(lineFacts(words[0], words, '/').readsSubtree).toBe(reads)
   })
 })
 
-describe('changesFiles', () => {
+describe('lineFacts writes', () => {
   // sed 4.9 opens a w file while it reads the script, before it refuses a
   // later command. Mirrors test_constants.py.
   it.each([
@@ -369,7 +368,7 @@ describe('changesFiles', () => {
     [['awk', '1', '/data/a'], true],
     [['cp', '/data/a', '/data/b'], true],
   ] as const)('reads %j as writing: %s', (words, writes) => {
-    expect(changesFiles(words[0], words)).toBe(writes)
+    expect(lineFacts(words[0], words, '/').writes).toBe(writes)
   })
 
   it.each(['uniq', 'xxd'])('%s reads a pattern operand as a possible output', (name) => {
@@ -383,8 +382,30 @@ describe('changesFiles', () => {
       resolved: false,
     })
     const literal = new PathSpec({ virtual: '/data/p[1]', directory: '/data', vfsPath: 'p[1]' })
-    expect(changesFiles(name, [name, pattern])).toBe(true)
-    expect(changesFiles(name, [name, literal])).toBe(false)
+    expect(lineFacts(name, [name, pattern], '/').writes).toBe(true)
+    expect(lineFacts(name, [name, literal], '/').writes).toBe(false)
+  })
+})
+
+describe('lineFacts subtree and move target', () => {
+  it.each([
+    [['rm', '-r', '/data/d'], true],
+    [['rmdir', '/data/d'], true],
+    [['mv', '/data/d', '/data/e'], true],
+    [['cp', '-r', '/data/d', '/data/e'], false],
+    [['unlink', '/data/f'], false],
+  ] as const)('reads %j as taking whole subtrees: %s', (words, subtree) => {
+    expect(lineFacts(words[0], words, '/').subtree).toBe(subtree)
+  })
+
+  it.each([
+    [['mv', '-t', 'sub', '/data/a'], '/home', '/home/sub'],
+    [['mv', '--target-directory=/out', '/data/a'], '/', '/out'],
+    [['mv', '-S.txt', '/data/a', '/data/b'], '/', null],
+    [['cp', '-t', '/out', '/data/a'], '/', '/out'],
+    [['mv', '/data/a', '/data/b'], '/', null],
+  ] as const)('resolves the target directory of %j in %s as %s', (words, cwd, target) => {
+    expect(lineFacts(words[0], words, cwd).moveTarget).toBe(target)
   })
 })
 
@@ -491,6 +512,16 @@ const LINES = [
   'tar -cf /out/x.tar /data/link',
   'zip /out/x.zip /data/link',
   'rm /data/link',
+  'sort /data/a.txt',
+  'shuf /data/a.txt',
+  'iconv -f utf-8 -t utf-8 /data/a.txt',
+  'uniq /data/a.txt',
+  'xxd /data/a.txt',
+  'tee',
+  'mktemp -u',
+  'gzip -c /data/a.txt',
+  'sed -n p /data/a.txt',
+  'sed -i s/a/b/ /data/a.txt',
   'mv /data/link /out/l',
   'unlink /data/link',
 ]
@@ -498,7 +529,7 @@ const LINES = [
 describe('line facts against effects', () => {
   it.each(LINES)('%s does no more to the mounts than its facts say', async (line) => {
     const words = line.split(' ')
-    const facts = lineFacts(words[0] ?? '', words)
+    const facts = lineFacts(words[0] ?? '', words, '/')
     const ops = await effects(line)
     if (!facts.writes) {
       expect(ops.filter((op) => !READS.has(op.effect))).toEqual([])

@@ -42,7 +42,7 @@ import type { ValueType } from '../../commands/spec/types.ts'
 import { getRedirects, literalWord } from '../../shell/helpers.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
-import { Follow, PathSpec, type Refusal } from '../../types.ts'
+import { Follow, PathSpec, type LineFacts, type Refusal } from '../../types.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
 import { resolvePath } from '../../utils/path.ts'
@@ -75,7 +75,6 @@ import {
   Consumer,
   SLASH_KEEPS_LAST,
   WordPolicy,
-  changesFiles,
   isTool,
   lineFacts,
   lookup,
@@ -403,7 +402,7 @@ export function unlistedService(
  * picked by an operand's extension, so each path's counts, and a run follows
  * links before it picks either, so a link's target counts beside its name.
  * Mirage's own handler counts only when the line's options let it write
- * (`changesFiles`: `sort -o` writes, `sort` does not). A namespace or
+ * (`LineFacts.writes`: `sort -o` writes, `sort` does not). A namespace or
  * routed program that changes what it names (`WRITING_PROGRAMS`: `ln`,
  * `chmod` ...) writes by name. A walk the tree refuses runs nothing, and a
  * shell builtin, a function, an external program or an unknown name declares
@@ -413,7 +412,7 @@ function writes(
   name: string,
   args: readonly string[],
   operands: readonly (string | PathSpec)[],
-  follows: boolean,
+  facts: LineFacts,
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
@@ -468,7 +467,7 @@ function writes(
     const followed = followPaths(
       namespace.sessionLinks(session),
       [...named],
-      follows,
+      facts.follows !== Follow.NONE,
       !SLASH_KEEPS_LAST.has(name),
     )
     for (const p of followed) {
@@ -492,14 +491,13 @@ function writes(
       reached.push(item)
   }
   const extensions = named.length > 0 ? new Set(named.map((p) => getExtension(p.virtual))) : [null]
-  const builtins = changesFiles(runs, [runs, ...operands])
   return reached.some((mount) => {
     const cli = mount.cliFor(runs)
     if (cli !== null) {
       const result = walk(runs, cli.spec, args, session.cwd, envSnapshot(session))
       return result.leaf !== null && cli.handlers[result.path.join(' ')]?.write === true
     }
-    return [...extensions].some((extension) => mount.mayWrite(runs, extension, builtins))
+    return [...extensions].some((extension) => mount.mayWrite(runs, extension, facts.writes))
   })
 }
 
@@ -537,7 +535,7 @@ export async function gate(
   // lands before the policies are asked.
   const budget = new YieldBudget(callerSignal())
   await budget.run()
-  const facts = lineFacts(name, [name, ...args])
+  const facts = lineFacts(name, [name, ...operands], session.cwd)
   const follows = facts.follows !== Follow.NONE
   const paths = seen(
     session,
@@ -570,7 +568,7 @@ export async function gate(
     unread,
   )
   await budget.run()
-  const write = writes(name, args, operands, follows, session, registry, namespace, implied)
+  const write = writes(name, args, operands, facts, session, registry, namespace, implied)
   await budget.run()
   const ctx: CommandContext = {
     line,
@@ -585,6 +583,8 @@ export async function gate(
     tool,
     walks: facts.walks,
     write,
+    subtree: facts.subtree,
+    moveTarget: facts.moveTarget,
     // The methods read the session this command is judged in, which for a
     // line explain walks is the walked one, not the stored one.
     ...registry.policies.views?.(session.sessionId, session),

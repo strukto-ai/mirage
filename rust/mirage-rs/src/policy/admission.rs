@@ -440,7 +440,7 @@ mod tests {
                 paths: strings(&facts["paths"]).into_iter().map(path).collect(),
                 operands: strings(&facts["operands"]).into_iter().map(path).collect(),
                 walks: facts["walks"].as_bool().unwrap(),
-                subtree: matches!(command, "rm" | "rmdir" | "mv"),
+                subtree: facts["subtree"].as_bool().unwrap(),
                 moves: command == "mv",
                 move_target: None,
             });

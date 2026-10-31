@@ -87,7 +87,7 @@ async def _virtuals(ws: Workspace, name: str, *args: str) -> list[str]:
             name,
             list(args),
             words[1:],
-            line_facts(name, words).follows is not Follow.NONE,
+            line_facts(name, words, "/").follows is not Follow.NONE,
             ws._namespace,
             "/",
         )

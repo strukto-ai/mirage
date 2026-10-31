@@ -2398,7 +2398,8 @@ async def cp_generic(
 
 def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     """A cp line reads below its sources when it copies recursively
-    (``-r``, ``-R``, ``-a``).
+    (``-r``, ``-R``, ``-a``), and copies into the directory ``-t`` names
+    if it names one.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
@@ -2407,5 +2408,6 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     return LineFacts(
         reads_subtree=any(
             fl.as_bool(dest) for dest in ("r", "recursive", "archive")
-        )
+        ),
+        move_target=fl.as_str("target_directory"),
     )

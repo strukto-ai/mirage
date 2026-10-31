@@ -857,7 +857,7 @@ class MountEntry:
                 none.
             builtins (bool): whether mirage's own handlers count; False
                 when the line's options leave them nothing to write
-                (``changes_files``). A user command counts either way.
+                (``LineFacts.writes``). A user command counts either way.
         """
         return any(
             cmd.write and (builtins or self._is_user_command(cmd))

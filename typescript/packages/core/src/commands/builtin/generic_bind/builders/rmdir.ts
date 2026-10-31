@@ -153,7 +153,7 @@ const rmdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'rmdir',
-  facts: new LineFacts({ follows: Follow.NONE }),
+  facts: new LineFacts({ follows: Follow.NONE, subtree: true }),
   write: true,
   fn: rmdir,
 }

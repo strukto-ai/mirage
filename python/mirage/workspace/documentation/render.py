@@ -36,6 +36,7 @@ from mirage.workspace.documentation.constants import (
     WALKS,
 )
 from mirage.workspace.documentation.types import Change
+from mirage.workspace.lookup import line_facts
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.admission import unlisted_service
@@ -99,8 +100,14 @@ def allowed(
         if inside
         else ()
     )
+    facts = line_facts(words[0], words, cwd)
     ctx = CommandContext(
-        command=words[0], paths=paths, argv=tuple(words[1:]), cwd=cwd
+        command=words[0],
+        paths=paths,
+        argv=tuple(words[1:]),
+        cwd=cwd,
+        subtree=facts.subtree,
+        move_target=facts.move_target,
     )
     if registry is not None and unlisted_service(ctx, registry, session):
         return False

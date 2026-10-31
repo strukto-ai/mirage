@@ -28,7 +28,7 @@ from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused
 from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view, encode_text
-from mirage.types import JsonValue, PathSpec, StatFn
+from mirage.types import JsonValue, LineFacts, PathSpec, StatFn
 
 # The --all-repeated and --group words, in the order GNU lists each
 # back. No aliases in either, so one candidate per line.
@@ -220,4 +220,21 @@ async def uniq_generic(
     return output, IOResult()
 
 
-__all__ = ["engine_config", "uniq_flags", "uniq_generic"]
+def _names_output(operands: Sequence[str | PathSpec]) -> bool:
+    return len(operands) > 1 or any(
+        isinstance(w, PathSpec) and w.pattern is not None for w in operands
+    )
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A uniq line writes its second operand, which a pattern the
+    backend expands may name too; a quoted name is no pattern.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(writes=_names_output(operands))
+
+
+__all__ = ["facts", "engine_config", "uniq_flags", "uniq_generic"]

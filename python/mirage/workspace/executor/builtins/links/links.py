@@ -194,6 +194,7 @@ def operand_follow(
     dispatch: DispatchFn,
     name: str,
     words: Sequence[str | PathSpec],
+    cwd: str,
 ) -> FollowOperands:
     """The pathname resolution a line gives its operands, as one call.
 
@@ -214,8 +215,9 @@ def operand_follow(
         name (str): command name.
         words (Sequence[str | PathSpec]): the command's raw words, name
             first.
+        cwd (str): the session's working directory.
     """
-    follows = line_facts(name, words).follows
+    follows = line_facts(name, words, cwd).follows
     follow_last = follows is Follow.LAST
     slash_follows = name not in SLASH_KEEPS_LAST
 

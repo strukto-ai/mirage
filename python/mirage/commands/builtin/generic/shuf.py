@@ -3,6 +3,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Mapping,
+    Sequence,
 )
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -31,7 +32,7 @@ from mirage.rs.stream import (
     run_stream,
     serve_requests,
 )
-from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
+from mirage.types import JsonValue, LineFacts, PathSpec, PolymorphicReadFn
 from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.key_prefix import mount_key
 
@@ -406,7 +407,18 @@ async def shuf_generic(
     return rendered, IOResult()
 
 
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A shuf line writes only the file ``-o`` names.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(writes=fl.raw("output") is not None)
+
+
 __all__ = [
+    "facts",
     "MAX_OUTPUT_LINES",
     "MEMORY_EXHAUSTED",
     "NO_WRITE_OP",

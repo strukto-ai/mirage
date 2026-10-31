@@ -13,7 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.shuf import NO_WRITE_OP, parse_flags
+from mirage.commands.builtin.generic.shuf import (
+    NO_WRITE_OP,
+    facts,
+    parse_flags,
+)
 from mirage.commands.builtin.generic.shuf import shuf_generic as generic_shuf
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
@@ -94,4 +98,4 @@ async def _shuf(
     )
 
 
-BUILDER = GenericCommand("shuf", shuf, write=True, read=True)
+BUILDER = GenericCommand("shuf", shuf, write=True, read=True, facts=facts)

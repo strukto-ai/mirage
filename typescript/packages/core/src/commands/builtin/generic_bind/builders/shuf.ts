@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NO_WRITE_OP, parseFlags, shufGeneric } from '../../generic/shuf.ts'
+import { NO_WRITE_OP, facts, parseFlags, shufGeneric } from '../../generic/shuf.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { type GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'shuf',
+  facts: facts,
   write: true,
   read: true,
   fn: async (_accessor, paths, texts, ctx) => {

@@ -335,8 +335,9 @@ export function operandFollow(
   dispatch: DispatchFn,
   name: string,
   words: readonly (string | PathSpec)[],
+  cwd: string,
 ): FollowOperands {
-  const follows = lineFacts(name, words).follows
+  const follows = lineFacts(name, words, cwd).follows
   const followLast = follows === Follow.LAST
   const slashFollows = !SLASH_KEEPS_LAST.has(name)
   return async (items) => {

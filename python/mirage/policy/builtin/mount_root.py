@@ -19,7 +19,7 @@ from mirage.commands.spec.compile import expand_table_long
 from mirage.commands.spec.long_options import GNU_LONG_OPTIONS
 from mirage.errors.fs import ebusy, eexist, einval, eisdir
 from mirage.policy.base import Policy
-from mirage.policy.match import operand_paths, target_directory
+from mirage.policy.match import operand_paths
 from mirage.policy.types import (
     Action,
     CommandContext,
@@ -317,7 +317,7 @@ class MountRootPolicy(Policy):
             # `mv -t /mnt f` move INTO a mount root, which is ordinary.
             # The refusal stops the whole line, as rm's does; GNU would
             # move the other sources.
-            target = target_directory(ctx)
+            target = ctx.move_target
             sources = (
                 operands
                 if target is not None or len(operands) < 2

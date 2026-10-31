@@ -155,14 +155,15 @@ def check_cli_specs(trees: dict[str, dict[str, Any]]) -> list[str]:
 
 
 def check_shell_specs(trees: dict[str, dict[str, Any]]) -> list[str]:
-    """Compare the shell's own specs and both synopsis tables: what
-    ``help``, ``NAME --help``, ``man`` and the usage lines print.
+    """Compare the shell's own specs, both synopsis tables (what
+    ``help``, ``NAME --help``, ``man`` and the usage lines print) and
+    the line facts each command declares.
 
     Args:
         trees (dict[str, dict[str, Any]]): the generated host manifests.
     """
     failures = []
-    for key in ("shell_specs", "synopses"):
+    for key in ("shell_specs", "synopses", "facts"):
         missing = [host for host, tree in trees.items() if key not in tree]
         if missing:
             failures.append(f"{key} missing for {missing}; regenerate them")

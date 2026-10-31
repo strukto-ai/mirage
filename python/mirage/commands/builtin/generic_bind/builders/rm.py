@@ -193,5 +193,5 @@ async def rm(
 
 
 BUILDER = GenericCommand(
-    "rm", rm, write=True, facts=LineFacts(follows=Follow.NONE)
+    "rm", rm, write=True, facts=LineFacts(follows=Follow.NONE, subtree=True)
 )

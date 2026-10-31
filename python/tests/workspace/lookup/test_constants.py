@@ -24,11 +24,11 @@ from mirage.vfs.call import VfsCall, declared_calls
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import Effect
 from mirage.workspace import Workspace
-from mirage.workspace.lookup.constants import changes_files, line_facts
+from mirage.workspace.lookup.constants import line_facts
 
 
 def _follows(words: list[str | PathSpec]) -> Follow:
-    return line_facts(str(words[0]), words).follows
+    return line_facts(str(words[0]), words, "/").follows
 
 
 @pytest.mark.parametrize(
@@ -156,7 +156,7 @@ def test_walkers_are_read_off_the_parsed_line(words, walks):
     # grep 3.11, coreutils 9.7: a long option's prefix, -d recurse and an
     # option's attached value read as grep reads them, the last of -r
     # and -d wins, and a -d word grep refuses walks nothing.
-    assert line_facts(words[0], words).walks is walks
+    assert line_facts(words[0], words, "/").walks is walks
 
 
 @pytest.mark.parametrize(
@@ -186,7 +186,7 @@ def test_subtree_readers_cover_the_archivers_and_recursive_copy(words, reads):
     # operands but stop at a mount boundary, so they read subtrees
     # without walking mounts; a walk kept to one mount still reads its
     # subtree.
-    assert line_facts(words[0], words).reads_subtree is reads
+    assert line_facts(words[0], words, "/").reads_subtree is reads
 
 
 @pytest.mark.parametrize(
@@ -232,7 +232,7 @@ def test_subtree_readers_cover_the_archivers_and_recursive_copy(words, reads):
 def test_a_builtin_writes_only_when_its_line_can(words, writes):
     # sed 4.9 opens a w file while it reads the script, before it
     # refuses a later command.
-    assert changes_files(words[0], words) is writes
+    assert line_facts(words[0], words, "/").writes is writes
 
 
 @pytest.mark.parametrize("name", ["uniq", "xxd"])
@@ -243,8 +243,36 @@ def test_a_pattern_operand_may_name_the_output(name):
         "/data/p.*", "/data", "p.*", pattern="p.*", resolved=False
     )
     literal = PathSpec("/data/p[1]", "/data", "p[1]")
-    assert changes_files(name, [name, pattern]) is True
-    assert changes_files(name, [name, literal]) is False
+    assert line_facts(name, [name, pattern], "/").writes is True
+    assert line_facts(name, [name, literal], "/").writes is False
+
+
+@pytest.mark.parametrize(
+    "words, subtree",
+    [
+        (["rm", "-r", "/data/d"], True),
+        (["rmdir", "/data/d"], True),
+        (["mv", "/data/d", "/data/e"], True),
+        (["cp", "-r", "/data/d", "/data/e"], False),
+        (["unlink", "/data/f"], False),
+    ],
+)
+def test_the_movers_and_removers_take_whole_subtrees(words, subtree):
+    assert line_facts(words[0], words, "/").subtree is subtree
+
+
+@pytest.mark.parametrize(
+    "words, cwd, target",
+    [
+        (["mv", "-t", "sub", "/data/a"], "/home", "/home/sub"),
+        (["mv", "--target-directory=/out", "/data/a"], "/", "/out"),
+        (["mv", "-S.txt", "/data/a", "/data/b"], "/", None),
+        (["cp", "-t", "/out", "/data/a"], "/", "/out"),
+        (["mv", "/data/a", "/data/b"], "/", None),
+    ],
+)
+def test_the_target_directory_resolves_in_the_lines_cwd(words, cwd, target):
+    assert line_facts(words[0], words, cwd).move_target == target
 
 
 class _Op(NamedTuple):
@@ -356,6 +384,16 @@ _LINES = [
     "tar -cf /out/x.tar /data/link",
     "zip /out/x.zip /data/link",
     "rm /data/link",
+    "sort /data/a.txt",
+    "shuf /data/a.txt",
+    "iconv -f utf-8 -t utf-8 /data/a.txt",
+    "uniq /data/a.txt",
+    "xxd /data/a.txt",
+    "tee",
+    "mktemp -u",
+    "gzip -c /data/a.txt",
+    "sed -n p /data/a.txt",
+    "sed -i s/a/b/ /data/a.txt",
     "mv /data/link /out/l",
     "unlink /data/link",
 ]
@@ -365,7 +403,7 @@ _LINES = [
 @pytest.mark.asyncio
 async def test_a_lines_facts_cover_what_it_does_to_the_mounts(line):
     words = line.split()
-    facts = line_facts(words[0], words)
+    facts = line_facts(words[0], words, "/")
     ops = await _effects(line)
     if not facts.writes:
         assert [op for op in ops if op.effect not in _READS] == []

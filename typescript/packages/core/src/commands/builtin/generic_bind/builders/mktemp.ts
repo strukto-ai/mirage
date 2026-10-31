@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mktempGeneric } from '../../generic/mktemp.ts'
+import { facts, mktempGeneric } from '../../generic/mktemp.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { vfsStatPath } from '../../utils/paths.ts'
@@ -39,6 +39,7 @@ const mktemp: CommandFn = (_accessor, _paths, texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'mktemp',
+  facts: facts,
   write: true,
   fn: mktemp,
 }

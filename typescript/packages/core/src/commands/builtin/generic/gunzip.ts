@@ -16,7 +16,7 @@ import type { ByteSource } from '../../../io/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import type { PathSpec, StatFn } from '../../../types.ts'
+import { LineFacts, type PathSpec, type StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { GZIP_SUFFIX } from '../constants.ts'
 import { linkResolver } from '../utils/links.ts'
@@ -59,4 +59,9 @@ export async function gunzipGeneric(
     ...(stat !== undefined ? { stat } : {}),
     resolver: linkResolver(ctx),
   })
+}
+
+/** A gunzip line replaces its file operands unless `-c` or `-t`. Mirrors Python's `facts`. */
+export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: operands.length > 0 && !(fl.asBool('c') || fl.asBool('t')) })
 }

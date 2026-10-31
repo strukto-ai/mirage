@@ -55,7 +55,7 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
-from mirage.types import Follow, PathSpec, Refusal
+from mirage.types import Follow, LineFacts, PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import path_visible
@@ -92,7 +92,6 @@ from mirage.workspace.lookup import (
     SLASH_KEEPS_LAST,
     Consumer,
     WordPolicy,
-    changes_files,
     is_tool,
     line_facts,
     lookup,
@@ -385,7 +384,7 @@ def _writes(
     name: str,
     args: list[str],
     operands: Sequence[str | PathSpec],
-    follows: bool,
+    facts: LineFacts,
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
@@ -404,7 +403,7 @@ def _writes(
     a walk reaches. Its handler is picked by an operand's extension, so
     each path's counts, and a run follows links before it picks either,
     so a link's target counts beside its name. Mirage's own handler
-    counts only when the line's options let it write (``changes_files``:
+    counts only when the line's options let it write (``LineFacts.writes``:
     ``sort -o`` writes, ``sort`` does not). A namespace or routed
     program that changes what it names (``WRITING_PROGRAMS``: ``ln``,
     ``chmod`` ...) writes by name.
@@ -415,8 +414,7 @@ def _writes(
         name (str): command name, expanded.
         args (list[str]): the words after it.
         operands (Sequence[str | PathSpec]): the same words, classified.
-        follows (bool): whether the command may resolve an operand's
-            last component.
+        facts (LineFacts): what the line does, read off its words.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the mounts and the
             CLI installs.
@@ -489,7 +487,7 @@ def _writes(
             for p in follow_paths(
                 namespace.session_links(session),
                 list(named),
-                follows,
+                facts.follows is not Follow.NONE,
                 slash_follows=name not in SLASH_KEEPS_LAST,
             )
             if isinstance(p, PathSpec) and p.virtual not in typed
@@ -507,7 +505,6 @@ def _writes(
             if m is owner or m.prefix.startswith(below)
         ]
     extensions = {get_extension(p.virtual) for p in named} or {None}
-    builtins = changes_files(runs, [runs, *operands])
     for mount in reached:
         candidate_tree = mount.cli_for(runs)
         if candidate_tree is not None:
@@ -524,7 +521,7 @@ def _writes(
             ):
                 return True
         elif any(
-            mount.may_write(runs, extension, builtins)
+            mount.may_write(runs, extension, facts.writes)
             for extension in extensions
         ):
             return True
@@ -607,7 +604,7 @@ async def gate(
     # deadline lands before the policies are asked.
     budget = YieldBudget()
     await budget.run()
-    facts = line_facts(name, [name, *args])
+    facts = line_facts(name, [name, *operands], session.cwd)
     follows = facts.follows is not Follow.NONE
     paths = _seen(
         session,
@@ -638,7 +635,7 @@ async def gate(
     )
     await budget.run()
     write = _writes(
-        name, args, operands, follows, session, registry, namespace, implied
+        name, args, operands, facts, session, registry, namespace, implied
     )
     await budget.run()
     ctx = CommandContext(
@@ -654,6 +651,8 @@ async def gate(
         tool=tool,
         walks=facts.walks,
         write=write,
+        subtree=facts.subtree,
+        move_target=facts.move_target,
         session=view,
         vfs=vfs,
         caller=caller,

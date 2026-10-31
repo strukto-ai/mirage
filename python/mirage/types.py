@@ -154,8 +154,9 @@ class LineFacts:
             `-o`, `tar -t`).
         subtree (bool): an operand is a whole subtree it moves or
             removes (`rm`, `rmdir`, `mv`).
-        move_target (str | None): the directory a move names by option
-            (`mv -t DIR`), as typed; None when it names none.
+        move_target (str | None): the directory a cp or mv line names
+            by option (`mv -t DIR`), resolved in the line's working
+            directory; None when it names none.
     """
 
     follows: Follow = Follow.LAST

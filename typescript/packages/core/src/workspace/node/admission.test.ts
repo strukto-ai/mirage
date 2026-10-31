@@ -96,7 +96,7 @@ async function virtuals(w: Workspace, name: string, ...args: string[]): Promise<
     name,
     args,
     words.slice(1),
-    lineFacts(name, words).follows !== Follow.NONE,
+    lineFacts(name, words, '/').follows !== Follow.NONE,
     w.namespace,
     '/',
     null,

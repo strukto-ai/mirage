@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import GZIP_SUFFIX
@@ -9,7 +9,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+from mirage.types import LineFacts, PathSpec, PolymorphicReadFn, StatFn
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,4 +59,17 @@ async def gunzip_generic(
         to_stdout=parsed.to_stdout,
         test_only=parsed.test_only,
         resolver=link_resolver(ctx),
+    )
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A gunzip line replaces its file operands unless ``-c`` or
+    ``-t``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(
+        writes=len(operands) > 0 and not (fl.as_bool("c") or fl.as_bool("t"))
     )

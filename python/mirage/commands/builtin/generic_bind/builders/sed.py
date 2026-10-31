@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.sed import sed_generic
+from mirage.commands.builtin.generic.sed import facts, sed_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.config import Context
@@ -38,4 +38,4 @@ async def sed(
     )
 
 
-BUILDER = GenericCommand("sed", sed, write=True, read=True)
+BUILDER = GenericCommand("sed", sed, write=True, read=True, facts=facts)

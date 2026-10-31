@@ -31,6 +31,7 @@ from mirage.policy.types import (
 from mirage.types import PathSpec
 from mirage.vfs.types import Effect, Target, VfsCall
 from mirage.workspace.dispatcher.constants import CALLS
+from mirage.workspace.lookup import line_facts
 
 
 def _path(virtual: str, raw: str = "") -> PathSpec:
@@ -233,6 +234,7 @@ def _subtree_ctx(command: str, *operands: str) -> CommandContext:
         argv=operands,
         cwd="/",
         tokens=(command, *operands),
+        subtree=line_facts(command, [command, *operands], "/").subtree,
     )
 
 

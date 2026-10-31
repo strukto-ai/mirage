@@ -6,6 +6,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Mapping,
+    Sequence,
 )
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
 from mirage.rs.stream import open_stream, run_stream, stream_output_chunks
-from mirage.types import PathSpec, ReadStreamFn
+from mirage.types import LineFacts, PathSpec, ReadStreamFn
 
 # xxd's exit for an OUTFILE it cannot open, for an INFILE it cannot seek
 # where -s says, and for a dump that seeks backwards on a stream (vim's
@@ -498,7 +499,24 @@ async def _write_output(
     return None, IOResult()
 
 
-__all__ = ["xxd"]
+def _names_output(operands: Sequence[str | PathSpec]) -> bool:
+    return len(operands) > 1 or any(
+        isinstance(w, PathSpec) and w.pattern is not None for w in operands
+    )
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """An xxd line writes its second operand, which a pattern the
+    backend expands may name too; a quoted name is no pattern.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(writes=_names_output(operands))
+
+
+__all__ = ["facts", "xxd"]
 
 
 @dataclass(frozen=True, slots=True)

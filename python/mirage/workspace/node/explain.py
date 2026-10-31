@@ -386,6 +386,7 @@ def _line_refusal(
     rules: AdmissionRules | None,
     open_: bool,
     lost: bool,
+    cwd: str,
 ) -> str | None:
     """Why a runtime that takes the line whole may not run a command the
     chain did not refuse, None when it may.
@@ -418,9 +419,10 @@ def _line_refusal(
             cannot read.
         lost (bool): whether a ``cd`` the walk could not follow ran
             before the command.
+        cwd (str): the working directory the line runs in.
     """
     if scopes_paths(rules, name):
-        if line_facts(name, [name, *args]).reads_subtree:
+        if line_facts(name, [name, *args], cwd).reads_subtree:
             return "walks a tree the gate cannot follow"
         if any(
             is_glob(p.raw_path or p.virtual)
@@ -584,6 +586,7 @@ async def _judge_words(
             rules,
             open_,
             lost,
+            session.cwd,
         )
         if whole_line and not isinstance(asked, Deny)
         else None

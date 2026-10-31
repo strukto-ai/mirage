@@ -6,10 +6,12 @@ import pytest
 import mirage.commands.builtin.generic.sed as sed_module
 from mirage.commands.builtin.generic.sed import (
     _script_origins,
+    facts,
     sed_generic,
-    sed_writes,
 )
 from mirage.commands.config import Context
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.types import materialize
 from mirage.types import MountMode, PathSpec
@@ -37,6 +39,10 @@ async def _no_read(path: PathSpec) -> AsyncIterator[bytes]:
     yield b""
 
 
+def _writes(flags: dict[str, FlagValue], texts: list[str]) -> bool:
+    return facts(FlagView(flags, spec=SPECS["sed"]), texts).writes
+
+
 def test_script_origins_name_the_script_files() -> None:
     argv = ["-n", "-e", "p", "-f", "s.sed", "-fx.sed", "--line-length", "5"]
     assert _script_origins(argv, 3) == [None, "s.sed", "x.sed"]
@@ -59,7 +65,7 @@ def test_script_origins_name_the_script_files() -> None:
 def test_sed_writes_when_its_script_names_a_w_file(
     flags: dict[str, FlagValue], texts: list[str], writes: bool
 ) -> None:
-    assert sed_writes(flags, texts) is writes
+    assert _writes(flags, texts) is writes
 
 
 @pytest.mark.asyncio
@@ -139,8 +145,8 @@ async def test_reached_writes_and_status_survive_early_output_close(
 
 def test_many_empty_scripts_are_not_retained_in_the_write_cache():
     sed_module._write_checks.clear()
-    assert not sed_writes({"e": [""] * 5000}, [])
+    assert not _writes({"e": [""] * 5000}, [])
     assert not sed_module._write_checks
-    assert not sed_writes({"e": ["# small"]}, [])
+    assert not _writes({"e": ["# small"]}, [])
     assert len(sed_module._write_checks) == 1
     sed_module._write_checks.clear()
