@@ -121,9 +121,9 @@ class Descriptor:
             changed since; "" names it by ``opened``.
         late (list[tuple[int, bytes]]): writes a garbage collection held
             back (``write``), at the offsets they were made at.
-        late_end (int | None): after an appending write a collection
-            held back, where the position sits from the file's end, which
-            only landing learns; None when no such write is pending.
+        late_end (bool): an appending write a collection held back left
+            the position at an end only landing learns; a relative seek
+            before then is refused, an absolute one keeps its place.
     """
 
     files: "RuntimeFiles"
@@ -134,7 +134,7 @@ class Descriptor:
     pos: int = 0
     inode: str = ""
     late: list[tuple[int, bytes]] = dataclasses.field(default_factory=list)
-    late_end: int | None = None
+    late_end: bool = False
 
     @property
     def path(self) -> str:
@@ -156,9 +156,12 @@ class Descriptor:
         late, self.late = self.late, []
         for offset, data in late:
             self.files.pwrite(self.fh, offset, data)
-        if self.late_end is not None:
-            self.pos = self.files.fstat(self.fh).size + self.late_end
-            self.late_end = None
+        if self.late_end and not self.late:
+            end = self.files.fstat(self.fh).size
+            # A collection during that call may have sought since.
+            if self.late_end:
+                self.pos = end
+                self.late_end = False
 
     def pread(self, offset: int, size: int) -> bytes:
         """Read at an explicit offset without moving the position.
@@ -217,7 +220,7 @@ class Descriptor:
                 self.files.defer(self.landed)
             self.late.append((self.pos, data))
             if self.mode.append:
-                self.late_end = 0
+                self.late_end = True
             else:
                 self.pos += len(data)
             return
@@ -238,20 +241,20 @@ class Descriptor:
 
         Returns:
             int | None: the new position, or None when the whence is
-            unknown or the target would be negative (the position is
-            then untouched).
+            unknown, the target would be negative, or it counts from a
+            position a held append left unknown (the position is then
+            untouched).
         """
         self.landed()
+        if whence == 1 and self.late_end:
+            return None
         if whence == 2:
             base: int | None = self.size
         else:
             base = {0: 0, 1: self.pos}.get(whence)
         if base is None or base + offset < 0:
             return None
-        if whence == 1 and self.late_end is not None:
-            self.late_end += offset
-        else:
-            self.late_end = None
+        self.late_end = False
         self.pos = base + offset
         return self.pos
 

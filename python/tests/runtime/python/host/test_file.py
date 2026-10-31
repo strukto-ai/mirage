@@ -432,18 +432,22 @@ class _WritesWhenCollected:
         self.stream.write(b"during-")
 
 
-class _AppendsAndSeeks:
-    """Appends to a live stream, then seeks it, from its finalizer."""
+class _Finalizes:
+    """Makes calls on a live stream from its finalizer, in a cycle of its
+    own, and keeps what each answered, or the errno it raised."""
 
-    def __init__(self, stream, offset: int, whence: int) -> None:
+    def __init__(self, stream, calls, seen) -> None:
         self.stream = stream
-        self.offset = offset
-        self.whence = whence
+        self.calls = calls
+        self.seen = seen
         self.cycle = self
 
     def __del__(self) -> None:
-        self.stream.write(b"during-")
-        self.stream.seek(self.offset, self.whence)
+        for name, *args in self.calls:
+            try:
+                self.seen.append(getattr(self.stream, name)(*args))
+            except OSError as exc:
+                self.seen.append(exc.errno)
 
 
 def _collected(build) -> None:
@@ -651,33 +655,65 @@ def test_an_fd_read_after_a_held_append_starts_at_the_new_end():
     loop.close()
 
 
-def test_a_seek_after_a_held_append_is_kept():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    loop = asyncio.new_event_loop()
+def _append_stream(ws, loop):
     stream = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
         "/data/log", "a+b", buffering=0
     )
     stream.write(b"before-")
-    _collected(lambda: _AppendsAndSeeks(stream, 0, os.SEEK_SET))
+    return stream
+
+
+def test_a_seek_after_a_held_append_is_kept():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    stream = _append_stream(ws, loop)
+    seen = []
+    calls = [("write", b"during-"), ("seek", 0)]
+    _collected(lambda: _Finalizes(stream, calls, seen))
+    assert seen == [7, 0]
     assert stream.read() == b"before-during-"
     stream.close()
     loop.run_until_complete(ws.close())
     loop.close()
 
 
-def test_a_relative_seek_after_a_held_append_counts_from_the_new_end():
+def test_a_relative_seek_from_a_held_append_is_refused():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     loop = asyncio.new_event_loop()
-    stream = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
-        "/data/log", "a+b", buffering=0
-    )
-    stream.write(b"before-")
-    _collected(lambda: _AppendsAndSeeks(stream, -1, os.SEEK_CUR))
-    assert stream.tell() == len(b"before-during-") - 1
+    stream = _append_stream(ws, loop)
+    seen = []
+    calls = [("write", b"during-"), ("seek", -1, os.SEEK_CUR)]
+    _collected(lambda: _Finalizes(stream, calls, seen))
+    assert seen == [7, errno.EINVAL]
+    assert stream.tell() == len(b"before-during-")
     stream.truncate()
     stream.close()
     assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
-        b"before-during"
+        b"before-during-"
     )
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_seek_made_while_held_appends_land_is_kept(monkeypatch):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    stream = _append_stream(ws, loop)
+    seen = []
+    write = [("write", b"during-")]
+    _collected(lambda: _Finalizes(stream, write, seen))
+    files = stream._handle.files
+    fstat = files.fstat
+    rewind = [("seek", 0)]
+
+    def collecting_fstat(fh):
+        monkeypatch.setattr(files, "fstat", fstat)
+        _collected(lambda: _Finalizes(stream, rewind, seen))
+        return fstat(fh)
+
+    monkeypatch.setattr(files, "fstat", collecting_fstat)
+    assert stream.read() == b"before-during-"
+    assert seen == [7, 0]
+    stream.close()
     loop.run_until_complete(ws.close())
     loop.close()
