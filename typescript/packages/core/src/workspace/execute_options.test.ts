@@ -564,8 +564,8 @@ describe('execute({ signal }): mid-flight cancellation', () => {
       name: 'AbortError',
     })
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(0)
-    const events = await ws.observer.commandEvents()
-    expect(events.at(-1)?.exit_code).toBe(130)
+    const results = (await ws.observer.events()).filter((e) => e.type === 'result')
+    expect(results.at(-1)?.exit_code).toBe(130)
     await ws.close()
   })
 
@@ -827,8 +827,8 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     await expect(ws.shell('echo hi', { signal: controller.signal })).rejects.toMatchObject({
       name: 'AbortError',
     })
-    const events = await ws.observer.commandEvents()
-    expect(events.at(-1)?.exit_code).toBe(130)
+    const results = (await ws.observer.events()).filter((e) => e.type === 'result')
+    expect(results.at(-1)?.exit_code).toBe(130)
     expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
     await ws.close()
   })

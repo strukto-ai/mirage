@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import {
+  trace,
+  type Span,
+  type SpanOptions,
+  type Tracer,
+  type TracerProvider,
+} from '@opentelemetry/api'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
@@ -44,6 +51,10 @@ function decode(b: Uint8Array | undefined): string {
 }
 
 describe('Observer', () => {
+  afterEach(() => {
+    trace.disable()
+  })
+
   it('logOp writes one JSONL line under the UTC-date folder', async () => {
     const store = new RAMObserverStore()
     const o = new Observer(store, new ManualClock(NEW_YEAR))
@@ -65,21 +76,49 @@ describe('Observer', () => {
     expect(parsed.vfs).toBe('read')
   })
 
-  it('logExecution writes a command JSONL line', async () => {
+  it('writes a line as its command, then its result', async () => {
     const store = new RAMObserverStore()
-    const o = new Observer(store, new ManualClock(NEW_YEAR + 1.5))
-    const io = new IOResult({ stdout: new TextEncoder().encode('file.csv\n') })
-    await o.logExecution('ls /data', io, [], 'sess-1')
-    const parsed = JSON.parse(decode(store.files.get('/2021-01-01/sess-1.jsonl')).trim()) as Record<
-      string,
-      unknown
-    >
-    expect(parsed.timestamp).toBe(1_609_459_201_500)
-    expect(parsed.type).toBe('command')
-    expect(parsed.session).toBe('sess-1')
-    expect(parsed.command).toBe('ls /data')
-    expect(parsed.stdout).toBe('file.csv\n')
-    expect(parsed.exit_code).toBe(0)
+    const clock = new ManualClock(NEW_YEAR + 1.5)
+    const o = new Observer(store, clock)
+    await o.logCommand('ls /data', 'sess-1', undefined, 'L')
+    clock.advance(2)
+    const io = new IOResult({
+      stdout: new TextEncoder().encode('file.csv\n'),
+      stderr: new TextEncoder().encode('ls: warn\n'),
+      exitCode: 1,
+    })
+    await o.logResult(io, [], 'sess-1', undefined, 'L')
+    const [command, result] = decode(store.files.get('/2021-01-01/sess-1.jsonl'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    expect(command).toEqual({
+      type: 'command',
+      session: 'sess-1',
+      timestamp: 1_609_459_201_500,
+      id: 'L',
+      command: 'ls /data',
+    })
+    expect(result).toEqual({
+      type: 'result',
+      session: 'sess-1',
+      timestamp: 1_609_459_203_500,
+      parent: 'L',
+      duration_ms: 2000,
+      exit_code: 1,
+      stdout: 'file.csv\n',
+      stderr: 'ls: warn\n',
+    })
+  })
+
+  it('lists a line once its result is in', async () => {
+    const o = new Observer()
+    await o.logCommand('sleep 1', 's1', undefined, 'L')
+    expect(await o.sessionCommandEvents('s1')).toEqual([])
+    expect(await o.commandEvents()).toEqual([])
+    await o.logResult(new IOResult(), [], 's1', undefined, 'L')
+    expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['sleep 1'])
+    expect((await o.commandEvents()).map((e) => e.command)).toEqual(['sleep 1'])
   })
 
   // Twin of test_a_long_line_lets_the_loop_run_while_it_logs.
@@ -97,7 +136,7 @@ describe('Observer', () => {
     setTimeout(() => {
       turned = true
     }, 0)
-    await o.logExecution('grep -r x /d', new IOResult(), new Array<OpRecord>(10_000).fill(rec), 's')
+    await o.logResult(new IOResult(), new Array<OpRecord>(10_000).fill(rec), 's')
     expect(turned).toBe(true)
   })
 
@@ -185,7 +224,7 @@ describe('Observer', () => {
     await o.logCommandText('a b c', 's1')
     const events = await o.sessionCommandEvents('s1')
     expect(events.map((e) => e.command)).toEqual(['a b c'])
-    expect(events[0]?.exit_code).toBe(0)
+    expect(events[0]).not.toHaveProperty('id')
   })
 
   it('delete removes an entry and renumbers', async () => {
@@ -375,5 +414,69 @@ describe('a damaged history file', () => {
     expect(names).toHaveLength(2)
     expect(names.every((name) => new TextEncoder().encode(name).length <= 255)).toBe(true)
     expect((await o.sessionCommandEvents(long)).map((e) => e.command)).toEqual(['echo 50'])
+  })
+
+  it('sends a finished line as a span over its vfs calls', async () => {
+    const spans: { name: string; options: SpanOptions; parent: Span | undefined; end?: unknown }[] =
+      []
+    const fake: Tracer = {
+      startSpan(name, options = {}, ctx) {
+        const seen: (typeof spans)[number] = {
+          name,
+          options,
+          parent: ctx === undefined ? undefined : trace.getSpan(ctx),
+        }
+        spans.push(seen)
+        return {
+          isRecording: () => true,
+          end: (time?: unknown) => {
+            seen.end = time
+          },
+          spanContext: () => ({
+            traceId: '1'.repeat(32),
+            spanId: String(spans.length).repeat(16),
+            traceFlags: 1,
+          }),
+        } as unknown as Span
+      },
+      startActiveSpan: () => {
+        throw new Error('unused')
+      },
+    }
+    const provider: TracerProvider = { getTracer: () => fake }
+    trace.setGlobalTracerProvider(provider)
+    const clock = new ManualClock(NEW_YEAR)
+    const o = new Observer(new RAMObserverStore(), clock, 'w')
+    const start = NEW_YEAR * 1000
+    const rec = new OpRecord({
+      op: 'read',
+      path: '/d/a',
+      source: 's3',
+      bytes: 6,
+      timestamp: start + 5,
+      durationMs: 12,
+    })
+    await o.logCommand('cat /d/a', 's1', undefined, 'L')
+    clock.advance(1)
+    await o.logResult(new IOResult({ exitCode: 1 }), [rec], 's1', undefined, 'L')
+    const [line, call] = spans
+    expect([line?.name, line?.options.attributes, line?.options.startTime, line?.end]).toEqual([
+      'command',
+      {
+        'mirage.session.id': 's1',
+        'mirage.command': 'cat /d/a',
+        'mirage.exit_code': 1,
+        'mirage.workspace.id': 'w',
+      },
+      start,
+      start + 1000,
+    ])
+    expect([call?.name, call?.options.attributes, call?.options.startTime, call?.end]).toEqual([
+      'vfs.read',
+      { 'mirage.vfs.path': '/d/a', 'mirage.vfs.source': 's3', 'mirage.vfs.bytes': 6 },
+      start + 5,
+      start + 17,
+    ])
+    expect(call?.parent).toBeDefined()
   })
 })

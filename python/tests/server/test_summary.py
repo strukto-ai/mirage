@@ -77,14 +77,14 @@ async def test_the_detail_is_read_on_the_workspace_loop(monkeypatch):
     registry = WorkspaceRegistry()
     entry = registry.add(Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE))
     runner = entry.runner
-    history = runner.ws.history
+    history = runner.ws.observer.command_events
     loops = []
 
     async def recording():
         loops.append(asyncio.get_running_loop())
         return await history()
 
-    monkeypatch.setattr(runner.ws, "history", recording)
+    monkeypatch.setattr(runner.ws.observer, "command_events", recording)
     try:
         await make_detail(entry, verbose=True)
         assert loops == [runner.loop]

@@ -231,6 +231,12 @@ def test_history_reads_as_one_row_per_entry():
     lines = _format_history(
         [
             {
+                "type": "command",
+                "session": "s1",
+                "timestamp": 0,
+                "command": "cat /d/a",
+            },
+            {
                 "type": "vfs",
                 "session": "s1",
                 "timestamp": 0,
@@ -238,18 +244,31 @@ def test_history_reads_as_one_row_per_entry():
                 "path": "/d/a",
             },
             {
-                "type": "command",
+                "type": "result",
                 "session": "s1",
                 "timestamp": 1000,
-                "command": "cat /d/a",
-                "exit_code": 0,
+                "exit_code": 1,
+                "stdout": "hi\n",
+                "stderr": "cat: x: No such file\n",
             },
         ]
     ).splitlines()
     assert [line.split() for line in lines] == [
-        ["TIME", "SESSION", "EXIT", "ENTRY"],
-        ["1970-01-01", "00:00:00", "s1", "read", "/d/a"],
-        ["1970-01-01", "00:00:01", "s1", "0", "cat", "/d/a"],
+        ["TIME", "SESSION", "TYPE", "EXIT", "ENTRY"],
+        ["1970-01-01", "00:00:00", "s1", "command", "cat", "/d/a"],
+        ["1970-01-01", "00:00:00", "s1", "vfs", "read", "/d/a"],
+        [
+            "1970-01-01",
+            "00:00:01",
+            "s1",
+            "result",
+            "1",
+            "hi\\ncat:",
+            "x:",
+            "No",
+            "such",
+            "file\\n",
+        ],
     ]
     assert _format_history([]) == "No history."
 
@@ -262,7 +281,6 @@ def test_a_multiline_command_stays_on_its_row():
                 "session": "s1",
                 "timestamp": 0,
                 "command": "cat <<EOF\nhi\nEOF",
-                "exit_code": 0,
             }
         ]
     )

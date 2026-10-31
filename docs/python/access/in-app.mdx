@@ -69,7 +69,7 @@ from mirage.vfs.ram import RAMVFS
 ws = Workspace({"/": RAMVFS()}, io=IOConfig(buffer_bytes=262144))
 ```
 
-Every process that builds the workspace on one Redis store, under the same ids, shares its sessions, history and background jobs:
+Every process that builds the workspace on one Redis store, under the same ids, shares its sessions and background jobs:
 
 ```python
 from mirage import MountMode, Workspace

@@ -17,7 +17,6 @@ export { Workspace, type NodeWorkspaceOptions } from './workspace.ts'
 export { Mount, type MountSpecOptions } from '@struktoai/mirage-core/workspace/mount/spec'
 export { DiskVFS, type DiskVFSOptions, type DiskVFSState } from './vfs/disk/disk.ts'
 export { DiskObserverStore } from './observe/disk_store.ts'
-export { RedisObserverStore, type RedisObserverStoreOptions } from './observe/redis_store.ts'
 export { RedisJobStore, type RedisJobStoreOptions } from './shell/job_table/redis.ts'
 export { DiskNamespaceStore } from './workspace/mount/namespace/disk.ts'
 export {

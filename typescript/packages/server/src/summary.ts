@@ -58,7 +58,7 @@ async function buildInternals(ws: Workspace): Promise<WorkspaceInternals> {
   return {
     cache_bytes: cache.cacheSize,
     cache_entries: cache.cacheEntries ?? null,
-    history_length: (await ws.history()).length,
+    history_length: (await ws.observer.commandEvents()).length,
     in_flight_jobs: ws.jobTable.allRunningJobs().length,
   }
 }

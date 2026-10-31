@@ -1750,19 +1750,27 @@ async def test_history_reads_what_the_workspace_ran():
         url = f"/v1/workspaces/{wid}/history"
         r = await client.get(url)
         assert r.status_code == 200, r.text
-        assert [e["command"] for e in r.json()] == [
-            "echo hi > /a.txt",
-            "cat /a.txt",
+        assert [
+            (e["type"], e.get("command", e.get("exit_code"))) for e in r.json()
+        ] == [
+            ("command", "echo hi > /a.txt"),
+            ("result", 0),
+            ("command", "cat /a.txt"),
+            ("result", 0),
         ]
         r = await client.get(url, params={"vfs": "true"})
         assert [(e["type"], e.get("vfs")) for e in r.json()] == [
+            ("command", None),
             ("vfs", "write"),
+            ("result", None),
             ("command", None),
             ("vfs", "read"),
-            ("command", None),
+            ("result", None),
         ]
         r = await client.get(url, params={"last": 1})
-        assert [e["command"] for e in r.json()] == ["cat /a.txt"]
+        assert [(e["type"], e["stdout"]) for e in r.json()] == [
+            ("result", "hi\n")
+        ]
         assert (await client.get(url, params={"last": -1})).status_code == 422
         assert (
             await client.get("/v1/workspaces/nope/history")

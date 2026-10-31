@@ -1326,6 +1326,8 @@ async def run_steps(
                         e["command"]
                         if e["type"] == "command"
                         else f"{e['vfs']} {e['path']}"
+                        if e["type"] == "vfs"
+                        else f"exit {e['exit_code']}: {e['stdout']}{e['stderr']}"
                         for e in entries
                     )
                 }

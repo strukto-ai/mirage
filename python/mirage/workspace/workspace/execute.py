@@ -649,12 +649,14 @@ async def _shown(io: IOResult, sink: JobConsole | None) -> IOResult:
     if not isinstance(sink, Terminal):
         return io
     if sink.reader is not None:
-        out = sink.stdout_prefix
+        out, err = sink.stdout_prefix, sink.stderr_prefix
     else:
         out, err = sink.drain()
         sink.put_back(out, err)
     return IOResult(
-        stdout=out + await io.materialize_stdout(), exit_code=io.exit_code
+        stdout=out + await io.materialize_stdout(),
+        stderr=err + await io.materialize_stderr(),
+        exit_code=io.exit_code,
     )
 
 
@@ -746,7 +748,19 @@ async def run_prepared_line(
         set_line_writer(frame.writer)
     previous_alias_expansion = effective_session._alias_expansion
     effective_session._alias_expansion = None
+    # bash adds a line to history only when it is non-empty (anything
+    # before its newline): a blank line is skipped, while a
+    # whitespace-only or comment-only line is kept.
+    recorded = is_line and bool(command.strip("\n"))
     try:
+        # The line is recorded as it starts; how it ended follows it.
+        if recorded:
+            await ws.observer.log_command(
+                command,
+                session_id,
+                session_cwd(ws.sessions, session_id),
+                execution_scope.id,
+            )
         aliases = expanding_aliases(effective_session)
         ast = (
             parse_scope.parse(
@@ -1205,14 +1219,11 @@ async def run_prepared_line(
         reset_current_session(session_token)
         await ws.sessions.flush(session.session_id)
         ws.records.extend(scope.records)
-        # bash adds a line to history only when it is non-empty
-        # (anything before its newline): a blank line is skipped, while a
-        # whitespace-only or comment-only line is kept.
-        if is_line and command.strip("\n"):
-            await ws.observer.log_execution(
-                command,
+        if recorded:
+            await ws.observer.log_result(
                 await _shown(io, sink),
                 scope.records,
                 session_id,
                 session_cwd(ws.sessions, session_id),
+                execution_scope.id,
             )

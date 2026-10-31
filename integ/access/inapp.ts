@@ -347,7 +347,13 @@ async function steps(
         })
         answers.push({
           text: entries
-            .map((e) => (e.type === 'command' ? e.command : `${String(e.vfs)} ${String(e.path)}`))
+            .map((e) =>
+              e.type === 'command'
+                ? e.command
+                : e.type === 'vfs'
+                  ? `${String(e.vfs)} ${String(e.path)}`
+                  : `exit ${String(e.exit_code)}: ${String(e.stdout)}${String(e.stderr)}`,
+            )
             .join('\n'),
         })
       } else if (kind === 'asks') {

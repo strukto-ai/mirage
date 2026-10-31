@@ -552,17 +552,43 @@ describe('configToWorkspaceArgs', () => {
   })
 
   it('routes a per-group override to its own backend', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mirage-obs-'))
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      store: {
-        type: 'ram',
-        observer: { type: 'redis', url: 'redis://localhost:6379/4', key_prefix: 'obs:' },
-      },
+      store: { type: 'ram', observer: { type: 'disk', root } },
     })
     const args = await configToWorkspaceArgs(cfg)
     expect(args.options.store).toBeInstanceOf(RAMWorkspaceStateStore)
     expect(args.options.store?.namespace('ws1')).toBeInstanceOf(RAMNamespaceStore)
-    expect(args.options.store?.observer('ws1').constructor.name).toBe('RedisObserverStore')
+    expect(args.options.store?.observer('ws1').constructor.name).toBe('DiskObserverStore')
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('never keeps history on redis', () => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/': { vfs: 'ram' } },
+        store: { type: 'ram', observer: { type: 'redis' } },
+      }),
+    ).toThrow(/store.observer` cannot be redis/)
+  })
+
+  it("keeps a redis store's history on disk under its root", async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mirage-obs-'))
+    try {
+      const cfg = loadWorkspaceConfig({
+        mounts: { '/': { vfs: 'ram' } },
+        store: { type: 'redis', root },
+      })
+      const store = (await configToWorkspaceArgs(cfg)).options.store
+      await store?.observer('ws1').append('/d/s.jsonl', new TextEncoder().encode('{}\n'))
+      expect(readFileSync(join(root, 'workspaces', 'ws1', 'history', 'd', 's.jsonl'), 'utf8')).toBe(
+        '{}\n',
+      )
+      await store?.close()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('passes workspace_id through (snake_case YAML)', async () => {

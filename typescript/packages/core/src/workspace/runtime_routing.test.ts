@@ -287,8 +287,11 @@ describe('routing ladder', () => {
       // The denied line is still a typed line: it records like any
       // other command, mirroring Python's finally path.
       const events = await ws.history()
-      expect(events.map((e) => e.command)).toEqual(['python3 -c "x"', 'echo ok'])
-      expect(events[0]?.exit_code).toBe(126)
+      expect(events.filter((e) => e.type === 'command').map((e) => e.command)).toEqual([
+        'python3 -c "x"',
+        'echo ok',
+      ])
+      expect(events.filter((e) => e.type === 'result').map((e) => e.exit_code)).toEqual([126, 0])
     } finally {
       await ws.close()
     }
@@ -626,8 +629,8 @@ describe('whole-line runtimes', () => {
       expect(ws.records.slice(mark).map((r) => [r.op, r.path])).toEqual([['read', '/f.txt']])
       const logged = await ws.observer.events()
       const line = logged.findIndex((e) => e.command === 'anything')
-      const before = logged[line - 1]
-      expect([before?.type, before?.vfs, before?.path]).toEqual(['vfs', 'read', '/f.txt'])
+      const after = logged.find((e) => e.parent !== undefined && e.parent === logged[line]?.id)
+      expect([after?.type, after?.vfs, after?.path]).toEqual(['vfs', 'read', '/f.txt'])
     } finally {
       await ws.close()
     }
@@ -791,9 +794,9 @@ describe('whole-line runtimes', () => {
       expect(ws.records.slice(mark).map((r) => [r.op, r.path])).toEqual([['read', '/f.txt']])
       const logged = await ws.observer.events()
       const line = logged.findIndex((e) => e.command === 'anything')
-      expect(line).toBeGreaterThan(0)
-      const before = logged[line - 1]
-      expect([before?.type, before?.vfs, before?.path]).toEqual(['vfs', 'read', '/f.txt'])
+      expect(line).toBeGreaterThanOrEqual(0)
+      const after = logged.find((e) => e.parent !== undefined && e.parent === logged[line]?.id)
+      expect([after?.type, after?.vfs, after?.path]).toEqual(['vfs', 'read', '/f.txt'])
     } finally {
       await ws.close()
     }

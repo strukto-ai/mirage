@@ -52,8 +52,8 @@ def test_logs_populated_after_execute():
     data = obs_store.files[session_files[0]]
     lines = data.decode().strip().split("\n")
     assert len(lines) >= 1
-    entry = json.loads(lines[-1])
-    assert entry["type"] == "command"
+    assert [json.loads(line)["type"] for line in lines][0] == "command"
+    assert json.loads(lines[-1])["type"] == "result"
 
 
 def test_logs_contain_op_records():
@@ -88,11 +88,18 @@ def test_execute_records_exit_code_and_cwd():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     asyncio.run(ws.shell("echo hello > /data/test.txt"))
     asyncio.run(ws.shell("cat /data/missing.txt"))
-    commands = asyncio.run(ws.history())
-    assert len(commands) == 2
-    assert all("exit_code" in e for e in commands)
-    assert all("cwd" in e for e in commands)
-    assert [e["exit_code"] for e in commands] == [0, 1]
+    entries = asyncio.run(ws.history())
+    assert [e["type"] for e in entries] == [
+        "command",
+        "result",
+        "command",
+        "result",
+    ]
+    assert all("cwd" in e for e in entries)
+    assert [e["exit_code"] for e in entries if e["type"] == "result"] == [0, 1]
+    assert [e["parent"] for e in entries[1::2]] == [
+        e["id"] for e in entries[::2]
+    ]
 
 
 def test_execute_records_what_the_line_showed():
@@ -102,8 +109,8 @@ def test_execute_records_what_the_line_showed():
         await ws.shell("echo hi; echo err >&2")
         return await ws.history()
 
-    commands = asyncio.run(run())
-    assert [e["stdout"] for e in commands] == ["hi\n"]
+    (result,) = (e for e in asyncio.run(run()) if e["type"] == "result")
+    assert (result["stdout"], result["stderr"]) == ("hi\n", "err\n")
 
 
 @pytest.mark.asyncio
@@ -130,9 +137,11 @@ async def test_history_keeps_bounded_unicode_stdout_for_both_shell_modes(
             result = await ws.shell("cat; echo warning >&2", stdin=source())
         assert result.stdout == payload
         assert result.stderr == b"warning\n"
-        assert [e["stdout"] for e in await ws.history()] == [
-            text[:STDOUT_TRUNCATE]
-        ]
+        assert [
+            (e["stdout"], e["stderr"])
+            for e in await ws.history()
+            if e["type"] == "result"
+        ] == [(text[:STDOUT_TRUNCATE], "warning\n")]
     finally:
         await ws.close()
 
@@ -189,32 +198,38 @@ async def test_history_filters_by_session_time_count_and_vfs():
         clock.advance(10)
         ws.create_session("s2")
         await ws.shell("cat /data/a.txt", session_id="s2")
-        assert [e["command"] for e in await ws.history()] == [
-            "echo hi > /data/a.txt",
-            "cat /data/a.txt",
-        ]
-        assert [
-            (e["type"], e.get("vfs") or e["command"])
-            for e in await ws.history(vfs=True)
-        ] == [
-            ("vfs", "write"),
+        cat = [("command", "cat /data/a.txt"), ("result", 0)]
+        assert [_shown(e) for e in await ws.history()] == [
             ("command", "echo hi > /data/a.txt"),
-            ("vfs", "read"),
-            ("command", "cat /data/a.txt"),
+            ("result", 0),
+            *cat,
         ]
-        later = [["cat /data/a.txt"]] * 3
+        assert [_shown(e) for e in await ws.history(vfs=True)] == [
+            ("command", "echo hi > /data/a.txt"),
+            ("vfs", "write"),
+            ("result", 0),
+            ("command", "cat /data/a.txt"),
+            ("vfs", "read"),
+            ("result", 0),
+        ]
         assert [
-            [e["command"] for e in await ws.history(session_id="s2")],
-            [e["command"] for e in await ws.history(since=1_010_000)],
-            [e["command"] for e in await ws.history(last=1)],
-        ] == later
-        assert [e["type"] for e in await ws.history(last=2, vfs=True)] == [
-            "vfs",
-            "command",
+            [_shown(e) for e in await ws.history(session_id="s2")],
+            [_shown(e) for e in await ws.history(since=1_010_000)],
+            [_shown(e) for e in await ws.history(last=2)],
+        ] == [cat] * 3
+        assert [_shown(e) for e in await ws.history(last=2, vfs=True)] == [
+            ("vfs", "read"),
+            ("result", 0),
         ]
         assert await ws.history(last=0) == []
     finally:
         await ws.close()
+
+
+def _shown(entry: dict) -> tuple[str, str | int]:
+    return entry["type"], entry.get(
+        "command", entry.get("vfs", entry.get("exit_code"))
+    )
 
 
 @pytest.mark.asyncio
@@ -225,7 +240,7 @@ async def test_a_session_history_holds_that_session_alone():
             ws.create_session(sid)
             await ws.shell(line, session_id=sid)
         assert [
-            e["command"] for e in await ws.history(session_id="s1", last=5)
-        ] == ["echo one"]
+            e.get("command") for e in await ws.history(session_id="s1", last=5)
+        ] == ["echo one", None]
     finally:
         await ws.close()

@@ -184,6 +184,8 @@ interface HistoryEntry {
   timestamp: number
   command?: string
   exit_code?: number
+  stdout?: string
+  stderr?: string
   vfs?: string
   path?: string
 }
@@ -191,17 +193,31 @@ interface HistoryEntry {
 function formatHistory(items: HistoryEntry[]): string {
   if (items.length === 0) return 'No history.'
   return formatTable(
-    ['TIME', 'SESSION', 'EXIT', 'ENTRY'],
+    ['TIME', 'SESSION', 'TYPE', 'EXIT', 'ENTRY'],
     items.map((e) => [
       new Date(e.timestamp).toISOString().slice(0, 19).replace('T', ' '),
       e.session,
+      e.type,
       e.exit_code === undefined ? '' : String(e.exit_code),
-      (e.type === 'command' ? (e.command ?? '') : `${e.vfs ?? ''} ${e.path ?? ''}`).replaceAll(
-        '\n',
-        '\\n',
-      ),
+      historyEntry(e),
     ]),
   )
+}
+
+/**
+ * A history entry's text on one row: the line, the vfs call, or the start
+ * of what the line wrote, its newlines escaped. Mirrors Python's
+ * `_history_entry`.
+ */
+function historyEntry(e: HistoryEntry): string {
+  const text = (
+    e.type === 'command'
+      ? (e.command ?? '')
+      : e.type === 'vfs'
+        ? `${e.vfs ?? ''} ${e.path ?? ''}`
+        : (e.stdout ?? '') + (e.stderr ?? '')
+  ).replaceAll('\n', '\\n')
+  return text.length <= 60 ? text : `${text.slice(0, 57)}...`
 }
 
 function formatAsks(items: AskRecord[]): string {

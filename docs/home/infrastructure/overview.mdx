@@ -12,7 +12,7 @@ with the others.
 | --- | --- | --- | --- |
 | [Namespace](/home/infrastructure/namespace) | Symlinks and file attributes | `ram`, `disk`, `redis` | `store.namespace` |
 | [Sessions](/home/infrastructure/sessions) | Each session's working directory, variables and functions | `ram`, `disk`, `redis`, `s3` | `store.workspace` |
-| [History](/home/infrastructure/history) | Command history | `ram`, `disk`, `redis` | `store.observer` |
+| [History](/home/infrastructure/history) | Command history | `ram`, `disk` | `store.observer` |
 | [Jobs](/home/infrastructure/jobs) | Background jobs, their output and the processes each instance runs | `ram`, `redis` | `store.jobs` |
 | [File cache](/home/infrastructure/file-cache) | File content Mirage has read | `ram`, `redis` | `cache` |
 | [Index](/home/infrastructure/file-index) | Directory listings and file metadata | `ram`, `redis` | `index`, or a mount's `index` |

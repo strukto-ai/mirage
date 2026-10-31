@@ -19,6 +19,7 @@ from mirage.observe.record import OpRecord
 
 EVENT_VFS = "vfs"
 EVENT_COMMAND = "command"
+EVENT_RESULT = "result"
 EVENT_CLEAR = "clear"
 EVENT_DELETE = "delete"
 STDOUT_TRUNCATE = 4096
@@ -26,22 +27,32 @@ STDOUT_TRUNCATE = 4096
 
 @dataclass
 class LogEntry:
-    """Unified log entry for vfs calls, commands, and history control events.
+    """Unified log entry for commands, their vfs calls and results, and
+    history control events.
+
+    A line is a ``command`` entry written when it starts, with its ``id``,
+    then a ``vfs`` entry for each call it made to a mount and a
+    ``result`` entry when it ends, both naming it as their ``parent``.
 
     Args:
-        type (str): One of EVENT_VFS, EVENT_COMMAND, EVENT_CLEAR,
-            EVENT_DELETE.
+        type (str): One of EVENT_COMMAND, EVENT_VFS, EVENT_RESULT,
+            EVENT_CLEAR, EVENT_DELETE.
         session (str): Session ID.
         timestamp (int): UTC epoch milliseconds.
+        id (str | None): The line's id (for type="command").
+        parent (str | None): The line an entry belongs to (for
+            type="vfs" and type="result").
         vfs (str | None): The vfs call, such as read or write (for
             type="vfs").
         path (str | None): Virtual path (for type="vfs").
         source (str | None): VFS name (for type="vfs").
         bytes (int | None): Bytes transferred (for type="vfs").
-        duration_ms (int | None): Duration in ms (for type="vfs").
+        duration_ms (int | None): Duration in ms (for type="vfs" and
+            type="result").
         command (str | None): Shell command (for type="command").
-        exit_code (int | None): Exit code (for type="command").
-        stdout (str | None): Truncated stdout (for type="command").
+        exit_code (int | None): Exit code (for type="result").
+        stdout (str | None): Truncated stdout (for type="result").
+        stderr (str | None): Truncated stderr (for type="result").
         offset (int | None): 1-based listing position (for
             type="delete"); negative counts back from the end.
     """
@@ -50,6 +61,8 @@ class LogEntry:
     session: str
     timestamp: int
     cwd: str | None = None
+    id: str | None = None
+    parent: str | None = None
     vfs: str | None = None
     path: str | None = None
     source: str | None = None
@@ -58,21 +71,23 @@ class LogEntry:
     command: str | None = None
     exit_code: int | None = None
     stdout: str | None = None
+    stderr: str | None = None
     offset: int | None = None
-    execution_id: str | None = None
 
     @staticmethod
     def from_op_record(
         rec: OpRecord,
         session: str,
         cwd: str | None = None,
+        parent: str | None = None,
     ) -> "LogEntry":
         """Create a LogEntry from an OpRecord.
 
         Args:
             rec (OpRecord): The operation record.
-                session (str): Session ID.
+            session (str): Session ID.
             cwd (str | None): Session cwd at log time.
+            parent (str | None): The line that made the call.
 
         Returns:
             LogEntry: Unified log entry.
@@ -87,7 +102,7 @@ class LogEntry:
             source=rec.source,
             bytes=rec.bytes,
             duration_ms=rec.duration_ms,
-            execution_id=rec.execution_id,
+            parent=parent,
         )
 
     def to_json_line(self) -> str:

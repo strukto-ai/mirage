@@ -193,8 +193,18 @@ def test_workspace_history_method():
     _exec(ws, "ls /data")
     _exec(ws, "pwd")
     events = asyncio.run(ws.history())
-    assert [e["command"] for e in events] == ["ls /data", "pwd"]
-    assert all(e["type"] == "command" for e in events)
+    assert [e.get("command") for e in events] == [
+        "ls /data",
+        None,
+        "pwd",
+        None,
+    ]
+    assert [e["type"] for e in events] == [
+        "command",
+        "result",
+        "command",
+        "result",
+    ]
 
 
 def test_history_s_appends_without_executing():
@@ -346,7 +356,11 @@ def test_substitution_records_only_outer_line():
     ws = _ws()
     _exec(ws, "echo hi > /data/f.txt")
     _exec(ws, "wc -l $(find /data -name '*.txt')")
-    commands = [e["command"] for e in asyncio.run(ws.history())]
+    commands = [
+        e["command"]
+        for e in asyncio.run(ws.history())
+        if e["type"] == "command"
+    ]
     assert commands == [
         "echo hi > /data/f.txt",
         "wc -l $(find /data -name '*.txt')",
@@ -378,7 +392,11 @@ def test_eval_xargs_source_record_single_entry():
     _exec(ws, "echo /data/f.txt | xargs cat")
     _exec(ws, "echo 'cat /data/f.txt' > /data/s.sh")
     _exec(ws, "source /data/s.sh")
-    commands = [e["command"] for e in asyncio.run(ws.history())]
+    commands = [
+        e["command"]
+        for e in asyncio.run(ws.history())
+        if e["type"] == "command"
+    ]
     assert commands == [
         "echo hi > /data/f.txt",
         "eval cat /data/f.txt",
@@ -392,7 +410,11 @@ def test_unrecorded_execute_skips_history_keeps_caller_ops():
     ws = _ws()
     _exec(ws, "echo hi > /data/f.txt")
     _exec(ws, "cat /data/f.txt", record=False)
-    commands = [e["command"] for e in asyncio.run(ws.history())]
+    commands = [
+        e["command"]
+        for e in asyncio.run(ws.history())
+        if e["type"] == "command"
+    ]
     assert commands == ["echo hi > /data/f.txt"]
 
 
@@ -408,8 +430,8 @@ def test_in_place_restore_rewinds_history(tmp_path):
     dst = _ws()
     _exec(dst, "echo pre-restore")
     asyncio.run(apply_state_dict(dst, read_tar(snap)))
-    cmds = [e["command"] for e in asyncio.run(dst.history())]
-    assert cmds == ["echo from-snapshot"]
+    cmds = [e.get("command") for e in asyncio.run(dst.history())]
+    assert cmds == ["echo from-snapshot", None]
 
 
 def test_failed_line_ops_still_in_audit(monkeypatch):
@@ -423,7 +445,11 @@ def test_failed_line_ops_still_in_audit(monkeypatch):
     assert any(e["path"] == "/data/f.txt" for e in reads)
     last_cmd = [e for e in events if e["type"] == "command"][-1]
     assert last_cmd["command"] == "cat /data/f.txt"
-    assert last_cmd["exit_code"] == 1
+    assert [e for e in events if e["type"] == "result"][-1] == {
+        **[e for e in events if e["type"] == "result"][-1],
+        "parent": last_cmd["id"],
+        "exit_code": 1,
+    }
 
 
 # bash 5.2 adds a line to history only when it is non-empty
@@ -438,7 +464,11 @@ def test_a_blank_line_is_not_recorded_but_whitespace_and_comments_are():
     _exec(ws, "   ")
     _exec(ws, "# comment")
     events = asyncio.run(ws.history())
-    assert [e["command"] for e in events] == ["echo one", "   ", "# comment"]
+    assert [e["command"] for e in events if e["type"] == "command"] == [
+        "echo one",
+        "   ",
+        "# comment",
+    ]
     file_out = _stdout(_exec(ws, "cat /.bash_history"))
     assert "\n\n" not in file_out
     assert "\n   \n" in file_out
