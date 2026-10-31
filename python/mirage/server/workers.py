@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import random
+import secrets
 import shutil
 import sys
 import tempfile
@@ -28,26 +29,30 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
+import h11
 import httpx
 import uvicorn
 from fastapi import HTTPException
 from starlette.types import Message, Receive, Scope, Send
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from websockets.asyncio.client import unix_connect
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from mirage.server.app import build_app
 from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
 from mirage.server.env import (
     ENV_FORWARDED_ALLOW_IPS,
     ENV_WORKER_SOCKET,
+    ENV_WORKER_TOKEN,
     ENV_WORKER_TYPE,
     ENV_WORKERS,
 )
+from mirage.server.host_validation import HostHeaderMiddleware
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.paths import mirage_home
+from mirage.server.rate_limit import COUNTED_HEADER
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +64,8 @@ EXIT_SECONDS = 10
 # A request that needs no workspace and answers only a signed-in caller:
 # what a worker says to it says whether the caller may go on.
 AUTH_PROBE = "/v1/jobs?workspace_id=-"
+# What FastAPI reads as false in a query flag.
+_FALSE = frozenset({"0", "f", "false", "n", "no", "off"})
 # Headers that belong to one connection, which are not passed on.
 HOP_BY_HOP = frozenset(
     {
@@ -286,17 +293,21 @@ class ThreadWorker(Worker):
         index (int): its place in the pool.
         socket (str): the Unix socket it serves on.
         host (str): a Host it accepts, for its health check.
+        token (str): the pool's ``$MIRAGE_WORKER_TOKEN``.
     """
 
-    def __init__(self, index: int, socket: str, host: str) -> None:
+    def __init__(self, index: int, socket: str, host: str, token: str) -> None:
         super().__init__(index, socket, host)
+        self._token = token
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
     async def _launch(self) -> None:
         # Only the daemon reaches a worker's socket, and it names the
-        # client it served; the daemon keeps the cap.
+        # client it served; the daemon keeps the cap. A thread reads the
+        # token from the daemon's own environment.
+        os.environ[ENV_WORKER_TOKEN] = self._token
         app = build_app(max_workspaces=sys.maxsize, forwarded_allow_ips=["*"])
         self._server = uvicorn.Server(
             uvicorn.Config(app, uds=self.socket, log_level="warning")
@@ -363,14 +374,17 @@ class WorkerPool:
         self._stopping = False
         # Creates being answered, each holding a slot under max_workspaces.
         self.reserved = 0
+        # The workers' $MIRAGE_WORKER_TOKEN: a request carrying it was
+        # counted against the rate limits already.
+        self.token = secrets.token_hex(16)
         self.on_lost: Callable[[], None] = lambda: None
         self.workers: list[Worker] = []
         for i in range(count):
             socket = str(Path(self._directory) / f"{i}.sock")
             worker: Worker = (
-                ProcessWorker(i, socket, host, env)
+                ProcessWorker(i, socket, host, {**env, ENV_WORKER_TOKEN: self.token})
                 if worker_type == WorkerType.PROCESS
-                else ThreadWorker(i, socket, host)
+                else ThreadWorker(i, socket, host, self.token)
             )
             worker.on_exit = functools.partial(self._lost, worker)
             self.workers.append(worker)
@@ -497,12 +511,15 @@ class _Peeked:
         id (str | None): the workspace id the body names, if it names one.
         lost (bool): whether the body passed ``MAX_REQUEST_PART`` before
             naming its id.
+        twice (bool): whether a multipart load's ``request`` part comes
+            twice in a row.
     """
 
     head: bytes
     more: bool
     id: str | None
     lost: bool = False
+    twice: bool = False
 
 
 _UNAVAILABLE = _Answer(
@@ -646,6 +663,11 @@ class WorkerProxy:
         if workspace_id is None:
             if method == "GET":
                 return await self._gather(scope, send, "created_at")
+            # An explain builds nothing, so it holds no slot.
+            query = parse_qs(scope.get("query_string", b"").decode())
+            explain = query.get("explain", ["false"])[-1].lower()
+            if method == "POST" and explain not in _FALSE:
+                return await self._pass(first, scope, receive, send)
             if method == "POST":
                 return await self._create(scope, receive, send, None)
             return await self._pass(first, scope, receive, send)
@@ -660,7 +682,11 @@ class WorkerProxy:
         closes = action == "close" and len(parts) == 4 and method == "POST"
         if deletes or closes:
             answer = await self._fetch(home, scope, b"", receive)
-            if answer.status < 300:
+            # A delete that fails may still have removed the workspace.
+            gone = answer.status < 300 or (
+                deletes and not await self._holds(home, scope, workspace_id)
+            )
+            if gone:
                 if deletes:
                     pool.forget(workspace_id)
                 else:
@@ -697,6 +723,15 @@ class WorkerProxy:
                     {
                         "detail": "the workspace id must come in the body's "
                         f"first {MAX_REQUEST_PART} bytes"
+                    },
+                )
+            if peeked.twice:
+                return await _send(
+                    send,
+                    400,
+                    {
+                        "detail": "multipart body has more than one "
+                        "'request' part"
                     },
                 )
             named = peeked.id
@@ -736,6 +771,7 @@ class WorkerProxy:
                     scope,
                     peeked.head,
                     receive if peeked.more else None,
+                    counted=True,
                 )
                 if answer.status == 201:
                     made = _id_of(answer.body)
@@ -777,7 +813,7 @@ class WorkerProxy:
         for worker in self.pool.workers:
             if worker.dead:
                 continue
-            answer = await self._fetch(worker, scope, body)
+            answer = await self._fetch(worker, scope, body, counted=True)
             if answer.status != 404:
                 break
         await _reply(send, answer or _UNAVAILABLE)
@@ -805,61 +841,118 @@ class WorkerProxy:
             return None
         return _answered(response)
 
+    async def _holds(
+        self, worker: Worker, scope: Scope, workspace_id: str
+    ) -> bool:
+        """Whether ``worker`` still holds workspace ``workspace_id``."""
+        headers = [
+            (k, v)
+            for k, v in _headers_for(scope)
+            if k not in ("content-length", "content-type")
+        ]
+        headers.append((COUNTED_HEADER, self.pool.token))
+        try:
+            response = await worker.http().get(
+                f"/v1/workspaces/{quote(workspace_id, safe='')}",
+                headers=headers,
+            )
+        except httpx.TransportError as exc:
+            logger.debug(
+                "mirage: worker %d did not answer: %s", worker.index, exc
+            )
+            return True
+        return response.status_code != 404
+
     def _has_room(self, extra: int) -> bool:
         """Whether ``extra`` more workspaces fit under ``max_workspaces``."""
         cap = self.max_workspaces
         return cap is None or self.pool.held() + extra <= cap
 
     def _request(
-        self, worker: Worker, scope: Scope, content: Any
+        self, worker: Worker, scope: Scope, content: Any, counted: bool
     ) -> httpx.Request:
-        path = scope.get("raw_path") or scope["path"].encode()
-        query = scope.get("query_string", b"")
-        url = path.decode("latin-1") + ("?" + query.decode() if query else "")
+        headers = _headers_for(scope)
+        if counted:
+            # The caller check counted it already against the rate limits.
+            headers.append((COUNTED_HEADER, self.pool.token))
         return worker.http().build_request(
-            scope["method"], url, headers=_headers_for(scope), content=content
+            scope["method"], _target(scope), headers=headers, content=content
         )
 
     async def _pass(
         self, worker: Worker, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        """Pass a request through to ``worker``, streaming both ways. A
+        """Pass a request through to ``worker``, streaming both ways at
+        once, so a shell's output comes while its stdin still uploads. A
         client gone before the answer ends stops the worker's side too."""
+        try:
+            reader, writer = await asyncio.open_unix_connection(worker.socket)
+        except OSError as exc:
+            logger.debug(
+                "mirage: worker %d did not answer: %s", worker.index, exc
+            )
+            return await _reply(send, _UNAVAILABLE)
+        connection = h11.Connection(h11.CLIENT)
+        writer.write(
+            connection.send(
+                h11.Request(
+                    method=scope["method"],
+                    target=_target(scope),
+                    headers=_framed(scope, worker.host),
+                )
+            )
+        )
         sent = asyncio.Event()
 
-        async def body() -> AsyncIterator[bytes]:
-            async for chunk in _chunks(receive):
-                yield chunk
-            sent.set()
+        async def upload() -> None:
+            try:
+                async for chunk in _chunks(receive):
+                    if chunk:
+                        writer.write(connection.send(h11.Data(data=chunk)))
+                        await writer.drain()
+                writer.write(connection.send(h11.EndOfMessage()))
+                await writer.drain()
+            except (OSError, h11.LocalProtocolError) as exc:
+                # The worker answered without taking the whole body.
+                logger.debug("mirage: a request body was cut: %s", exc)
+            finally:
+                sent.set()
 
         async def answer() -> None:
-            request = self._request(worker, scope, body())
+            started = False
             try:
-                response = await worker.http().send(request, stream=True)
-            except httpx.TransportError as exc:
+                while True:
+                    event = connection.next_event()
+                    if event is h11.NEED_DATA:
+                        connection.receive_data(await reader.read(65536))
+                    elif isinstance(event, h11.Response):
+                        await send(
+                            {
+                                "type": "http.response.start",
+                                "status": event.status_code,
+                                "headers": _passable(list(event.headers)),
+                            }
+                        )
+                        started = True
+                    elif isinstance(event, h11.Data):
+                        await send(
+                            {
+                                "type": "http.response.body",
+                                "body": bytes(event.data),
+                                "more_body": True,
+                            }
+                        )
+                    elif isinstance(event, h11.EndOfMessage):
+                        await send({"type": "http.response.body", "body": b""})
+                        return
+                    elif isinstance(event, h11.ConnectionClosed):
+                        raise ConnectionResetError("the worker closed")
+            except (OSError, h11.RemoteProtocolError) as exc:
                 logger.debug(
                     "mirage: worker %d did not answer: %s", worker.index, exc
                 )
-                return await _reply(send, _UNAVAILABLE)
-            try:
-                await send(
-                    {
-                        "type": "http.response.start",
-                        "status": response.status_code,
-                        "headers": _passable(response.headers.raw),
-                    }
-                )
-                async for chunk in response.aiter_raw():
-                    await send(
-                        {
-                            "type": "http.response.body",
-                            "body": chunk,
-                            "more_body": True,
-                        }
-                    )
-                await send({"type": "http.response.body", "body": b""})
-            finally:
-                await response.aclose()
+                if not started:
+                    await _reply(send, _UNAVAILABLE)
 
         async def gone() -> None:
             await sent.wait()
@@ -868,6 +961,7 @@ class WorkerProxy:
                 if message["type"] == "http.disconnect":
                     return
 
+        uploading = asyncio.create_task(upload())
         answering = asyncio.create_task(answer())
         watching = asyncio.create_task(gone())
         try:
@@ -875,9 +969,11 @@ class WorkerProxy:
                 [answering, watching], return_when=asyncio.FIRST_COMPLETED
             )
         finally:
+            uploading.cancel()
             watching.cancel()
             if not answering.done():
                 answering.cancel()
+            writer.close()
         if answering in done:
             await answering
 
@@ -887,6 +983,7 @@ class WorkerProxy:
         scope: Scope,
         body: bytes,
         rest: Receive | None = None,
+        counted: bool = False,
     ) -> _Answer:
         """Send ``body``, and the rest of the request from ``rest``, and
         read the whole answer."""
@@ -900,7 +997,7 @@ class WorkerProxy:
         content: Any = body if rest is None else then(rest)
         try:
             response = await worker.http().send(
-                self._request(worker, scope, content)
+                self._request(worker, scope, content, counted)
             )
         except httpx.TransportError as exc:
             logger.debug(
@@ -946,6 +1043,30 @@ class WorkerProxy:
                 subprotocols=scope.get("subprotocols") or None,
                 max_size=None,
             )
+        except InvalidStatus as exc:
+            # The worker's refusal, as it sent it, where the server can.
+            refusal = exc.response
+            if "websocket.http.response" in scope.get("extensions", {}):
+                raw = [
+                    (k.encode("latin-1"), v.encode("latin-1"))
+                    for k, v in refusal.headers.raw_items()
+                ]
+                await send(
+                    {
+                        "type": "websocket.http.response.start",
+                        "status": refusal.status_code,
+                        "headers": _passable(raw),
+                    }
+                )
+                await send(
+                    {
+                        "type": "websocket.http.response.body",
+                        "body": refusal.body or b"",
+                    }
+                )
+            else:
+                await send({"type": "websocket.close", "code": 1008})
+            return
         except Exception as exc:
             logger.debug(
                 "mirage: worker %d refused a WebSocket: %s", worker.index, exc
@@ -967,7 +1088,20 @@ class WorkerProxy:
                         await send({"type": "websocket.send", "text": message})
             except ConnectionClosed as exc:
                 logger.debug("mirage: a worker's WebSocket closed: %s", exc)
-            await send({"type": "websocket.close", "code": 1000})
+            # The worker's close, as it sent it: 1005 says none came, 1006
+            # and 1015 that the connection failed, and none can be sent.
+            code = upstream.close_code
+            if code is None or code == 1005:
+                code = 1000
+            elif code in (1006, 1015):
+                code = 1011
+            await send(
+                {
+                    "type": "websocket.close",
+                    "code": code,
+                    "reason": upstream.close_reason or "",
+                }
+            )
 
         async def up() -> None:
             while True:
@@ -1017,6 +1151,7 @@ def build_worker_proxy(
     pool: WorkerPool,
     max_workspaces: int | None,
     proxies: Sequence[str],
+    allowed_hosts: Sequence[str],
     idle_grace_seconds: float,
     exit: Callable[[], None],
     pid_file: Path | None = None,
@@ -1030,6 +1165,8 @@ def build_worker_proxy(
             together; None for no cap.
         proxies (Sequence[str]): the proxies whose ``X-Forwarded-For``
             names the client.
+        allowed_hosts (Sequence[str]): the Hosts it answers, as the
+            workers do, since it answers some requests itself.
         idle_grace_seconds (float): how long the workers may hold no
             workspace before the daemon exits.
         exit (Callable[[], None]): stops the daemon.
@@ -1039,11 +1176,10 @@ def build_worker_proxy(
     proxy = WorkerProxy(
         pool, max_workspaces, idle_grace_seconds, exit, pid_file
     )
+    checked = HostHeaderMiddleware(cast(Any, proxy), list(allowed_hosts))
     if not proxies:
-        return proxy
-    return ProxyHeadersMiddleware(
-        cast(Any, proxy), trusted_hosts=list(proxies)
-    )
+        return checked
+    return ProxyHeadersMiddleware(checked, trusted_hosts=list(proxies))
 
 
 def _path_parts(path: str) -> list[str]:
@@ -1083,6 +1219,30 @@ def _headers_for(scope: Scope) -> list[tuple[str, str]]:
     ]
     kept.append(("x-forwarded-for", client[0] if client else ""))
     return kept
+
+
+def _target(scope: Scope) -> str:
+    """A request's path and query, as the client sent them."""
+    path = scope.get("raw_path") or scope["path"].encode()
+    query = scope.get("query_string", b"")
+    return path.decode("latin-1") + ("?" + query.decode() if query else "")
+
+
+def _framed(scope: Scope, host: str) -> list[tuple[str, str]]:
+    """A request's headers for its worker, with its body framed as the
+    client framed it."""
+    headers = _headers_for(scope)
+    sent = {
+        k.decode("latin-1").lower(): v.decode("latin-1")
+        for k, v in scope["headers"]
+    }
+    if "content-length" in sent:
+        headers.append(("content-length", sent["content-length"]))
+    elif "transfer-encoding" in sent:
+        headers.append(("transfer-encoding", "chunked"))
+    if not any(k == "host" for k, _ in headers):
+        headers.append(("host", host))
+    return headers
 
 
 def _passable(raw: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
@@ -1191,6 +1351,10 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
             chunks.append(chunk)
             size += len(chunk)
             yield chunk
+            # Checked here too, since bytes before the first part make no
+            # event.
+            if size > MAX_REQUEST_PART:
+                return
 
     if not content_type.startswith("multipart/"):
         async for _ in read():
@@ -1201,19 +1365,20 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
     request: list[bytes] = []
     name = b""
     named = False
+    twice = False
     events = part_events(read(), content_type)
     try:
         async for kind, value in events:
+            # Read on to the next part, which must not be a second request.
             if kind == PartEvent.BEGIN:
                 if name == b"request":
-                    named = True
+                    twice = value == b"request"
                     break
                 name = value
             elif kind == PartEvent.DATA and name == b"request":
                 request.append(bytes(value))
             elif kind == PartEvent.END and name == b"request":
                 named = True
-                break
             if size > MAX_REQUEST_PART:
                 break
     except HTTPException as exc:
@@ -1226,4 +1391,5 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
         more,
         _id_of(b"".join(request)),
         lost=not named and size > MAX_REQUEST_PART,
+        twice=twice,
     )

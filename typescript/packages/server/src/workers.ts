@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import {
   createServer,
@@ -32,9 +33,17 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { Worker as Thread } from 'node:worker_threads'
 import proxyaddr from '@fastify/proxy-addr'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
-import { ENV_FORWARDED_ALLOW_IPS, ENV_WORKER_SOCKET, ENV_WORKER_TYPE, ENV_WORKERS } from './env.ts'
+import {
+  ENV_FORWARDED_ALLOW_IPS,
+  ENV_WORKER_SOCKET,
+  ENV_WORKER_TOKEN,
+  ENV_WORKER_TYPE,
+  ENV_WORKERS,
+} from './env.ts'
+import { isCrossOrigin, isHostAllowed } from './host_validation.ts'
 import { MAX_REQUEST_PART, partEvents } from './multipart.ts'
 import { mirageHome } from './paths.ts'
+import { COUNTED_HEADER } from './rate_limit.ts'
 
 // How long a worker has to answer its health check once started.
 const READY_SECONDS = 60
@@ -291,6 +300,11 @@ export class WorkerPool {
   readonly workers: Worker[]
   /** Creates being answered, each holding a slot under `max_workspaces`. */
   reserved = 0
+  /**
+   * The workers' `$MIRAGE_WORKER_TOKEN`: a request carrying it was counted
+   * against the rate limits already.
+   */
+  readonly token = randomUUID()
   /** Called when a worker's workspaces are gone with it. */
   onLost: () => void = () => undefined
   private readonly homes = new Map<string, Worker>()
@@ -308,7 +322,7 @@ export class WorkerPool {
         socket: join(this.directory, `${String(index)}.sock`),
         entry: options.entry,
         execArgv: options.execArgv,
-        env: options.env,
+        env: { ...options.env, [ENV_WORKER_TOKEN]: this.token },
         host: options.host,
       })
       worker.onExit = () => {
@@ -399,6 +413,8 @@ export interface WorkerProxyOptions {
   maxWorkspaces: number | null
   /** The proxies whose `X-Forwarded-For` names the client. */
   proxies: readonly string[]
+  /** The Hosts it answers, as the workers do. */
+  allowedHosts: readonly string[]
   idleGraceSeconds: number
   /** Stops the daemon: after idling, or on a shutdown a worker let through. */
   exit: () => void
@@ -419,6 +435,8 @@ interface Peeked {
   id: string | undefined
   /** Whether the body passed `MAX_REQUEST_PART` before naming its id. */
   lost: boolean
+  /** Whether a multipart load's `request` part comes twice in a row. */
+  twice: boolean
 }
 
 /**
@@ -490,12 +508,14 @@ export class WorkerProxy {
       send(res, 502, UNAVAILABLE)
       return
     }
+    if (this.refusedHere(req, res)) return
     const url = new URL(req.url ?? '/', 'http://daemon')
     const parts = pathParts(req.url)
     const method = req.method ?? 'GET'
     if (parts[0] !== 'v1') return this.pass(first, req, res)
     const [, resource, id, action] = parts
-    if (resource === 'health' && parts.length === 2 && method === 'GET') {
+    const own = parts.length === 2 && method === 'GET'
+    if (own && resource === 'health') {
       send(res, 200, {
         status: 'ok',
         workspaces: pool.count(),
@@ -504,7 +524,7 @@ export class WorkerProxy {
       })
       return
     }
-    if (resource === 'ready' && parts.length === 2 && method === 'GET') {
+    if (own && resource === 'ready') {
       const status = this.draining ? 'shutting_down' : this.hasRoom(1) ? 'ready' : 'full'
       send(res, status === 'ready' ? 200 : 503, { status })
       return
@@ -531,6 +551,11 @@ export class WorkerProxy {
     if (resource !== 'workspaces') return this.pass(first, req, res)
     if (id === undefined) {
       if (method === 'GET') return this.gather(req, res, 'created_at')
+      // An explain builds nothing, so it holds no slot.
+      const explain = url.searchParams.get('explain')
+      if (method === 'POST' && explain !== null && explain !== 'false') {
+        return this.pass(first, req, res)
+      }
       if (method === 'POST') return this.create(req, res, null)
       return this.pass(first, req, res)
     }
@@ -544,7 +569,9 @@ export class WorkerProxy {
     const closes = action === 'close' && parts.length === 4 && method === 'POST'
     if (deletes || closes) {
       const answer = await this.fetch(home, req, null, true)
-      if (answer.status < 300) {
+      // A delete that fails may still have removed the workspace.
+      const gone = answer.status < 300 || (deletes && !(await this.holds(home, req, id)))
+      if (gone) {
         if (deletes) pool.forget(id)
         else pool.release(id)
         this.idleCheck()
@@ -583,6 +610,10 @@ export class WorkerProxy {
         })
         return
       }
+      if (peeked.twice) {
+        send(res, 400, { detail: "multipart body has more than one 'request' part" })
+        return
+      }
       const home = peeked.id === undefined ? undefined : pool.home(peeked.id)
       const live = home?.live.has(peeked.id ?? '') === true
       // A retry of a live id goes to its worker even when full, but holds a
@@ -609,7 +640,7 @@ export class WorkerProxy {
       const settle = peeked.id === undefined ? () => undefined : pool.claim(peeked.id, worker)
       this.cancelIdle()
       try {
-        const answer = await this.fetch(worker, req, peeked.head, peeked.more)
+        const answer = await this.fetch(worker, req, peeked.head, peeked.more, true)
         if (answer.status === 201) {
           const made = idOf(answer.body)
           if (made !== undefined) pool.adopt(made, worker)
@@ -620,6 +651,7 @@ export class WorkerProxy {
       }
     } finally {
       if (reserved) pool.reserved -= 1
+      discard(req)
       this.idleCheck()
     }
   }
@@ -649,13 +681,14 @@ export class WorkerProxy {
     }
     const body = await readUpTo(req, MAX_REQUEST_PART)
     if (body === null) {
+      discard(req)
       send(res, 413, { detail: 'request body too large' })
       return
     }
     let last: Answer | null = null
     for (const worker of this.options.pool.workers) {
       if (worker.dead) continue
-      last = await this.fetch(worker, req, body)
+      last = await this.fetch(worker, req, body, false, true)
       if (last.status !== 404) break
     }
     if (last === null) send(res, 502, UNAVAILABLE)
@@ -675,6 +708,34 @@ export class WorkerProxy {
     probe.end()
     const answer = await answered(probe)
     return answer.status < 300 ? null : answer
+  }
+
+  /**
+   * Answer 400 for a Host or a browser Origin the workers refuse, as they
+   * would, since the daemon answers some requests itself: true when it did.
+   */
+  private refusedHere(req: IncomingMessage, res: ServerResponse): boolean {
+    const { host, origin, 'sec-fetch-site': fetchSite } = req.headers
+    if (!isHostAllowed(host, this.options.allowedHosts)) {
+      send(res, 400, { detail: 'Invalid host header' })
+      return true
+    }
+    if (isCrossOrigin(host, origin, fetchSite)) {
+      send(res, 400, { detail: 'Cross-origin request refused' })
+      return true
+    }
+    return false
+  }
+
+  /** Whether `worker` still holds workspace `id`. */
+  private async holds(worker: Worker, req: IncomingMessage, id: string): Promise<boolean> {
+    const headers = headersFor(req, this.client(req))
+    delete headers['content-length']
+    delete headers['content-type']
+    headers[COUNTED_HEADER] = this.options.pool.token
+    const probe = this.open(worker, 'GET', `/v1/workspaces/${encodeURIComponent(id)}`, headers)
+    probe.end()
+    return (await answered(probe)).status !== 404
   }
 
   /** Whether `extra` more workspaces fit under `max_workspaces`. */
@@ -718,8 +779,11 @@ export class WorkerProxy {
     req: IncomingMessage,
     body: Buffer | null,
     more = false,
+    counted = false,
   ): Promise<Answer> {
     const headers = headersFor(req, this.client(req))
+    // The caller check counted it already against the rate limits.
+    if (counted) headers[COUNTED_HEADER] = this.options.pool.token
     if (!more) {
       if (body === null || body.byteLength === 0) delete headers['content-length']
       else headers['content-length'] = String(body.byteLength)
@@ -840,6 +904,13 @@ function answers(socket: string, host: string): Promise<boolean> {
 }
 
 /** The whole answer to `request`. */
+/** Read the rest of a body answered without it, so its connection goes on. */
+function discard(req: IncomingMessage): void {
+  if (req.readableEnded) return
+  req.unpipe()
+  req.resume()
+}
+
 function answered(request: ClientRequest): Promise<Answer> {
   return new Promise((resolve, reject) => {
     request.once('response', (response) => {
@@ -971,11 +1042,11 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
       read.push(chunk)
       size += chunk.byteLength
       if (size > MAX_REQUEST_PART) {
-        return { head: Buffer.concat(read), more: true, id: undefined, lost: true }
+        return { head: Buffer.concat(read), more: true, id: undefined, lost: true, twice: false }
       }
     }
     const head = Buffer.concat(read)
-    return { head, more: false, id: idOf(head), lost: false }
+    return { head, more: false, id: idOf(head), lost: false, twice: false }
   }
   let done = false
   const kept = async function* (): AsyncGenerator<Buffer> {
@@ -983,17 +1054,21 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
       read.push(chunk)
       size += chunk.byteLength
       yield chunk
+      // Checked here too, since bytes before the first part make no event.
+      if (size > MAX_REQUEST_PART) return
     }
     done = true
   }
   const request: Buffer[] = []
   let name = ''
   let named = false
+  let twice = false
   try {
     for await (const event of partEvents(kept(), type)) {
+      // Read on to the next part, which must not be a second request.
       if (event.kind === 'begin') {
         if (name === 'request') {
-          named = true
+          twice = event.name === 'request'
           break
         }
         name = event.name
@@ -1001,7 +1076,6 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
         request.push(Buffer.from(event.data))
       } else if (event.kind === 'end' && name === 'request') {
         named = true
-        break
       }
       if (size > MAX_REQUEST_PART) break
     }
@@ -1014,5 +1088,6 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
     more: !done,
     id: idOf(Buffer.concat(request)),
     lost: !named && size > MAX_REQUEST_PART,
+    twice,
   }
 }

@@ -100,7 +100,8 @@ async function serveWorkers(
     throw new DaemonConfigError('ssh_port does not combine with workers yet')
   }
   const gracefulTimeout = resolveGracefulTimeout()
-  const host = resolveAllowedHosts().find((allowed) => !allowed.includes('*')) ?? 'localhost'
+  const allowedHosts = resolveAllowedHosts()
+  const host = allowedHosts.find((allowed) => !allowed.includes('*')) ?? 'localhost'
   const pool = new WorkerPool({
     count: workers,
     type: resolveWorkerType(),
@@ -128,6 +129,7 @@ async function serveWorkers(
     pool,
     maxWorkspaces: resolveMaxWorkspaces(),
     proxies: resolveForwardedAllowIps(),
+    allowedHosts,
     idleGraceSeconds,
     exit: triggerExit,
   })

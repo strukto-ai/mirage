@@ -774,6 +774,12 @@ async def _read_load_body(
     async for event, data in part_events(request.stream(), content_type):
         if event is PartEvent.BEGIN:
             name = data
+            # The daemon routes a load by its first request part alone.
+            if name == b"request" and name in seen:
+                raise HTTPException(
+                    status_code=400,
+                    detail="multipart body has more than one 'request' part",
+                )
             seen.add(name)
         elif event is PartEvent.DATA and name == b"request":
             body += data

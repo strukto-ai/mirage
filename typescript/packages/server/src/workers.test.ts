@@ -22,7 +22,8 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildApp, type MirageApp } from './app.ts'
 import { DaemonConfigError } from './daemon_config.ts'
-import { ENV_HOME, ENV_WORKER_TYPE, ENV_WORKERS } from './env.ts'
+import { ENV_HOME, ENV_WORKER_TOKEN, ENV_WORKER_TYPE, ENV_WORKERS } from './env.ts'
+import type { RateLimit } from './rate_limit.ts'
 import {
   buildWorkerProxy,
   resolveWorkers,
@@ -78,7 +79,10 @@ interface Daemon {
   exited: () => number
 }
 
-async function daemon(maxWorkspaces: number | null = null): Promise<Daemon> {
+async function daemon(
+  maxWorkspaces: number | null = null,
+  rateLimits: readonly RateLimit[] = [],
+): Promise<Daemon> {
   const pool = new WorkerPool({
     count: 2,
     type: WorkerType.Process,
@@ -88,13 +92,17 @@ async function daemon(maxWorkspaces: number | null = null): Promise<Daemon> {
     host: 'localhost',
     gracefulTimeout: 0,
   })
-  const apps = pool.workers.map(() => buildApp({ maxWorkspaces: Number.MAX_SAFE_INTEGER }))
+  vi.stubEnv(ENV_WORKER_TOKEN, pool.token)
+  const apps = pool.workers.map(() =>
+    buildApp({ maxWorkspaces: Number.MAX_SAFE_INTEGER, rateLimits }),
+  )
   await Promise.all(apps.map((app, i) => app.listen({ path: pool.workers[i]?.socket ?? '' })))
   let exits = 0
   const proxy = buildWorkerProxy({
     pool,
     maxWorkspaces,
     proxies: [],
+    allowedHosts: ['localhost', '127.0.0.1'],
     idleGraceSeconds: 60,
     exit: () => {
       exits += 1
@@ -118,6 +126,26 @@ async function call(
   })
   const text = await res.text()
   return { status: res.status, json: text === '' ? null : (JSON.parse(text) as unknown) }
+}
+
+/** A request with its own Host, which fetch cannot send. */
+function withHost(
+  url: string,
+  method: string,
+  path: string,
+  host: string,
+  body?: string,
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const { port } = new URL(url)
+    const req = request({ port, method, path, headers: { host, 'content-type': 'application/json' } })
+    req.once('response', (res) => {
+      res.resume()
+      resolve(res.statusCode ?? 0)
+    })
+    req.once('error', reject)
+    req.end(body)
+  })
 }
 
 /** Where the next new workspaces go: worker 0 or worker 1, in order. */
@@ -261,6 +289,24 @@ describe('WorkerProxy', () => {
     slow.finish()
     expect(await slow).toBe(503)
     expect(ids(d).flat()).toEqual(['a'])
+    expect(await withHost(d.url, 'GET', '/v1/health', 'evil.example')).toBe(400)
+    expect(await withHost(d.url, 'GET', '/v1/ready', 'evil.example')).toBe(400)
+    const explained = await call(`${d.url}/v1/workspaces?explain=true`, 'POST', {
+      id: 'b',
+      config: CONFIG,
+    })
+    expect(explained.status).toBe(200)
+    expect(ids(d).flat()).toEqual(['a'])
+  })
+
+  it('counts a request once against the rate limits, after its caller check', async () => {
+    d = await daemon(null, [{ key: 'ip', rate: '2/minute' }])
+    placeOn(0)
+    expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })).status).toBe(
+      201,
+    )
+    expect((await call(`${d.url}/v1/workspaces/a`, 'GET')).status).toBe(200)
+    expect((await call(`${d.url}/v1/workspaces/a`, 'GET')).status).toBe(429)
   })
 
   it('reads a multipart load up to its request part, and routes what it loads', async () => {
@@ -282,6 +328,22 @@ describe('WorkerProxy', () => {
     late.append('request', JSON.stringify({ id: 'a' }))
     const lost = await fetch(`${d.url}/v1/workspaces/load`, { method: 'POST', body: late })
     expect(lost.status).toBe(413)
+    const preamble = Buffer.concat([
+      Buffer.alloc(2 * 1024 * 1024, 'x'),
+      Buffer.from('\r\n--b\r\nContent-Disposition: form-data; name="request"\r\n\r\n{}\r\n--b--\r\n'),
+    ])
+    const before = await fetch(`${d.url}/v1/workspaces/load`, {
+      method: 'POST',
+      body: preamble,
+      headers: { 'content-type': 'multipart/form-data; boundary=b' },
+    })
+    expect(before.status).toBe(413)
+    const twice = new FormData()
+    twice.append('request', '{"id": ')
+    twice.append('request', '"a"}')
+    twice.append('snapshot', new Blob([tar]), 'snapshot.tar')
+    const split = await fetch(`${d.url}/v1/workspaces/load`, { method: 'POST', body: twice })
+    expect(split.status).toBe(400)
     expect(ids(d)).toEqual([['a'], ['r']])
   })
 
@@ -310,6 +372,7 @@ describe.each([WorkerType.Process, WorkerType.Thread])('%s workers', (type) => {
       pool,
       maxWorkspaces: null,
       proxies: [],
+      allowedHosts: ['localhost', '127.0.0.1'],
       idleGraceSeconds: 60,
       exit: () => undefined,
     })

@@ -84,9 +84,8 @@ def _workers_proxy() -> Any:
     not taken with workers yet; each worker counts its own rate limits."""
     if resolve_ssh_config().port is not None:
         raise DaemonConfigError("ssh_port does not combine with workers yet")
-    host = next(
-        (h for h in resolve_allowed_hosts(None) if "*" not in h), "localhost"
-    )
+    allowed_hosts = resolve_allowed_hosts(None)
+    host = next((h for h in allowed_hosts if "*" not in h), "localhost")
     pool = WorkerPool(
         count=_workers,
         worker_type=resolve_worker_type(),
@@ -98,6 +97,7 @@ def _workers_proxy() -> Any:
         pool,
         max_workspaces=resolve_max_workspaces(),
         proxies=resolve_forwarded_allow_ips(),
+        allowed_hosts=allowed_hosts,
         idle_grace_seconds=_idle_grace,
         exit=_exit,
         pid_file=pid_file_path(),

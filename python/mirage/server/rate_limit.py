@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hmac
 import logging
 import math
 import os
@@ -38,7 +39,7 @@ from mirage.server.daemon_config import (
     DaemonConfigError,
     read_daemon_table,
 )
-from mirage.server.env import ENV_RATE_LIMITS
+from mirage.server.env import ENV_RATE_LIMITS, ENV_WORKER_TOKEN
 from mirage.server.metrics import refused
 from mirage.server.paths import mirage_home
 
@@ -52,6 +53,10 @@ _PER = {
 }
 _KEYS = frozenset({"ip", "account", "workspace"})
 _HEADER = "header:"
+
+# The header on a request the daemon already counted, when it runs
+# workers: its value is the workers' $MIRAGE_WORKER_TOKEN.
+COUNTED_HEADER = "x-mirage-counted"
 
 
 @dataclass(frozen=True)
@@ -154,6 +159,16 @@ def resolve_rate_limits(
         raise DaemonConfigError(f"rate_limits: {exc}") from exc
 
 
+def _is_counted(scope: Scope, token: str) -> bool:
+    """Whether a request carries the workers' ``token``: the daemon
+    counted it already."""
+    name = COUNTED_HEADER.encode()
+    for k, v in scope["headers"]:
+        if k.lower() == name:
+            return hmac.compare_digest(v, token.encode())
+    return False
+
+
 def _value(
     key: str | Callable[[HTTPConnection], str | None], request: HTTPConnection
 ) -> str | None:
@@ -185,7 +200,8 @@ class RateLimitMiddleware:
     on the address, the workspace or a header, so a caller with a bad
     token is counted too, and after it, with ``signed_in``, for those
     keyed on the account or a function, which may read the signed-in
-    account. WebSocket handshakes count too; public paths are not counted.
+    account. WebSocket handshakes count too; public paths are not counted,
+    nor, on a worker, a request the daemon already counted.
 
     Args:
         app (ASGIApp): downstream ASGI app.
@@ -208,6 +224,7 @@ class RateLimitMiddleware:
             if (callable(limit.key) or limit.key == "account") == signed_in
         )
         self._limiter = FixedWindowRateLimiter(MemoryStorage())
+        self._token = os.environ.get(ENV_WORKER_TOKEN)
 
     async def __call__(
         self, scope: Scope, receive: Receive, send: Send
@@ -216,6 +233,7 @@ class RateLimitMiddleware:
             not self.rate_limits
             or scope["type"] not in ("http", "websocket")
             or scope["path"] in PUBLIC_PATHS
+            or (self._token is not None and _is_counted(scope, self._token))
         ):
             await self.app(scope, receive, send)
             return

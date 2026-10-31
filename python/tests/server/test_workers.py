@@ -16,7 +16,8 @@ import asyncio
 import json
 import os
 import sys
-from collections.abc import AsyncIterator
+import tempfile
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +30,8 @@ from httpx import ASGITransport, AsyncClient
 from mirage.server import workers
 from mirage.server.app import build_app
 from mirage.server.daemon_config import DaemonConfigError
-from mirage.server.env import ENV_WORKER_TYPE, ENV_WORKERS
+from mirage.server.env import ENV_WORKER_TOKEN, ENV_WORKER_TYPE, ENV_WORKERS
+from mirage.server.rate_limit import RateLimit
 from mirage.server.workers import (
     WorkerPool,
     WorkerProxy,
@@ -94,7 +96,10 @@ class _Daemon:
 
 
 @asynccontextmanager
-async def _daemon(max_workspaces: int | None = None) -> AsyncIterator[_Daemon]:
+async def _daemon(
+    max_workspaces: int | None = None,
+    rate_limits: Sequence[RateLimit] = (),
+) -> AsyncIterator[_Daemon]:
     """Two servers on the pool's sockets, in this process, behind the
     proxy."""
     pool = WorkerPool(
@@ -104,7 +109,16 @@ async def _daemon(max_workspaces: int | None = None) -> AsyncIterator[_Daemon]:
         host="localhost",
         graceful_timeout=0,
     )
-    apps = [build_app(max_workspaces=sys.maxsize) for _ in pool.workers]
+    # The worker apps read the pool's token as they first answer.
+    os.environ[ENV_WORKER_TOKEN] = pool.token
+    apps = [
+        build_app(
+            max_workspaces=sys.maxsize,
+            rate_limits=rate_limits,
+            forwarded_allow_ips=["*"],
+        )
+        for _ in pool.workers
+    ]
     servers = [
         uvicorn.Server(uvicorn.Config(app, uds=w.socket, log_level="warning"))
         for app, w in zip(apps, pool.workers)
@@ -117,6 +131,7 @@ async def _daemon(max_workspaces: int | None = None) -> AsyncIterator[_Daemon]:
         pool,
         max_workspaces=max_workspaces,
         proxies=[],
+        allowed_hosts=["test", "localhost", "127.0.0.1"],
         idle_grace_seconds=60,
         exit=lambda: exits.append(1),
     )
@@ -130,6 +145,7 @@ async def _daemon(max_workspaces: int | None = None) -> AsyncIterator[_Daemon]:
             server.should_exit = True
         await asyncio.gather(*tasks)
         await pool.stop()
+        del os.environ[ENV_WORKER_TOKEN]
 
 
 def _ids(d: _Daemon) -> list[list[str]]:
@@ -294,6 +310,70 @@ async def test_a_refused_caller_and_an_uploading_body_hold_no_slot():
         finish.set()
         assert (await slow).status_code == 503
         assert [i for ids in _ids(d) for i in ids] == ["a"]
+        for path in ("/v1/health", "/v1/ready"):
+            got = await d.client.get(path, headers={"host": "evil.example"})
+            assert got.status_code == 400
+        explained = await d.client.post(
+            "/v1/workspaces?explain=true", json={"id": "b", "config": CONFIG}
+        )
+        assert explained.status_code == 200
+        assert [i for ids in _ids(d) for i in ids] == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_a_request_counts_once_after_its_caller_check(monkeypatch):
+    _place_on(monkeypatch, 0)
+    async with _daemon(rate_limits=[RateLimit("ip", "2/minute")]) as d:
+        made = await d.client.post(
+            "/v1/workspaces", json={"id": "a", "config": CONFIG}
+        )
+        assert made.status_code == 201
+        assert (await d.client.get("/v1/workspaces/a")).status_code == 200
+        assert (await d.client.get("/v1/workspaces/a")).status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_a_shell_answers_while_its_stdin_still_uploads():
+    async with _daemon() as d:
+        await d.client.post(
+            "/v1/workspaces", json={"id": "a", "config": CONFIG}
+        )
+        socket = os.path.join(tempfile.mkdtemp(prefix="mw-"), "d.sock")
+        server = uvicorn.Server(
+            uvicorn.Config(
+                d.proxy, uds=socket, lifespan="off", log_level="warning"
+            )
+        )
+        serving = asyncio.create_task(server.serve())
+        while not server.started:
+            await asyncio.sleep(0.01)
+        reader, writer = await asyncio.open_unix_connection(socket)
+        part = (
+            b'--b\r\nContent-Disposition: form-data; name="request"\r\n\r\n'
+            b'{"command": "head -n 1"}\r\n'
+            b'--b\r\nContent-Disposition: form-data; name="stdin"\r\n\r\n'
+            b"hello\n"
+        )
+        writer.write(
+            b"POST /v1/workspaces/a/shell?stream=true HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Content-Type: multipart/form-data; boundary=b\r\n"
+            b"Transfer-Encoding: chunked\r\n\r\n"
+            + f"{len(part):x}\r\n".encode()
+            + part
+            + b"\r\n"
+        )
+        got = b""
+        try:
+            # The body stays open: the output must come before it ends.
+            while b'"status":"done"' not in got:
+                got += await asyncio.wait_for(reader.read(65536), 10)
+        finally:
+            writer.close()
+            server.should_exit = True
+            await serving
+        assert got.startswith(b"HTTP/1.1 200")
+        assert b'"stream":"stdout","data":"aGVsbG8K"' in got
 
 
 @pytest.mark.asyncio
@@ -328,6 +408,23 @@ async def test_a_multipart_load_is_read_up_to_its_request_part(monkeypatch):
             ],
         )
         assert lost.status_code == 413
+        preamble = await d.client.post(
+            "/v1/workspaces/load",
+            content=b"x" * (2 * 1024 * 1024)
+            + b'\r\n--b\r\nContent-Disposition: form-data; name="request"'
+            b"\r\n\r\n{}\r\n--b--\r\n",
+            headers={"content-type": "multipart/form-data; boundary=b"},
+        )
+        assert preamble.status_code == 413
+        twice = await d.client.post(
+            "/v1/workspaces/load",
+            files=[
+                ("request", (None, '{"id": ')),
+                ("request", (None, '"a"}')),
+                ("snapshot", ("snapshot.tar", tar)),
+            ],
+        )
+        assert twice.status_code == 400
         assert _ids(d) == [["a"], ["r"]]
 
 
@@ -359,6 +456,7 @@ async def test_workers_serve_lose_their_workspaces_and_leave_nothing_behind(
         pool,
         max_workspaces=None,
         proxies=[],
+        allowed_hosts=["test", "localhost", "127.0.0.1"],
         idle_grace_seconds=60,
         exit=lambda: None,
     )
