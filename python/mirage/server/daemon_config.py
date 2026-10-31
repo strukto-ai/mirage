@@ -43,6 +43,9 @@ ALLOWED_KEYS = frozenset(
         "ssh_host",
         "ssh_host_key_file",
         "ssh_authorized_keys",
+        "workers",
+        "cpus",
+        "workspace_max_memory",
     }
 )
 NUMERIC_KEYS = frozenset(
@@ -54,6 +57,7 @@ NUMERIC_KEYS = frozenset(
         "max_sessions",
         "port",
         "ssh_port",
+        "workers",
     }
 )
 

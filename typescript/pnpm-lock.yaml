@@ -145,7 +145,7 @@ importers:
         version: 1.59.1
       redis:
         specifier: ^5.0.0
-        version: 5.12.1(@opentelemetry/api@1.9.1)
+        version: 5.12.1(@opentelemetry/api@1.10.0)
       tsx:
         specifier: ^4.20.0
         version: 4.21.0
@@ -827,7 +827,7 @@ importers:
         version: 8.20.0
       redis:
         specifier: ^5.0.0
-        version: 5.12.1(@opentelemetry/api@1.9.1)
+        version: 5.12.1(@opentelemetry/api@1.10.0)
       ssh2:
         specifier: ^1.16.0
         version: 1.17.0
@@ -836,7 +836,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@opentelemetry/api@1.9.1)(@types/node@24.12.2)(vite@7.3.7(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
+        version: 4.1.12(@opentelemetry/api@1.10.0)(@types/node@24.12.2)(vite@7.3.7(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
 
   packages/openai-agents:
     dependencies:
@@ -930,6 +930,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@fastify/proxy-addr':
+        specifier: ^5.1.0
+        version: 5.1.0
       '@fastify/websocket':
         specifier: ^11.3.3
         version: 11.3.3
@@ -10153,7 +10156,7 @@ snapshots:
 
   axios@1.20.0:
     dependencies:
-      follow-redirects: 1.16.1
+      follow-redirects: 1.16.1(debug@4.4.3)
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -11133,8 +11136,6 @@ snapshots:
   flatbuffers@25.9.23: {}
 
   flatted@3.4.2: {}
-
-  follow-redirects@1.16.1: {}
 
   follow-redirects@1.16.1(debug@4.4.3):
     optionalDependencies:
@@ -13707,34 +13708,6 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
-      '@types/node': 24.12.2
-    transitivePeerDependencies:
-      - msw
-
-  vitest@4.1.12(@opentelemetry/api@1.9.1)(@types/node@24.12.2)(vite@7.3.7(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)):
-    dependencies:
-      '@vitest/expect': 4.1.12
-      '@vitest/mocker': 4.1.12(vite@7.3.7(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0))
-      '@vitest/pretty-format': 4.1.12
-      '@vitest/runner': 4.1.12
-      '@vitest/snapshot': 4.1.12
-      '@vitest/spy': 4.1.12
-      '@vitest/utils': 4.1.12
-      es-module-lexer: 2.3.2
-      expect-type: 1.3.0
-      magic-string: 0.30.21
-      obug: 2.1.4
-      pathe: 2.0.3
-      picomatch: 4.0.4
-      std-env: 4.2.0
-      tinybench: 2.9.0
-      tinyexec: 1.2.4
-      tinyglobby: 0.2.17
-      tinyrainbow: 3.1.1
-      vite: 7.3.7(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0)
-      why-is-node-running: 2.3.0
-    optionalDependencies:
-      '@opentelemetry/api': 1.9.1
       '@types/node': 24.12.2
     transitivePeerDependencies:
       - msw

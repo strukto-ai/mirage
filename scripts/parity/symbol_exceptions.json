@@ -1181,6 +1181,12 @@
    "typescript_only": {
     "versionSortConfig": "The version-sort configuration is read once: Python's _version_sort carries functools.cache, and TypeScript keeps the value in this binding."
    }
+  },
+  "server/workers": {
+   "typescript_only": {
+    "FrontOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
+    "WorkerPoolOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments."
+   }
   }
  }
 }

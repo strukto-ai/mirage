@@ -320,6 +320,9 @@ mirage login
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
 | `max_workspaces` | `MIRAGE_MAX_WORKSPACES` | no cap; past it a new workspace answers 503 |
 | `max_sessions` | `MIRAGE_MAX_SESSIONS` | no cap; past it a new session answers 429 |
+| `workspace_max_memory` | `MIRAGE_WORKSPACE_MAX_MEMORY` | no cap; a size such as `256M`, the most each workspace's `max_memory` may be |
+| `workers` | `MIRAGE_WORKERS` | `1`, or one per CPU of `cpus`; see [Workers](/typescript/access/server#workers) |
+| `cpus` | `MIRAGE_CPUS` | none; a CPU list such as `0-3,6` that pins the workers on Linux |
 | `rate_limits` | `MIRAGE_RATE_LIMITS` | none; see [Rate limits](/home/access/http#rate-limits) |
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |

@@ -65,6 +65,7 @@ from mirage.server.registry import (
     resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
+    resolve_workspace_max_memory,
 )
 from mirage.server.routers import (
     asks,
@@ -302,6 +303,7 @@ def build_app(
     forwarded_allow_ips: Sequence[str] | None = None,
     max_sessions: int | None = None,
     graceful_timeout: float | None = None,
+    workspace_max_memory: str | int | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -378,6 +380,11 @@ def build_app(
             cancels the rest. ``None`` (default) reads
             ``$MIRAGE_GRACEFUL_TIMEOUT`` or the ``graceful_timeout`` config key,
             else 0, which drains nothing.
+        workspace_max_memory (str | int | None): the most each
+            workspace's ``max_memory`` may be, a size (``256M``) or bytes;
+            a workspace asking more, or no cap, runs under it. ``None``
+            (default) reads ``$MIRAGE_WORKSPACE_MAX_MEMORY`` or the
+            ``workspace_max_memory`` config key, else sets no cap.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -415,6 +422,9 @@ def build_app(
         policies=policies,
         programs=resolve_policy_file(policy_file),
         max_sessions=resolve_max_sessions(max_sessions),
+        workspace_max_memory=resolve_workspace_max_memory(
+            workspace_max_memory
+        ),
     )
     app.state.graceful_timeout = resolve_graceful_timeout(graceful_timeout)
     app.state.jobs = app.state.registry.jobs

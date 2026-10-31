@@ -21,13 +21,20 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { DaemonConfigError } from './daemon_config.ts'
-import { ENV_GRACEFUL_TIMEOUT, ENV_HOME, ENV_MAX_SESSIONS, ENV_MAX_WORKSPACES } from './env.ts'
+import {
+  ENV_GRACEFUL_TIMEOUT,
+  ENV_HOME,
+  ENV_MAX_SESSIONS,
+  ENV_MAX_WORKSPACES,
+  ENV_WORKSPACE_MAX_MEMORY,
+} from './env.ts'
 import {
   Claim,
   resolveGracefulTimeout,
   resolveMaxSessions,
   resolveMaxWorkspaces,
   resolvePolicyFile,
+  resolveWorkspaceMaxMemory,
   WorkspaceRegistry,
 } from './registry.ts'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
@@ -374,5 +381,38 @@ describe('drain deadline', () => {
     expect(await line).toBe('cancelled')
     await snapshot
     await registry.closeAll()
+  })
+})
+
+describe('resolveWorkspaceMaxMemory', () => {
+  it('reads the env then config, as a size', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mir-memory-'))
+    try {
+      expect(resolveWorkspaceMaxMemory(undefined, { [ENV_HOME]: home })).toBeNull()
+      await writeFile(join(home, 'config.toml'), '[daemon]\nworkspace_max_memory = "256M"\n')
+      expect(resolveWorkspaceMaxMemory(undefined, { [ENV_HOME]: home })).toBe(256 << 20)
+      expect(resolveWorkspaceMaxMemory(undefined, { [ENV_WORKSPACE_MAX_MEMORY]: '1G' })).toBe(
+        1 << 30,
+      )
+      for (const bad of ['0', 'lots']) {
+        expect(() =>
+          resolveWorkspaceMaxMemory(undefined, { [ENV_WORKSPACE_MAX_MEMORY]: bad }),
+        ).toThrow(DaemonConfigError)
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('workspaceMaxMemory', () => {
+  it('runs a workspace asking more, or no cap, under it, and keeps one asking less', async () => {
+    const r = new WorkspaceRegistry({ workspaceMaxMemory: 1000 })
+    const limits = (['1G', null, 500] as const).map((maxMemory, i) => {
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, maxMemory })
+      return r.add(ws, `w${String(i)}`).runner.ws.registry.memory?.limit
+    })
+    expect(limits).toEqual([1000, 1000, 500])
+    await r.closeAll()
   })
 })

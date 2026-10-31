@@ -23,6 +23,7 @@ import {
   resolveMaxSessions,
   resolveMaxWorkspaces,
   resolvePolicyFile,
+  resolveWorkspaceMaxMemory,
   WorkspaceRegistry,
 } from './registry.ts'
 import type { AuthConfig } from './auth/index.ts'
@@ -115,6 +116,13 @@ export interface BuildAppOptions {
    * reads `$MIRAGE_GRACEFUL_TIMEOUT` or the `graceful_timeout` config key, else 0.
    */
   gracefulTimeout?: number
+  /**
+   * The most each workspace's `max_memory` may be, a size (`256M`) or
+   * bytes; a workspace asking more, or no cap, runs under it. Undefined
+   * reads `$MIRAGE_WORKSPACE_MAX_MEMORY` or the `workspace_max_memory`
+   * config key, else sets no cap.
+   */
+  workspaceMaxMemory?: string | number
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -140,6 +148,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     policies: options.policies ?? [],
     programs: resolvePolicyFile(options.policyFile),
     maxSessions: resolveMaxSessions(options.maxSessions),
+    workspaceMaxMemory: resolveWorkspaceMaxMemory(options.workspaceMaxMemory),
   })
   const gracefulTimeout = resolveGracefulTimeout(options.gracefulTimeout)
   const rateLimits = resolveRateLimits(options.rateLimits)
