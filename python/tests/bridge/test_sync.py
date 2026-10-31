@@ -494,3 +494,44 @@ def test_an_operation_runs_put_off_work_around_it_never_inside():
     finally:
         loop.close()
     assert events == ["before", "started", 1, "after", "ended"]
+
+
+def test_two_threads_draining_two_loops_never_wait_on_each_other():
+    # Each thread has used both loops, so an operation inside one's drain
+    # would drain the other, which the other thread is draining.
+    loops = [asyncio.new_event_loop(), asyncio.new_event_loop()]
+    setup = threading.Lock()
+    ready = threading.Barrier(3)
+    both = threading.Barrier(2)
+    done = []
+
+    def work() -> None:
+        both.wait(5)
+        with operation():
+            done.append(threading.get_ident())
+
+    def user(first: int) -> None:
+        with setup:
+            for loop in loops:
+                run_async_from_sync(_one_turn(), loop)
+        ready.wait(5)
+        ready.wait(5)
+        run_async_from_sync(_one_turn(), loops[first])
+
+    users = [
+        threading.Thread(target=user, args=(i,), daemon=True) for i in (0, 1)
+    ]
+    for each in users:
+        each.start()
+    ready.wait(5)
+    for loop in loops:
+        defer(loop, work)
+    ready.wait(5)
+    for each in users:
+        each.join(10)
+    hung = any(each.is_alive() for each in users)
+    if not hung:
+        for loop in loops:
+            loop.close()
+    assert not hung
+    assert len(done) == 2

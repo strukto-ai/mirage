@@ -119,6 +119,8 @@ class Descriptor:
         inode (str): where the links on ``opened`` led as it opened, which
             names its inode however the file is renamed or the link
             changed since; "" names it by ``opened``.
+        waiting (list[Callable[[], None]]): closes of streams over it the
+            garbage collector put off (``settle``).
     """
 
     files: "RuntimeFiles"
@@ -128,6 +130,17 @@ class Descriptor:
     directory: bool = False
     pos: int = 0
     inode: str = ""
+    waiting: list[Callable[[], None]] = dataclasses.field(default_factory=list)
+
+    def settle(self) -> None:
+        """Run the closes the garbage collector put off on streams over
+        this descriptor, before anything else reads or moves it, from
+        whichever thread comes next; inside a collection they wait."""
+        if not self.waiting or self.files.held:
+            return
+        waiting, self.waiting = self.waiting, []
+        for close in waiting:
+            close()
 
     @property
     def path(self) -> str:
@@ -137,6 +150,7 @@ class Descriptor:
     @property
     def size(self) -> int:
         """The file's length as the handle holds it, its writes counted."""
+        self.settle()
         return self.files.fstat(self.fh).size
 
     def pread(self, offset: int, size: int) -> bytes:
@@ -148,6 +162,7 @@ class Descriptor:
         """
         if size <= 0:
             return b""
+        self.settle()
         return self.files.pread(self.fh, offset, size)
 
     def read(self, size: int | None = None) -> bytes:
@@ -157,6 +172,7 @@ class Descriptor:
             size (int | None): byte budget; None or negative reads to the
                 end, a chunk at a time.
         """
+        self.settle()
         if size is not None and size >= 0:
             chunk = self.pread(self.pos, size)
             self.pos += len(chunk)
@@ -176,6 +192,7 @@ class Descriptor:
             data (bytes): the payload.
         """
         if data:
+            self.settle()
             self.files.pwrite(self.fh, offset, data)
 
     def write(self, data: bytes) -> None:
@@ -185,6 +202,7 @@ class Descriptor:
         Args:
             data (bytes): the payload.
         """
+        self.settle()
         # The end first, as O_APPEND moves to it: a write that fails to
         # find it leaves nothing written.
         if self.mode.append and data:
@@ -205,6 +223,7 @@ class Descriptor:
             unknown or the target would be negative (the position is
             then untouched).
         """
+        self.settle()
         if whence == 2:
             base: int | None = self.size
         else:
@@ -220,14 +239,17 @@ class Descriptor:
         Args:
             size (int): the new length.
         """
+        self.settle()
         self.files.ftruncate(self.fh, size)
 
     def land(self) -> None:
         """Land what it wrote, as fsync(2) does."""
+        self.settle()
         self.files.fsync(self.fh)
 
     def close(self) -> None:
         """Land what it wrote and let the core's handle go."""
+        self.settle()
         self.files.close(self.fh)
 
 

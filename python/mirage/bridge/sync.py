@@ -89,9 +89,10 @@ def defer(loop: asyncio.AbstractEventLoop, work: Callable[[], None]) -> None:
 
 def run_deferred(loop: asyncio.AbstractEventLoop) -> None:
     """Run what was put off on ``loop``, in order, after any drain another
-    thread is running. Inside a collection nothing runs, and work that
-    reaches here again from inside a drain leaves it to that drain. A
-    failure is logged and the rest still run.
+    thread is running. Nothing runs inside a collection, nor from inside
+    a drain this thread is running: one drain at a time per thread, so
+    two threads draining two loops never wait on each other. A failure
+    is logged and the rest still run.
 
     Args:
         loop (asyncio.AbstractEventLoop): the loop the work drives.
@@ -100,7 +101,7 @@ def run_deferred(loop: asyncio.AbstractEventLoop) -> None:
     if not DEFERRED.get(loop) and (lock is None or not lock.locked()):
         return
     draining = _caller("draining")
-    if collecting() or loop in draining:
+    if collecting() or draining:
         return
     if lock is None:
         lock = DRAIN_LOCKS.setdefault(loop, threading.Lock())

@@ -638,3 +638,72 @@ def test_a_finalizer_writes_into_a_live_streams_buffer():
     )
     loop.run_until_complete(ws.close())
     loop.close()
+
+
+def _shared_fd(ws, loop, live_mode=None):
+    """An fd holding ``before-``, a live stream over it opened in
+    ``live_mode`` (if any), and a collected buffered stream over it whose
+    ``during-`` waits to land."""
+    routed, opener = _host(ws, loop)
+    fd = routed["open"]("/data/log", os.O_WRONLY | os.O_CREAT)
+    routed["write"](fd, b"before-")
+    live = None
+    if live_mode is not None:
+        live = opener(fd, live_mode, buffering=0, closefd=False)
+    stream = opener(fd, "wb", closefd=False)
+    stream.write(b"during-")
+    _drop_in_cycle(stream)
+    del stream
+    _collected()
+    return routed, fd, live
+
+
+def test_a_new_thread_writes_after_a_collected_stream_over_its_fd():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, fd, _ = _shared_fd(ws, loop)
+    worker = threading.Thread(target=routed["write"], args=(fd, b"after"))
+    worker.start()
+    worker.join(10)
+    routed["close"](fd)
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during-after"
+    )
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_bare_truncate_keeps_what_a_collected_sibling_lands():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, fd, live = _shared_fd(ws, loop, "wb")
+    assert live.truncate() == len(b"before-during-")
+    live.close()
+    routed["close"](fd)
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during-"
+    )
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_close_queued_and_run_at_once_elsewhere_still_lands(monkeypatch):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    _, opener = _host(ws, loop)
+    stream = opener("/data/f", "wb", buffering=0)
+    stream.write(b"landed")
+    files = stream._handle.files
+
+    def run_elsewhere(work):
+        other = threading.Thread(target=work)
+        other.start()
+        other.join(10)
+
+    monkeypatch.setattr(files, "defer", run_elsewhere)
+    _drop_in_cycle(stream)
+    del stream
+    _collected()
+    assert loop.run_until_complete(ws.vfs.read("/data/f")) == b"landed"
+    loop.run_until_complete(ws.close())
+    loop.close()
