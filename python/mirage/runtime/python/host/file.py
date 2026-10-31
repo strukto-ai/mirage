@@ -63,9 +63,9 @@ class HandleRaw(io.RawIOBase):
 
     A close the garbage collector makes while the stream's calls drive a
     shared loop (``RuntimeFiles.held``) waits, for every layer the
-    collection reaches, until the loop can be driven (``RuntimeFiles
-    .defer``) or anything uses the descriptor (``Descriptor.settle``);
-    the layers then close outermost first, as any close does.
+    collection reaches, until the descriptor is next used or the loop
+    can be driven (``Descriptor.used``, ``RuntimeFiles.defer``); the
+    layers then close outermost first, as any close does.
 
     Args:
         handle (Descriptor): the descriptor it reads and writes through.
@@ -125,7 +125,6 @@ class HandleRaw(io.RawIOBase):
             raise io.UnsupportedOperation("File not open for reading")
         if reading is False and not self._writable:
             raise io.UnsupportedOperation("File not open for writing")
-        self._handle.settle()
 
     def seekable(self) -> bool:
         return True
@@ -160,13 +159,11 @@ class HandleRaw(io.RawIOBase):
 
     def tell(self) -> int:
         self._check()
-        return self._handle.pos
+        return syscall(self._handle.tell)()
 
     def truncate(self, size: int | None = None) -> int:
         self._check(reading=False)
-        size = self._handle.pos if size is None else size
-        syscall(self._handle.truncate)(size)
-        return size
+        return syscall(self._handle.truncate)(size)
 
     def readall(self) -> bytes:
         self._check(reading=True)
@@ -200,7 +197,7 @@ class HandleRaw(io.RawIOBase):
         self._waiting.append(layer)
         if first:
             self._handle.waiting.append(self._close_waiting)
-            self._handle.files.defer(self._close_waiting)
+            self._handle.files.defer(self._handle.settle)
         return True
 
     def _close_waiting(self) -> None:

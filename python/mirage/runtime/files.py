@@ -15,7 +15,9 @@
 import asyncio
 import dataclasses
 import logging
+import threading
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -120,7 +122,9 @@ class Descriptor:
             names its inode however the file is renamed or the link
             changed since; "" names it by ``opened``.
         waiting (list[Callable[[], None]]): closes of streams over it the
-            garbage collector put off (``settle``).
+            garbage collector put off (``used``).
+        lock (threading.RLock): held by one use at a time (``used``).
+        depth (int): how deep the use holding ``lock`` is.
     """
 
     files: "RuntimeFiles"
@@ -131,16 +135,39 @@ class Descriptor:
     pos: int = 0
     inode: str = ""
     waiting: list[Callable[[], None]] = dataclasses.field(default_factory=list)
+    lock: threading.RLock = dataclasses.field(
+        default_factory=threading.RLock, compare=False, repr=False
+    )
+    depth: int = dataclasses.field(default=0, compare=False, repr=False)
+
+    @contextmanager
+    def used(self) -> Iterator[None]:
+        """Hold the descriptor for one call, one thread at a time.
+
+        The outermost use first runs, in order, the closes the garbage
+        collector put off on streams over it (``HandleRaw.closes_later``),
+        so nothing reads or moves it before they land; one put off during
+        a use waits for the next. Inside a collection they all wait. A
+        close that fails is logged.
+        """
+        with self.lock:
+            outermost = not self.depth
+            self.depth += 1
+            try:
+                while outermost and self.waiting and not self.files.held:
+                    close = self.waiting.pop(0)
+                    try:
+                        close()
+                    except Exception:
+                        logger.debug("a put-off close failed", exc_info=True)
+                yield
+            finally:
+                self.depth -= 1
 
     def settle(self) -> None:
-        """Run the closes the garbage collector put off on streams over
-        this descriptor, before anything else reads or moves it, from
-        whichever thread comes next; inside a collection they wait."""
-        if not self.waiting or self.files.held:
-            return
-        waiting, self.waiting = self.waiting, []
-        for close in waiting:
-            close()
+        """Run the closes put off on streams over it now (``used``)."""
+        with self.used():
+            pass
 
     @property
     def path(self) -> str:
@@ -150,8 +177,13 @@ class Descriptor:
     @property
     def size(self) -> int:
         """The file's length as the handle holds it, its writes counted."""
-        self.settle()
-        return self.files.fstat(self.fh).size
+        with self.used():
+            return self.files.fstat(self.fh).size
+
+    def tell(self) -> int:
+        """The position, once what was put off on it landed."""
+        with self.used():
+            return self.pos
 
     def pread(self, offset: int, size: int) -> bytes:
         """Read at an explicit offset without moving the position.
@@ -162,8 +194,8 @@ class Descriptor:
         """
         if size <= 0:
             return b""
-        self.settle()
-        return self.files.pread(self.fh, offset, size)
+        with self.used():
+            return self.files.pread(self.fh, offset, size)
 
     def read(self, size: int | None = None) -> bytes:
         """Read from the position, advancing it by what was read.
@@ -172,16 +204,16 @@ class Descriptor:
             size (int | None): byte budget; None or negative reads to the
                 end, a chunk at a time.
         """
-        self.settle()
-        if size is not None and size >= 0:
-            chunk = self.pread(self.pos, size)
-            self.pos += len(chunk)
-            return chunk
-        out = bytearray()
-        while chunk := self.pread(self.pos, READ_CHUNK):
-            out += chunk
-            self.pos += len(chunk)
-        return bytes(out)
+        with self.used():
+            if size is not None and size >= 0:
+                chunk = self.pread(self.pos, size)
+                self.pos += len(chunk)
+                return chunk
+            out = bytearray()
+            while chunk := self.pread(self.pos, READ_CHUNK):
+                out += chunk
+                self.pos += len(chunk)
+            return bytes(out)
 
     def pwrite(self, offset: int, data: bytes) -> None:
         """Write at an explicit offset without moving the position; an
@@ -192,8 +224,8 @@ class Descriptor:
             data (bytes): the payload.
         """
         if data:
-            self.settle()
-            self.files.pwrite(self.fh, offset, data)
+            with self.used():
+                self.files.pwrite(self.fh, offset, data)
 
     def write(self, data: bytes) -> None:
         """Write at the position, advancing it; an appending handle first
@@ -202,13 +234,13 @@ class Descriptor:
         Args:
             data (bytes): the payload.
         """
-        self.settle()
-        # The end first, as O_APPEND moves to it: a write that fails to
-        # find it leaves nothing written.
-        if self.mode.append and data:
-            self.pos = self.size
-        self.pwrite(self.pos, data)
-        self.pos += len(data)
+        with self.used():
+            # The end first, as O_APPEND moves to it: a write that fails
+            # to find it leaves nothing written.
+            if self.mode.append and data:
+                self.pos = self.size
+            self.pwrite(self.pos, data)
+            self.pos += len(data)
 
     def seek(self, offset: int, whence: int) -> int | None:
         """Move the position, POSIX whence numbering.
@@ -223,34 +255,39 @@ class Descriptor:
             unknown or the target would be negative (the position is
             then untouched).
         """
-        self.settle()
-        if whence == 2:
-            base: int | None = self.size
-        else:
-            base = {0: 0, 1: self.pos}.get(whence)
-        if base is None or base + offset < 0:
-            return None
-        self.pos = base + offset
-        return self.pos
+        with self.used():
+            if whence == 2:
+                base: int | None = self.size
+            else:
+                base = {0: 0, 1: self.pos}.get(whence)
+            if base is None or base + offset < 0:
+                return None
+            self.pos = base + offset
+            return self.pos
 
-    def truncate(self, size: int) -> None:
+    def truncate(self, size: int | None = None) -> int:
         """Set the file's length: a shrink drops bytes, growth reads zeros.
 
         Args:
-            size (int): the new length.
+            size (int | None): the new length; None is the position.
+
+        Returns:
+            int: the length set.
         """
-        self.settle()
-        self.files.ftruncate(self.fh, size)
+        with self.used():
+            length = self.pos if size is None else size
+            self.files.ftruncate(self.fh, length)
+            return length
 
     def land(self) -> None:
         """Land what it wrote, as fsync(2) does."""
-        self.settle()
-        self.files.fsync(self.fh)
+        with self.used():
+            self.files.fsync(self.fh)
 
     def close(self) -> None:
         """Land what it wrote and let the core's handle go."""
-        self.settle()
-        self.files.close(self.fh)
+        with self.used():
+            self.files.close(self.fh)
 
 
 class RuntimeFiles:

@@ -451,6 +451,12 @@ def _collected(build=None) -> None:
             gc.enable()
 
 
+def _run_elsewhere(work) -> None:
+    other = threading.Thread(target=work)
+    other.start()
+    other.join(10)
+
+
 def _drop_in_cycle(stream) -> None:
     cycle = [stream]
     cycle.append(cycle)
@@ -693,17 +699,105 @@ def test_a_close_queued_and_run_at_once_elsewhere_still_lands(monkeypatch):
     _, opener = _host(ws, loop)
     stream = opener("/data/f", "wb", buffering=0)
     stream.write(b"landed")
-    files = stream._handle.files
-
-    def run_elsewhere(work):
-        other = threading.Thread(target=work)
-        other.start()
-        other.join(10)
-
-    monkeypatch.setattr(files, "defer", run_elsewhere)
+    monkeypatch.setattr(stream._handle.files, "defer", _run_elsewhere)
     _drop_in_cycle(stream)
     del stream
     _collected()
     assert loop.run_until_complete(ws.vfs.read("/data/f")) == b"landed"
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_sibling_closes_drained_from_the_loop_land_in_order():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, opener = _host(ws, loop)
+    fd = routed["open"]("/data/log", os.O_WRONLY | os.O_CREAT)
+    routed["write"](fd, b"before-")
+    siblings = [opener(fd, "wb", closefd=False) for _ in range(2)]
+    siblings[0].write(b"one-")
+    siblings[1].write(b"two-")
+    for _ in range(2):
+        _drop_in_cycle(siblings.pop(0))
+        _collected()
+    assert run_async_from_sync(_one_turn(), loop) == 1
+    routed["write"](fd, b"after")
+    routed["close"](fd)
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-one-two-after"
+    )
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_write_waits_for_a_put_off_close_another_thread_runs(monkeypatch):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, fd, live = _shared_fd(ws, loop, "wb")
+    files = live._handle.files
+    pwrite = files.pwrite
+    landing, written = threading.Event(), threading.Event()
+
+    def slow_pwrite(fh, offset, data):
+        monkeypatch.setattr(files, "pwrite", pwrite)
+        landing.set()
+        written.wait(0.3)
+        return pwrite(fh, offset, data)
+
+    monkeypatch.setattr(files, "pwrite", slow_pwrite)
+    teller = threading.Thread(target=live.tell)
+    teller.start()
+    assert landing.wait(5)
+
+    def write_after() -> None:
+        routed["write"](fd, b"after")
+        written.set()
+
+    writer = threading.Thread(target=write_after)
+    writer.start()
+    teller.join(10)
+    writer.join(10)
+    routed["close"](fd)
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during-after"
+    )
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_read_a_collection_interrupts_reads_every_byte(monkeypatch):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    content = bytes(range(256)) * (2 * READ_CHUNK // 256)
+    loop.run_until_complete(ws.vfs.write("/data/big", content))
+    routed, opener = _host(ws, loop)
+    fd = routed["open"]("/data/big", os.O_RDWR)
+    live = opener(fd, "rb", buffering=0, closefd=False)
+    sibling = opener(fd, "wb", closefd=False)
+    sibling.write(b"S")
+    _drop_in_cycle(sibling)
+    del sibling
+    hooks = sys.get_asyncgen_hooks
+    armed = threading.Event()
+
+    def collecting_hooks():
+        if armed.is_set():
+            armed.clear()
+            gc.collect()
+        return hooks()
+
+    enabled = gc.isenabled()
+    gc.disable()
+    monkeypatch.setattr(sys, "get_asyncgen_hooks", collecting_hooks)
+    try:
+        armed.set()
+        data = live.readall()
+    finally:
+        monkeypatch.undo()
+        if enabled:
+            gc.enable()
+    assert data == content
+    routed["close"](fd)
+    assert loop.run_until_complete(ws.vfs.read("/data/big")) == content + b"S"
     loop.run_until_complete(ws.close())
     loop.close()
