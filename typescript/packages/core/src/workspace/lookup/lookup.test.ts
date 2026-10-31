@@ -27,7 +27,8 @@ import { headAllowed } from '../../policy/match/allow.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Follow, LineFacts, MountMode, PathSpec, wordText } from '../../types.ts'
 import { ParsedArgs } from '../../commands/spec/parser.ts'
-import { SPECS, parseCommand } from '../../commands/spec/index.ts'
+import { parseCommand } from '../../commands/spec/index.ts'
+import { specOf } from '../../commands/spec/builtins.ts'
 import { PARSES_KEPT } from '../../commands/spec/constants.ts'
 import * as stream from '../../rs/stream.ts'
 import { SCANS } from '../../rs/scan.ts'
@@ -377,7 +378,7 @@ describe('lineFacts writes', () => {
   })
 
   it('keeps a bounded number of facts on one parse', () => {
-    const names = Array.from({ length: 6 }, (_, i) => `/data/p${i}*`)
+    const names = Array.from({ length: 6 }, (_, i) => `/data/p${String(i)}*`)
     for (let mask = 0; mask < 1 << names.length; mask++) {
       const operands = names.map((n, i) => {
         const quoted = (mask & (1 << i)) !== 0
@@ -392,7 +393,7 @@ describe('lineFacts writes', () => {
       })
       lineFacts('sort', ['sort', ...operands], '/')
     }
-    const parsed = parseCommand(SPECS.sort!, names, '/', 'sort')
+    const parsed = parseCommand(specOf('sort'), names, '/', 'sort')
     expect(parsed.facts.size).toBeGreaterThan(0)
     expect(parsed.facts.size).toBeLessThanOrEqual(PARSES_KEPT)
   })

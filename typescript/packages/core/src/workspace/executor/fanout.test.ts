@@ -34,12 +34,15 @@ it.each([
   [['grep', 'x'], false],
   [['grep', '-r', 'x'], true],
   [['cat'], false],
-] as [string[], boolean][])('a walk fans out over a nested mount: %j', async (words, expected) => {
-  const ws = nested()
-  const path = PathSpec.fromStrPath('/base')
-  expect(shouldFanOut(words[0]!, [path], [...words, path], '/', ws.registry)).toBe(expected)
-  await ws.close()
-})
+] as [[string, ...string[]], boolean][])(
+  'a walk fans out over a nested mount: %j',
+  async (words, expected) => {
+    const ws = nested()
+    const path = PathSpec.fromStrPath('/base')
+    expect(shouldFanOut(words[0], [path], [...words, path], '/', ws.registry)).toBe(expected)
+    await ws.close()
+  },
+)
 
 it('no nested mount and a refused operand stay single', async () => {
   const ws = nested()
