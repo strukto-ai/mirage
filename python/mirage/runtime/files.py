@@ -124,6 +124,9 @@ class Descriptor:
         late_end (bool): an appending write a collection held back left
             the position at an end only landing learns; a relative seek
             before then is refused, an absolute one keeps its place.
+        landing (bool): held writes are landing now; a call of theirs
+            that reaches ``landed`` again (a drain of put-off work) leaves
+            them to it, so they land in order.
     """
 
     files: "RuntimeFiles"
@@ -135,6 +138,7 @@ class Descriptor:
     inode: str = ""
     late: list[tuple[int, bytes]] = dataclasses.field(default_factory=list)
     late_end: bool = False
+    landing: bool = False
 
     @property
     def path(self) -> str:
@@ -151,17 +155,22 @@ class Descriptor:
         """Write what a garbage collection held back, in order, once it is
         over: before anything else reaches the handle, or at the loop's
         next call from outside (``RuntimeFiles.defer``)."""
-        if not self.late or self.files.held:
+        if self.files.held or self.landing:
             return
-        late, self.late = self.late, []
-        for offset, data in late:
-            self.files.pwrite(self.fh, offset, data)
-        if self.late_end and not self.late:
-            end = self.files.fstat(self.fh).size
-            # A collection during that call may have sought since.
-            if self.late_end:
-                self.pos = end
-                self.late_end = False
+        self.landing = True
+        try:
+            # A collection during these calls may hold more back, or seek.
+            while self.late:
+                late, self.late = self.late, []
+                for offset, data in late:
+                    self.files.pwrite(self.fh, offset, data)
+                if self.late_end and not self.late:
+                    end = self.files.fstat(self.fh).size
+                    if self.late_end and not self.late:
+                        self.pos = end
+                        self.late_end = False
+        finally:
+            self.landing = False
 
     def pread(self, offset: int, size: int) -> bytes:
         """Read at an explicit offset without moving the position.

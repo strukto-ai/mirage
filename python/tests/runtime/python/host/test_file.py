@@ -717,3 +717,29 @@ def test_a_seek_made_while_held_appends_land_is_kept(monkeypatch):
     stream.close()
     loop.run_until_complete(ws.close())
     loop.close()
+
+
+def test_appends_a_collection_holds_while_others_land_land_too(monkeypatch):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    stream = _append_stream(ws, loop)
+    seen = []
+    _collected(lambda: _Finalizes(stream, [("write", b"during-")], seen))
+    files = stream._handle.files
+    pwrite = files.pwrite
+    more = [("write", b"more-")]
+
+    def collecting_pwrite(fh, offset, data):
+        monkeypatch.setattr(files, "pwrite", pwrite)
+        _collected(lambda: _Finalizes(stream, more, seen))
+        return pwrite(fh, offset, data)
+
+    monkeypatch.setattr(files, "pwrite", collecting_pwrite)
+    stream.truncate()
+    stream.close()
+    assert seen == [7, 5]
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during-more-"
+    )
+    loop.run_until_complete(ws.close())
+    loop.close()
