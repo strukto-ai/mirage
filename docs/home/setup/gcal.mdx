@@ -47,6 +47,7 @@ For SDK guides, see [Google Calendar (Python)](/python/vfs/gcal) and [Google Cal
         clientId: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
         refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
+        bucketDays: 1,
       }),
     }, { mode: MountMode.READ })
     const result = await ws.shell('ls /gcal/primary')
@@ -82,7 +83,7 @@ For SDK guides, see [Google Calendar (Python)](/python/vfs/gcal) and [Google Cal
 
 The primary calendar is always `primary`; every other calendar directory ends
 in `__<calendar-id>`. Each date directory holds the events of one day by
-default; set `bucket_days` to `7` or `30` for week or month buckets. Without
+default; set `bucket_days` to `7` or `30` for 7-day or 30-day buckets. Without
 `start_time` or `end_time`, a calendar lists all of its history up to 90 days
 after today.
 
