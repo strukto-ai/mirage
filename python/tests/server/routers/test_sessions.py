@@ -235,7 +235,9 @@ async def _wait_status(app, wid: str, session_id: str, status: str) -> None:
     """Wait for the session's job to reach ``status``."""
     for _ in range(500):
         jobs = app.state.jobs.list(wid)
-        if any(j.session_id == session_id and j.status == status for j in jobs):
+        if any(
+            j.session_id == session_id and j.status == status for j in jobs
+        ):
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"session {session_id}'s job never reached {status}")

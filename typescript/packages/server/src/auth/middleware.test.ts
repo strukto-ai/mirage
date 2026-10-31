@@ -445,76 +445,76 @@ describe('AuthMiddleware integration', () => {
     )
 
     it('refuses an unfinished upload after deletion', async () => {
-        const app = jwtApp(),
-          entered = gate(),
-          release = gate(),
-          input = new PassThrough()
-        const alice = await bearer({ sub: 'alice' }),
-          bob = await bearer({ sub: 'bob' })
-        let pending: Promise<Awaited<ReturnType<typeof app.inject>>> | undefined
-        try {
-          expect(
-            (
-              await app.inject({
-                method: 'POST',
-                url: '/v1/workspaces',
-                headers: alice,
-                payload: { ...RAM, id: 'w' },
-              })
-            ).statusCode,
-          ).toBe(201)
-          const discard = vi.spyOn(UploadStdin.prototype, 'discard')
-          const ws = app.registry.get('w').runner.ws
-          const loaded = ws.ensureSessionsLoaded.bind(ws)
-          let paused = false
-          vi.spyOn(ws, 'ensureSessionsLoaded').mockImplementation(async () => {
-            await loaded()
-            if (paused) return
-            paused = true
-            entered.release()
-            await release.wait
-          })
-          pending = Promise.resolve(
-            app.inject({
+      const app = jwtApp(),
+        entered = gate(),
+        release = gate(),
+        input = new PassThrough()
+      const alice = await bearer({ sub: 'alice' }),
+        bob = await bearer({ sub: 'bob' })
+      let pending: Promise<Awaited<ReturnType<typeof app.inject>>> | undefined
+      try {
+        expect(
+          (
+            await app.inject({
               method: 'POST',
-              url: '/v1/workspaces/w/shell',
-              headers: { ...alice, 'content-type': 'multipart/form-data; boundary=boundary' },
-              payload: input,
-            }),
-          )
-          input.write(
-            '--boundary\r\nContent-Disposition: form-data; name="request"\r\n\r\n{"command":"echo ALICE-LATE-SECRET"}\r\n--boundary\r\nContent-Disposition: form-data; name="stdin"\r\n\r\ninput',
-          )
-          await entered.wait
-          input.write(Buffer.alloc(2 * 1024 * 1024, 120))
-          expect(
-            (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
-              .statusCode,
-          ).toBe(200)
-          expect(
-            (
-              await app.inject({
-                method: 'POST',
-                url: '/v1/workspaces',
-                headers: bob,
-                payload: { ...RAM, id: 'w' },
-              })
-            ).statusCode,
-          ).toBe(201)
-          input.end('\r\n--boundary--\r\n')
-          release.release()
-          const response = await pending
-          expect(response.statusCode, response.body).toBe(404)
-          expect(discard).toHaveBeenCalled()
-          expect(app.jobs.list('w')).toEqual([])
-        } finally {
-          release.release()
-          input.end('\r\n--boundary--\r\n')
-          await pending
-          vi.restoreAllMocks()
-          await app.close()
-        }
-      })
+              url: '/v1/workspaces',
+              headers: alice,
+              payload: { ...RAM, id: 'w' },
+            })
+          ).statusCode,
+        ).toBe(201)
+        const discard = vi.spyOn(UploadStdin.prototype, 'discard')
+        const ws = app.registry.get('w').runner.ws
+        const loaded = ws.ensureSessionsLoaded.bind(ws)
+        let paused = false
+        vi.spyOn(ws, 'ensureSessionsLoaded').mockImplementation(async () => {
+          await loaded()
+          if (paused) return
+          paused = true
+          entered.release()
+          await release.wait
+        })
+        pending = Promise.resolve(
+          app.inject({
+            method: 'POST',
+            url: '/v1/workspaces/w/shell',
+            headers: { ...alice, 'content-type': 'multipart/form-data; boundary=boundary' },
+            payload: input,
+          }),
+        )
+        input.write(
+          '--boundary\r\nContent-Disposition: form-data; name="request"\r\n\r\n{"command":"echo ALICE-LATE-SECRET"}\r\n--boundary\r\nContent-Disposition: form-data; name="stdin"\r\n\r\ninput',
+        )
+        await entered.wait
+        input.write(Buffer.alloc(2 * 1024 * 1024, 120))
+        expect(
+          (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
+            .statusCode,
+        ).toBe(200)
+        expect(
+          (
+            await app.inject({
+              method: 'POST',
+              url: '/v1/workspaces',
+              headers: bob,
+              payload: { ...RAM, id: 'w' },
+            })
+          ).statusCode,
+        ).toBe(201)
+        input.end('\r\n--boundary--\r\n')
+        release.release()
+        const response = await pending
+        expect(response.statusCode, response.body).toBe(404)
+        expect(discard).toHaveBeenCalled()
+        expect(app.jobs.list('w')).toEqual([])
+      } finally {
+        release.release()
+        input.end('\r\n--boundary--\r\n')
+        await pending
+        vi.restoreAllMocks()
+        await app.close()
+      }
+    })
 
     it.each(['mcp', 'rpc', 'rpc_lookup', 'rpc_before_lookup'])(
       'refuses a retained %s adapter after deletion',

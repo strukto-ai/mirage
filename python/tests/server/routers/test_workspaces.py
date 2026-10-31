@@ -1611,7 +1611,9 @@ async def test_workspace_cancel_and_kill_reach_every_session(tmp_path):
         )
         for _ in range(500):
             jobs = app.state.jobs.list(wid)
-            if any(j.command == "sleep 30" and j.status == "running" for j in jobs):
+            if any(
+                j.command == "sleep 30" and j.status == "running" for j in jobs
+            ):
                 break
             await asyncio.sleep(0.01)
         assert (await client.post(f"/v1/workspaces/{wid}/cancel")).json() == {

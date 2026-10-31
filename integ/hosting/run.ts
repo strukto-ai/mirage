@@ -363,13 +363,15 @@ async function run(
           )
           assert.equal(settled, false, 'the substitution must still be held at its HTTP read')
         }
-        for (const tag of ['discard', 'keep']) {
-          queued.push(
-            submit<Result>(held, { command: `echo ${tag} > /work/${scenario.id}-${tag}` }),
-          )
-        }
+        const tags = ['discard', 'keep'].map((tag) => `echo ${tag} > /work/${scenario.id}-${tag}`)
+        for (const command of tags) queued.push(submit<Result>(held, { command }))
         const [discard, keep] = queued
         assert(discard && keep)
+        // Both have reached the held session's queue before one is dropped.
+        await poll(async () => {
+          const { pending } = await request<{ pending: string[] }>('GET', `/__integ/pending/${a}`)
+          return tags.every((command) => pending.includes(command)) ? true : undefined
+        })
         const [sameWorkspace, otherWorkspace, health] = await Promise.all([
           request<Result>('POST', `${path}?session_id=other`, {
             command: mounted ? 'python3 /work/probe.py other' : 'echo same-workspace',
@@ -440,8 +442,13 @@ async function run(
       } finally {
         gate?.release()
         await request('POST', `/__integ/release/${scenario.id}`, {})
+        // A line that runs on, such as a CPU loop, ends only when dropped.
+        line.drop()
         for (const request of queued) request.drop()
-        await Promise.allSettled([foreground, ...queued.map((request) => request.answer)])
+        await Promise.race([
+          Promise.allSettled([foreground, ...queued.map((request) => request.answer)]),
+          delay(10_000),
+        ])
         if (mounted) {
           for (const wid of [a, b]) await request('DELETE', `/v1/workspaces/${wid}`)
         }

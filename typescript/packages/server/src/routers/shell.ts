@@ -86,10 +86,7 @@ async function readPart(
  * begins, or the body ends without one; a `stdin` part then goes to the
  * line as it arrives.
  */
-async function readShellBody(
-  req: FastifyRequest,
-  capacity: number,
-): Promise<ShellUpload> {
+async function readShellBody(req: FastifyRequest, capacity: number): Promise<ShellUpload> {
   const contentType = req.headers['content-type'] ?? ''
   if (!contentType.startsWith('multipart/')) {
     return {

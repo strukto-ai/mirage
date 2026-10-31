@@ -405,7 +405,7 @@ class WorkerProxy:
                 "mirage: worker %d did not answer: %s", worker.index, exc
             )
             return UNAVAILABLE
-        if response.status_code < 300:
+        if response.status_code == 404:
             return None
         return answered(response)
 

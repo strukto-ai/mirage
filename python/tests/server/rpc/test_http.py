@@ -3,9 +3,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
 import pytest
 import uvicorn
+from fastapi import FastAPI
 
 from mirage.server import build_app
 

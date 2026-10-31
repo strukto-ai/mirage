@@ -36,6 +36,13 @@ app.route<{ Params: { key: string } }>({
 app.get<{ Params: { key: string } }>('/__integ/entered/:key', async (request) => ({
   entered: gates.has(request.params.key),
 }))
+// The lines a workspace's sessions have queued, which have not started.
+app.get<{ Params: { wid: string } }>('/__integ/pending/:wid', async (request) => ({
+  pending: app.jobs
+    .list(request.params.wid)
+    .filter((job) => job.status === 'pending')
+    .map((job) => job.command),
+}))
 app.post<{ Params: { key: string } }>('/__integ/release/:key', async (request) => {
   gate(request.params.key).release()
   return { released: true }

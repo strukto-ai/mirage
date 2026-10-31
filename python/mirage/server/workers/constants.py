@@ -19,9 +19,10 @@ READY_SECONDS = 60
 # How long a stopped worker has to exit before it is killed, past the
 # graceful timeout it drains for.
 EXIT_SECONDS = 10
-# A request that needs no workspace and answers only a signed-in caller:
-# what a worker says to it says whether the caller may go on.
-AUTH_PROBE = "/v1/workspaces"
+# A path no route serves, so it costs a worker nothing and names no
+# workspace a limit counts: a worker answers it 404 when the caller may go
+# on, and refuses it as any request otherwise.
+AUTH_PROBE = "/v1/-"
 # Headers that belong to one connection, which are not passed on.
 HOP_BY_HOP = frozenset(
     {
