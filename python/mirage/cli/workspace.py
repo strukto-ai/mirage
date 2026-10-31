@@ -193,9 +193,11 @@ def _format_history(items: list[dict[str, Any]]) -> str:
             ),
             item["session"],
             str(item.get("exit_code", "")),
-            item["command"]
-            if item["type"] == "command"
-            else f"{item['vfs']} {item['path']}",
+            (
+                item["command"]
+                if item["type"] == "command"
+                else f"{item['vfs']} {item['path']}"
+            ).replace("\n", "\\n"),
         ]
         for item in items
     ]

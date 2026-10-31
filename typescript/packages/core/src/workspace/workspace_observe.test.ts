@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import { STDOUT_TRUNCATE } from '../observe/log_entry.ts'
 import { RAMObserverStore } from '../observe/store.ts'
@@ -245,6 +245,22 @@ describe('Workspace.history', () => {
         'command',
       ])
       expect(await ws.history({ last: 0 })).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("reads a session's log alone", async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('echo hi > /data/a.txt')
+      ws.createSession('s2')
+      await ws.shell('cat /data/a.txt', { sessionId: 's2' })
+      const everyLog = vi.spyOn(ws.observer.store, 'readAll')
+      expect((await ws.history({ sessionId: 's2' })).map((e) => e.command)).toEqual([
+        'cat /data/a.txt',
+      ])
+      expect(everyLog).not.toHaveBeenCalled()
     } finally {
       await ws.close()
     }

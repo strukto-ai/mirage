@@ -206,12 +206,17 @@ export class Observer {
   }
 
   /**
-   * All recorded events across sessions, in timestamp order. Stable over
-   * the per-file line order, so events that share a millisecond (one
-   * line's ops plus its command entry) keep append order.
+   * All recorded events, in timestamp order: every session's, or only
+   * `session`'s, read from its own log alone. Stable over the per-file
+   * line order, so events that share a millisecond (one line's ops plus
+   * its command entry) keep append order.
    */
-  async events(): Promise<EventDict[]> {
-    const out = parseFiles(await this._store.readAll())
+  async events(session?: string): Promise<EventDict[]> {
+    const out = parseFiles(
+      await (session === undefined
+        ? this._store.readAll()
+        : this._store.readMatching(`/${session}.jsonl`)),
+    )
     out.sort((a, b) => eventTimestamp(a) - eventTimestamp(b))
     return out
   }

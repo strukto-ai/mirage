@@ -196,7 +196,10 @@ function formatHistory(items: HistoryEntry[]): string {
       new Date(e.timestamp).toISOString().slice(0, 19).replace('T', ' '),
       e.session,
       e.exit_code === undefined ? '' : String(e.exit_code),
-      e.type === 'command' ? (e.command ?? '') : `${e.vfs ?? ''} ${e.path ?? ''}`,
+      (e.type === 'command' ? (e.command ?? '') : `${e.vfs ?? ''} ${e.path ?? ''}`).replaceAll(
+        '\n',
+        '\\n',
+      ),
     ]),
   )
 }

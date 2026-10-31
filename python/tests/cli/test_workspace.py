@@ -252,3 +252,19 @@ def test_history_reads_as_one_row_per_entry():
         ["1970-01-01", "00:00:01", "s1", "0", "cat", "/d/a"],
     ]
     assert _format_history([]) == "No history."
+
+
+def test_a_multiline_command_stays_on_its_row():
+    table = _format_history(
+        [
+            {
+                "type": "command",
+                "session": "s1",
+                "timestamp": 0,
+                "command": "cat <<EOF\nhi\nEOF",
+                "exit_code": 0,
+            }
+        ]
+    )
+    assert table.splitlines()[1].split()[-1] == "<<EOF\\nhi\\nEOF"
+    assert len(table.splitlines()) == 2

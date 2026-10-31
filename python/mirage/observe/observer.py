@@ -257,8 +257,9 @@ class Observer:
             )
         )
 
-    async def events(self) -> list[dict[str, Any]]:
-        """All recorded events across sessions, in timestamp order.
+    async def events(self, session: str | None = None) -> list[dict[str, Any]]:
+        """All recorded events, in timestamp order: every session's, or
+        only ``session``'s, read from its own log alone.
 
         Timestamps are UTC epoch milliseconds. The sort is stable over
         the per-file line order, so events that share a millisecond
@@ -266,10 +267,18 @@ class Observer:
         were appended in; append order within a session file is the
         contract.
 
+        Args:
+            session (str | None): only this session's events.
+
         Returns:
             list[dict]: Parsed LogEntry dicts.
         """
-        out = _parse_files(await self._store.read_all())
+        files = (
+            await self._store.read_all()
+            if session is None
+            else await self._store.read_matching(f"/{session}.jsonl")
+        )
+        out = _parse_files(files)
         out.sort(key=lambda e: e.get("timestamp", 0))
         return out
 
