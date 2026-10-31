@@ -59,8 +59,13 @@ export function transport(server: Server, log: string[]): Transport {
     cwd: server.cwd ?? undefined,
     stderr: 'pipe',
   })
-  stdio.stderr?.on('data', (chunk: Buffer) => log.push(String(chunk)))
+  stdio.stderr?.on('data', (chunk: Buffer) => keepTail(log, String(chunk)))
   return stdio
+}
+
+/** Keep the last 20 lines of a server's stderr, all a failure prints. */
+function keepTail(log: string[], chunk: string): void {
+  log.splice(0, log.length, ...`${log.join('')}${chunk}`.split(/(?<=\n)/).slice(-20))
 }
 
 /** The leaf errors inside an aggregate error, one line each. */
