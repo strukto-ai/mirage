@@ -57,13 +57,64 @@ class WorkspaceRunner:
                 workspace's coroutines from this point forward.
         """
         self.ws = ws
+        self._start(f"mirage-ws-{id(ws):x}")
+
+    @classmethod
+    async def build(
+        cls, make: Coroutine[Any, Any, Workspace]
+    ) -> "WorkspaceRunner":
+        """Build a workspace on a loop of its own and pin it there.
+
+        Constructing its mounts, importing their backends or reading a
+        snapshot runs on the new runner's thread, so it never stalls the
+        caller's loop, and whatever the build binds to a loop is bound to
+        the one the workspace runs on.
+
+        Args:
+            make (Coroutine[Any, Any, Workspace]): builds the workspace;
+                it runs on the runner's loop.
+
+        Returns:
+            WorkspaceRunner: the runner holding the built workspace.
+
+        Raises:
+            Exception: whatever ``make`` raises, once the loop is stopped.
+        """
+        runner = cls.__new__(cls)
+        runner._start(f"mirage-ws-{id(runner):x}")
+
+        # The workspace is held as soon as it is built, so a caller
+        # cancelled while the result comes back still closes it.
+        async def keep() -> None:
+            runner.ws = await make
+
+        try:
+            await on_loop(keep(), runner.loop)
+        except BaseException:
+            runner._stopped = True
+            built: Workspace | None = getattr(runner, "ws", None)
+            if built is not None:
+                try:
+                    await on_loop(built.close(), runner.loop)
+                except Exception:
+                    logger.exception("closing a workspace whose build failed")
+            runner.loop.call_soon_threadsafe(runner.loop.stop)
+            await asyncio.to_thread(runner._thread.join)
+            runner.loop.close()
+            raise
+        return runner
+
+    def _start(self, name: str) -> None:
+        """Start the runner's loop on a thread of its own.
+
+        Args:
+            name (str): the thread's name.
+        """
         self.loop = asyncio.new_event_loop()
         self._stopped = False
         self._stopping: asyncio.Task[None] | None = None
         self._thread = threading.Thread(
-            target=self._run,
-            name=f"mirage-ws-{id(ws):x}",
-            daemon=True,
+            target=self._run, name=name, daemon=True
         )
         self._thread.start()
 

@@ -28,6 +28,7 @@ from mirage.server.inflight import InFlight
 from mirage.server.io_serde import io_result_to_dict
 from mirage.server.jobs import ExecutionTable
 from mirage.server.mcp.http import McpEndpoint
+from mirage.server.metrics import refused
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
@@ -116,6 +117,9 @@ class DaemonRpcServer(MirageRpcServer):
         async def run(scope: ExecutionScope) -> JsonValue:
             return await runner.call(line(scope))
 
+        if self._jobs.draining:
+            refused("shutting_down")
+            raise RpcError(RPC_INTERNAL_ERROR, "server is shutting down")
         if not self._entry.accepting_jobs:
             raise RpcError(RPC_INTERNAL_ERROR, "workspace not found")
         job = self._jobs.submit(

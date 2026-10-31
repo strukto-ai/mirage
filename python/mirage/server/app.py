@@ -13,16 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import functools
 import importlib
 import logging
 import os
+import signal
+import threading
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import cast
+from types import FrameType
+from typing import Any, cast
 
 from fastapi import FastAPI
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from mirage.concurrency.limiter import run_blocking
 from mirage.policy.base import Policy
@@ -39,16 +44,25 @@ from mirage.server.daemon_config import (
 from mirage.server.host_validation import (
     HostHeaderMiddleware,
     resolve_allowed_hosts,
+    resolve_forwarded_allow_ips,
 )
 from mirage.server.mcp.http import register_mcp_routes
+from mirage.server.metrics import register_metrics
 from mirage.server.paths import (
     mirage_home,
     pid_file_path,
     state_root_path,
 )
+from mirage.server.rate_limit import (
+    RateLimit,
+    RateLimitMiddleware,
+    resolve_rate_limits,
+)
 from mirage.server.registry import (
     OWNERS_PREFIX,
     WorkspaceRegistry,
+    resolve_graceful_timeout,
+    resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
 )
@@ -140,6 +154,98 @@ async def _start_ssh(app: FastAPI) -> SSHListener | None:
     return await start(app.state.registry, config)
 
 
+def _drain_on_signals(
+    app: FastAPI,
+) -> dict[signal.Signals, Callable[[int, FrameType | None], Any]]:
+    """Have SIGTERM and SIGINT drain the app before the server's own
+    handlers stop it, when ``graceful_timeout`` is set: running lines get
+    that long to finish while new workspaces are refused and
+    ``/v1/ready`` answers 503, then the server stops as it would have.
+    Whatever runs the app (uvicorn, a gunicorn worker, hypercorn) has
+    installed its handlers by the time the lifespan starts. A handler is
+    process-wide and only the main thread may set one, so nothing is
+    wrapped without a timeout or off the main thread.
+
+    Args:
+        app (FastAPI): the app.
+
+    Returns:
+        dict[signal.Signals, Callable[[int, FrameType | None], Any]]: the
+            handlers it wrapped, to put back as the app stops.
+    """
+    app.state.drain_task = None
+    if (
+        app.state.graceful_timeout <= 0
+        or threading.current_thread() is not threading.main_thread()
+    ):
+        return {}
+    loop = asyncio.get_running_loop()
+    wrapped = {}
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        stop = signal.getsignal(signum)
+        if callable(stop):
+            wrapped[signum] = stop
+            signal.signal(
+                signum, functools.partial(_on_signal, app, loop, stop)
+            )
+    return wrapped
+
+
+def _on_signal(
+    app: FastAPI,
+    loop: asyncio.AbstractEventLoop,
+    stop: Callable[[int, FrameType | None], Any],
+    signum: int,
+    frame: FrameType | None,
+) -> None:
+    """Start the drain on the app's loop; a signal handler may only hand
+    work to it.
+
+    Args:
+        app (FastAPI): the app.
+        loop (asyncio.AbstractEventLoop): the app's loop.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+        frame (FrameType | None): the interrupted frame.
+    """
+    loop.call_soon_threadsafe(_start_drain, app, stop, signum)
+
+
+def _start_drain(
+    app: FastAPI, stop: Callable[[int, FrameType | None], Any], signum: int
+) -> None:
+    """Drain once; a signal that arrives while it runs changes nothing.
+
+    Args:
+        app (FastAPI): the app.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+    """
+    if app.state.drain_task is None:
+        app.state.drain_task = asyncio.ensure_future(
+            _drain_then_stop(app, stop, signum)
+        )
+
+
+async def _drain_then_stop(
+    app: FastAPI, stop: Callable[[int, FrameType | None], Any], signum: int
+) -> None:
+    """Drain the app, then hand the signal to the server's handler.
+
+    Args:
+        app (FastAPI): the app.
+        stop (Callable[[int, FrameType | None], Any]): the handler the
+            server installed.
+        signum (int): the signal.
+    """
+    try:
+        await app.state.registry.drain(app.state.graceful_timeout)
+    finally:
+        stop(signum, None)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     listener = await _start_ssh(app)
@@ -152,19 +258,29 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if on_exit is not None
         else None
     )
+    wrapped = _drain_on_signals(app)
+    forget = register_metrics(app.state.registry)
     try:
         yield
     finally:
+        for signum, stop in wrapped.items():
+            signal.signal(signum, stop)
         if exit_task is not None:
             exit_task.cancel()
         if listener is not None:
             listener.close()
             await listener.wait_closed()
+        app.state.registry.draining = True
+        if app.state.graceful_timeout > 0:
+            await app.state.registry.drain(app.state.graceful_timeout)
         try:
             await app.state.mcp.close()
             await app.state.jobs.close()
         finally:
-            await app.state.registry.close_all()
+            try:
+                await app.state.registry.close_all()
+            finally:
+                forget()
             if app.state.pid_file is not None:
                 await run_blocking(_remove_pid_file, app.state.pid_file)
 
@@ -182,6 +298,10 @@ def build_app(
     max_workspaces: int | None = None,
     policies: Sequence[Policy] = (),
     policy_file: str | Path | None = None,
+    rate_limits: Sequence[RateLimit] | None = None,
+    forwarded_allow_ips: Sequence[str] | None = None,
+    max_sessions: int | None = None,
+    graceful_timeout: float | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -237,6 +357,27 @@ def build_app(
             answer the same way. ``None`` (default) reads
             ``$MIRAGE_POLICY_FILE`` or the ``policy_file`` config key,
             else runs none.
+        rate_limits (Sequence[RateLimit] | None): limits on the requests
+            the app answers, each keyed on the client address, the
+            account, the workspace, a header or a function of the
+            request; past one a request answers 429. ``None`` (default)
+            reads ``$MIRAGE_RATE_LIMITS`` or the ``rate_limits`` config
+            key, else sets none.
+        forwarded_allow_ips (Sequence[str] | None): the proxies whose
+            ``X-Forwarded-For`` names the client, addresses or networks,
+            ``*`` for any. ``None`` (default) reads
+            ``$MIRAGE_FORWARDED_ALLOW_IPS`` or the ``forwarded_allow_ips``
+            config key, else believes none.
+        max_sessions (int | None): the most sessions each workspace
+            holds; past it a new session answers 429. ``None`` (default)
+            reads ``$MIRAGE_MAX_SESSIONS`` or the ``max_sessions`` config
+            key, else sets no cap.
+        graceful_timeout (float | None): how long a shutdown (SIGTERM,
+            SIGINT, or the lifespan ending) lets running lines finish,
+            holding new ones and refusing new workspaces, before it
+            cancels the rest. ``None`` (default) reads
+            ``$MIRAGE_GRACEFUL_TIMEOUT`` or the ``graceful_timeout`` config key,
+            else 0, which drains nothing.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -245,6 +386,8 @@ def build_app(
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
+    limits = resolve_rate_limits(rate_limits)
+    app.add_middleware(RateLimitMiddleware, rate_limits=limits, signed_in=True)
     auth = auth_config if auth_config is not None else resolve_auth_config()
     if auth.mode == AuthMode.LOCAL and auth.local_token is None:
         logger.warning(
@@ -253,6 +396,10 @@ def build_app(
             "MIRAGE_AUTH_MODE to enforce authentication."
         )
     app.add_middleware(AuthMiddleware, config=auth)
+    app.add_middleware(RateLimitMiddleware, rate_limits=limits)
+    proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
+    if proxies:
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=proxies)
     app.state.allowed_hosts = hosts
     app.state.auth_config = auth
     app.state.started_at = time.time()
@@ -267,7 +414,9 @@ def build_app(
         max_workspaces=resolve_max_workspaces(max_workspaces),
         policies=policies,
         programs=resolve_policy_file(policy_file),
+        max_sessions=resolve_max_sessions(max_sessions),
     )
+    app.state.graceful_timeout = resolve_graceful_timeout(graceful_timeout)
     app.state.jobs = app.state.registry.jobs
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None

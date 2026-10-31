@@ -20,6 +20,7 @@ import json
 import lzma
 import os
 import tarfile
+import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -593,14 +594,16 @@ async def test_concurrent_creates_of_one_config_build_it_once(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_create_of_another_config_does_not_wait_behind_a_stuck_one():
-    entered = asyncio.Event()
-    release = asyncio.Event()
+    # The secret is read on the loop the workspace will run on, a thread of
+    # its own, so it is held with thread-safe events.
+    entered = threading.Event()
+    release = threading.Event()
 
     async def gated_token(
         config: HeldSourceConfig, ref: str
     ) -> ResolvedSecret:
         entered.set()
-        await release.wait()
+        await asyncio.to_thread(release.wait)
         return ResolvedSecret(fields={"credential": f"xoxb-{ref}"})
 
     register_secrets("gated-src", HeldSourceConfig, gated_token)
@@ -619,7 +622,7 @@ async def test_a_create_of_another_config_does_not_wait_behind_a_stuck_one():
                 "/v1/workspaces", json=_slack_body("gated-src", "stuck")
             )
         )
-        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert await asyncio.to_thread(entered.wait, 5)
         refused = await asyncio.wait_for(
             client.post("/v1/workspaces", json=other), timeout=5
         )
@@ -1063,13 +1066,15 @@ async def test_a_create_waits_out_a_load_of_the_same_id(
     # A slow release still frees the id before the load answers.
     secret = "s" * 32
     app = _jwt_app(secret, tmp_path / "state", snapshot_store=snapshot_store)
-    loading = asyncio.Event()
-    finish = asyncio.Event()
+    # The load runs on the loop its workspace would run on, a thread of its
+    # own, so it is held with thread-safe events.
+    loading = threading.Event()
+    finish = threading.Event()
     release = WorkspaceRegistry.release
 
     async def held_load(*args, **kwargs):
         loading.set()
-        await finish.wait()
+        await asyncio.to_thread(finish.wait)
         raise ValueError("not a snapshot")
 
     async def slow_release(self, workspace_id):
@@ -1082,7 +1087,7 @@ async def test_a_create_waits_out_a_load_of_the_same_id(
         load = asyncio.create_task(
             alice.post("/v1/workspaces/load", json={"key": "s.tar", "id": "w"})
         )
-        await loading.wait()
+        await asyncio.to_thread(loading.wait)
         r = await alice.post(
             "/v1/workspaces", json={**_minimal_config(), "id": "w"}
         )
@@ -1714,3 +1719,105 @@ async def test_clone_with_a_bad_capacity_override_is_a_bad_request():
         )
         assert r.status_code == 400, r.text
         assert "capacity must be a size like 100MB" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_server_shutting_down_refuses_new_workspaces():
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    app.state.registry.draining = True
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_minimal_config())
+    assert r.status_code == 503
+    assert r.json() == {"detail": "server is shutting down"}
+
+
+@pytest.mark.asyncio
+async def test_a_load_past_max_sessions_is_refused(monkeypatch):
+    seen: list[str] = []
+    monkeypatch.setattr(workspaces_router, "refused", seen.append)
+    free, _ = _make_app_with_short_grace(grace=10.0)
+    capped = build_app(idle_grace_seconds=10.0, max_sessions=2)
+    async with AsyncClient(
+        transport=ASGITransport(app=free), base_url="http://test"
+    ) as client:
+        wid = (
+            await client.post("/v1/workspaces", json=_minimal_config())
+        ).json()["id"]
+        for sid in ("a", "b"):
+            r = await client.post(
+                f"/v1/workspaces/{wid}/sessions", json={"session_id": sid}
+            )
+            assert r.status_code == 201, r.text
+        tar = await _download(client, wid)
+    async with AsyncClient(
+        transport=ASGITransport(app=capped), base_url="http://test"
+    ) as client:
+        r = await _upload(client, tar)
+    assert r.status_code == 400
+    assert r.json()["detail"] == (
+        "load failed: the snapshot holds 3 sessions, past max_sessions (2)"
+    )
+    assert seen == ["max_sessions"]
+    assert len(capped.state.registry) == 0
+    await free.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_reopen_past_max_sessions_is_refused(monkeypatch, tmp_path):
+    seen: list[str] = []
+    monkeypatch.setattr(workspaces_router, "refused", seen.append)
+    state = tmp_path / "state"
+    free = build_app(idle_grace_seconds=10.0, state_root=state)
+    capped = build_app(
+        idle_grace_seconds=10.0, state_root=state, max_sessions=2
+    )
+    body = {**_minimal_config(), "id": "keep"}
+    async with AsyncClient(
+        transport=ASGITransport(app=free), base_url="http://test"
+    ) as client:
+        assert (
+            await client.post("/v1/workspaces", json=body)
+        ).status_code == 201
+        for sid in ("a", "b"):
+            r = await client.post(
+                "/v1/workspaces/keep/sessions", json={"session_id": sid}
+            )
+            assert r.status_code == 201, r.text
+        assert (
+            await client.post("/v1/workspaces/keep/close")
+        ).status_code == 200
+    async with AsyncClient(
+        transport=ASGITransport(app=capped), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=body)
+    assert r.status_code == 400
+    assert r.json()["detail"] == (
+        "the saved workspace holds 3 sessions, past max_sessions (2)"
+    )
+    assert seen == ["max_sessions"]
+    assert len(capped.state.registry) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_create_stops_its_runner(monkeypatch):
+    before = _runner_threads()
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    monkeypatch.setattr(app.state.registry, "add", _cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await client.post("/v1/workspaces", json=_minimal_config())
+    assert _runner_threads() == before
+
+
+def _runner_threads() -> set[threading.Thread]:
+    return {
+        t for t in threading.enumerate() if t.name.startswith("mirage-ws-")
+    }
+
+
+def _cancelled(*args, **kwargs):
+    raise asyncio.CancelledError()

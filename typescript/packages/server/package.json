@@ -112,10 +112,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@fastify/rate-limit": "^10.0.0",
     "@fastify/websocket": "^11.3.3",
     "@modelcontextprotocol/client": "^2.3.0",
     "@modelcontextprotocol/server": "^2.3.0",
+    "@opentelemetry/api": "^1.10.0",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
     "fastify": "^5.12.6",
@@ -132,6 +132,7 @@
     }
   },
   "devDependencies": {
+    "@opentelemetry/sdk-metrics": "^3.0.0",
     "@types/node": "^22.0.0",
     "@types/ssh2": "^1.15.0",
     "@types/ws": "^8.18.1",

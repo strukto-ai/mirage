@@ -38,7 +38,10 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | `maxWorkspaces` | `MIRAGE_MAX_WORKSPACES`, else the `max_workspaces` key, else no cap | The most workspaces the app holds at once. A create, clone or load past it answers 503, and the ones it holds keep running. |
 | `policies` | none | The server's own [policies](/home/access/http#server-policies): each answers `preWorkspace` before a workspace is built, and is registered on every workspace the app builds. |
 | `policyFile` | `MIRAGE_POLICY_FILE`, else the `policy_file` key, else none | A file of policy programs that answer the same way. |
-| `network` | the `network` key, else no limit | What every workspace's connections are held to besides its own [`network`](/home/configuration#network). In `jwt` mode the cloud metadata addresses are refused too. |
+| `maxSessions` | `MIRAGE_MAX_SESSIONS`, else the `max_sessions` key, else no cap | The most sessions each workspace holds, its default session among them. A new session past it, over HTTP or SSH, answers 429. |
+| `rateLimits` | `MIRAGE_RATE_LIMITS`, else the `rate_limits` key, else none | A list of `{ key, rate }`. See [Rate limits](/home/access/http#rate-limits). |
+| `forwardedAllowIps` | `MIRAGE_FORWARDED_ALLOW_IPS`, else the `forwarded_allow_ips` key, else none | The proxies, addresses or networks, whose `X-Forwarded-For` names the client. `['*']` believes any. |
+| `gracefulTimeout` | `MIRAGE_GRACEFUL_TIMEOUT`, else the `graceful_timeout` key, else `0` | Seconds running lines get to finish on `app.close()` before they are cancelled. New work is refused meanwhile. |
 | `sshConfig` | from the `ssh_*` settings | The SSH server, opened when the app is ready; off unless a port is set. |
 | `snapshotStore` | none | An `S3Config`: the store a snapshot request may name a key in. Without one, a snapshot only goes back to the caller; the server never writes one to its own disk. |
 | `stateRoot` | under `$MIRAGE_HOME` | Where live state is kept. |
@@ -85,7 +88,6 @@ The protocol is the same on both servers. These are the differences in how this 
 - **No legacy `scp -O`.** Modern `scp` uses SFTP, which is served; the old SCP protocol is not.
 - **`authorized_keys` options.** `mirage-profile` and `mirage-account` are read: the first binds the key to a [profile](/home/access/ssh#auth-optional), the second opens only that [account](/home/access/http#accounts)'s workspaces. A key line carrying any other option (`from=`, `command=`, ...) is skipped with a warning, rather than accepted as if it had none.
 - **Terminal line limit.** 1024 bytes.
-- **Rate limit.** The server allows each client address 1000 requests a minute, and 60 a minute on `POST /v1/workspaces/load` and `POST /v1/workspaces/{id}/snapshot`. Requests exceeding the limit return HTTP 429 Too Many Requests.
 - **One event loop.** Every workspace shares Node's loop. Shell evaluation yields between steps, but a long synchronous step in a JavaScript callback or a CPU-heavy runtime holds every workspace until it returns, so run such work in a worker.
 
 ## Code map

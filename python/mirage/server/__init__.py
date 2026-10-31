@@ -18,13 +18,15 @@ from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.server.app import build_app
+    from mirage.server.rate_limit import RateLimit
     from mirage.server.registry import WorkspaceRegistry
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.server.app": ("build_app",),
+    "mirage.server.rate_limit": ("RateLimit",),
     "mirage.server.registry": ("WorkspaceRegistry",),
 }
 
-__all__ = ["WorkspaceRegistry", "build_app"]
+__all__ = ["RateLimit", "WorkspaceRegistry", "build_app"]
 
 __getattr__ = lazy_exports(__name__, _EXPORTS)

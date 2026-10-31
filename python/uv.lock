@@ -2437,6 +2437,20 @@ wheels = [
 ]
 
 [[package]]
+name = "limits"
+version = "5.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "deprecated" },
+    { name = "packaging" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/71/69/826a5d1f45426c68d8f6539f8d275c0e4fcaa57f0c017ec3100986558a41/limits-5.8.0.tar.gz", hash = "sha256:c9e0d74aed837e8f6f50d1fcebcf5fd8130957287206bc3799adaee5092655da", size = 226104, upload-time = "2026-02-05T07:17:35.859Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/98/cb5ca20618d205a09d5bec7591fbc4130369c7e6308d9a676a28ff3ab22c/limits-5.8.0-py3-none-any.whl", hash = "sha256:ae1b008a43eb43073c3c579398bd4eb4c795de60952532dc24720ab45e1ac6b8", size = 60954, upload-time = "2026-02-05T07:17:34.425Z" },
+]
+
+[[package]]
 name = "logfire-api"
 version = "4.32.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2658,8 +2672,10 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jsonschema" },
+    { name = "limits" },
     { name = "mcp" },
     { name = "multidict" },
+    { name = "opentelemetry-api" },
     { name = "orjson" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "python-multipart" },
@@ -2824,6 +2840,7 @@ dev = [
     { name = "google-auth-oauthlib" },
     { name = "moto", extra = ["s3", "server"] },
     { name = "mypy" },
+    { name = "opentelemetry-sdk" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -2866,6 +2883,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "lancedb", marker = "extra == 'lancedb'", specifier = ">=0.33.0" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=5.0.4" },
+    { name = "limits", specifier = ">=5.8.0" },
     { name = "mcp", specifier = ">=2.3.0,<3" },
     { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=2.0.18" },
     { name = "mfusepy", marker = "extra == 'fuse'", specifier = ">=1.0.0" },
@@ -2919,6 +2937,7 @@ requires-dist = [
     { name = "openai-agents", marker = "extra == 'openai'", specifier = ">=0.24.0" },
     { name = "opendal", marker = "extra == 'hf-buckets'", specifier = ">=0.47.1" },
     { name = "opendal", marker = "extra == 'nextcloud'", specifier = ">=0.47.1" },
+    { name = "opentelemetry-api", specifier = ">=1.45.1" },
     { name = "orjson", specifier = ">=3.11" },
     { name = "pydantic-ai-backend", extras = ["console"], marker = "extra == 'pydantic-ai'", specifier = ">=0.2.37" },
     { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=2.61.0" },
@@ -2948,6 +2967,7 @@ dev = [
     { name = "google-auth-oauthlib", specifier = ">=1.3.1" },
     { name = "moto", extras = ["s3", "server"], specifier = ">=5.1.22" },
     { name = "mypy", specifier = ">=2.3.0" },
+    { name = "opentelemetry-sdk", specifier = ">=1.45.1" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },

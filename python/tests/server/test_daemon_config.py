@@ -74,3 +74,16 @@ def test_validate_accepts_numeric_grace_and_rejects_string():
 def test_validate_leaves_network_to_each_workspace():
     with pytest.raises(DaemonConfigError, match="network"):
         validate_daemon_table({"network": False})
+
+
+def test_validate_accepts_the_server_operation_keys():
+    validate_daemon_table(
+        {
+            "rate_limits": "ip=1000/minute",
+            "forwarded_allow_ips": "10.0.0.0/8",
+            "max_sessions": 16,
+            "graceful_timeout": 25,
+        }
+    )
+    with pytest.raises(DaemonConfigError, match="graceful_timeout"):
+        validate_daemon_table({"graceful_timeout": "soon"})

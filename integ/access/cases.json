@@ -573,6 +573,7 @@
  },
  "server": {
   "health_without_token": 200,
+  "ready_without_token": [200, {"status": "ready"}],
   "unknown_host": 400,
   "mcp_methods": {
    "get": 405,

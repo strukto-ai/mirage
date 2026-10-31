@@ -19,6 +19,7 @@ import ssh2 from 'ssh2'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import { DaemonConfigError } from './daemon_config.ts'
+import * as metrics from './metrics.ts'
 import type { SSHConfig } from './ssh/config.ts'
 import { mintKeyPair } from './ssh/keys.ts'
 
@@ -68,6 +69,7 @@ describe('buildApp ssh entry point', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.doUnmock('ssh2')
+    vi.restoreAllMocks()
   })
 
   function sshConfigIn(dir: string, publicKey: string): SSHConfig {
@@ -122,8 +124,10 @@ describe('buildApp ssh entry point', () => {
     vi.doMock('ssh2', () => {
       throw new Error("Cannot find package 'ssh2'")
     })
+    const registered = vi.spyOn(metrics, 'registerMetrics')
     const app = buildApp({ pidFile: join(dir, 'daemon.pid'), sshConfig: sshConfigIn(dir, 'x') })
     await expect(app.ready()).rejects.toThrow(/needs ssh2/)
+    expect(registered).not.toHaveBeenCalled()
   })
 })
 
@@ -155,3 +159,29 @@ function sshExec(
     client.connect({ host: '127.0.0.1', port, username, privateKey })
   })
 }
+
+describe('buildApp drain', () => {
+  it('lets a running line finish before the app closes', async () => {
+    const app = buildApp({ gracefulTimeout: 5 })
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { id: 'd', config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } },
+    })
+    expect(created.statusCode).toBe(201)
+    const line = app.registry.get('d').runner.ws.shell('sleep 0.3; echo done')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await app.close()
+    expect(app.registry.draining).toBe(true)
+    expect((await line).stdoutText).toBe('done\n')
+  })
+})
+
+describe('buildApp close', () => {
+  it('marks the server shutting down on every close', async () => {
+    const app = buildApp()
+    expect(app.registry.draining).toBe(false)
+    await app.close()
+    expect(app.registry.draining).toBe(true)
+  })
+})

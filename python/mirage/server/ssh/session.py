@@ -14,6 +14,7 @@
 
 import asyncio
 import concurrent.futures
+import errno
 import logging
 import secrets
 import shlex
@@ -23,6 +24,7 @@ import asyncssh
 from asyncssh.connection import SSHConnection
 
 from mirage import Workspace
+from mirage.server.metrics import refused
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.ssh.constants import ACCOUNT_OPTION, PROFILE_OPTION
 from mirage.server.ssh.stream import (
@@ -199,6 +201,7 @@ async def open_session(
     session_id: str,
     env: Mapping[str, str] | None = None,
     profile: str | None = None,
+    registry: WorkspaceRegistry | None = None,
 ) -> None:
     """Create the session a channel runs as.
 
@@ -214,11 +217,22 @@ async def open_session(
         env (Mapping[str, str] | None): the login environment.
         profile (str | None): the profile the login key is bound to;
             None for the workspace default.
+        registry (WorkspaceRegistry | None): the server's workspaces,
+            whose shutdown and ``max_sessions`` refuse a new session.
 
     Raises:
         PolicyError: the workspace has no such profile.
+        OSError: EAGAIN while the server shuts down or the workspace is
+            at ``max_sessions``.
     """
     await ws.ensure_sessions_loaded()
+    if registry is not None and registry.draining:
+        refused("shutting_down")
+        raise OSError(errno.EAGAIN, "server is shutting down")
+    cap = registry.max_sessions if registry is not None else None
+    if cap is not None and len(ws.list_sessions()) >= cap:
+        refused("max_sessions")
+        raise OSError(errno.EAGAIN, f"workspace is at max_sessions ({cap})")
     session = ws.create_session(session_id, profile=profile)
     try:
         missing = {
@@ -487,7 +501,13 @@ async def open_login(
     try:
         profile = key_profile(process.channel.get_connection())
         await runner.call(
-            open_session(runner.ws, session_id, login_env(process), profile)
+            open_session(
+                runner.ws,
+                session_id,
+                login_env(process),
+                profile,
+                registry,
+            )
         )
     except Exception as exc:
         logger.warning(

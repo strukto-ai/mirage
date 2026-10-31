@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { refused } from '../metrics.ts'
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { JsonValue } from '@struktoai/mirage-core/types'
@@ -55,6 +56,10 @@ class DaemonRpcServer extends MirageRpcServer {
   ): Promise<JsonValue> {
     const ws = this.entry.runner.ws
     const sessionId = this.sessionId
+    if (this.jobs.draining) {
+      refused('shutting_down')
+      throw new RpcError(RPC_INTERNAL_ERROR, 'server is shutting down')
+    }
     if (!this.entry.acceptingJobs) throw new RpcError(RPC_INTERNAL_ERROR, 'workspace not found')
     const submitted = this.jobs.submit(
       this.entry.id,

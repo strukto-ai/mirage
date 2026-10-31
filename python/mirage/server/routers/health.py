@@ -16,6 +16,7 @@ import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from mirage.server.schemas import HealthResponse
@@ -35,6 +36,23 @@ async def health(request: Request) -> HealthResponse:
         status="ok",
         workspaces=len(request.app.state.registry),
         uptime_s=round(time.time() - started_at, 3),
+    )
+
+
+@router.get("/v1/ready")
+async def ready(request: Request) -> JSONResponse:
+    """Whether the server takes new workspaces: 503 while it drains for
+    shutdown or holds ``max_workspaces``, so a load balancer sends new
+    work elsewhere. ``/v1/health`` only says the process is up.
+    """
+    registry = request.app.state.registry
+    status = "ready"
+    if registry.draining:
+        status = "shutting_down"
+    elif not registry.has_room(own=False):
+        status = "full"
+    return JSONResponse(
+        {"status": status}, status_code=200 if status == "ready" else 503
     )
 
 

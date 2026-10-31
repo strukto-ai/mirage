@@ -27,6 +27,16 @@ export function registerHealthRoutes(app: FastifyInstance, deps: HealthDeps): vo
     workspaces: deps.registry.size(),
     uptime_s: Math.round((Date.now() / 1000 - deps.startedAt) * 1000) / 1000,
   }))
+  // Whether the server takes new workspaces: 503 while it drains for
+  // shutdown or holds maxWorkspaces, so a load balancer sends new work
+  // elsewhere. /v1/health only says the process is up.
+  app.get('/v1/ready', async (_req, reply) => {
+    const { registry } = deps
+    let status = 'ready'
+    if (registry.draining) status = 'shutting_down'
+    else if (!registry.hasRoom(false)) status = 'full'
+    return reply.status(status === 'ready' ? 200 : 503).send({ status })
+  })
   // The daemon serves every account, so an account may not stop it.
   app.post('/v1/shutdown', async (req, reply) => {
     if (req.account !== null) {

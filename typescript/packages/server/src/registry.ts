@@ -34,7 +34,12 @@ import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
 import { watchNetwork } from '@struktoai/mirage-node/io/network'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
-import { ENV_MAX_WORKSPACES, ENV_POLICY_FILE } from './env.ts'
+import {
+  ENV_GRACEFUL_TIMEOUT,
+  ENV_MAX_SESSIONS,
+  ENV_MAX_WORKSPACES,
+  ENV_POLICY_FILE,
+} from './env.ts'
 import { ExecutionTable } from './jobs.ts'
 import { mirageHome } from './paths.ts'
 
@@ -98,6 +103,8 @@ export interface WorkspaceRegistryOptions {
   policies?: readonly Policy[]
   /** The server's policy programs, by method, which answer the same way. */
   programs?: ProfileScripts
+  /** The most sessions each workspace holds, its default among them; null for no cap. */
+  maxSessions?: number | null
 }
 
 /**
@@ -110,22 +117,75 @@ export function resolveMaxWorkspaces(
   maxWorkspaces?: number | null,
   env: Record<string, string | undefined> = process.env,
 ): number | null {
-  let value: string | number | undefined = maxWorkspaces ?? undefined
+  return cap(maxWorkspaces, env, ENV_MAX_WORKSPACES, 'max_workspaces')
+}
+
+/**
+ * The most sessions each workspace holds, its default session among them:
+ * `maxSessions` when given, else `$MIRAGE_MAX_SESSIONS`, else the
+ * `max_sessions` key in config.toml's `[daemon]` table, else no cap.
+ * Mirrors Python's `resolve_max_sessions`.
+ */
+export function resolveMaxSessions(
+  maxSessions?: number | null,
+  env: Record<string, string | undefined> = process.env,
+): number | null {
+  return cap(maxSessions, env, ENV_MAX_SESSIONS, 'max_sessions')
+}
+
+/**
+ * A positive whole cap: `given`, else the `name` variable, else `key` in
+ * config.toml's `[daemon]` table, else null for no cap. Throws
+ * DaemonConfigError for anything but a positive whole number.
+ */
+function cap(
+  given: number | null | undefined,
+  env: Record<string, string | undefined>,
+  name: string,
+  key: string,
+): number | null {
+  let value: string | number | undefined = given ?? undefined
   if (value === undefined) {
-    const fromEnv = env[ENV_MAX_WORKSPACES]
+    const fromEnv = env[name]
+    value =
+      fromEnv !== undefined && fromEnv !== '' ? fromEnv : readDaemonTable(mirageHome(env))[key]
+    if (value === undefined || value === '') return null
+  }
+  const held = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : 0
+  if (!Number.isSafeInteger(held) || held < 1) {
+    throw new DaemonConfigError(
+      `${key} must be a positive whole number, got ${JSON.stringify(value)}`,
+    )
+  }
+  return held
+}
+
+/**
+ * How long a shutdown lets running lines finish before it cancels them:
+ * `gracefulTimeout` when given, else `$MIRAGE_GRACEFUL_TIMEOUT`, else the
+ * `graceful_timeout` key in config.toml's `[daemon]` table, else 0. Mirrors
+ * Python's `resolve_graceful_timeout`.
+ */
+export function resolveGracefulTimeout(
+  gracefulTimeout?: number | null,
+  env: Record<string, string | undefined> = process.env,
+): number {
+  let value: string | number | undefined = gracefulTimeout ?? undefined
+  if (value === undefined) {
+    const fromEnv = env[ENV_GRACEFUL_TIMEOUT]
     value =
       fromEnv !== undefined && fromEnv !== ''
         ? fromEnv
-        : readDaemonTable(mirageHome(env)).max_workspaces
-    if (value === undefined || value === '') return null
+        : readDaemonTable(mirageHome(env)).graceful_timeout
+    if (value === undefined || value === '') return 0
   }
-  const cap = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : 0
-  if (!Number.isSafeInteger(cap) || cap < 1) {
+  const seconds = typeof value === 'number' ? value : value.trim() === '' ? NaN : Number(value)
+  if (!Number.isFinite(seconds) || seconds < 0) {
     throw new DaemonConfigError(
-      `max_workspaces must be a positive whole number, got ${JSON.stringify(value)}`,
+      `graceful_timeout must be a number of seconds, 0 or more, got ${JSON.stringify(value)}`,
     )
   }
-  return cap
+  return seconds
 }
 
 /**
@@ -167,6 +227,7 @@ export class WorkspaceRegistry {
   accountsRequired: boolean
   private readonly owners: DiskRecordClient | null
   readonly maxWorkspaces: number | null
+  readonly maxSessions: number | null
   readonly policies: readonly Policy[]
   private readonly programs: ProfileScripts
   private readonly admissionPrograms: ScriptPolicy
@@ -174,6 +235,7 @@ export class WorkspaceRegistry {
 
   constructor(options: WorkspaceRegistryOptions = {}) {
     this.maxWorkspaces = options.maxWorkspaces ?? null
+    this.maxSessions = options.maxSessions ?? null
     this.policies = [...(options.policies ?? [])]
     this.programs = Object.fromEntries(
       Object.entries(options.programs ?? {}).filter(([method]) => method !== 'preWorkspace'),
@@ -234,12 +296,37 @@ export class WorkspaceRegistry {
    * Whether a workspace being built fits under `maxWorkspaces`, counting
    * those registered and every build in flight, its own among them, so
    * builds racing each other cannot pass it. A build that registered and
-   * still answers its request counts once. Mirrors Python's `has_room`.
+   * still answers its request counts once. `own` false asks whether one
+   * more would fit, as readiness does. Mirrors Python's `has_room`.
    */
-  hasRoom(): boolean {
+  hasRoom(own = true): boolean {
     if (this.maxWorkspaces === null) return true
     const ids = new Set([...this.entries.keys(), ...this.creates.keys()])
-    return ids.size <= this.maxWorkspaces
+    return ids.size + (own ? 0 : 1) <= this.maxWorkspaces
+  }
+
+  /**
+   * Whether the server is shutting down: no workspace is built and no line
+   * starts after it, and readiness answers that it is going. The flag lives
+   * on the job table, which every door that starts a line holds.
+   */
+  get draining(): boolean {
+    return this.jobs.draining
+  }
+
+  set draining(value: boolean) {
+    this.jobs.draining = value
+  }
+
+  /**
+   * Stop building workspaces and let running lines end. Each workspace
+   * holds new lines while its running ones finish, up to `seconds`; the
+   * lines still running then are cancelled. The workspaces stay registered
+   * for `closeAll` to stop. Mirrors Python's `drain`.
+   */
+  async drain(seconds: number): Promise<void> {
+    this.draining = true
+    await Promise.all([...this.entries.values()].map((entry) => settle(entry, seconds)))
   }
 
   /**
@@ -515,6 +602,36 @@ function workspaceContext(
  * Stop an entry's runner, closing the runtimes its server policy programs
  * ran on before the workspace goes. Mirrors Python's `_stop`.
  */
+/**
+ * Let an entry's running lines end within `seconds`, holding new ones
+ * meanwhile, and cancel those still running then.
+ */
+async function settle(entry: WorkspaceEntry, seconds: number): Promise<void> {
+  const ws = entry.runner.ws
+  // The deadline starts before a capture already under way is waited for,
+  // so a snapshot holding the workspace cannot stretch it.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => {
+      resolve(false)
+    }, seconds * 1000)
+  })
+  const quiet = ws
+    .quiesced(() => Promise.resolve(true), seconds)
+    .catch((err: unknown) => {
+      if ((err as { code?: unknown }).code !== 'EBUSY') throw err
+      console.debug(`drain: cancelling ${entry.id}'s lines:`, err)
+      return false
+    })
+  try {
+    if (await Promise.race([quiet, late])) return
+  } finally {
+    clearTimeout(timer)
+  }
+  await ws.cancel()
+  await quiet
+}
+
 async function stop(entry: WorkspaceEntry, drop = false): Promise<void> {
   if (entry.programs !== null) {
     try {
