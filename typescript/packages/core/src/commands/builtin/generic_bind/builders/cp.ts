@@ -17,7 +17,7 @@ import type { FileStat, NativeCopy, PathSpec, PrimitiveCopy } from '../../../../
 import { treeWalk } from '../../utils/tree.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
-import { cpGeneric, parseFlags } from '../../generic/cp.ts'
+import { cpGeneric, facts, parseFlags } from '../../generic/cp.ts'
 import { serves, typedLink, linksOf, mountsOf, dispatchOf, mountRoot } from '../../utils/links.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { enotsup } from '../../../../errors/fs.ts'
@@ -28,6 +28,7 @@ import { specOf } from '../../../spec/builtins.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'cp',
+  facts: facts,
   write: true,
   fn: async (_accessor, paths, _texts, ctx) => {
     const files = commandFiles(ctx, paths)

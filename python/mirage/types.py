@@ -126,6 +126,46 @@ class LsLinkMode(str, Enum):
     NONE = "none"
 
 
+class Follow(str, Enum):
+    """How a command resolves a command-line operand's last component
+    when it is a symlink: never (lstat(2): `rm`, `stat`), always
+    (open(2): `cat`, `stat -L`), or only once a stat shows it leads to a
+    directory (`ls` with no option that settles it)."""
+
+    NONE = "none"
+    LAST = "last"
+    DIRECTORY = "directory"
+
+
+@dataclass(frozen=True, slots=True)
+class LineFacts:
+    """What one command line does, as its own command reads its options:
+    the admission gate, the router and the fan-out ask this instead of
+    reading the options themselves.
+
+    Args:
+        follows (Follow): how its operands' last component resolves.
+        walks (bool): its traversal enters the mounts below its operands
+            (`find`, `du`, `grep -r`; not `du -x`).
+        reads_subtree (bool): it reads below the paths it names, whether
+            or not it crosses a mount (`du -x`, `tar -c`, `cp -r`).
+        writes (bool): it may change files; False only when its options
+            leave a writing command nothing to change (`sort` without
+            `-o`, `tar -t`).
+        subtree (bool): an operand is a whole subtree it moves or
+            removes (`rm`, `rmdir`, `mv`).
+        move_target (str | None): the directory a move names by option
+            (`mv -t DIR`), as typed; None when it names none.
+    """
+
+    follows: Follow = Follow.LAST
+    walks: bool = False
+    reads_subtree: bool = False
+    writes: bool = True
+    subtree: bool = False
+    move_target: str | None = None
+
+
 class FileType(str, Enum):
     """POSIX file type (the `st_mode` kind), the switch behavior branches on.
 

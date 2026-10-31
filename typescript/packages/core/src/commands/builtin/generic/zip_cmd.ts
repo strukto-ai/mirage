@@ -20,7 +20,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { PathSpec, StatFn } from '../../../types.ts'
+import { Follow, LineFacts, type PathSpec, type StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
@@ -146,4 +146,13 @@ export async function zipGeneric(
   const host = new StreamHost(reads, deps.stream, ctx, false)
   const io = new IOResult()
   return [hostedStream('zip', config, host, io, ctx.signal), io]
+}
+
+/**
+ * A zip line stores a link operand as given, its planner deciding whether to
+ * follow it (`-y`), and reads below a directory under `-r`. Mirrors Python's
+ * `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ follows: Follow.NONE, readsSubtree: fl.asBool('r') })
 }

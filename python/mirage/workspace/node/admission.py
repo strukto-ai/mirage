@@ -55,7 +55,7 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import Redirect, RedirectKind
-from mirage.types import PathSpec, Refusal
+from mirage.types import Follow, PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import path_visible
@@ -93,12 +93,10 @@ from mirage.workspace.lookup import (
     Consumer,
     WordPolicy,
     changes_files,
-    follows_last_component,
     is_tool,
-    line_flags,
+    line_facts,
     lookup,
     runs_as,
-    walks_mounts,
     word_policy,
 )
 from mirage.workspace.lookup.constants import (
@@ -209,6 +207,7 @@ def policy_scopes(
     name: str,
     args: list[str],
     operands: Sequence[str | PathSpec],
+    follows: bool,
     links: NamespaceLinks | None,
     cwd: str,
     implied: PathSpec | None = None,
@@ -223,7 +222,7 @@ def policy_scopes(
     /data/link`` reads ``/data/secret``, so a rule protecting the target
     has to see it, and a command-scoped rule never runs at the dispatcher
     where the resolved path would otherwise be checked. The follow
-    policy is the command's own (``follows_last_component``: ``rm``,
+    policy is the command's own (``LineFacts.follows``: ``rm``,
     ``mv``, ``ln``, ``stat``, ``tar`` ... act on the link itself, ``-L``
     turns following back on), the same one the router applies to the
     operands before the handler runs, so a rule sees exactly the path
@@ -243,6 +242,8 @@ def policy_scopes(
         name (str): command name.
         args (list[str]): the words after it, as typed.
         operands (Sequence[str | PathSpec]): the same words, classified.
+        follows (bool): whether the command may resolve an operand's
+            last component (``LineFacts.follows`` is not NONE).
         links (NamespaceLinks | None): the session's link table
             (``Namespace.session_links``); None where no link stands.
         cwd (str): session working directory.
@@ -267,7 +268,7 @@ def policy_scopes(
         followed = follow_paths(
             links,
             list(operands),
-            follows_last_component(name, [name, *args]),
+            follows,
             slash_follows=name not in SLASH_KEEPS_LAST,
         )
         seen = {p.virtual for p in scopes}
@@ -384,6 +385,7 @@ def _writes(
     name: str,
     args: list[str],
     operands: Sequence[str | PathSpec],
+    follows: bool,
     session: SessionState,
     registry: MountRegistry,
     namespace: Namespace | None,
@@ -413,6 +415,8 @@ def _writes(
         name (str): command name, expanded.
         args (list[str]): the words after it.
         operands (Sequence[str | PathSpec]): the same words, classified.
+        follows (bool): whether the command may resolve an operand's
+            last component.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the mounts and the
             CLI installs.
@@ -485,7 +489,7 @@ def _writes(
             for p in follow_paths(
                 namespace.session_links(session),
                 list(named),
-                follows_last_component(name, [name, *args]),
+                follows,
                 slash_follows=name not in SLASH_KEEPS_LAST,
             )
             if isinstance(p, PathSpec) and p.virtual not in typed
@@ -603,12 +607,15 @@ async def gate(
     # deadline lands before the policies are asked.
     budget = YieldBudget()
     await budget.run()
+    facts = line_facts(name, [name, *args])
+    follows = facts.follows is not Follow.NONE
     paths = _seen(
         session,
         policy_scopes(
             name,
             args,
             operands,
+            follows,
             (
                 namespace.session_links(session)
                 if namespace is not None and namespace.nodes
@@ -630,10 +637,8 @@ async def gate(
         unread,
     )
     await budget.run()
-    walks = walks_mounts(name, line_flags(name, [name, *args]))
-    await budget.run()
     write = _writes(
-        name, args, operands, session, registry, namespace, implied
+        name, args, operands, follows, session, registry, namespace, implied
     )
     await budget.run()
     ctx = CommandContext(
@@ -647,7 +652,7 @@ async def gate(
         tokens=tokens,
         program=program,
         tool=tool,
-        walks=walks,
+        walks=facts.walks,
         write=write,
         session=view,
         vfs=vfs,

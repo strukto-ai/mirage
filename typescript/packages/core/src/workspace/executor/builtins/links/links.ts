@@ -16,7 +16,7 @@ import { destKind } from '../../../../commands/builtin/generic/cp.ts'
 import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.ts'
 import { parseToKwargs } from '../../../../commands/spec/parser.ts'
 import type { FileStat } from '../../../../types.ts'
-import { FileType, PathSpec } from '../../../../types.ts'
+import { FileType, Follow, PathSpec } from '../../../../types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import {
   fsStrerror,
@@ -34,7 +34,7 @@ import { statOrNull } from '../../../mount/namespace/probe.ts'
 import type { Result } from '../types.ts'
 import type { FlagValue } from '../../../../commands/spec/types.ts'
 import type { FollowOperands, NamespaceLinks } from '../../../../view/types.ts'
-import { SLASH_KEEPS_LAST, followsLastComponent, lsLinkMode } from '../../../lookup/constants.ts'
+import { SLASH_KEEPS_LAST, lineFacts } from '../../../lookup/constants.ts'
 
 // Opt in by assigning a debug sink, as Python's module logger is off until
 // configured.
@@ -336,13 +336,13 @@ export function operandFollow(
   name: string,
   words: readonly (string | PathSpec)[],
 ): FollowOperands {
-  const lsMode = name === 'ls' ? lsLinkMode(words) : null
-  const followLast = lsMode !== null ? lsMode === 'all' : followsLastComponent(name, words)
+  const follows = lineFacts(name, words).follows
+  const followLast = follows === Follow.LAST
   const slashFollows = !SLASH_KEEPS_LAST.has(name)
   return async (items) => {
     if (links.symlinkTargets().size === 0) return [...items]
     const out = followPaths(links, [...items], followLast, slashFollows)
-    return lsMode === 'directory' ? followDirectoryLinks(links, dispatch, out) : out
+    return follows === Follow.DIRECTORY ? followDirectoryLinks(links, dispatch, out) : out
   }
 }
 

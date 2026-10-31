@@ -13,18 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
-from mirage.commands.builtin.generic.grep import recurses
 from mirage.commands.builtin.generic.ls import link_mode
-from mirage.commands.builtin.generic.rg import walks_descendant_mounts
 from mirage.commands.builtin.generic.sed import sed_writes
+from mirage.commands.builtin.generic_bind.factory import declared_facts
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
-from mirage.commands.spec.types import FlagValue
+from mirage.commands.spec.types import FlagValue, WordKind
 from mirage.shell.constants import BUILTIN_GROUP
 from mirage.shell.types import BuiltinGroup, ShellBuiltin
-from mirage.types import LsLinkMode, PathSpec
+from mirage.types import Follow, LineFacts, LsLinkMode, PathSpec
 
 # Bash builtins the parser accepts but the executor cannot honor; they
 # still route to the shell layer so the error names a capability gap.
@@ -92,36 +92,6 @@ KEYWORDS = frozenset(
 
 # ShellBuiltin subset handled through the job table in the executor.
 JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "disown", "ps"})
-
-# Commands with lstat semantics: they act on the symlink entry itself,
-# so dispatch must not rewrite their operands through the link table.
-# `stat` is here because GNU stat lstats, but it takes -L to dereference
-# after all, which route's `dereferences` reads back out of the command
-# line; `file`, `du` and `find` are the same shape.
-#
-# `tar` and `zip` are here for a different reason and deliberately carry
-# no DEREFERENCE_FLAGS entry: they dereference too, but their planner
-# has to be the one doing it. Rewriting the operand up here would hand
-# the planner a target it can no longer tell was reached through a link,
-# so `tar` could not store a symlink member at all and neither archiver
-# could apply its own cross-mount refusal or ELOOP wording. tar's -h and
-# zip's -y are read by the planner instead.
-NO_FOLLOW_COMMANDS = frozenset(
-    {
-        "rm",
-        "mv",
-        "ln",
-        "readlink",
-        "rmdir",
-        "unlink",
-        "stat",
-        "file",
-        "du",
-        "find",
-        "tar",
-        "zip",
-    }
-)
 
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS
 
@@ -258,26 +228,6 @@ INTERPRETER_NAMES = frozenset(
 # interpreters, and the process tools whose host programs see that
 # runtime's own processes rather than mirage's managed runners.
 CAPTURABLE_BUILTINS = INTERPRETER_NAMES | frozenset({"ps", "kill"})
-
-# Per-command option that turns a no-follow command back into a
-# following one (GNU's -L), then the one that takes it back, the last of
-# the two winning: `du -LP` does not follow, `du -PL` does, and so for
-# file's -L and -h (file 5.46). Each is the option's dest in the
-# command's spec, read off the parsed line, so a long spelling and its
-# abbreviation count as the short one does (`stat --deref`).
-DEREFERENCE_FLAGS: dict[str, tuple[str, ...]] = {
-    "stat": ("dereference",),
-    "file": ("L", "h"),
-    "du": ("L", "P"),
-}
-
-# find states its link policy as a leading option rather than a flag, and
-# the last one wins: `find -L -P x` does not follow, `find -P -L x` does.
-# -P (no follow) is the default; -H dereferences the start point only and
-# -L dereferences everything, so both follow the operand. Only the run of
-# options before the first operand counts, which is where GNU accepts
-# them.
-LAST_WINS_LINK_OPTIONS = {"find": {"-P": False, "-H": True, "-L": True}}
 
 # Options whose argument is a program, so the words after it are that
 # program's argv rather than the command's own: python3's -c and -m
@@ -418,71 +368,6 @@ def line_flags(
     return parse_to_kwargs(parse_command(spec, [*first, *argv], "/", runs))
 
 
-def walks_mounts(name: str, flags: Mapping[str, FlagValue]) -> bool:
-    """Whether a command's traversal enters the mounts below its
-    operands; a wrapper walks as the program it runs.
-
-    What the admission gate stamps as ``CommandContext.walks``, so a
-    mount rule can speak on an ancestor operand, and what the executor's
-    fan-out reruns in each descendant mount: one answer for both, so a
-    line the fan-out carries into a mount is one its rule was asked
-    about. ``du -x``, ``tree -x`` and ``rg --one-file-system`` keep to
-    the operand's mount. ``tar`` and ``zip`` walk too but refuse to cross
-    a mount boundary, so a mount rule has nothing to say about them.
-
-    Args:
-        name (str): command name.
-        flags (Mapping[str, FlagValue]): the parsed flags
-            (``line_flags``).
-    """
-    runs = EXEC_WRAPPERS.get(name, (name,))[0]
-    if runs == "find":
-        return True
-    if runs == "rg":
-        return walks_descendant_mounts(flags)
-    if runs not in ("du", "tree", "ls", "grep"):
-        return False
-    fl = FlagView(flags, spec=SPECS[runs])
-    if runs == "du":
-        return not fl.as_bool("one_file_system")
-    if runs == "tree":
-        return not fl.as_bool("x")
-    if runs == "ls":
-        return fl.as_bool("recursive")
-    return recurses(fl)
-
-
-def reads_subtrees(name: str, flags: Mapping[str, FlagValue]) -> bool:
-    """Whether a command reads below the paths its words name: every
-    walk, whether or not it crosses into the mounts below (``du -x``,
-    ``rg --one-file-system`` read their own mount's subtree), plus the
-    subtree readers that stop at a mount boundary (``tar -c``,
-    ``zip -r``, ``cp -r``, ``cp -a``).
-
-    What the whole-line gate reads: a runtime does its own walking where
-    no entry gate follows, so a path rule that scopes such a command
-    refuses the captured line instead of running it unguarded.
-
-    Args:
-        name (str): command name.
-        flags (Mapping[str, FlagValue]): the parsed flags
-            (``line_flags``).
-    """
-    runs = EXEC_WRAPPERS.get(name, (name,))[0]
-    if runs in ("find", "du", "tree", "rg"):
-        return True
-    if runs in ("grep", "ls"):
-        return walks_mounts(runs, flags)
-    if name not in ("tar", "zip", "cp"):
-        return False
-    fl = FlagView(flags, spec=SPECS[name])
-    if name == "tar":
-        return fl.as_bool("create")
-    if name == "zip":
-        return fl.as_bool("r")
-    return any(fl.as_bool(d) for d in ("r", "recursive", "archive"))
-
-
 # The builtins whose declared write ``changes_files`` narrows by line.
 _NARROWED_WRITES = frozenset(
     {
@@ -573,55 +458,6 @@ def changes_files(name: str, words: Sequence[str | PathSpec]) -> bool:
 SLASH_KEEPS_LAST = {"tar", "rm", "rmdir", "mv", "unlink", "mkdir"}
 
 
-def _last_link_option(
-    words: list[str | PathSpec], policy: dict[str, bool]
-) -> bool:
-    """Resolve a leading run of link options to its last one's mode.
-
-    Args:
-        words (list[str | PathSpec]): the command's raw words, name first.
-        policy (dict[str, bool]): option word to the follow mode it sets.
-    """
-    follows = False
-    for word in words[1:]:
-        if not isinstance(word, str) or word not in policy:
-            break
-        follows = policy[word]
-    return follows
-
-
-def dereferences(name: str, words: list[str | PathSpec]) -> bool:
-    """Whether a no-follow command was asked to dereference after all.
-
-    Args:
-        name (str): command name.
-        words (list[str | PathSpec]): the command's raw words.
-    """
-    policy = LAST_WINS_LINK_OPTIONS.get(name)
-    if policy is not None:
-        return _last_link_option(words, policy)
-    options = DEREFERENCE_FLAGS.get(name)
-    if options is None:
-        return False
-    fl = FlagView(line_flags(name, words), spec=SPECS[name])
-    return fl.typed_order(*options)[-1:] == [options[0]]
-
-
-def ls_link_mode(words: Sequence[str | PathSpec]) -> LsLinkMode:
-    """Which command-line links an ``ls`` line resolves before it lists.
-
-    Read off the parsed line rather than scanned, because ls's own rule
-    turns on the last of several options, some of them valued and any of
-    them abbreviated (``--cl``, ``--indicator-style=classify``); the rule
-    itself is the ls generic's ``link_mode``.
-
-    Args:
-        words (Sequence[str | PathSpec]): the command's raw words, name
-            first.
-    """
-    return link_mode(FlagView(line_flags("ls", words), spec=SPECS["ls"]))
-
-
 # Commands that decide the last component for themselves, so the router
 # resolves only the prefix for them. chmod/chown/chgrp read -h off their
 # own line (GNU `chgrp -h ops link` writes the link, not its target),
@@ -648,24 +484,79 @@ SELF_RESOLVING = {
 }
 
 
-def follows_last_component(name: str, words: list[str | PathSpec]) -> bool:
-    """Whether a command resolves its operand's final component itself.
+def _ls_facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """An ls line resolves the command-line links ``link_mode`` says, and
+    walks, and reads, below its operands under ``-R``.
 
-    The directory prefix is resolved for every command, so this is only
-    about the last one: open(2) semantics (True) against lstat(2)
-    (False). A trailing slash overrides a False per operand, which is
-    ``follow_paths``' job because the slash is a property of the operand
-    rather than of the command.
+    Args:
+        fl (FlagView): the ls flag view.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    recursive = fl.as_bool("recursive")
+    return LineFacts(
+        follows=_LS_FOLLOWS[link_mode(fl)],
+        walks=recursive,
+        reads_subtree=recursive,
+    )
+
+
+_LS_FOLLOWS = {
+    LsLinkMode.ALL: Follow.LAST,
+    LsLinkMode.DIRECTORY: Follow.DIRECTORY,
+    LsLinkMode.NONE: Follow.NONE,
+}
+
+
+def facts_of(
+    name: str,
+    flags: Mapping[str, FlagValue],
+    operands: Sequence[str | PathSpec],
+) -> LineFacts:
+    """What a line of a builtin does, read off its parsed flags by the
+    command's own facts; a wrapper does what the program it runs does.
 
     Args:
         name (str): command name.
-        words (list[str | PathSpec]): the command's raw words.
+        flags (Mapping[str, FlagValue]): the line's parsed flags.
+        operands (Sequence[str | PathSpec]): its operands, in order.
     """
-    if name == "ls":
-        # A link to a directory is resolved only once a stat has shown
-        # where it leads, which the router does itself; what this answers
-        # is whether the line may resolve one at all.
-        return ls_link_mode(words) is not LsLinkMode.NONE
+    runs = EXEC_WRAPPERS.get(name, (name,))[0]
+    declared = _ls_facts if runs == "ls" else declared_facts(runs)
+    if isinstance(declared, LineFacts):
+        facts = declared
+    else:
+        facts = declared(FlagView(flags, spec=SPECS[runs]), operands)
     if name in SELF_RESOLVING:
-        return False
-    return name not in NO_FOLLOW_COMMANDS or dereferences(name, words)
+        return replace(facts, follows=Follow.NONE)
+    return facts
+
+
+def line_facts(name: str, words: Sequence[str | PathSpec]) -> LineFacts:
+    """What a command line does, read off its words by the command's own
+    grammar and facts (``facts_of``), so an abbreviation, a long
+    spelling and an option's attached value read as the handler will
+    read them: ``grep --recur`` and ``grep -d recurse`` walk,
+    ``grep -ephrase`` does not. A command that decides its operand's
+    last component itself (``SELF_RESOLVING``) follows no link.
+
+    Args:
+        name (str): command name.
+        words (Sequence[str | PathSpec]): the command's words, name
+            first; an operand classified as a path carries whether it is
+            a pattern still to expand.
+    """
+    runs, *first = EXEC_WRAPPERS.get(name, (name,))
+    spec = SPECS.get(runs)
+    if spec is None or (
+        runs != "ls" and isinstance(declared_facts(runs), LineFacts)
+    ):
+        return facts_of(name, {}, ())
+    typed = [*first, *words[1:]]
+    argv = [w if isinstance(w, str) else w.raw_path for w in typed]
+    parsed = parse_command(spec, argv, "/", runs)
+    operands = [
+        typed[i]
+        for i, role in enumerate(parsed.word_roles)
+        if role is WordKind.OPERAND
+    ]
+    return facts_of(name, parse_to_kwargs(parsed), operands)

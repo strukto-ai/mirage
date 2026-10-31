@@ -17,7 +17,7 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { mountKey } from '../../../../utils/key_prefix.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { PathSpec } from '../../../../types.ts'
+import { Follow, LineFacts, PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { byteView } from '../../../../shell/bytes.ts'
@@ -208,4 +208,13 @@ export async function tarGeneric(
   }
   const io = new IOResult()
   return [hostedStream('tar', config, host, io, ctx.signal), io]
+}
+
+/**
+ * A tar line hands a link operand to its planner as given, which reads `-h`
+ * itself, and reads below what it archives under `-c`. Mirrors Python's
+ * `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ follows: Follow.NONE, readsSubtree: fl.asBool('create') })
 }

@@ -16,7 +16,7 @@ import { GzipDataError, gunzipStream } from '../../../utils/compress.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { MountView } from '../../../view/types.ts'
-import { FileStat, FileType, type PathSpec } from '../../../types.ts'
+import { FileStat, FileType, LineFacts, type PathSpec } from '../../../types.ts'
 import { enoent, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { WalkLimitError } from '../../../errors/types.ts'
@@ -701,16 +701,6 @@ export function printedPath(path: string, f: RgFlags): string {
   return f.pathSeparator === null ? path : path.replaceAll('/', f.pathSeparator)
 }
 
-// Whether a search walks into the mounts below its operand: not for
-// --type-list, which reads no path, nor under --one-file-system.
-export function walksDescendantMounts(bag: Record<string, FlagValue>): boolean {
-  const fl = new FlagView(bag, specOf('rg'))
-  return !(
-    fl.asBool('type_list') ||
-    last(fl, 'one_file_system', 'no_one_file_system') === 'one_file_system'
-  )
-}
-
 export function betweenFiles(f: RgFlags): string {
   return decodeText(lead(f, null, true, false)[0])
 }
@@ -1083,4 +1073,17 @@ export function labelFlags(bag: Record<string, FlagValue>): Record<string, FlagV
   flagOccurrences(flags).push(...flagOccurrences(bag))
   if (filenameFlag(new FlagView(bag, specOf('rg'))) !== 'no_filename') flags.with_filename = true
   return flags
+}
+
+/**
+ * An rg line reads below every path it names, and walks into the mounts
+ * below them unless it lists its types (`--type-list`, which reads no path)
+ * or keeps to one filesystem. Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  const walks = !(
+    fl.asBool('type_list') ||
+    last(fl, 'one_file_system', 'no_one_file_system') === 'one_file_system'
+  )
+  return new LineFacts({ walks, readsSubtree: true })
 }

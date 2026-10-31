@@ -14,7 +14,7 @@
 
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { PathSpec } from '../../../types.ts'
+import { Follow, LineFacts, PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
 import { pathsScoped } from '../../../view/namespace_view.ts'
@@ -644,4 +644,17 @@ function respellUnder(virtual: string, paths: readonly PathSpec[]): string {
     }
   }
   return virtual
+}
+
+/**
+ * A du line reads below every path it names, walks into the mounts below
+ * unless `-x`, and follows a link operand when the last of `-L` and `-P` is
+ * `-L`. Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({
+    follows: fl.typedOrder('L', 'P').at(-1) === 'L' ? Follow.LAST : Follow.NONE,
+    walks: !fl.asBool('one_file_system'),
+    readsSubtree: true,
+  })
 }

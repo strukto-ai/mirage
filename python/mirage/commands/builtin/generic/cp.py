@@ -67,6 +67,7 @@ from mirage.types import (
     CopyStrategy,
     FileStat,
     FileType,
+    LineFacts,
     NativeCopy,
     NativeMove,
     PathSpec,
@@ -2392,4 +2393,19 @@ async def cp_generic(
     return output.encode() if output else None, IOResult(
         stderr=stderr_of(errors),
         exit_code=1 if len(errors) > warned + len(accepted) else 0,
+    )
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A cp line reads below its sources when it copies recursively
+    (``-r``, ``-R``, ``-a``).
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(
+        reads_subtree=any(
+            fl.as_bool(dest) for dest in ("r", "recursive", "archive")
+        )
     )

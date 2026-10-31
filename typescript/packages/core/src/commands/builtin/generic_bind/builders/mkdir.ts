@@ -30,7 +30,7 @@ import {
   nearestAncestor,
 } from '../../utils/paths.ts'
 import type { LinkView } from '../../../../view/types.ts'
-import { FileType, PathSpec, type WalkProbe } from '../../../../types.ts'
+import { FileType, Follow, LineFacts, PathSpec, type WalkProbe } from '../../../../types.ts'
 import { CycleError, norm, parent, walkNodes } from '../../../../utils/path.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
@@ -262,6 +262,7 @@ const mkdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'mkdir',
+  facts: new LineFacts({ follows: Follow.NONE }),
   write: true,
   fn: mkdir,
 }

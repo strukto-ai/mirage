@@ -16,7 +16,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { LINK_TARGET_KEY, FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { LINK_TARGET_KEY, FileType, LineFacts, PathSpec, type FileStat } from '../../../types.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { enoent, isMissError, isWalkError } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
@@ -395,4 +395,12 @@ export async function treeGeneric(
       stderr: stopped.length > 0 ? formatRecords(stopped) : null,
     }),
   ]
+}
+
+/**
+ * A tree line reads below every path it names and walks into the mounts below
+ * unless `-x`. Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ walks: !fl.asBool('x'), readsSubtree: true })
 }

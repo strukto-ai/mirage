@@ -42,7 +42,7 @@ import type { ValueType } from '../../commands/spec/types.ts'
 import { getRedirects, literalWord } from '../../shell/helpers.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import type { Redirect, TSNodeLike } from '../../shell/types.ts'
-import { PathSpec, type Refusal } from '../../types.ts'
+import { Follow, PathSpec, type Refusal } from '../../types.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
 import { resolvePath } from '../../utils/path.ts'
@@ -76,12 +76,10 @@ import {
   SLASH_KEEPS_LAST,
   WordPolicy,
   changesFiles,
-  followsLastComponent,
   isTool,
-  lineFlags,
+  lineFacts,
   lookup,
   runsAs,
-  walksMounts,
   wordPolicy,
 } from '../lookup/index.ts'
 import type { SessionState } from '../session/session.ts'
@@ -189,10 +187,10 @@ export class Admitted implements EntryGate {
  * follows them: on the browser fallback the ambient view folds every live
  * session's hides, and a peer hiding the link must not keep its target from
  * the rule; null where no link stands. The follow policy is the command's own
- * (`followsLastComponent`: rm, mv, ln, stat, tar ... act on the link
- * itself, `-L` turns following back on), the same one the router
- * applies to the operands before the handler runs, so a rule sees
- * exactly the path the command will touch. A loop is left to that later
+ * (`follows`, whether `LineFacts.follows` is not NONE: rm, mv, ln, stat,
+ * tar ... act on the link itself, `-L` turns following back on), the same
+ * one the router applies to the operands before the handler runs, so a rule
+ * sees exactly the path the command will touch. A loop is left to that later
  * step to report; here the typed paths stand. Then the operand a bare
  * `ls`/`find`/`du`/`tree`/`grep -r` implies, the working directory,
  * which the executor injects after the gate and which a rule on that
@@ -208,6 +206,7 @@ export function policyScopes(
   name: string,
   args: readonly string[],
   operands: readonly (string | PathSpec)[],
+  follows: boolean,
   links: NamespaceLinks | null,
   cwd: string,
   implied: PathSpec | null = null,
@@ -228,12 +227,7 @@ export function policyScopes(
     scopes.unshift(toScope(resolvePath(name, cwd)))
   }
   if (links !== null && operands.length > 0) {
-    const followed = followPaths(
-      links,
-      [...operands],
-      followsLastComponent(name, [name, ...args]),
-      !SLASH_KEEPS_LAST.has(name),
-    )
+    const followed = followPaths(links, [...operands], follows, !SLASH_KEEPS_LAST.has(name))
     const seen = new Set(scopes.map((p) => p.virtual))
     for (const item of followed) {
       if (item instanceof PathSpec && !seen.has(item.virtual)) {
@@ -419,6 +413,7 @@ function writes(
   name: string,
   args: readonly string[],
   operands: readonly (string | PathSpec)[],
+  follows: boolean,
   session: SessionState,
   registry: MountRegistry,
   namespace: Namespace | null,
@@ -473,7 +468,7 @@ function writes(
     const followed = followPaths(
       namespace.sessionLinks(session),
       [...named],
-      followsLastComponent(name, [name, ...args]),
+      follows,
       !SLASH_KEEPS_LAST.has(name),
     )
     for (const p of followed) {
@@ -542,12 +537,15 @@ export async function gate(
   // lands before the policies are asked.
   const budget = new YieldBudget(callerSignal())
   await budget.run()
+  const facts = lineFacts(name, [name, ...args])
+  const follows = facts.follows !== Follow.NONE
   const paths = seen(
     session,
     policyScopes(
       name,
       args,
       operands,
+      follows,
       namespace !== null && namespace.nodes.size > 0 ? namespace.sessionLinks(session) : null,
       session.cwd,
       implied,
@@ -572,9 +570,7 @@ export async function gate(
     unread,
   )
   await budget.run()
-  const walks = walksMounts(name, lineFlags(name, [name, ...args]))
-  await budget.run()
-  const write = writes(name, args, operands, session, registry, namespace, implied)
+  const write = writes(name, args, operands, follows, session, registry, namespace, implied)
   await budget.run()
   const ctx: CommandContext = {
     line,
@@ -587,7 +583,7 @@ export async function gate(
     tokens,
     program,
     tool,
-    walks,
+    walks: facts.walks,
     write,
     // The methods read the session this command is judged in, which for a
     // line explain walks is the walked one, not the stored one.

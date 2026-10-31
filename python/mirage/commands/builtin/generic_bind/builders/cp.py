@@ -18,7 +18,7 @@ from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.cp import cp_generic as generic_cp
-from mirage.commands.builtin.generic.cp import parse_flags
+from mirage.commands.builtin.generic.cp import facts, parse_flags
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
 from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
@@ -181,4 +181,4 @@ async def cp(
     )
 
 
-BUILDER = GenericCommand("cp", cp, write=True)
+BUILDER = GenericCommand("cp", cp, write=True, facts=facts)

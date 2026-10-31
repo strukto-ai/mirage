@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fileGeneric } from '../../generic/file.ts'
+import { facts, fileGeneric } from '../../generic/file.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -31,6 +31,7 @@ const file: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'file',
+  facts: facts,
   read: true,
   fn: file,
 }

@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.rg import rg_generic
+from mirage.commands.builtin.generic.rg import facts, rg_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.generic_bind.search import search_reads
@@ -54,4 +54,4 @@ async def rg(
     )
 
 
-BUILDER = GenericCommand("rg", rg, read=True)
+BUILDER = GenericCommand("rg", rg, read=True, facts=facts)

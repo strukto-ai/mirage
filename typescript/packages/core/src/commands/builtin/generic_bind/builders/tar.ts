@@ -16,7 +16,7 @@ import type { FileStat, PathSpec } from '../../../../types.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
-import { parseFlags, tarGeneric } from '../../generic/tar/tar.ts'
+import { facts, parseFlags, tarGeneric } from '../../generic/tar/tar.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
@@ -61,6 +61,7 @@ const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'tar',
+  facts: facts,
   write: true,
   fn: tar,
 }

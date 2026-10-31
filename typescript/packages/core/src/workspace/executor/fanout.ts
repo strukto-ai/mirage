@@ -34,7 +34,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Files, readerOf } from '../files.ts'
-import { walksMounts } from '../lookup/index.ts'
+import { factsOf } from '../lookup/index.ts'
 
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 
@@ -96,7 +96,7 @@ export function shouldFanOut(
   // A refused operand names nothing; every valid operand may own a subtree.
   if (!paths.some((p) => p.walkError === null && registry.descendantMounts(p.virtual).length > 0))
     return false
-  return COMPOSED.has(cmdName) && walksMounts(cmdName, flagKwargs)
+  return COMPOSED.has(cmdName) && factsOf(cmdName, flagKwargs, paths).walks
 }
 
 /**

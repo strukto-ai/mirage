@@ -30,7 +30,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import NativeMove, PathSpec
+from mirage.types import Follow, LineFacts, NativeMove, PathSpec
 
 
 async def mv(
@@ -72,4 +72,6 @@ async def mv(
     )
 
 
-BUILDER = GenericCommand("mv", mv, write=True)
+BUILDER = GenericCommand(
+    "mv", mv, write=True, facts=LineFacts(follows=Follow.NONE)
+)

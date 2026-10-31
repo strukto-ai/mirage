@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileType, type FileStat, type PathSpec } from '../../../../types.ts'
+import { FileType, Follow, LineFacts, type FileStat, type PathSpec } from '../../../../types.ts'
 import { walk } from '../../generic/cp.ts'
 import { removeTree, rmWithoutOperands } from '../../generic/rm_cmd.ts'
 import { formatOptionalRecords } from '../../utils/output.ts'
@@ -166,6 +166,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'rm',
+  facts: new LineFacts({ follows: Follow.NONE }),
   write: true,
   fn: rm,
 }

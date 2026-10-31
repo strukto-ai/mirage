@@ -15,7 +15,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import prefix_aggregate
-from mirage.commands.builtin.generic.grep import grep_generic
+from mirage.commands.builtin.generic.grep import facts, grep_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.generic_bind.search import search_reads
@@ -51,4 +51,6 @@ async def grep(
     )
 
 
-BUILDER = GenericCommand("grep", grep, aggregate=prefix_aggregate, read=True)
+BUILDER = GenericCommand(
+    "grep", grep, aggregate=prefix_aggregate, read=True, facts=facts
+)

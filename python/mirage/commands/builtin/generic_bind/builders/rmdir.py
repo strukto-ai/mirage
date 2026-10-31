@@ -38,7 +38,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType, Follow, LineFacts, PathSpec
 from mirage.utils.path import CycleError, resolve_path
 from mirage.view.types import LinkView
 
@@ -203,4 +203,6 @@ async def rmdir(
     return output, operands_io(format_records(errors))
 
 
-BUILDER = GenericCommand("rmdir", rmdir, write=True)
+BUILDER = GenericCommand(
+    "rmdir", rmdir, write=True, facts=LineFacts(follows=Follow.NONE)
+)

@@ -627,6 +627,66 @@ export type CopyDeref = 'always' | 'command_line' | 'never'
 // a long format, `-F`).
 export type LsLinkMode = 'all' | 'directory' | 'none'
 
+/**
+ * How a command resolves a command-line operand's last component when it is
+ * a symlink: never (lstat(2): `rm`, `stat`), always (open(2): `cat`,
+ * `stat -L`), or only once a stat shows it leads to a directory (`ls` with no
+ * option that settles it).
+ */
+export const Follow = Object.freeze({
+  NONE: 'none',
+  LAST: 'last',
+  DIRECTORY: 'directory',
+} as const)
+
+export type Follow = (typeof Follow)[keyof typeof Follow]
+
+/**
+ * What one command line does, as its own command reads its options: the
+ * admission gate, the router and the fan-out ask this instead of reading the
+ * options themselves. `follows` is how its operands' last component
+ * resolves; `walks` that its traversal enters the mounts below its operands
+ * (`find`, `du`, `grep -r`; not `du -x`); `readsSubtree` that it reads below
+ * the paths it names, whether or not it crosses a mount (`du -x`, `tar -c`,
+ * `cp -r`); `writes` that it may change files, false only when its options
+ * leave a writing command nothing to change (`sort` without `-o`, `tar -t`);
+ * `subtree` that an operand is a whole subtree it moves or removes (`rm`,
+ * `rmdir`, `mv`); `moveTarget` the directory a move names by option
+ * (`mv -t DIR`), as typed, null when it names none. Mirrors Python's
+ * `LineFacts`.
+ */
+export class LineFacts {
+  readonly follows: Follow
+  readonly walks: boolean
+  readonly readsSubtree: boolean
+  readonly writes: boolean
+  readonly subtree: boolean
+  readonly moveTarget: string | null
+
+  constructor(init: Partial<Omit<LineFacts, 'with'>> = {}) {
+    this.follows = init.follows ?? Follow.LAST
+    this.walks = init.walks ?? false
+    this.readsSubtree = init.readsSubtree ?? false
+    this.writes = init.writes ?? true
+    this.subtree = init.subtree ?? false
+    this.moveTarget = init.moveTarget ?? null
+    Object.freeze(this)
+  }
+
+  /** A copy with some fields replaced, the mirror of Python's `dataclasses.replace`. */
+  with(update: Partial<Omit<LineFacts, 'with'>>): LineFacts {
+    return new LineFacts({
+      follows: this.follows,
+      walks: this.walks,
+      readsSubtree: this.readsSubtree,
+      writes: this.writes,
+      subtree: this.subtree,
+      moveTarget: this.moveTarget,
+      ...update,
+    })
+  }
+}
+
 export const FileType = Object.freeze({
   DIRECTORY: 'directory',
   FILE: 'file',

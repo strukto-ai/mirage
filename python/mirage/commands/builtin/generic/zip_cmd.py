@@ -1,7 +1,7 @@
 # Refusal wording from Info-ZIP Zip 3.0 (Info-ZIP license; see
 # licenses/third_party/info-zip.txt).
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from mirage.commands.builtin.generic.archive.walk import (
@@ -19,7 +19,14 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
-from mirage.types import JsonValue, PathSpec, ReadStreamFn, StatFn
+from mirage.types import (
+    Follow,
+    JsonValue,
+    LineFacts,
+    PathSpec,
+    ReadStreamFn,
+    StatFn,
+)
 from mirage.utils.path import respell_one
 from mirage.view.types import LinkView, MountView
 
@@ -154,4 +161,16 @@ async def zip_cmd(
     return hosted_stream("zip", config, host, io), io
 
 
-__all__ = ["zip_cmd"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A zip line stores a link operand as given, its planner deciding
+    whether to follow it (``-y``), and reads below a directory under
+    ``-r``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(follows=Follow.NONE, reads_subtree=fl.as_bool("r"))
+
+
+__all__ = ["facts", "zip_cmd"]

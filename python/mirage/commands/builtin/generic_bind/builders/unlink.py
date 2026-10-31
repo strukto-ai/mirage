@@ -26,7 +26,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType, Follow, LineFacts, PathSpec
 
 
 async def unlink(
@@ -91,4 +91,6 @@ async def unlink(
     return None, IOResult()
 
 
-BUILDER = GenericCommand("unlink", unlink, write=True)
+BUILDER = GenericCommand(
+    "unlink", unlink, write=True, facts=LineFacts(follows=Follow.NONE)
+)

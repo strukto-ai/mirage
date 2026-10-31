@@ -50,7 +50,7 @@ import { resolvePath } from '../../utils/path.ts'
 import { commandWords } from '../executor/command/routing.ts'
 import { envChild, envVars } from '../executor/builtins/env/env.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
-import { lineFlags, readsSubtrees } from '../lookup/index.ts'
+import { lineFacts } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
@@ -393,7 +393,7 @@ function lineRefusal(
   lost: boolean,
 ): string | null {
   if (scopesPaths(rules, name)) {
-    if (readsSubtrees(name, lineFlags(name, [name, ...args]))) {
+    if (lineFacts(name, [name, ...args]).readsSubtree) {
       return 'walks a tree the gate cannot follow'
     }
     const globby = [...operands, ...redirects].some(

@@ -630,6 +630,24 @@
      }
     }
    ]
+  },
+  {
+   "id": "a_path_rule_reaches_a_link_target_only_when_the_line_follows_it",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "agent", "profile": {"commands": {"deny": [{"reason": "sealed", "paths": ["/data/sec/*"]}]}}},
+    {"op": "exec", "command": "mkdir -p /data/sec /data/pub; echo k > /data/sec/k; ln -s /data/sec/k /data/pub/l", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "stat -c %F /data/pub/l", "expect": {"value": {"exit_code": 0, "stdout": "symbolic link\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "stat -L -c %F /data/pub/l", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "stat: cannot statx '/data/pub/l': Permission denied\n", "refusal": "sealed"}}},
+    {"op": "exec", "session": "agent", "command": "file /data/pub/l", "expect": {"value": {"exit_code": 0, "stdout": "/data/pub/l: symbolic link to /data/sec/k\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "file -L /data/pub/l", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "file: /data/pub/l: Permission denied\n", "refusal": "sealed"}}},
+    {"op": "exec", "session": "agent", "command": "find /data/pub/l", "expect": {"value": {"exit_code": 0, "stdout": "/data/pub/l\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "find -L /data/pub/l", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "find: '/data/pub/l': Permission denied\n", "refusal": "sealed"}}},
+    {"op": "exec", "session": "agent", "command": "find /data/pub/l -L 2>/dev/null", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "du /data/pub/l | cut -f2", "expect": {"value": {"exit_code": 0, "stdout": "/data/pub/l\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "du -L /data/pub/l", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "du: cannot access '/data/pub/l': Permission denied\n", "refusal": "sealed"}}},
+    {"op": "exec", "session": "agent", "command": "du -L -P /data/pub/l | cut -f2", "expect": {"value": {"exit_code": 0, "stdout": "/data/pub/l\n", "stderr": "", "refusal": null}}}
+   ]
   }
  ]
 }

@@ -66,7 +66,7 @@ from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.builtins.env.env import env_child, env_vars
 from mirage.workspace.executor.command.routing import command_words
 from mirage.workspace.expand.classify.path import classify_bare_path
-from mirage.workspace.lookup import line_flags, reads_subtrees
+from mirage.workspace.lookup import line_facts
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
@@ -420,7 +420,7 @@ def _line_refusal(
             before the command.
     """
     if scopes_paths(rules, name):
-        if reads_subtrees(name, line_flags(name, [name, *args])):
+        if line_facts(name, [name, *args]).reads_subtree:
             return "walks a tree the gate cannot follow"
         if any(
             is_glob(p.raw_path or p.virtual)

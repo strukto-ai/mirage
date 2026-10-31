@@ -26,7 +26,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { FileType, LineFacts, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { matcherSyntax, patternWarnings, resolvePattern } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
@@ -447,4 +447,13 @@ export async function grepGeneric(
   }
 
   return [owned(run()), io]
+}
+
+/**
+ * A grep line walks, and reads, below the directories it names when it
+ * recurses (`recurses`). Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  const walks = recurses(fl)
+  return new LineFacts({ walks, readsSubtree: walks })
 }

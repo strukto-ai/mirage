@@ -12,87 +12,94 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import functools
+import inspect
+from collections.abc import Callable
+from typing import NamedTuple
+
 import pytest
 
-from mirage.types import LsLinkMode, PathSpec
-from mirage.workspace.lookup.constants import (
-    NO_FOLLOW_COMMANDS,
-    changes_files,
-    dereferences,
-    follows_last_component,
-    line_flags,
-    ls_link_mode,
-    reads_subtrees,
-    walks_mounts,
+from mirage.types import Follow, MountMode, PathSpec
+from mirage.vfs.call import VfsCall, declared_calls
+from mirage.vfs.ram import RAMVFS
+from mirage.vfs.types import Effect
+from mirage.workspace import Workspace
+from mirage.workspace.lookup.constants import changes_files, line_facts
+
+
+def _follows(words: list[str | PathSpec]) -> Follow:
+    return line_facts(str(words[0]), words).follows
+
+
+@pytest.mark.parametrize(
+    "words, follows",
+    [
+        (["stat", "/data/link"], Follow.NONE),
+        (["stat", "-L", "/data/link"], Follow.LAST),
+        (["stat", "-Lc", "%n", "/data/link"], Follow.LAST),
+        (["stat", "--dereference", "/data/link"], Follow.LAST),
+        (["stat", "--deref", "/data/link"], Follow.LAST),
+        (["stat", "-c", "%L", "/data/link"], Follow.NONE),
+        (["stat", "--", "-L"], Follow.NONE),
+        (["rm", "-L", "/data/link"], Follow.NONE),
+        (["cat", "-l", "/data/link"], Follow.LAST),
+        (["file", "/data/link"], Follow.NONE),
+        (["file", "-L", "/data/link"], Follow.LAST),
+        (["file", "-h", "/data/link"], Follow.NONE),
+        (["file", "-L", "-h", "/data/link"], Follow.NONE),
+        (["file", "-h", "-L", "/data/link"], Follow.LAST),
+        (["file", "-Lh", "/data/link"], Follow.NONE),
+        (["du", "/data/link"], Follow.NONE),
+        (["du", "-L", "/data/link"], Follow.LAST),
+        (["du", "-LP", "/data/link"], Follow.NONE),
+        (["du", "-PL", "/data/link"], Follow.LAST),
+        (["du", "-L", "-P", "/data/link"], Follow.NONE),
+        (["find", "/data/link"], Follow.NONE),
+        (["find", "-H", "/data/link"], Follow.LAST),
+        (["find", "-L", "-P", "/data/link"], Follow.NONE),
+        (["find", "-P", "-L", "/data/link"], Follow.LAST),
+        (["find", "-L", "-P", "-L", "/data/link"], Follow.LAST),
+        (["find", "/data/link", "-L"], Follow.NONE),
+        (["tar", "-chf", "/out.tar", "/data/link"], Follow.NONE),
+        (["zip", "-r", "/out.zip", "/data/link"], Follow.NONE),
+        (["mv", "/data/link", "/x"], Follow.NONE),
+        (["rmdir", "/data/link"], Follow.NONE),
+        (["unlink", "/data/link"], Follow.NONE),
+        (["mkdir", "-p", "/data/link"], Follow.NONE),
+        (["touch", "/data/link"], Follow.NONE),
+        (["ln", "-s", "/x", "/data/link"], Follow.NONE),
+        (["readlink", "/data/link"], Follow.NONE),
+    ],
 )
-
-
-def _walks(words: list[str]) -> bool:
-    return walks_mounts(words[0], line_flags(words[0], words))
-
-
-def _reads_subtrees(words: list[str]) -> bool:
-    return reads_subtrees(words[0], line_flags(words[0], words))
-
-
-def test_stat_is_a_no_follow_command():
-    """GNU stat lstats, so its operands must not be rewritten."""
-    assert "stat" in NO_FOLLOW_COMMANDS
-
-
-def test_bare_dash_l_dereferences():
-    assert dereferences("stat", ["stat", "-L", "/data/link"]) is True
-
-
-def test_clustered_short_flag_dereferences():
-    assert dereferences("stat", ["stat", "-Lc", "%n", "/data/link"]) is True
-
-
-def test_long_form_dereferences():
-    assert (
-        dereferences("stat", ["stat", "--dereference", "/data/link"]) is True
-    )
-
-
-def test_absent_flag_does_not_dereference():
-    assert dereferences("stat", ["stat", "/data/link"]) is False
-
-
-def test_an_l_inside_a_format_value_does_not_dereference():
-    """Only option words count, so `-c '%L'` must not trip the check."""
-    assert dereferences("stat", ["stat", "-c", "%L", "/data/link"]) is False
-
-
-def test_a_command_with_no_dereference_flag_is_never_affected():
-    assert dereferences("rm", ["rm", "-L", "/data/link"]) is False
-
-
-def test_flags_after_end_of_options_are_operands():
-    assert dereferences("stat", ["stat", "--", "-L"]) is False
+def test_a_command_follows_a_link_operand_as_its_options_say(words, follows):
+    # coreutils 9.7, file 5.46, findutils 4.10: lstat by default for
+    # these, the later of -L and its take-back (-h, -P) deciding, and
+    # find's -P/-H/-L only before the first start point.
+    assert _follows(words) is follows
 
 
 def test_a_pathspec_operand_is_not_read_as_a_flag():
     """Operands arrive classified as PathSpec, not str."""
     spec = PathSpec.from_str_path("/data/-L")
-    assert dereferences("stat", ["stat", spec]) is False
+    assert _follows(["stat", spec]) is Follow.NONE
 
 
 @pytest.mark.parametrize(
-    "words, mode",
+    "words, follows",
     [
-        (["ls", "-l", "/data/link"], LsLinkMode.NONE),
-        (["ls", "-d", "/data/link"], LsLinkMode.NONE),
-        (["ls", "-la", "/data/link"], LsLinkMode.NONE),
-        (["ls", "-g", "/data/link"], LsLinkMode.NONE),
-        (["ls", "-F", "/data/link"], LsLinkMode.NONE),
-        (["ls", "--cl", "/data/link"], LsLinkMode.NONE),
-        (["ls", "--indicator-style=classify", "/data/link"], LsLinkMode.NONE),
-        (["ls", "/data/link"], LsLinkMode.DIRECTORY),
-        (["ls", "-p", "/data/link"], LsLinkMode.DIRECTORY),
-        (["ls", "--file-type", "/data/link"], LsLinkMode.DIRECTORY),
-        (["ls", "--classify=never", "/data/link"], LsLinkMode.DIRECTORY),
-        (["ls", "-l", "-L", "/data/link"], LsLinkMode.ALL),
-        (["ls", "-F", "-H", "/data/link"], LsLinkMode.ALL),
+        (["ls", "-l", "/data/link"], Follow.NONE),
+        (["ls", "-d", "/data/link"], Follow.NONE),
+        (["ls", "-la", "/data/link"], Follow.NONE),
+        (["ls", "-g", "/data/link"], Follow.NONE),
+        (["ls", "-F", "/data/link"], Follow.NONE),
+        (["ls", "--cl", "/data/link"], Follow.NONE),
+        (["ls", "--indicator-style=classify", "/data/link"], Follow.NONE),
+        (["ls", "/data/link"], Follow.DIRECTORY),
+        (["ls", "-p", "/data/link"], Follow.DIRECTORY),
+        (["ls", "--file-type", "/data/link"], Follow.DIRECTORY),
+        (["ls", "--classify=never", "/data/link"], Follow.DIRECTORY),
+        (["ls", "-l", "-L", "/data/link"], Follow.LAST),
+        (["ls", "-F", "-H", "/data/link"], Follow.LAST),
         (
             [
                 "ls",
@@ -100,73 +107,17 @@ def test_a_pathspec_operand_is_not_read_as_a_flag():
                 "--dereference-command-line-symlink-to-dir",
                 "/data/link",
             ],
-            LsLinkMode.DIRECTORY,
+            Follow.DIRECTORY,
         ),
     ],
 )
-def test_ls_link_mode_is_gnus_command_line_rule(words, mode):
+def test_ls_follows_gnus_command_line_rule(words, follows):
     # coreutils 9.7: the last of -L, -H and
     # --dereference-command-line-symlink-to-dir wins; without one, -d, a
     # long format or the classify style (abbreviated or valued) resolve
     # no command-line link, and anything else resolves a link to a
     # directory. -p and --file-type are not classify.
-    assert ls_link_mode(words) is mode
-
-
-def test_a_command_with_no_no_follow_flag_is_never_affected():
-    # Only ls reads -l as a request to report the link itself.
-    assert follows_last_component("cat", ["cat", "-l", "/data/link"]) is True
-
-
-def test_file_lstats_like_stat():
-    """GNU file describes a link; -L is what follows it."""
-    assert "file" in NO_FOLLOW_COMMANDS
-    assert dereferences("file", ["file", "-L", "/data/link"]) is True
-
-
-def test_du_does_not_follow_a_link_operand():
-    assert "du" in NO_FOLLOW_COMMANDS
-    assert dereferences("du", ["du", "-L", "/data/link"]) is True
-
-
-def test_find_link_options_are_last_wins():
-    # GNU takes the last of -P/-H/-L: `find -L -P x` does not follow,
-    # `find -P -L x` does.
-    assert dereferences("find", ["find", "-L", "-P", "/data/link"]) is False
-    assert dereferences("find", ["find", "-P", "-L", "/data/link"]) is True
-    assert (
-        dereferences("find", ["find", "-L", "-P", "-L", "/data/link"]) is True
-    )
-    assert dereferences("find", ["find", "-H", "/data/link"]) is True
-    assert dereferences("find", ["find", "/data/link"]) is False
-
-
-def test_find_link_options_only_count_before_the_operand():
-    # -L after the start point is a predicate position, not a policy one.
-    assert dereferences("find", ["find", "/data/link", "-L"]) is False
-
-
-def test_long_form_abbreviated_dereferences():
-    # coreutils 9.7: `stat --deref` is --dereference.
-    assert dereferences("stat", ["stat", "--deref", "/data/link"]) is True
-
-
-@pytest.mark.parametrize(
-    "words, follows",
-    [
-        (["file", "-h", "/data/link"], False),
-        (["file", "-L", "-h", "/data/link"], False),
-        (["file", "-h", "-L", "/data/link"], True),
-        (["file", "-Lh", "/data/link"], False),
-        (["du", "-LP", "/data/link"], False),
-        (["du", "-PL", "/data/link"], True),
-        (["du", "-L", "-P", "/data/link"], False),
-    ],
-)
-def test_the_last_link_option_wins(words, follows):
-    # file 5.46 and coreutils 9.7: the later of -L and its take-back
-    # (-h, -P) decides.
-    assert dereferences(words[0], words) is follows
+    assert _follows(words) is follows
 
 
 @pytest.mark.parametrize(
@@ -179,6 +130,7 @@ def test_the_last_link_option_wins(words, follows):
         (["tree", "-x", "/data"], False),
         (["rg", "x"], True),
         (["rg", "--one-file-system", "x", "/data"], False),
+        (["rg", "--type-list"], False),
         (["grep", "x", "/data"], False),
         (["grep", "-rn", "x", "/data"], True),
         (["grep", "--recursive", "x"], True),
@@ -187,6 +139,7 @@ def test_the_last_link_option_wins(words, follows):
         (["grep", "--directories=recurse", "x", "/data"], True),
         (["grep", "--dereference-recursive", "x", "/data"], True),
         (["grep", "-r", "-d", "skip", "x", "/data"], False),
+        (["grep", "-d", "bogus", "x", "/data"], False),
         (["grep", "-ephrase", "/data/x"], False),
         (["grep", "-frules.txt", "/data/x"], False),
         (["grep", "--", "-r"], False),
@@ -201,9 +154,9 @@ def test_the_last_link_option_wins(words, follows):
 )
 def test_walkers_are_read_off_the_parsed_line(words, walks):
     # grep 3.11, coreutils 9.7: a long option's prefix, -d recurse and an
-    # option's attached value read as grep reads them, and the last of
-    # -r and -d wins.
-    assert _walks(words) is walks
+    # option's attached value read as grep reads them, the last of -r
+    # and -d wins, and a -d word grep refuses walks nothing.
+    assert line_facts(words[0], words).walks is walks
 
 
 @pytest.mark.parametrize(
@@ -214,6 +167,7 @@ def test_walkers_are_read_off_the_parsed_line(words, walks):
         (["tar", "--create", "-f", "/out.tar", "/data"], True),
         (["tar", "-xf", "/out.tar"], False),
         (["zip", "-r", "/out.zip", "/data"], True),
+        (["zip", "/out.zip", "/data/a"], False),
         (["cp", "-r", "/data", "/copy"], True),
         (["cp", "-a", "/data", "/copy"], True),
         (["cp", "--archive", "/data", "/copy"], True),
@@ -223,6 +177,7 @@ def test_walkers_are_read_off_the_parsed_line(words, walks):
         (["du", "-x", "/data"], True),
         (["tree", "-x", "/data"], True),
         (["rg", "--one-file-system", "x", "/data"], True),
+        (["find", "/data"], True),
         (["ls", "-l", "/data"], False),
     ],
 )
@@ -231,7 +186,7 @@ def test_subtree_readers_cover_the_archivers_and_recursive_copy(words, reads):
     # operands but stop at a mount boundary, so they read subtrees
     # without walking mounts; a walk kept to one mount still reads its
     # subtree.
-    assert _reads_subtrees(words) is reads
+    assert line_facts(words[0], words).reads_subtree is reads
 
 
 @pytest.mark.parametrize(
@@ -290,3 +245,153 @@ def test_a_pattern_operand_may_name_the_output(name):
     literal = PathSpec("/data/p[1]", "/data", "p[1]")
     assert changes_files(name, [name, pattern]) is True
     assert changes_files(name, [name, literal]) is False
+
+
+class _Op(NamedTuple):
+    mount: str
+    name: str
+    effect: Effect
+    path: str
+
+
+def _recording(mount: str, ops: list[_Op]) -> RAMVFS:
+    def wrap(name: str, mark: VfsCall) -> Callable:
+        base = getattr(RAMVFS, name)
+
+        def note(args: tuple) -> None:
+            for arg in args:
+                if isinstance(arg, PathSpec):
+                    ops.append(_Op(mount, name, mark.effect, arg.virtual))
+
+        if inspect.iscoroutinefunction(base):
+
+            @functools.wraps(base)
+            async def call_async(self, *args, **kwargs):
+                note(args)
+                return await base(self, *args, **kwargs)
+
+            return call_async
+
+        @functools.wraps(base)
+        def call(self, *args, **kwargs):
+            note(args)
+            return base(self, *args, **kwargs)
+
+        return call
+
+    methods = {
+        name: wrap(name, mark)
+        for name, mark in declared_calls(RAMVFS).items()
+        if name in vars(RAMVFS)
+    }
+    return type("RecordingRAMVFS", (RAMVFS,), methods)()
+
+
+_READS = frozenset({Effect.READ, Effect.METADATA})
+
+# Commands that stat a link's target without following the link: file
+# names a link whose target is gone "broken", and du asks whether its
+# operand is there at all before it measures the link itself.
+_PROBES_TARGET = frozenset({"file", "du"})
+
+
+async def _effects(line: str) -> list[_Op]:
+    ops: list[_Op] = []
+    ws = Workspace(
+        {
+            "/": _recording("/", ops),
+            "/data/inner": _recording("/data/inner", ops),
+            "/far": _recording("/far", ops),
+        },
+        mode=MountMode.WRITE,
+    )
+    ws.create_session("s")
+    try:
+        for setup in (
+            "mkdir -p /data/sub /out",
+            "echo a > /data/a.txt",
+            "echo b > /data/sub/b.txt",
+            "echo c > /data/inner/c.txt",
+            "echo t > /far/t.txt",
+            "ln -s /far/t.txt /data/link",
+        ):
+            await ws.shell(setup, session_id="s")
+        ops.clear()
+        await ws.shell(line, session_id="s")
+        return list(ops)
+    finally:
+        await ws.close()
+
+
+# Lines whose declared facts the fact-vs-effect check runs against a
+# recording mount. /data/inner is a descendant mount and /data/link
+# points into /far, so an op on /data/inner other than a stat of its root
+# is a walk and an op on /far is a follow.
+_LINES = [
+    "stat /data/link",
+    "stat -L /data/link",
+    "file /data/link",
+    "file -L /data/link",
+    "file -L -h /data/link",
+    "du /data/link",
+    "du -L /data/link",
+    "du /data",
+    "du -x /data",
+    "find /data",
+    "find /data/link",
+    "find -L /data/link",
+    "find /data/link -L",
+    "tree /data",
+    "tree -x /data",
+    "grep a /data/a.txt",
+    "grep -r a /data",
+    "rg a /data",
+    "rg --one-file-system a /data",
+    "ls /data",
+    "ls -R /data",
+    "ls -l /data/link",
+    "ls -L /data/link",
+    "cat /data/link",
+    "cp -r /data/sub /out",
+    "tar -cf /out/x.tar /data/link",
+    "zip /out/x.zip /data/link",
+    "rm /data/link",
+    "mv /data/link /out/l",
+    "unlink /data/link",
+]
+
+
+@pytest.mark.parametrize("line", _LINES)
+@pytest.mark.asyncio
+async def test_a_lines_facts_cover_what_it_does_to_the_mounts(line):
+    words = line.split()
+    facts = line_facts(words[0], words)
+    ops = await _effects(line)
+    if not facts.writes:
+        assert [op for op in ops if op.effect not in _READS] == []
+    if not facts.walks:
+        assert [
+            op
+            for op in ops
+            if op.mount == "/data/inner"
+            and (op.name, op.path) != ("stat", "/data/inner")
+        ] == []
+    if facts.follows is Follow.NONE:
+        probes = Effect.METADATA if words[0] in _PROBES_TARGET else None
+        assert [
+            op for op in ops if op.mount == "/far" and op.effect != probes
+        ] == []
+
+
+@pytest.mark.parametrize(
+    "line, mount",
+    [
+        ("stat -L /data/link", "/far"),
+        ("find -L /data/link", "/far"),
+        ("du /data", "/data/inner"),
+        ("grep -r c /data", "/data/inner"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_the_recording_sees_follows_and_walks(line, mount):
+    assert any(op.mount == mount for op in await _effects(line))

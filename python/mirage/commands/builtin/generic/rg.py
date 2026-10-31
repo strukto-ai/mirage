@@ -81,6 +81,7 @@ from mirage.types import (
     FileStat,
     FileType,
     JsonValue,
+    LineFacts,
     PathSpec,
     PolymorphicReadFn,
 )
@@ -882,21 +883,6 @@ def printed_path(path: str, f: RgFlags) -> str:
     return path.replace("/", f.path_separator)
 
 
-def walks_descendant_mounts(flags: Mapping[str, FlagValue]) -> bool:
-    """Whether a search walks into the mounts below its operand: not for
-    --type-list, which reads no path, nor under --one-file-system.
-
-    Args:
-        flags (Mapping[str, FlagValue]): the raw flag kwargs.
-    """
-    fl = FlagView(flags, spec=SPECS["rg"])
-    return not (
-        fl.as_bool("type_list")
-        or _last(fl, "one_file_system", "no_one_file_system")
-        == "one_file_system"
-    )
-
-
 def between_files(f: RgFlags) -> bytes:
     return _lead(f, None, True, False)[0]
 
@@ -1324,7 +1310,24 @@ async def _search_all(
             io.stderr = await materialize(io.stderr) + format_records(shown)
 
 
-__all__ = ["rg_generic"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """An rg line reads below every path it names, and walks into the
+    mounts below them unless it lists its types (``--type-list``, which
+    reads no path) or keeps to one filesystem.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    walks = not (
+        fl.as_bool("type_list")
+        or _last(fl, "one_file_system", "no_one_file_system")
+        == "one_file_system"
+    )
+    return LineFacts(walks=walks, reads_subtree=True)
+
+
+__all__ = ["facts", "rg_generic"]
 
 
 def label_flags(flags: Mapping[str, FlagValue]) -> dict[str, FlagValue]:

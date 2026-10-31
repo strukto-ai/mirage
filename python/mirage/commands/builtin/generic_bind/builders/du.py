@@ -15,7 +15,7 @@
 from dataclasses import dataclass, field, replace
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.du import DuEntries, du_generic
+from mirage.commands.builtin.generic.du import DuEntries, du_generic, facts
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     CommandFiles,
@@ -396,4 +396,4 @@ async def du(
     )
 
 
-BUILDER = GenericCommand("du", du)
+BUILDER = GenericCommand("du", du, facts=facts)

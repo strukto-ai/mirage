@@ -18,13 +18,10 @@ export {
   SLASH_KEEPS_LAST,
   UNSUPPORTED_BUILTINS,
   changesFiles,
-  dereferences,
   endOptionsAfterProgram,
-  followsLastComponent,
+  factsOf,
+  lineFacts,
   lineFlags,
-  lsLinkMode,
-  readsSubtrees,
-  walksMounts,
 } from './constants.ts'
 export {
   execs,

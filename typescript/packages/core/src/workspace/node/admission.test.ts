@@ -16,10 +16,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { IOResult, materialize } from '../../io/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode } from '../../types.ts'
+import { Follow, MountMode } from '../../types.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { voicedStderr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { lineFacts } from '../lookup/index.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
 import { Admitted, admit, policyScopes } from './admission.ts'
 import { admitLine } from './explain.ts'
@@ -91,7 +92,15 @@ function ws(profile: SessionProfile | null = DOC): Workspace {
 
 async function virtuals(w: Workspace, name: string, ...args: string[]): Promise<string[]> {
   const words = await classifyParts([name, ...args], w.registry, '/')
-  return policyScopes(name, args, words.slice(1), w.namespace, '/', null).map((p) => p.virtual)
+  return policyScopes(
+    name,
+    args,
+    words.slice(1),
+    lineFacts(name, words).follows !== Follow.NONE,
+    w.namespace,
+    '/',
+    null,
+  ).map((p) => p.virtual)
 }
 
 describe('admission', () => {
@@ -133,7 +142,9 @@ describe('admission', () => {
     expect(await virtuals(w, 'cat', '/data/secret')).toEqual(['/data/secret'])
     const words = await classifyParts(['cat', '/data/link'], w.registry, '/')
     expect(
-      policyScopes('cat', ['/data/link'], words.slice(1), null, '/', null).map((p) => p.virtual),
+      policyScopes('cat', ['/data/link'], words.slice(1), true, null, '/', null).map(
+        (p) => p.virtual,
+      ),
     ).toEqual(['/data/link'])
   })
 

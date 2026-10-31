@@ -53,7 +53,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.job_table import JobTable
-from mirage.types import PathSpec, Producer
+from mirage.types import Follow, PathSpec, Producer
 from mirage.view.types import StatPath
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.links.links import operand_follow
@@ -108,7 +108,7 @@ from mirage.workspace.files import Files
 from mirage.workspace.lookup import (
     JOB_BUILTINS,
     Consumer,
-    dereferences,
+    line_facts,
     lookup,
     runs_as,
 )
@@ -713,7 +713,7 @@ async def handle_command(
                     session.cwd,
                     functools.partial(path_stat, dispatch),
                     namespace,
-                    dereferences(cmd_name, parts),
+                    line_facts(cmd_name, parts).follows is not Follow.NONE,
                 )
                 if ref_err is not None:
                     return (

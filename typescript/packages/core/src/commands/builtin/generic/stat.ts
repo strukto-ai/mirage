@@ -21,7 +21,9 @@ import {
   CapacityState,
   DEVICE_NUMBERS_KEY,
   FileType,
+  Follow,
   LINK_TARGET_KEY,
+  LineFacts,
   type CapacityResult,
   type FileStat,
   type PathSpec,
@@ -571,4 +573,9 @@ export async function statGeneric(
   if (lines.length === 0) return [null, io]
   const out: ByteSource = formatRecords(lines)
   return [out, io]
+}
+
+/** A stat line reports a link itself unless `-L`. Mirrors Python's `facts`. */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ follows: fl.asBool('dereference') ? Follow.LAST : Follow.NONE })
 }

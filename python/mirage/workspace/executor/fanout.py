@@ -42,7 +42,7 @@ from mirage.types import PathSpec, Producer
 from mirage.utils.hidden import path_visible
 from mirage.view.types import FollowOperands, SessionView
 from mirage.workspace.files import Files
-from mirage.workspace.lookup import walks_mounts
+from mirage.workspace.lookup import facts_of
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -122,7 +122,7 @@ def _should_fan_out(
     """Whether `cmd` on this path should run across multiple mounts.
 
     True for a walk the fan-out composes when the path has at least one
-    descendant mount and the line walks into it (``walks_mounts``, the
+    descendant mount and the line walks into it (``LineFacts.walks``, the
     answer the admission gate stamped on the line). False when there is
     no descendant mount under the path (single-mount dispatch is
     correct), and for a walk told to keep to its operand's filesystem
@@ -136,7 +136,9 @@ def _should_fan_out(
         for p in paths
     ):
         return False
-    return cmd_name in _COMPOSED and walks_mounts(cmd_name, flag_kwargs)
+    return (
+        cmd_name in _COMPOSED and facts_of(cmd_name, flag_kwargs, paths).walks
+    )
 
 
 async def _fan_out_traversal(

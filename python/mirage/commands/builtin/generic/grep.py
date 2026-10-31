@@ -64,7 +64,13 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.regex import LineRegex
 from mirage.rs.scan import scanned
 from mirage.shell.bytes import utf8_locale
-from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
+from mirage.types import (
+    FileStat,
+    FileType,
+    LineFacts,
+    PathSpec,
+    PolymorphicReadFn,
+)
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
 from mirage.view.namespace_view import followed_stat
@@ -500,3 +506,15 @@ async def grep_generic(
                 )
 
     return run(), io
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A grep line walks, and reads, below the directories it names when
+    it recurses (``recurses``).
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    walks = recurses(fl)
+    return LineFacts(walks=walks, reads_subtree=walks)

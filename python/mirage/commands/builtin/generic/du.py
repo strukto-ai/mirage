@@ -17,7 +17,7 @@ from mirage.errors.types import DotWalkError, FsCondition
 from mirage.io.types import IOResult, PathRecord
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
-from mirage.types import FileStat, PathSpec
+from mirage.types import FileStat, Follow, LineFacts, PathSpec
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.path import respell_raw
 from mirage.view.namespace_view import paths_scoped
@@ -759,4 +759,24 @@ async def du_generic(
     )
     return out.stdout, IOResult(
         stderr=out.stderr, exit_code=out.exit_code, records=out.records
+    )
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A du line reads below every path it names, walks into the mounts
+    below unless ``-x``, and follows a link operand when the last of
+    ``-L`` and ``-P`` is ``-L``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(
+        follows=(
+            Follow.LAST
+            if fl.typed_order("L", "P")[-1:] == ["L"]
+            else Follow.NONE
+        ),
+        walks=not fl.as_bool("one_file_system"),
+        reads_subtree=True,
     )

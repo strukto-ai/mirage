@@ -17,7 +17,10 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic_bind.adapter import GenericCommand
+from mirage.commands.builtin.generic_bind.adapter import (
+    FactsFn,
+    GenericCommand,
+)
 from mirage.commands.builtin.generic_bind.builders import BUILDERS
 from mirage.commands.builtin.generic_bind.files import Reading, with_reading
 from mirage.commands.config import (
@@ -31,7 +34,7 @@ from mirage.commands.config import (
 from mirage.commands.spec import SPECS
 from mirage.io.cooperative import chunks
 from mirage.io.types import IOResult
-from mirage.types import PathSpec
+from mirage.types import LineFacts, PathSpec
 
 
 async def _run_builder(
@@ -136,6 +139,17 @@ def generic_reading(
     if vfs is None and stream is None:
         return GENERIC_COMMANDS.require(name)
     return _bind(builder, vfs, stream)
+
+
+def declared_facts(name: str) -> LineFacts | FactsFn:
+    """What the generic command ``name`` declares a line of it does; a
+    name with no generic command declares nothing (``LineFacts()``).
+
+    Args:
+        name (str): the command name.
+    """
+    builder = _BY_NAME.get(name)
+    return LineFacts() if builder is None else builder.facts
 
 
 def generic(name: str, *, vfs: str | None = None) -> Command:

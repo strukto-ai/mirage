@@ -25,22 +25,20 @@ import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { MountMode, PathSpec } from '../../types.ts'
+import { Follow, MountMode, PathSpec, wordText } from '../../types.ts'
+import { declaredCalls, methodName } from '../../vfs/call.ts'
+import { Effect } from '../../vfs/types.ts'
 import {
   Consumer,
   SHELL_CONSUMERS,
   changesFiles,
-  dereferences,
   execs,
-  lineFlags,
-  readsSubtrees,
+  lineFacts,
   lookup,
   lookupAll,
-  lsLinkMode,
   program,
   programNote,
   programs,
-  walksMounts,
 } from './index.ts'
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -190,78 +188,89 @@ describe('lookupAll', () => {
   })
 })
 
-describe('find link-policy options', () => {
-  it('takes the last of -P/-H/-L', () => {
-    // GNU: `find -L -P x` does not follow, `find -P -L x` does.
-    expect(dereferences('find', ['find', '-L', '-P', '/data/link'])).toBe(false)
-    expect(dereferences('find', ['find', '-P', '-L', '/data/link'])).toBe(true)
-    expect(dereferences('find', ['find', '-L', '-P', '-L', '/data/link'])).toBe(true)
-    expect(dereferences('find', ['find', '-H', '/data/link'])).toBe(true)
-    expect(dereferences('find', ['find', '/data/link'])).toBe(false)
+const follows = (words: readonly (string | PathSpec)[]): Follow =>
+  lineFacts(wordText(words[0] ?? ''), words).follows
+
+describe('lineFacts follows', () => {
+  // coreutils 9.7, file 5.46, findutils 4.10: lstat by default for these,
+  // the later of -L and its take-back (-h, -P) deciding, and find's -P/-H/-L
+  // only before the first start point. Mirrors test_constants.py.
+  it.each([
+    [['stat', '/data/link'], Follow.NONE],
+    [['stat', '-L', '/data/link'], Follow.LAST],
+    [['stat', '-Lc', '%n', '/data/link'], Follow.LAST],
+    [['stat', '--dereference', '/data/link'], Follow.LAST],
+    [['stat', '--deref', '/data/link'], Follow.LAST],
+    [['stat', '-c', '%L', '/data/link'], Follow.NONE],
+    [['stat', '--', '-L'], Follow.NONE],
+    [['rm', '-L', '/data/link'], Follow.NONE],
+    [['cat', '-l', '/data/link'], Follow.LAST],
+    [['file', '/data/link'], Follow.NONE],
+    [['file', '-L', '/data/link'], Follow.LAST],
+    [['file', '-h', '/data/link'], Follow.NONE],
+    [['file', '-L', '-h', '/data/link'], Follow.NONE],
+    [['file', '-h', '-L', '/data/link'], Follow.LAST],
+    [['file', '-Lh', '/data/link'], Follow.NONE],
+    [['du', '/data/link'], Follow.NONE],
+    [['du', '-L', '/data/link'], Follow.LAST],
+    [['du', '-LP', '/data/link'], Follow.NONE],
+    [['du', '-PL', '/data/link'], Follow.LAST],
+    [['du', '-L', '-P', '/data/link'], Follow.NONE],
+    [['find', '/data/link'], Follow.NONE],
+    [['find', '-H', '/data/link'], Follow.LAST],
+    [['find', '-L', '-P', '/data/link'], Follow.NONE],
+    [['find', '-P', '-L', '/data/link'], Follow.LAST],
+    [['find', '-L', '-P', '-L', '/data/link'], Follow.LAST],
+    [['find', '/data/link', '-L'], Follow.NONE],
+    [['tar', '-chf', '/out.tar', '/data/link'], Follow.NONE],
+    [['zip', '-r', '/out.zip', '/data/link'], Follow.NONE],
+    [['mv', '/data/link', '/x'], Follow.NONE],
+    [['rmdir', '/data/link'], Follow.NONE],
+    [['unlink', '/data/link'], Follow.NONE],
+    [['mkdir', '-p', '/data/link'], Follow.NONE],
+    [['touch', '/data/link'], Follow.NONE],
+    [['ln', '-s', '/x', '/data/link'], Follow.NONE],
+    [['readlink', '/data/link'], Follow.NONE],
+  ] as const)('reads %j as %s', (words, follow) => {
+    expect(follows(words)).toBe(follow)
   })
 
-  it('only counts options before the operand', () => {
-    expect(dereferences('find', ['find', '/data/link', '-L'])).toBe(false)
+  it('does not read a PathSpec operand as a flag', () => {
+    // Operands arrive classified as PathSpec, not string.
+    const spec = PathSpec.fromStrPath('/data/-L')
+    expect(follows(['stat', spec])).toBe(Follow.NONE)
   })
-})
 
-describe('lsLinkMode', () => {
   // coreutils 9.7: the last of -L, -H and
   // --dereference-command-line-symlink-to-dir wins; without one, -d, a long
   // format or the classify style (abbreviated or valued) resolve no
   // command-line link, and anything else resolves a link to a directory. -p
   // and --file-type are not classify. Mirrors test_constants.py.
   it.each([
-    [['ls', '-l', '/data/link'], 'none'],
-    [['ls', '-d', '/data/link'], 'none'],
-    [['ls', '-la', '/data/link'], 'none'],
-    [['ls', '-g', '/data/link'], 'none'],
-    [['ls', '-F', '/data/link'], 'none'],
-    [['ls', '--cl', '/data/link'], 'none'],
-    [['ls', '--indicator-style=classify', '/data/link'], 'none'],
-    [['ls', '/data/link'], 'directory'],
-    [['ls', '-p', '/data/link'], 'directory'],
-    [['ls', '--file-type', '/data/link'], 'directory'],
-    [['ls', '--classify=never', '/data/link'], 'directory'],
-    [['ls', '-l', '-L', '/data/link'], 'all'],
-    [['ls', '-F', '-H', '/data/link'], 'all'],
-    [['ls', '-H', '--dereference-command-line-symlink-to-dir', '/data/link'], 'directory'],
-  ] as const)('reads %j as %s', (words, mode) => {
-    expect(lsLinkMode(words)).toBe(mode)
-  })
-})
-
-describe('dereference options', () => {
-  it('reads an abbreviated long form', () => {
-    // coreutils 9.7: `stat --deref` is --dereference.
-    expect(dereferences('stat', ['stat', '--deref', '/data/link'])).toBe(true)
-    expect(dereferences('stat', ['stat', '-c', '%L', '/data/link'])).toBe(false)
-  })
-
-  // file 5.46 and coreutils 9.7: the later of -L and its take-back (-h, -P)
-  // decides. Mirrors test_constants.py.
-  it.each([
-    [['file', '-h', '/data/link'], false],
-    [['file', '-L', '-h', '/data/link'], false],
-    [['file', '-h', '-L', '/data/link'], true],
-    [['file', '-Lh', '/data/link'], false],
-    [['du', '-LP', '/data/link'], false],
-    [['du', '-PL', '/data/link'], true],
-    [['du', '-L', '-P', '/data/link'], false],
-  ] as const)('reads %j as following: %s', (words, follows) => {
-    expect(dereferences(words[0], words)).toBe(follows)
+    [['ls', '-l', '/data/link'], Follow.NONE],
+    [['ls', '-d', '/data/link'], Follow.NONE],
+    [['ls', '-la', '/data/link'], Follow.NONE],
+    [['ls', '-g', '/data/link'], Follow.NONE],
+    [['ls', '-F', '/data/link'], Follow.NONE],
+    [['ls', '--cl', '/data/link'], Follow.NONE],
+    [['ls', '--indicator-style=classify', '/data/link'], Follow.NONE],
+    [['ls', '/data/link'], Follow.DIRECTORY],
+    [['ls', '-p', '/data/link'], Follow.DIRECTORY],
+    [['ls', '--file-type', '/data/link'], Follow.DIRECTORY],
+    [['ls', '--classify=never', '/data/link'], Follow.DIRECTORY],
+    [['ls', '-l', '-L', '/data/link'], Follow.LAST],
+    [['ls', '-F', '-H', '/data/link'], Follow.LAST],
+    [['ls', '-H', '--dereference-command-line-symlink-to-dir', '/data/link'], Follow.DIRECTORY],
+  ] as const)('reads ls %j as %s', (words, follow) => {
+    expect(follows(words)).toBe(follow)
   })
 })
 
 describe('walkers and subtree readers', () => {
-  const walks = (words: readonly string[]): boolean =>
-    walksMounts(words[0] ?? '', lineFlags(words[0] ?? '', words))
-  const readsBelow = (words: readonly string[]): boolean =>
-    readsSubtrees(words[0] ?? '', lineFlags(words[0] ?? '', words))
-
   // grep 3.11, coreutils 9.7: a long option's prefix, -d recurse and an
-  // option's attached value read as grep reads them, and the last of -r and
-  // -d wins. Mirrors test_constants.py.
+  // option's attached value read as grep reads them, the last of -r and -d
+  // wins, and a -d word grep refuses walks nothing. Mirrors
+  // test_constants.py.
   it.each([
     [['find', '/data'], true],
     [['du', '/data'], true],
@@ -270,6 +279,7 @@ describe('walkers and subtree readers', () => {
     [['tree', '-x', '/data'], false],
     [['rg', 'x'], true],
     [['rg', '--one-file-system', 'x', '/data'], false],
+    [['rg', '--type-list'], false],
     [['grep', 'x', '/data'], false],
     [['grep', '-rn', 'x', '/data'], true],
     [['grep', '--recursive', 'x'], true],
@@ -278,6 +288,7 @@ describe('walkers and subtree readers', () => {
     [['grep', '--directories=recurse', 'x', '/data'], true],
     [['grep', '--dereference-recursive', 'x', '/data'], true],
     [['grep', '-r', '-d', 'skip', 'x', '/data'], false],
+    [['grep', '-d', 'bogus', 'x', '/data'], false],
     [['grep', '-ephrase', '/data/x'], false],
     [['grep', '-frules.txt', '/data/x'], false],
     [['grep', '--', '-r'], false],
@@ -289,7 +300,7 @@ describe('walkers and subtree readers', () => {
     [['cat', '/data/x'], false],
     [['tar', '-cf', '/out.tar', '/data'], false],
   ] as const)('reads %j as walking: %s', (words, walking) => {
-    expect(walks(words)).toBe(walking)
+    expect(lineFacts(words[0], words).walks).toBe(walking)
   })
 
   // tar -c (dashless too), zip -r and cp -r or -a read below their operands
@@ -301,6 +312,7 @@ describe('walkers and subtree readers', () => {
     [['tar', '--create', '-f', '/out.tar', '/data'], true],
     [['tar', '-xf', '/out.tar'], false],
     [['zip', '-r', '/out.zip', '/data'], true],
+    [['zip', '/out.zip', '/data/a'], false],
     [['cp', '-r', '/data', '/copy'], true],
     [['cp', '-a', '/data', '/copy'], true],
     [['cp', '--archive', '/data', '/copy'], true],
@@ -310,9 +322,10 @@ describe('walkers and subtree readers', () => {
     [['du', '-x', '/data'], true],
     [['tree', '-x', '/data'], true],
     [['rg', '--one-file-system', 'x', '/data'], true],
+    [['find', '/data'], true],
     [['ls', '-l', '/data'], false],
   ] as const)('reads %j as reading below: %s', (words, reads) => {
-    expect(readsBelow(words)).toBe(reads)
+    expect(lineFacts(words[0], words).readsSubtree).toBe(reads)
   })
 })
 
@@ -372,6 +385,144 @@ describe('changesFiles', () => {
     const literal = new PathSpec({ virtual: '/data/p[1]', directory: '/data', vfsPath: 'p[1]' })
     expect(changesFiles(name, [name, pattern])).toBe(true)
     expect(changesFiles(name, [name, literal])).toBe(false)
+  })
+})
+
+interface Op {
+  mount: string
+  name: string
+  effect: Effect
+  path: string
+}
+
+type Method = (this: RAMVFS, ...args: unknown[]) => unknown
+
+function recording(mount: string, ops: Op[]): RAMVFS {
+  class RecordingRAMVFS extends RAMVFS {}
+  const own = new Set(Object.getOwnPropertyNames(RAMVFS.prototype))
+  for (const [name, mark] of declaredCalls(RAMVFS)) {
+    const method = methodName(name)
+    if (!own.has(method)) continue
+    const base = Object.getOwnPropertyDescriptor(RAMVFS.prototype, method)?.value as Method
+    const call = Object.assign(function (this: RAMVFS, ...args: unknown[]): unknown {
+      for (const arg of args) {
+        if (arg instanceof PathSpec)
+          ops.push({ mount, name, effect: mark.effect, path: arg.virtual })
+      }
+      return base.apply(this, args)
+    }, base)
+    Object.defineProperty(call, 'name', { value: base.name })
+    Object.defineProperty(RecordingRAMVFS.prototype, method, {
+      value: call,
+      writable: true,
+      configurable: true,
+    })
+  }
+  return new RecordingRAMVFS()
+}
+
+const READS: ReadonlySet<Effect> = new Set([Effect.READ, Effect.METADATA])
+
+// Commands that stat a link's target without following the link: file names
+// a link whose target is gone "broken", and du asks whether its operand is
+// there at all before it measures the link itself.
+const PROBES_TARGET: ReadonlySet<string> = new Set(['file', 'du'])
+
+async function effects(line: string): Promise<Op[]> {
+  const ops: Op[] = []
+  const ws = new Workspace(
+    {
+      '/': recording('/', ops),
+      '/data/inner': recording('/data/inner', ops),
+      '/far': recording('/far', ops),
+    },
+    { mode: MountMode.WRITE },
+  )
+  ws.createSession('s')
+  try {
+    for (const setup of [
+      'mkdir -p /data/sub /out',
+      'echo a > /data/a.txt',
+      'echo b > /data/sub/b.txt',
+      'echo c > /data/inner/c.txt',
+      'echo t > /far/t.txt',
+      'ln -s /far/t.txt /data/link',
+    ]) {
+      await ws.shell(setup, { sessionId: 's' })
+    }
+    ops.length = 0
+    await ws.shell(line, { sessionId: 's' })
+    return [...ops]
+  } finally {
+    await ws.close()
+  }
+}
+
+// Lines whose declared facts the fact-vs-effect check runs against a
+// recording mount. /data/inner is a descendant mount and /data/link points
+// into /far, so an op on /data/inner other than a stat of its root is a walk
+// and an op on /far is a follow.
+const LINES = [
+  'stat /data/link',
+  'stat -L /data/link',
+  'file /data/link',
+  'file -L /data/link',
+  'file -L -h /data/link',
+  'du /data/link',
+  'du -L /data/link',
+  'du /data',
+  'du -x /data',
+  'find /data',
+  'find /data/link',
+  'find -L /data/link',
+  'find /data/link -L',
+  'tree /data',
+  'tree -x /data',
+  'grep a /data/a.txt',
+  'grep -r a /data',
+  'rg a /data',
+  'rg --one-file-system a /data',
+  'ls /data',
+  'ls -R /data',
+  'ls -l /data/link',
+  'ls -L /data/link',
+  'cat /data/link',
+  'cp -r /data/sub /out',
+  'tar -cf /out/x.tar /data/link',
+  'zip /out/x.zip /data/link',
+  'rm /data/link',
+  'mv /data/link /out/l',
+  'unlink /data/link',
+]
+
+describe('line facts against effects', () => {
+  it.each(LINES)('%s does no more to the mounts than its facts say', async (line) => {
+    const words = line.split(' ')
+    const facts = lineFacts(words[0] ?? '', words)
+    const ops = await effects(line)
+    if (!facts.writes) {
+      expect(ops.filter((op) => !READS.has(op.effect))).toEqual([])
+    }
+    if (!facts.walks) {
+      expect(
+        ops.filter(
+          (op) => op.mount === '/data/inner' && !(op.name === 'stat' && op.path === '/data/inner'),
+        ),
+      ).toEqual([])
+    }
+    if (facts.follows === Follow.NONE) {
+      const probes = PROBES_TARGET.has(words[0] ?? '') ? Effect.METADATA : null
+      expect(ops.filter((op) => op.mount === '/far' && op.effect !== probes)).toEqual([])
+    }
+  })
+
+  it.each([
+    ['stat -L /data/link', '/far'],
+    ['find -L /data/link', '/far'],
+    ['du /data', '/data/inner'],
+    ['grep -r c /data', '/data/inner'],
+  ])('the recording sees %s reach %s', async (line, mount) => {
+    expect((await effects(line)).some((op) => op.mount === mount)).toBe(true)
   })
 })
 

@@ -46,7 +46,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import FsCondition, WalkDeclinedError
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType, Follow, LineFacts, PathSpec
 
 
 async def rm(
@@ -192,4 +192,6 @@ async def rm(
     return output, operands_io(format_records(errors))
 
 
-BUILDER = GenericCommand("rm", rm, write=True)
+BUILDER = GenericCommand(
+    "rm", rm, write=True, facts=LineFacts(follows=Follow.NONE)
+)

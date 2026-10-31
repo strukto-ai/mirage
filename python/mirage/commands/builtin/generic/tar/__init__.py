@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     )
     from mirage.commands.builtin.generic.tar.tar import (
         TarFlags,
+        facts,
         parse_flags,
         tar_generic,
     )
@@ -30,6 +31,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     ),
     "mirage.commands.builtin.generic.tar.tar": (
         "TarFlags",
+        "facts",
         "parse_flags",
         "tar_generic",
     ),
@@ -44,6 +46,7 @@ __all__ = [
     "Member",
     "TarFlags",
     "excluded",
+    "facts",
     "member_name",
     "parse_flags",
     "plan_create",

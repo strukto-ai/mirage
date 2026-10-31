@@ -15,7 +15,7 @@
 import { FlagView } from '../../../spec/flag_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
-import { findGeneric } from '../../generic/find.ts'
+import { facts, findGeneric } from '../../generic/find.ts'
 import { landingRoot, linksOf, mountsOf } from '../../utils/links.ts'
 import { WalkBudget, treeWalk } from '../../utils/tree.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
@@ -25,6 +25,7 @@ import { type CommandFiles, commandFiles, resolveOrEmpty } from '../files.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'find',
+  facts: facts,
   fn: async (_accessor, paths, texts, ctx) => {
     const files = commandFiles(ctx, paths)
     return findWalk(files, await resolveOrEmpty(files, paths), texts, ctx)
