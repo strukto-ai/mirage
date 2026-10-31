@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lsGeneric, parseFlags } from '../../generic/ls.ts'
+import { facts, lsGeneric, parseFlags } from '../../generic/ls.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { treeWalk } from '../../utils/tree.ts'
@@ -40,5 +40,6 @@ const ls: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'ls',
+  facts: facts,
   fn: ls,
 }

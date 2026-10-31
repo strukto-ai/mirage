@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.ls import ls_generic, ls_options
+from mirage.commands.builtin.generic.ls import facts, ls_generic, ls_options
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.tree import tree_walk
@@ -54,4 +54,4 @@ async def ls(
     return await ls_generic(resolved, list(texts), ctx, readdir, stat, options)
 
 
-BUILDER = GenericCommand("ls", ls)
+BUILDER = GenericCommand("ls", ls, facts=facts)
