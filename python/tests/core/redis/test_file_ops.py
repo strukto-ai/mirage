@@ -181,6 +181,51 @@ async def test_rmdir_not_empty(accessor):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "op, late",
+    [
+        ("rm_r", "/dir/late.txt"),
+        ("rm_r", "/dir/sub/late.txt"),
+        ("rename", "/dir/sub/late.txt"),
+        ("rmdir", "/dir/late.txt"),
+    ],
+)
+async def test_a_child_written_during_a_directory_op_keeps_its_directories(
+    accessor, op, late
+):
+    # The op lists before it acts, so a key written under /dir meanwhile
+    # stays; the directories above it are recorded again and the op is
+    # ENOTEMPTY, never success over an orphan.
+    store = accessor.store
+    if op == "rmdir":
+        await store.del_file("/dir/child.txt")
+    else:
+        await store.add_dir("/dir/sub")
+    hook = "remove_dir" if op == "rmdir" else "del_file"
+    inner = getattr(store, hook)
+
+    async def racing(key: str) -> None:
+        setattr(store, hook, inner)
+        await store.set_file(late, b"late")
+        await inner(key)
+
+    setattr(store, hook, racing)
+    src = PathSpec(vfs_path="dir", virtual="/dir", directory="/dir")
+    with pytest.raises(OSError) as excinfo:
+        if op == "rename":
+            dst = PathSpec(vfs_path="moved", virtual="/moved", directory="/")
+            await rename(accessor, src, dst)
+        else:
+            await (rm_r if op == "rm_r" else rmdir)(accessor, src)
+    assert excinfo.value.errno == errno.ENOTEMPTY
+    assert await store.get_file(late) == b"late"
+    for up in ("/dir", "/dir/sub") if "/sub/" in late else ("/dir",):
+        assert await store.has_dir(up)
+    if op == "rename":
+        assert await store.get_file("/moved/child.txt") == b"child"
+
+
+@pytest.mark.asyncio
 async def test_rmdir_not_found(mk_store):
     a = await mk_store("test:fops:rd2:")
     with pytest.raises(FileNotFoundError):

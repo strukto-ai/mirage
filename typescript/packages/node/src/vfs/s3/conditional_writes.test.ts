@@ -632,7 +632,7 @@ describe('conditional writes on an S3 mount', () => {
   it.each([
     [null, 'DeleteObjects', 'd/b', 'rm -r /s3/d', 'd/a', `rm: cannot remove '/s3/d/b': ${STALE}\n`],
     ['cat /s3/d/a', 'after', 'd/a', 'rm -r /s3/d', 'd/b', null],
-    ['cat /s3/d/a', 'after', 'd/a', 'mv /s3/d /s3/e', 'd/b', null],
+    ['cat /s3/d/a', 'after', 'd/a', 'mv /s3/d /s3/e', 'e/a', null],
     [null, 'DeleteObjects', 'd/b', 'mv /s3/d /s3/e', 'd/a', null],
     [null, 'CopyObject', 'd/a', 'mv /s3/d /s3/e', 'e/a', null],
   ] as const)(
@@ -650,6 +650,34 @@ describe('conditional writes on an S3 mount', () => {
       if (stderr !== null) expect(err).toBe(stderr)
       expect(object(changed)).toBe('theirs\n')
       expect(object(gone)).toBeUndefined()
+    },
+  )
+
+  it.each(
+    [WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL].flatMap((write) => [
+      [write, 'rm -r /s3/d', 'DeleteObjects', 'd/', "rm: cannot remove '/s3/d'", ['d/late']],
+      [write, 'mv /s3/d /s3/e', 'DeleteObjects', 'd/', "mv: cannot remove '/s3/d'", ['d/late']],
+      [
+        write,
+        'rmdir /s3/m',
+        'DeleteObject',
+        'm/',
+        "rmdir: failed to remove '/s3/m'",
+        ['m/', 'm/late'],
+      ],
+    ]),
+  )(
+    'leaves and reports a child written during a directory op (%s): %s',
+    async (write, line, when, dir, prefix, left) => {
+      // The walk lists once; a key written under the directory after it
+      // stays, and the op is ENOTEMPTY rather than a success.
+      mock.store.set('b', 'm/', new Uint8Array())
+      const ws = workspace(write)
+      mock.before(when, () => {
+        mock.store.set('b', `${dir}late`, ENC.encode('new\n'))
+      })
+      expect(await run(ws, line)).toEqual([1, '', `${prefix}: Directory not empty\n`])
+      expect(keysUnder(dir)).toEqual(left)
     },
   )
 
@@ -1269,25 +1297,29 @@ describe('conditional writes on an S3 mount', () => {
     expect([code, err.includes("couldn't edit")], err).toEqual([1, false])
   })
 
-  it('copies a conditional dir mv whole before deleting', async () => {
-    // As GNU mv across devices: a copy failing on a later page leaves the source.
-    for (const name of ['c', 'd', 'e']) mock.store.set('b', `d/${name}`, ENC.encode(name))
-    const before = keysUnder('d/')
-    mock.pageSize = 2
-    for (let i = 0; i < 3; i++) mock.before('CopyObject', () => undefined)
-    mock.before('CopyObject', () => {
-      throw new Error('network down')
-    })
-    const ws = workspace()
-    expect((await run(ws, 'mv /s3/d /s3/e'))[0]).toBe(1)
-    expect(keysUnder('d/')).toEqual(before)
-    expect(sent('DeleteObjects')).toEqual([])
-  })
+  it.each([false, true])(
+    'copies a conditional dir mv whole before deleting (lost: %s)',
+    async (lost) => {
+      // As GNU mv across devices: a copy failing on a later page leaves the
+      // source, and so does one whose source changed since it was listed.
+      for (const name of ['c', 'd', 'e']) mock.store.set('b', `d/${name}`, ENC.encode(name))
+      const before = keysUnder('d/')
+      mock.pageSize = 2
+      for (let i = 0; i < 3; i++) mock.before('CopyObject', () => undefined)
+      mock.before('CopyObject', () => {
+        if (lost) theirs('d/d')
+        else throw new Error('network down')
+      })
+      const ws = workspace()
+      expect((await run(ws, 'mv /s3/d /s3/e'))[0]).toBe(1)
+      expect(keysUnder('d/')).toEqual(before)
+      expect(sent('DeleteObjects')).toEqual([])
+    },
+  )
 
   it.each([
     ['rm -r', 'DeleteObjects', 'DeleteObjects', 'rm -r /s3/d'],
     ['dir mv', 'CopyObject', 'CopyObject', 'mv /s3/d /s3/e'],
-    ['dir mv, failed removal', 'CopyObject', 'DeleteObjects', 'mv /s3/d /s3/e'],
   ] as const)(
     'keeps the versions an earlier page lost when a later one fails: %s',
     async (_name, changedOn, failedOn, line) => {

@@ -15,9 +15,9 @@
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { ensurePathSpec } from './_helpers.ts'
-import { copy } from './copy.ts'
+import { copy, copyTree } from './copy.ts'
 import { backendPath } from './path.ts'
-import { rmRecursive } from './rm.ts'
+import { removeTree } from './rm.ts'
 import { stat } from './stat.ts'
 import { unlink } from './unlink.ts'
 
@@ -42,12 +42,15 @@ export async function rename(
   if (srcStat.type === FileType.DIRECTORY) {
     if (remoteDst.startsWith(remoteSrc + '/')) {
       // Moving a directory into its own subtree would run away in the
-      // recursive copy and then rmRecursive would delete the original.
+      // recursive copy and then removeTree would delete the original.
       // Refuse before either side effect.
       throw new Error(`cannot move '${s.virtual}' to a subdirectory of itself, '${d.virtual}'`)
     }
-    await copy(accessor, s, d, true)
-    await rmRecursive(accessor, s)
+    // Only what the copy carried is deleted: a file written under the
+    // source after its listing stays there, and the move is ENOTEMPTY.
+    const copied = new Set<string>()
+    await copyTree(accessor, remoteSrc, remoteDst, copied)
+    await removeTree(accessor, s, copied)
   } else {
     await copy(accessor, s, d)
     await unlink(accessor, s)

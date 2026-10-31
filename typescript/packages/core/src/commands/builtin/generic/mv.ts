@@ -664,6 +664,16 @@ export async function mvGeneric(
       try {
         await strategy.rename(src, target)
       } catch (err) {
+        // A walk that moved what it listed found the source holding a child
+        // written since: as in GNU's move across devices, the source is
+        // what could not be removed.
+        if (
+          (err as { code?: string }).code === 'ENOTEMPTY' &&
+          errorVirtualPath(err) === src.virtual
+        ) {
+          errors.push(`mv: cannot remove '${src.rawPath}': ${strerrorOf(err)}`)
+          continue
+        }
         if (err instanceof MoveError) {
           errors.push(`mv: cannot remove '${src.rawPath}': ${strerrorOf(err.error)}`)
           errors.push(

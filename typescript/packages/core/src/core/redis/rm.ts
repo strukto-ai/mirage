@@ -16,6 +16,8 @@ import type { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from '../../utils/path.ts'
+import { enotempty } from '../../errors/fs.ts'
+import { keepLeft } from './dest.ts'
 
 export async function rmR(accessor: RedisAccessor, path: PathSpec): Promise<void> {
   const p = norm(path.mountPath)
@@ -37,4 +39,6 @@ export async function rmR(accessor: RedisAccessor, path: PathSpec): Promise<void
       await store.delAttrs(key)
     }
   }
+  // The listings ran once, so a key written under the path since stayed.
+  if (await keepLeft(store, p)) throw enotempty(path)
 }

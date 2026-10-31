@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, enotempty } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
-import { checkDestParents, checkRename, lookupError } from './dest.ts'
+import { checkDestParents, checkRename, keepLeft, lookupError } from './dest.ts'
 
 // Re-key every descendant of a renamed directory. A synthetic-directory
 // store keeps subdirectories as members of their own set, so moving only
@@ -101,6 +101,8 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
     await store.removeDir(s)
     await store.delModified(s)
     await store.delAttrs(s)
+    // A key written under the source while the subtree moved stayed.
+    if (await keepLeft(store, s)) throw enotempty(src)
     return
   }
   throw await lookupError(store, src, s)

@@ -22,11 +22,12 @@ import {
   stale,
 } from '../../cache/context.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
-import { enoent, strerrorOf } from '../../errors/fs.ts'
+import { enoent, enotempty, strerrorOf } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import {
   type ExistsFn,
+  holdsChild,
   keepWalk,
   type ObjectStoreDriver,
   type PairFn,
@@ -70,26 +71,36 @@ export function makeRename<A extends Accessor, C>(
     // moveFile leaves this 'rename': the walk never ran, so nothing under
     // the prefix can have moved.
     let op = 'rename'
+    // Whether the source still held a child once the walk was done.
+    let left = false
     // A move is a copy then a delete, so both carry a condition.
     const [cond, source] = await moveCondition(src, dst)
     const move = async (conn: C): Promise<boolean> => {
+      const srcPfx = kp.applyDir(kpfx, src.mountPath)
+      let moved: boolean
       if (cond !== null) {
         const moveFileIf = requireHook(driver.moveFileIf)
         if (await moveFileIf(conn, srcKey, kp.apply(kpfx, dst.mountPath), cond, source)) return true
         op = 'rename_prefix'
-        return requireHook(driver.movePrefixIf)(
+        moved = await requireHook(driver.movePrefixIf)(
           conn,
-          kp.applyDir(kpfx, src.mountPath),
+          srcPfx,
           kp.applyDir(kpfx, dst.mountPath),
           knownVersions(src, kpfx),
           knownVersions(dst, kpfx),
         )
+      } else {
+        if (await moveFile(conn, srcKey, kp.apply(kpfx, dst.mountPath))) return true
+        // A directory owns no object of its own, so a clean false here is
+        // the ordinary way into the prefix walk, not an answer about it.
+        op = 'rename_prefix'
+        moved = await movePrefix(conn, srcPfx, kp.applyDir(kpfx, dst.mountPath))
       }
-      if (await moveFile(conn, srcKey, kp.apply(kpfx, dst.mountPath))) return true
-      // A directory owns no object of its own, so a clean false here is
-      // the ordinary way into the prefix walk, not an answer about it.
-      op = 'rename_prefix'
-      return movePrefix(conn, kp.applyDir(kpfx, src.mountPath), kp.applyDir(kpfx, dst.mountPath))
+      // The walk lists once, so a key written under the source after its
+      // page was read stayed behind: the move copied and removed what it
+      // listed, and the source is not empty.
+      left = moved && (await holdsChild(driver, conn, srcPfx))
+      return moved
     }
     const settle = (moved: boolean | undefined): Promise<void> => {
       // undefined when the store threw: movePrefix is a paginated walk
@@ -142,5 +153,7 @@ export function makeRename<A extends Accessor, C>(
     if (!moved) throw enoent(src)
     liftLost(src, upto, op !== 'rename')
     liftLost(dst, upto, op !== 'rename')
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- move sets it inside the walk
+    if (left) throw enotempty(src)
   }
 }

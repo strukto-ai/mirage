@@ -25,7 +25,14 @@ import { eisdir, enoent, enotempty } from '../../errors/fs.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { isDir } from '../../utils/stat_view.ts'
-import { keepWalk, type ObjectStoreDriver, type PathFn, refused, requireHook } from './driver.ts'
+import {
+  holdsChild,
+  keepWalk,
+  type ObjectStoreDriver,
+  type PathFn,
+  refused,
+  requireHook,
+} from './driver.ts'
 import { ConditionLostError } from './errors.ts'
 import { makeStat } from './stat.ts'
 
@@ -94,12 +101,17 @@ export function makeRemovePrefix<A extends Accessor, C>(
     }
     const { conn, close } = await driver.connect(accessor)
     const upto = lostCount()
+    let left: boolean
     try {
-      await settleAfter(async () => {
+      left = await settleAfter(async () => {
         try {
           if (conditional) {
             await requireHook(driver.deletePrefixIf)(conn, pfx, knownVersions(path, kpfx))
           } else await driver.deletePrefix(conn, pfx)
+          // The walk lists once, so a key written under the prefix after its
+          // page was read stays; as GNU rm's last rmdir meets an entry
+          // created after its read, that is ENOTEMPTY.
+          return await holdsChild(driver, conn, pfx)
         } finally {
           await close()
         }
@@ -113,6 +125,7 @@ export function makeRemovePrefix<A extends Accessor, C>(
       })
     }
     liftLost(path, upto, true)
+    if (left) throw enotempty(path)
   }
 }
 
@@ -164,6 +177,13 @@ export function makeRmdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
       if (!hasChild && sawKey) {
         await driver.deleteFile(conn, pfx)
         deleted = true
+        // A child written between the listing and the delete still holds
+        // the directory, so rmdir(2) is ENOTEMPTY and the marker goes back:
+        // a refused rmdir changes nothing.
+        hasChild = await holdsChild(driver, conn, pfx)
+        if (hasChild && driver.markersSupported !== false) {
+          await driver.put(conn, pfx, new Uint8Array())
+        }
       }
     } finally {
       // Gated on the delete having run, not on "did not throw": the

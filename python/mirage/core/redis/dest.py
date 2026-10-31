@@ -21,6 +21,7 @@ from mirage.errors.fs import (
     enotempty,
 )
 from mirage.types import PathSpec
+from mirage.utils.dates import now_iso
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import ancestors
 from mirage.vfs.redis.store import RedisStore
@@ -216,3 +217,36 @@ async def check_mkdir_target(
         if component == key:
             raise eexist(named)
         raise enotdir(named)
+
+
+async def keep_left(store: RedisStore, p: str) -> bool:
+    """Keep what a directory op left under ``p`` inside its directories.
+
+    The op lists before it acts, so a key written under ``p`` meanwhile
+    stays while the op removes the directories above it, and a key under
+    no recorded directory is the orphan ``check_dest_parents`` refuses.
+    Each directory from ``p`` down to such a key is recorded again, as
+    ``mkdir -p`` records it.
+
+    Args:
+        store (RedisStore): The backing store.
+        p (str): Normalized key of the directory the op walked.
+
+    Returns:
+        bool: Whether any key was left under ``p``.
+    """
+    prefix = p.rstrip("/") + "/"
+    keys = [*await store.list_files(prefix), *await store.list_dirs()]
+    left = [k for k in keys if k.startswith(prefix)]
+    if not left:
+        return False
+    held = {p}
+    for key in left:
+        held.update(up for up in ancestors(key) if up.startswith(prefix))
+    now = now_iso()
+    for key in sorted(held):
+        if not await store.has_dir(key):
+            await store.add_dir(key)
+            if not await store.get_modified(key):
+                await store.set_modified(key, now)
+    return True

@@ -98,3 +98,26 @@ export async function openForWrite(
     throw err
   }
 }
+
+/**
+ * Whether the remote directory still lists children. SFTP 3 answers a
+ * not-empty rmdir with its one generic code (SSH_FX_FAILURE); this probe
+ * decides between "not empty" and every other refusal that code covers. A
+ * probe that fails is a negative probe, never an error to surface; the
+ * caller re-raises what the server said. Mirrors Python's `holds_entries`.
+ */
+export async function holdsEntries(sftp: SFTPWrapper, remote: string): Promise<boolean> {
+  try {
+    return await new Promise<boolean>((resolveFn, rejectFn) => {
+      sftp.readdir(remote, (err, entries) => {
+        if (err !== undefined) {
+          rejectFn(err)
+          return
+        }
+        resolveFn(entries.some((e) => e.filename !== '.' && e.filename !== '..'))
+      })
+    })
+  } catch {
+    return false
+  }
+}

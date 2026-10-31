@@ -21,23 +21,74 @@ import { isNotFound } from './errors.ts'
 import { backendPath, virtualPath } from './path.ts'
 import { stat } from './stat.ts'
 import { unlink } from './unlink.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, enotempty } from '../../errors/fs.ts'
+
+/** Whether a directory lists any entry; a missing one holds none. Mirrors Python's `holds_child`. */
+export async function holdsChild(
+  accessor: DatabricksVolumeAccessor,
+  remoteDir: string,
+): Promise<boolean> {
+  try {
+    return (await listDirectoryContents(accessor, remoteDir)).length > 0
+  } catch (exc) {
+    if (isNotFound(exc)) return false
+    throw exc
+  }
+}
 
 async function removeTreeRecurse(
   accessor: DatabricksVolumeAccessor,
   remoteDir: string,
   removed: string[],
-): Promise<void> {
+  copied: Set<string> | null,
+): Promise<boolean> {
+  let left = false
   for (const entry of await listDirectoryContents(accessor, remoteDir)) {
     if (entry.isDirectory) {
-      await removeTreeRecurse(accessor, entry.path, removed)
-    } else {
+      left = (await removeTreeRecurse(accessor, entry.path, removed, copied)) || left
+    } else if (copied === null || copied.has(entry.path)) {
       await deleteFile(accessor, entry.path)
       removed.push(entry.path)
+    } else {
+      left = true
     }
   }
-  await deleteDirectory(accessor, remoteDir)
+  if (left) return true
+  try {
+    await deleteDirectory(accessor, remoteDir)
+  } catch (exc) {
+    // The Files API deletes only an empty directory, so a file written
+    // after the listing refuses it.
+    if (isNotFound(exc) || !(await holdsChild(accessor, remoteDir))) throw exc
+    return true
+  }
   removed.push(remoteDir)
+  return false
+}
+
+/**
+ * Remove a directory tree, or only the files a move copied out of it
+ * (`copied`, their backend paths; null deletes every file listed). The walk
+ * lists each directory once, so a file written under it since, or one the
+ * move never copied, stays and keeps its directories: the tree is
+ * ENOTEMPTY. Returns the backend paths removed. Mirrors Python's
+ * `remove_tree`.
+ */
+export async function removeTree(
+  accessor: DatabricksVolumeAccessor,
+  path: PathSpec,
+  copied: Set<string> | null = null,
+): Promise<string[]> {
+  const removed: string[] = []
+  let left: boolean
+  try {
+    left = await removeTreeRecurse(accessor, backendPath(accessor.config, path), removed, copied)
+  } catch (exc) {
+    if (isNotFound(exc)) throw enoent(path.virtual)
+    throw exc
+  }
+  if (left) throw enotempty(path.virtual)
+  return removed
 }
 
 export async function rmRecursive(
@@ -50,13 +101,6 @@ export async function rmRecursive(
     await unlink(accessor, p)
     return [p.mountPath]
   }
-  const remoteRoot = backendPath(accessor.config, p)
-  const removed: string[] = []
-  try {
-    await removeTreeRecurse(accessor, remoteRoot, removed)
-  } catch (exc) {
-    if (isNotFound(exc)) throw enoent(p.virtual)
-    throw exc
-  }
+  const removed = await removeTree(accessor, p)
   return removed.map((backend) => virtualPath(accessor.config, backend, ''))
 }

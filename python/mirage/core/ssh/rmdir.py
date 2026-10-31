@@ -15,28 +15,9 @@
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
+from mirage.core.ssh.utils import holds_entries, join_root
 from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.types import PathSpec
-
-
-async def _holds_entries(sftp: asyncssh.SFTPClient, remote: str) -> bool:
-    """Whether the remote directory still lists children.
-
-    The probe behind the version-3 arm below: it decides between "not
-    empty" and every other refusal the one generic code covers. A probe
-    that fails is a negative probe, never an error to surface; the
-    caller re-raises what the server said.
-
-    Args:
-        sftp (asyncssh.SFTPClient): open SFTP session.
-        remote (str): absolute remote path of the directory.
-    """
-    try:
-        names = await sftp.listdir(remote)
-    except (OSError, asyncssh.Error):
-        return False
-    return any(name not in (".", "..") for name in names)
 
 
 async def rmdir(accessor: SSHAccessor, path: PathSpec) -> None:
@@ -70,6 +51,6 @@ async def rmdir(accessor: SSHAccessor, path: PathSpec) -> None:
     except asyncssh.SFTPNotADirectory as exc:
         raise enotdir(path) from exc
     except asyncssh.SFTPFailure as exc:
-        if await _holds_entries(sftp, remote):
+        if await holds_entries(sftp, remote):
             raise enotempty(path) from exc
         raise

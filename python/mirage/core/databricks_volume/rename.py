@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.core.databricks_volume.copy import copy
+from mirage.core.databricks_volume.copy import copy, copy_tree
 from mirage.core.databricks_volume.path import backend_path
-from mirage.core.databricks_volume.rm import rm_recursive
+from mirage.core.databricks_volume.rm import remove_tree
 from mirage.core.databricks_volume.stat import stat
 from mirage.core.databricks_volume.unlink import unlink
 from mirage.types import FileType, PathSpec
@@ -39,14 +39,17 @@ async def rename(
     if src_stat.type == FileType.DIRECTORY:
         if remote_dst.startswith(remote_src + "/"):
             # Moving a directory into its own subtree would run away in the
-            # recursive copy and then rm_recursive would delete the original.
+            # recursive copy and then remove_tree would delete the original.
             # Refuse before either side effect.
             raise ValueError(
                 f"cannot move '{src.virtual}' to a subdirectory of "
                 f"itself, '{dst.virtual}'"
             )
-        await copy(accessor, src, dst, recursive=True)
-        await rm_recursive(accessor, src)
+        # Only what the copy carried is deleted: a file written under the
+        # source after its listing stays there, and the move is ENOTEMPTY.
+        copied: set[str] = set()
+        await copy_tree(accessor, remote_src, remote_dst, copied)
+        await remove_tree(accessor, src, copied)
     else:
         await copy(accessor, src, dst)
         await unlink(accessor, src)

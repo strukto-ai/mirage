@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 from types import SimpleNamespace
 
 import pytest
@@ -117,3 +118,28 @@ async def test_rename_into_own_subtree_fails(accessor, files, remote_root):
     assert files.upload_calls == []
     assert files.delete_calls == []
     assert files.delete_directory_calls == []
+
+
+@pytest.mark.asyncio
+async def test_rename_keeps_a_file_written_after_the_copy(
+    accessor, files, remote_root
+):
+    # Only what the copy carried is deleted: a file written under the source
+    # since stays there, and the move is ENOTEMPTY rather than a loss.
+    _seed_directory(files, remote_root)
+    _seed_directory(files, f"{remote_root}/d")
+    _seed_file(files, f"{remote_root}/d/a.txt", b"aaa")
+    inner = files.upload
+
+    def racing(path, contents, overwrite=False):
+        files.upload = inner
+        inner(path, contents, overwrite)
+        _seed_file(files, f"{remote_root}/d/late.txt", b"late")
+
+    files.upload = racing
+    with pytest.raises(OSError) as refused:
+        await rename(accessor, _path("/dbx/d"), _path("/dbx/d2"))
+    assert refused.value.errno == errno.ENOTEMPTY
+    assert files.downloads[f"{remote_root}/d2/a.txt"] == b"aaa"
+    assert files.downloads[f"{remote_root}/d/late.txt"] == b"late"
+    assert f"{remote_root}/d/a.txt" not in files.downloads

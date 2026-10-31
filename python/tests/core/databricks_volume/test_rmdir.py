@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 from types import SimpleNamespace
 
 import pytest
@@ -62,6 +63,26 @@ async def test_rmdir_non_empty_fails(accessor, files, remote_root):
     with pytest.raises(OSError):
         await rmdir(accessor, _path("/dbx/full"))
     assert files.delete_directory_calls == []
+
+
+@pytest.mark.asyncio
+async def test_rmdir_refuses_a_child_written_after_the_listing(
+    accessor, files, remote_root
+):
+    _seed_directory(files, remote_root)
+    _seed_directory(files, f"{remote_root}/empty")
+    inner = files.delete_directory
+
+    def racing(path: str) -> None:
+        files.delete_directory = inner
+        _seed_file(files, f"{remote_root}/empty/late.txt")
+        inner(path)
+
+    files.delete_directory = racing
+    with pytest.raises(OSError) as refused:
+        await rmdir(accessor, _path("/dbx/empty"))
+    assert refused.value.errno == errno.ENOTEMPTY
+    assert f"{remote_root}/empty" in files.directory_metadata
 
 
 @pytest.mark.asyncio

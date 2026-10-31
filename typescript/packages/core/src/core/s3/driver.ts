@@ -815,14 +815,18 @@ async function movePrefixIf(
         moved.push([key, token])
       }
     }
-    // A batch at a time, so a later batch's failure keeps what one lost.
-    for (let start = 0; start < moved.length; start += DELETE_BATCH) {
-      const [batchLost, batchFailed] = await deleteBatch(
-        conn,
-        moved.slice(start, start + DELETE_BATCH),
-      )
-      for (const item of batchLost) lost.push(item)
-      for (const item of batchFailed) failed.push(item)
+    // As any failed copy, a lost one keeps the whole source: deleting the
+    // rest would split the directory across both ends.
+    if (lost.length === 0) {
+      // A batch at a time, so a later batch's failure keeps what one lost.
+      for (let start = 0; start < moved.length; start += DELETE_BATCH) {
+        const [batchLost, batchFailed] = await deleteBatch(
+          conn,
+          moved.slice(start, start + DELETE_BATCH),
+        )
+        for (const item of batchLost) lost.push(item)
+        for (const item of batchFailed) failed.push(item)
+      }
     }
   } catch (err) {
     raiseLostBefore(lost, err, untouched)

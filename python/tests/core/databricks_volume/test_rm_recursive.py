@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 from types import SimpleNamespace
 
 import pytest
@@ -73,6 +74,30 @@ async def test_rm_recursive_nested_tree(accessor, files, remote_root):
     assert f"{remote_root}/d" in files.delete_directory_calls
     assert "/d" in removed
     assert f"{remote_root}/d" not in files.directory_metadata
+
+
+@pytest.mark.asyncio
+async def test_rm_recursive_keeps_a_file_written_during_the_walk(
+    accessor, files, remote_root
+):
+    # The Files API deletes only an empty directory: a file written after
+    # the listing refuses it, and the removal is ENOTEMPTY.
+    _seed_directory(files, remote_root)
+    _seed_directory(files, f"{remote_root}/d")
+    _seed_file(files, f"{remote_root}/d/a.txt")
+    inner = files.delete
+
+    def racing(path: str) -> None:
+        files.delete = inner
+        _seed_file(files, f"{remote_root}/d/late.txt", b"late")
+        inner(path)
+
+    files.delete = racing
+    with pytest.raises(OSError) as refused:
+        await rm_recursive(accessor, _path("/dbx/d"))
+    assert refused.value.errno == errno.ENOTEMPTY
+    assert files.downloads[f"{remote_root}/d/late.txt"] == b"late"
+    assert f"{remote_root}/d" in files.directory_metadata
 
 
 @pytest.mark.asyncio

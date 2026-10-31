@@ -26,10 +26,11 @@ from mirage.core.object_store.driver import (
     ExistsFn,
     ObjectStoreDriver,
     PairFn,
+    holds_child,
     keep_walk,
 )
 from mirage.core.object_store.errors import ConditionLostError
-from mirage.errors.fs import enoent, strerror_of
+from mirage.errors.fs import enoent, enotempty, strerror_of
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
 from mirage.utils import key_prefix as kp
@@ -80,11 +81,14 @@ def make_rename(
         # move_file leaves this "rename": the walk never ran, so nothing
         # under the prefix can have moved.
         op = "rename"
+        # Whether the source still held a child once the walk was done.
+        left = False
         # A move is a copy then a delete, so both carry a condition.
         cond, source = await move_condition(src_spec, dst_spec)
 
         async def move(conn: C) -> bool:
-            nonlocal op
+            nonlocal op, left
+            src_pfx = kp.apply_dir(kpfx, src)
             if cond is not None:
                 move_file_if = driver.move_file_if
                 move_prefix_if = driver.move_prefix_if
@@ -94,22 +98,28 @@ def make_rename(
                 ):
                     return True
                 op = "rename_prefix"
-                return await move_prefix_if(
+                moved = await move_prefix_if(
                     conn,
-                    kp.apply_dir(kpfx, src),
+                    src_pfx,
                     kp.apply_dir(kpfx, dst),
                     known_versions(src_spec, kpfx),
                     known_versions(dst_spec, kpfx),
                 )
-            if await move_file(conn, src_key, kp.apply(kpfx, dst)):
-                return True
-            # A directory owns no object of its own, so a clean False
-            # here is the ordinary way into the prefix walk, not an
-            # answer about it.
-            op = "rename_prefix"
-            return await move_prefix(
-                conn, kp.apply_dir(kpfx, src), kp.apply_dir(kpfx, dst)
-            )
+            else:
+                if await move_file(conn, src_key, kp.apply(kpfx, dst)):
+                    return True
+                # A directory owns no object of its own, so a clean False
+                # here is the ordinary way into the prefix walk, not an
+                # answer about it.
+                op = "rename_prefix"
+                moved = await move_prefix(
+                    conn, src_pfx, kp.apply_dir(kpfx, dst)
+                )
+            # The walk lists once, so a key written under the source after
+            # its page was read stayed behind: the move copied and removed
+            # what it listed, and the source is not empty.
+            left = moved and await holds_child(driver, conn, src_pfx)
+            return moved
 
         async def settle(moved: bool | None) -> None:
             # None when the store raised: move_prefix is a paginated walk
@@ -166,5 +176,7 @@ def make_rename(
             raise enoent(src_spec.virtual)
         lift_lost(src_spec, upto, subtree=op != "rename")
         lift_lost(dst_spec, upto, subtree=op != "rename")
+        if left:
+            raise enotempty(src_spec)
 
     return rename
