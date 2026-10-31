@@ -15,7 +15,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
-from mirage.commands.builtin.generic.ls import link_mode
 from mirage.commands.builtin.generic_bind.factory import declared_facts
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.compile import compile_spec
@@ -24,7 +23,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue, WordKind
 from mirage.shell.constants import BUILTIN_GROUP
 from mirage.shell.types import BuiltinGroup, ShellBuiltin
-from mirage.types import Follow, LineFacts, LsLinkMode, PathSpec
+from mirage.types import Follow, LineFacts, PathSpec
 
 # Bash builtins the parser accepts but the executor cannot honor; they
 # still route to the shell layer so the error names a capability gap.
@@ -385,29 +384,6 @@ SELF_RESOLVING = {
 }
 
 
-def _ls_facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
-    """An ls line resolves the command-line links ``link_mode`` says, and
-    walks, and reads, below its operands under ``-R``.
-
-    Args:
-        fl (FlagView): the ls flag view.
-        operands (Sequence[str | PathSpec]): the line's operands.
-    """
-    recursive = fl.as_bool("recursive")
-    return LineFacts(
-        follows=_LS_FOLLOWS[link_mode(fl)],
-        walks=recursive,
-        reads_subtree=recursive,
-    )
-
-
-_LS_FOLLOWS = {
-    LsLinkMode.ALL: Follow.LAST,
-    LsLinkMode.DIRECTORY: Follow.DIRECTORY,
-    LsLinkMode.NONE: Follow.NONE,
-}
-
-
 def facts_of(
     name: str,
     flags: Mapping[str, FlagValue],
@@ -422,7 +398,7 @@ def facts_of(
         operands (Sequence[str | PathSpec]): its operands, in order.
     """
     runs = EXEC_WRAPPERS.get(name, (name,))[0]
-    declared = _ls_facts if runs == "ls" else declared_facts(runs)
+    declared = declared_facts(runs)
     if isinstance(declared, LineFacts):
         facts = declared
     else:

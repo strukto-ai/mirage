@@ -40,7 +40,9 @@ from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
     FileType,
+    Follow,
     JsonValue,
+    LineFacts,
     LsIndicator,
     LsLinkMode,
     LsSortBy,
@@ -117,6 +119,12 @@ _SCANNED = (
 )
 # GNU reads a bare --classify, --hyperlink or --color as `always`.
 _BARE_ALWAYS = frozenset(("classify", "hyperlink", "color"))
+
+_FOLLOWS = {
+    LsLinkMode.ALL: Follow.LAST,
+    LsLinkMode.DIRECTORY: Follow.DIRECTORY,
+    LsLinkMode.NONE: Follow.NONE,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,6 +278,22 @@ def link_mode(
     if fl.as_bool("directory") or long or classify:
         return LsLinkMode.NONE
     return LsLinkMode.DIRECTORY
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """An ls line resolves the command-line links ``link_mode`` says, and
+    walks, and reads, below its operands under ``-R``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    recursive = fl.as_bool("recursive")
+    return LineFacts(
+        follows=_FOLLOWS[link_mode(fl)],
+        walks=recursive,
+        reads_subtree=recursive,
+    )
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
@@ -1634,6 +1658,7 @@ __all__ = [
     "LsWarning",
     "Operand",
     "exit_status_for",
+    "facts",
     "format_simple",
     "ls",
     "ls_generic",
