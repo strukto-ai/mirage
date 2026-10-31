@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { liveEgress } from '@struktoai/mirage-core/io/gateway'
-import { type NetworkRule, networkBound, networkLets } from '@struktoai/mirage-core/io/network'
+import {
+  type NetworkRule,
+  networkBound,
+  networkLets,
+  networkRoute,
+} from '@struktoai/mirage-core/io/network'
 import { Policies } from '@struktoai/mirage-core/policy/policies'
 import { AsyncResource } from 'node:async_hooks'
 import dns, { type LookupAddress, type LookupOptions } from 'node:dns'
@@ -98,8 +103,19 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
   // Bound here, so a lookup a resolver answers on another context still
   // asks the rule of the call that opened the connection.
   const lets = AsyncResource.bind(networkLets)
+  if (relays.has(`${options.host ?? 'localhost'}:${String(options.port)}`)) {
+    return Reflect.apply(connect, this, args)
+  }
+  // A routed connection goes, and is judged, where its route names, its end
+  // looked up as the system looks it up; undici hands the port over as text.
+  const routed = networkRoute(options.host ?? 'localhost', Number(options.port as number | string))
+  if (routed !== null) {
+    options = { ...options, host: routed[0], port: routed[1] }
+    delete options.lookup
+    if (normalized !== null) normalized[0] = options
+    else args[0] = options
+  }
   const host = options.host ?? 'localhost'
-  if (relays.has(`${host}:${String(options.port)}`)) return Reflect.apply(connect, this, args)
   if (net.isIP(host) !== 0) {
     if (lets('', host, options.port)) return Reflect.apply(connect, this, args)
     process.nextTick(() => this.destroy(refusal(host, options.port)))

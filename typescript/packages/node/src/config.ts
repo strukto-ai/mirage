@@ -14,7 +14,12 @@
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 
 import { IOConfig } from '@struktoai/mirage-core/io/config'
-import { NetworkRule, networkLayer, type NetworkSetting } from '@struktoai/mirage-core/io/network'
+import {
+  NetworkRule,
+  networkLayer,
+  networkRoutes,
+  type NetworkSetting,
+} from '@struktoai/mirage-core/io/network'
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import { readFileSync } from 'node:fs'
@@ -430,7 +435,11 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   }
   if (raw.network !== undefined) {
     const layer = networkLayer(raw.network)
-    new NetworkRule(layer === null ? [] : [layer])
+    new NetworkRule(
+      layer === null ? [] : [layer],
+      false,
+      networkRoutes(raw.network as NetworkSetting),
+    )
   }
   // At the sync entry point, as Python's WorkspaceConfig validator is, so the CLI
   // refuses a bad value before it POSTs the document to the daemon.

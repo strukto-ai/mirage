@@ -14,7 +14,7 @@
 
 import { networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { watchNetwork } from './network.ts'
+import { routed, watchNetwork } from './network.ts'
 
 describe('the page network watcher', () => {
   afterAll(() => {
@@ -43,5 +43,22 @@ describe('the page network watcher', () => {
     expect(manual.type).toBe('opaqueredirect')
     expect((await fetch('https://other.test/')).type).toBe('basic')
     expect(asked).toEqual(['manual', 'manual', undefined])
+  })
+
+  it('sends a request where the bound rule routes its host and port', async () => {
+    vi.stubGlobal('location', { href: 'https://page.test/' })
+    const rule = networkRule({
+      routes: { 'localhost:5003': '127.0.0.1:61001', 'api.test:443': '[::1]:8443' },
+    })
+    const under = (input: RequestInfo | URL): Promise<string> =>
+      runWithNetwork(rule, () => {
+        const to = routed(input)
+        return Promise.resolve(to instanceof Request ? to.url : String(to))
+      })
+    expect(await under('http://localhost:5003/a?b=1')).toBe('http://127.0.0.1:61001/a?b=1')
+    expect(await under('https://api.test/x')).toBe('https://[::1]:8443/x')
+    expect(await under(new Request('ws://localhost:5003/s'))).toBe('ws://127.0.0.1:61001/s')
+    expect(await under('http://localhost:5004/')).toBe('http://localhost:5004/')
+    expect(routed('http://localhost:5003/')).toBe('http://localhost:5003/')
   })
 })

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type Egress, liveEgress, opened } from '@struktoai/mirage-core/io/gateway'
+import { networkRoute } from '@struktoai/mirage-core/io/network'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import {
@@ -347,12 +348,16 @@ function connecting(this: net.Socket, ...args: unknown[]): net.Socket {
   }
   const egress = through(options)
   if (egress === null) return Reflect.apply(connect, this, args)
+  // undici hands the port over as text.
+  const port = Number(options.port as number | string)
+  // A routed connection goes, and is judged, where its route names, its end
+  // looked up as the system looks it up.
+  const routed = networkRoute(options.host ?? 'localhost', port)
   const ticket: Ticket = {
-    host: options.host ?? 'localhost',
-    // undici hands the port over as text.
-    port: Number(options.port as number | string),
+    host: routed?.[0] ?? options.host ?? 'localhost',
+    port: routed?.[1] ?? port,
     egress,
-    lookup: options.lookup ?? null,
+    lookup: routed === null ? (options.lookup ?? null) : null,
     run: AsyncResource.bind(<T>(fn: () => Promise<T>): Promise<T> => fn()),
   }
   const redirect = (made: Gateway): net.Socket => {

@@ -18,7 +18,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from mirage.io.network import NetworkRule, NetworkSetting, network_layer
+from mirage.io.network import (
+    NetworkRule,
+    NetworkSetting,
+    network_layer,
+    network_routes,
+)
 from mirage.policy.builtin.output_cap import (
     check_command_limits,
     command_limits_to_json,
@@ -717,7 +722,7 @@ class SessionProfile(BaseModel):
     policy: dict[ScriptMethod, list[ProfilePolicy]] | None = None
     command_limits: dict[str, Limit] | None = None
     processes: ProcessPermissions | None = None
-    network: bool | dict[str, list[str]] | None = None
+    network: bool | dict[str, list[str] | dict[str, str]] | None = None
 
     @field_validator("network", mode="before")
     @classmethod
@@ -725,11 +730,16 @@ class SessionProfile(BaseModel):
         if v is None:
             return v
         layer = network_layer(v)
-        NetworkRule([layer] if layer is not None else [])
+        NetworkRule(
+            [layer] if layer is not None else [], False, network_routes(v)
+        )
         return (
             bool(v)
             if isinstance(v, bool)
-            else {key: list(entries) for key, entries in v.items()}
+            else {
+                key: dict(value) if key == "routes" else list(value)
+                for key, value in v.items()
+            }
         )
 
     @field_validator("command_limits")

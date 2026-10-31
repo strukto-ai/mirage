@@ -221,18 +221,23 @@ export async function statCheck(ws: ExecWorkspace, check: StatCheck): Promise<st
  */
 // {mount} lets one case assert a behavior every backend shares while each
 // target keeps its own mount path. {http} carries the fixture HTTP server's
-// base URL, which is only known once the server has bound a port.
+// base URL, which is only known once the server has bound a port, and
+// {http_host} its host and port, which a session profile's network routes
+// name.
 export function bindMount(c: Case, mountPath: string): Case {
   // A browser page has no `process`; only a node run serves {http}.
   const http = typeof process === 'undefined' ? '' : (process.env.HTTP_ENDPOINT ?? '')
   const tokens: ReadonlyArray<readonly [string, string]> = [
     ['{mount}', rstripSlash(mountPath)],
+    ['{http_host}', http === '' ? '' : new URL(http).host],
     ['{http}', http],
   ]
   const subst = (text: string): string =>
     tokens.reduce((acc, [token, value]) => acc.split(token).join(value), text)
+  const profiles = c.session_profiles === undefined ? undefined : JSON.stringify(c.session_profiles)
   const present = tokens.some(
     ([token]) =>
+      profiles?.includes(token) === true ||
       c.command?.includes(token) === true ||
       c.expect.stdout.includes(token) ||
       c.expect.stderr.includes(token) ||
@@ -251,6 +256,9 @@ export function bindMount(c: Case, mountPath: string): Case {
         }
   return {
     ...c,
+    ...(profiles !== undefined
+      ? { session_profiles: JSON.parse(subst(profiles)) as Record<string, unknown> }
+      : {}),
     ...(c.command !== undefined ? { command: subst(c.command) } : {}),
     ...(check !== undefined ? { check } : {}),
     expect: {

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
-import { NetworkRule, networkLayer, type NetworkSetting } from '../io/network.ts'
+import { NetworkRule, networkLayer, networkRoutes, type NetworkSetting } from '../io/network.ts'
 import type { Limit } from '../types.ts'
 import {
   checkCommandLimits,
@@ -767,7 +767,11 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
   } = {}
   if (obj.network != null) {
     const layer = networkLayer(obj.network)
-    new NetworkRule(layer === null ? [] : [layer])
+    new NetworkRule(
+      layer === null ? [] : [layer],
+      false,
+      networkRoutes(obj.network as NetworkSetting),
+    )
     out.network = obj.network as NetworkSetting
   }
   if (obj.command_limits != null) {
