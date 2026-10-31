@@ -16,7 +16,6 @@ import typer
 
 from mirage.cli import config as config_module
 from mirage.cli import daemon as daemon_module
-from mirage.cli import job as job_module
 from mirage.cli import login as login_module
 from mirage.cli import mcp as mcp_module
 from mirage.cli import rpc as rpc_module
@@ -37,7 +36,6 @@ app = typer.Typer(
 )
 app.add_typer(workspace_module.app, name="workspace")
 app.add_typer(session_module.app, name="session")
-app.add_typer(job_module.app, name="job")
 app.add_typer(shell_module.app, name="shell")
 app.add_typer(vfs_module.app, name="vfs")
 app.command("glob")(vfs_module.glob_cmd)

@@ -36,8 +36,8 @@ const RPC_PATH = '/v1/workspaces/:workspaceId/rpc'
 
 /**
  * The RPC server as the daemon serves it. `shell` is a daemon job, as
- * `POST /shell` and MCP's `shell` are, so it is listed by `/v1/jobs` and
- * a cancelled request cancels it.
+ * `POST /shell` and MCP's `shell` are, so it drains at shutdown and a
+ * cancelled request cancels it.
  */
 class DaemonRpcServer extends MirageRpcServer {
   constructor(

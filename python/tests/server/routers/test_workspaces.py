@@ -1604,14 +1604,14 @@ async def test_workspace_cancel_and_kill_reach_every_session(tmp_path):
             params={"session_id": "a"},
             json={"command": "sleep 30 &"},
         )
-        r = await client.post(
-            f"/v1/workspaces/{wid}/shell?background=true",
-            json={"command": "sleep 30"},
+        running = asyncio.create_task(
+            client.post(
+                f"/v1/workspaces/{wid}/shell", json={"command": "sleep 30"}
+            )
         )
-        job_id = r.json()["job_id"]
         for _ in range(500):
-            status = (await client.get(f"/v1/jobs/{job_id}")).json()["status"]
-            if status == "running":
+            jobs = app.state.jobs.list(wid)
+            if any(j.command == "sleep 30" and j.status == "running" for j in jobs):
                 break
             await asyncio.sleep(0.01)
         assert (await client.post(f"/v1/workspaces/{wid}/cancel")).json() == {
@@ -1621,6 +1621,7 @@ async def test_workspace_cancel_and_kill_reach_every_session(tmp_path):
             "killed": 1
         }
         await client.delete(f"/v1/workspaces/{wid}")
+        await asyncio.gather(running, return_exceptions=True)
 
 
 @pytest.mark.asyncio

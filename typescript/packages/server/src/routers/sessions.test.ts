@@ -108,48 +108,42 @@ describe('sessions router', () => {
 })
 
 describe('session cancel and kill', () => {
+  /** The session's job once it reaches `status`. */
   async function waitStatus(
     app: ReturnType<typeof buildApp>,
-    jobId: string,
+    sessionId: string,
     status: string,
   ): Promise<void> {
     for (let i = 0; i < 500; i += 1) {
-      const job = (await app.inject({ method: 'GET', url: `/v1/jobs/${jobId}` })).json<{
-        status: string
-      }>()
-      if (job.status === status) return
+      const job = app.jobs.list('cw').find((record) => record.sessionId === sessionId)
+      if (job?.status === status) return
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
-    throw new Error(`job ${jobId} never reached ${status}`)
+    throw new Error(`session ${sessionId}'s job never reached ${status}`)
   }
 
   it('cancel stops the jobs of the session and spares the others', async () => {
     const app = buildApp()
     try {
       await createWs(app, 'cw')
-      const jobs: Record<string, string> = {}
       for (const sid of ['a', 'b']) {
         await app.inject({
           method: 'POST',
           url: '/v1/workspaces/cw/sessions',
           payload: { session_id: sid },
         })
-        const r = await app.inject({
+        void app.inject({
           method: 'POST',
-          url: `/v1/workspaces/cw/shell?background=true&session_id=${sid}`,
+          url: `/v1/workspaces/cw/shell?session_id=${sid}`,
           payload: { command: 'sleep 30' },
         })
-        jobs[sid] = r.json<{ job_id: string }>().job_id
-        await waitStatus(app, jobs[sid], 'running')
+        await waitStatus(app, sid, 'running')
       }
       const r = await app.inject({ method: 'POST', url: '/v1/workspaces/cw/sessions/a/cancel' })
       expect(r.statusCode).toBe(200)
       expect(r.json()).toEqual({ canceled: 1 })
-      await waitStatus(app, jobs.a ?? '', 'canceled')
-      const b = (await app.inject({ method: 'GET', url: `/v1/jobs/${jobs.b ?? ''}` })).json<{
-        status: string
-      }>()
-      expect(b.status).toBe('running')
+      await waitStatus(app, 'a', 'canceled')
+      await waitStatus(app, 'b', 'running')
       const missing = await app.inject({
         method: 'POST',
         url: '/v1/workspaces/cw/sessions/nope/cancel',

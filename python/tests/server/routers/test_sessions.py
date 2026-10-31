@@ -231,13 +231,14 @@ async def test_session_isolated_per_workspace():
         assert "only_in_a" not in ids
 
 
-async def _wait_status(client, job_id: str, status: str) -> dict:
+async def _wait_status(app, wid: str, session_id: str, status: str) -> None:
+    """Wait for the session's job to reach ``status``."""
     for _ in range(500):
-        job = (await client.get(f"/v1/jobs/{job_id}")).json()
-        if job["status"] == status:
-            return job
+        jobs = app.state.jobs.list(wid)
+        if any(j.session_id == session_id and j.status == status for j in jobs):
+            return
         await asyncio.sleep(0.01)
-    raise AssertionError(f"job {job_id} never reached {status}: {job}")
+    raise AssertionError(f"session {session_id}'s job never reached {status}")
 
 
 @pytest.mark.asyncio
@@ -257,24 +258,27 @@ async def test_session_cancel_stops_its_jobs_and_spares_the_others():
             await client.post(
                 f"/v1/workspaces/{wid}/sessions", json={"session_id": sid}
             )
-        jobs = {}
+        running = []
         for sid in ("a", "b"):
-            r = await client.post(
-                f"/v1/workspaces/{wid}/shell",
-                params={"session_id": sid, "background": "true"},
-                json={"command": "sleep 30"},
+            running.append(
+                asyncio.create_task(
+                    client.post(
+                        f"/v1/workspaces/{wid}/shell",
+                        params={"session_id": sid},
+                        json={"command": "sleep 30"},
+                    )
+                )
             )
-            jobs[sid] = r.json()["job_id"]
-            await _wait_status(client, jobs[sid], "running")
+            await _wait_status(app, wid, sid, "running")
         r = await client.post(f"/v1/workspaces/{wid}/sessions/a/cancel")
         assert r.status_code == 200
         assert r.json() == {"canceled": 1}
-        await _wait_status(client, jobs["a"], "canceled")
-        b = (await client.get(f"/v1/jobs/{jobs['b']}")).json()
-        assert b["status"] == "running"
+        await _wait_status(app, wid, "a", "canceled")
+        await _wait_status(app, wid, "b", "running")
         r = await client.post(f"/v1/workspaces/{wid}/sessions/nope/cancel")
         assert r.status_code == 404
         await client.delete(f"/v1/workspaces/{wid}")
+        await asyncio.gather(*running, return_exceptions=True)
 
 
 @pytest.mark.asyncio

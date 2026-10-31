@@ -232,23 +232,17 @@ describe('the MCP endpoint over HTTP', () => {
   })
 
   it('runs shell as a daemon job', async () => {
-    const { base } = await daemon()
+    const { base, app } = await daemon()
     const id = await createWorkspace(base)
     await call(`${base}/v1/workspaces/${id}/mcp`, 'shell', { command: 'echo from-mcp' })
-    const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=${id}`)).json()) as {
-      command: string
-    }[]
-    expect(jobs.map((job) => job.command)).toContain('echo from-mcp')
+    expect(app.jobs.list(id).map((job) => job.command)).toContain('echo from-mcp')
   })
 })
 
-async function jobStatus(base: string, workspaceId: string, command: string): Promise<string> {
+async function jobStatus(workspaceId: string, command: string): Promise<string> {
   let status = 'missing'
   for (let i = 0; i < 100; i++) {
-    const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=${workspaceId}`)).json()) as {
-      command: string
-      status: string
-    }[]
+    const jobs = apps.flatMap((app) => app.jobs.list(workspaceId))
     status = jobs.find((job) => job.command === command)?.status ?? 'missing'
     if (status === 'canceled') break
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -270,7 +264,7 @@ describe('cancelling an MCP shell call', () => {
       stop.abort()
     }, 500)
     await expect(running).rejects.toThrow()
-    expect(await jobStatus(base, id, 'sleep 20')).toBe('canceled')
+    expect(await jobStatus(id, 'sleep 20')).toBe('canceled')
   })
 
   it('a dropped request cancels its shell job', async () => {
@@ -295,7 +289,7 @@ describe('cancelling an MCP shell call', () => {
       stop.abort()
     }, 500)
     await expect(running).rejects.toThrow()
-    expect(await jobStatus(base, id, 'sleep 20')).toBe('canceled')
+    expect(await jobStatus(id, 'sleep 20')).toBe('canceled')
   })
 
   it('refuses a body over the limit', async () => {
@@ -320,7 +314,7 @@ describe('cancelling an MCP shell call', () => {
     if (typeof operations === 'string') throw new Error(operations)
     const result = await operations.shell('sleep 20', AbortSignal.abort())
     expect(result.isError).toBe(true)
-    expect(await jobStatus(base, id, 'sleep 20')).toBe('canceled')
+    expect(await jobStatus(id, 'sleep 20')).toBe('canceled')
   })
 
   it('lets go of a call once its answer is read', async () => {

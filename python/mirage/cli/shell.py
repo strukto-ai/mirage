@@ -13,19 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import json
 import sys
-from typing import IO, Any
+from typing import Any
 from urllib.parse import quote, urlencode
 
 import typer
 
 from mirage.cli.client import make_client
-from mirage.cli.output import (
-    emit,
-    fail,
-    handle_response,
-)
+from mirage.cli.output import emit, fail
 from mirage.cli.vfs import answer, post
 
 app = typer.Typer(
@@ -55,12 +50,6 @@ def shell_cmd(
         help="Workspace runtime entry to place this line's captured "
         "stages on.",
     ),
-    background: bool = typer.Option(
-        False,
-        "--background",
-        "--bg",
-        help="Don't wait; return job_id immediately.",
-    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -77,8 +66,7 @@ def shell_cmd(
     Foreground output streams to stdout and stderr as bytes. ``--json``
     collects those same streams into the final result. Piped input uploads
     concurrently in either mode. Ctrl-C cancels the request and exits 130.
-    ``--background`` returns the job id after input uploads. ``--explain``
-    describes the line without running it.
+    ``--explain`` describes the line without running it.
     """
     query: dict[str, str] = {"session_id": session_id} if session_id else {}
     payload: dict[str, Any] = {"command": command}
@@ -94,79 +82,33 @@ def shell_cmd(
     piped = not sys.stdin.isatty()
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        if not background:
-            # Only foreground shell calls need the stream implementation.
-            from mirage.cli.stream import stream_shell  # noqa: PLC0415
-            from mirage.shell.constants import (  # noqa: PLC0415
-                INTERRUPTED_STATUS,
-                SIGPIPE_STATUS,
-            )
+        # Imported here, so other commands load no stream code.
+        from mirage.cli.stream import stream_shell  # noqa: PLC0415
+        from mirage.shell.constants import (  # noqa: PLC0415
+            INTERRUPTED_STATUS,
+            SIGPIPE_STATUS,
+        )
 
-            try:
-                with asyncio.Runner() as runner:
-                    code = runner.run(
-                        stream_shell(
-                            client,
-                            path
-                            + "?"
-                            + urlencode({**query, "stream": "true"}),
-                            payload,
-                            piped,
-                            json_output=json_output,
-                        )
+        try:
+            with asyncio.Runner() as runner:
+                code = runner.run(
+                    stream_shell(
+                        client,
+                        path
+                        + "?"
+                        + urlencode({**query, "stream": "true"}),
+                        payload,
+                        piped,
+                        json_output=json_output,
                     )
-            except KeyboardInterrupt:
-                raise typer.Exit(code=INTERRUPTED_STATUS) from None
-            except BrokenPipeError:
-                raise typer.Exit(code=SIGPIPE_STATUS) from None
-            except (OSError, RuntimeError, ValueError) as exc:
-                fail(str(exc), exit_code=2)
-            raise typer.Exit(code=code)
-        if piped:
-            response = client.request(
-                "POST",
-                path,
-                params={**query, "background": "true"},
-                files=_upload(payload),
-            )
-        else:
-            response = client.request(
-                "POST",
-                path,
-                params={**query, "background": "true"},
-                json=payload,
-            )
-        emit(handle_response(response))
-
-
-class _Pipe:
-    """Piped stdin with no size to report.
-
-    httpx sizes a file part with ``fstat``, which on a pipe counts only
-    the bytes it holds right now; with no size it sends the part chunked.
-
-    Args:
-        stream (IO[bytes]): the stdin stream.
-    """
-
-    def __init__(self, stream: IO[bytes]) -> None:
-        self._stream = stream
-
-    def read(self, size: int = -1) -> bytes:
-        return self._stream.read(size)
-
-
-def _upload(
-    payload: dict[str, Any],
-) -> dict[str, tuple[str, str | _Pipe, str]]:
-    return {
-        "request": ("request.json", json.dumps(payload), "application/json"),
-        "stdin": (
-            "stdin.bin",
-            _Pipe(sys.stdin.buffer),
-            "application/octet-stream",
-        ),
-    }
+                )
+        except KeyboardInterrupt:
+            raise typer.Exit(code=INTERRUPTED_STATUS) from None
+        except BrokenPipeError:
+            raise typer.Exit(code=SIGPIPE_STATUS) from None
+        except (OSError, RuntimeError, ValueError) as exc:
+            fail(str(exc), exit_code=2)
+        raise typer.Exit(code=code)
 
 
 def _format_explanation(data: dict[str, Any]) -> str:

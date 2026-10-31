@@ -13,28 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import os
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from httpx._utils import peek_filelike_length
 from typer.testing import CliRunner
 
 from mirage.cli import shell, stream
-
-
-def test_piped_stdin_is_sent_without_a_size(monkeypatch):
-    read, write = os.pipe()
-    os.write(write, b"only what is buffered so far")
-    with os.fdopen(read, "rb") as pipe:
-        monkeypatch.setattr(
-            shell.sys, "stdin", type("Stdin", (), {"buffer": pipe})()
-        )
-        part = shell._upload({"command": "cat"})["stdin"][1]
-        assert peek_filelike_length(part) is None
-        assert part.read(4) == b"only"
-    os.close(write)
 
 
 class _Answer:
@@ -63,11 +48,7 @@ class _Client:
 
     def request(self, method: str, path: str, **kwargs: Any) -> _Answer:
         self.calls.append((method, path))
-        if path.endswith("/shell"):
-            return _Answer(202, {"job_id": "j1"})
-        if method == "DELETE":
-            return _Answer(200, {})
-        return _Answer(200, {"finished_at": 1.0, "status": "canceled"})
+        return _Answer(200, {})
 
 
 @pytest.mark.parametrize("json_output", [False, True])
@@ -194,27 +175,6 @@ def test_explain_prints_why_a_route_places_the_line():
         "  on local: monty has no sqlite3",
         "  python3 -c 'import sqlite3'  [allow]  on local",
     ]
-
-
-@pytest.mark.parametrize("json_output", [False, True])
-def test_background_returns_structured_job_with_optional_json(
-    monkeypatch, json_output
-):
-    client = _Client()
-    monkeypatch.setattr(shell, "make_client", lambda: client)
-    monkeypatch.setattr(
-        shell,
-        "sys",
-        SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)),
-    )
-    result = CliRunner().invoke(
-        shell.app,
-        ["-w", "w", "-c", "cat", "--background"]
-        + (["--json"] if json_output else []),
-    )
-    assert result.exit_code == 0
-    assert json.loads(result.stdout) == {"job_id": "j1"}
-    assert client.calls == [("POST", "/v1/workspaces/w/shell")]
 
 
 def test_stream_broken_pipe_exits_141_without_traceback(monkeypatch):

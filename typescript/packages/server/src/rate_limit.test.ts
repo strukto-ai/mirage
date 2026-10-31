@@ -125,7 +125,7 @@ describe('registerRateLimits', () => {
       await statuses({ rateLimits: [byPath] }, [
         { url: '/v1/workspaces' },
         { url: '/v1/workspaces' },
-        { url: '/v1/jobs' },
+        { url: '/v1/ready' },
       ]),
     ).toEqual([200, 429, 200])
   })

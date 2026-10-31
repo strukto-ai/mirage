@@ -238,15 +238,11 @@ async def test_a_write_larger_than_a_mebibyte_goes_through(tmp_path):
 
 @pytest.mark.asyncio
 async def test_shell_runs_as_a_daemon_job(tmp_path):
-    async with daemon(tmp_path) as (base, _):
+    async with daemon(tmp_path) as (base, app):
         workspace_id = await create_workspace(base)
         url = f"{base}/v1/workspaces/{workspace_id}/mcp"
         await call(url, "shell", {"command": "echo from-mcp"})
-        async with httpx.AsyncClient(base_url=base) as http:
-            jobs = await http.get(
-                "/v1/jobs", params={"workspace_id": workspace_id}
-            )
-    commands = [job["command"] for job in jobs.json()]
+        commands = [job.command for job in app.state.jobs.list(workspace_id)]
     assert "echo from-mcp" in commands
 
 
@@ -256,20 +252,17 @@ MCP_HEADERS = {
 }
 
 
-async def job_status(base: str, workspace_id: str, command: str) -> str:
-    async with httpx.AsyncClient(base_url=base) as http:
-        for _ in range(100):
-            jobs = await http.get(
-                "/v1/jobs", params={"workspace_id": workspace_id}
-            )
-            statuses = [
-                job["status"]
-                for job in jobs.json()
-                if job["command"] == command
-            ]
-            if statuses and statuses[0] == "canceled":
-                return statuses[0]
-            await asyncio.sleep(0.05)
+async def job_status(app: FastAPI, workspace_id: str, command: str) -> str:
+    statuses: list[str] = []
+    for _ in range(100):
+        statuses = [
+            job.status
+            for job in app.state.jobs.list(workspace_id)
+            if job.command == command
+        ]
+        if statuses and statuses[0] == "canceled":
+            return statuses[0]
+        await asyncio.sleep(0.05)
     return statuses[0] if statuses else "missing"
 
 
@@ -284,7 +277,7 @@ def shell_call(request_id: int, command: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_a_dropped_request_cancels_its_shell_job(tmp_path):
-    async with daemon(tmp_path) as (base, _):
+    async with daemon(tmp_path) as (base, app):
         workspace_id = await create_workspace(base)
         url = f"{base}/v1/workspaces/{workspace_id}/mcp"
         async with httpx.AsyncClient() as http:
@@ -295,12 +288,12 @@ async def test_a_dropped_request_cancels_its_shell_job(tmp_path):
                     headers=MCP_HEADERS,
                     timeout=0.5,
                 )
-        assert await job_status(base, workspace_id, "sleep 20") == "canceled"
+        assert await job_status(app, workspace_id, "sleep 20") == "canceled"
 
 
 @pytest.mark.asyncio
 async def test_a_clients_cancel_reaches_its_shell_job(tmp_path):
-    async with daemon(tmp_path) as (base, _):
+    async with daemon(tmp_path) as (base, app):
         workspace_id = await create_workspace(base)
         url = f"{base}/v1/workspaces/{workspace_id}/mcp"
         async with httpx.AsyncClient(timeout=10) as http:
@@ -322,7 +315,7 @@ async def test_a_clients_cancel_reaches_its_shell_job(tmp_path):
             assert cancelled.status_code == 202
             answered = await asyncio.wait_for(running, 5)
         assert answered.status_code < 300
-        assert await job_status(base, workspace_id, "sleep 20") == "canceled"
+        assert await job_status(app, workspace_id, "sleep 20") == "canceled"
 
 
 @pytest.mark.asyncio

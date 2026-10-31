@@ -25,7 +25,6 @@ describe('mirage CLI program', () => {
         'config',
         'daemon',
         'glob',
-        'job',
         'login',
         'logout',
         'mcp',

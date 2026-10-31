@@ -18,7 +18,6 @@ import { main } from '../main.ts'
 const ALIASES: Record<string, string> = {
   '--workspace_id': '--workspace',
   '--session_id': '--session',
-  '--background': '--bg',
 }
 
 function rewriteArgv(argv: string[]): string[] {

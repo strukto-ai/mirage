@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 import uvicorn
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from mirage.server import build_app
@@ -57,7 +58,6 @@ async def test_shell_sync_returns_io_result():
         assert body["kind"] == "io"
         assert body["exit_code"] == 0
         assert body["stdout"].startswith("hello")
-        assert "X-Mirage-Job-Id" in r.headers
 
 
 @pytest.mark.asyncio
@@ -157,132 +157,10 @@ async def test_shell_sync_records_a_job_in_done_state():
             f"/v1/workspaces/{wid}/shell",
             json={"command": "echo done-marker"},
         )
-        job_id = r.headers["X-Mirage-Job-Id"]
-
-        rj = await client.get(f"/v1/jobs/{job_id}")
-        assert rj.status_code == 200
-        body = rj.json()
-        assert body["status"] == "done"
-        assert body["result"]["stdout"].startswith("done-marker")
-
-
-@pytest.mark.asyncio
-async def test_shell_background_returns_job_id_immediately():
-    app = build_app(idle_grace_seconds=10.0)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
-        wid = await _create_workspace(client)
-        r = await client.post(
-            f"/v1/workspaces/{wid}/shell?background=true",
-            json={"command": "sleep 0.3 && echo bg-done"},
-        )
-        assert r.status_code == 202, r.text
-        body = r.json()
-        assert body["job_id"].startswith("exec_")
-        assert body["workspace_id"] == wid
-        assert r.headers["X-Mirage-Job-Id"] == body["job_id"]
-
-
-@pytest.mark.asyncio
-async def test_background_job_completes_and_result_is_readable():
-    app = build_app(idle_grace_seconds=10.0)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
-        wid = await _create_workspace(client)
-        r = await client.post(
-            f"/v1/workspaces/{wid}/shell?background=true",
-            json={"command": "echo finished"},
-        )
-        job_id = r.json()["job_id"]
-        rw = await client.post(f"/v1/jobs/{job_id}/wait", json={})
-        body = rw.json()
-        assert body["status"] == "done"
-        assert body["result"]["stdout"].startswith("finished")
-
-
-@pytest.mark.asyncio
-async def test_wait_with_timeout_returns_running_status():
-    app = build_app(idle_grace_seconds=10.0)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
-        wid = await _create_workspace(client)
-        r = await client.post(
-            f"/v1/workspaces/{wid}/shell?background=true",
-            json={"command": "sleep 1.0"},
-        )
-        job_id = r.json()["job_id"]
-        rw = await client.post(
-            f"/v1/jobs/{job_id}/wait", json={"timeout_s": 0.1}
-        )
-        assert rw.status_code == 200
-        assert rw.json()["status"] == "running"
-
-
-@pytest.mark.asyncio
-async def test_cancel_running_job():
-    app = build_app(idle_grace_seconds=10.0)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
-        wid = await _create_workspace(client)
-        r = await client.post(
-            f"/v1/workspaces/{wid}/shell?background=true",
-            json={"command": "sleep 5.0"},
-        )
-        assert r.status_code == 202, r.text
-        job_id = r.json()["job_id"]
-        async with asyncio.timeout(5):
-            while True:
-                rg = await client.get(f"/v1/jobs/{job_id}")
-                assert rg.status_code == 200, rg.text
-                status = rg.json()["status"]
-                if status == "running":
-                    break
-                assert status == "pending"
-                await asyncio.sleep(0.01)
-
-        rd = await client.delete(f"/v1/jobs/{job_id}")
-        assert rd.status_code == 200
-        assert rd.json()["canceled"] is True
-        rw = await client.post(
-            f"/v1/jobs/{job_id}/wait", json={"timeout_s": 5.0}
-        )
-        assert rw.status_code == 200, rw.text
-        assert rw.json()["status"] == "canceled"
-        assert rw.json()["finished_at"] is not None
-
-
-@pytest.mark.asyncio
-async def test_list_jobs_filtered_by_workspace():
-    app = build_app(idle_grace_seconds=10.0)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
-        wid_a = await _create_workspace(client)
-        wid_b = await _create_workspace(client)
-        await client.post(
-            f"/v1/workspaces/{wid_a}/shell",
-            json={"command": "echo a"},
-        )
-        await client.post(
-            f"/v1/workspaces/{wid_b}/shell",
-            json={"command": "echo b"},
-        )
-        r = await client.get("/v1/jobs")
-        assert len(r.json()) == 2
-
-        r = await client.get(f"/v1/jobs?workspace_id={wid_a}")
-        jobs = r.json()
-        assert len(jobs) == 1
-        assert jobs[0]["workspace_id"] == wid_a
+        assert r.status_code == 200, r.text
+        [job] = app.state.jobs.list(wid)
+        assert job.status == "done"
+        assert job.result["stdout"].startswith("done-marker")
 
 
 @pytest.mark.asyncio
@@ -311,9 +189,8 @@ async def test_shell_with_stdin_multipart():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("background", [False, True])
 @pytest.mark.parametrize("vfs", ["ram", "disk"])
-async def test_large_multipart_stdin_roundtrip(tmp_path, vfs, background):
+async def test_large_multipart_stdin_roundtrip(tmp_path, vfs):
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
     async with AsyncClient(
@@ -338,7 +215,6 @@ async def test_large_multipart_stdin_roundtrip(tmp_path, vfs, background):
                 )
                 result = await client.post(
                     f"/v1/workspaces/{wid}/shell",
-                    params={"background": str(background).lower()},
                     files={
                         "request": (
                             "request.json",
@@ -352,15 +228,8 @@ async def test_large_multipart_stdin_roundtrip(tmp_path, vfs, background):
                         ),
                     },
                 )
-                assert result.status_code == (202 if background else 200), (
-                    result.text
-                )
-                if background:
-                    job = result.json()["job_id"]
-                    waited = await client.post(f"/v1/jobs/{job}/wait", json={})
-                    assert waited.json()["status"] == "done", waited.text
-                else:
-                    assert result.json()["exit_code"] == 0, result.text
+                assert result.status_code == 200, result.text
+                assert result.json()["exit_code"] == 0, result.text
                 read = await client.post(
                     f"/v1/workspaces/{wid}/shell",
                     json={"command": "base64 /work/input.bin"},
@@ -405,17 +274,6 @@ async def test_unknown_session_404(stream):
 
 
 @pytest.mark.asyncio
-async def test_unknown_job_404():
-    app = build_app(idle_grace_seconds=10.0)
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://test"
-    ) as client:
-        r = await client.get("/v1/jobs/job_doesnotexist")
-        assert r.status_code == 404
-
-
-@pytest.mark.asyncio
 async def test_a_caller_that_drops_cancels_its_foreground_job(tmp_path):
     app = build_app(idle_grace_seconds=10.0, pid_file=tmp_path / "daemon.pid")
     server = uvicorn.Server(
@@ -439,10 +297,7 @@ async def test_a_caller_that_drops_cancels_its_foreground_job(tmp_path):
                 )
             status = ""
             for _ in range(100):
-                jobs = (
-                    await client.get("/v1/jobs", params={"workspace_id": wid})
-                ).json()
-                status = jobs[0]["status"]
+                status = app.state.jobs.list(wid)[0].status
                 if status == "canceled":
                     break
                 await asyncio.sleep(0.05)
@@ -475,10 +330,10 @@ MULTIPART = {"content-type": f"multipart/form-data; boundary={BOUNDARY}"}
 
 
 @asynccontextmanager
-async def _served() -> AsyncIterator[AsyncClient]:
+async def _served(app: FastAPI | None = None) -> AsyncIterator[AsyncClient]:
     server = uvicorn.Server(
         uvicorn.Config(
-            build_app(idle_grace_seconds=10.0),
+            app or build_app(idle_grace_seconds=10.0),
             host="127.0.0.1",
             port=0,
             log_level="warning",
@@ -501,7 +356,8 @@ async def _served() -> AsyncIterator[AsyncClient]:
 
 @pytest.mark.asyncio
 async def test_stdin_streams_into_a_running_line():
-    async with _served() as client:
+    app = build_app(idle_grace_seconds=10.0)
+    async with _served(app) as client:
         wid = await _create_workspace(client)
         running = asyncio.Event()
 
@@ -513,10 +369,8 @@ async def test_stdin_streams_into_a_running_line():
 
         async def watch() -> None:
             while True:
-                jobs = (
-                    await client.get("/v1/jobs", params={"workspace_id": wid})
-                ).json()
-                if any(j["status"] == "running" for j in jobs):
+                jobs = app.state.jobs.list(wid)
+                if any(j.status == "running" for j in jobs):
                     running.set()
                     return
                 await asyncio.sleep(0.02)
@@ -553,7 +407,8 @@ async def test_a_line_that_stops_reading_still_answers():
 
 @pytest.mark.asyncio
 async def test_a_line_starts_before_its_stdin_sends_a_byte():
-    async with _served() as client:
+    app = build_app(idle_grace_seconds=10.0)
+    async with _served(app) as client:
         wid = await _create_workspace(client)
         running = asyncio.Event()
 
@@ -564,10 +419,8 @@ async def test_a_line_starts_before_its_stdin_sends_a_byte():
 
         async def watch() -> None:
             while True:
-                jobs = (
-                    await client.get("/v1/jobs", params={"workspace_id": wid})
-                ).json()
-                if any(j["status"] == "running" for j in jobs):
+                jobs = app.state.jobs.list(wid)
+                if any(j.status == "running" for j in jobs):
                     running.set()
                     return
                 await asyncio.sleep(0.02)
@@ -748,14 +601,11 @@ async def test_shell_stream_preserves_bytes_channels_and_final_status(padding):
             assert events[-1]["result"]["exit_code"] == 1
             assert events[-1]["result"]["stdout"] == ""
             assert events[-1]["result"]["stderr"] == ""
-            job = await client.get(
-                f"/v1/jobs/{response.headers['X-Mirage-Job-Id']}"
-            )
-            assert job.json()["status"] == "done"
+            assert app.state.jobs.list(wid)[-1].status == "done"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("other", ["background", "explain"])
+@pytest.mark.parametrize("other", ["explain"])
 async def test_shell_stream_refuses_incompatible_mode(other):
     app = build_app(idle_grace_seconds=10.0)
     async with app.router.lifespan_context(app):
@@ -768,30 +618,27 @@ async def test_shell_stream_refuses_incompatible_mode(other):
                 json={"command": "echo no"},
             )
             assert response.status_code == 400
-            assert (await client.get("/v1/jobs")).json() == []
+            assert app.state.jobs.list() == []
 
 
 @pytest.mark.asyncio
 async def test_shell_stream_sends_prefix_before_completion_and_cancels_on_disconnect():
-    async with _served() as client:
+    app = build_app(idle_grace_seconds=10.0)
+    async with _served(app) as client:
         wid = await _create_workspace(client)
         async with client.stream(
             "POST",
             f"/v1/workspaces/{wid}/shell?stream=true",
             json={"command": "echo ready; sleep 30"},
         ) as response:
-            job_id = response.headers["X-Mirage-Job-Id"]
             lines = response.aiter_lines()
             first = json.loads(await asyncio.wait_for(anext(lines), 3))
             assert base64.b64decode(first["data"]) == b"ready\n"
-            assert (await client.get(f"/v1/jobs/{job_id}")).json()[
-                "status"
-            ] == "running"
-        waited = await client.post(
-            f"/v1/jobs/{job_id}/wait", json={"timeout_s": 3}
-        )
-        assert waited.json()["status"] == "canceled"
-        assert waited.json()["finished_at"] is not None
+            [job] = app.state.jobs.list(wid)
+            assert job.status == "running"
+        waited = await app.state.jobs.wait(job.id, 3)
+        assert waited.status == "canceled"
+        assert waited.finished_at is not None
 
 
 @pytest.mark.asyncio

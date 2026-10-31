@@ -63,8 +63,8 @@ class DaemonToolOperations(McpToolOperations):
     """The tool table as the daemon serves it: through its own API.
 
     ``shell`` is a job, submitted to the daemon's execution table the way
-    ``POST /shell`` submits one, so an MCP command is listed by
-    ``/v1/jobs``, can be cancelled there, and is recorded like any other.
+    ``POST /shell`` submits one, so an MCP command drains at shutdown and
+    is recorded like any other.
     A caller cancelled while it waits (an MCP client's cancel) cancels
     the job too.
     The other tools run on the workspace's own loop through the

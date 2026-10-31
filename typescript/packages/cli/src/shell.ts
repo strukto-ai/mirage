@@ -14,7 +14,7 @@
 
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { emit, fail, handleResponse } from './output.ts'
+import { emit, fail } from './output.ts'
 import { answer, post } from './vfs.ts'
 
 interface ExplainedNode {
@@ -72,7 +72,7 @@ function explainedLines(node: ExplainedNode, depth: number, out: string[]): void
  * Run a shell line with raw stdout and stderr streamed as bytes. `--json`
  * collects the same streams into the final result. Piped stdin uploads
  * concurrently in either mode, and Ctrl-C cancels the request with exit130.
- * `--bg` returns the job id after stdin uploads; `--explain` runs nothing.
+ * `--explain` runs nothing.
  */
 export function registerShellCommand(program: Command): void {
   program
@@ -83,7 +83,6 @@ export function registerShellCommand(program: Command): void {
     .option('-s, --session <id>', 'Session id')
     .option('--cwd <path>', 'Working directory for this line (a workspace path)')
     .option('--runtime <name>', "Workspace runtime entry to place this line's captured stages on")
-    .option('--bg', 'Background; return job_id immediately')
     .option('--json', 'Collect output and print the final result as JSON')
     .option('--explain', 'Say what the line would do, as a tree; run nothing')
     .action(
@@ -93,7 +92,6 @@ export function registerShellCommand(program: Command): void {
         session?: string
         cwd?: string
         runtime?: string
-        bg?: boolean
         explain?: boolean
         json?: boolean
       }) => {
@@ -110,29 +108,18 @@ export function registerShellCommand(program: Command): void {
         const path = `/v1/workspaces/${encodeURIComponent(opts.workspace)}/shell`
         const c = makeClient()
         await c.ensureRunning({ allowSpawn: false })
-        const foreground = session === '' ? path : `${path}?${session}`
-        const background =
-          session === '' ? `${path}?background=true` : `${path}?${session}&background=true`
-        const piped = !process.stdin.isTTY
-        if (opts.bg !== true) {
-          const { streamShell } = await import('./stream.ts')
-          try {
-            process.exitCode = await streamShell(
-              c,
-              `${foreground}${session === '' ? '?' : '&'}stream=true`,
-              body,
-              piped,
-              opts.json === true,
-            )
-          } catch (error) {
-            fail(error instanceof Error ? error.message : String(error), 2)
-          }
-          return
+        const { streamShell } = await import('./stream.ts')
+        try {
+          process.exitCode = await streamShell(
+            c,
+            session === '' ? `${path}?stream=true` : `${path}?${session}&stream=true`,
+            body,
+            !process.stdin.isTTY,
+            opts.json === true,
+          )
+        } catch (error) {
+          fail(error instanceof Error ? error.message : String(error), 2)
         }
-        const response = piped
-          ? await c.requestUpload('POST', background, body, { name: 'stdin', data: process.stdin })
-          : await c.request('POST', background, { body: JSON.stringify(body) })
-        emit(await handleResponse(response))
       },
     )
 }

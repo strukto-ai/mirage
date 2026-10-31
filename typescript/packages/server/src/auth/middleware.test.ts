@@ -350,7 +350,6 @@ describe('AuthMiddleware integration', () => {
           payload: { command: 'echo hi' },
         })
         expect(r.statusCode, r.body).toBe(200)
-        const jobId = r.headers['x-mirage-job-id'] as string
         r = await app.inject({ method: 'GET', url: '/v1/workspaces', headers: alice })
         expect(r.json()).toHaveLength(1)
         r = await app.inject({ method: 'GET', url: '/v1/workspaces', headers: bob })
@@ -371,9 +370,6 @@ describe('AuthMiddleware integration', () => {
           ['PUT', '/v1/workspaces/a/profiles/x', {}],
           ['GET', '/v1/workspaces/a/snapshot', undefined],
           ['POST', '/v1/workspaces/a/snapshot', { key: 's.tar' }],
-          ['GET', `/v1/jobs/${jobId}`, undefined],
-          ['DELETE', `/v1/jobs/${jobId}`, undefined],
-          ['POST', `/v1/jobs/${jobId}/wait`, {}],
         ]
         for (const [method, url, payload] of denied) {
           r = await app.inject({
@@ -384,8 +380,6 @@ describe('AuthMiddleware integration', () => {
           })
           expect(r.statusCode, `${method} ${url}`).toBe(404)
         }
-        r = await app.inject({ method: 'GET', url: '/v1/jobs', headers: bob })
-        expect(r.json()).toEqual([])
         // The id is taken, whoever asks; bob learns no more than that.
         r = await app.inject({
           method: 'POST',
@@ -402,7 +396,7 @@ describe('AuthMiddleware integration', () => {
     })
 
     it.each(['bob', 'alice'])(
-      'never exposes deleted jobs when %s reuses and closes the workspace name',
+      'drops the deleted jobs when %s reuses the workspace name',
       async (nextOwner) => {
         const app = jwtApp()
         const alice = await bearer({ sub: 'alice' })
@@ -419,21 +413,14 @@ describe('AuthMiddleware integration', () => {
             method: 'POST',
             url: '/v1/workspaces/w/shell',
             headers: alice,
-            payload: { command: 'echo ALICE-SECRET >&2; echo ALICE-SECRET' },
+            payload: { command: 'echo ALICE-SECRET' },
           })
           expect(r.statusCode, r.body).toBe(200)
-          const oldJob = r.headers['x-mirage-job-id'] as string
-          r = await app.inject({ method: 'GET', url: `/v1/jobs/${oldJob}`, headers: alice })
-          expect(r.json<{ result: { stdout: string; stderr: string } }>().result).toMatchObject({
-            stdout: 'ALICE-SECRET\n',
-            stderr: 'ALICE-SECRET\n',
-          })
           const entry = app.registry.get('w')
           const tools = new DaemonToolOperations(entry, app.jobs, entry.runner.ws.defaultSessionId)
           const answer = await tools.shell('echo MCP-SECRET')
           expect(answer.content).toEqual([{ type: 'text', text: 'MCP-SECRET\n' }])
-          const oldJobs = app.jobs.list('w').map((job) => job.id)
-          expect(oldJobs).toHaveLength(2)
+          expect(app.jobs.list('w')).toHaveLength(2)
           r = await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice })
           expect(r.statusCode, r.body).toBe(200)
           r = await app.inject({
@@ -450,164 +437,14 @@ describe('AuthMiddleware integration', () => {
             payload: { command: 'echo fresh' },
           })
           expect(r.statusCode, r.body).toBe(200)
-          const newJob = r.headers['x-mirage-job-id'] as string
-          for (const closed of [false, true]) {
-            if (closed) {
-              r = await app.inject({
-                method: 'POST',
-                url: '/v1/workspaces/w/close',
-                headers: successor,
-              })
-              expect(r.statusCode, r.body).toBe(200)
-            }
-            for (const oldJob of oldJobs) {
-              const denied: [string, string, Record<string, unknown> | undefined][] = [
-                ['GET', `/v1/jobs/${oldJob}`, undefined],
-                ['POST', `/v1/jobs/${oldJob}/wait`, {}],
-                ['DELETE', `/v1/jobs/${oldJob}`, undefined],
-              ]
-              for (const [method, url, payload] of denied) {
-                r = await app.inject({
-                  method: method as 'GET' | 'POST' | 'DELETE',
-                  url,
-                  headers: successor,
-                  ...(payload === undefined ? {} : { payload }),
-                })
-                expect(r.statusCode, `${String(closed)} ${method}: ${r.body}`).toBe(404)
-              }
-            }
-            for (const url of ['/v1/jobs', '/v1/jobs?workspace_id=w']) {
-              r = await app.inject({ method: 'GET', url, headers: successor })
-              expect(r.json<{ job_id: string }[]>().map((j) => j.job_id)).toEqual([newJob])
-            }
-            r = await app.inject({ method: 'GET', url: `/v1/jobs/${newJob}`, headers: successor })
-            expect(r.json<{ result: { stdout: string } }>().result.stdout).toBe('fresh\n')
-          }
+          expect(app.jobs.list('w').map((job) => job.command)).toEqual(['echo fresh'])
         } finally {
           await app.close()
         }
       },
     )
 
-    it.each(['get', 'list', 'filtered', 'wait', 'wait_start', 'cancel'])(
-      'does not let a job lookup outlive deletion (%s)',
-      async (operation) => {
-        const app = jwtApp(),
-          entered = gate(),
-          release = gate()
-        const alice = await bearer({ sub: 'alice' }),
-          bob = await bearer({ sub: 'bob' })
-        let pending: Promise<Awaited<ReturnType<typeof app.inject>>> | undefined
-        try {
-          expect(
-            (
-              await app.inject({
-                method: 'POST',
-                url: '/v1/workspaces',
-                headers: alice,
-                payload: { ...RAM, id: 'w' },
-              })
-            ).statusCode,
-          ).toBe(201)
-          const shell = await app.inject({
-            method: 'POST',
-            url: '/v1/workspaces/w/shell',
-            headers: alice,
-            payload: { command: 'echo ALICE-SECRET' },
-          })
-          const jobId = shell.headers['x-mirage-job-id'] as string
-          expect(
-            (await app.inject({ method: 'POST', url: '/v1/workspaces/w/close', headers: alice }))
-              .statusCode,
-          ).toBe(200)
-          const allows = app.registry.allows.bind(app.registry)
-          let blocked = true
-          const heldGet = vi.spyOn(app.registry, 'allows').mockImplementation(async (...args) => {
-            if (blocked) {
-              entered.release()
-              await release.wait
-            }
-            return allows(...args)
-          })
-          if (operation === 'wait_start') {
-            heldGet.mockRestore()
-            const wait = app.jobs.wait.bind(app.jobs)
-            vi.spyOn(app.jobs, 'wait').mockImplementation(async (...args) => {
-              entered.release()
-              await release.wait
-              return wait(...args)
-            })
-          }
-          const requests = {
-            get: { method: 'GET', url: `/v1/jobs/${jobId}` },
-            list: { method: 'GET', url: '/v1/jobs' },
-            filtered: { method: 'GET', url: '/v1/jobs?workspace_id=w' },
-            wait: { method: 'POST', url: `/v1/jobs/${jobId}/wait`, payload: {} },
-            wait_start: { method: 'POST', url: `/v1/jobs/${jobId}/wait`, payload: {} },
-            cancel: { method: 'DELETE', url: `/v1/jobs/${jobId}` },
-          } as const
-          pending = Promise.resolve(
-            app.inject({
-              ...requests[operation as keyof typeof requests],
-              headers: operation === 'wait_start' ? alice : bob,
-            }),
-          )
-          await entered.wait
-          blocked = false
-          expect(
-            (
-              await app.inject({
-                method: 'POST',
-                url: '/v1/workspaces',
-                headers: alice,
-                payload: { ...RAM, id: 'w' },
-              })
-            ).statusCode,
-          ).toBe(201)
-          expect(
-            (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
-              .statusCode,
-          ).toBe(200)
-          expect(app.jobs.list('w')).toEqual([])
-          expect(
-            (
-              await app.inject({
-                method: 'POST',
-                url: '/v1/workspaces',
-                headers: bob,
-                payload: { ...RAM, id: 'w' },
-              })
-            ).statusCode,
-          ).toBe(201)
-          expect(
-            (await app.inject({ method: 'POST', url: '/v1/workspaces/w/close', headers: bob }))
-              .statusCode,
-          ).toBe(200)
-          release.release()
-          const response = await pending
-          heldGet.mockRestore()
-          if (operation === 'list' || operation === 'filtered') {
-            expect(response.statusCode, response.body).toBe(200)
-            expect(response.json()).toEqual([])
-          } else {
-            expect(response.statusCode, response.body).toBe(404)
-          }
-        } finally {
-          release.release()
-          await pending
-          vi.restoreAllMocks()
-          await app.close()
-        }
-      },
-    )
-
-    it.each([
-      { background: true, closed: false },
-      { background: true, closed: true },
-      { background: false, closed: false },
-    ])(
-      'refuses an unfinished upload after deletion (background=$background, replacement closed=$closed)',
-      async ({ background, closed }) => {
+    it('refuses an unfinished upload after deletion', async () => {
         const app = jwtApp(),
           entered = gate(),
           release = gate(),
@@ -627,28 +464,20 @@ describe('AuthMiddleware integration', () => {
             ).statusCode,
           ).toBe(201)
           const discard = vi.spyOn(UploadStdin.prototype, 'discard')
-          if (!background) {
-            const ws = app.registry.get('w').runner.ws
-            const loaded = ws.ensureSessionsLoaded.bind(ws)
-            let paused = false
-            vi.spyOn(ws, 'ensureSessionsLoaded').mockImplementation(async () => {
-              await loaded()
-              if (paused) return
-              paused = true
-              entered.release()
-              await release.wait
-            })
-          }
-          const visible = app.registry.visible.bind(app.registry)
-          const observed = vi.spyOn(app.registry, 'visible').mockImplementation((id, account) => {
-            const entry = visible(id, account)
-            if (background && id === 'w' && account === 'alice') entered.release()
-            return entry
+          const ws = app.registry.get('w').runner.ws
+          const loaded = ws.ensureSessionsLoaded.bind(ws)
+          let paused = false
+          vi.spyOn(ws, 'ensureSessionsLoaded').mockImplementation(async () => {
+            await loaded()
+            if (paused) return
+            paused = true
+            entered.release()
+            await release.wait
           })
           pending = Promise.resolve(
             app.inject({
               method: 'POST',
-              url: `/v1/workspaces/w/shell?background=${String(background)}`,
+              url: '/v1/workspaces/w/shell',
               headers: { ...alice, 'content-type': 'multipart/form-data; boundary=boundary' },
               payload: input,
             }),
@@ -657,8 +486,7 @@ describe('AuthMiddleware integration', () => {
             '--boundary\r\nContent-Disposition: form-data; name="request"\r\n\r\n{"command":"echo ALICE-LATE-SECRET"}\r\n--boundary\r\nContent-Disposition: form-data; name="stdin"\r\n\r\ninput',
           )
           await entered.wait
-          observed.mockRestore()
-          if (!background) input.write(Buffer.alloc(2 * 1024 * 1024, 120))
+          input.write(Buffer.alloc(2 * 1024 * 1024, 120))
           expect(
             (await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice }))
               .statusCode,
@@ -673,20 +501,12 @@ describe('AuthMiddleware integration', () => {
               })
             ).statusCode,
           ).toBe(201)
-          if (closed)
-            expect(
-              (await app.inject({ method: 'POST', url: '/v1/workspaces/w/close', headers: bob }))
-                .statusCode,
-            ).toBe(200)
           input.end('\r\n--boundary--\r\n')
           release.release()
           const response = await pending
           expect(response.statusCode, response.body).toBe(404)
-          if (!background) expect(discard).toHaveBeenCalled()
+          expect(discard).toHaveBeenCalled()
           expect(app.jobs.list('w')).toEqual([])
-          expect(
-            (await app.inject({ method: 'GET', url: '/v1/jobs', headers: bob })).json(),
-          ).toEqual([])
         } finally {
           release.release()
           input.end('\r\n--boundary--\r\n')
@@ -694,8 +514,7 @@ describe('AuthMiddleware integration', () => {
           vi.restoreAllMocks()
           await app.close()
         }
-      },
-    )
+      })
 
     it.each(['mcp', 'rpc', 'rpc_lookup', 'rpc_before_lookup'])(
       'refuses a retained %s adapter after deletion',
@@ -793,9 +612,6 @@ describe('AuthMiddleware integration', () => {
             }
           }
           expect(app.jobs.list('w')).toEqual([])
-          expect(
-            (await app.inject({ method: 'GET', url: '/v1/jobs', headers: bob })).json(),
-          ).toEqual([])
         } finally {
           release.release()
           await pending
