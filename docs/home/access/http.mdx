@@ -199,6 +199,12 @@ const app = buildApp()
 
 ### Rate limits
 
+By default, the server allows 1000 requests per minute per client IP, counted
+before authentication so rejected tokens consume the same budget. Configured
+limits replace this default; include an `ip` limit to keep unauthenticated
+requests bounded. An explicit empty list in code or `rate_limits = ""` in
+`config.toml` disables rate limiting.
+
 Each limit allows a number of requests per second, minute, hour or day for each
 value of its key, and answers `429` with `Retry-After` past it until the window
 that value's first request opened ends. Set them in `config.toml`:
@@ -217,9 +223,11 @@ forwarded_allow_ips = "10.0.0.0/8"
 | `header:<name>` | That header's value. |
 
 A request with no value for a key (no account, no workspace in its path, no such
-header) is not counted by that limit, and `/v1/health`, `/v1/ready` and
-WebSocket connections are never counted. In code, a key may also be a function of the
-request that returns the value to count by, or nothing to skip the limit:
+header) is not counted by that limit. `/v1/health`, `/v1/ready` and the OAuth
+protected-resource metadata are never counted. WebSocket handshakes consume the
+same budget as HTTP requests; messages on an established connection do not.
+In code, a key may also be a function of the request that returns the value to
+count by, or nothing to skip the limit:
 
 <CodeGroup>
 ```python Python

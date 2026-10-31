@@ -15,6 +15,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import WebSocket from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import { buildApp, type BuildAppOptions } from './app.ts'
 import { AuthMode } from './auth/index.ts'
@@ -56,7 +57,9 @@ describe('resolveRateLimits', () => {
   it('reads the env then config', async () => {
     const home = await mkdtemp(join(tmpdir(), 'mir-rate-'))
     try {
-      expect(resolveRateLimits(undefined, { [ENV_HOME]: home })).toEqual([])
+      expect(resolveRateLimits(undefined, { [ENV_HOME]: home })).toEqual([
+        { key: 'ip', rate: '1000/minute' },
+      ])
       await writeFile(join(home, 'config.toml'), '[daemon]\nrate_limits = "account=600/minute"\n')
       expect(resolveRateLimits(undefined, { [ENV_HOME]: home }).map((l) => l.key)).toEqual([
         'account',
@@ -67,6 +70,8 @@ describe('resolveRateLimits', () => {
       expect(() => resolveRateLimits(undefined, { ...env, [ENV_RATE_LIMITS]: 'ip=5' })).toThrow(
         DaemonConfigError,
       )
+      await writeFile(join(home, 'config.toml'), '[daemon]\nrate_limits = ""\n')
+      expect(resolveRateLimits(undefined, { [ENV_HOME]: home })).toEqual([])
     } finally {
       await rm(home, { recursive: true, force: true })
     }
@@ -139,6 +144,46 @@ describe('registerRateLimits', () => {
 })
 
 describe('registerRateLimits around sign-in', () => {
+  it('limits authentication by default, ignoring untrusted forwarding headers', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const app = buildApp({ authConfig: { mode: AuthMode.Local, localToken: 'right' } })
+    const get = (token: string, forwarded = '10.0.0.1') =>
+      app.inject({
+        method: 'GET',
+        url: '/v1/workspaces',
+        headers: { authorization: `Bearer ${token}`, 'x-forwarded-for': forwarded },
+      })
+    try {
+      for (let i = 0; i < 1000; i++) {
+        expect((await get(`wrong-${String(i)}`, `10.0.0.${String(i % 256)}`)).statusCode).toBe(401)
+      }
+      const refused = await get('right')
+      expect(refused.statusCode).toBe(429)
+      expect(refused.json()).toEqual({ detail: 'Too Many Requests' })
+      expect(Number(refused.headers['retry-after'])).toBe(60)
+      expect((await app.inject({ url: '/v1/health' })).statusCode).toBe(200)
+      expect((await app.inject({ url: '/v1/ready' })).statusCode).toBe(200)
+      vi.setSystemTime(Date.now() + 60_001)
+      expect((await get('right')).statusCode).toBe(200)
+    } finally {
+      await app.close()
+      warn.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('lets an explicit empty list disable the default', async () => {
+    const app = buildApp({ rateLimits: [] })
+    try {
+      for (let i = 0; i < 1001; i++) {
+        expect((await app.inject({ url: '/v1/workspaces' })).statusCode).toBe(200)
+      }
+    } finally {
+      await app.close()
+    }
+  })
+
   it('counts a bad token by address before authentication', async () => {
     const app = buildApp({
       authConfig: { mode: AuthMode.Local, localToken: 'right' },
@@ -161,6 +206,52 @@ describe('registerRateLimits around sign-in', () => {
         { url: '/v1/workspaces', headers: { upgrade: 'websocket' } },
       ]),
     ).toEqual([200, 429])
+  })
+
+  it('shares the HTTP authentication budget with WebSocket handshakes', async () => {
+    const app = buildApp({
+      authConfig: { mode: AuthMode.Local, localToken: 'right' },
+      rateLimits: [{ key: 'ip', rate: '1/minute' }],
+    })
+    try {
+      const address = await app.listen({ host: '127.0.0.1', port: 0 })
+      for (const status of [401, 429]) {
+        const response = await new Promise<{ status: number; retryAfter?: string }>(
+          (resolve, reject) => {
+            const ws = new WebSocket(
+              `${address.replace('http:', 'ws:')}/v1/workspaces/missing/ssh`,
+              {
+                headers: { authorization: 'Bearer wrong' },
+              },
+            )
+            ws.once('open', () => {
+              ws.close()
+              reject(new Error('an invalid bearer must not open a WebSocket'))
+            })
+            ws.once('unexpected-response', (req, res) => {
+              resolve({
+                status: res.statusCode ?? 0,
+                ...(res.headers['retry-after'] === undefined
+                  ? {}
+                  : { retryAfter: res.headers['retry-after'] }),
+              })
+              req.destroy()
+            })
+            ws.once('error', reject)
+          },
+        )
+        expect(response.status).toBe(status)
+        if (status === 429) {
+          expect(Number(response.retryAfter)).toBeGreaterThanOrEqual(1)
+          expect(Number(response.retryAfter)).toBeLessThanOrEqual(60)
+        }
+      }
+      expect(
+        (await app.inject({ url: '/v1/workspaces', remoteAddress: '127.0.0.1' })).statusCode,
+      ).toBe(429)
+    } finally {
+      await app.close()
+    }
   })
 })
 

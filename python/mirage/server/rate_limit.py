@@ -28,7 +28,7 @@ from limits import (
 )
 from limits.aio.storage import MemoryStorage
 from limits.aio.strategies import FixedWindowRateLimiter
-from starlette.requests import Request
+from starlette.requests import HTTPConnection
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -66,14 +66,14 @@ class RateLimit:
     count, requests answer 429 with ``Retry-After`` until it ends.
 
     Args:
-        key (str | Callable[[Request], str | None]): what to count by.
+        key (str | Callable[[HTTPConnection], str | None]): what to count by.
         rate (str): the count per unit.
 
     Raises:
         ValueError: an unknown key or a malformed rate.
     """
 
-    key: str | Callable[[Request], str | None]
+    key: str | Callable[[HTTPConnection], str | None]
     rate: str
     item: RateLimitItem = field(init=False, repr=False, compare=False)
 
@@ -128,8 +128,9 @@ def resolve_rate_limits(
 ) -> tuple[RateLimit, ...]:
     """The server's rate limits: ``rate_limits`` when given, else those
     ``$MIRAGE_RATE_LIMITS`` names, else the ``rate_limits`` key in
-    config.toml's ``[daemon]`` table, else none. Mirrors TypeScript's
-    ``resolveRateLimits``.
+    config.toml's ``[daemon]`` table, else 1000 requests per minute per IP.
+    An explicit empty list or empty config value disables the limits.
+    Mirrors TypeScript's ``resolveRateLimits``.
 
     Args:
         rate_limits (Sequence[RateLimit] | None): the limits the caller
@@ -143,8 +144,8 @@ def resolve_rate_limits(
     text = os.environ.get(ENV_RATE_LIMITS) or read_daemon_table(
         mirage_home()
     ).get("rate_limits")
-    if not text:
-        return ()
+    if text is None:
+        return (RateLimit("ip", "1000/minute"),)
     try:
         return tuple(parse_rate_limits(str(text)))
     except ValueError as exc:
@@ -152,13 +153,13 @@ def resolve_rate_limits(
 
 
 def _value(
-    key: str | Callable[[Request], str | None], request: Request
+    key: str | Callable[[HTTPConnection], str | None], request: HTTPConnection
 ) -> str | None:
     """What ``request`` is counted as under ``key``, None when nothing.
 
     Args:
-        key (str | Callable[[Request], str | None]): the limit's key.
-        request (Request): the request.
+        key (str | Callable[[HTTPConnection], str | None]): the limit's key.
+        request (HTTPConnection): the HTTP request or WebSocket handshake.
     """
     if callable(key):
         return key(request)
@@ -182,7 +183,7 @@ class RateLimitMiddleware:
     on the address, the workspace or a header, so a caller with a bad
     token is counted too, and after it, with ``signed_in``, for those
     keyed on the account or a function, which may read the signed-in
-    account. The public paths and WebSocket connections are not counted.
+    account. WebSocket handshakes count too; public paths are not counted.
 
     Args:
         app (ASGIApp): downstream ASGI app.
@@ -211,12 +212,12 @@ class RateLimitMiddleware:
     ) -> None:
         if (
             not self.rate_limits
-            or scope["type"] != "http"
+            or scope["type"] not in ("http", "websocket")
             or scope["path"] in PUBLIC_PATHS
         ):
             await self.app(scope, receive, send)
             return
-        request = Request(scope)
+        request = HTTPConnection(scope)
         for at, limit in enumerate(self.rate_limits):
             value = _value(limit.key, request)
             if value is None or await self._limiter.hit(

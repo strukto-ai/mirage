@@ -320,7 +320,7 @@ mirage login
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
 | `max_workspaces` | `MIRAGE_MAX_WORKSPACES` | no cap; past it a new workspace answers 503 |
 | `max_sessions` | `MIRAGE_MAX_SESSIONS` | no cap; past it a new session answers 429 |
-| `rate_limits` | `MIRAGE_RATE_LIMITS` | none; see [Rate limits](/home/access/http#rate-limits) |
+| `rate_limits` | `MIRAGE_RATE_LIMITS` | `ip=1000/minute`; see [Rate limits](/home/access/http#rate-limits) |
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |
 | `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |

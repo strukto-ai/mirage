@@ -94,7 +94,8 @@ export interface BuildAppOptions {
    * Limits on the requests the app answers, each keyed on the client
    * address, the account, the workspace, a header or a function of the
    * request; past one a request answers 429. Undefined reads
-   * `$MIRAGE_RATE_LIMITS` or the `rate_limits` config key, else sets none.
+   * `$MIRAGE_RATE_LIMITS` or the `rate_limits` config key, else allows
+   * 1000 requests per minute per IP. An empty list disables the limits.
    */
   rateLimits?: readonly RateLimit[]
   /**
