@@ -432,16 +432,18 @@ class _WritesWhenCollected:
         self.stream.write(b"during-")
 
 
-class _AppendsAndRewinds:
-    """Appends to a live stream, then rewinds it, from its finalizer."""
+class _AppendsAndSeeks:
+    """Appends to a live stream, then seeks it, from its finalizer."""
 
-    def __init__(self, stream) -> None:
+    def __init__(self, stream, offset: int, whence: int) -> None:
         self.stream = stream
+        self.offset = offset
+        self.whence = whence
         self.cycle = self
 
     def __del__(self) -> None:
         self.stream.write(b"during-")
-        self.stream.seek(0)
+        self.stream.seek(self.offset, self.whence)
 
 
 def _collected(build) -> None:
@@ -656,8 +658,26 @@ def test_a_seek_after_a_held_append_is_kept():
         "/data/log", "a+b", buffering=0
     )
     stream.write(b"before-")
-    _collected(lambda: _AppendsAndRewinds(stream))
+    _collected(lambda: _AppendsAndSeeks(stream, 0, os.SEEK_SET))
     assert stream.read() == b"before-during-"
     stream.close()
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_relative_seek_after_a_held_append_counts_from_the_new_end():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    stream = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
+        "/data/log", "a+b", buffering=0
+    )
+    stream.write(b"before-")
+    _collected(lambda: _AppendsAndSeeks(stream, -1, os.SEEK_CUR))
+    assert stream.tell() == len(b"before-during-") - 1
+    stream.truncate()
+    stream.close()
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during"
+    )
     loop.run_until_complete(ws.close())
     loop.close()

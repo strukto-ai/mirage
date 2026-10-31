@@ -121,8 +121,9 @@ class Descriptor:
             changed since; "" names it by ``opened``.
         late (list[tuple[int, bytes]]): writes a garbage collection held
             back (``write``), at the offsets they were made at.
-        late_end (bool): an appending write was held back since the
-            position last moved, so landing moves it to the new end.
+        late_end (int | None): after an appending write a collection
+            held back, where the position sits from the file's end, which
+            only landing learns; None when no such write is pending.
     """
 
     files: "RuntimeFiles"
@@ -133,7 +134,7 @@ class Descriptor:
     pos: int = 0
     inode: str = ""
     late: list[tuple[int, bytes]] = dataclasses.field(default_factory=list)
-    late_end: bool = False
+    late_end: int | None = None
 
     @property
     def path(self) -> str:
@@ -155,9 +156,9 @@ class Descriptor:
         late, self.late = self.late, []
         for offset, data in late:
             self.files.pwrite(self.fh, offset, data)
-        if self.late_end:
-            self.late_end = False
-            self.pos = self.files.fstat(self.fh).size
+        if self.late_end is not None:
+            self.pos = self.files.fstat(self.fh).size + self.late_end
+            self.late_end = None
 
     def pread(self, offset: int, size: int) -> bytes:
         """Read at an explicit offset without moving the position.
@@ -216,7 +217,7 @@ class Descriptor:
                 self.files.defer(self.landed)
             self.late.append((self.pos, data))
             if self.mode.append:
-                self.late_end = True
+                self.late_end = 0
             else:
                 self.pos += len(data)
             return
@@ -247,7 +248,10 @@ class Descriptor:
             base = {0: 0, 1: self.pos}.get(whence)
         if base is None or base + offset < 0:
             return None
-        self.late_end = False
+        if whence == 1 and self.late_end is not None:
+            self.late_end += offset
+        else:
+            self.late_end = None
         self.pos = base + offset
         return self.pos
 
