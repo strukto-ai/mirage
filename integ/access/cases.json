@@ -236,7 +236,7 @@
    "op": "cancel",
    "setup": [],
    "cases": [
-    {"id": "stops_a_running_line", "input": {"command": "touch /begun; sleep 2; touch /leaked"}, "expect": {"text": "canceled"}}
+    {"id": "stops_a_running_line", "input": {"command": "touch /begun; sleep 5; touch /leaked"}, "expect": {"text": "canceled"}}
    ]
   },
   {

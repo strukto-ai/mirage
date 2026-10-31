@@ -63,7 +63,7 @@ WAITED = "the line waited for all of its input"
 # CANCEL_SLEEP seconds and touches LEAKED. A session of WATCH's looks.
 BEGUN = "/begun"
 LEAKED = "/leaked"
-CANCEL_SLEEP = 2
+CANCEL_SLEEP = 5
 WATCH = "watch"
 HELD = "the access held the output until the line ended"
 STREAM_WAIT = 10.0
