@@ -23,7 +23,6 @@ const gcal = new GCalVFS({
   clientId: process.env.GOOGLE_CLIENT_ID!,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
   refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
-  bucketDays: 1,
 })
 
 const ws = new Workspace({ '/gcal': gcal }, { mode: MountMode.READ })
@@ -42,7 +41,6 @@ import { GCalVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const gcal = new GCalVFS({
   accessToken: async () => (await fetch('/api/google-token')).text(),
-  bucketDays: 1,
 })
 
 const ws = new Workspace({ '/gcal': gcal }, { mode: MountMode.READ })
@@ -50,8 +48,6 @@ const ws = new Workspace({ '/gcal': gcal }, { mode: MountMode.READ })
 
 In the browser, get the access token from your backend so the client secret never reaches the page.
 `/api/google-token` stands for that endpoint.
-
-Pass `bucketDays` when you construct `GCalVFS` directly; `buildVfs('gcal', ...)` applies the default.
 
 ## Config
 
