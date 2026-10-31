@@ -356,7 +356,7 @@ describe('pipeline', () => {
     ws.getSession('s-hist').cwd = '/'
     await ws.shell('echo tracked', { sessionId: 's-hist' })
     const records = (await ws.history()).filter((e) => e.session === 's-hist')
-    expect(records.length).toBe(1)
+    expect(records.map((e) => e.type)).toEqual(['command', 'result'])
     expect(records[0]?.command).toBe('echo tracked')
   })
 

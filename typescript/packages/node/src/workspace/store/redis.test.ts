@@ -18,15 +18,17 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '../../workspace.ts'
+import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { RedisWorkspaceStateStore } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
 
 function makeStore(prefix: string): RedisWorkspaceStateStore {
+  const observer = new RAMWorkspaceStateStore()
   return REDIS_URL !== undefined
-    ? new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix })
-    : new RedisWorkspaceStateStore({ keyPrefix: prefix })
+    ? new RedisWorkspaceStateStore({ url: REDIS_URL, keyPrefix: prefix, observer })
+    : new RedisWorkspaceStateStore({ keyPrefix: prefix, observer })
 }
 
 function testPrefix(): string {
@@ -158,7 +160,6 @@ describe.skipIf(skip)('RedisWorkspaceStateStore', () => {
     try {
       await store.sessions('ws1').set('s1', { session_id: 's1' })
       await store.namespace('ws1').set('/a', { mode: 0o600 })
-      await store.observer('ws1').append('d/s1.jsonl', new TextEncoder().encode('{}\n'))
       await store.casSetMeta('ws1', { workspace_id: 'ws1' }, 0)
       await store.casSetMeta('ws2', { workspace_id: 'ws2' }, 0)
       await store.drop('ws1')

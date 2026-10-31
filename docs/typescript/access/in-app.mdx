@@ -84,7 +84,7 @@ const ws = new Workspace(
 )
 ```
 
-Every process that builds the workspace on one Redis store, under the same ids, shares its sessions, history and background jobs:
+Every process that builds the workspace on one Redis store, under the same ids, shares its sessions and background jobs:
 
 ```ts
 import { MountMode, RAMVFS, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'

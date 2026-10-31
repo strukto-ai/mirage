@@ -16,8 +16,15 @@ import asyncio
 import json
 import logging
 
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
+
 from mirage.io import IOResult
 from mirage.observe import OpRecord
+from mirage.observe import observer as observer_module
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
@@ -46,19 +53,47 @@ def test_log_op_writes_jsonl():
     assert parsed["vfs"] == "read"
 
 
-def test_log_execution_writes_jsonl():
+def test_a_line_writes_its_command_then_its_result():
     store = RAMObserverStore()
-    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR + 1.5))
-    io = IOResult(stdout=b"file.csv\n")
-    asyncio.run(obs.log_execution("ls /data", io, [], session="sess-1"))
+    clock = ManualClock(start=NEW_YEAR + 1.5)
+    obs = Observer(store=store, clock=clock)
+    asyncio.run(obs.log_command("ls /data", "sess-1", line="L"))
+    clock.advance(2)
+    io = IOResult(stdout=b"file.csv\n", stderr=b"ls: warn\n", exit_code=1)
+    asyncio.run(obs.log_result(io, [], "sess-1", line="L"))
     data = store.files["/2021-01-01/sess-1.jsonl"]
-    parsed = json.loads(data.decode().strip())
-    assert parsed["timestamp"] == 1_609_459_201_500
-    assert parsed["type"] == "command"
-    assert parsed["session"] == "sess-1"
-    assert parsed["command"] == "ls /data"
-    assert parsed["stdout"] == "file.csv\n"
-    assert parsed["exit_code"] == 0
+    command, result = (json.loads(x) for x in data.decode().splitlines())
+    assert command == {
+        "type": "command",
+        "session": "sess-1",
+        "timestamp": 1_609_459_201_500,
+        "id": "L",
+        "command": "ls /data",
+    }
+    assert result == {
+        "type": "result",
+        "session": "sess-1",
+        "timestamp": 1_609_459_203_500,
+        "parent": "L",
+        "duration_ms": 2000,
+        "exit_code": 1,
+        "stdout": "file.csv\n",
+        "stderr": "ls: warn\n",
+    }
+
+
+def test_a_line_joins_the_listing_when_its_result_is_in():
+    obs = Observer()
+    asyncio.run(obs.log_command("sleep 1", "s1", line="L"))
+    assert asyncio.run(obs.session_command_events("s1")) == []
+    assert asyncio.run(obs.command_events()) == []
+    asyncio.run(obs.log_result(IOResult(), [], "s1", line="L"))
+    assert [
+        e["command"] for e in asyncio.run(obs.session_command_events("s1"))
+    ] == ["sleep 1"]
+    assert [e["command"] for e in asyncio.run(obs.command_events())] == [
+        "sleep 1"
+    ]
 
 
 def test_a_long_line_lets_the_loop_run_while_it_logs():
@@ -83,7 +118,7 @@ def test_a_long_line_lets_the_loop_run_while_it_logs():
 
         task = asyncio.create_task(other())
         records = [rec] * 10_000
-        await obs.log_execution("grep -r x /d", IOResult(), records, "s")
+        await obs.log_result(IOResult(), records, "s")
         task.cancel()
         return turns
 
@@ -187,7 +222,7 @@ def test_log_command_text_appends_single_entry():
     asyncio.run(obs.log_command_text("a b c", session="s1"))
     events = asyncio.run(obs.session_command_events("s1"))
     assert [e["command"] for e in events] == ["a b c"]
-    assert events[0]["exit_code"] == 0
+    assert "id" not in events[0]
 
 
 def test_delete_event_removes_entry_and_renumbers():
@@ -383,3 +418,76 @@ def test_a_long_session_id_records_under_a_bounded_name(tmp_path):
     assert all(len(name.encode()) <= 255 for name in names)
     listed = asyncio.run(obs.session_command_events(long))
     assert [e["command"] for e in listed] == ["echo 50"]
+
+
+def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        observer_module, "_tracer", lambda: provider.get_tracer("t")
+    )
+    clock = ManualClock(start=NEW_YEAR)
+    obs = Observer(store=RAMObserverStore(), clock=clock, workspace_id="w")
+    start = int(NEW_YEAR * 1000)
+    rec = OpRecord(
+        op="read",
+        path="/d/a",
+        source="s3",
+        bytes=6,
+        timestamp=start + 5,
+        duration_ms=12,
+    )
+    asyncio.run(obs.log_command("cat /d/a", "s1", line="L"))
+    clock.advance(1)
+    asyncio.run(obs.log_result(IOResult(exit_code=1), [rec], "s1", line="L"))
+    call, line = exporter.get_finished_spans()
+    assert (line.name, dict(line.attributes or {})) == (
+        "command",
+        {
+            "mirage.workspace.id": "w",
+            "mirage.session.id": "s1",
+            "mirage.command": "cat /d/a",
+            "mirage.exit_code": 1,
+        },
+    )
+    assert (line.start_time, line.end_time) == (
+        start * 1_000_000,
+        (start + 1000) * 1_000_000,
+    )
+    assert call.parent is not None
+    assert call.parent.span_id == line.context.span_id
+    assert (call.name, dict(call.attributes or {})) == (
+        "vfs.read",
+        {
+            "mirage.vfs.path": "/d/a",
+            "mirage.vfs.source": "s3",
+            "mirage.vfs.bytes": 6,
+        },
+    )
+    assert (call.start_time, call.end_time) == (
+        (start - 7) * 1_000_000,
+        (start + 5) * 1_000_000,
+    )
+
+
+def test_bash_history_lists_lines_in_the_order_they_ended():
+    clock = ManualClock(start=NEW_YEAR)
+    obs = Observer(store=RAMObserverStore(), clock=clock)
+    asyncio.run(obs.log_command("sleep 9", "s1", line="slow"))
+    clock.advance(1)
+    asyncio.run(obs.log_command("echo quick", "s2", line="quick"))
+    clock.advance(1)
+    asyncio.run(obs.log_result(IOResult(), [], "s2", line="quick"))
+    clock.advance(1)
+    asyncio.run(obs.log_result(IOResult(), [], "s1", line="slow"))
+    asyncio.run(obs.log_result(IOResult(), [], "s1", line="slow"))
+    assert [e["command"] for e in asyncio.run(obs.command_events())] == [
+        "echo quick",
+        "sleep 9",
+    ]
+    results = [e for e in asyncio.run(obs.events()) if e["type"] == "result"]
+    assert [(e["parent"], e["duration_ms"]) for e in results] == [
+        ("quick", 1000),
+        ("slow", 3000),
+    ]

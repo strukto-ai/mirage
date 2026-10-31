@@ -167,16 +167,19 @@ describe('toStateDict / applyStateDict', () => {
     const ws = buildWorkspace()
     await ws.shell('echo "one"')
     await ws.shell('echo "two"')
-    expect((await ws.history()).length).toBe(2)
+    expect((await ws.history()).length).toBe(4)
     const path = join(tempDir, 'history.json')
     await ws.snapshot(path)
     const loaded = await Workspace.load(path, {
       mode: MountMode.WRITE,
     })
     const entries = await loaded.history()
-    expect(entries.length).toBe(2)
-    expect(entries[0]?.command).toBe('echo "one"')
-    expect(entries[1]?.command).toBe('echo "two"')
+    expect(entries.map((e) => e.command ?? e.stdout)).toEqual([
+      'echo "one"',
+      'one\n',
+      'echo "two"',
+      'two\n',
+    ])
     await ws.close()
     await loaded.close()
   })

@@ -158,22 +158,31 @@ describe('workspaces router', () => {
         await app.inject({ method: 'GET', url: `/v1/workspaces/h/history${qs}` })
       const all = await read('')
       expect(all.statusCode).toBe(200)
-      expect(all.json<{ command: string }[]>().map((e) => e.command)).toEqual([
-        'echo hi > /a.txt',
-        'cat /a.txt',
+      interface Entry {
+        type: string
+        command?: string
+        vfs?: string
+        exit_code?: number
+        stdout?: string
+      }
+      expect(all.json<Entry[]>().map((e) => [e.type, e.command ?? e.exit_code])).toEqual([
+        ['command', 'echo hi > /a.txt'],
+        ['result', 0],
+        ['command', 'cat /a.txt'],
+        ['result', 0],
       ])
-      expect(
-        (await read('?vfs=true'))
-          .json<{ type: string; vfs?: string }[]>()
-          .map((e) => [e.type, e.vfs ?? null]),
-      ).toEqual([
-        ['vfs', 'write'],
-        ['command', null],
-        ['vfs', 'read'],
-        ['command', null],
-      ])
-      expect((await read('?last=1')).json<{ command: string }[]>().map((e) => e.command)).toEqual([
-        'cat /a.txt',
+      expect((await read('?vfs=true')).json<Entry[]>().map((e) => [e.type, e.vfs ?? null])).toEqual(
+        [
+          ['command', null],
+          ['vfs', 'write'],
+          ['result', null],
+          ['command', null],
+          ['vfs', 'read'],
+          ['result', null],
+        ],
+      )
+      expect((await read('?last=1')).json<Entry[]>().map((e) => [e.type, e.stdout])).toEqual([
+        ['result', 'hi\n'],
       ])
       expect((await read('?last=-1')).statusCode).toBe(400)
       expect(

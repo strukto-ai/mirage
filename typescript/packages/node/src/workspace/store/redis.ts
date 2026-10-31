@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { createHash } from 'node:crypto'
+import path from 'node:path'
 import type { ObserverStore } from '@struktoai/mirage-core/observe/store'
 import type { NamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
 import { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
@@ -19,15 +21,28 @@ import type {
   WorkspaceFields,
   WorkspaceStateStoreOverrides,
 } from '@struktoai/mirage-core/workspace/store/base'
-import { RedisObserverStore } from '../../observe/redis_store.ts'
 import { RedisConnection } from '../../optional_peer.ts'
 import { CAS_SCRIPT, RedisNamespaceStore } from '../mount/namespace/redis.ts'
 import type { JobStore } from '@struktoai/mirage-core/shell/job_table/store'
 import { RedisJobStore } from '../../shell/job_table/redis.ts'
+import { DEFAULT_STATE_ROOT, DiskWorkspaceStateStore } from './disk.ts'
 
 export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOverrides {
   url?: string
   keyPrefix?: string
+  /** The state root its history goes under, `~/.mirage/state` by default. */
+  root?: string
+}
+
+/**
+ * Where a Redis store keeps its history on disk: a folder of its own under
+ * `root`, named by a hash of its url and key prefix, so no two stores share
+ * one and the url's credentials never reach a path. Mirrors Python's
+ * `_history_root`.
+ */
+function historyRoot(root: string, url: string, keyPrefix: string): string {
+  const digest = createHash('sha256').update(`${url}\n${keyPrefix}`).digest('hex')
+  return path.join(root, 'redis', digest.slice(0, 16))
 }
 
 /**
@@ -37,14 +52,15 @@ export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOver
  *
  * - `{prefix}workspaces` — hash, workspace id -> metadata JSON
  * - `{prefix}{ws}:namespace:nodes` — node table
- * - `{prefix}{ws}:observer:*` — observer plane
  * - `{prefix}{ws}:sessions` — session table
  * - `{prefix}{ws}:jobs:*`: job lists, consoles and owner leases
  *
  * All plane state survives restarts and is visible to every process
  * pointed at the same url and prefix, so a workspace rebuilt from its
- * config alone gets identical overlays, history, sessions, and grants,
- * and sees the jobs every other one runs.
+ * config alone gets identical overlays, sessions, and grants, and sees
+ * the jobs every other one runs. History only grows, so it stays out of
+ * Redis: on this machine's disk, in a folder of this store's own under
+ * `root`, unless `observer` names another store.
  * Mirrors the Python RedisWorkspaceStateStore.
  */
 export class RedisWorkspaceStateStore extends WorkspaceStateStore {
@@ -53,15 +69,23 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   private readonly metaKey: string
   private readonly redis: RedisConnection
   private readonly namespaces = new Map<string, RedisNamespaceStore>()
-  private readonly observers = new Map<string, RedisObserverStore>()
   private readonly sessionTables = new Map<string, RedisNamespaceStore>()
   private readonly jobPlanes = new Map<string, RedisJobStore>()
 
   constructor(options: RedisWorkspaceStateStoreOptions = {}) {
-    const { url, keyPrefix, ...overrides } = options
-    super(overrides)
-    this.url = url ?? 'redis://localhost:6379/0'
-    this.prefix = keyPrefix ?? 'mirage:'
+    const { url, keyPrefix, root, ...overrides } = options
+    const at = url ?? 'redis://localhost:6379/0'
+    const prefix = keyPrefix ?? 'mirage:'
+    super({
+      ...overrides,
+      observer:
+        overrides.observer ??
+        new DiskWorkspaceStateStore({
+          root: historyRoot(root ?? DEFAULT_STATE_ROOT, at, prefix),
+        }),
+    })
+    this.url = at
+    this.prefix = prefix
     this.metaKey = `${this.prefix}workspaces`
     this.redis = new RedisConnection(this.url, 'RedisWorkspaceStateStore')
   }
@@ -78,16 +102,10 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     return ns
   }
 
-  protected makeObserver(workspaceId: string): ObserverStore {
-    let ob = this.observers.get(workspaceId)
-    if (ob === undefined) {
-      ob = new RedisObserverStore({
-        url: this.url,
-        keyPrefix: `${this.prefix}${workspaceId}:observer:`,
-      })
-      this.observers.set(workspaceId, ob)
-    }
-    return ob
+  protected makeObserver(_workspaceId: string): ObserverStore {
+    throw new Error(
+      'The redis store keeps no history; it goes to the observer override, disk by default',
+    )
   }
 
   protected makeSessions(workspaceId: string): NamespaceStore {
@@ -137,7 +155,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   }
 
   protected async forgetSelf(workspaceId: string): Promise<void> {
-    for (const handles of [this.namespaces, this.observers, this.sessionTables, this.jobPlanes]) {
+    for (const handles of [this.namespaces, this.sessionTables, this.jobPlanes]) {
       await handles.get(workspaceId)?.close()
       handles.delete(workspaceId)
     }
@@ -147,7 +165,6 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
 
   protected async closeSelf(): Promise<void> {
     for (const ns of this.namespaces.values()) await ns.close()
-    for (const ob of this.observers.values()) await ob.close()
     for (const table of this.sessionTables.values()) await table.close()
     for (const jobs of this.jobPlanes.values()) await jobs.close()
     await this.redis.close()

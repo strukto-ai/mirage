@@ -19,13 +19,15 @@ from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
 
-from mirage.context.session_context import current_execution_id
+from opentelemetry import trace
+
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.observe.log_entry import (
     EVENT_CLEAR,
     EVENT_COMMAND,
     EVENT_DELETE,
+    EVENT_RESULT,
     EVENT_VFS,
     STDOUT_TRUNCATE,
     LogEntry,
@@ -38,6 +40,9 @@ from mirage.utils.dates import utc_date_folder
 logger = logging.getLogger(__name__)
 
 _NAME_LIMIT = 200
+_NS_PER_MS = 1_000_000
+
+TRACER_NAME = "mirage.observe"
 
 
 def _session_file(session: str) -> str:
@@ -55,6 +60,60 @@ def _session_file(session: str) -> str:
         digest = hashlib.sha256(session.encode()).hexdigest()
         quoted = f"{quoted[: _NAME_LIMIT - len(digest)]}~{digest}"
     return f"{quoted}.jsonl"
+
+
+def _tracer() -> trace.Tracer:
+    """The tracer a finished line goes to: a no-op until the process
+    sets up an OpenTelemetry SDK, whose exporter picks the backend."""
+    return trace.get_tracer(TRACER_NAME)
+
+
+def _trace_line(
+    workspace_id: str | None,
+    session: str,
+    command: str,
+    span: tuple[int, int],
+    exit_code: int,
+    records: list[OpRecord],
+) -> None:
+    """Send a finished line to OpenTelemetry: a ``command`` span over its
+    run, and under it a ``vfs.<call>`` span for each call it made to a
+    mount.
+
+    Args:
+        workspace_id (str | None): the workspace the line ran in.
+        session (str): the session it ran in.
+        command (str): the typed line.
+        span (tuple[int, int]): its start and end, epoch milliseconds.
+        exit_code (int): how it ended.
+        records (list[OpRecord]): the calls it made.
+    """
+    tracer = _tracer()
+    attributes: dict[str, str | int] = {
+        "mirage.session.id": session,
+        "mirage.command": command,
+        "mirage.exit_code": exit_code,
+    }
+    if workspace_id is not None:
+        attributes["mirage.workspace.id"] = workspace_id
+    line = tracer.start_span(
+        "command", start_time=span[0] * _NS_PER_MS, attributes=attributes
+    )
+    if line.is_recording():
+        parent = trace.set_span_in_context(line)
+        for rec in records:
+            call = tracer.start_span(
+                f"vfs.{rec.op}",
+                context=parent,
+                start_time=(rec.timestamp - rec.duration_ms) * _NS_PER_MS,
+                attributes={
+                    "mirage.vfs.path": rec.path,
+                    "mirage.vfs.source": rec.source,
+                    "mirage.vfs.bytes": rec.bytes,
+                },
+            )
+            call.end(end_time=rec.timestamp * _NS_PER_MS)
+    line.end(end_time=span[1] * _NS_PER_MS)
 
 
 def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:
@@ -119,19 +178,29 @@ class Observer:
     ahead of the commands it acts on. A session with no history sets no
     floor.
 
+    Each line that ends also goes to OpenTelemetry as a span, its vfs
+    calls as spans under it; nothing leaves the process until an SDK is
+    set up.
+
     Args:
         store (ObserverStore | None): Storage backend for log files;
             defaults to an in-memory RAMObserverStore.
         clock (Clock | None): the workspace clock; None is the system
             clock.
+        workspace_id (str | None): the workspace, named on its spans.
     """
 
     def __init__(
-        self, store: ObserverStore | None = None, clock: Clock | None = None
+        self,
+        store: ObserverStore | None = None,
+        clock: Clock | None = None,
+        workspace_id: str | None = None,
     ) -> None:
         self._store = store if store is not None else RAMObserverStore()
         self._clock: Clock = clock if clock is not None else SystemClock()
+        self._workspace_id = workspace_id
         self._newest: dict[str, int | None] = {}
+        self._started: dict[str, tuple[int, float, str]] = {}
 
     def _now_ms(self) -> int:
         """The clock's wall time in epoch milliseconds, an entry's stamp."""
@@ -175,6 +244,7 @@ class Observer:
         rec: OpRecord,
         session: str,
         cwd: str | None = None,
+        parent: str | None = None,
     ) -> None:
         """Persist an OpRecord as a JSONL line.
 
@@ -182,48 +252,97 @@ class Observer:
             rec (OpRecord): The operation record.
             session (str): Session ID.
             cwd (str | None): Session cwd at log time.
+            parent (str | None): The line that made the call.
         """
-        await self._log(LogEntry.from_op_record(rec, session, cwd))
+        await self._log(LogEntry.from_op_record(rec, session, cwd, parent))
 
-    async def log_execution(
+    async def log_command(
         self,
         command: str,
+        session: str,
+        cwd: str | None = None,
+        line: str | None = None,
+    ) -> None:
+        """Record a typed line as it starts, under its id, which its vfs
+        calls and its result name as their parent.
+
+        Args:
+            command (str): The typed line, verbatim and unexpanded.
+            session (str): Session the line runs in.
+            cwd (str | None): Session cwd at its start.
+            line (str | None): The line's id.
+        """
+        entry = LogEntry(
+            type=EVENT_COMMAND,
+            session=session,
+            timestamp=self._now_ms(),
+            cwd=cwd,
+            id=line,
+            command=command,
+        )
+        began = self._clock.monotonic()
+        await self._log(entry)
+        if line is not None:
+            self._started[line] = (entry.timestamp, began, command)
+
+    async def log_result(
+        self,
         io: IOResult,
         op_records: list[OpRecord],
         session: str,
         cwd: str | None = None,
+        line: str | None = None,
     ) -> None:
-        """Record one finished typed line: its ops, then its command.
-
-        The line reader's single recording call: every op the line
-        emitted lands first, then the command entry itself.
+        """Record how a typed line ended: its vfs calls, then its result,
+        each naming the line as its parent. A line ends once: a second
+        call for a line already ended records nothing.
 
         Args:
-            command (str): The typed line, verbatim and unexpanded.
             io (IOResult): Final result of the line.
-            op_records (list[OpRecord]): Ops collected while it ran.
+            op_records (list[OpRecord]): Calls collected while it ran.
             session (str): Session the line ran in.
             cwd (str | None): Session cwd at completion.
+            line (str | None): The line's id.
         """
-        # TODO: batch the op lines and the command line into a single
+        # TODO: batch the vfs lines and the result line into a single
         # store.append so one typed line costs one roundtrip and lands
         # atomically in the store. A store whose append never suspends
         # still lets the loop run between a long line's records.
+        started = self._started.pop(line, None) if line is not None else None
+        if line is not None and started is None:
+            return
         budget = YieldBudget()
         for rec in op_records:
             await budget.run()
-            await self.log_op(rec, session, cwd)
+            await self.log_op(rec, session, cwd, line)
         stdout = await io.materialize_stdout()
+        stderr = await io.materialize_stderr()
+        now = self._now_ms()
+        took = (
+            None
+            if started is None
+            else round((self._clock.monotonic() - started[1]) * 1000)
+        )
+        if started is not None and took is not None:
+            _trace_line(
+                self._workspace_id,
+                session,
+                started[2],
+                (started[0], started[0] + took),
+                io.exit_code,
+                op_records,
+            )
         await self._log(
             LogEntry(
-                type=EVENT_COMMAND,
+                type=EVENT_RESULT,
                 session=session,
-                timestamp=self._now_ms(),
+                timestamp=now,
                 cwd=cwd,
-                command=command,
+                parent=line,
                 exit_code=io.exit_code,
                 stdout=stdout.decode(errors="replace")[:STDOUT_TRUNCATE],
-                execution_id=current_execution_id(),
+                stderr=stderr.decode(errors="replace")[:STDOUT_TRUNCATE],
+                duration_ms=took,
             )
         )
 
@@ -247,7 +366,6 @@ class Observer:
                 timestamp=self._now_ms(),
                 cwd=cwd,
                 command=command,
-                exit_code=0,
             )
         )
 
@@ -308,24 +426,36 @@ class Observer:
         return out
 
     async def command_events(self) -> list[dict[str, Any]]:
-        """Command events across all sessions, in append order.
+        """The command events of every session's ended lines, in the
+        order they ended: a line enters its history once its result is
+        in, and an entry added without running (``history -s``) at once,
+        so the listing only ever grows at its end.
 
         Returns:
             list[dict]: Events with type == EVENT_COMMAND.
         """
-        return [
-            e for e in await self.events() if e.get("type") == EVENT_COMMAND
-        ]
+        ended: list[dict[str, Any]] = []
+        running: dict[str, dict[str, Any]] = {}
+        for e in await self.events():
+            kind = e.get("type")
+            if kind == EVENT_COMMAND and e.get("id") is None:
+                ended.append(e)
+            elif kind == EVENT_COMMAND:
+                running[e["id"]] = e
+            elif kind == EVENT_RESULT and e.get("parent") in running:
+                ended.append(running.pop(e["parent"]))
+        return ended
 
     async def session_command_events(
         self, session: str
     ) -> list[dict[str, Any]]:
         """One session's visible history listing, append order.
 
-        Projects the session's events: commands after the last clear
-        tombstone, with delete events applied at the position they
-        were issued (history -d renumbers subsequent entries, GNU
-        behavior).
+        Projects the session's events: a line joins the listing when its
+        result is in (an entry added without running, ``history -s``,
+        at once), a clear tombstone empties it, and delete events apply
+        at the position they were issued (history -d renumbers
+        subsequent entries, GNU behavior).
 
         Args:
             session (str): Session ID to project.
@@ -334,16 +464,18 @@ class Observer:
             list[dict]: Events with type == EVENT_COMMAND.
         """
         files = await self._store.read_matching(f"/{_session_file(session)}")
-        entries = _parse_files(files)
-        last_clear = -1
-        for i, e in enumerate(entries):
-            if e.get("type") == EVENT_CLEAR:
-                last_clear = i
         visible: list[dict[str, Any]] = []
-        for e in entries[last_clear + 1 :]:
+        running: dict[str, dict[str, Any]] = {}
+        for e in _parse_files(files):
             kind = e.get("type")
-            if kind == EVENT_COMMAND:
+            if kind == EVENT_COMMAND and e.get("id") is None:
                 visible.append(e)
+            elif kind == EVENT_COMMAND:
+                running[e["id"]] = e
+            elif kind == EVENT_RESULT and e.get("parent") in running:
+                visible.append(running.pop(e["parent"]))
+            elif kind == EVENT_CLEAR:
+                visible = []
             elif kind == EVENT_DELETE:
                 offset = e.get("offset", 0)
                 idx = offset - 1 if offset > 0 else len(visible) + offset
@@ -375,7 +507,13 @@ class Observer:
             events (list[dict]): LogEntry dicts from StateKey.HISTORY.
         """
         await self._store.clear()
-        known = (EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_VFS)
+        known = (
+            EVENT_COMMAND,
+            EVENT_CLEAR,
+            EVENT_DELETE,
+            EVENT_RESULT,
+            EVENT_VFS,
+        )
         newest = _newest_stamp([e for e in events if e.get("type") in known])
         written = (
             self._now_ms() if newest is None else max(self._now_ms(), newest)

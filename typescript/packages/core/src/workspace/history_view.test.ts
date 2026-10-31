@@ -43,7 +43,7 @@ function out(r: ExecuteResult): string {
 }
 
 async function commands(ws: Workspace): Promise<(string | undefined)[]> {
-  return (await ws.history()).map((e) => e.command as string)
+  return (await ws.history()).filter((e) => e.type === 'command').map((e) => e.command as string)
 }
 
 describe('history view + builtin', () => {
@@ -155,8 +155,8 @@ describe('history view + builtin', () => {
     await ws.shell('ls /data')
     await ws.shell('pwd')
     const events = await ws.history()
-    expect(events.map((e) => e.command)).toEqual(['ls /data', 'pwd'])
-    expect(events.every((e) => e.type === 'command')).toBe(true)
+    expect(events.map((e) => e.command)).toEqual(['ls /data', undefined, 'pwd', undefined])
+    expect(events.map((e) => e.type)).toEqual(['command', 'result', 'command', 'result'])
     await ws.close()
   })
 })
@@ -400,7 +400,8 @@ describe('history recording boundaries (GNU line-reader semantics)', () => {
     expect(reads.some((e) => String(e.path).endsWith('f.txt'))).toBe(true)
     const lastCmd = events.filter((e) => e.type === 'command').at(-1)
     expect(lastCmd?.command).toBe('cat /data/f.txt')
-    expect(lastCmd?.exit_code).toBe(1)
+    const lastResult = events.filter((e) => e.type === 'result').at(-1)
+    expect([lastResult?.parent, lastResult?.exit_code]).toEqual([lastCmd?.id, 1])
     await ws.close()
   })
 })

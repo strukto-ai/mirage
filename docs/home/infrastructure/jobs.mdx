@@ -133,7 +133,7 @@ with the same config on each. The instances then share:
   `kill owner:pid` stops one.
 - Cleanup: an instance counts as gone 30 seconds after it was last seen, and
   the next one to start stops the programs it left running.
-- Sessions, history and symlinks, since the whole store is on Redis.
+- Sessions and symlinks, since the whole store is on Redis.
 
 A session sees only its own processes, on every instance; a profile with
 [`processes: workspace`](/home/profiles) widens that to every session's.

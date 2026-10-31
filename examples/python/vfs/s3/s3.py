@@ -424,12 +424,16 @@ async def main():
     # ── execution history: hidden recorder + GNU views ──
     print("\n=== EXECUTION HISTORY ===\n")
     events = await ws.history()
-    print(f"  Total commands recorded: {len(events)}")
+    commands = [e for e in events if e["type"] == "command"]
+    exits = {
+        e["parent"]: e["exit_code"] for e in events if e["type"] == "result"
+    }
+    print(f"  Total commands recorded: {len(commands)}")
 
-    entry = events[-1]
+    entry = commands[-1]
     print(f"\n  Last command: {entry['command']}")
     print(f"  Session: {entry['session']}")
-    print(f"  Exit code: {entry['exit_code']}")
+    print(f"  Exit code: {exits.get(entry['id'], 'running')}")
 
     print("\n  --- history (shell builtin, this session) ---")
     r = await ws.shell("history 5")
@@ -499,14 +503,20 @@ async def main():
     print(f"  {(await r.stdout_str()).strip() or '(empty)'}")
 
     print("\n--- background job history ---")
+    events = await ws.history()
+    exits = {
+        e["parent"]: e["exit_code"] for e in events if e["type"] == "result"
+    }
     bg_entries = [
         e
-        for e in await ws.history()
-        if "grep" in e["command"] and "&" not in e["command"]
+        for e in events
+        if e["type"] == "command"
+        and "grep" in e["command"]
+        and "&" not in e["command"]
     ]
     print(f"  Background job records: {len(bg_entries)}")
     for e in bg_entries[-4:]:
-        print(f"    {e['command'][:60]}  exit={e['exit_code']}")
+        print(f"    {e['command'][:60]}  exit={exits.get(e['id'], 'running')}")
 
     # ── glob expansion ──
     print("\n=== GLOB EXPANSION ===\n")

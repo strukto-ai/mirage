@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { context, trace, type Attributes, type Tracer } from '@opentelemetry/api'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
 import { utcDateFolder } from '../utils/dates.ts'
@@ -20,6 +21,7 @@ import {
   EVENT_CLEAR,
   EVENT_COMMAND,
   EVENT_DELETE,
+  EVENT_RESULT,
   EVENT_VFS,
   LogEntry,
   type LogEntryInit,
@@ -29,7 +31,6 @@ import type { OpRecord } from './record.ts'
 import { type ObserverStore, RAMObserverStore } from './store.ts'
 import { sha256Hex } from '../utils/hash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
-import { currentExecutionId } from '../context/session_context.ts'
 
 /**
  * Opt in by assigning a debug sink, as Python's module logger is off until
@@ -38,11 +39,69 @@ import { currentExecutionId } from '../context/session_context.ts'
  */
 export const logger: { debug?: (message: string) => void } = {}
 
-const KNOWN_EVENTS = new Set<string>([EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_VFS])
+const KNOWN_EVENTS = new Set<string>([
+  EVENT_COMMAND,
+  EVENT_CLEAR,
+  EVENT_DELETE,
+  EVENT_RESULT,
+  EVENT_VFS,
+])
 
 export type EventDict = Record<string, unknown>
 
 const NAME_LIMIT = 200
+
+const TRACER_NAME = 'mirage.observe'
+
+/**
+ * The tracer a finished line goes to: a no-op until the process sets up
+ * an OpenTelemetry SDK, whose exporter picks the backend.
+ */
+function tracer(): Tracer {
+  return trace.getTracer(TRACER_NAME)
+}
+
+/**
+ * Send a finished line to OpenTelemetry: a `command` span over its run
+ * (`span`, its start and end in epoch milliseconds), and under it a
+ * `vfs.<call>` span for each call it made to a mount. Mirrors Python's
+ * `_trace_line`.
+ */
+function traceLine(
+  workspaceId: string | undefined,
+  session: string,
+  command: string,
+  span: [number, number],
+  exitCode: number,
+  records: readonly OpRecord[],
+): void {
+  const attributes: Attributes = {
+    'mirage.session.id': session,
+    'mirage.command': command,
+    'mirage.exit_code': exitCode,
+  }
+  if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
+  const line = tracer().startSpan('command', { startTime: span[0], attributes })
+  if (line.isRecording()) {
+    const parent = trace.setSpan(context.active(), line)
+    for (const rec of records) {
+      const call = tracer().startSpan(
+        `vfs.${rec.op}`,
+        {
+          startTime: rec.timestamp - rec.durationMs,
+          attributes: {
+            'mirage.vfs.path': rec.path,
+            'mirage.vfs.source': rec.source,
+            'mirage.vfs.bytes': rec.bytes,
+          },
+        },
+        parent,
+      )
+      call.end(rec.timestamp)
+    }
+  }
+  line.end(span[1])
+}
 
 /**
  * The name a session's log goes under in each day: its id percent-quoted
@@ -118,13 +177,21 @@ function later(a: number | null, b: number | null): number | null {
  * restarts behind stored history (a fresh `ManualClock` over a restored or
  * persisted log) would otherwise file a clear or delete ahead of the
  * commands it acts on. A session with no history sets no floor.
+ *
+ * Each line that ends also goes to OpenTelemetry as a span, its vfs calls
+ * as spans under it; nothing leaves the process until an SDK is set up.
  */
 export class Observer {
   private readonly _store: ObserverStore
   private readonly clock: Clock
   private readonly newest = new Map<string, number | null>()
+  private readonly started = new Map<string, [number, number, string]>()
 
-  constructor(store?: ObserverStore, clock: Clock = new SystemClock()) {
+  constructor(
+    store?: ObserverStore,
+    clock: Clock = new SystemClock(),
+    private readonly workspaceId?: string,
+  ) {
     this._store = store ?? new RAMObserverStore()
     this.clock = clock
   }
@@ -168,45 +235,77 @@ export class Observer {
     )
   }
 
-  async logOp(rec: OpRecord, session: string, cwd?: string): Promise<void> {
-    await this.log(LogEntry.fromOpRecord(rec, session, cwd))
+  async logOp(rec: OpRecord, session: string, cwd?: string, parent?: string): Promise<void> {
+    await this.log(LogEntry.fromOpRecord(rec, session, cwd, parent))
   }
 
   /**
-   * Record one finished typed line: its ops, then its command. The line
-   * reader's single recording call: every op the line emitted lands
-   * first, then the command entry itself.
+   * Record a typed line as it starts, under its id `line`, which its vfs
+   * calls and its result name as their parent.
    */
-  async logExecution(
-    command: string,
+  async logCommand(command: string, session: string, cwd?: string, line?: string): Promise<void> {
+    const init: LogEntryInit = { type: EVENT_COMMAND, session, timestamp: this.nowMs(), command }
+    if (cwd !== undefined) init.cwd = cwd
+    if (line !== undefined) init.id = line
+    const began = this.clock.monotonic()
+    await this.log(new LogEntry(init))
+    if (line !== undefined) this.started.set(line, [init.timestamp, began, command])
+  }
+
+  /**
+   * Record how a typed line ended: its vfs calls, then its result, each
+   * naming the line as its parent. A line ends once: a second call for a
+   * line already ended records nothing.
+   */
+  async logResult(
     io: IOResult,
     opRecords: OpRecord[],
     session: string,
     cwd?: string,
+    line?: string,
   ): Promise<void> {
-    // TODO: batch the op lines and the command line into a single
+    // TODO: batch the vfs lines and the result line into a single
     // store.append so one typed line costs one roundtrip and lands
     // atomically in the store. A store whose append never suspends still
     // lets the loop run between a long line's records.
+    const started = line === undefined ? undefined : this.started.get(line)
+    if (line !== undefined) {
+      if (started === undefined) return
+      this.started.delete(line)
+    }
     const budget = new YieldBudget()
     for (const rec of opRecords) {
       const pending = budget.run()
       if (pending !== undefined) await pending
-      await this.logOp(rec, session, cwd)
+      await this.logOp(rec, session, cwd, line)
     }
-    const stdout = await io.materializeStdout()
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(stdout).slice(0, STDOUT_TRUNCATE)
+    const decoder = new TextDecoder('utf-8', { fatal: false })
+    const stdout = decoder.decode(await io.materializeStdout()).slice(0, STDOUT_TRUNCATE)
+    const stderr = decoder.decode(await io.materializeStderr()).slice(0, STDOUT_TRUNCATE)
+    const now = this.nowMs()
+    const took =
+      started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
+    if (started !== undefined && took !== undefined) {
+      traceLine(
+        this.workspaceId,
+        session,
+        started[2],
+        [started[0], started[0] + took],
+        io.exitCode,
+        opRecords,
+      )
+    }
     const init: LogEntryInit = {
-      type: EVENT_COMMAND,
+      type: EVENT_RESULT,
       session,
-      timestamp: this.nowMs(),
-      command,
+      timestamp: now,
       exitCode: io.exitCode,
-      stdout: text,
+      stdout,
+      stderr,
     }
     if (cwd !== undefined) init.cwd = cwd
-    const executionId = currentExecutionId()
-    if (executionId !== null) init.executionId = executionId
+    if (line !== undefined) init.parent = line
+    if (took !== undefined) init.durationMs = took
     await this.log(new LogEntry(init))
   }
 
@@ -217,7 +316,6 @@ export class Observer {
       session,
       timestamp: this.nowMs(),
       command,
-      exitCode: 0,
     }
     if (cwd !== undefined) init.cwd = cwd
     await this.log(new LogEntry(init))
@@ -249,27 +347,51 @@ export class Observer {
     return out
   }
 
-  /** Command events across all sessions, in append order. */
+  /**
+   * The command events of every session's ended lines, in the order they
+   * ended: a line enters its history once its result is in, and an entry
+   * added without running (`history -s`) at once, so the listing only ever
+   * grows at its end.
+   */
   async commandEvents(): Promise<EventDict[]> {
-    return (await this.events()).filter((e) => e.type === EVENT_COMMAND)
+    const ended: EventDict[] = []
+    const running = new Map<unknown, EventDict>()
+    for (const e of await this.events()) {
+      if (e.type === EVENT_COMMAND && e.id === undefined) {
+        ended.push(e)
+      } else if (e.type === EVENT_COMMAND) {
+        running.set(e.id, e)
+      } else if (e.type === EVENT_RESULT) {
+        const started = running.get(e.parent)
+        if (started !== undefined) ended.push(started)
+        running.delete(e.parent)
+      }
+    }
+    return ended
   }
 
   /**
    * One session's visible history listing, append order. Projects the
-   * session's events: commands after the last clear tombstone, with
-   * delete events applied at the position they were issued (history -d
-   * renumbers subsequent entries, GNU behavior).
+   * session's events: a line joins the listing when its result is in (an
+   * entry added without running, `history -s`, at once), a clear
+   * tombstone empties it, and delete events apply at the position they
+   * were issued (history -d renumbers subsequent entries, GNU behavior).
    */
   async sessionCommandEvents(session: string): Promise<EventDict[]> {
     const entries = parseFiles(await this._store.readMatching(`/${await sessionFile(session)}`))
-    let lastClear = -1
-    entries.forEach((e, i) => {
-      if (e.type === EVENT_CLEAR) lastClear = i
-    })
-    const visible: EventDict[] = []
-    for (const e of entries.slice(lastClear + 1)) {
-      if (e.type === EVENT_COMMAND) {
+    let visible: EventDict[] = []
+    const running = new Map<unknown, EventDict>()
+    for (const e of entries) {
+      if (e.type === EVENT_COMMAND && e.id === undefined) {
         visible.push(e)
+      } else if (e.type === EVENT_COMMAND) {
+        running.set(e.id, e)
+      } else if (e.type === EVENT_RESULT) {
+        const started = running.get(e.parent)
+        if (started !== undefined) visible.push(started)
+        running.delete(e.parent)
+      } else if (e.type === EVENT_CLEAR) {
+        visible = []
       } else if (e.type === EVENT_DELETE) {
         const offset = typeof e.offset === 'number' ? e.offset : 0
         const idx = offset > 0 ? offset - 1 : visible.length + offset

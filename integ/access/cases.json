@@ -377,9 +377,10 @@
     {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
     {"id": "writes_a_file", "input": {"step": "shell", "id": "w", "command": "echo hi > /f"}, "expect": {"text": "", "is_error": false}},
     {"id": "reads_it", "input": {"step": "shell", "id": "w", "command": "cat /f"}, "expect": {"text": "hi\n", "is_error": false}},
-    {"id": "lists_the_lines", "input": {"step": "history", "id": "w"}, "expect": {"text": "echo hi > /f\ncat /f"}},
-    {"id": "lists_the_vfs_calls_too", "input": {"step": "history", "id": "w", "vfs": true}, "expect": {"text": "write /f\necho hi > /f\nread /f\ncat /f"}},
-    {"id": "lists_the_newest", "input": {"step": "history", "id": "w", "last": 1}, "expect": {"text": "cat /f"}},
+    {"id": "fails_to_read", "input": {"step": "shell", "id": "w", "command": "cat /nope"}, "expect": {"text": "cat: /nope: No such file or directory\n", "is_error": true}},
+    {"id": "lists_each_line_and_its_result", "input": {"step": "history", "id": "w"}, "expect": {"text": "echo hi > /f\nexit 0: \ncat /f\nexit 0: hi\n\ncat /nope\nexit 1: cat: /nope: No such file or directory\n"}},
+    {"id": "lists_the_vfs_calls_too", "input": {"step": "history", "id": "w", "vfs": true}, "expect": {"text": "echo hi > /f\nwrite /f\nexit 0: \ncat /f\nread /f\nexit 0: hi\n\ncat /nope\nexit 1: cat: /nope: No such file or directory\n"}},
+    {"id": "lists_the_newest", "input": {"step": "history", "id": "w", "last": 2}, "expect": {"text": "cat /nope\nexit 1: cat: /nope: No such file or directory\n"}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },

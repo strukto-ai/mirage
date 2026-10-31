@@ -89,6 +89,7 @@
     "@octokit/plugin-retry": "^8.1.1",
     "@octokit/plugin-throttling": "^11.0.5",
     "@octokit/request-error": "^7.1.1",
+    "@opentelemetry/api": "^1.10.0",
     "bson": "^6.10.4",
     "isomorphic-git": "^1.38.1",
     "sha.js": "^2.4.12",

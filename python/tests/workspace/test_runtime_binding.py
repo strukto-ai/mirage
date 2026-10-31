@@ -330,8 +330,14 @@ async def test_policy_deny_folds_into_the_line_result():
         # The denied line is still a typed line: it records like any
         # other command.
         events = await ws.history()
-        assert [e["command"] for e in events] == ["python3 -c 'x'", "echo ok"]
-        assert events[0]["exit_code"] == 126
+        assert [e["command"] for e in events if e["type"] == "command"] == [
+            "python3 -c 'x'",
+            "echo ok",
+        ]
+        assert [e["exit_code"] for e in events if e["type"] == "result"] == [
+            126,
+            0,
+        ]
     finally:
         await ws.close()
 
@@ -632,12 +638,15 @@ async def test_what_a_runtime_reads_is_in_its_lines_report():
         line = next(
             i for i, e in enumerate(logged) if e.get("command") == "anything"
         )
-        before = logged[line - 1]
-        assert (before["type"], before["vfs"], before["path"]) == (
+        after = next(
+            e for e in logged if e.get("parent") == logged[line]["id"]
+        )
+        assert (after["type"], after["vfs"], after["path"]) == (
             "vfs",
             "read",
             "/ram/f.txt",
         )
+        assert after["parent"] == logged[line]["id"]
     finally:
         await ws.close()
 
@@ -681,12 +690,15 @@ async def test_what_an_aborted_runtime_read_stays_on_the_books():
         line = next(
             i for i, e in enumerate(logged) if e.get("command") == "anything"
         )
-        before = logged[line - 1]
-        assert (before["type"], before["vfs"], before["path"]) == (
+        after = next(
+            e for e in logged if e.get("parent") == logged[line]["id"]
+        )
+        assert (after["type"], after["vfs"], after["path"]) == (
             "vfs",
             "read",
             "/ram/f.txt",
         )
+        assert after["parent"] == logged[line]["id"]
     finally:
         await ws.close()
 

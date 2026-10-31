@@ -91,8 +91,7 @@ const PEER_FEATURES: readonly { feature: string; packages: readonly string[]; ne
   {
     feature: 'Redis',
     packages: ['redis'],
-    needs:
-      '`RedisVFS`, the Redis file and index cache stores, and the Redis session and history stores.',
+    needs: '`RedisVFS`, the Redis file and index cache stores, and the Redis session store.',
   },
   { feature: 'Postgres', packages: ['pg'], needs: '`PostgresVFS`.' },
   { feature: 'MongoDB', packages: ['mongodb'], needs: '`MongoDBVFS` and `GridFSVFS`.' },

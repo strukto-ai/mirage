@@ -35,7 +35,7 @@ import {
   type RedisIndexConfig,
 } from '../../cache/index/config.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { EVENT_COMMAND, EVENT_VFS } from '../../observe/log_entry.ts'
+import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { OpKwargs } from '../../view/types.ts'
@@ -476,7 +476,7 @@ export class Workspace {
       const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
       this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
-    this.observer = new Observer(stores.observe, this.clock)
+    this.observer = new Observer(stores.observe, this.clock, this.wsId)
     this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]
     // Explicit at the construction site: the history view does not cache
@@ -735,9 +735,10 @@ export class Workspace {
   }
 
   /**
-   * What the hidden recorder holds, oldest first: a `command` entry for
-   * every line run, and with `vfs` a `vfs` entry for every call a line
-   * made to a mount. `sessionId` keeps one session's entries, `since`
+   * What the hidden recorder holds, oldest first: a `command` entry when a
+   * line starts and a `result` entry when it ends, naming the line as its
+   * `parent`, and with `vfs` a `vfs` entry for every call a line made to a
+   * mount. `sessionId` keeps one session's entries, `since`
    * those at or after an epoch millisecond, `last` the newest that many.
    * Mirrors Python's `Workspace.history`.
    */
@@ -745,7 +746,7 @@ export class Workspace {
     options: { sessionId?: string; since?: number; last?: number; vfs?: boolean } = {},
   ): Promise<EventDict[]> {
     const { sessionId, since, last, vfs = false } = options
-    const kinds = new Set<unknown>(vfs ? [EVENT_COMMAND, EVENT_VFS] : [EVENT_COMMAND])
+    const kinds = new Set<unknown>([EVENT_COMMAND, EVENT_RESULT, ...(vfs ? [EVENT_VFS] : [])])
     const picked = (await this.observer.events(sessionId)).filter(
       (e) =>
         kinds.has(e.type) &&

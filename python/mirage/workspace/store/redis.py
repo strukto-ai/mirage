@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 import json
+import os
 from typing import Any, Awaitable, cast
 
 import redis.asyncio as aioredis
 
-from mirage.observe.redis_store import RedisObserverStore
 from mirage.observe.store import ObserverStore
 from mirage.shell.job_table.redis import RedisJobStore
 from mirage.shell.job_table.store import JobStore
@@ -27,6 +28,24 @@ from mirage.workspace.mount.namespace.redis import (
 )
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
+from mirage.workspace.store.disk import (
+    DEFAULT_STATE_ROOT,
+    DiskWorkspaceStateStore,
+)
+
+
+def _history_root(root: str, url: str, key_prefix: str) -> str:
+    """Where a Redis store keeps its history on disk: a folder of its
+    own under ``root``, named by a hash of its url and key prefix, so no
+    two stores share one and the url's credentials never reach a path.
+
+    Args:
+        root (str): the state root.
+        url (str): the store's Redis url.
+        key_prefix (str): the store's key prefix.
+    """
+    digest = hashlib.sha256(f"{url}\n{key_prefix}".encode()).hexdigest()
+    return os.path.join(root, "redis", digest[:16])
 
 
 class RedisWorkspaceStateStore(WorkspaceStateStore):
@@ -36,14 +55,15 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
 
     - ``{prefix}workspaces`` — hash, workspace id -> metadata JSON
     - ``{prefix}{ws}:namespace:nodes`` — node table
-    - ``{prefix}{ws}:observer:*`` — observer plane
     - ``{prefix}{ws}:sessions`` — session table
     - ``{prefix}{ws}:jobs:*``: job lists, consoles and owner leases
 
     All plane state survives restarts and is visible to every process
     pointed at the same url and prefix, so a workspace rebuilt from its
-    config alone gets identical overlays, history, sessions, and
-    grants, and sees the jobs every other one runs.
+    config alone gets identical overlays, sessions, and grants, and sees
+    the jobs every other one runs. History only grows, so it stays out
+    of Redis: on this machine's disk, in a folder of this store's own
+    under ``root``, unless ``observer`` names another store.
     """
 
     def __init__(
@@ -51,6 +71,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         url: str = "redis://localhost:6379/0",
         key_prefix: str = "mirage:",
         *,
+        root: str = DEFAULT_STATE_ROOT,
         namespace: WorkspaceStateStore | None = None,
         observer: WorkspaceStateStore | None = None,
         workspace: WorkspaceStateStore | None = None,
@@ -58,7 +79,11 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     ) -> None:
         super().__init__(
             namespace=namespace,
-            observer=observer,
+            observer=observer
+            if observer is not None
+            else DiskWorkspaceStateStore(
+                root=_history_root(root, url, key_prefix)
+            ),
             workspace=workspace,
             jobs=jobs,
         )
@@ -70,7 +95,6 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         # hash is keyed by workspace id instead of session id.
         self._meta_cas = self._meta_client.register_script(CAS_SCRIPT)
         self._namespaces: dict[str, RedisNamespaceStore] = {}
-        self._observers: dict[str, RedisObserverStore] = {}
         self._sessions: dict[str, RedisNamespaceStore] = {}
         self._jobs: dict[str, RedisJobStore] = {}
 
@@ -83,12 +107,10 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         return self._namespaces[workspace_id]
 
     def _make_observer(self, workspace_id: str) -> ObserverStore:
-        if workspace_id not in self._observers:
-            self._observers[workspace_id] = RedisObserverStore(
-                url=self._url,
-                key_prefix=f"{self._prefix}{workspace_id}:observer:",
-            )
-        return self._observers[workspace_id]
+        raise RuntimeError(
+            "The redis store keeps no history; it goes to the observer "
+            "override, disk by default"
+        )
 
     def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._sessions:
@@ -133,7 +155,6 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     async def _forget(self, workspace_id: str) -> None:
         for handles in (
             self._namespaces,
-            self._observers,
             self._sessions,
             self._jobs,
         ):
@@ -148,8 +169,6 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     async def _close(self) -> None:
         for ns in self._namespaces.values():
             await ns.close()
-        for ob in self._observers.values():
-            await ob.close()
         for sess in self._sessions.values():
             await sess.close()
         for jobs in self._jobs.values():

@@ -40,17 +40,29 @@ export class Terminal extends JobConsole {
   private attached: () => void = () => undefined
   private prefix = new Uint8Array()
   private prefixSize = 0
+  private errPrefix = new Uint8Array()
+  private errPrefixSize = 0
 
   /** A bounded prefix of stdout handed to the current line's reader. */
   get stdoutPrefix(): Uint8Array {
     return this.prefix.subarray(0, this.prefixSize)
   }
 
+  /** A bounded prefix of stderr handed to the current line's reader. */
+  get stderrPrefix(): Uint8Array {
+    return this.errPrefix.subarray(0, this.errPrefixSize)
+  }
+
   private remember(channel: Channel, data: Uint8Array): void {
-    if (channel !== Channel.STDOUT) return
-    const part = data.subarray(0, CHUNK_SIZE - this.prefixSize)
-    this.prefix.set(part, this.prefixSize)
-    this.prefixSize += part.byteLength
+    if (channel === Channel.STDOUT) {
+      const part = data.subarray(0, CHUNK_SIZE - this.prefixSize)
+      this.prefix.set(part, this.prefixSize)
+      this.prefixSize += part.byteLength
+    } else {
+      const part = data.subarray(0, CHUNK_SIZE - this.errPrefixSize)
+      this.errPrefix.set(part, this.errPrefixSize)
+      this.errPrefixSize += part.byteLength
+    }
   }
 
   /** Take what the line wrote. */
@@ -92,6 +104,8 @@ export class Terminal extends JobConsole {
   async attach(reader: JobConsole | null): Promise<void> {
     this.prefix = reader === null ? new Uint8Array() : new Uint8Array(CHUNK_SIZE)
     this.prefixSize = 0
+    this.errPrefix = reader === null ? new Uint8Array() : new Uint8Array(CHUNK_SIZE)
+    this.errPrefixSize = 0
     if (reader === null) {
       this.reader = null
       return
@@ -136,6 +150,8 @@ export class Terminal extends JobConsole {
     this.held = 0
     this.prefix = new Uint8Array(CHUNK_SIZE)
     this.prefixSize = 0
+    this.errPrefix = new Uint8Array(CHUNK_SIZE)
+    this.errPrefixSize = 0
     this.reader = to.jobs
   }
 
@@ -176,6 +192,8 @@ export class Terminal extends JobConsole {
     this.reader = null
     this.prefix = new Uint8Array()
     this.prefixSize = 0
+    this.errPrefix = new Uint8Array()
+    this.errPrefixSize = 0
     this.ended += 1
     this.attaching = null
     this.attached()

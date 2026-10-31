@@ -278,15 +278,16 @@ class StoreBlock(BaseModel):
 
     @model_validator(mode="after")
     def _s3_hosts_only_the_workspace_group(self) -> "StoreBlock":
-        """Refuse an s3 override on a plane the s3 store cannot host.
+        """Refuse an override on a plane its store cannot host.
 
         The type alone permits it on any group, but ``S3WorkspaceStateStore``
         raises when asked to build a namespace or observer plane, so
         without this the config loads and the workspace fails to
-        construct.
+        construct. History stays off Redis, and jobs off disk.
 
         Raises:
-            ValueError: an s3 group was given for namespace or observer.
+            ValueError: an s3 group was given for namespace, observer or
+                jobs, redis for observer, or disk for jobs.
         """
         for group in ("namespace", "observer", "jobs"):
             block = getattr(self, group)
@@ -297,6 +298,11 @@ class StoreBlock(BaseModel):
                     "ram or redis and pass the s3 store as the 'workspace' "
                     "group override"
                 )
+        if self.observer is not None and self.observer.type == "redis":
+            raise ValueError(
+                "config `store.observer` cannot be redis: history only "
+                "grows; keep it on ram or disk"
+            )
         if self.jobs is not None and self.jobs.type == "disk":
             raise ValueError(
                 "config `store.jobs` cannot be disk: a job's console is a "
@@ -958,6 +964,7 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
         return _redis_state_store()(
             url=block.url,
             key_prefix=block.key_prefix,
+            root=block.root,
             namespace=namespace,
             observer=observer,
             workspace=workspace,
