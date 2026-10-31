@@ -63,6 +63,10 @@ either `account_id` (endpoint is auto-built as
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table r2 end */}
 
+## Conditional writes
+
+Under `write: conditional`, writes, copies and deletes carry the version of the file mirage read, as on [S3](/python/vfs/s3#conditional-writes), and one that lost its condition fails with `STALE_WRITE`. Mirage conditions copies and deletes on this mount, so the provider must honour `If-Match` on them; one that ignores it runs them unconditioned. The `s3` VFS pointed at this provider's endpoint conditions only writes and refuses copies and deletes with `ENOTSUP`.
+
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with Cloudflare R2 mounted at `/<path>`.
