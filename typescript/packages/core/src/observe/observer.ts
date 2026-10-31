@@ -27,6 +27,7 @@ import {
 } from './log_entry.ts'
 import type { OpRecord } from './record.ts'
 import { type ObserverStore, RAMObserverStore } from './store.ts'
+import { sha256Hex } from '../utils/hash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { currentExecutionId } from '../context/session_context.ts'
 
@@ -41,16 +42,25 @@ const KNOWN_EVENTS = new Set<string>([EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, 
 
 export type EventDict = Record<string, unknown>
 
+const NAME_LIMIT = 200
+
 /**
  * The name a session's log goes under in each day: its id percent-quoted
  * as Python's `quote(safe="")` does, so no id spans folders or ends like
- * another's. Mirrors Python's `_session_file`.
+ * another's. One that quotes past `NAME_LIMIT` keeps its start and ends
+ * in a hash of the whole id, a character longer than the limit, so the
+ * name fits a filesystem and meets no shorter one. Mirrors Python's
+ * `_session_file`.
  */
-function sessionFile(session: string): string {
-  const quoted = encodeURIComponent(session).replace(
+async function sessionFile(session: string): Promise<string> {
+  let quoted = encodeURIComponent(session).replace(
     /[!'()*]/g,
     (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
   )
+  if (quoted.length > NAME_LIMIT) {
+    const digest = await sha256Hex(new TextEncoder().encode(session))
+    quoted = `${quoted.slice(0, NAME_LIMIT - digest.length)}~${digest}`
+  }
   return `${quoted}.jsonl`
 }
 
@@ -137,7 +147,7 @@ export class Observer {
     const known = this.newest.get(session)
     if (known !== undefined) return known
     const found = newestStamp(
-      parseFiles(await this._store.readMatching(`/${sessionFile(session)}`)),
+      parseFiles(await this._store.readMatching(`/${await sessionFile(session)}`)),
     )
     const floor = later(found, this.newest.get(session) ?? null)
     this.newest.set(session, floor)
@@ -153,7 +163,7 @@ export class Observer {
     this.newest.set(stamped.session, stamped.timestamp)
     const line = new TextEncoder().encode(stamped.toJsonLine() + '\n')
     await this._store.append(
-      `/${utcDateFolder(stamped.timestamp)}/${sessionFile(stamped.session)}`,
+      `/${utcDateFolder(stamped.timestamp)}/${await sessionFile(stamped.session)}`,
       line,
     )
   }
@@ -233,7 +243,7 @@ export class Observer {
     const out = parseFiles(
       await (session === undefined
         ? this._store.readAll()
-        : this._store.readMatching(`/${sessionFile(session)}`)),
+        : this._store.readMatching(`/${await sessionFile(session)}`)),
     )
     out.sort((a, b) => eventTimestamp(a) - eventTimestamp(b))
     return out
@@ -251,7 +261,7 @@ export class Observer {
    * renumbers subsequent entries, GNU behavior).
    */
   async sessionCommandEvents(session: string): Promise<EventDict[]> {
-    const entries = parseFiles(await this._store.readMatching(`/${sessionFile(session)}`))
+    const entries = parseFiles(await this._store.readMatching(`/${await sessionFile(session)}`))
     let lastClear = -1
     entries.forEach((e, i) => {
       if (e.type === EVENT_CLEAR) lastClear = i
@@ -296,7 +306,7 @@ export class Observer {
     for (const session of bySession.keys()) this.newest.set(session, written)
     for (const [session, lines] of bySession) {
       await this._store.write(
-        `/${day}/${sessionFile(session)}`,
+        `/${day}/${await sessionFile(session)}`,
         new TextEncoder().encode(lines.join('\n') + '\n'),
       )
     }

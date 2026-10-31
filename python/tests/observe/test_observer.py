@@ -18,6 +18,7 @@ import logging
 
 from mirage.io import IOResult
 from mirage.observe import OpRecord
+from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.observe.store import RAMObserverStore
@@ -369,3 +370,16 @@ def test_a_session_id_names_one_flat_log():
     ]
     listed = asyncio.run(obs.session_command_events("s1"))
     assert [e["command"] for e in listed] == ["echo s1"]
+
+
+def test_a_long_session_id_records_under_a_bounded_name(tmp_path):
+    store = DiskObserverStore(str(tmp_path))
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    long, longer = "\u00e9" * 50, "\u00e9" * 51
+    for session in (long, longer):
+        asyncio.run(obs.log_command_text(f"echo {len(session)}", session))
+    names = [p.name for p in (tmp_path / "2021-01-01").iterdir()]
+    assert len(names) == 2
+    assert all(len(name.encode()) <= 255 for name in names)
+    listed = asyncio.run(obs.session_command_events(long))
+    assert [e["command"] for e in listed] == ["echo 50"]

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 import json
 import logging
 from dataclasses import replace
@@ -36,15 +37,24 @@ from mirage.utils.dates import utc_date_folder
 
 logger = logging.getLogger(__name__)
 
+_NAME_LIMIT = 200
+
 
 def _session_file(session: str) -> str:
     """The name a session's log goes under in each day: its id
-    percent-quoted, so no id spans folders or ends like another's.
+    percent-quoted, so no id spans folders or ends like another's. One
+    that quotes past ``_NAME_LIMIT`` keeps its start and ends in a hash
+    of the whole id, a character longer than the limit, so the name fits
+    a filesystem and meets no shorter one.
 
     Args:
         session (str): the session id.
     """
-    return f"{quote(session, safe='')}.jsonl"
+    quoted = quote(session, safe="")
+    if len(quoted) > _NAME_LIMIT:
+        digest = hashlib.sha256(session.encode()).hexdigest()
+        quoted = f"{quoted[: _NAME_LIMIT - len(digest)]}~{digest}"
+    return f"{quoted}.jsonl"
 
 
 def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:

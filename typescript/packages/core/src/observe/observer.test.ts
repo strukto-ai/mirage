@@ -363,4 +363,17 @@ describe('a damaged history file', () => {
     ])
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['echo s1'])
   })
+
+  it('files a long session id under a bounded name', async () => {
+    const store = new RAMObserverStore()
+    const o = new Observer(store, new ManualClock(NEW_YEAR))
+    const [long, longer] = ['\u00e9'.repeat(50), '\u00e9'.repeat(51)]
+    for (const session of [long, longer]) {
+      await o.logCommandText(`echo ${String(session.length)}`, session)
+    }
+    const names = [...store.files.keys()].map((key) => key.split('/').at(-1) ?? '')
+    expect(names).toHaveLength(2)
+    expect(names.every((name) => new TextEncoder().encode(name).length <= 255)).toBe(true)
+    expect((await o.sessionCommandEvents(long)).map((e) => e.command)).toEqual(['echo 50'])
+  })
 })
