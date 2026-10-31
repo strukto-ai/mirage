@@ -121,6 +121,8 @@ class Descriptor:
             changed since; "" names it by ``opened``.
         late (list[tuple[int, bytes]]): writes a garbage collection held
             back (``write``), at the offsets they were made at.
+        late_end (bool): an appending write was held back since the
+            position last moved, so landing moves it to the new end.
     """
 
     files: "RuntimeFiles"
@@ -131,6 +133,7 @@ class Descriptor:
     pos: int = 0
     inode: str = ""
     late: list[tuple[int, bytes]] = dataclasses.field(default_factory=list)
+    late_end: bool = False
 
     @property
     def path(self) -> str:
@@ -152,7 +155,8 @@ class Descriptor:
         late, self.late = self.late, []
         for offset, data in late:
             self.files.pwrite(self.fh, offset, data)
-        if self.mode.append:
+        if self.late_end:
+            self.late_end = False
             self.pos = self.files.fstat(self.fh).size
 
     def pread(self, offset: int, size: int) -> bytes:
@@ -174,6 +178,7 @@ class Descriptor:
             size (int | None): byte budget; None or negative reads to the
                 end, a chunk at a time.
         """
+        self.landed()
         if size is not None and size >= 0:
             chunk = self.pread(self.pos, size)
             self.pos += len(chunk)
@@ -210,7 +215,9 @@ class Descriptor:
             if not self.late:
                 self.files.defer(self.landed)
             self.late.append((self.pos, data))
-            if not self.mode.append:
+            if self.mode.append:
+                self.late_end = True
+            else:
                 self.pos += len(data)
             return
         # The end first, as O_APPEND moves to it: a write that fails to
@@ -240,6 +247,7 @@ class Descriptor:
             base = {0: 0, 1: self.pos}.get(whence)
         if base is None or base + offset < 0:
             return None
+        self.late_end = False
         self.pos = base + offset
         return self.pos
 

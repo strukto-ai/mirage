@@ -432,6 +432,29 @@ class _WritesWhenCollected:
         self.stream.write(b"during-")
 
 
+class _AppendsAndRewinds:
+    """Appends to a live stream, then rewinds it, from its finalizer."""
+
+    def __init__(self, stream) -> None:
+        self.stream = stream
+        self.cycle = self
+
+    def __del__(self) -> None:
+        self.stream.write(b"during-")
+        self.stream.seek(0)
+
+
+def _collected(build) -> None:
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        build()
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+
+
 def _drop_in_cycle(stream) -> None:
     cycle = [stream]
     cycle.append(cycle)
@@ -604,5 +627,37 @@ def test_an_append_stream_moves_to_the_end_of_what_a_collection_held():
     assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
         b"before-during-after"
     )
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_an_fd_read_after_a_held_append_starts_at_the_new_end():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    router = HostFs(ws.vfs, loop)
+    fd = router.open("/data/log", os.O_RDWR | os.O_APPEND | os.O_CREAT)
+    router.write(fd, b"before-")
+    stream = make_open(ws.vfs, loop, router)(
+        fd, "ab", buffering=0, closefd=False
+    )
+    _collected(lambda: _WritesWhenCollected(stream))
+    assert router.read(fd, 1) == b""
+    router.lseek(fd, 0, os.SEEK_SET)
+    assert router.read(fd, 100) == b"before-during-"
+    router.close(fd)
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_seek_after_a_held_append_is_kept():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    stream = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
+        "/data/log", "a+b", buffering=0
+    )
+    stream.write(b"before-")
+    _collected(lambda: _AppendsAndRewinds(stream))
+    assert stream.read() == b"before-during-"
+    stream.close()
     loop.run_until_complete(ws.close())
     loop.close()
