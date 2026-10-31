@@ -447,6 +447,7 @@
                   "python/vfs/linear",
                   "python/vfs/wandb",
                   "python/vfs/langfuse",
+                  "python/vfs/jaeger",
                   "python/vfs/slack",
                   "python/vfs/discord",
                   "python/vfs/email"
@@ -633,6 +634,7 @@
                   "typescript/setup/linear",
                   "typescript/setup/wandb",
                   "typescript/setup/langfuse",
+                  "typescript/setup/jaeger",
                   "typescript/setup/slack",
                   "typescript/setup/discord",
                   "typescript/setup/email"
