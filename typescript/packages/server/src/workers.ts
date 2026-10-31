@@ -516,6 +516,11 @@ export class WorkerProxy {
     if (this.refusedHere(req, res)) return
     const url = new URL(req.url ?? '/', 'http://daemon')
     const parts = pathParts(req.url)
+    if (parts === null) {
+      send(res, 400, { detail: 'path is not percent-encoded' })
+      discard(req)
+      return
+    }
     const method = req.method ?? 'GET'
     if (parts[0] !== 'v1') return this.pass(first, req, res)
     const [, resource, id, action] = parts
@@ -827,6 +832,10 @@ export class WorkerProxy {
   private upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
     const { pool } = this.options
     const parts = pathParts(req.url)
+    if (parts === null) {
+      socket.end('HTTP/1.1 400 Bad Request\r\nconnection: close\r\ncontent-length: 0\r\n\r\n')
+      return
+    }
     const home =
       parts[1] === 'workspaces' && parts[2] !== undefined ? pool.home(parts[2]) : undefined
     const worker = home?.dead === false ? home : pool.first()
@@ -890,19 +899,16 @@ export function buildWorkerProxy(options: WorkerProxyOptions): WorkerProxy {
   return new WorkerProxy(options)
 }
 
-/** The decoded segments of a request's path. */
-function pathParts(url: string | undefined): string[] {
-  return new URL(url ?? '/', 'http://daemon').pathname
-    .split('/')
-    .slice(1)
-    .map((segment) => {
-      try {
-        return decodeURIComponent(segment)
-      } catch (error) {
-        console.debug('mirage: a path segment is not percent-encoded:', error)
-        return segment
-      }
-    })
+/** The decoded segments of a request's path, null if one is not percent-encoded. */
+function pathParts(url: string | undefined): string[] | null {
+  const segments = new URL(url ?? '/', 'http://daemon').pathname.split('/').slice(1)
+  try {
+    return segments.map((segment) => decodeURIComponent(segment))
+  } catch (error) {
+    // Answered with a 400, unlogged: any caller can send one.
+    if (error instanceof URIError) return null
+    throw error
+  }
 }
 
 /** Whether the server on `socket` answers its health check. */
@@ -997,8 +1003,9 @@ function idOf(body: Buffer): string | undefined {
     const id = parsed.id ?? parsed.config?.workspace_id
     return typeof id === 'string' ? id : undefined
   } catch (error) {
-    // The worker refuses a body that is not JSON; it names no id here.
-    console.debug('mirage: a create body is not JSON:', error)
+    // The worker refuses a body that is not JSON; it names no id here. Only
+    // the error's name is logged: its message quotes the body's secrets.
+    console.debug('mirage: a create body is not JSON:', (error as Error).name)
     return undefined
   }
 }

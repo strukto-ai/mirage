@@ -1375,7 +1375,9 @@ def _id_of(body: bytes) -> str | None:
         parsed = json.loads(body)
     except ValueError as exc:
         # The worker refuses a body that is not JSON; it names no id here.
-        logger.debug("mirage: a create body is not JSON: %s", exc)
+        logger.debug(
+            "mirage: a create body is not JSON: %s", type(exc).__name__
+        )
         return None
     if not isinstance(parsed, dict):
         return None

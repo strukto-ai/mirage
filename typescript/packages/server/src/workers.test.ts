@@ -308,6 +308,7 @@ describe('WorkerProxy', () => {
     expect(ids(d).flat()).toEqual(['a'])
     expect(await withHost(d.url, 'GET', '/v1/health', 'evil.example')).toBe(400)
     expect(await withHost(d.url, 'GET', '/v1/ready', 'evil.example')).toBe(400)
+    expect(await withHost(d.url, 'GET', '/v1/workspaces/%E0', 'localhost')).toBe(400)
     const explained = await call(`${d.url}/v1/workspaces?explain=true`, 'POST', {
       id: 'b',
       config: CONFIG,
