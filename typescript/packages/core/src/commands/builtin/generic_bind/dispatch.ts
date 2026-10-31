@@ -15,6 +15,7 @@ import type { IdSource } from '../../../utils/ids.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chunks } from '../../../io/cooperative.ts'
+import type { FindExpr } from '../../../rs/find.ts'
 import { NOOPAccessor } from '../../../accessor/base.ts'
 import { materialize, IOResult } from '../../../io/types.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -74,6 +75,7 @@ export async function runDispatch(
   follow?: FollowOperands,
   diff?: DiffComputer,
   ids?: IdSource,
+  find?: FindExpr,
 ): Promise<[ByteSource | null, IOResult]> {
   return runWithCaller({ ...currentCaller(), mount: null }, async () => {
     const result = await builder.fn(new NOOPAccessor(), paths.map(virtualKey), [...texts], {
@@ -86,6 +88,7 @@ export async function runDispatch(
       argv,
       ...(diff === undefined ? {} : { diff }),
       ...(ids === undefined ? {} : { ids }),
+      ...(find === undefined ? {} : { find }),
       ...(signal === undefined ? {} : { signal }),
     })
     if (result === null) return [null, new IOResult()]

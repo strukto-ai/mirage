@@ -896,7 +896,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: unknown predicate '-perm'\n"
+        "stderr": "find: unknown predicate `-perm'\n"
       },
       "flags": [
         "path",

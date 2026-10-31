@@ -31,6 +31,7 @@ import type { RouteDecision } from '../../../runtime/types.ts'
 import type { SessionState } from '../../session/session.ts'
 import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
+import type { FindExpr } from '../../../rs/find.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
@@ -77,7 +78,7 @@ export function nestedShell(
 
 /**
  * find's start points: the path operands typed before its expression.
- * The expression tail is the parser's, so a word inside it (an `-exec`
+ * The expression's start is mirage-rs's, so a word inside it (an `-exec`
  * command word, a `-newer` reference) is never a start point even when
  * the rest slot's PATH kind would have read it as one. Only the head is
  * parsed against the spec, so what it yields as path operands is exactly
@@ -85,11 +86,11 @@ export function nestedShell(
  */
 export function findStartPoints(
   argv: readonly (string | PathSpec)[],
-  exprTokens: readonly string[],
+  start: number,
   spec: CommandSpec | null,
   cwd: string,
 ): PathSpec[] {
-  const head = argv.slice(0, argv.length - exprTokens.length)
+  const head = argv.slice(0, start)
   return parseFlags(head, spec, 'find', cwd).paths
 }
 
@@ -101,6 +102,9 @@ interface RunOnMountOpts {
   // The words after the command name, as the line spelled them; absent for
   // a run split out of a line.
   argv?: readonly string[]
+  // find's expression, parsed once for the line, which its handler reads in
+  // place of `texts`.
+  find?: FindExpr
 }
 
 /**
@@ -269,6 +273,7 @@ export async function runOnMount(
         ? { shell: nestedShell(ctx.executeFn, session, signal) }
         : {}),
       ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
+      ...(opts.find !== undefined ? { find: opts.find } : {}),
     })
   } catch (err) {
     // Command-owned usage errors (extra operands, missing patterns) become

@@ -39,9 +39,9 @@ describe('LogEntry.fromOpRecord', () => {
       durationMs: 45,
     })
     const entry = LogEntry.fromOpRecord(rec, 'sess-1')
-    expect(entry.type).toBe('op')
+    expect(entry.type).toBe('vfs')
     expect(entry.session).toBe('sess-1')
-    expect(entry.op).toBe('read')
+    expect(entry.vfs).toBe('read')
     expect(entry.path).toBe('/data/file.csv')
     expect(entry.source).toBe('s3')
     expect(entry.bytes).toBe(1024)
@@ -61,17 +61,17 @@ describe('LogEntry.toJsonLine', () => {
     })
     const entry = LogEntry.fromOpRecord(rec, 's')
     const parsed = JSON.parse(entry.toJsonLine()) as Record<string, unknown>
-    expect(parsed.type).toBe('op')
-    expect(parsed.op).toBe('read')
+    expect(parsed.type).toBe('vfs')
+    expect(parsed.vfs).toBe('read')
     expect(parsed).not.toHaveProperty('command')
   })
 
-  it('emits only command fields for a command entry (no op key)', () => {
+  it('emits only command fields for a command entry (no vfs key)', () => {
     const entry = commandEntry()
     const parsed = JSON.parse(entry.toJsonLine()) as Record<string, unknown>
     expect(parsed.type).toBe('command')
     expect(parsed.command).toBe('ls')
-    expect(parsed).not.toHaveProperty('op')
+    expect(parsed).not.toHaveProperty('vfs')
   })
 
   it('includes cwd when provided for op entries', () => {

@@ -83,7 +83,7 @@ it('links a pipeline CLI and operation history to the admitted execution', async
   expect(seen[0]).not.toBe('exec-request')
   const events = await ws.observer.events()
   expect(events.at(-1)?.execution_id).toBe('exec-request')
-  const ops = events.filter((event) => event.type === 'op')
+  const ops = events.filter((event) => event.type === 'vfs')
   expect(ops.length).toBeGreaterThan(0)
   expect(ops.every((event) => typeof event.execution_id === 'string')).toBe(true)
 })

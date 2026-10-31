@@ -62,7 +62,9 @@ implementations cannot drift apart.
 - `fixtures/`: the seed data cases assume.
 
 The Rust `cat`, `rg_input` and `shuf` streams, the grep, zgrep and rg option
-grammars (`grep.rs`, `rg_options.rs`) behind `scan`, shared integer/UTF-8/record
+grammars (`grep.rs`, `rg_options.rs`) and find's expression grammar (`find.rs`,
+pinned by `unix/find/error.json` and `printf.json` against GNU findutils 4.10.0
+in `debian:stable-slim`) behind `scan`, shared integer/UTF-8/record
 helpers and their mirrored host adapters use the existing whole-host core
 and TypeScript filters. `unix/cat/{A,E.upper}.json`
 pins high bytes and CRLF display; `unix/zgrep/error.json` pins corrupt trailers

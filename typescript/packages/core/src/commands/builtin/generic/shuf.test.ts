@@ -17,7 +17,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { ByteSpool } from '../../../io/spool.ts'
 import { CHUNK_SIZE } from '../../../io/cooperative.ts'
 import { closeQuietly } from '../../../io/stream.ts'
-import { materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import type { Context } from '../../config.ts'
@@ -25,20 +24,31 @@ import { UINTMAX } from '../constants.ts'
 import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
 import { SeededIdSource } from '../../../utils/ids.ts'
 import { sha256Hex } from '../../../utils/hash.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import {
   MAX_OUTPUT_LINES,
   MEMORY_EXHAUSTED,
-  SIZE_MAX,
   emitCount,
   parseFlags,
-  parseInputRange,
-  rangeError,
   shufGeneric,
   type ShufFlags,
 } from './shuf.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+function refusal(parsed: ShufFlags | IOResult): string | null {
+  if (!(parsed instanceof IOResult)) return null
+  return parsed.stderr instanceof Uint8Array ? DEC.decode(parsed.stderr) : ''
+}
+
+function rangeOf(raw: string): readonly [bigint, bigint] | 'invalid' | 'overflow' | null {
+  const parsed = parseFlags({ input_range: raw })
+  if (!(parsed instanceof IOResult)) return parsed.inputRange
+  return refusal(parsed)?.endsWith(': Value too large for defined data type\n') === true
+    ? 'overflow'
+    : 'invalid'
+}
 
 function stubStream(): AsyncIterable<Uint8Array> {
   throw new Error('shuf read an operand although its line count was refused')
@@ -182,7 +192,7 @@ describe('shuf refuses a trailing newline in a value', () => {
 
   // The control: the anchoring must not refuse a clean value.
   it.each(['2', '+2', '0'])('still accepts -n %s', (value) => {
-    expect(typeof parseFlags({ head_count: value })).not.toBe('string')
+    expect(parseFlags({ head_count: value })).not.toBeInstanceOf(IOResult)
   })
 })
 
@@ -192,7 +202,7 @@ describe('shuf refuses a trailing newline in a value', () => {
 // Ground truth NL3-C.
 describe('shuf skips leading C whitespace on -n', () => {
   it.each([' 2', '\t2', '\n2', '\x0b2', '\f2', '\r2', '  2', ' +2'])('accepts %j', (value) => {
-    expect(typeof parseFlags({ head_count: value })).not.toBe('string')
+    expect(parseFlags({ head_count: value })).not.toBeInstanceOf(IOResult)
   })
 
   // `-n` is unsigned, so ' -2' is refused where nl's `-v` accepts it.
@@ -202,7 +212,9 @@ describe('shuf skips leading C whitespace on -n', () => {
     ['+ 2', '+ 2'],
     ['\x1c2', '\\0342'],
   ] as [string, string][])('refuses %j', (value, quoted) => {
-    expect(parseFlags({ head_count: value })).toBe(`shuf: invalid line count: '${quoted}'\n`)
+    expect(refusal(parseFlags({ head_count: value }))).toBe(
+      `shuf: invalid line count: '${quoted}'\n`,
+    )
   })
 })
 
@@ -222,7 +234,7 @@ describe('shuf -i takes a prefix on either bound', () => {
     ['2-2', [2n, 2n]],
     ['01-03', [1n, 3n]],
   ] as [string, [bigint, bigint]][])('accepts %j', (raw, bounds) => {
-    expect(parseInputRange(raw)).toEqual(bounds)
+    expect(rangeOf(raw)).toEqual(bounds)
   })
 
   // A `-` is never a sign, and shuf has one message for all of it.
@@ -243,7 +255,7 @@ describe('shuf -i takes a prefix on either bound', () => {
     '1',
     '',
   ])('refuses %j', (raw) => {
-    expect(parseInputRange(raw)).toBe('invalid')
+    expect(rangeOf(raw)).toBe('invalid')
   })
 })
 
@@ -267,13 +279,13 @@ describe('shuf parseFlags is the one flag read', () => {
       echo: false,
       zeroTerminated: true,
       withReplacement: true,
-      inputRange: '1-3',
+      inputRange: [1n, 3n],
       output: PathSpec.fromStrPath('/data/out.txt'),
     })
   })
 
   it('returns the stderr text for a line GNU refuses', () => {
-    expect(parseFlags({ head_count: '-1' })).toBe("shuf: invalid line count: '-1'\n")
+    expect(refusal(parseFlags({ head_count: '-1' }))).toBe("shuf: invalid line count: '-1'\n")
   })
 
   it('defaults every field when the line carried no flag', () => {
@@ -290,7 +302,7 @@ describe('shuf parseFlags is the one flag read', () => {
 
 // `-i`'s bounds are `uintmax_t`, so UINTMAX_MAX is a legal bound and one past
 // it earns gnulib's LONGINT_OVERFLOW clause. The SPAN has a second, different
-// limit at SIZE_MAX and that one reads as the PLAIN message, the same one a
+// limit at UINTMAX and that one reads as the PLAIN message, the same one a
 // decreasing range gets. Every row measured against GNU coreutils 9.4 (ground
 // truth SH1, SH3, SH4).
 describe('shuf -i reads a bound as an exact integer up to UINTMAX', () => {
@@ -304,7 +316,7 @@ describe('shuf -i reads a bound as an exact integer up to UINTMAX', () => {
     [`0-${String(UINTMAX - 1n)}`, [0n, UINTMAX - 1n]],
     [`1-${String(UINTMAX)}`, [1n, UINTMAX]],
   ] as [string, [bigint, bigint]][])('accepts -i %j', (raw, bounds) => {
-    expect(parseInputRange(raw)).toEqual(bounds)
+    expect(rangeOf(raw)).toEqual(bounds)
   })
 
   // A bound past UINTMAX_MAX is `overflow`, and the clause is EOVERFLOW's --
@@ -321,7 +333,7 @@ describe('shuf -i reads a bound as an exact integer up to UINTMAX', () => {
     ' 18446744073709551616-1',
     '99999999999999999999999999-99999999999999999999999999',
   ])('refuses -i %j with the overflow clause', async (raw) => {
-    expect(parseInputRange(raw)).toBe('overflow')
+    expect(rangeOf(raw)).toBe('overflow')
     const got = await run({ input_range: raw })
     expect(got.exit).toBe(1)
     expect(got.stdout).toBe('')
@@ -334,30 +346,22 @@ describe('shuf -i reads a bound as an exact integer up to UINTMAX', () => {
   // bound outranks a non-numeric high one, and a non-numeric low bound
   // outranks an overflowing high one (SH4).
   it('scans the bounds left to right', () => {
-    expect(parseInputRange('18446744073709551616-x')).toBe('overflow')
-    expect(parseInputRange('x-18446744073709551616')).toBe('invalid')
+    expect(rangeOf('18446744073709551616-x')).toBe('overflow')
+    expect(rangeOf('x-18446744073709551616')).toBe('invalid')
   })
 
-  // `hi - lo` must be strictly under SIZE_MAX, and that limit is `invalid`,
+  // `hi - lo` must be strictly under UINTMAX, and that limit is `invalid`,
   // not `overflow`: exactly one argument trips it -- the one whose element
   // count is 2**64 -- and it carries no clause, so it reads identically to
   // `-i 3-1` (SH3).
-  it('refuses a span at SIZE_MAX with the plain message', async () => {
-    const raw = `0-${String(SIZE_MAX)}`
-    expect(parseInputRange(raw)).toBe('invalid')
-    expect(parseInputRange(`+0-${String(SIZE_MAX)}`)).toBe('invalid')
-    expect(parseInputRange(`0-${String(SIZE_MAX - 1n)}`)).toEqual([0n, SIZE_MAX - 1n])
+  it('refuses a span at UINTMAX with the plain message', async () => {
+    const raw = `0-${String(UINTMAX)}`
+    expect(rangeOf(raw)).toBe('invalid')
+    expect(rangeOf(`+0-${String(UINTMAX)}`)).toBe('invalid')
+    expect(rangeOf(`0-${String(UINTMAX - 1n)}`)).toEqual([0n, UINTMAX - 1n])
     const got = await run({ input_range: raw })
     expect(got.exit).toBe(1)
     expect(got.stderr).toBe(`shuf: invalid input range: '${raw}'\n`)
-  })
-
-  it('renders the clause only when it is earned', () => {
-    expect(rangeError('3-1', 'invalid')).toBe("shuf: invalid input range: '3-1'\n")
-    expect(rangeError('1-3\n', 'invalid')).toBe("shuf: invalid input range: '1-3\\n'\n")
-    expect(rangeError('18446744073709551616-1', 'overflow')).toBe(
-      "shuf: invalid input range: '18446744073709551616-1': Value too large for defined data type\n",
-    )
   })
 })
 
@@ -393,8 +397,9 @@ describe('shuf -i samples a huge range without enumerating it', () => {
       const lines = got.stdout.split('\n').slice(0, -1)
       expect(lines).toHaveLength(3)
       expect(new Set(lines).size).toBe(3)
-      const bounds = parseInputRange(raw)
-      if (typeof bounds === 'string') throw new Error(`refused a valid range: ${bounds}`)
+      const bounds = rangeOf(raw)
+      if (bounds === null || typeof bounds === 'string')
+        throw new Error(`refused a valid range: ${String(bounds)}`)
       for (const line of lines) {
         expect(BigInt(line) >= bounds[0] && BigInt(line) <= bounds[1]).toBe(true)
       }
@@ -452,7 +457,7 @@ describe('shuf refuses an output it cannot render', () => {
   })
 })
 
-// `-n` past UINTMAX_MAX is CLAMPED to SIZE_MAX, never refused, which is the
+// `-n` past UINTMAX_MAX is CLAMPED to UINTMAX, never refused, which is the
 // opposite of what the same overflow does to `-i`. The clamp is stated rather
 // than left to the host's numbers: `Number.parseInt` answers `Infinity` for a
 // 400-digit count, which `BigInt` then refuses outright, where python reads
@@ -464,20 +469,20 @@ describe('shuf -n clamps an overflowing count', () => {
     '+18446744073709551616',
     '99999999999999999999999999',
     '9'.repeat(400),
-  ])('clamps -n %j to SIZE_MAX', (raw) => {
+  ])('clamps -n %j to UINTMAX', (raw) => {
     const parsed = parseFlags({ head_count: raw })
-    if (typeof parsed === 'string') throw new Error(`refused a count GNU accepts: ${parsed}`)
-    expect(parsed.count).toBe(SIZE_MAX)
+    if (parsed instanceof IOResult) throw new Error('refused a count GNU accepts')
+    expect(parsed.count).toBe(UINTMAX)
   })
 
   it.each([
     ['2', 2n],
     [' +2', 2n],
     ['0', 0n],
-    [String(SIZE_MAX - 1n), SIZE_MAX - 1n],
+    [String(UINTMAX - 1n), UINTMAX - 1n],
   ] as [string, bigint][])('keeps -n %j below the clamp', (raw, expected) => {
     const parsed = parseFlags({ head_count: raw })
-    if (typeof parsed === 'string') throw new Error(`refused a count GNU accepts: ${parsed}`)
+    if (parsed instanceof IOResult) throw new Error('refused a count GNU accepts')
     expect(parsed.count).toBe(expected)
   })
 })
@@ -510,13 +515,11 @@ describe('shuf decides the emitted count before anything is built', () => {
 
 // GNU validates options as getopt hands them over, so the first bad one on
 // the line speaks, and a repeated -i or a second, different -o is its own
-// refusal. Measured on coreutils 9.7; mirrored in test_shuf.py. One
-// documented divergence: the options are walked in the order they were
-// FIRST typed, each value in turn, so `-i 1-2 -n abc -i 3-4` refuses the
-// second -i where GNU names the count.
+// refusal. Measured on coreutils 9.7; mirrored in test_shuf.py.
 describe('shuf refuses in command-line order', () => {
   function parseLine(...argv: string[]): ShufFlags | string {
-    return parseFlags(parseLineFlags(argv, specOf('shuf'), 'shuf', '/').flagKwargs)
+    const parsed = parseFlags(parseLineFlags(argv, specOf('shuf'), 'shuf', '/').flagKwargs)
+    return refusal(parsed) ?? (parsed as ShufFlags)
   }
 
   it.each([
@@ -525,7 +528,7 @@ describe('shuf refuses in command-line order', () => {
     [['-i', '1-2', '-i', '3-4'], 'shuf: multiple -i options specified\n'],
     [['-i', '1-2', '-i', '1-2'], 'shuf: multiple -i options specified\n'],
     [['-i', '1-x', '-i', '2-3'], "shuf: invalid input range: '1-x'\n"],
-    [['-i', '1-2', '-n', 'abc', '-i', '3-4'], 'shuf: multiple -i options specified\n'],
+    [['-i', '1-2', '-n', 'abc', '-i', '3-4'], "shuf: invalid line count: 'abc'\n"],
     [['-i', '1-2', '-o', '/a', '-o', '/b'], 'shuf: multiple output files specified\n'],
     [
       ['-e', 'a', '-i', '1-2'],
@@ -533,6 +536,10 @@ describe('shuf refuses in command-line order', () => {
     ],
   ])('refuses %j', (argv, message) => {
     expect(parseLine(...argv)).toBe(message)
+  })
+
+  it('keeps the least of several counts', () => {
+    expect(parseLine('-n', '3', '-n', '1')).toMatchObject({ count: 1n })
   })
 
   it('accepts the same output twice', () => {

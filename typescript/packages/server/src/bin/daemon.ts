@@ -21,7 +21,6 @@ import { DaemonConfigError, readDaemonTable } from '../daemon_config.ts'
 import { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS, ENV_WORKER_SOCKET } from '../env.ts'
 import { resolveAllowedHosts, resolveForwardedAllowIps } from '../host_validation.ts'
 import { pidFilePath, mirageHome } from '../paths.ts'
-import { resolveRateLimits } from '../rate_limit.ts'
 import { resolveGracefulTimeout, resolveMaxWorkspaces } from '../registry.ts'
 import { resolveSSHConfig } from '../ssh/config.ts'
 import { buildWorkerProxy, resolveWorkers, resolveWorkerType, WorkerPool } from '../workers.ts'
@@ -89,8 +88,8 @@ async function serveWorker(socket: string): Promise<void> {
 
 /**
  * The daemon's server on its port, sending each workspace's requests to
- * one of `workers` workers. The daemon's SSH port and rate limits are one
- * server's, so neither is taken with workers yet.
+ * one of `workers` workers. The daemon's SSH port is one server's, so it
+ * is not taken with workers yet; each worker counts its own rate limits.
  */
 async function serveWorkers(
   port: number,
@@ -99,9 +98,6 @@ async function serveWorkers(
 ): Promise<void> {
   if (resolveSSHConfig().port !== null) {
     throw new DaemonConfigError('ssh_port does not combine with workers yet')
-  }
-  if (resolveRateLimits().length > 0) {
-    throw new DaemonConfigError('rate_limits do not combine with workers yet')
   }
   const gracefulTimeout = resolveGracefulTimeout()
   const host = resolveAllowedHosts().find((allowed) => !allowed.includes('*')) ?? 'localhost'

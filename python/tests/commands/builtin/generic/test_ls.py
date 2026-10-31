@@ -12,19 +12,24 @@ from mirage.commands.builtin.generic.ls import (
     LS_OK,
     LsWarning,
     exit_status_for,
+    link_mode,
     ls,
     parse_flags,
     probe_operand,
     sort_by_version,
     type_indicator,
 )
-from mirage.commands.builtin.utils.formatting import LsColumns
+from mirage.commands.builtin.utils.formatting import BlockSize, LsColumns
+from mirage.commands.errors import UsageError
+from mirage.commands.spec import SPECS
+from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.types import CommandTimeoutError
 from mirage.types import (
     ContentType,
     FileStat,
     FileType,
     LsIndicator,
+    LsLinkMode,
     LsSortBy,
     LsTimeKind,
     MountMode,
@@ -617,6 +622,124 @@ def test_parse_flags_last_sort_and_time_spelling_win(
 )
 def test_parse_flags_accepts_an_unambiguous_prefix(flags, attr, expected):
     assert attrgetter(attr)(parse_flags(flags)) == expected
+
+
+@pytest.mark.parametrize(
+    "flags,indicator",
+    [
+        ({"classify": True}, LsIndicator.CLASSIFY),
+        ({"classify": "never"}, LsIndicator.NONE),
+        ({"classify": "always", "p": True}, LsIndicator.SLASH),
+        ({"p": True, "indicator_style": "c"}, LsIndicator.CLASSIFY),
+        ({"file_type": True, "classify": "no"}, LsIndicator.NONE),
+    ],
+)
+def test_parse_flags_the_last_indicator_spelling_wins(flags, indicator):
+    assert parse_flags(flags).indicator is indicator
+
+
+@pytest.mark.parametrize(
+    "flags,hyperlink",
+    [
+        ({"hyperlink": True}, True),
+        ({"hyperlink": "never"}, False),
+        ({"color": True}, False),
+        ({"color": "never"}, False),
+    ],
+)
+def test_parse_flags_reads_a_bare_when_option_as_always(flags, hyperlink):
+    assert parse_flags(flags).hyperlink is hyperlink
+
+
+@pytest.mark.parametrize(
+    "flags,block",
+    [
+        ({"block_size": "K"}, BlockSize(1024, "K")),
+        ({"block_size": "KB"}, BlockSize(1000, "kB")),
+        ({"block_size": "2K"}, BlockSize(2048, "")),
+        ({"block_size": "human-readable"}, BlockSize(1024, "", 1024)),
+        ({"block_size": "si"}, BlockSize(1000, "", 1000)),
+        (
+            {"block_size": "18446744073709551615"},
+            BlockSize(18446744073709551615, ""),
+        ),
+        ({"block_size": "K", "human_readable": True}, None),
+        ({"human_readable": True, "block_size": "K"}, BlockSize(1024, "K")),
+    ],
+)
+def test_parse_flags_the_later_of_h_and_block_size_wins(flags, block):
+    assert parse_flags(flags).columns.block_size == block
+
+
+@pytest.mark.parametrize(
+    "flags,message,status",
+    [
+        ({"block_size": "x"}, "ls: invalid --block-size argument 'x'", 2),
+        (
+            {"block_size": "1x"},
+            "ls: invalid suffix in --block-size argument '1x'",
+            2,
+        ),
+        (
+            {"block_size": "16E"},
+            "ls: --block-size argument '16E' too large",
+            2,
+        ),
+        (
+            {"block_size": "x", "human_readable": True},
+            "ls: invalid --block-size argument 'x'",
+            2,
+        ),
+        (
+            {"sort": "n"},
+            "ls: ambiguous argument 'n' for '--sort'\nValid arguments are:\n"
+            "  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n"
+            "  - 'extension'\n  - 'name'\n  - 'width'\n"
+            "Try 'ls --help' for more information.",
+            1,
+        ),
+        (
+            {"time": "x", "sort": "y"},
+            "ls: invalid argument 'x' for '--time'",
+            1,
+        ),
+        ({"color": "x"}, "ls: invalid argument 'x' for '--color'", 1),
+        (
+            {"classify": ""},
+            "ls: ambiguous argument '' for '--classify'",
+            1,
+        ),
+        (
+            {"time_style": "x"},
+            "ls: invalid argument 'x' for 'time style'",
+            2,
+        ),
+    ],
+)
+def test_parse_flags_refuses_what_gnu_refuses(flags, message, status):
+    with pytest.raises(UsageError) as refusal:
+        parse_flags(flags)
+    assert str(refusal.value).startswith(message)
+    assert refusal.value.exit_code == status
+
+
+def test_parse_flags_keeps_a_time_style_format_byte_for_byte():
+    style = "+%Y\udcff\u00e9"
+    assert parse_flags({"time_style": style}).columns.time_style == style
+
+
+@pytest.mark.parametrize(
+    "flags,mode",
+    [
+        ({"classify": True}, LsLinkMode.NONE),
+        ({"classify": "x"}, LsLinkMode.DIRECTORY),
+        ({"sort": "x", "classify": True}, LsLinkMode.NONE),
+        ({"indicator_style": "classify"}, LsLinkMode.NONE),
+        ({"classify": True, "dereference": True}, LsLinkMode.ALL),
+    ],
+)
+def test_link_mode_leaves_a_refused_indicator_unclassified(flags, mode):
+    assert link_mode(FlagView(flags, spec=SPECS["ls"])) is mode
 
 
 @pytest.mark.asyncio

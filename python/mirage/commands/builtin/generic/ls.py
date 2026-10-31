@@ -27,16 +27,6 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import (
-    usage_hint,
-    word_refusal_error,
-    word_refusal_line,
-)
-from mirage.commands.spec.word_choice import (
-    WordMatch,
-    WordRefusalKind,
-    match_word,
-)
 from mirage.errors.classify import is_entry_error
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror, strerror_of
@@ -44,7 +34,8 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkError, DotWalkLoop, FsCondition
 from mirage.io.types import IOResult
 from mirage.rs import open_stream
-from mirage.rs.scan import scan
+from mirage.rs.scan import scan, scanned
+from mirage.shell.bytes import text_view
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
@@ -94,253 +85,139 @@ class LsFlags:
     hyperlink: bool = False
 
 
-# The words GNU 9.7's `--sort` takes, in the order `ls --sort=x` lists them
-# back. 9.7 added `name`, the order no `--sort` at all means, so
-# `--sort=n` is ambiguous between it and `none`.
-_SORT_WORDS = {
-    "none": LsSortBy.NONE,
-    "size": LsSortBy.SIZE,
-    "time": LsSortBy.TIME,
-    "version": LsSortBy.VERSION,
-    "extension": LsSortBy.EXTENSION,
-    "name": LsSortBy.NAME,
-    "width": LsSortBy.WIDTH,
-}
-_SORT_FLAGS = {
-    "t": LsSortBy.TIME,
-    "S": LsSortBy.SIZE,
-    "X": LsSortBy.EXTENSION,
-    "v": LsSortBy.VERSION,
-    "U": LsSortBy.NONE,
-}
-_TIME_GROUPS = (
-    ("atime", "access", "use"),
-    ("ctime", "status"),
-    ("mtime", "modification"),
-    ("birth", "creation"),
-)
-_TIME_KINDS = {
-    "atime": LsTimeKind.ATIME,
-    "ctime": LsTimeKind.CTIME,
-    "mtime": LsTimeKind.MTIME,
-    "birth": LsTimeKind.BIRTH,
-}
-# GNU's `when` words, shared by --hyperlink and --classify.
-_WHEN_GROUPS = (
-    ("always", "yes", "force"),
-    ("never", "no", "none"),
-    ("auto", "tty", "if-tty"),
-)
-_INDICATOR_GROUPS = tuple((style.value,) for style in LsIndicator)
-# The four spellings of an indicator style; the last one typed wins.
-_INDICATOR_DESTS = ("classify", "file_type", "p", "indicator_style")
 # The three spellings of a command-line link policy; the last one wins.
 _DEREF_DESTS = (
     "dereference",
     "dereference_command_line",
     "dereference_command_line_symlink_to_dir",
 )
+# The four spellings of an indicator style; the last one typed wins.
+_INDICATOR_DESTS = ("classify", "file_type", "p", "indicator_style")
+# What mirage-rs reads: every option that carries a word, a size or a
+# style, in the order typed.
+_SCANNED = (
+    "sort",
+    "t",
+    "S",
+    "X",
+    "v",
+    "U",
+    "time",
+    "c",
+    "u",
+    "hyperlink",
+    "color",
+    "classify",
+    "indicator_style",
+    "p",
+    "file_type",
+    "block_size",
+    "human_readable",
+    "time_style",
+)
+# GNU reads a bare --classify, --hyperlink or --color as `always`.
+_BARE_ALWAYS = frozenset(("classify", "hyperlink", "color"))
 
 
-def _grouped_argument_error(
-    option: str,
-    value: str,
-    groups: tuple[tuple[str, ...], ...],
-    kind: WordRefusalKind,
-) -> UsageError:
-    """The refusal of an ambiguous or invalid choice word for an option
-    whose values have aliases, the valid words listed one group per line
-    (``--time``, ``--hyperlink``); exit 1, as GNU 9.7's ls answers it.
-
-    Args:
-        option (str): the option's long spelling.
-        value (str): the rejected value, as typed; the shared renderer
-            escapes it.
-        groups (tuple[tuple[str, ...], ...]): the valid values, aliases
-            grouped.
-        kind (WordRefusalKind): the wording the match answered with --
-            ``ls --hyperlink=a`` spans three values and is ambiguous,
-            ``--hyperlink=zzz`` spans none and is invalid.
-    """
-    return word_refusal_error("ls", option, value, groups, 1, kind)
-
-
-_WORD_OPTIONS: dict[str, tuple[str, tuple[tuple[str, ...], ...]]] = {
-    "sort": ("--sort", tuple((word,) for word in _SORT_WORDS)),
-    "time": ("--time", _TIME_GROUPS),
-    "hyperlink": ("--hyperlink", _WHEN_GROUPS),
-    "color": ("--color", _WHEN_GROUPS),
-    "classify": ("--classify", _WHEN_GROUPS),
-    "indicator_style": ("--indicator-style", _INDICATOR_GROUPS),
-}
-
-
-def _check_option_words(fl: FlagView) -> None:
-    """Refuse a bad option value where GNU does: while it reads the line.
-
-    GNU checks each value inside its getopt loop, so the first bad one
-    typed is the one it names, and a later good value of the same option
-    does not rescue an earlier bad one (coreutils 9.7: ``ls --sort=bogus
-    --sort=size`` and ``ls --time=x --sort=y`` both refuse, the second
-    naming ``--time``). ``--time-style`` is the exception: GNU reads only
-    its last value, after the loop.
+@dataclass(frozen=True, slots=True)
+class LsValues:
+    """What mirage-rs read out of ls's typed options.
 
     Args:
-        fl (FlagView): the ls flag view.
+        sort_by (LsSortBy | None): the last sort spelling, None when the
+            line typed none.
+        time_kind (LsTimeKind): the timestamp shown and sorted by.
+        indicator (LsIndicator): the mark appended to a name.
+        hyperlink (bool): whether ``--hyperlink`` asked for OSC 8 links.
+        block_size (formatting.BlockSize | None): ``--block-size``, None
+            for bytes or when ``-h`` came after it.
+        time_style (str): ``locale``, ``full-iso``, ``long-iso``, ``iso``
+            or ``+FORMAT``.
     """
-    for dest, value in fl.occurrences(*_WORD_OPTIONS, "block_size"):
-        if value is True:
-            continue
-        word = str(value)
-        if dest == "block_size":
-            parsed = formatting.parse_block_size(word)
-            if isinstance(parsed, formatting.BlockSizeRefusal):
-                raise UsageError(_block_size_error(word, parsed), 2)
-            continue
-        option, groups = _WORD_OPTIONS[dest]
-        match = match_word(word, groups)
-        if not isinstance(match, WordMatch):
-            raise _grouped_argument_error(option, word, groups, match.kind)
+
+    sort_by: LsSortBy | None
+    time_kind: LsTimeKind
+    indicator: LsIndicator
+    hyperlink: bool
+    block_size: formatting.BlockSize | None
+    time_style: str
 
 
-def _sort_flag(fl: FlagView) -> tuple[LsSortBy, bool]:
-    """The sort key the line asked for, last spelling winning, and
-    whether it asked at all.
+def _block_size_of(raw: JsonValue) -> formatting.BlockSize | None:
+    """The size scale mirage-rs answered, checked for its shape.
 
     Args:
-        fl (FlagView): the ls flag view.
+        raw (JsonValue): the ``block_size`` value of the scan.
     """
-    typed = fl.typed_order("t", "S", "X", "v", "U", "sort")
-    if not typed:
-        return LsSortBy.NAME, False
-    last = typed[-1]
-    if last != "sort":
-        return _SORT_FLAGS[last], True
-    word = fl.as_str("sort") or ""
-    words = tuple(_SORT_WORDS)
-    match = match_word(word, words)
-    if not isinstance(match, WordMatch):
-        raise word_refusal_error("ls", "--sort", word, words, 1, match.kind)
-    return _SORT_WORDS[match.word], True
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        divisor = raw.get("divisor")
+        suffix = raw.get("suffix")
+        base = raw.get("human_base")
+        if (
+            isinstance(divisor, str)
+            and isinstance(suffix, str)
+            and (base is None or type(base) is int)
+        ):
+            return formatting.BlockSize(int(divisor), suffix, base)
+    raise TypeError(f"ls: mirage-rs read --block-size as {raw!r}")
 
 
-def _time_flag(fl: FlagView) -> LsTimeKind:
-    """Which timestamp ``-c``, ``-u`` or ``--time`` asked for, last one
-    winning.
+def _tape(fl: FlagView, names: Sequence[str]) -> list[tuple[str, str]]:
+    """The typed options as the scan reads them: a switch empty, except
+    the bare spelling of an option that takes ``WHEN``, which is the word
+    GNU reads it as and stays apart from an explicit empty value.
 
     Args:
         fl (FlagView): the ls flag view.
+        names (Sequence[str]): the options to read.
     """
-    typed = fl.typed_order("c", "u", "time")
-    if not typed:
-        return LsTimeKind.MTIME
-    last = typed[-1]
-    if last == "c":
-        return LsTimeKind.CTIME
-    if last == "u":
-        return LsTimeKind.ATIME
-    word = fl.as_str("time") or ""
-    match = match_word(word, _TIME_GROUPS)
-    if not isinstance(match, WordMatch):
-        raise _grouped_argument_error("--time", word, _TIME_GROUPS, match.kind)
-    return _TIME_KINDS[match.word]
-
-
-def _time_style_flag(fl: FlagView) -> str:
-    """``--time-style``, validated the way GNU words it (exit 2).
-
-    A ``posix-`` prefix short-circuits the whole option: GNU's loop
-    strips each one and, outside a hard LC_TIME locale, jumps straight
-    to the locale style without looking at what follows. mirage has no
-    other locale, so every ``posix-`` spelling is the locale style and
-    none of them is ever refused -- measured on coreutils 9.4, where
-    ``posix-full-iso``, ``posix-l``, ``posix-zzz``, ``posix-`` and
-    ``posix-+%H:%M`` all exit 0 and all print what ``locale`` prints.
-    The matcher therefore has to run after that check, not before: the
-    remainder is not a candidate word at all.
-
-    Args:
-        fl (FlagView): the ls flag view.
-    """
-    style = fl.as_str("time_style")
-    if style is None:
-        return "locale"
-    if style.startswith("posix-"):
-        return "locale"
-    if style.startswith("+"):
-        return style
-    match = match_word(style, formatting.LS_TIME_STYLES)
-    if isinstance(match, WordMatch):
-        return match.word
-    # GNU 9.7 lists the styles as patterns here, so it is the one such
-    # refusal in the repo whose candidates are neither quoted nor a subset
-    # of the words it accepts -- and the one that exits 2, as `ls -l
-    # --time-style=x` does. The first line is still the usual one, so
-    # `--time-style=lo` spans long-iso and locale and reads `ambiguous
-    # argument 'lo'`.
-    raise UsageError(
-        f"{word_refusal_line('ls', 'time style', style, match.kind)}\n"
-        "Valid arguments are:\n"
-        "  - [posix-]full-iso\n"
-        "  - [posix-]long-iso\n"
-        "  - [posix-]iso\n"
-        "  - [posix-]locale\n"
-        "  - +FORMAT (e.g., +%H:%M) for a 'date'-style format\n"
-        f"{usage_hint('ls')}",
-        2,
-    )
-
-
-def _hyperlink_flag(fl: FlagView) -> bool:
-    """Whether ``--hyperlink`` asked for OSC 8 links: ``always`` does,
-    ``never`` does not, and ``auto`` does not either, since command
-    output here is never a terminal.
-
-    Args:
-        fl (FlagView): the ls flag view.
-    """
-    raw = fl.raw("hyperlink")
-    if raw is None or raw is False:
-        return False
-    if raw is True:
-        return True
-    word = str(raw)
-    match = match_word(word, _WHEN_GROUPS)
-    if not isinstance(match, WordMatch):
-        raise _grouped_argument_error(
-            "--hyperlink", word, _WHEN_GROUPS, match.kind
+    return [
+        (
+            dest,
+            "always"
+            if value is True and dest in _BARE_ALWAYS
+            else (value if isinstance(value, str) else ""),
         )
-    return match.word == "always"
+        for dest, value in fl.occurrences(*names)
+        if value is not False
+    ]
 
 
-def _indicator_word(dest: str, raw: FlagValue) -> LsIndicator:
-    """The style one indicator option asks for, checked as GNU checks it.
-
-    ``-F`` and a bare ``--classify`` classify; ``--classify=WHEN`` does
-    for ``always`` and never otherwise, since output here is never a
-    terminal. An ambiguous or invalid choice word is refused with the
-    valid words listed, exit 1.
+def scan_values(fl: FlagView, names: Sequence[str] = _SCANNED) -> LsValues:
+    """ls's option values, read by mirage-rs in one pass over the line.
 
     Args:
-        dest (str): one of the indicator options' dests.
-        raw (FlagValue): the value this occurrence was typed with.
+        fl (FlagView): the ls flag view.
+        names (Sequence[str]): which options to read; the others keep
+            their defaults.
+
+    Raises:
+        UsageError: the first value ls refuses, in its words and with its
+            exit status.
     """
-    if dest == "p":
-        return LsIndicator.SLASH
-    if dest == "file_type":
-        return LsIndicator.FILE_TYPE
-    if dest == "classify" and raw is True:
-        return LsIndicator.CLASSIFY
-    word = str(raw)
-    option = "--classify" if dest == "classify" else "--indicator-style"
-    groups = _WHEN_GROUPS if dest == "classify" else _INDICATOR_GROUPS
-    match = match_word(word, groups)
-    if not isinstance(match, WordMatch):
-        raise _grouped_argument_error(option, word, groups, match.kind)
-    if dest == "indicator_style":
-        return LsIndicator(match.word)
-    return (
-        LsIndicator.CLASSIFY if match.word == "always" else (LsIndicator.NONE)
+    values = scanned("ls", _tape(fl, names))
+    sort = values["sort"]
+    time = values["time"]
+    indicator = values["indicator"]
+    hyperlink = values["hyperlink"]
+    style = values["time_style"]
+    if not (
+        (sort is None or isinstance(sort, str))
+        and isinstance(time, str)
+        and isinstance(indicator, str)
+        and isinstance(hyperlink, bool)
+        and isinstance(style, str)
+    ):
+        raise TypeError(f"ls: mirage-rs read the options as {values!r}")
+    return LsValues(
+        sort_by=None if sort is None else LsSortBy(sort),
+        time_kind=LsTimeKind(time),
+        indicator=LsIndicator(indicator),
+        hyperlink=hyperlink,
+        block_size=_block_size_of(values["block_size"]),
+        time_style=text_view(style),
     )
 
 
@@ -354,13 +231,12 @@ def indicator_flag(fl: FlagView) -> LsIndicator:
     Args:
         fl (FlagView): the ls flag view.
     """
-    style = LsIndicator.NONE
-    for dest, raw in fl.occurrences(*_INDICATOR_DESTS):
-        style = _indicator_word(dest, raw)
-    return style
+    return scan_values(fl, _INDICATOR_DESTS).indicator
 
 
-def link_mode(fl: FlagView) -> LsLinkMode:
+def link_mode(
+    fl: FlagView, indicator: LsIndicator | None = None
+) -> LsLinkMode:
     """Which command-line links GNU ls resolves before it lists them.
 
     GNU settles it once: the last of ``-L``, ``-H`` and
@@ -372,6 +248,8 @@ def link_mode(fl: FlagView) -> LsLinkMode:
 
     Args:
         fl (FlagView): the ls flag view.
+        indicator (LsIndicator | None): the style a scan of the whole
+            line already read; None reads the indicator options here.
     """
     typed = fl.typed_order(*_DEREF_DESTS)
     if typed:
@@ -384,35 +262,14 @@ def link_mode(fl: FlagView) -> LsLinkMode:
         fl.as_bool(dest) for dest in ("args_l", "g", "o", "numeric_uid_gid")
     )
     try:
-        classify = indicator_flag(fl) is LsIndicator.CLASSIFY
+        style = indicator if indicator is not None else indicator_flag(fl)
+        classify = style is LsIndicator.CLASSIFY
     except UsageError as exc:
         logger.debug("ls: the command refuses this line itself: %s", exc)
         classify = False
     if fl.as_bool("directory") or long or classify:
         return LsLinkMode.NONE
     return LsLinkMode.DIRECTORY
-
-
-def _block_size_error(text: str, refusal: formatting.BlockSizeRefusal) -> str:
-    """GNU's three ``--block-size`` refusals, worded as ls words them.
-
-    Measured on coreutils 9.7: ``ls: invalid --block-size argument
-    'x'``, ``ls: invalid suffix in --block-size argument '1x'`` and
-    ``ls: --block-size argument '99999999999999999999' too large``. The
-    word is quoted but NOT escaped, where a bad ``--sort`` word is both:
-    ``ls --block-size=1é`` reports the two UTF-8 bytes intact, and
-    ``ls --sort=é`` prints ``'\\303\\251'``.
-
-    Args:
-        text (str): the option value as typed.
-        refusal (BlockSizeRefusal): which failure the parser reported.
-    """
-    quoted = f"'{text}'"
-    if refusal is formatting.BlockSizeRefusal.TOO_LARGE:
-        return f"ls: --block-size argument {quoted} too large"
-    if refusal is formatting.BlockSizeRefusal.INVALID_SUFFIX:
-        return f"ls: invalid suffix in --block-size argument {quoted}"
-    return f"ls: invalid --block-size argument {quoted}"
 
 
 def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
@@ -424,20 +281,18 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
     never columns, so ``-1`` has nothing else to do); ``-n`` prints the
     same columns as ``-l``,
     because a mirage owner is already the id (an agent, a profile) and
-    never a name looked up from one; the last of ``-t``, ``-S``, ``-X``,
-    ``-v``, ``-U`` and ``--sort`` wins, as does the last of ``-c``, ``-u``
-    and ``--time``; and ``-c`` or ``-u`` with neither ``-l`` nor a sort
-    sorts by that time; and the later of ``-h`` and ``--block-size``
-    wins. Raises ``UsageError`` for a value GNU refuses, with GNU's
-    exit status for that option.
+    never a name looked up from one; and ``-c`` or ``-u`` with neither
+    ``-l`` nor a sort sorts by that time. The words, sizes and styles
+    (the last sort, time and indicator spelling, the later of ``-h`` and
+    ``--block-size``) are mirage-rs's, read in one pass. Raises
+    ``UsageError`` for a value GNU refuses, with GNU's exit status for
+    that option.
 
     Args:
         flags (Mapping[str, FlagValue]): flags for the shared ls spec.
     """
     fl = FlagView(flags, spec=SPECS["ls"])
-    _check_option_words(fl)
-    sort_by, sorted_explicitly = _sort_flag(fl)
-    time_kind = _time_flag(fl)
+    values = scan_values(fl)
     no_owner = fl.as_bool("g")
     no_group = fl.as_bool("o")
     long = (
@@ -446,35 +301,21 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
         or no_group
         or fl.as_bool("numeric_uid_gid")
     )
+    sort_by = LsSortBy.NAME if values.sort_by is None else values.sort_by
     if (
-        not sorted_explicitly
-        and time_kind is not LsTimeKind.MTIME
+        values.sort_by is None
+        and values.time_kind is not LsTimeKind.MTIME
         and not long
     ):
         sort_by = LsSortBy.TIME
-    block = None
-    block_text = fl.as_str("block_size")
-    if block_text is not None:
-        parsed_block = formatting.parse_block_size(block_text)
-        if isinstance(parsed_block, formatting.BlockSizeRefusal):
-            raise UsageError(_block_size_error(block_text, parsed_block), 2)
-        block = parsed_block
-        # The later of -h and --block-size wins (GNU: `--block-size=1 -h`
-        # prints 1.5K, `-h --block-size=1` prints 1536); the value is
-        # still checked either way.
-        if (
-            fl.typed_order("human_readable", "block_size")[-1]
-            == "human_readable"
-        ):
-            block = None
     columns = formatting.LsColumns(
         owner=not no_owner,
         group=not no_group,
         inode=fl.as_bool("inode"),
         context=fl.as_bool("context"),
-        time_kind=time_kind,
-        time_style=_time_style_flag(fl),
-        block_size=block,
+        time_kind=values.time_kind,
+        time_style=values.time_style,
+        block_size=values.block_size,
     )
     return LsFlags(
         long=long,
@@ -485,15 +326,15 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> LsFlags:
         reverse=fl.as_bool("reverse"),
         recursive=fl.as_bool("recursive"),
         list_dir=fl.as_bool("directory"),
-        indicator=indicator_flag(fl),
+        indicator=values.indicator,
         # -L alone dereferences what a listing finds; -H and its sibling
         # stop at the command line, and the last of the three wins.
         deref=fl.typed_order(*_DEREF_DESTS)[-1:] == ["dereference"],
-        follow_args=link_mode(fl) is LsLinkMode.ALL,
-        time_kind=time_kind,
+        follow_args=link_mode(fl, values.indicator) is LsLinkMode.ALL,
+        time_kind=values.time_kind,
         group_dirs_first=fl.as_bool("group_directories_first"),
         columns=columns,
-        hyperlink=_hyperlink_flag(fl),
+        hyperlink=values.hyperlink,
         escape=fl.as_bool("escape"),
     )
 
@@ -1750,6 +1591,7 @@ async def ls_generic(
     ctx: Context,
     readdir: Readdir,
     stat: Stat,
+    options: Mapping[str, Any] | None = None,
 ) -> tuple[bytes, IOResult]:
     """Run ls over resolved operands, GNU semantics; mirrors lsGeneric.
 
@@ -1765,6 +1607,8 @@ async def ls_generic(
             dispatcher.
         readdir (Readdir): Bound readdir called as ``readdir(p)``.
         stat (Stat): Bound (overlaid) stat called as ``stat(p)``.
+        options (Mapping[str, Any] | None): ``ls_options`` the caller read
+            before it resolved the operands; None reads them here.
     """
     return await ls(
         paths,
@@ -1779,7 +1623,7 @@ async def ls_generic(
         mounts=mounts_of(ctx),
         stat_path=vfs_stat_path(ctx.vfs),
         identity=identity_of(ctx),
-        **ls_options(ctx.flags),
+        **(ls_options(ctx.flags) if options is None else options),
     )
 
 

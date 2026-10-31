@@ -28,11 +28,33 @@ export interface RowAction {
   readonly kind: RowActionKind
 }
 
-/** One `-printf` action: each row it reaches, rendered through `format`,
- * the format as typed, escapes and directives unexpanded. */
+/** A run of `-printf` output that is the same for every row, its escapes
+ * already expanded. */
+export interface PrintfLiteral {
+  readonly lit: string
+}
+
+/** A `%` directive a row renders: `%p`, `%s`, `%y` and so on. */
+export interface PrintfDirective {
+  readonly dir: string
+}
+
+/** A `%T` directive: the row's modification time in one field. */
+export interface PrintfTime {
+  readonly time: string
+}
+
+export type PrintfPart = PrintfLiteral | PrintfDirective | PrintfTime
+
+/** One `-printf` action: each row it reaches, rendered through a format
+ * compiled once by mirage-rs. `format` is the format as typed, `parts` its
+ * literal runs and directives, and `stat` whether a directive reads the
+ * row's stat. */
 export interface PrintfAction {
   readonly kind: 'printf'
   readonly format: string
+  readonly parts: readonly PrintfPart[]
+  readonly stat: boolean
 }
 
 export type FindAction = ExecAction | RowAction | PrintfAction

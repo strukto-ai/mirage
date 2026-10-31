@@ -358,7 +358,7 @@ def test_substitution_keeps_inner_ops_in_audit():
     _exec(ws, "echo hi > /data/f.txt")
     _exec(ws, "echo $(cat /data/f.txt)")
     events = asyncio.run(ws.observer.events())
-    reads = [e for e in events if e["type"] == "op" and e["op"] == "read"]
+    reads = [e for e in events if e["type"] == "vfs" and e["vfs"] == "read"]
     assert any(e["path"] == "/data/f.txt" for e in reads)
 
 
@@ -367,7 +367,7 @@ def test_outer_ops_after_substitution_not_lost():
     _exec(ws, "echo hi > /data/f.txt")
     _exec(ws, "wc -l $(find /data -name '*.txt')")
     events = asyncio.run(ws.observer.events())
-    reads = [(e["op"], e["path"]) for e in events if e["type"] == "op"]
+    reads = [(e["vfs"], e["path"]) for e in events if e["type"] == "vfs"]
     assert ("read", "/data/f.txt") in reads
 
 
@@ -419,7 +419,7 @@ def test_failed_line_ops_still_in_audit(monkeypatch):
     io = _exec(ws, "cat /data/f.txt")
     assert io.exit_code == 1
     events = asyncio.run(ws.observer.events())
-    reads = [e for e in events if e["type"] == "op" and e["op"] == "read"]
+    reads = [e for e in events if e["type"] == "vfs" and e["vfs"] == "read"]
     assert any(e["path"] == "/data/f.txt" for e in reads)
     last_cmd = [e for e in events if e["type"] == "command"][-1]
     assert last_cmd["command"] == "cat /data/f.txt"

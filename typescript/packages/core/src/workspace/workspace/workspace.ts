@@ -35,6 +35,7 @@ import {
   type RedisIndexConfig,
 } from '../../cache/index/config.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { EVENT_COMMAND, EVENT_VFS } from '../../observe/log_entry.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { OpKwargs } from '../../view/types.ts'
@@ -231,6 +232,7 @@ export class Workspace {
   private settleWrites: () => void = () => undefined
   private readonly closers: (() => Promise<void>)[] = []
   private closing: Promise<void> | null = null
+  private metaWrite: Promise<void> | null = null
   private stateDropped = false
   // The stores this workspace's state lives in, whether the state store
   // built them or the caller passed one in directly: delete clears these,
@@ -733,11 +735,24 @@ export class Workspace {
   }
 
   /**
-   * Command events recorded by the hidden recorder, across all sessions
-   * in timestamp order.
+   * What the hidden recorder holds, oldest first: a `command` entry for
+   * every line run, and with `vfs` a `vfs` entry for every call a line
+   * made to a mount. `sessionId` keeps one session's entries, `since`
+   * those at or after an epoch millisecond, `last` the newest that many.
+   * Mirrors Python's `Workspace.history`.
    */
-  history(): Promise<EventDict[]> {
-    return this.observer.commandEvents()
+  async history(
+    options: { sessionId?: string; since?: number; last?: number; vfs?: boolean } = {},
+  ): Promise<EventDict[]> {
+    const { sessionId, since, last, vfs = false } = options
+    const kinds = new Set<unknown>(vfs ? [EVENT_COMMAND, EVENT_VFS] : [EVENT_COMMAND])
+    const picked = (await this.observer.events(sessionId)).filter(
+      (e) =>
+        kinds.has(e.type) &&
+        (since === undefined || (typeof e.timestamp === 'number' ? e.timestamp : 0) >= since),
+    )
+    if (last === undefined) return picked
+    return picked.slice(Math.max(0, picked.length - last))
   }
 
   /** The session an op runs under: the bound one, else the default. */
@@ -1220,11 +1235,15 @@ export class Workspace {
    * record resolves first so a minted default session id can adopt the
    * stored pointer before hydration keys off it. The first call also starts
    * stopping what lapsed instances of the workspace left running
-   * (`JobTable.reapLapsed`).
+   * (`JobTable.reapLapsed`). Closing waits for the record's write in
+   * flight, so it never races the state's drop.
    */
   async ensureSessionsLoaded(): Promise<void> {
     this.jobTable.reapLapsed()
-    await this.meta.ensure()
+    this.metaWrite ??= this.meta.ensure().finally(() => {
+      this.metaWrite = null
+    })
+    await this.metaWrite
     await this.sessionManager.ensureLoaded()
   }
 
@@ -2394,6 +2413,9 @@ export class Workspace {
         const error: unknown = result.reason
         executionErrors.push(error)
       }
+    // A discovery record write in flight lands before teardown drops the
+    // state or closes the store.
+    await Promise.allSettled([this.metaWrite])
     this.stateDropped = dropState
     try {
       await closeWorkspace({

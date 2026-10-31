@@ -206,6 +206,7 @@ a `workspace_id`.
 | `mirage workspace cancel ID` | Cancel the running lines of every session. |
 | `mirage workspace kill ID` | Kill the background jobs of every session. |
 | `mirage workspace set-profile ID NAME FILE` | Add a [profile](/home/policy/overview) from a YAML or JSON file, or replace what `NAME` means. Sessions keep their rules until `session update` moves them, and the workspace's config is not rewritten. |
+| `mirage workspace history ID [--session S] [--since MS] [--last N] [--vfs]` | Show what it ran, oldest first; `--vfs` adds each call a line made to a mount. |
 | `mirage workspace clone SRC [--id ID]` | Copy a workspace. |
 | `mirage workspace snapshot ID FILE.tar` | Save it to a tar here: the server sends the tar back, on this machine or another. |
 | `mirage workspace snapshot ID --key KEY` | Save it to the server's snapshot store instead. |
@@ -322,7 +323,7 @@ mirage login
 | `max_sessions` | `MIRAGE_MAX_SESSIONS` | no cap; past it a new session answers 429 |
 | `workers` | `MIRAGE_WORKERS` | `1`; see [Workers](/typescript/access/server#workers) |
 | `worker_type` | `MIRAGE_WORKER_TYPE` | `thread` in TypeScript; in Python, `thread` without the GIL, else `process` |
-| `rate_limits` | `MIRAGE_RATE_LIMITS` | none; see [Rate limits](/home/access/http#rate-limits) |
+| `rate_limits` | `MIRAGE_RATE_LIMITS` | `ip=1000/minute`; see [Rate limits](/home/access/http#rate-limits) |
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |
 | `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |

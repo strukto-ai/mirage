@@ -25,7 +25,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument 'abc' to '-maxdepth'\n"
+        "stderr": "find: Expected a positive decimal integer argument to -maxdepth, but got 'abc'\n"
       }
     },
     {
@@ -53,7 +53,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument '12abc' to '-maxdepth'\n"
+        "stderr": "find: Expected a positive decimal integer argument to -maxdepth, but got '12abc'\n"
       }
     }
   ]

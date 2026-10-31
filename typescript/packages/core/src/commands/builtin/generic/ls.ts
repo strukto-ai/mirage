@@ -30,20 +30,16 @@ import {
 import type { CommandFnResult, Context } from '../../config.ts'
 import type { ChildMounts, LinkView, MountView, StatPath } from '../../../view/types.ts'
 import {
-  LS_TIME_STYLES,
   STAT_FAILED_KEY,
+  type BlockSize,
   type LsColumns,
   formatLsLong,
   lsName,
   lsPrefix,
-  parseBlockSize,
   timeOf,
-  type BlockSizeRefusal,
 } from '../utils/formatting.ts'
 import { UsageError } from '../../errors.ts'
 import { isEntryError } from '../../../errors/classify.ts'
-import { wordRefusalError, wordRefusalLine, usageHint } from '../../spec/usage.ts'
-import { type WordRefusalKind, matchWord } from '../../spec/word_choice.ts'
 import { identityOf, type Identity } from '../utils/identity.ts'
 import {
   fsStrerror,
@@ -68,7 +64,8 @@ import { vfsStatPath } from '../utils/paths.ts'
 import { WalkBudget } from '../utils/tree.ts'
 import { openStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { scan } from '../../../rs/scan.ts'
+import { scan, scanned } from '../../../rs/scan.ts'
+import { textView } from '../../../shell/bytes.ts'
 import { engineConfig } from './sort.ts'
 
 type Readdir = (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
@@ -832,201 +829,126 @@ export interface LsFlags {
   readonly hyperlink: boolean
 }
 
-// The words GNU 9.7's `--sort` takes, in the order `ls --sort=x` lists them
-// back. 9.7 added `name`, the order no `--sort` at all means, so
-// `--sort=n` is ambiguous between it and `none`.
-const SORT_WORDS: Readonly<Record<string, LsSortBy>> = {
-  none: 'none',
-  size: 'size',
-  time: 'time',
-  version: 'version',
-  extension: 'extension',
-  name: 'name',
-  width: 'width',
-}
-const SORT_FLAGS: Readonly<Record<string, LsSortBy>> = {
-  t: 'time',
-  S: 'size',
-  X: 'extension',
-  v: 'version',
-  U: 'none',
-}
-const TIME_GROUPS: readonly (readonly string[])[] = [
-  ['atime', 'access', 'use'],
-  ['ctime', 'status'],
-  ['mtime', 'modification'],
-  ['birth', 'creation'],
-]
-const TIME_KINDS: Readonly<Record<string, LsTimeKind>> = {
-  atime: 'atime',
-  ctime: 'ctime',
-  mtime: 'mtime',
-  birth: 'birth',
-}
-// GNU's `when` words, shared by --hyperlink and --classify.
-const WHEN_GROUPS: readonly (readonly string[])[] = [
-  ['always', 'yes', 'force'],
-  ['never', 'no', 'none'],
-  ['auto', 'tty', 'if-tty'],
-]
-const INDICATOR_GROUPS: readonly (readonly string[])[] = [
-  ['none'],
-  ['slash'],
-  ['file-type'],
-  ['classify'],
-]
-// The four spellings of an indicator style; the last one typed wins.
-const INDICATOR_DESTS = ['classify', 'file_type', 'p', 'indicator_style'] as const
 // The three spellings of a command-line link policy; the last one wins.
 const DEREF_DESTS = [
   'dereference',
   'dereference_command_line',
   'dereference_command_line_symlink_to_dir',
 ] as const
+// The four spellings of an indicator style; the last one typed wins.
+const INDICATOR_DESTS = ['classify', 'file_type', 'p', 'indicator_style'] as const
+// What mirage-rs reads: every option that carries a word, a size or a style,
+// in the order typed.
+const SCANNED = [
+  'sort',
+  't',
+  'S',
+  'X',
+  'v',
+  'U',
+  'time',
+  'c',
+  'u',
+  'hyperlink',
+  'color',
+  'classify',
+  'indicator_style',
+  'p',
+  'file_type',
+  'block_size',
+  'human_readable',
+  'time_style',
+] as const
+// GNU reads a bare --classify, --hyperlink or --color as `always`.
+const BARE_ALWAYS: ReadonlySet<string> = new Set(['classify', 'hyperlink', 'color'])
 
-// The refusal of an ambiguous or invalid choice word for an option whose
-// values have aliases, the valid words listed one group per line (--time,
-// --hyperlink); exit 1, as GNU 9.7's ls answers it. The value goes in as
-// typed -- the shared renderer escapes it.
-function groupedArgumentError(
-  option: string,
-  value: string,
-  groups: readonly (readonly string[])[],
-  kind: WordRefusalKind,
-): UsageError {
-  return wordRefusalError('ls', option, value, groups, 1, kind)
+/** What mirage-rs read out of ls's typed options: the last sort spelling (null
+ * when the line typed none), the timestamp shown and sorted by, the mark
+ * appended to a name, whether `--hyperlink` asked for OSC 8 links,
+ * `--block-size` (null for bytes or when `-h` came after it) and the time
+ * style (`locale`, `full-iso`, `long-iso`, `iso` or `+FORMAT`). */
+interface LsValues {
+  readonly sortBy: LsSortBy | null
+  readonly timeKind: LsTimeKind
+  readonly indicator: LsIndicator
+  readonly hyperlink: boolean
+  readonly blockSize: BlockSize | null
+  readonly timeStyle: string
 }
 
-const WORD_OPTIONS: Readonly<Record<string, [string, readonly (readonly string[])[]]>> = {
-  sort: ['--sort', Object.keys(SORT_WORDS).map((word) => [word])],
-  time: ['--time', TIME_GROUPS],
-  hyperlink: ['--hyperlink', WHEN_GROUPS],
-  color: ['--color', WHEN_GROUPS],
-  classify: ['--classify', WHEN_GROUPS],
-  indicator_style: ['--indicator-style', INDICATOR_GROUPS],
+function oneOf<T extends string>(
+  words: readonly T[],
+  value: JsonValue | undefined,
+  what: string,
+): T {
+  const found = words.find((word) => word === value)
+  if (found === undefined) {
+    throw new Error(`ls: mirage-rs read ${what} as ${JSON.stringify(value)}`)
+  }
+  return found
+}
+
+// The size scale mirage-rs answered, checked for its shape.
+function blockSizeOf(raw: JsonValue | undefined): BlockSize | null {
+  if (raw === null) return null
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const { divisor, suffix, human_base: base } = raw
+    if (
+      typeof divisor === 'string' &&
+      typeof suffix === 'string' &&
+      (base === null || typeof base === 'number')
+    ) {
+      return { divisor: Number(divisor), suffix, humanBase: base }
+    }
+  }
+  throw new Error(`ls: mirage-rs read --block-size as ${JSON.stringify(raw)}`)
+}
+
+// The typed options as the scan reads them: a switch empty, except the bare
+// spelling of an option that takes WHEN, which is the word GNU reads it as and
+// stays apart from an explicit empty value.
+function tape(fl: FlagView, names: readonly string[]): [string, string][] {
+  return fl
+    .occurrences(...names)
+    .filter(([, value]) => value !== false)
+    .map(([dest, value]): [string, string] => [
+      dest,
+      value === true && BARE_ALWAYS.has(dest) ? 'always' : typeof value === 'string' ? value : '',
+    ])
 }
 
 /**
- * Refuse a bad option value where GNU does: while it reads the line.
- *
- * GNU checks each value inside its getopt loop, so the first bad one typed is
- * the one it names, and a later good value of the same option does not rescue
- * an earlier bad one (coreutils 9.7: `ls --sort=bogus --sort=size` and
- * `ls --time=x --sort=y` both refuse, the second naming `--time`).
- * `--time-style` is the exception: GNU reads only its last value, after the
- * loop.
+ * ls's option values, read by mirage-rs in one pass over the line; `names`
+ * picks which options to read, the others keeping their defaults. Throws
+ * UsageError for the first value ls refuses, in its words and with its exit
+ * status. Mirrors Python's `scan_values`.
  */
-function checkOptionWords(fl: FlagView): void {
-  for (const [dest, value] of fl.occurrences(...Object.keys(WORD_OPTIONS), 'block_size')) {
-    if (value === true) continue
-    const word = String(value)
-    if (dest === 'block_size') {
-      const parsed = parseBlockSize(word)
-      if (typeof parsed === 'string') throw new UsageError(blockSizeError(word, parsed), 2)
-      continue
-    }
-    const entry = WORD_OPTIONS[dest]
-    if (entry === undefined) continue
-    const [option, groups] = entry
-    const match = matchWord(word, groups)
-    if (!match.matched) throw groupedArgumentError(option, word, groups, match.kind)
+function scanValues(fl: FlagView, names: readonly string[] = SCANNED): LsValues {
+  const values = scanned('ls', tape(fl, names))
+  const { sort, hyperlink } = values
+  const style = values.time_style
+  if (typeof hyperlink !== 'boolean' || typeof style !== 'string') {
+    throw new Error(`ls: mirage-rs read the options as ${JSON.stringify(values)}`)
   }
-}
-
-// The sort key the line asked for, last spelling winning, and whether it
-// asked at all.
-function sortFlag(fl: FlagView): [LsSortBy, boolean] {
-  const typed = fl.typedOrder('t', 'S', 'X', 'v', 'U', 'sort')
-  const last = typed[typed.length - 1]
-  if (last === undefined) return ['name', false]
-  if (last !== 'sort') return [SORT_FLAGS[last] ?? 'name', true]
-  const word = fl.asStr('sort') ?? ''
-  const words = Object.keys(SORT_WORDS)
-  const match = matchWord(word, words)
-  if (!match.matched) {
-    throw wordRefusalError('ls', '--sort', word, words, 1, match.kind)
+  return {
+    sortBy:
+      sort === null
+        ? null
+        : oneOf<LsSortBy>(
+            ['name', 'time', 'size', 'version', 'extension', 'width', 'none'],
+            sort,
+            '--sort',
+          ),
+    timeKind: oneOf<LsTimeKind>(['mtime', 'atime', 'ctime', 'birth'], values.time, '--time'),
+    indicator: oneOf<LsIndicator>(
+      ['none', 'slash', 'file-type', 'classify'],
+      values.indicator,
+      'the indicator',
+    ),
+    hyperlink,
+    blockSize: blockSizeOf(values.block_size),
+    timeStyle: textView(style),
   }
-  return [SORT_WORDS[match.word] ?? 'name', true]
-}
-
-// Which timestamp -c, -u or --time asked for, last one winning.
-function timeFlag(fl: FlagView): LsTimeKind {
-  const typed = fl.typedOrder('c', 'u', 'time')
-  const last = typed[typed.length - 1]
-  if (last === undefined) return 'mtime'
-  if (last === 'c') return 'ctime'
-  if (last === 'u') return 'atime'
-  const word = fl.asStr('time') ?? ''
-  const match = matchWord(word, TIME_GROUPS)
-  if (!match.matched) throw groupedArgumentError('--time', word, TIME_GROUPS, match.kind)
-  return TIME_KINDS[match.word] ?? 'mtime'
-}
-
-// --time-style, validated the way GNU words it (exit 2). A posix- prefix
-// short-circuits the whole option: GNU's loop strips each one and, outside
-// a hard LC_TIME locale, jumps straight to the locale style without looking
-// at what follows. mirage has no other locale, so every posix- spelling is
-// the locale style and none of them is ever refused -- measured on
-// coreutils 9.4, where `posix-full-iso`, `posix-l`, `posix-zzz`, `posix-`
-// and `posix-+%H:%M` all exit 0 and all print what `locale` prints. The
-// matcher therefore has to run after that check, not before: the remainder
-// is not a candidate word at all.
-function timeStyleFlag(fl: FlagView): string {
-  const style = fl.asStr('time_style')
-  if (style === undefined) return 'locale'
-  if (style.startsWith('posix-')) return 'locale'
-  if (style.startsWith('+')) return style
-  const match = matchWord(style, LS_TIME_STYLES)
-  if (match.matched) return match.word
-  // GNU 9.7 lists the styles as patterns here, so it is the one such refusal
-  // in the repo whose candidates are neither quoted nor a subset of the words
-  // it accepts -- and the one that exits 2, as `ls -l --time-style=x` does.
-  // The first line is still the usual one, so `--time-style=lo` spans
-  // long-iso and locale and reads `ambiguous argument 'lo'`.
-  throw new UsageError(
-    `${wordRefusalLine('ls', 'time style', style, match.kind)}\n` +
-      'Valid arguments are:\n' +
-      '  - [posix-]full-iso\n' +
-      '  - [posix-]long-iso\n' +
-      '  - [posix-]iso\n' +
-      '  - [posix-]locale\n' +
-      "  - +FORMAT (e.g., +%H:%M) for a 'date'-style format\n" +
-      usageHint('ls'),
-    2,
-  )
-}
-
-// Whether --hyperlink asked for OSC 8 links: always does, never does
-// not, and auto does not either, since command output here is never a
-// terminal.
-function hyperlinkFlag(fl: FlagView): boolean {
-  const raw: unknown = fl.raw('hyperlink')
-  if (raw === undefined || raw === null || raw === false) return false
-  if (raw === true) return true
-  const word = typeof raw === 'string' ? raw : ''
-  const match = matchWord(word, WHEN_GROUPS)
-  if (!match.matched) {
-    throw groupedArgumentError('--hyperlink', word, WHEN_GROUPS, match.kind)
-  }
-  return match.word === 'always'
-}
-
-// The style one indicator option asks for, checked as GNU checks it: -F and a
-// bare --classify classify; --classify=WHEN does for `always` and never
-// otherwise, since output here is never a terminal. An ambiguous or invalid
-// choice word is refused with the valid words listed, exit 1. Mirrors Python's
-// _indicator_word.
-function indicatorWord(dest: string, raw: unknown): LsIndicator {
-  if (dest === 'p') return 'slash'
-  if (dest === 'file_type') return 'file-type'
-  if (dest === 'classify' && raw === true) return 'classify'
-  const word = typeof raw === 'string' ? raw : ''
-  const option = dest === 'classify' ? '--classify' : '--indicator-style'
-  const groups = dest === 'classify' ? WHEN_GROUPS : INDICATOR_GROUPS
-  const match = matchWord(word, groups)
-  if (!match.matched) throw groupedArgumentError(option, word, groups, match.kind)
-  if (dest === 'indicator_style') return match.word as LsIndicator
-  return match.word === 'always' ? 'classify' : 'none'
 }
 
 /**
@@ -1036,11 +958,7 @@ function indicatorWord(dest: string, raw: unknown): LsIndicator {
  * Mirrors Python's indicator_flag.
  */
 export function indicatorFlag(fl: FlagView): LsIndicator {
-  let style: LsIndicator = 'none'
-  for (const [dest, raw] of fl.occurrences(...INDICATOR_DESTS)) {
-    style = indicatorWord(dest, raw)
-  }
-  return style
+  return scanValues(fl, INDICATOR_DESTS).indicator
 }
 
 /**
@@ -1049,9 +967,11 @@ export function indicatorFlag(fl: FlagView): LsIndicator {
  * wins, and with none of them -d, a long format or the classify style resolve
  * no link while anything else resolves one that leads to a directory
  * (coreutils 9.7). A value the command refuses leaves the style unclassified,
- * since that line fails before it lists anything. Mirrors Python's link_mode.
+ * since that line fails before it lists anything. `indicator` is the style a
+ * scan of the whole line already read; without it the indicator options are
+ * read here. Mirrors Python's link_mode.
  */
-export function linkMode(fl: FlagView): LsLinkMode {
+export function linkMode(fl: FlagView, indicator?: LsIndicator): LsLinkMode {
   const typed = fl.typedOrder(...DEREF_DESTS)
   const last = typed.at(-1)
   if (last !== undefined) {
@@ -1060,7 +980,7 @@ export function linkMode(fl: FlagView): LsLinkMode {
   const long = ['args_l', 'g', 'o', 'numeric_uid_gid'].some((dest) => fl.asBool(dest))
   let classify = false
   try {
-    classify = indicatorFlag(fl) === 'classify'
+    classify = (indicator ?? indicatorFlag(fl)) === 'classify'
   } catch (err) {
     // The command refuses this line itself, before it lists anything.
     if (!(err instanceof UsageError)) throw err
@@ -1073,52 +993,28 @@ export function linkMode(fl: FlagView): LsLinkMode {
 // undoes it in either order (GNU ignores -1 beside -l, and with no
 // terminal there are never columns, so -1 has nothing else to do); -n prints the
 // same columns as -l, because a mirage owner is already the id (an agent,
-// a profile) and never a name looked up from one; the last of -t, -S, -X,
-// -v, -U and --sort wins, as does the last of -c, -u and --time; and -c or
-// -u with neither -l nor a sort sorts by that time; and the later of -h
-// and --block-size wins. Throws UsageError for
-// a value GNU refuses, with GNU's exit status for that option.
-// GNU's three --block-size refusals, worded as ls words them. Measured on
-// coreutils 9.7: `ls: invalid --block-size argument 'x'`, `ls: invalid
-// suffix in --block-size argument '1x'` and `ls: --block-size argument
-// '99999999999999999999' too large`. The word is quoted but NOT escaped,
-// where a bad --sort word is both: `ls --block-size=1é` reports the two
-// UTF-8 bytes intact, and `ls --sort=é` prints `'\303\251'`.
-function blockSizeError(text: string, refusal: BlockSizeRefusal): string {
-  const quoted = `'${text}'`
-  if (refusal === 'too large') return `ls: --block-size argument ${quoted} too large`
-  if (refusal === 'invalid suffix') return `ls: invalid suffix in --block-size argument ${quoted}`
-  return `ls: invalid --block-size argument ${quoted}`
-}
-
+// a profile) and never a name looked up from one; and -c or -u with neither
+// -l nor a sort sorts by that time. The words, sizes and styles (the last
+// sort, time and indicator spelling, the later of -h and --block-size) are
+// mirage-rs's, read in one pass. Throws UsageError for a value GNU refuses,
+// with GNU's exit status for that option.
 export function parseFlags(fl: FlagView): LsFlags {
-  checkOptionWords(fl)
-  const [askedSort, sortedExplicitly] = sortFlag(fl)
-  const timeKind = timeFlag(fl)
+  const values = scanValues(fl)
   const noOwner = fl.asBool('g')
   const noGroup = fl.asBool('o')
   const long = fl.asBool('args_l') || noOwner || noGroup || fl.asBool('numeric_uid_gid')
-  const sortBy: LsSortBy = !sortedExplicitly && timeKind !== 'mtime' && !long ? 'time' : askedSort
-  const blockText = fl.asStr('block_size')
-  let blockSize = null
-  if (blockText !== undefined) {
-    const parsedBlock = parseBlockSize(blockText)
-    if (typeof parsedBlock === 'string')
-      throw new UsageError(blockSizeError(blockText, parsedBlock), 2)
-    blockSize = parsedBlock
-    // The later of -h and --block-size wins (GNU: `--block-size=1 -h`
-    // prints 1.5K, `-h --block-size=1` prints 1536); the value is still
-    // checked either way.
-    if (fl.typedOrder('human_readable', 'block_size').at(-1) === 'human_readable') blockSize = null
-  }
+  const sortBy: LsSortBy =
+    values.sortBy === null && values.timeKind !== 'mtime' && !long
+      ? 'time'
+      : (values.sortBy ?? 'name')
   const columns: LsColumns = Object.freeze({
     owner: !noOwner,
     group: !noGroup,
     inode: fl.asBool('inode'),
     context: fl.asBool('context'),
-    timeKind,
-    timeStyle: timeStyleFlag(fl),
-    blockSize,
+    timeKind: values.timeKind,
+    timeStyle: values.timeStyle,
+    blockSize: values.blockSize,
   })
   return Object.freeze({
     long,
@@ -1126,18 +1022,18 @@ export function parseFlags(fl: FlagView): LsFlags {
     showDotEntries: fl.asBool('all'),
     human: fl.asBool('human_readable'),
     reverse: fl.asBool('reverse'),
-    indicator: indicatorFlag(fl),
+    indicator: values.indicator,
     recursive: fl.asBool('recursive'),
     listDir: fl.asBool('directory'),
     // -L alone dereferences what a listing finds; -H and its sibling stop at
     // the command line, and the last of the three wins.
     deref: fl.typedOrder(...DEREF_DESTS).at(-1) === 'dereference',
-    followArgs: linkMode(fl) === 'all',
+    followArgs: linkMode(fl, values.indicator) === 'all',
     sortBy,
-    timeKind,
+    timeKind: values.timeKind,
     groupDirsFirst: fl.asBool('group_directories_first'),
     columns,
-    hyperlink: hyperlinkFlag(fl),
+    hyperlink: values.hyperlink,
     escape: fl.asBool('escape'),
   })
 }
@@ -1179,8 +1075,8 @@ export async function lsGeneric(
   readdir: Readdir,
   stat: Stat,
   statPath: StatPath | null = vfsStatPath(ctx.vfs) ?? null,
+  flags: LsFlags = parseFlags(new FlagView(ctx.flags, specOf('ls'))),
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags, specOf('ls'))
   const targets: PathSpec[] =
     paths.length > 0
       ? paths
@@ -1192,7 +1088,6 @@ export async function lsGeneric(
             vfsPath: ctx.cwd.vfsPath,
           }),
         ]
-  const flags = parseFlags(fl)
   const {
     long,
     all,

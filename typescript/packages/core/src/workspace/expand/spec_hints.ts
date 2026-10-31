@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { execSpans } from '../../commands/builtin/find_parse.ts'
+import { findLayout } from '../../rs/find.ts'
 import { walk } from '../../commands/cli/walk.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
 import * as constants from '../../commands/spec/constants.ts'
@@ -99,7 +99,7 @@ export function specWordKinds(
   }
   const kinds = [...parseCommand(spec, literal, '/', name, env).wordKinds]
   if (name === 'find') {
-    for (const [start, end] of execSpans(literal)) {
+    for (const [start, end] of findLayout(literal).spans) {
       for (let i = start; i <= end; i++) kinds[i] = 'str'
     }
   }

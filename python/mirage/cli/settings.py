@@ -25,6 +25,7 @@ from mirage.server.auth import storage as auth_storage
 from mirage.server.auth.config import CONFIG_ENV_KEYS
 from mirage.server.daemon_config import (
     ALLOWED_KEYS,
+    DEFAULT_RATE_LIMITS,
     NUMERIC_KEYS,
     DaemonConfigError,
     read_daemon_table,
@@ -178,7 +179,7 @@ def _default_for_key(key: str) -> str:
         "max_sessions": "",
         "workers": "1",
         "worker_type": "",
-        "rate_limits": "",
+        "rate_limits": DEFAULT_RATE_LIMITS,
         "policy_file": "",
         "port": "8765",
         "ssh_port": "",
@@ -207,7 +208,9 @@ def resolved_config() -> dict[str, tuple[str, str]]:
         env_value = os.environ.get(env_name) if env_name else None
         if env_value:
             out[key] = (env_value, f"env {env_name}")
-        elif str(table.get(key, "")):
+        elif str(table.get(key, "")) or (
+            key == "rate_limits" and key in table
+        ):
             out[key] = (str(table[key]), "file")
         else:
             out[key] = (_default_for_key(key), "default")

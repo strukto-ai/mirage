@@ -20,7 +20,6 @@ import {
   type LsTimeKind,
 } from '../../../types.ts'
 import { gnuStrftime } from './strftime.ts'
-import { UINTMAX } from '../constants.ts'
 import { UTC_ZONE, type Zone } from '../../../utils/timezone.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
 import { ALL_MODE_BITS, contentSize, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
@@ -45,29 +44,6 @@ export const UNKNOWN_STAT_FIELD = '?'
 // the listing slash-marked it, and unknown otherwise.
 export const STAT_FAILED_KEY = 'stat_failed'
 
-// GNU's --block-size units: the letter and its power; K prints as K for
-// KiB and kB for KB. GNU's size table, which takes every letter in upper
-// case and only k, m, g and t in lower case; R and Q are not in it
-// (coreutils 9.7 refuses `--block-size=1R`).
-const BLOCK_UNITS = 'KMGTPEZY'
-const LOWER_BLOCK_UNITS = 'kmgt'
-const C_SPACE = ' \t\n\v\f\r'
-
-/** Which of GNU's three --block-size refusals a value earned: a word it
- * cannot read a number or a unit out of (`x`, `0`, `iB`, an empty value),
- * a number followed by something that is not a unit (`1x`, `1.5K`, `Kx`,
- * a trailing blank), and a value past UINTMAX_MAX (`Y` alone is 2**80).
- * The suffix test outranks the overflow test: a value that fails both is
- * worded as the suffix failure. Mirrors Python's `BlockSizeRefusal`. */
-export type BlockSizeRefusal = 'invalid' | 'invalid suffix' | 'too large'
-
-function blockUnitPower(letter: string): number | null {
-  if (letter === '') return null
-  if (BLOCK_UNITS.includes(letter) || LOWER_BLOCK_UNITS.includes(letter))
-    return BLOCK_UNITS.indexOf(letter.toUpperCase()) + 1
-  return null
-}
-export const LS_TIME_STYLES: readonly string[] = ['full-iso', 'long-iso', 'iso', 'locale']
 const EPOCH = new Date(0)
 
 /** How --block-size scales the size column: bytes per printed unit
@@ -104,69 +80,6 @@ export const DEFAULT_COLUMNS: LsColumns = Object.freeze({
   timeStyle: 'locale',
   blockSize: null,
 })
-
-// GNU's --block-size=SIZE grammar, null when the text is not one:
-// human-readable and si pick the two -h scales; otherwise an optional
-// count is followed by an optional unit letter, B making it decimal (KB
-// is 1000 and prints kB) and iB keeping it binary. A zero count is
-// refused under any unit, as GNU refuses 0K the way it refuses 0.
-// GNU's --block-size=SIZE grammar, or which refusal it earns.
-//
-// `human-readable` and `si` pick the two -h scales; otherwise an optional
-// count is followed by an optional unit letter, `B` making it decimal (`KB`
-// is 1000 and prints `kB`) and `iB` keeping it binary. The count is read
-// the way strtoumax reads it: leading blanks and one `+` are skipped, a `-`
-// is not a sign here. A zero count is refused under any unit, as GNU
-// refuses `0K` the way it refuses `0`, and a product past UINTMAX_MAX is
-// too large. Measured on coreutils 9.7 (see the Python twin's docstring for
-// the table). Deliberate divergence: strtoumax reads a `0x` or `0` prefix as
-// hexadecimal or octal (`010` is 8 blocks), mirage reads every count in
-// decimal.
-export function parseBlockSize(text: string): BlockSize | BlockSizeRefusal {
-  if (text === 'human-readable') return { divisor: 1024, suffix: '', humanBase: 1024 }
-  if (text === 'si') return { divisor: 1000, suffix: '', humanBase: 1000 }
-  let body = text
-  // strtol's prefix: leading C blanks and one `+` are skipped only in front
-  // of a digit (`' +1'` is 1) and never in front of a bare unit (`+K` and
-  // `' K'` are refused, coreutils 9.7).
-  while (body !== '' && C_SPACE.includes(body.charAt(0))) body = body.slice(1)
-  if (body.startsWith('+')) body = body.slice(1)
-  if (body !== text && !/^[0-9]/.test(body)) return 'invalid'
-  let i = 0
-  while (i < body.length && /[0-9]/.test(body.charAt(i))) i += 1
-  const digits = body.slice(0, i)
-  const unit = body.slice(i)
-  if (digits === '' && (unit === '' || blockUnitPower(unit.charAt(0)) === null)) return 'invalid'
-  const count = digits === '' ? 1n : BigInt(digits)
-  let factor = 1n
-  let shown = ''
-  if (unit !== '') {
-    const letter = unit.charAt(0)
-    const rest = unit.slice(1)
-    const power = blockUnitPower(letter)
-    if (power === null) return 'invalid suffix'
-    const upper = letter.toUpperCase()
-    if (rest === '') {
-      factor = 1024n ** BigInt(power)
-      shown = upper
-    } else if (rest === 'B') {
-      factor = 1000n ** BigInt(power)
-      shown = (upper === 'K' ? 'k' : upper) + 'B'
-    } else if (rest === 'iB') {
-      factor = 1024n ** BigInt(power)
-      shown = upper + 'iB'
-    } else {
-      return 'invalid suffix'
-    }
-  }
-  const divisor = count * factor
-  if (divisor > UINTMAX) return 'too large'
-  if (count === 0n) return 'invalid'
-  // The unit is echoed after each size only when the value was a bare
-  // unit: `K` prints `4K`, `KiB` prints `4KiB`, `1K` and `2K` print `4` and
-  // `2` (coreutils 9.7).
-  return { divisor: Number(divisor), suffix: digits === '' ? shown : '', humanBase: null }
-}
 
 // The size column under -h or --block-size, bytes otherwise.
 export function scaledSize(n: number, block: BlockSize | null, human: boolean): string {

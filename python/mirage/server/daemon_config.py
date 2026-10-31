@@ -59,6 +59,7 @@ NUMERIC_KEYS = frozenset(
         "workers",
     }
 )
+DEFAULT_RATE_LIMITS = "ip=1000/minute"
 
 
 class DaemonConfigError(Exception):

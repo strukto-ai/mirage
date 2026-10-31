@@ -15,7 +15,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 import { PUBLIC_PATHS } from './auth/middleware.ts'
-import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
+import { DEFAULT_RATE_LIMITS, DaemonConfigError, readDaemonTable } from './daemon_config.ts'
 import { ENV_RATE_LIMITS } from './env.ts'
 import { refused } from './metrics.ts'
 import { mirageHome } from './paths.ts'
@@ -89,7 +89,9 @@ export function parseRateLimits(text: string): RateLimit[] {
 /**
  * The server's rate limits: `rateLimits` when given, else those
  * `$MIRAGE_RATE_LIMITS` names, else the `rate_limits` key in config.toml's
- * `[daemon]` table, else none. Mirrors Python's `resolve_rate_limits`.
+ * `[daemon]` table, else 1000 requests per minute per IP. An explicit empty
+ * list or empty config value disables the limits. Mirrors Python's
+ * `resolve_rate_limits`.
  */
 export function resolveRateLimits(
   rateLimits?: readonly RateLimit[],
@@ -101,8 +103,9 @@ export function resolveRateLimits(
   }
   const fromEnv = env[ENV_RATE_LIMITS]
   const text =
-    fromEnv !== undefined && fromEnv !== '' ? fromEnv : readDaemonTable(mirageHome(env)).rate_limits
-  if (text === undefined || text === '') return []
+    fromEnv !== undefined && fromEnv !== ''
+      ? fromEnv
+      : (readDaemonTable(mirageHome(env)).rate_limits ?? DEFAULT_RATE_LIMITS)
   try {
     return parseRateLimits(text)
   } catch (err) {
@@ -136,9 +139,8 @@ function value(key: RateLimit['key'], request: FastifyRequest): string | null {
  * server registers it twice: before authentication for the limits keyed on
  * the address, the workspace or a header, so a caller with a bad token is
  * counted too, and after it, with `signedIn`, for those keyed on the account
- * or a function, which may read the signed-in account. The public paths and
- * WebSocket connections are not counted. Mirrors Python's
- * `RateLimitMiddleware`. Mirrors Python's
+ * or a function, which may read the signed-in account. WebSocket handshakes
+ * count too; public paths are not counted. Mirrors Python's
  * `RateLimitMiddleware`.
  */
 export function registerRateLimits(
@@ -149,19 +151,13 @@ export function registerRateLimits(
   const counted = rateLimits.filter(
     (limit) => (typeof limit.key === 'function' || limit.key === 'account') === signedIn,
   )
-  if (counted.length === 0) return
-  const limiters = counted.map((limit) => {
+  for (const limit of counted) {
     const [points, duration] = measure(limit)
-    return { limit, limiter: new RateLimiterMemory({ points, duration }) }
-  })
-  app.addHook('onRequest', async (req, reply) => {
-    if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
-    // Node marks a request upgraded only when the connection really is,
-    // so a bare Upgrade header does not skip the limits.
-    if ((req.raw as { upgrade?: boolean }).upgrade === true) return
-    for (const { limit, limiter } of limiters) {
-      const by = value(limit.key, req)
-      if (by === null) continue
+    const limiter = new RateLimiterMemory({ points, duration })
+    app.addHook('onRequest', async (req, reply) => {
+      if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
+      const by = limit.key === 'ip' ? req.ip : value(limit.key, req)
+      if (by === null) return
       try {
         await limiter.consume(by)
       } catch (e) {
@@ -172,8 +168,7 @@ export function registerRateLimits(
         console.warn(`rate-limiting a request past ${name}=${limit.rate}`)
         refused('rate_limit')
         await reply.code(429).send({ detail: 'Too Many Requests' })
-        return
       }
-    }
-  })
+    })
+  }
 }

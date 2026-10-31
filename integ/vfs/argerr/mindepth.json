@@ -25,7 +25,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument 'xx' to '-mindepth'\n"
+        "stderr": "find: Expected a positive decimal integer argument to -mindepth, but got 'xx'\n"
       }
     },
     {
@@ -53,7 +53,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument '2x' to '-mindepth'\n"
+        "stderr": "find: Expected a positive decimal integer argument to -mindepth, but got '2x'\n"
       }
     }
   ]

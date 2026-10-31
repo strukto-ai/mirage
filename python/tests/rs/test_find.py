@@ -1,10 +1,14 @@
-import re
 import time
 
 import pytest
 
-from mirage.commands.builtin.find_parse import parse_find_expression
-from mirage.commands.builtin.types import ExecAction, PrintfAction, RowAction
+from mirage.commands.builtin.types import (
+    ExecAction,
+    PrintfAction,
+    PrintfDirective,
+    PrintfLiteral,
+    RowAction,
+)
 from mirage.commands.errors import UsageError
 from mirage.core.generic.find_eval import (
     Action,
@@ -21,7 +25,12 @@ from mirage.core.generic.find_eval import (
     TrueNode,
     Type,
     evaluate,
-    tree_has_action,
+)
+from mirage.rs.find import (
+    find_layout,
+    parse_find,
+    parse_find_expression,
+    strictly_after,
 )
 
 
@@ -117,6 +126,12 @@ def test_repeated_mtime_windows_merge_to_union():
     assert expr.mtime_max - expr.mtime_min == pytest.approx(3 * 86400, abs=1)
 
 
+@pytest.mark.parametrize("unit,factor", [("c", 1), ("", 512), ("G", 1024**3)])
+def test_size_takes_uintmax_in_any_unit(unit, factor):
+    expr = parse_find_expression(["-size", f"{2**64 - 1}{unit}"])
+    assert expr.max_size == (2**64 - 1) * factor
+
+
 def test_size_rounds_up_to_unit():
     # GNU -size -1k keeps only empty files; 1k keeps 1..1024 bytes;
     # +1k excludes a file of exactly 1024 bytes.
@@ -156,13 +171,6 @@ def test_size_bare_number_counts_512_byte_blocks():
 def test_size_block_and_word_units(spec, bounds):
     expr = parse_find_expression(["-size", spec])
     assert (expr.min_size, expr.max_size) == bounds
-
-
-@pytest.mark.parametrize("unit,factor", [("c", 1), ("", 512), ("G", 1024**3)])
-def test_size_takes_uintmax_in_any_unit(unit, factor):
-    # GNU bounds the number alone: 18446744073709551615G is valid.
-    expr = parse_find_expression(["-size", f"{2**64 - 1}{unit}"])
-    assert expr.max_size == (2**64 - 1) * factor
 
 
 @pytest.mark.parametrize(
@@ -388,72 +396,7 @@ def test_operator_closed_by_paren_names_both(tokens, op):
         parse_find_expression(tokens)
 
 
-def test_printf_stores_format_on_its_action():
-    expr = parse_find_expression(["-printf", "%p\\n"])
-    assert expr.actions == [PrintfAction("%p\\n")]
-
-
-def test_printf_missing_argument():
-    with pytest.raises(UsageError, match="missing argument to '-printf'"):
-        parse_find_expression(["-printf"])
-
-
-def test_printf_combines_with_tests():
-    expr = parse_find_expression(["-name", "*.txt", "-printf", "%f\\n"])
-    assert expr.actions == [PrintfAction("%f\\n")]
-
-
-@pytest.mark.parametrize(
-    "tokens,actions",
-    [
-        (
-            ["-printf", "%p\\n", "-exec", "cat", "{}", ";"],
-            [PrintfAction("%p\\n"), ExecAction(("cat", "{}"))],
-        ),
-        (
-            ["-exec", "cat", "{}", ";", "-printf", "%p\\n"],
-            [ExecAction(("cat", "{}")), PrintfAction("%p\\n")],
-        ),
-        (
-            ["-printf", "%p ", "-print"],
-            [PrintfAction("%p "), RowAction("print")],
-        ),
-        (
-            ["-print0", "-printf", "%p"],
-            [RowAction("print0"), PrintfAction("%p")],
-        ),
-        (["-printf", "%p", "-ls"], [PrintfAction("%p"), RowAction("ls")]),
-        (
-            ["-printf", "%p", "-delete"],
-            [PrintfAction("%p"), RowAction("delete")],
-        ),
-        (
-            ["-printf", "%p ", "-printf", "%s\\n"],
-            [PrintfAction("%p "), PrintfAction("%s\\n")],
-        ),
-    ],
-)
-def test_printf_runs_beside_other_actions_in_order(tokens, actions):
-    # GNU runs every action of the -a chain per row, in the order written.
-    assert parse_find_expression(tokens).actions == actions
-
-
-def test_printf_formats_under_or_must_agree():
-    with pytest.raises(UsageError) as exc:
-        parse_find_expression(
-            ["-name", "a", "-printf", "A", "-o", "-name", "b", "-printf", "B"]
-        )
-    assert str(exc.value) == (
-        "find: -printf may print only one format under -o, ! or parentheses"
-    )
-    expr = parse_find_expression(
-        ["-name", "a", "-printf", "%p", "-o", "-name", "b", "-printf", "%p"]
-    )
-    assert expr.actions == [PrintfAction("%p")]
-
-
 def test_exec_per_match_and_batched():
-    from mirage.commands.builtin.types import ExecAction
 
     expr = parse_find_expression(
         ["-name", "*.txt", "-exec", "echo", "got", "{}", ";"]
@@ -464,75 +407,6 @@ def test_exec_per_match_and_batched():
     expr = parse_find_expression(["-exec", "echo", "{}", "+"])
     assert expr.execs == [ExecAction(("echo", "{}"), batch=True)]
     assert expr.tree == Action("exec", batch=True)
-
-
-@pytest.mark.parametrize(
-    "tokens,message",
-    [
-        (["-exec"], "find: missing argument to `-exec'"),
-        (["-exec", ";"], "find: missing argument to `-exec'"),
-        (["-exec", "echo", "{}"], "find: missing argument to `-exec'"),
-        (
-            ["-exec", "echo", "{}", "x", "+"],
-            "find: missing argument to `-exec'",
-        ),
-        (
-            ["-exec", "echo", "x{}y", "+"],
-            "find: In '-exec ... {} +' the '{}' must appear by itself, but you "
-            "specified 'x{}y'",
-        ),
-        (
-            ["-exec", "echo", "{}", "{}", "+"],
-            "find: Only one instance of {} is supported with -exec ... +",
-        ),
-        (["!", "-exec", "false", ";"], "find: -exec is not supported under !"),
-        (
-            ["-exec", "false", "{}", ";", "-o", "-print"],
-            "find: -exec and -print cannot be combined under -o, ! or "
-            "parentheses",
-        ),
-        (
-            ["-name", "a", "-exec", "true", ";", "-o", "-exec", "false", ";"],
-            "find: -exec may run only one command under -o, ! or parentheses",
-        ),
-        (
-            ["-name", "a", "-o", "-exec", "echo", "{}", ";", "-name", "b"],
-            "find: -exec must end its -a chain under -o, ! or parentheses",
-        ),
-        (
-            ["-type", "d", "-exec", "false", "{}", ";", "-o", "-prune"],
-            "find: -exec must end the expression under -o, ! or parentheses",
-        ),
-        (
-            ["-exec", "echo", "{}", ";", "-o", "-exec", "echo", "{}", ";"],
-            "find: -exec must end the expression under -o, ! or parentheses",
-        ),
-        (
-            [
-                "(",
-                "-name",
-                "a",
-                "-exec",
-                "echo",
-                "{}",
-                ";",
-                ")",
-                "-o",
-                "-name",
-                "b",
-            ],
-            "find: -exec must end the expression under -o, ! or parentheses",
-        ),
-        (
-            ["-newermt", "nope"],
-            "find: I cannot figure out how to interpret 'nope' as a date or time",
-        ),
-        (["-newer"], "find: missing argument to '-newer'"),
-    ],
-)
-def test_exec_and_newer_refusals(tokens, message):
-    with pytest.raises(UsageError, match=re.escape(message)):
-        parse_find_expression(tokens)
 
 
 def test_batched_exec_is_true_whatever_the_command_exits():
@@ -564,32 +438,6 @@ def test_exec_allowed_after_a_parenthesized_or():
     )
     assert len(expr.execs) == 1
     assert expr.tree == And([Or([Name("a"), Name("b")]), Action("exec")])
-
-
-def test_one_action_may_end_any_arm():
-    # The tree decides per entry which arm reaches the action; the
-    # executor then runs that one action on every row kept, so the
-    # arms must agree on it and nothing may follow it.
-    expr = parse_find_expression(
-        ["-name", "a", "-print", "-o", "-name", "b", "-print"]
-    )
-    assert expr.tree == Or(
-        [And([Name("a"), Action("print")]), And([Name("b"), Action("print")])]
-    )
-    assert expr.actions == [RowAction("print")]
-    expr = parse_find_expression(
-        ["-name", "a", "-o", "-exec", "echo", "{}", ";"]
-    )
-    assert expr.actions == [ExecAction(("echo", "{}"))]
-    expr = parse_find_expression(["(", "-exec", "false", ";", ")"])
-    assert expr.tree == Action("exec")
-    expr = parse_find_expression(
-        ["-path", "./skip", "-prune", "-o", "-type", "f", "-printf", "%p"]
-    )
-    assert expr.actions == [PrintfAction("%p")]
-    assert expr.tree == Or(
-        [And([Path("./skip"), Prune()]), And([Type("f"), Action("printf")])]
-    )
 
 
 @pytest.mark.parametrize(
@@ -646,8 +494,6 @@ def test_an_or_among_tests_keeps_the_action_chain(line):
 
 
 def test_actions_are_recorded_in_order():
-    from mirage.commands.builtin.types import ExecAction, RowAction
-
     expr = parse_find_expression(
         ["-delete", "-exec", "echo", "{}", ";", "-print0", "-ls", "-print"]
     )
@@ -661,8 +507,6 @@ def test_actions_are_recorded_in_order():
 
 
 def test_newer_records_the_reference_and_newermt_a_strict_bound():
-    from mirage.commands.builtin.find_parse import strictly_after
-
     expr = parse_find_expression(["-newer", "d/a.txt", "-name", "*.txt"])
     assert expr.newer == ["d/a.txt"]
     assert expr.mtime_min is None
@@ -673,8 +517,6 @@ def test_newer_records_the_reference_and_newermt_a_strict_bound():
 
 
 def test_exec_spans_cover_the_action_words():
-    from mirage.commands.builtin.find_parse import exec_spans
-
     argv = [
         "/d",
         "-exec",
@@ -689,9 +531,9 @@ def test_exec_spans_cover_the_action_words():
         "+",
         "-print",
     ]
-    assert exec_spans(argv) == [(1, 4), (7, 10)]
-    assert exec_spans(["-exec", "a", "b"]) == [(0, 2)]
-    assert exec_spans(["-name", "x"]) == []
+    assert find_layout(argv).spans == [(1, 4), (7, 10)]
+    assert find_layout(["-exec", "a", "b"]).spans == [(0, 2)]
+    assert find_layout(["-name", "x"]).spans == []
 
 
 @pytest.mark.parametrize(
@@ -736,35 +578,6 @@ def test_predicate_after_action_is_refused(action, test):
         UsageError, match="tests after actions are not supported"
     ):
         parse_find_expression(action + test)
-
-
-@pytest.mark.parametrize(
-    "action",
-    [
-        ["-print"],
-        ["-print0"],
-        ["-ls"],
-        ["-delete"],
-        ["-printf", "%p"],
-    ],
-)
-@pytest.mark.parametrize("position", ["left", "right", "group"])
-def test_row_actions_may_end_an_arm(action, position):
-    expressions = {
-        "left": [*action, "-o", "-name", "keep"],
-        "right": ["-name", "keep", "-o", *action],
-        "group": ["(", *action, ")"],
-    }
-    expr = parse_find_expression(expressions[position])
-    assert tree_has_action(expr.tree)
-    assert expr.actions == [
-        PrintfAction("%p")
-        if action[0] == "-printf"
-        else RowAction(action[0][1:])
-    ]
-    parse_find_expression(
-        ["(", "-name", "a", "-o", "-name", "b", ")", *action]
-    )
 
 
 @pytest.mark.parametrize(
@@ -856,3 +669,53 @@ def test_top_level_windows_intersect_and_or_windows_widen():
     either = parse_find_expression(["-mtime", "-1", "-o", "-mtime", "-3"])
     assert both.mtime_min - either.mtime_min == pytest.approx(2 * 86400, abs=2)
     assert (both.mtime_max, either.mtime_max) == (None, None)
+
+
+def test_printf_compiles_once_into_parts_the_action_carries():
+    expr = parse_find_expression(["-printf", "%p\\t%s\\q"])
+    (action,) = expr.actions
+    assert action == PrintfAction(
+        "%p\\t%s\\q",
+        (
+            PrintfDirective("p"),
+            PrintfLiteral("\t"),
+            PrintfDirective("s"),
+            PrintfLiteral("\\q"),
+        ),
+        True,
+    )
+    assert expr.warnings == ["find: warning: unrecognized escape `\\q'"]
+
+
+def test_a_bound_time_test_folds_by_where_it_sat():
+    parsed = parse_find(["-newer", "old", "-newer", "new"])
+    assert parsed.newer == ["old", "new"]
+    unresolved = parsed.bind()
+    assert (unresolved.mtime_min, unresolved.mtime_max) == (None, None)
+    assert unresolved.tree == And([TrueNode(), TrueNode()])
+    bound = parsed.bind([100.0, 200.0])
+    assert bound.mtime_min == strictly_after(200.0)
+    assert bound.tree == And(
+        [
+            Mtime(strictly_after(100.0), None),
+            Mtime(strictly_after(200.0), None),
+        ]
+    )
+
+
+def test_a_mtime_counts_days_from_the_clock_bound_with_it():
+    parsed = parse_find(["-mtime", "+2"])
+    assert parsed.bind(now=1000000.0).mtime_max == 1000000.0 - 2 * 86400
+    assert parse_find(["-mtime", "-2"]).bind(now=1000000.0).mtime_min == (
+        1000000.0 - 2 * 86400
+    )
+    equal = parse_find(["-mtime", "2"]).bind(now=1000000.0)
+    assert (equal.mtime_min, equal.mtime_max) == (
+        1000000.0 - 3 * 86400,
+        1000000.0 - 2 * 86400,
+    )
+
+
+def test_a_newermt_that_is_no_date_is_refused_in_gnus_words():
+    with pytest.raises(UsageError, match="^find: I cannot figure out"):
+        parse_find(["-newermt", "nope"]).bind()

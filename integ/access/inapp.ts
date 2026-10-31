@@ -48,7 +48,7 @@ interface Suite {
   cases: Case[]
 }
 
-const STEP_OPS = new Set(['workspace', 'session_admin', 'snapshot', 'ask'])
+const STEP_OPS = new Set(['workspace', 'session_admin', 'snapshot', 'ask', 'history'])
 const WAITED = 'the line waited for all of its input'
 const STREAM_WAIT_MS = 10_000
 const BESIDE_WAIT_MS = 20_000
@@ -340,6 +340,16 @@ async function steps(
           await Workspace.load(prefix + (step.key as string), { s3: store }),
         )
         answers.push({ text: step.to })
+      } else if (kind === 'history') {
+        const entries = await get(wid).history({
+          vfs: step.vfs === true,
+          ...(typeof step.last === 'number' ? { last: step.last } : {}),
+        })
+        answers.push({
+          text: entries
+            .map((e) => (e.type === 'command' ? e.command : `${String(e.vfs)} ${String(e.path)}`))
+            .join('\n'),
+        })
       } else if (kind === 'asks') {
         answers.push({
           text: get(wid)

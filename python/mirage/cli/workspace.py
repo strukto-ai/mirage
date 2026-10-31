@@ -14,6 +14,7 @@
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
@@ -180,6 +181,27 @@ def _format_workspace_explanation(data: dict[str, Any]) -> str:
         for said in data["answers"]
     )
     return "\n".join(out)
+
+
+def _format_history(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "No history."
+    rows = [
+        [
+            datetime.fromtimestamp(item["timestamp"] / 1000, UTC).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            item["session"],
+            str(item.get("exit_code", "")),
+            (
+                item["command"]
+                if item["type"] == "command"
+                else f"{item['vfs']} {item['path']}"
+            ).replace("\n", "\\n"),
+        ]
+        for item in items
+    ]
+    return format_table(["TIME", "SESSION", "EXIT", "ENTRY"], rows)
 
 
 def _format_asks(items: list[dict[str, Any]]) -> str:
@@ -460,6 +482,42 @@ def load_cmd(
                     timeout=None,
                 )
     emit(handle_response(r), human=_format_workspace_detail)
+
+
+@app.command("history")
+def history_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+    session: str = typer.Option(
+        "", "--session", help="Only this session's entries."
+    ),
+    since: int | None = typer.Option(
+        None, "--since", help="Only entries at or after this epoch ms."
+    ),
+    last: int | None = typer.Option(
+        None, "--last", help="Only the newest this many entries."
+    ),
+    vfs: bool = typer.Option(
+        False, "--vfs", help="Include each call a line made to a mount."
+    ),
+) -> None:
+    """Show what the workspace ran, oldest first."""
+    params: dict[str, str] = {}
+    if session:
+        params["session_id"] = session
+    if since is not None:
+        params["since"] = str(since)
+    if last is not None:
+        params["last"] = str(last)
+    if vfs:
+        params["vfs"] = "true"
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "GET",
+            f"/v1/workspaces/{quote(workspace_id, safe='')}/history",
+            params=params,
+        )
+    emit(handle_response(r), human=_format_history)
 
 
 @app.command("list-asks")

@@ -71,7 +71,9 @@ class DiskObserverStore(ObserverStoreBase):
         out: dict[str, bytes] = {}
         files, _dirs = await self._walk()
         for abs_path in files:
-            rel = "/" + os.path.relpath(abs_path, self._root)
+            rel = "/" + os.path.relpath(abs_path, self._root).replace(
+                os.sep, "/"
+            )
             if not rel.endswith(suffix):
                 continue
             async with aiofiles.open(abs_path, "rb") as f:

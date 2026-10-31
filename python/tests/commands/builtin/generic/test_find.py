@@ -81,7 +81,7 @@ def test_parse_find_args_reads_each_flag(kwargs, expected, filled):
 
 
 def test_parse_find_args_unknown_predicate_raises():
-    with pytest.raises(UsageError, match="find: unknown predicate '-bogus'"):
+    with pytest.raises(UsageError, match="find: unknown predicate `-bogus'"):
         parse_find_args(("-bogus",))
 
 
@@ -354,12 +354,20 @@ async def test_walk_find_time_test_before_prune_gates_it():
 @pytest.mark.parametrize(
     "kwargs,message",
     [
-        ({"maxdepth": "abc"}, "find: invalid argument 'abc' to '-maxdepth'"),
-        ({"mindepth": "xx"}, "find: invalid argument 'xx' to '-mindepth'"),
+        (
+            {"maxdepth": "abc"},
+            "find: Expected a positive decimal integer argument to "
+            "-maxdepth, but got 'abc'",
+        ),
+        (
+            {"mindepth": "xx"},
+            "find: Expected a positive decimal integer argument to "
+            "-mindepth, but got 'xx'",
+        ),
         ({"size": ""}, "find: invalid null argument to -size"),
         ({"size": "abc"}, "find: Invalid argument `abc' to -size"),
         ({"size": "5x"}, "find: invalid -size type `x'"),
-        ({"mtime": "abc"}, "find: invalid argument 'abc' to '-mtime'"),
+        ({"mtime": "abc"}, "find: invalid argument `abc' to `-mtime'"),
     ],
 )
 def test_parse_find_args_invalid_numeric_raises_find_parse_error(

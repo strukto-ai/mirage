@@ -36,29 +36,18 @@ def _registry() -> MountRegistry:
 
 
 @pytest.mark.asyncio
-async def test_newer_is_rewritten_to_newermt():
-    tokens = ["-newer", "ref", "-name", "x", "-newer", "/w/ref"]
-    rewritten, err = await resolve_newer_refs(
-        tokens, ["ref", "/w/ref"], _registry(), "/w", _stat
+async def test_each_reference_is_its_modification_time():
+    times, err = await resolve_newer_refs(
+        ["ref", "/w/ref"], _registry(), "/w", _stat
     )
     assert err is None
-    assert rewritten == [
-        "-newermt",
-        "2020-01-01T00:00:00+00:00",
-        "-name",
-        "x",
-        "-newermt",
-        "2020-01-01T00:00:00+00:00",
-    ]
+    assert times == [1577836800.0, 1577836800.0]
 
 
 @pytest.mark.asyncio
 async def test_missing_reference_is_gnu_error():
-    tokens = ["-newer", "nope"]
-    rewritten, err = await resolve_newer_refs(
-        tokens, ["nope"], _registry(), "/w", _stat
-    )
-    assert rewritten == tokens
+    times, err = await resolve_newer_refs(["nope"], _registry(), "/w", _stat)
+    assert times == []
     assert err == b"find: 'nope': No such file or directory\n"
 
 

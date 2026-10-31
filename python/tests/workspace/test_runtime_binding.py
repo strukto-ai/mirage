@@ -633,8 +633,8 @@ async def test_what_a_runtime_reads_is_in_its_lines_report():
             i for i, e in enumerate(logged) if e.get("command") == "anything"
         )
         before = logged[line - 1]
-        assert (before["type"], before["op"], before["path"]) == (
-            "op",
+        assert (before["type"], before["vfs"], before["path"]) == (
+            "vfs",
             "read",
             "/ram/f.txt",
         )
@@ -682,8 +682,8 @@ async def test_what_an_aborted_runtime_read_stays_on_the_books():
             i for i, e in enumerate(logged) if e.get("command") == "anything"
         )
         before = logged[line - 1]
-        assert (before["type"], before["op"], before["path"]) == (
-            "op",
+        assert (before["type"], before["vfs"], before["path"]) == (
+            "vfs",
             "read",
             "/ram/f.txt",
         )

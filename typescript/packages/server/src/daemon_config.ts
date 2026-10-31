@@ -55,6 +55,7 @@ export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'ssh_port',
   'workers',
 ])
+export const DEFAULT_RATE_LIMITS = 'ip=1000/minute'
 
 export class DaemonConfigError extends Error {
   constructor(message: string) {

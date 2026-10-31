@@ -57,7 +57,7 @@ export class DiskObserverStore extends ObserverStoreBase {
     const out = new Map<string, Uint8Array>()
     const { files } = await this.walk()
     for (const absPath of files) {
-      const rel = '/' + path.relative(this.root, absPath)
+      const rel = '/' + path.relative(this.root, absPath).split(path.sep).join('/')
       if (!rel.endsWith(suffix)) continue
       out.set(rel, new Uint8Array(await readFile(absPath)))
     }

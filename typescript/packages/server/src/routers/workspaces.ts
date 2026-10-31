@@ -68,6 +68,13 @@ interface WorkspaceGetQuery {
   verbose?: string
 }
 
+interface WorkspaceHistoryQuery {
+  session_id?: string
+  since?: string
+  last?: string
+  vfs?: string
+}
+
 const SnapshotBodySchema = z.object({ key: z.string() }).strict()
 
 const LoadBodySchema = z
@@ -548,6 +555,35 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       }
       const verbose = req.query.verbose === 'true'
       return await makeDetail(entry, verbose)
+    },
+  )
+
+  // The workspace's recorded history, oldest first: a `command` entry for
+  // every line its sessions ran, and with `vfs` a `vfs` entry for every
+  // call a line made to a mount.
+  app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceHistoryQuery }>(
+    '/v1/workspaces/:id/history',
+    async (req, reply) => {
+      const entry = deps.registry.visible(req.params.id, req.account)
+      if (entry === null || deps.registry.removing(req.params.id)) {
+        return reply.status(404).send({ detail: 'workspace not found' })
+      }
+      const options: NonNullable<Parameters<Workspace['history']>[0]> = {}
+      if (req.query.session_id !== undefined) options.sessionId = req.query.session_id
+      for (const name of ['since', 'last'] as const) {
+        const value = req.query[name]
+        if (value === undefined) continue
+        if (!/^[0-9]+$/.test(value)) {
+          return reply.status(400).send({ detail: `${name} must be a whole number` })
+        }
+        options[name] = Number(value)
+      }
+      try {
+        options.vfs = queryFlag(req.query.vfs, 'vfs')
+      } catch (e) {
+        return reply.status(400).send({ detail: (e as Error).message })
+      }
+      return await entry.runner.ws.history(options)
     },
   )
 

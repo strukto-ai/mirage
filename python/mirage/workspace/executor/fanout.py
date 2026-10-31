@@ -35,6 +35,7 @@ from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.rs.find import FindExpr
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec, Producer
@@ -107,6 +108,7 @@ async def _own_part(
             follow=follow,
             diff=registry.diff,
             ids=registry.ids,
+            find=options.get("find"),
         )
     return await run_single(cmd_name, paths, texts, flag_kwargs, **options)
 
@@ -152,6 +154,7 @@ async def _fan_out_traversal(
     dispatch: DispatchFn | None = None,
     native: RunSingle | None = None,
     follow: FollowOperands | None = None,
+    find: FindExpr | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Compose a traversal over the mounts inside its operands.
 
@@ -177,6 +180,7 @@ async def _fan_out_traversal(
             of the walk runs on.
         follow (FollowOperands | None): The line's operand resolution,
             which a walk through the dispatcher's globs take.
+        find (FindExpr | None): find's parsed expression.
     """
     if dispatch is None or native is None:
         raise ValueError("traversal requires dispatcher and native execution")
@@ -189,6 +193,7 @@ async def _fan_out_traversal(
                 paths,
                 texts,
                 flag_kwargs,
+                find,
                 dispatch,
                 part,
                 cwd,
@@ -282,6 +287,7 @@ async def run_with_fanout(
     resolve_hint: PathSpec | None = None,
     dispatch: DispatchFn | None = None,
     follow: FollowOperands | None = None,
+    find: FindExpr | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """One operand's native run, fanned out over the mounts nested in it.
 
@@ -312,6 +318,7 @@ async def run_with_fanout(
             native run over the merged bytes).
         follow (FollowOperands | None): the line's operand resolution,
             which a walk through the dispatcher's globs take.
+        find (FindExpr | None): find's parsed expression.
     """
     if not _should_fan_out(cmd_name, paths, flag_kwargs, registry):
         if cmd_name in _TRAVERSAL_CMDS and dispatch is not None:
@@ -328,6 +335,7 @@ async def run_with_fanout(
                 flag_kwargs,
                 stdin=stdin,
                 resolve_hint=resolve_hint,
+                find=find,
             )
         return await run_single(
             cmd_name,
@@ -367,5 +375,6 @@ async def run_with_fanout(
         dispatch=dispatch,
         native=run_single,
         follow=follow,
+        find=find,
     )
     return stdout, io

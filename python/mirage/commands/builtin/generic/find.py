@@ -2,12 +2,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.builtin.find_parse import (
-    parse_depth,
-    parse_find_expression,
-    parse_mtime,
-    parse_size,
-)
 from mirage.commands.builtin.utils.links import (
     landing_root,
     links_of,
@@ -32,6 +26,7 @@ from mirage.errors.fs import fs_strerror, strerror_of, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, PathRecord
+from mirage.rs.find import FindExpr, parse_find_expression
 from mirage.types import FileStat, FileType, FindType, PathSpec
 from mirage.utils.path import respell_one, respell_raw
 from mirage.view.types import LinkView, StatPath
@@ -40,6 +35,7 @@ from mirage.view.types import LinkView, StatPath
 def parse_find_args(
     texts: tuple[str, ...],
     *,
+    find: FindExpr | None = None,
     name: str | None = None,
     type: str | None = None,
     size: str | None = None,
@@ -50,8 +46,25 @@ def parse_find_args(
     mindepth: str | None = None,
     empty: bool = False,
 ) -> find_eval.FindArgs:
-    if texts:
-        expr = parse_find_expression(list(texts))
+    """The walk's arguments, from the line's expression or from flags.
+
+    Args:
+        texts (tuple[str, ...]): the expression words, read by mirage-rs
+            when no parsed expression comes with them.
+        find (FindExpr | None): the expression the executor parsed once
+            for the line.
+        name (str | None): ``-name`` as a flag.
+        type (str | None): ``-type`` as a flag.
+        size (str | None): ``-size`` as a flag.
+        mtime (str | None): ``-mtime`` as a flag.
+        maxdepth (str | None): ``-maxdepth`` as a flag.
+        iname (str | None): ``-iname`` as a flag.
+        path (str | None): ``-path`` as a flag.
+        mindepth (str | None): ``-mindepth`` as a flag.
+        empty (bool): ``-empty`` as a flag.
+    """
+    if find is not None or texts:
+        expr = find if find is not None else parse_find_expression(texts)
         return find_eval.FindArgs(
             min_size=expr.min_size,
             max_size=expr.max_size,
@@ -65,27 +78,29 @@ def parse_find_args(
     ftype: FindType | str | None = type
     if type in (FindType.DIRECTORY.value, FindType.FILE.value):
         ftype = FindType(type)
-    md = parse_depth(maxdepth, "-maxdepth") if maxdepth is not None else None
-    md_min = (
-        parse_depth(mindepth, "-mindepth") if mindepth is not None else None
-    )
-    min_size, max_size = (None, None)
-    if size is not None:
-        min_size, max_size = parse_size(size)
-    mtime_min, mtime_max = (None, None)
-    if mtime is not None:
-        mtime_min, mtime_max = parse_mtime(mtime)
+    words = [
+        word
+        for flag, value in (
+            ("-maxdepth", maxdepth),
+            ("-mindepth", mindepth),
+            ("-size", size),
+            ("-mtime", mtime),
+        )
+        if value is not None
+        for word in (flag, value)
+    ]
+    limits = parse_find_expression(words) if words else FindExpr()
     return find_eval.FindArgs(
         name=name,
         iname=iname,
         path_pattern=path,
         type=ftype,
-        min_size=min_size,
-        max_size=max_size,
-        mtime_min=mtime_min,
-        mtime_max=mtime_max,
-        maxdepth=md,
-        mindepth=md_min,
+        min_size=limits.min_size,
+        max_size=limits.max_size,
+        mtime_min=limits.mtime_min,
+        mtime_max=limits.mtime_max,
+        maxdepth=limits.maxdepth,
+        mindepth=limits.mindepth,
         empty=empty,
     )
 
@@ -480,6 +495,7 @@ async def find_walk_generic(
     )
     args = parse_find_args(
         tuple(texts),
+        find=ctx.find,
         name=parsed.name,
         type=parsed.type,
         size=parsed.size,

@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { evaluate, treeHasAction } from '../../core/generic/find_eval.ts'
-import { UsageError } from '../errors.ts'
-import { parseFindExpression } from './find_parse.ts'
+import { evaluate, treeHasAction } from '../core/generic/find_eval.ts'
+import { UsageError } from '../commands/errors.ts'
+import { parseFindExpression } from './find.ts'
 
 describe('parseFindExpression', () => {
   it('negation', () => {
@@ -187,12 +187,13 @@ describe('parseFindExpression', () => {
     expect([e.minSize, e.maxSize]).toEqual(bounds)
   })
 
-  it.each(['18446744073709551615c', '18446744073709551615', '18446744073709551615G'])(
-    'takes -size %s, since GNU bounds the number alone',
-    (spec) => {
-      expect(parseFindExpression(['-size', spec]).maxSize).toBeGreaterThan(0)
-    },
-  )
+  it.each([
+    ['18446744073709551615c', 18446744073709551615n],
+    ['18446744073709551615', 18446744073709551615n * 512n],
+    ['18446744073709551615G', 18446744073709551615n * 1024n ** 3n],
+  ])('takes -size %s, since GNU bounds the number alone', (spec, bound) => {
+    expect(parseFindExpression(['-size', spec]).maxSize).toBe(Number(bound))
+  })
 
   it.each([
     ['', 'find: invalid null argument to -size'],
@@ -373,72 +374,18 @@ describe('parseFindExpression', () => {
   })
 })
 
-describe('find -printf parsing', () => {
-  it('stores the format on its action', () => {
-    const expr = parseFindExpression(['-printf', '%p\\n'])
-    expect(expr.actions).toEqual([{ kind: 'printf', format: '%p\\n' }])
-  })
-
-  it('refuses a missing argument', () => {
-    expect(() => parseFindExpression(['-printf'])).toThrow("missing argument to '-printf'")
-  })
-
-  it('combines with tests', () => {
-    const expr = parseFindExpression(['-name', '*.txt', '-printf', '%f\\n'])
-    expect(expr.actions).toEqual([{ kind: 'printf', format: '%f\\n' }])
-  })
-
-  // GNU runs every action of the -a chain per row, in the order written.
-  it.each([
-    [
-      ['-printf', '%p\\n', '-exec', 'cat', '{}', ';'],
-      [
-        { kind: 'printf', format: '%p\\n' },
-        { kind: 'exec', argv: ['cat', '{}'], batch: false },
-      ],
-    ],
-    [
-      ['-exec', 'cat', '{}', ';', '-printf', '%p\\n'],
-      [
-        { kind: 'exec', argv: ['cat', '{}'], batch: false },
-        { kind: 'printf', format: '%p\\n' },
-      ],
-    ],
-    [
-      ['-printf', '%p ', '-print'],
-      [{ kind: 'printf', format: '%p ' }, { kind: 'print' }],
-    ],
-    [
-      ['-print0', '-printf', '%p'],
-      [{ kind: 'print0' }, { kind: 'printf', format: '%p' }],
-    ],
-    [
-      ['-printf', '%p', '-ls'],
-      [{ kind: 'printf', format: '%p' }, { kind: 'ls' }],
-    ],
-    [
-      ['-printf', '%p', '-delete'],
-      [{ kind: 'printf', format: '%p' }, { kind: 'delete' }],
-    ],
-    [
-      ['-printf', '%p ', '-printf', '%s\\n'],
-      [
-        { kind: 'printf', format: '%p ' },
-        { kind: 'printf', format: '%s\\n' },
-      ],
-    ],
-  ])('runs beside other actions in order: %j', (tokens, actions) => {
-    expect(parseFindExpression(tokens).actions).toEqual(actions)
-  })
-
-  it('refuses two formats under -o, like two -exec commands', () => {
-    expect(() =>
-      parseFindExpression(['-name', 'a', '-printf', 'A', '-o', '-name', 'b', '-printf', 'B']),
-    ).toThrow('find: -printf may print only one format under -o, ! or parentheses')
-    expect(
-      parseFindExpression(['-name', 'a', '-printf', '%p', '-o', '-name', 'b', '-printf', '%p'])
-        .actions,
-    ).toEqual([{ kind: 'printf', format: '%p' }])
+describe('find -printf compiling', () => {
+  it('carries the format, its compiled parts and its warnings on the action', () => {
+    const expr = parseFindExpression(['-printf', '%p\\t%s\\q'])
+    expect(expr.actions).toEqual([
+      {
+        kind: 'printf',
+        format: '%p\\t%s\\q',
+        parts: [{ dir: 'p' }, { lit: '\t' }, { dir: 's' }, { lit: '\\q' }],
+        stat: true,
+      },
+    ])
+    expect(expr.warnings).toEqual(["find: warning: unrecognized escape `\\q'"])
   })
 })
 
@@ -490,7 +437,7 @@ describe('action placement', () => {
   // The tree decides per entry which arm reaches the action; the executor
   // then runs that one action on every row kept, so the arms must agree on
   // it and nothing may follow it.
-  for (const action of [['-print'], ['-print0'], ['-ls'], ['-delete'], ['-printf', '%p']]) {
+  for (const action of [['-print'], ['-print0'], ['-ls'], ['-delete']]) {
     it.each([
       [...action, '-o', '-name', 'keep'],
       ['-name', 'keep', '-o', ...action],
@@ -498,11 +445,7 @@ describe('action placement', () => {
     ])(`lets ${action[0] ?? ''} end an arm: %j`, (...tokens) => {
       const expr = parseFindExpression(tokens)
       expect(treeHasAction(expr.tree)).toBe(true)
-      expect(expr.actions).toEqual([
-        action[0] === '-printf'
-          ? { kind: 'printf', format: '%p' }
-          : { kind: (action[0] ?? '').slice(1) },
-      ])
+      expect(expr.actions).toEqual([{ kind: (action[0] ?? '').slice(1) }])
     })
     it(`allows ${action[0] ?? ''} after grouped tests`, () => {
       expect(() =>
@@ -633,18 +576,6 @@ describe('-prune', () => {
     })
     expect(expr.actions).toEqual([{ kind: 'print' }])
     expect(expr.depthFirst).toBe(false)
-    const printf = parseFindExpression([
-      '-path',
-      './skip',
-      '-prune',
-      '-o',
-      '-type',
-      'f',
-      '-printf',
-      '%p',
-    ])
-    expect(printf.actions).toEqual([{ kind: 'printf', format: '%p' }])
-    expect(treeHasAction(printf.tree)).toBe(true)
   })
 
   it('is inert under an explicit -depth', () => {

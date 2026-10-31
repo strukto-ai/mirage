@@ -28,6 +28,7 @@ import { OWN_OPTION_LOOP } from './spec/constants.ts'
 import { helpPage, versionLine } from './spec/standard.ts'
 import type { CommandSpec, FlagValue } from './spec/types.ts'
 import type { Files } from '../workspace/files.ts'
+import type { FindExpr } from '../rs/find.ts'
 
 /**
  * Everything a handler gets besides its handle and its operands.
@@ -79,6 +80,11 @@ export interface Context {
    * code start and load.
    */
   runtime?: CommandRuntime
+  /**
+   * find's expression, read once by mirage-rs for the whole line; `find`
+   * reads it in place of its words.
+   */
+  find?: FindExpr
   signal?: AbortSignal
   timeoutSeconds?: number
 }

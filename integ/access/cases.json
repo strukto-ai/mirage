@@ -13,6 +13,7 @@
   "snapshot": ["inapp", "http", "cli"],
   "ask": ["inapp", "http", "cli"],
   "job": ["http", "cli"],
+  "history": ["inapp", "http", "cli"],
   "auth": ["http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
   "server": ["http"]
  },
@@ -29,7 +30,8 @@
   "Explain a line or a VFS call": "explain",
   "Snapshots": "snapshot",
   "Asks": "ask",
-  "Jobs": "job"
+  "Jobs": "job",
+  "History": "history"
  },
  "workspace": {
   "mounts": {
@@ -365,6 +367,19 @@
     {"id": "submits_a_long_line", "input": {"step": "background", "id": "w", "command": "sleep 30"}, "expect": {"text": "submitted"}},
     {"id": "cancels_it", "input": {"step": "cancel"}, "expect": {"text": "canceling"}},
     {"id": "waits_for_the_cancel", "input": {"step": "wait"}, "expect": {"text": "canceled", "stdout": ""}},
+    {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
+   ]
+  },
+  {
+   "id": "history",
+   "op": "history",
+   "cases": [
+    {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
+    {"id": "writes_a_file", "input": {"step": "shell", "id": "w", "command": "echo hi > /f"}, "expect": {"text": "", "is_error": false}},
+    {"id": "reads_it", "input": {"step": "shell", "id": "w", "command": "cat /f"}, "expect": {"text": "hi\n", "is_error": false}},
+    {"id": "lists_the_lines", "input": {"step": "history", "id": "w"}, "expect": {"text": "echo hi > /f\ncat /f"}},
+    {"id": "lists_the_vfs_calls_too", "input": {"step": "history", "id": "w", "vfs": true}, "expect": {"text": "write /f\necho hi > /f\nread /f\ncat /f"}},
+    {"id": "lists_the_newest", "input": {"step": "history", "id": "w", "last": 1}, "expect": {"text": "cat /f"}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },

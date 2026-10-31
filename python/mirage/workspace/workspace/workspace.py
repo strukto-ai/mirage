@@ -43,7 +43,7 @@ from mirage.cache.index import NULL_INDEX, IndexConfig
 from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import Context
-from mirage.concurrency.limiter import run_blocking
+from mirage.concurrency.limiter import on_loop, run_blocking
 from mirage.context import (
     Caller,
     bind_caller,
@@ -71,6 +71,7 @@ from mirage.io.memory import MAX_MEMORY, MemoryBudget
 from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.observe.log_entry import EVENT_COMMAND, EVENT_VFS
 from mirage.observe.observer import Observer
 from mirage.observe.store import ObserverStore
 from mirage.policy import (
@@ -354,6 +355,8 @@ class Workspace:
         self._state_dropped = False
         self._close_error: BaseException | None = None
         self._close_lock = asyncio.Lock()
+        self._meta_lock = asyncio.Lock()
+        self._meta_loop: asyncio.AbstractEventLoop | None = None
         self._sync_bridge = SyncBridge()
         # mounts reused from another live workspace (copy() / load
         # VFS overrides) stay open here; their origin closes them.
@@ -660,13 +663,37 @@ class Workspace:
             self._registry.release_clocks()
             raise
 
-    async def history(self) -> list[dict[str, Any]]:
-        """Command events recorded by the hidden recorder.
+    async def history(
+        self,
+        session_id: str | None = None,
+        since: int | None = None,
+        last: int | None = None,
+        vfs: bool = False,
+    ) -> list[dict[str, Any]]:
+        """What the hidden recorder holds, oldest first: a ``command``
+        entry for every line run, and with ``vfs`` a ``vfs`` entry for
+        every call a line made to a mount.
+
+        Args:
+            session_id (str | None): only this session's entries.
+            since (int | None): only entries at or after this epoch
+                millisecond.
+            last (int | None): only the newest this many entries.
+            vfs (bool): include the ``vfs`` entries.
 
         Returns:
-            list[dict]: All sessions' command events, timestamp order.
+            list[dict]: The entries, timestamp order.
         """
-        return await self.observer.command_events()
+        kinds = (EVENT_COMMAND, EVENT_VFS) if vfs else (EVENT_COMMAND,)
+        picked = [
+            e
+            for e in await self.observer.events(session_id)
+            if e.get("type") in kinds
+            and (since is None or e.get("timestamp", 0) >= since)
+        ]
+        if last is None:
+            return picked
+        return picked[max(0, len(picked) - last) :]
 
     async def explain(
         self, line: str, session_id: str = ""
@@ -1688,8 +1715,8 @@ class Workspace:
                 closes.
             blocked_loop (asyncio.AbstractEventLoop | None): the loop a
                 sync ``with`` block is exiting inside; its runners are
-                cancelled but not joined, since they cannot run until
-                this returns.
+                cancelled but not joined, and a metadata write there is
+                not waited for, since neither can run until this returns.
         """
         # Stop lifecycle mutations before teardown yields or captures its
         # close lists. Keep _closed separate so runtime journals can still
@@ -1703,6 +1730,14 @@ class Workspace:
             *(execution.aclose() for execution in executions),
             return_exceptions=True,
         )
+        # A metadata record write in flight lands before teardown drops
+        # the state or closes the store; its lock settles on the loop the
+        # write runs on.
+        writer = self._meta_loop
+        if blocked_loop is None or writer is not blocked_loop:
+            await on_loop(
+                self._meta_settled(), writer or asyncio.get_running_loop()
+            )
         async with self._close_lock:
             if self._async_closed:
                 if self._close_error is not None:
@@ -2390,12 +2425,24 @@ class Workspace:
         The discovery record resolves first so a minted default session
         id can adopt the stored pointer before hydration keys off it. The
         first call also starts stopping what lapsed instances of the
-        workspace left running (``JobTable.reap_lapsed``).
+        workspace left running (``JobTable.reap_lapsed``). Closing waits
+        for the record's write in flight, so it never races the state's
+        drop.
         """
         self._sync_bridge.observe()
         self.job_table.reap_lapsed()
-        await self._meta.ensure()
+        async with self._meta_lock:
+            self._meta_loop = asyncio.get_running_loop()
+            try:
+                await self._meta.ensure()
+            finally:
+                self._meta_loop = None
         await self._session_mgr.ensure_loaded()
+
+    async def _meta_settled(self) -> None:
+        """Wait out a metadata record write in flight."""
+        async with self._meta_lock:
+            pass
 
     @property
     def workspace_id(self) -> str:

@@ -1734,6 +1734,43 @@ async def test_a_server_shutting_down_refuses_new_workspaces():
 
 
 @pytest.mark.asyncio
+async def test_history_reads_what_the_workspace_ran():
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = (
+            await client.post("/v1/workspaces", json=_minimal_config())
+        ).json()["id"]
+        for line in ("echo hi > /a.txt", "cat /a.txt"):
+            r = await client.post(
+                f"/v1/workspaces/{wid}/shell", json={"command": line}
+            )
+            assert r.status_code == 200, r.text
+        url = f"/v1/workspaces/{wid}/history"
+        r = await client.get(url)
+        assert r.status_code == 200, r.text
+        assert [e["command"] for e in r.json()] == [
+            "echo hi > /a.txt",
+            "cat /a.txt",
+        ]
+        r = await client.get(url, params={"vfs": "true"})
+        assert [(e["type"], e.get("vfs")) for e in r.json()] == [
+            ("vfs", "write"),
+            ("command", None),
+            ("vfs", "read"),
+            ("command", None),
+        ]
+        r = await client.get(url, params={"last": 1})
+        assert [e["command"] for e in r.json()] == ["cat /a.txt"]
+        assert (await client.get(url, params={"last": -1})).status_code == 422
+        assert (
+            await client.get("/v1/workspaces/nope/history")
+        ).status_code == 404
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
 async def test_a_load_past_max_sessions_is_refused(monkeypatch):
     seen: list[str] = []
     monkeypatch.setattr(workspaces_router, "refused", seen.append)

@@ -14,13 +14,13 @@
 
 import type { OpRecord } from './record.ts'
 
-export const EVENT_OP = 'op'
+export const EVENT_VFS = 'vfs'
 export const EVENT_COMMAND = 'command'
 export const EVENT_CLEAR = 'clear'
 export const EVENT_DELETE = 'delete'
 export const STDOUT_TRUNCATE = 4096
 
-export type EventType = 'op' | 'command' | 'clear' | 'delete'
+export type EventType = 'vfs' | 'command' | 'clear' | 'delete'
 
 export interface LogEntryInit {
   executionId?: string
@@ -28,7 +28,7 @@ export interface LogEntryInit {
   session: string
   timestamp: number
   cwd?: string
-  op?: string
+  vfs?: string
   path?: string
   source?: string
   bytes?: number
@@ -45,7 +45,7 @@ export class LogEntry {
   readonly session: string
   readonly timestamp: number
   readonly cwd: string | undefined
-  readonly op: string | undefined
+  readonly vfs: string | undefined
   readonly path: string | undefined
   readonly source: string | undefined
   readonly bytes: number | undefined
@@ -61,7 +61,7 @@ export class LogEntry {
     this.session = init.session
     this.timestamp = init.timestamp
     this.cwd = init.cwd
-    this.op = init.op
+    this.vfs = init.vfs
     this.path = init.path
     this.source = init.source
     this.bytes = init.bytes
@@ -74,10 +74,10 @@ export class LogEntry {
 
   static fromOpRecord(rec: OpRecord, session: string, cwd?: string): LogEntry {
     const init: LogEntryInit = {
-      type: EVENT_OP,
+      type: EVENT_VFS,
       session,
       timestamp: rec.timestamp,
-      op: rec.op,
+      vfs: rec.op,
       path: rec.path,
       source: rec.source,
       bytes: rec.bytes,
@@ -95,7 +95,7 @@ export class LogEntry {
       timestamp: this.timestamp,
     }
     if (this.cwd !== undefined) obj.cwd = this.cwd
-    if (this.op !== undefined) obj.op = this.op
+    if (this.vfs !== undefined) obj.vfs = this.vfs
     if (this.path !== undefined) obj.path = this.path
     if (this.source !== undefined) obj.source = this.source
     if (this.bytes !== undefined) obj.bytes = this.bytes

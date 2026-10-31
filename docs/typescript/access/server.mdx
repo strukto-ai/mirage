@@ -39,7 +39,7 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | `policies` | none | The server's own [policies](/home/access/http#server-policies): each answers `preWorkspace` before a workspace is built, and is registered on every workspace the app builds. |
 | `policyFile` | `MIRAGE_POLICY_FILE`, else the `policy_file` key, else none | A file of policy programs that answer the same way. |
 | `maxSessions` | `MIRAGE_MAX_SESSIONS`, else the `max_sessions` key, else no cap | The most sessions each workspace holds, its default session among them. A new session past it, over HTTP or SSH, answers 429. |
-| `rateLimits` | `MIRAGE_RATE_LIMITS`, else the `rate_limits` key, else none | A list of `{ key, rate }`. See [Rate limits](/home/access/http#rate-limits). |
+| `rateLimits` | `MIRAGE_RATE_LIMITS`, else the `rate_limits` key, else `ip=1000/minute` | A list of `{ key, rate }`; an empty list disables limits. See [Rate limits](/home/access/http#rate-limits). |
 | `forwardedAllowIps` | `MIRAGE_FORWARDED_ALLOW_IPS`, else the `forwarded_allow_ips` key, else none | The proxies, addresses or networks, whose `X-Forwarded-For` names the client. `['*']` believes any. |
 | `gracefulTimeout` | `MIRAGE_GRACEFUL_TIMEOUT`, else the `graceful_timeout` key, else `0` | Seconds running lines get to finish on `app.close()` before they are cancelled. New work is refused meanwhile. |
 | `sshConfig` | from the `ssh_*` settings | The SSH server, opened when the app is ready; off unless a port is set. |
@@ -55,7 +55,7 @@ By default the daemon is one process, and one thread holds every workspace. With
 
 `worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. TypeScript defaults to threads. Python defaults to threads on an interpreter without the GIL (3.14t) and to processes otherwise, since threads under the GIL take turns.
 
-The daemon answers `/v1/health` and `/v1/ready` itself, merges the lists of workspaces and jobs, and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. The SSH port and rate limits are one server's, so neither combines with workers yet.
+The daemon answers `/v1/health` and `/v1/ready` itself, merges the lists of workspaces and jobs, and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker. The SSH port is one server's, so it does not combine with workers yet.
 
 ## Started by the CLI
 

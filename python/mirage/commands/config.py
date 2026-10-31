@@ -29,6 +29,7 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.process.view import ProcessView
 from mirage.rs.diff_types import DiffComputer
+from mirage.rs.find import FindExpr
 from mirage.runtime.types import CommandRuntime, ShellFn
 from mirage.types import Limit, PathSpec
 from mirage.utils.ids import IdSource, SystemIdSource
@@ -75,6 +76,8 @@ class Context:
             source, so a seeded workspace replays them.
         runtime (CommandRuntime | None): Where an interpreter command
             runs its code, and what policy lets that code start and load.
+        find (FindExpr | None): find's expression, read once by mirage-rs
+            for the whole line; ``find`` reads it in place of its words.
     """
 
     stdin: ByteSource | None = None
@@ -90,6 +93,7 @@ class Context:
     runtime: CommandRuntime | None = None
     diff: DiffComputer | None = None
     ids: IdSource = field(default_factory=SystemIdSource)
+    find: FindExpr | None = None
 
 
 CommandFnResult = CommandOutput | None

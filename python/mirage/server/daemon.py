@@ -31,7 +31,6 @@ from mirage.server.host_validation import (
     resolve_forwarded_allow_ips,
 )
 from mirage.server.paths import pid_file_path
-from mirage.server.rate_limit import resolve_rate_limits
 from mirage.server.registry import (
     resolve_graceful_timeout,
     resolve_max_workspaces,
@@ -81,12 +80,10 @@ def _watch_daemon() -> None:
 
 def _workers_proxy() -> Any:
     """The daemon's server, sending each workspace's requests to one of
-    ``workers`` workers. The daemon's SSH port and rate limits are one
-    server's, so neither is taken with workers yet."""
+    ``workers`` workers. The daemon's SSH port is one server's, so it is
+    not taken with workers yet; each worker counts its own rate limits."""
     if resolve_ssh_config().port is not None:
         raise DaemonConfigError("ssh_port does not combine with workers yet")
-    if resolve_rate_limits():
-        raise DaemonConfigError("rate_limits do not combine with workers yet")
     host = next(
         (h for h in resolve_allowed_hosts(None) if "*" not in h), "localhost"
     )
