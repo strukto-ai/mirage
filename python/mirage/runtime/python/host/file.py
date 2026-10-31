@@ -124,6 +124,7 @@ class HandleRaw(io.RawIOBase):
             raise io.UnsupportedOperation("File not open for reading")
         if reading is False and not self._writable:
             raise io.UnsupportedOperation("File not open for writing")
+        self._handle.landed()
 
     def seekable(self) -> bool:
         return True

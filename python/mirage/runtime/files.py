@@ -152,6 +152,8 @@ class Descriptor:
         late, self.late = self.late, []
         for offset, data in late:
             self.files.pwrite(self.fh, offset, data)
+        if self.mode.append:
+            self.pos = self.files.fstat(self.fh).size
 
     def pread(self, offset: int, size: int) -> bytes:
         """Read at an explicit offset without moving the position.
@@ -231,6 +233,7 @@ class Descriptor:
             unknown or the target would be negative (the position is
             then untouched).
         """
+        self.landed()
         if whence == 2:
             base: int | None = self.size
         else:

@@ -579,3 +579,30 @@ def test_a_descriptor_writes_after_what_a_collection_held_back():
     )
     loop.run_until_complete(ws.close())
     loop.close()
+
+
+def test_an_append_stream_moves_to_the_end_of_what_a_collection_held():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    log = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
+        "/data/log", "ab", buffering=0
+    )
+    log.write(b"before-")
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        _WritesWhenCollected(log)
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+    log.flush()
+    assert log.tell() == len(b"before-during-")
+    log.truncate()
+    log.write(b"after")
+    log.close()
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during-after"
+    )
+    loop.run_until_complete(ws.close())
+    loop.close()
