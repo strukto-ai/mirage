@@ -898,7 +898,8 @@ function pathParts(url: string | undefined): string[] {
     .map((segment) => {
       try {
         return decodeURIComponent(segment)
-      } catch {
+      } catch (error) {
+        console.debug('mirage: a path segment is not percent-encoded:', error)
         return segment
       }
     })
@@ -914,7 +915,9 @@ function answers(socket: string, host: string): Promise<boolean> {
         resolve(res.statusCode === 200)
       },
     )
-    probe.once('error', () => {
+    probe.once('error', (error) => {
+      // A worker still starting refuses its socket; the caller retries.
+      console.debug('mirage: a worker did not answer its health check:', error)
       resolve(false)
     })
     probe.end()
@@ -993,7 +996,9 @@ function idOf(body: Buffer): string | undefined {
     }
     const id = parsed.id ?? parsed.config?.workspace_id
     return typeof id === 'string' ? id : undefined
-  } catch {
+  } catch (error) {
+    // The worker refuses a body that is not JSON; it names no id here.
+    console.debug('mirage: a create body is not JSON:', error)
     return undefined
   }
 }

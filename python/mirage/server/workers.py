@@ -1269,7 +1269,13 @@ async def _answers(worker: Worker) -> bool:
     """Whether ``worker`` answers its health check."""
     try:
         response = await worker.http().get("/v1/health", timeout=1)
-    except httpx.TransportError:
+    except httpx.TransportError as exc:
+        # A worker still starting refuses its socket; the caller retries.
+        logger.debug(
+            "mirage: worker %d did not answer its health check: %s",
+            worker.index,
+            exc,
+        )
         return False
     return response.status_code == 200
 
@@ -1367,7 +1373,9 @@ def _id_of(body: bytes) -> str | None:
     ``workspace_id``."""
     try:
         parsed = json.loads(body)
-    except ValueError:
+    except ValueError as exc:
+        # The worker refuses a body that is not JSON; it names no id here.
+        logger.debug("mirage: a create body is not JSON: %s", exc)
         return None
     if not isinstance(parsed, dict):
         return None
