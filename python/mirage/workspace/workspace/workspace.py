@@ -43,7 +43,7 @@ from mirage.cache.index import NULL_INDEX, IndexConfig
 from mirage.commands.cli import CLI
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import Context
-from mirage.concurrency.limiter import run_blocking
+from mirage.concurrency.limiter import on_loop, run_blocking
 from mirage.context import (
     Caller,
     bind_caller,
@@ -1706,10 +1706,13 @@ class Workspace:
             return_exceptions=True,
         )
         # A metadata record write in flight lands before teardown drops
-        # the state or closes the store.
-        if blocked_loop is None or self._meta_loop is not blocked_loop:
-            async with self._meta_lock:
-                pass
+        # the state or closes the store; its lock settles on the loop the
+        # write runs on.
+        writer = self._meta_loop
+        if blocked_loop is None or writer is not blocked_loop:
+            await on_loop(
+                self._meta_settled(), writer or asyncio.get_running_loop()
+            )
         async with self._close_lock:
             if self._async_closed:
                 if self._close_error is not None:
@@ -2410,6 +2413,11 @@ class Workspace:
             finally:
                 self._meta_loop = None
         await self._session_mgr.ensure_loaded()
+
+    async def _meta_settled(self) -> None:
+        """Wait out a metadata record write in flight."""
+        async with self._meta_lock:
+            pass
 
     @property
     def workspace_id(self) -> str:
