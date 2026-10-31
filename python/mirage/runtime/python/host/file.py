@@ -61,11 +61,11 @@ class HandleRaw(io.RawIOBase):
     ``flush`` lands the descriptor's writes on the mount, which a close,
     and a flush through the layers above, comes down to.
 
-    A close the garbage collector makes while the stream's calls drive a
-    shared loop (``RuntimeFiles.held``) waits, for every layer the
-    collection reaches, until the descriptor is next used or the loop
-    can be driven (``Descriptor.used``, ``RuntimeFiles.defer``); the
-    layers then close outermost first, as any close does.
+    The garbage collector closing it, while its calls drive a shared
+    loop (``RuntimeFiles.held``), reaches no loop: the last writes of
+    every layer it closes are kept, and the close is handed to the loop
+    (``RuntimeFiles.finish_soon``). Any other call inside a collection
+    is refused.
 
     Args:
         handle (Descriptor): the descriptor it reads and writes through.
@@ -79,6 +79,9 @@ class HandleRaw(io.RawIOBase):
             owns; None for a plain open.
         fd (int | None): the descriptor a stream over one answers
             ``fileno`` with; None for a plain open, which has none.
+        forget (Callable[[], None] | None): the part of ``release`` that
+            reaches no loop (the descriptor's number given back), which a
+            close inside a collection makes; None when there is none.
     """
 
     def __init__(
@@ -90,6 +93,7 @@ class HandleRaw(io.RawIOBase):
         live: Callable[[], bool] | None = None,
         release: Callable[[], None] | None = None,
         fd: int | None = None,
+        forget: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         self._handle = handle
@@ -98,7 +102,10 @@ class HandleRaw(io.RawIOBase):
         self._writable = writable
         self._release = release
         self._fd = fd
-        self._waiting: list[io.IOBase] = []
+        self._forget = forget
+        self._late: list[tuple[int, bytes]] = []
+        self._closing = False
+        self._handed = False
         self.name = handle.opened
         self.mode = mode
 
@@ -117,7 +124,7 @@ class HandleRaw(io.RawIOBase):
             reading (bool | None): the call reads (True) or writes
                 (False); None checks only that the stream is open.
         """
-        if self.closed:
+        if self.closed or (self._handed and not self._handle.files.held):
             raise ValueError("I/O operation on closed file")
         if self._live is not None and not self._live():
             raise OSError(errno.EBADF, os.strerror(errno.EBADF))
@@ -144,7 +151,14 @@ class HandleRaw(io.RawIOBase):
     def write(self, data: "ReadableBuffer") -> int:
         self._check(reading=False)
         payload = bytes(data)
-        syscall(self._handle.write)(payload)
+        if self._closing and self._handle.files.held:
+            # A collected stream's last flush: kept for its close, at the
+            # position it reached, which moves as a write moves it.
+            self._late.append((self._handle.pos, payload))
+            if not self._handle.mode.append:
+                self._handle.pos += len(payload)
+        else:
+            syscall(self._handle.write)(payload)
         return len(payload)
 
     def seek(self, offset: int, whence: int = 0) -> int:
@@ -159,11 +173,13 @@ class HandleRaw(io.RawIOBase):
 
     def tell(self) -> int:
         self._check()
-        return syscall(self._handle.tell)()
+        return self._handle.pos
 
     def truncate(self, size: int | None = None) -> int:
         self._check(reading=False)
-        return syscall(self._handle.truncate)(size)
+        size = self._handle.pos if size is None else size
+        syscall(self._handle.truncate)(size)
+        return size
 
     def readall(self) -> bytes:
         self._check(reading=True)
@@ -171,46 +187,57 @@ class HandleRaw(io.RawIOBase):
 
     def flush(self) -> None:
         super().flush()
-        if self._writable:
+        if self._writable and not self._handle.files.held:
             syscall(self._handle.land)()
 
+    def closing(self) -> None:
+        """Note that a layer over this stream is closing, so writes its
+        last flush makes inside a collection are kept (``write``)."""
+        if self._handle.files.held:
+            self._closing = True
+
+    def close_kept(self, layer: io.BufferedIOBase) -> bool:
+        """Whether closing ``layer``, a buffered stream over this one, is
+        the garbage collector finalizing it; if so ``layer`` flushes into
+        the kept writes, this stream's close goes to the loop, and
+        ``layer`` stays open for a text layer the collection finalizes
+        after it, which still flushes through it. A close the program
+        makes inside a collection closes ``layer`` as usual.
+
+        Args:
+            layer (io.BufferedIOBase): the buffered stream being closed.
+        """
+        if not self._handle.files.held:
+            return False
+        self._closing = True
+        if not getattr(layer, "_finalizing", False):
+            return False
+        layer.flush()
+        self.close()
+        return True
+
     def close(self) -> None:
-        if self.closed or self.closes_later(self):
+        held = self._handle.files.held
+        if self.closed or (self._handed and not held):
+            return
+        if held:
+            # Left open until the collection ends, so a layer over this
+            # one that it closes later still flushes here.
+            self._closing = True
+            if not self._handed:
+                self._handed = True
+                self._handle.files.finish_soon(
+                    self._handle.fh,
+                    self._late,
+                    self._release is not None,
+                    self._forget,
+                )
             return
         try:
             super().close()
         finally:
             if self._release is not None:
                 syscall(self._release)()
-
-    def closes_later(self, layer: io.IOBase) -> bool:
-        """Whether closing ``layer`` (this stream or one over it) waits:
-        the garbage collector is closing it while the stream's calls
-        drive a shared loop it may have interrupted.
-
-        Args:
-            layer (io.IOBase): the layer being closed.
-        """
-        if not self._handle.files.held:
-            return False
-        first = not self._waiting
-        self._waiting.append(layer)
-        if first:
-            self._handle.waiting.append(self._close_waiting)
-            self._handle.files.defer(self._handle.settle)
-        return True
-
-    def _close_waiting(self) -> None:
-        """Close the layers a collection left waiting, outermost first."""
-        waiting, self._waiting = self._waiting, []
-        for layer in sorted(waiting, key=_depth, reverse=True):
-            layer.close()
-
-
-def _depth(layer: io.IOBase) -> int:
-    if isinstance(layer, io.TextIOBase):
-        return 2
-    return 1 if isinstance(layer, io.BufferedIOBase) else 0
 
 
 class _LandingWriter(io.BufferedWriter):
@@ -222,7 +249,7 @@ class _LandingWriter(io.BufferedWriter):
         self.raw.flush()
 
     def close(self) -> None:
-        if not cast(HandleRaw, self.raw).closes_later(self):
+        if not cast(HandleRaw, self.raw).close_kept(self):
             super().close()
 
 
@@ -234,27 +261,17 @@ class _LandingRandom(io.BufferedRandom):
         self.raw.flush()
 
     def close(self) -> None:
-        if not cast(HandleRaw, self.raw).closes_later(self):
-            super().close()
-
-
-class _Reader(io.BufferedReader):
-    """A buffered reader whose close a collection makes waits with its
-    raw stream's (``HandleRaw.closes_later``)."""
-
-    def close(self) -> None:
-        if not cast(HandleRaw, self.raw).closes_later(self):
+        if not cast(HandleRaw, self.raw).close_kept(self):
             super().close()
 
 
 class _Text(io.TextIOWrapper):
-    """A text stream whose close a collection makes waits with its raw
-    stream's (``HandleRaw.closes_later``)."""
+    """A text stream whose last flush, when the garbage collector closes
+    it, reaches its raw stream as a kept write (``HandleRaw.closing``)."""
 
     def close(self) -> None:
-        raw = cast(HandleRaw, cast(Any, self.buffer).raw)
-        if not raw.closes_later(self):
-            super().close()
+        cast(HandleRaw, cast(Any, self.buffer).raw).closing()
+        super().close()
 
 
 def text_encoding(
@@ -328,7 +345,7 @@ def layered(
     elif facts.writable:
         buffered = _LandingWriter(raw, size)
     else:
-        buffered = _Reader(raw, size)
+        buffered = io.BufferedReader(raw, size)
     if facts.binary:
         return buffered
     text = _Text(

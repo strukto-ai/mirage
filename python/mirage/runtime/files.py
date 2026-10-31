@@ -15,13 +15,11 @@
 import asyncio
 import dataclasses
 import logging
-import threading
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from mirage.bridge.sync import collecting, defer, run_async_from_sync
+from mirage.bridge.sync import collecting, run_async_from_sync, soon
 from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import ConcurrencyLimiter
@@ -121,10 +119,6 @@ class Descriptor:
         inode (str): where the links on ``opened`` led as it opened, which
             names its inode however the file is renamed or the link
             changed since; "" names it by ``opened``.
-        waiting (list[Callable[[], None]]): closes of streams over it the
-            garbage collector put off (``used``).
-        lock (threading.RLock): held by one use at a time (``used``).
-        depth (int): how deep the use holding ``lock`` is.
     """
 
     files: "RuntimeFiles"
@@ -134,49 +128,6 @@ class Descriptor:
     directory: bool = False
     pos: int = 0
     inode: str = ""
-    waiting: list[Callable[[], None]] = dataclasses.field(default_factory=list)
-    lock: threading.RLock = dataclasses.field(
-        default_factory=threading.RLock, compare=False, repr=False
-    )
-    depth: int = dataclasses.field(default=0, compare=False, repr=False)
-
-    @contextmanager
-    def used(self) -> Iterator[None]:
-        """Hold the descriptor for one call, one thread at a time.
-
-        The outermost use first runs, in order, the closes the garbage
-        collector put off on streams over it (``HandleRaw.closes_later``),
-        so nothing reads or moves it before they land; one put off during
-        a use waits for the next. Inside a collection they all wait, and
-        the use itself never waits: the thread holding the descriptor may
-        be waiting on the loop the collection interrupted, so a use held
-        elsewhere is refused. A close that fails is logged.
-        """
-        held = self.files.held
-        if not self.lock.acquire(blocking=not held):
-            raise RuntimeError(
-                "a garbage collection cannot wait for a file in use"
-            )
-        try:
-            outermost = not self.depth
-            self.depth += 1
-            try:
-                while outermost and self.waiting and not held:
-                    close = self.waiting.pop(0)
-                    try:
-                        close()
-                    except Exception:
-                        logger.debug("a put-off close failed", exc_info=True)
-                yield
-            finally:
-                self.depth -= 1
-        finally:
-            self.lock.release()
-
-    def settle(self) -> None:
-        """Run the closes put off on streams over it now (``used``)."""
-        with self.used():
-            pass
 
     @property
     def path(self) -> str:
@@ -186,13 +137,7 @@ class Descriptor:
     @property
     def size(self) -> int:
         """The file's length as the handle holds it, its writes counted."""
-        with self.used():
-            return self.files.fstat(self.fh).size
-
-    def tell(self) -> int:
-        """The position, once what was put off on it landed."""
-        with self.used():
-            return self.pos
+        return self.files.fstat(self.fh).size
 
     def pread(self, offset: int, size: int) -> bytes:
         """Read at an explicit offset without moving the position.
@@ -203,8 +148,7 @@ class Descriptor:
         """
         if size <= 0:
             return b""
-        with self.used():
-            return self.files.pread(self.fh, offset, size)
+        return self.files.pread(self.fh, offset, size)
 
     def read(self, size: int | None = None) -> bytes:
         """Read from the position, advancing it by what was read.
@@ -213,16 +157,15 @@ class Descriptor:
             size (int | None): byte budget; None or negative reads to the
                 end, a chunk at a time.
         """
-        with self.used():
-            if size is not None and size >= 0:
-                chunk = self.pread(self.pos, size)
-                self.pos += len(chunk)
-                return chunk
-            out = bytearray()
-            while chunk := self.pread(self.pos, READ_CHUNK):
-                out += chunk
-                self.pos += len(chunk)
-            return bytes(out)
+        if size is not None and size >= 0:
+            chunk = self.pread(self.pos, size)
+            self.pos += len(chunk)
+            return chunk
+        out = bytearray()
+        while chunk := self.pread(self.pos, READ_CHUNK):
+            out += chunk
+            self.pos += len(chunk)
+        return bytes(out)
 
     def pwrite(self, offset: int, data: bytes) -> None:
         """Write at an explicit offset without moving the position; an
@@ -233,8 +176,7 @@ class Descriptor:
             data (bytes): the payload.
         """
         if data:
-            with self.used():
-                self.files.pwrite(self.fh, offset, data)
+            self.files.pwrite(self.fh, offset, data)
 
     def write(self, data: bytes) -> None:
         """Write at the position, advancing it; an appending handle first
@@ -243,13 +185,12 @@ class Descriptor:
         Args:
             data (bytes): the payload.
         """
-        with self.used():
-            # The end first, as O_APPEND moves to it: a write that fails
-            # to find it leaves nothing written.
-            if self.mode.append and data:
-                self.pos = self.size
-            self.pwrite(self.pos, data)
-            self.pos += len(data)
+        # The end first, as O_APPEND moves to it: a write that fails to
+        # find it leaves nothing written.
+        if self.mode.append and data:
+            self.pos = self.size
+        self.pwrite(self.pos, data)
+        self.pos += len(data)
 
     def seek(self, offset: int, whence: int) -> int | None:
         """Move the position, POSIX whence numbering.
@@ -264,39 +205,30 @@ class Descriptor:
             unknown or the target would be negative (the position is
             then untouched).
         """
-        with self.used():
-            if whence == 2:
-                base: int | None = self.size
-            else:
-                base = {0: 0, 1: self.pos}.get(whence)
-            if base is None or base + offset < 0:
-                return None
-            self.pos = base + offset
-            return self.pos
+        if whence == 2:
+            base: int | None = self.size
+        else:
+            base = {0: 0, 1: self.pos}.get(whence)
+        if base is None or base + offset < 0:
+            return None
+        self.pos = base + offset
+        return self.pos
 
-    def truncate(self, size: int | None = None) -> int:
+    def truncate(self, size: int) -> None:
         """Set the file's length: a shrink drops bytes, growth reads zeros.
 
         Args:
-            size (int | None): the new length; None is the position.
-
-        Returns:
-            int: the length set.
+            size (int): the new length.
         """
-        with self.used():
-            length = self.pos if size is None else size
-            self.files.ftruncate(self.fh, length)
-            return length
+        self.files.ftruncate(self.fh, size)
 
     def land(self) -> None:
         """Land what it wrote, as fsync(2) does."""
-        with self.used():
-            self.files.fsync(self.fh)
+        self.files.fsync(self.fh)
 
     def close(self) -> None:
         """Land what it wrote and let the core's handle go."""
-        with self.used():
-            self.files.close(self.fh)
+        self.files.close(self.fh)
 
 
 class RuntimeFiles:
@@ -521,24 +453,50 @@ class RuntimeFiles:
 
     @property
     def held(self) -> bool:
-        """Whether a call made now must wait (``defer``): the garbage
+        """Whether a call made now must not reach the loop: the garbage
         collector runs on this thread, and the calls drive a shared loop
         it may have interrupted. With no shared loop each call runs on a
         loop of its own, which nothing else is driving."""
         return self._loop is not None and collecting()
 
-    def defer(self, work: Callable[[], None]) -> None:
-        """Put off work a finalizer cannot do in place until the shared
-        loop can be driven (``mirage.bridge.sync.defer``); with none it
-        runs now.
+    def finish_soon(
+        self,
+        fh: int,
+        late: list[tuple[int, bytes]],
+        releases: bool,
+        forget: Callable[[], None] | None,
+    ) -> None:
+        """Close a stream the garbage collector dropped (``held``) on the
+        shared loop, without waiting: the loop writes ``late`` through
+        handle ``fh`` before any call made after this one, then gives an
+        fd's number back and lets the handle go, as a close does.
 
         Args:
-            work (Callable[[], None]): what the finalizer put off.
+            fh (int): the core's handle.
+            late (list[tuple[int, bytes]]): the stream's last writes, at
+                the offsets they were made at; read when the close runs,
+                so writes the collection makes after this one count.
+            releases (bool): the close lets the handle go; False for a
+                stream over an fd it leaves open.
+            forget (Callable[[], None] | None): the part of the close that
+                reaches no loop (an fd's number given back), if any.
         """
-        if self._loop is None:
-            work()
-            return
-        defer(self._loop, work)
+        core, loop = self._core, self._loop
+        assert core is not None and loop is not None
+
+        async def finish(core: MountCore) -> None:
+            path = self.path_of(fh)
+            for offset, data in late:
+                await core.write(path, data, offset, fh)
+            if forget is not None:
+                forget()
+            if releases:
+                await core.release(fh)
+
+        call = (
+            finish if self._caller is None else awaits_as(self._caller, finish)
+        )
+        soon(loop, run_landing(call(core)))
 
     def call(self, name: str, path: str, /, **kwargs: Any) -> Any:
         """Run one workspace function and return its result.

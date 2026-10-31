@@ -12,10 +12,10 @@ from mirage.bridge.sync import (
     BLOCKED,
     SyncBridge,
     blocking,
-    defer,
+    handed,
     on_auxiliary_loop,
-    operation,
     run_async_from_sync,
+    soon,
 )
 from mirage.core.api.client import SessionPool
 
@@ -384,12 +384,8 @@ async def test_blocking_marks_the_running_loop_for_its_call():
     assert loop not in BLOCKED
 
 
-async def _one_turn() -> int:
-    return 1
-
-
-def _fails() -> None:
-    raise RuntimeError("put off and failed")
+async def _nothing() -> None:
+    return None
 
 
 def test_a_collection_neither_drives_nor_waits_on_a_loop():
@@ -399,7 +395,7 @@ def test_a_collection_neither_drives_nor_waits_on_a_loop():
     def during(phase, info):
         if phase == "start" and not refused:
             with pytest.raises(RuntimeError, match="garbage collection"):
-                run_async_from_sync(_one_turn(), loop)
+                run_async_from_sync(_nothing(), loop)
             refused.append(loop.is_running())
 
     gc.callbacks.append(during)
@@ -411,127 +407,41 @@ def test_a_collection_neither_drives_nor_waits_on_a_loop():
     assert refused == [False]
 
 
-def test_the_next_drive_runs_what_was_put_off_first_in_order():
+def test_handed_work_starts_before_a_later_call():
     loop = asyncio.new_event_loop()
     events = []
 
-    async def drive() -> None:
-        events.append("drive")
+    async def record(name: str) -> None:
+        events.append(name)
 
-    defer(loop, lambda: events.append("first"))
-    defer(loop, _fails)
-    defer(loop, lambda: events.append(run_async_from_sync(_one_turn(), loop)))
     try:
-        run_async_from_sync(drive(), loop)
+        soon(loop, record("handed"))
+        run_async_from_sync(record("later"), loop)
     finally:
         loop.close()
-    assert events == ["first", 1, "drive"]
+    assert events == ["handed", "later"]
 
 
-def test_put_off_work_drains_without_nesting():
+def test_handed_waits_for_work_handed_to_its_loop():
     loop = asyncio.new_event_loop()
-    count = 2 * sys.getrecursionlimit()
-    done = []
-    for _ in range(count):
-        defer(
-            loop, lambda: done.append(run_async_from_sync(_one_turn(), loop))
-        )
+    events = []
+
+    async def slow() -> None:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        events.append("done")
+
     try:
-        run_async_from_sync(_one_turn(), loop)
+        soon(loop, slow())
+        loop.run_until_complete(handed())
     finally:
         loop.close()
-    assert len(done) == count
+    assert events == ["done"]
 
 
-def test_a_drain_another_thread_is_running_is_waited_for():
+def test_work_handed_to_a_closed_loop_is_dropped():
     loop = asyncio.new_event_loop()
-    owner = threading.Thread(target=loop.run_forever, daemon=True)
-    owner.start()
-    started, release = threading.Event(), threading.Event()
-    order = []
-
-    def slow() -> None:
-        order.append("first")
-        started.set()
-        assert release.wait(5)
-        order.append("first done")
-
-    def second_call() -> None:
-        order.append(run_async_from_sync(_one_turn(), loop))
-
-    defer(loop, slow)
-    defer(loop, lambda: order.append("second"))
-    first = threading.Thread(
-        target=run_async_from_sync, args=(_one_turn(), loop)
-    )
-    first.start()
-    try:
-        assert started.wait(5)
-        second = threading.Thread(target=second_call)
-        second.start()
-        second.join(0.1)
-    finally:
-        release.set()
-    first.join(5)
-    second.join(5)
-    loop.call_soon_threadsafe(loop.stop)
-    owner.join(5)
     loop.close()
-    assert order == ["first", "first done", "second", 1]
-
-
-def test_an_operation_runs_put_off_work_around_it_never_inside():
-    loop = asyncio.new_event_loop()
-    events = []
-    try:
-        run_async_from_sync(_one_turn(), loop)
-        defer(loop, lambda: events.append("before"))
-        with operation():
-            events.append("started")
-            defer(loop, lambda: events.append("after"))
-            events.append(run_async_from_sync(_one_turn(), loop))
-        events.append("ended")
-    finally:
-        loop.close()
-    assert events == ["before", "started", 1, "after", "ended"]
-
-
-def test_two_threads_draining_two_loops_never_wait_on_each_other():
-    # Each thread has used both loops, so an operation inside one's drain
-    # would drain the other, which the other thread is draining.
-    loops = [asyncio.new_event_loop(), asyncio.new_event_loop()]
-    setup = threading.Lock()
-    ready = threading.Barrier(3)
-    both = threading.Barrier(2)
-    done = []
-
-    def work() -> None:
-        both.wait(5)
-        with operation():
-            done.append(threading.get_ident())
-
-    def user(first: int) -> None:
-        with setup:
-            for loop in loops:
-                run_async_from_sync(_one_turn(), loop)
-        ready.wait(5)
-        ready.wait(5)
-        run_async_from_sync(_one_turn(), loops[first])
-
-    users = [
-        threading.Thread(target=user, args=(i,), daemon=True) for i in (0, 1)
-    ]
-    for each in users:
-        each.start()
-    ready.wait(5)
-    for loop in loops:
-        defer(loop, work)
-    ready.wait(5)
-    for each in users:
-        each.join(10)
-    hung = any(each.is_alive() for each in users)
-    if not hung:
-        for loop in loops:
-            loop.close()
-    assert not hung
-    assert len(done) == 2
+    work = _nothing()
+    soon(loop, work)
+    assert inspect.getcoroutinestate(work) == inspect.CORO_CLOSED

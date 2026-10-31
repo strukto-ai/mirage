@@ -17,7 +17,6 @@ import functools
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from mirage.bridge.sync import operation
 from mirage.commands.builtin.utils.links import link_view
 from mirage.errors import FsCondition, classify
 from mirage.errors.fs import fs_error
@@ -93,8 +92,7 @@ def as_raised(exc: OSError) -> OSError:
 
 
 def syscall(fn: Callable[..., T]) -> Callable[..., T]:
-    """`fn` raising what ``as_raised`` makes of its errors, as one host
-    file operation (``mirage.bridge.sync.operation``).
+    """`fn` raising what ``as_raised`` makes of its errors.
 
     Args:
         fn (Callable[..., T]): one entry point function.
@@ -103,8 +101,7 @@ def syscall(fn: Callable[..., T]) -> Callable[..., T]:
     @functools.wraps(fn)
     def call(*args: Any, **kwargs: Any) -> T:
         try:
-            with operation():
-                return fn(*args, **kwargs)
+            return fn(*args, **kwargs)
         except OSError as exc:
             raised = as_raised(exc)
             if raised is exc:

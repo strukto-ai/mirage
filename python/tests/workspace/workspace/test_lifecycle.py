@@ -890,7 +890,7 @@ async def test_close_settles_a_metadata_write_in_flight(monkeypatch, drop):
         await ws.close()
 
 
-def test_close_lands_a_stream_a_collection_put_off(monkeypatch):
+def test_close_lands_a_stream_the_collector_closed(monkeypatch):
     vfs = RAMVFS()
     ws = Workspace({"/data/": vfs}, mode=MountMode.WRITE)
     loop = asyncio.new_event_loop()
@@ -908,6 +908,14 @@ def test_close_lands_a_stream_a_collection_put_off(monkeypatch):
     try:
         stream = opener("/data/f", "wb", buffering=0)
         stream.write(b"landed")
+        core = stream._handle.files._core
+        release = core.release
+
+        async def slow_release(fh):
+            await asyncio.sleep(0.05)
+            await release(fh)
+
+        monkeypatch.setattr(core, "release", slow_release)
         cycle = [stream]
         cycle.append(cycle)
         del stream, cycle
