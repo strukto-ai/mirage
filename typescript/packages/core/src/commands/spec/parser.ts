@@ -226,8 +226,9 @@ export class ParsedArgs {
   readonly builtin: boolean
   // What a line of this parse does (`lineFacts`), kept beside the parse so
   // every reader of one command shares one reading and lives and dies with
-  // it; keyed by what a fact reads beyond the parse. Not enumerable, so it
-  // is no part of the parse a comparison or a serialization reads.
+  // it; keyed by what a fact reads beyond the parse, at most PARSES_KEPT of
+  // them. Not enumerable, so it is no part of the parse a comparison or a
+  // serialization reads.
   declare readonly facts: Map<string, LineFacts>
 
   constructor(init: ParsedArgsInit) {

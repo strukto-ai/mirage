@@ -1,6 +1,8 @@
 import pytest
 
 from mirage.commands.errors import UsageError
+from mirage.commands.spec.constants import PARSE_KEPT_CHARS
+from mirage.rs import scan as rs_scan
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan, scanned
 
@@ -51,3 +53,11 @@ def test_a_kept_refusal_refuses_every_reader():
             "cmp: invalid --bytes value '2é'\n"
             "cmp: Try 'cmp --help' for more information.\n".encode(),
         )
+
+
+def test_a_long_run_of_switches_is_not_kept(monkeypatch):
+    monkeypatch.setattr(rs_scan, "_SCANS", {})
+    switches = [("recursive", "")] * PARSE_KEPT_CHARS
+    scan("grep", switches)
+    scan("grep", switches[:1])
+    assert list(rs_scan._SCANS["grep"]) == [(("recursive", ""),)]

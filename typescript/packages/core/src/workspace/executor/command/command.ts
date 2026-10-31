@@ -749,6 +749,7 @@ export async function handleCommand(
       dispatch,
       follow,
       findExpr ?? undefined,
+      parts,
     )
     const [csStdout0, csIo] = await handleCrossMount(
       cmdName,
@@ -918,7 +919,7 @@ export async function handleCommand(
       : null
 
   const singleStat: StatPath = (path) => pathStat(dispatch, path)
-  if (!borrowed && shouldFanOut(cmdName, paths, flagKwargs, registry)) {
+  if (!borrowed && shouldFanOut(cmdName, paths, parts, session.cwd, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,

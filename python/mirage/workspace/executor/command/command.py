@@ -853,6 +853,7 @@ async def handle_command(
             dispatch=dispatch,
             follow=follow,
             find=find_expr,
+            words=parts,
         )
         stdout, io = await handle_cross_mount(
             cmd_name,
@@ -1017,7 +1018,7 @@ async def handle_command(
         else None
     )
     if not borrowed and _should_fan_out(
-        cmd_name, paths, flag_kwargs, registry
+        cmd_name, paths, parts, session.cwd, registry
     ):
         # The name plane's facts plus the dispatcher-backed start-point
         # stat. A start point only the namespace serves (a nested

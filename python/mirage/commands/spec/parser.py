@@ -189,7 +189,8 @@ class ParsedArgs:
     builtin: bool = False
     # What a line of this parse does (``line_facts``), kept beside the
     # parse so every reader of one command shares one reading and lives
-    # and dies with it; keyed by what a fact reads beyond the parse.
+    # and dies with it; keyed by what a fact reads beyond the parse, at
+    # most PARSES_KEPT of them.
     facts: dict[Hashable, LineFacts] = field(
         default_factory=dict, compare=False, repr=False
     )

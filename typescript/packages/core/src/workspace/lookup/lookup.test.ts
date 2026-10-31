@@ -27,6 +27,8 @@ import { headAllowed } from '../../policy/match/allow.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Follow, LineFacts, MountMode, PathSpec, wordText } from '../../types.ts'
 import { ParsedArgs } from '../../commands/spec/parser.ts'
+import { SPECS, parseCommand } from '../../commands/spec/index.ts'
+import { PARSES_KEPT } from '../../commands/spec/constants.ts'
 import * as stream from '../../rs/stream.ts'
 import { SCANS } from '../../rs/scan.ts'
 import { declaredCalls, methodName } from '../../vfs/call.ts'
@@ -372,6 +374,27 @@ describe('lineFacts writes', () => {
     [['cp', '/data/a', '/data/b'], true],
   ] as const)('reads %j as writing: %s', (words, writes) => {
     expect(lineFacts(words[0], words, '/').writes).toBe(writes)
+  })
+
+  it('keeps a bounded number of facts on one parse', () => {
+    const names = Array.from({ length: 6 }, (_, i) => `/data/p${i}*`)
+    for (let mask = 0; mask < 1 << names.length; mask++) {
+      const operands = names.map((n, i) => {
+        const quoted = (mask & (1 << i)) !== 0
+        const base = n.slice('/data/'.length)
+        return new PathSpec({
+          virtual: n,
+          directory: '/data',
+          vfsPath: base,
+          pattern: quoted ? null : base,
+          resolved: quoted,
+        })
+      })
+      lineFacts('sort', ['sort', ...operands], '/')
+    }
+    const parsed = parseCommand(SPECS.sort!, names, '/', 'sort')
+    expect(parsed.facts.size).toBeGreaterThan(0)
+    expect(parsed.facts.size).toBeLessThanOrEqual(PARSES_KEPT)
   })
 
   it.each(['uniq', 'xxd'])('%s reads a pattern operand as a possible output', (name) => {
@@ -817,6 +840,37 @@ describe('reading a line once', () => {
     expect(new Set(first.scans.values())).toEqual(first.scans.size > 0 ? new Set([1]) : new Set())
     if (tape !== null) expect(first.scans.get(tape)).toBe(1)
     expect(again).toEqual({ parses: 0, scans: new Map(), facts: 0 })
+  })
+
+  // A walk over a nested mount asks again whether the line walks; it reads
+  // the facts the gate kept, so the command's facts run once. Each line's
+  // words are its own, so no earlier test kept its facts.
+  it.each([
+    'grep -r q11 /data',
+    'find /data -name q12',
+    'du -L /data /data/inner/q13',
+    'ls -R /data /data/inner/q14',
+  ])('%s over a nested mount reads its facts once', async (line) => {
+    const ws = new Workspace(
+      { '/': new RAMVFS(), '/data/inner': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    ws.createSession('s')
+    let made = 0
+    const freeze = Object.freeze
+    const spy = vi.spyOn(Object, 'freeze').mockImplementation((value: unknown) => {
+      if (value instanceof LineFacts) made++
+      return freeze(value)
+    })
+    try {
+      await ws.shell('echo a > /data/inner/a.txt', { sessionId: 's' })
+      made = 0
+      await ws.shell(line, { sessionId: 's' })
+    } finally {
+      spy.mockRestore()
+      await ws.close()
+    }
+    expect(made).toBe(1)
   })
 
   it('no reader of a line changes the parse it shares', async () => {

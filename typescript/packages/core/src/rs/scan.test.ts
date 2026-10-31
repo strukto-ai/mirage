@@ -15,7 +15,8 @@
 import { expect, it } from 'vitest'
 import { StreamRefusal } from './errors.ts'
 import { UsageError } from '../commands/errors.ts'
-import { refused, scan, scanned } from './scan.ts'
+import { PARSE_KEPT_CHARS } from '../commands/spec/constants.ts'
+import { refused, scan, scanned, SCANS } from './scan.ts'
 
 it('reads each value typed', () => {
   const values = scan('cmp', [
@@ -78,4 +79,12 @@ it('refuses every reader of a kept refusal', () => {
       ),
     ])
   }
+})
+
+it('keeps no long run of switches', () => {
+  SCANS.clear()
+  const switches = Array.from({ length: PARSE_KEPT_CHARS }, () => ['recursive', ''] as const)
+  scan('grep', switches)
+  scan('grep', switches.slice(0, 1))
+  expect([...(SCANS.get('grep')?.keys() ?? [])]).toEqual([JSON.stringify([['recursive', '']])])
 })

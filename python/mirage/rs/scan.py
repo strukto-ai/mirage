@@ -54,14 +54,17 @@ def scan(
 
     A tape's answer is kept, per command, as a spec keeps its parses
     (PARSES_KEPT, PARSE_KEPT_CHARS), so the admission gate and the
-    handler reading one line's options share one scan. It is kept as
-    the text mirage-rs answered and decoded per reader, so no reader sees
-    another's changes.
+    handler reading one line's options share one scan; each entry counts
+    its name, its value and one more toward PARSE_KEPT_CHARS, so a run of
+    switches is bounded too. It is kept as the text mirage-rs answered and
+    decoded per reader, so no reader sees another's changes.
     """
     tape = tuple(options)
     kept = None
     answers = None
-    if sum(len(text) for _, text in tape) <= PARSE_KEPT_CHARS:
+    if sum(1 + len(name) + len(text) for name, text in tape) <= (
+        PARSE_KEPT_CHARS
+    ):
         answers = _SCANS.setdefault(command, {})
         kept = answers.get(tape)
     if kept is None:

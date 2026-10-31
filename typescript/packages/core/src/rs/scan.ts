@@ -37,9 +37,10 @@ export const SCANS = new Map<string, Map<string, string | StreamRefusal>>()
  *
  * A tape's answer is kept, per command, as a spec keeps its parses
  * (PARSES_KEPT, PARSE_KEPT_CHARS), so the admission gate and the handler
- * reading one line's options share one scan. It is kept as the text
- * mirage-rs answered and decoded per reader, so no reader sees another's
- * changes. Mirrors Python's `scan`.
+ * reading one line's options share one scan; each entry counts its name, its
+ * value and one more toward PARSE_KEPT_CHARS, so a run of switches is bounded
+ * too. It is kept as the text mirage-rs answered and decoded per reader, so no
+ * reader sees another's changes. Mirrors Python's `scan`.
  */
 export function scan(
   command: string,
@@ -48,7 +49,8 @@ export function scan(
   const tape = JSON.stringify(options)
   let answers: Map<string, string | StreamRefusal> | undefined
   let kept: string | StreamRefusal | undefined
-  if (options.reduce((chars, [, text]) => chars + text.length, 0) <= PARSE_KEPT_CHARS) {
+  const chars = options.reduce((sum, [name, text]) => sum + 1 + name.length + text.length, 0)
+  if (chars <= PARSE_KEPT_CHARS) {
     answers = SCANS.get(command)
     if (answers === undefined) {
       answers = new Map()

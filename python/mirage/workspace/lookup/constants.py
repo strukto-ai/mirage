@@ -19,6 +19,7 @@ from mirage.commands.builtin.generic.ls import link_mode
 from mirage.commands.builtin.generic_bind.factory import declared_facts
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.compile import compile_spec
+from mirage.commands.spec.constants import PARSES_KEPT
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue, WordKind
 from mirage.shell.constants import BUILTIN_GROUP
@@ -466,7 +467,8 @@ def line_facts(
     # The parse is keyed by the words, the cwd (which `mv -t` resolves
     # in) and the grammar; a fact reads beyond it only the name it was
     # typed as (a wrapper, a self-resolving command) and which operands
-    # are patterns, never a path's value.
+    # are patterns, never a path's value. A word list typed with its
+    # patterns quoted every way keeps PARSES_KEPT readings, as a spec does.
     key = (
         name,
         tuple(
@@ -476,5 +478,7 @@ def line_facts(
     kept = parsed.facts.get(key)
     if kept is None:
         kept = facts_of(name, parse_to_kwargs(parsed), operands)
+        if len(parsed.facts) >= PARSES_KEPT:
+            parsed.facts.clear()
         parsed.facts[key] = kept
     return kept

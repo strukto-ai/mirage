@@ -16,6 +16,7 @@ import copy
 import dataclasses
 import functools
 import inspect
+import itertools
 from collections import Counter
 from collections.abc import Callable
 from typing import NamedTuple
@@ -23,7 +24,9 @@ from typing import NamedTuple
 import pytest
 
 import mirage.rs.scan as rs_scan
-from mirage.commands.spec import parser
+from mirage.commands.spec import SPECS, parse_command, parser
+from mirage.commands.spec.constants import PARSES_KEPT
+from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import ParsedArgs
 from mirage.rs.stream import open_stream
 from mirage.types import Follow, MountMode, PathSpec
@@ -241,6 +244,24 @@ def test_a_builtin_writes_only_when_its_line_can(words, writes):
     # sed 4.9 opens a w file while it reads the script, before it
     # refuses a later command.
     assert line_facts(words[0], words, "/").writes is writes
+
+
+def test_one_parse_keeps_a_bounded_number_of_facts():
+    names = [f"/data/p{i}*" for i in range(6)]
+    for quoted in itertools.product((False, True), repeat=len(names)):
+        operands = [
+            PathSpec(
+                n,
+                "/data",
+                n[len("/data/") :],
+                pattern=None if q else n[len("/data/") :],
+                resolved=q,
+            )
+            for n, q in zip(names, quoted)
+        ]
+        line_facts("sort", ["sort", *operands], "/")
+    parsed = parse_command(SPECS["sort"], names, "/", "sort")
+    assert 0 < len(parsed.facts) <= PARSES_KEPT
 
 
 @pytest.mark.parametrize("name", ["uniq", "xxd"])
@@ -537,6 +558,44 @@ async def test_a_line_reads_its_facts_once_and_scans_each_tape_once(
     assert set(first.scans.values()) <= {1}
     assert tape is None or first.scans[tape] == 1
     assert again == _Reads(0, Counter(), 0)
+
+
+# A walk over a nested mount asks again whether the line walks; it reads
+# the facts the gate kept, so the command's facts run once. Each line's
+# words are its own, so no earlier test kept its facts.
+@pytest.mark.parametrize(
+    "line",
+    [
+        "grep -r q11 /data",
+        "find /data -name q12",
+        "du -L /data /data/inner/q13",
+        "ls -R /data /data/inner/q14",
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_walk_over_a_nested_mount_reads_its_facts_once(
+    line, monkeypatch
+):
+    views: list[FlagView] = []
+    view = constants.FlagView
+
+    def counted(*args, **kwargs):
+        made = view(*args, **kwargs)
+        views.append(made)
+        return made
+
+    ws = Workspace(
+        {"/": RAMVFS(), "/data/inner": RAMVFS()}, mode=MountMode.WRITE
+    )
+    ws.create_session("s")
+    try:
+        await ws.shell("echo a > /data/inner/a.txt", session_id="s")
+        monkeypatch.setattr(constants, "FlagView", counted)
+        result = await ws.shell(line, session_id="s")
+        await result.stdout_str()
+    finally:
+        await ws.close()
+    assert len(views) == 1
 
 
 @pytest.mark.asyncio

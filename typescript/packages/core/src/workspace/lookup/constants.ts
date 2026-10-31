@@ -18,6 +18,7 @@ import { FlagView, SPECS, WordKind, parseCommand } from '../../commands/spec/ind
 import { parseToKwargs } from '../../commands/spec/parser.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import { compileSpec } from '../../commands/spec/compile.ts'
+import { PARSES_KEPT } from '../../commands/spec/constants.ts'
 import { BUILTIN_GROUP } from '../../shell/constants.ts'
 import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
 import { Follow, LineFacts, type LsLinkMode, type PathSpec } from '../../types.ts'
@@ -237,7 +238,8 @@ export function lineFacts(
   // The parse is keyed by the words, the cwd (which `mv -t` resolves in) and
   // the grammar; a fact reads beyond it only the name it was typed as (a
   // wrapper, a self-resolving command) and which operands are patterns,
-  // never a path's value.
+  // never a path's value. A word list typed with its patterns quoted every
+  // way keeps PARSES_KEPT readings, as a spec does.
   const key = JSON.stringify([
     name,
     operands.map((w) => typeof w !== 'string' && w.pattern !== null),
@@ -245,6 +247,7 @@ export function lineFacts(
   let kept = parsed.facts.get(key)
   if (kept === undefined) {
     kept = factsOf(name, parseToKwargs(parsed), operands)
+    if (parsed.facts.size >= PARSES_KEPT) parsed.facts.clear()
     parsed.facts.set(key, kept)
   }
   return kept
