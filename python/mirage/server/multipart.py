@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -97,7 +97,7 @@ class Parts:
 
 async def part_events(
     chunks: AsyncIterator[bytes], content_type: str
-) -> AsyncIterator[tuple[PartEvent, bytes]]:
+) -> AsyncGenerator[tuple[PartEvent, bytes], None]:
     """A multipart body's part events, as the body arrives.
 
     A part begins once its headers end, before any of its data, and its

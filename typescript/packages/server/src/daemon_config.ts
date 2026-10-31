@@ -42,6 +42,8 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'ssh_host',
   'ssh_host_key_file',
   'ssh_authorized_keys',
+  'workers',
+  'worker_type',
 ])
 export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'idle_grace_seconds',
@@ -51,6 +53,7 @@ export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'max_sessions',
   'port',
   'ssh_port',
+  'workers',
 ])
 export const DEFAULT_RATE_LIMITS = 'ip=1000/minute'
 

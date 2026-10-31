@@ -110,6 +110,10 @@ async function readLoadBody(req: FastifyRequest): Promise<[LoadWorkspaceRequest,
   for await (const event of partEvents(req.raw, req.headers['content-type'] ?? '')) {
     if (event.kind === 'begin') {
       name = event.name
+      // The daemon routes a load by its first request part alone.
+      if (name === 'request' && seen.has(name)) {
+        throw new MultipartError(400, "multipart body has more than one 'request' part")
+      }
       seen.add(name)
     } else if (event.kind === 'data' && name === 'request') {
       request.push(event.data)

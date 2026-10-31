@@ -28,6 +28,8 @@ import {
   ENV_MAX_WORKSPACES,
   ENV_POLICY_FILE,
   ENV_RATE_LIMITS,
+  ENV_WORKER_TYPE,
+  ENV_WORKERS,
 } from '@struktoai/mirage-server/env'
 import {
   ALLOWED_KEYS,
@@ -135,6 +137,8 @@ const ENV_FOR_KEY: Record<string, string> = {
   graceful_timeout: ENV_GRACEFUL_TIMEOUT,
   max_workspaces: ENV_MAX_WORKSPACES,
   max_sessions: ENV_MAX_SESSIONS,
+  workers: ENV_WORKERS,
+  worker_type: ENV_WORKER_TYPE,
   rate_limits: ENV_RATE_LIMITS,
   policy_file: ENV_POLICY_FILE,
   port: ENV_DAEMON_PORT,
@@ -161,6 +165,8 @@ function defaultForKey(key: string, home: string): string {
     graceful_timeout: '0',
     max_workspaces: '',
     max_sessions: '',
+    workers: '1',
+    worker_type: '',
     rate_limits: DEFAULT_RATE_LIMITS,
     policy_file: '',
     port: '8765',

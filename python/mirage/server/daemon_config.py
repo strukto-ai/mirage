@@ -43,6 +43,8 @@ ALLOWED_KEYS = frozenset(
         "ssh_host",
         "ssh_host_key_file",
         "ssh_authorized_keys",
+        "workers",
+        "worker_type",
     }
 )
 NUMERIC_KEYS = frozenset(
@@ -54,6 +56,7 @@ NUMERIC_KEYS = frozenset(
         "max_sessions",
         "port",
         "ssh_port",
+        "workers",
     }
 )
 DEFAULT_RATE_LIMITS = "ip=1000/minute"
