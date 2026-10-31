@@ -486,3 +486,62 @@ def test_work_handed_off_in_a_collection_waits_for_it_to_end():
     owner.join(5)
     loop.close()
     assert events == ["collection ending", "ran"]
+
+
+class _HoldsCollection:
+    """Hands work to a loop from its finalizer, in a cycle of its own,
+    then keeps its collection going until ``go`` is set."""
+
+    def __init__(self, loop, events, handed_off, go) -> None:
+        self.loop = loop
+        self.events = events
+        self.handed_off = handed_off
+        self.go = go
+        self.cycle = self
+
+    def __del__(self) -> None:
+        async def record() -> None:
+            self.events.append("ran")
+
+        soon(self.loop, record())
+        self.handed_off.set()
+        self.go.wait(5)
+
+
+def _collect_holding(loop, events, handed_off, go) -> None:
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        _HoldsCollection(loop, events, handed_off, go)
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def test_handed_waits_for_work_a_collection_on_another_thread_holds():
+    loop = asyncio.new_event_loop()
+    events = []
+    handed_off = threading.Event()
+    go = threading.Event()
+    collector = threading.Thread(
+        target=_collect_holding, args=(loop, events, handed_off, go)
+    )
+
+    async def teardown() -> None:
+        waiting = asyncio.ensure_future(handed())
+        await asyncio.sleep(0.05)
+        events.append("still waiting" if not waiting.done() else "returned")
+        go.set()
+        await waiting
+        events.append("handed")
+
+    collector.start()
+    try:
+        assert handed_off.wait(5)
+        loop.run_until_complete(teardown())
+    finally:
+        go.set()
+        collector.join(5)
+        loop.close()
+    assert events == ["still waiting", "ran", "handed"]

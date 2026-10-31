@@ -24,7 +24,7 @@ import weakref
 import pytest
 
 from mirage import MountMode, Workspace
-from mirage.bridge.sync import run_async_from_sync
+from mirage.bridge.sync import handed, run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
@@ -644,8 +644,6 @@ def test_a_finalizer_cannot_close_or_flush_a_live_stream(call):
 
 
 def test_a_collected_stream_over_an_fd_it_leaves_open_lands_its_bytes():
-    from mirage.bridge.sync import handed
-
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     loop = asyncio.new_event_loop()
     routed, opener = _host(ws, loop)
@@ -663,11 +661,13 @@ def test_a_collected_stream_over_an_fd_it_leaves_open_lands_its_bytes():
     loop.close()
 
 
+async def _failing_write(*args):
+    raise OSError(errno.ENOSPC, "no space")
+
+
 def test_a_collected_stream_lets_its_handle_go_when_a_last_write_fails(
     monkeypatch,
 ):
-    from mirage.bridge.sync import handed
-
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     loop = asyncio.new_event_loop()
     _, opener = _host(ws, loop)
@@ -675,11 +675,7 @@ def test_a_collected_stream_lets_its_handle_go_when_a_last_write_fails(
     stream.write(b"lost")
     handle = stream.raw._handle
     core, fh = handle.files._core, handle.fh
-
-    async def failing_write(*args):
-        raise OSError(errno.ENOSPC, "no space")
-
-    monkeypatch.setattr(core, "write", failing_write)
+    monkeypatch.setattr(core, "write", _failing_write)
     _drop_in_cycle(stream)
     del stream
     _collected()

@@ -46,8 +46,8 @@ HANDED: WeakKeyDictionary[
 def _on_collection(phase: str, info: dict[str, int]) -> None:
     COLLECTING.now = phase == "start"
     if phase == "stop":
-        for loop, work in COLLECTING.__dict__.pop("handed", ()):
-            _hand(loop, work)
+        for loop, work, done in COLLECTING.__dict__.pop("handed", ()):
+            _start(loop, work, done)
 
 
 gc.callbacks.append(_on_collection)
@@ -71,24 +71,29 @@ def soon(
     Inside a collection it goes to the loop as the collection ends, once
     every finalizer it runs is done. The loop starts it, up to its first
     wait, in the callback the hand-off queues, so it goes before any
-    call made after, from any thread; ``handed`` waits for it. Work
-    handed to a closed loop is dropped and logged.
+    call made after, from any thread. ``handed`` waits for it from the
+    hand-off on, even before the collection ends. Work handed to a
+    closed loop is dropped and logged.
 
     Args:
         loop (asyncio.AbstractEventLoop): the loop that runs it.
         work (Coroutine[Any, Any, None]): what a finalizer could not do.
     """
-    if collecting():
-        COLLECTING.__dict__.setdefault("handed", []).append((loop, work))
-        return
-    _hand(loop, work)
-
-
-def _hand(
-    loop: asyncio.AbstractEventLoop, work: Coroutine[Any, Any, None]
-) -> None:
     done: concurrent.futures.Future[None] = concurrent.futures.Future()
+    pending = HANDED.setdefault(loop, set())
+    pending.add(done)
+    done.add_done_callback(pending.discard)
+    if collecting():
+        COLLECTING.__dict__.setdefault("handed", []).append((loop, work, done))
+        return
+    _start(loop, work, done)
 
+
+def _start(
+    loop: asyncio.AbstractEventLoop,
+    work: Coroutine[Any, Any, None],
+    done: concurrent.futures.Future[None],
+) -> None:
     def start() -> None:
         task = asyncio.Task(work, loop=loop, eager_start=True)
         task.add_done_callback(partial(_hand_back, done))
@@ -97,11 +102,8 @@ def _hand(
         loop.call_soon_threadsafe(start)
     except RuntimeError:
         work.close()
+        done.cancel()
         logger.debug("work handed to a closed loop", exc_info=True)
-        return
-    pending = HANDED.setdefault(loop, set())
-    pending.add(done)
-    done.add_done_callback(pending.discard)
 
 
 def _hand_back(
