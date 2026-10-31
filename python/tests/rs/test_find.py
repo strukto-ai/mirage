@@ -494,7 +494,6 @@ def test_an_or_among_tests_keeps_the_action_chain(line):
 
 
 def test_actions_are_recorded_in_order():
-
     expr = parse_find_expression(
         ["-delete", "-exec", "echo", "{}", ";", "-print0", "-ls", "-print"]
     )
