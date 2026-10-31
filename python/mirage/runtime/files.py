@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from mirage.bridge.sync import run_async_from_sync
+from mirage.bridge.sync import collecting, run_async_from_sync, soon
 from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import ConcurrencyLimiter
@@ -445,6 +445,71 @@ class RuntimeFiles:
             if renumbered is exc:
                 raise
             raise renumbered from exc
+        except RuntimeError:
+            # A refused call (a closed loop, a collection) closes only
+            # the wrapper it was handed; the op inside never started.
+            pending.close()
+            raise
+
+    @property
+    def held(self) -> bool:
+        """Whether a call made now must not reach the loop: the garbage
+        collector runs on this thread, and the calls drive a shared loop
+        it may have interrupted. With no shared loop each call runs on a
+        loop of its own, which nothing else is driving."""
+        return self._loop is not None and collecting()
+
+    def finish_soon(
+        self,
+        fh: int,
+        late: list[tuple[int, bytes]],
+        releases: bool,
+        forget: Callable[[], None] | None,
+    ) -> None:
+        """Close a stream the garbage collector dropped (``held``) on the
+        shared loop, without waiting: the loop writes ``late`` through
+        handle ``fh`` before any call made after the hand-off, lands it,
+        and gives an fd's number back and lets the handle go, as a close
+        does, even when a write fails.
+
+        Args:
+            fh (int): the core's handle.
+            late (list[tuple[int, bytes]]): the stream's last writes, at
+                the offsets they were made at; read when the close runs,
+                so writes the collection makes after this one count.
+            releases (bool): the close lets the handle go; False for a
+                stream over an fd it leaves open.
+            forget (Callable[[], None] | None): the part of the close that
+                reaches no loop (an fd's number given back), if any.
+        """
+        core, loop = self._core, self._loop
+        assert core is not None and loop is not None
+
+        async def finish(core: MountCore) -> None:
+            path = self.path_of(fh)
+            # Adjacent writes go as one, held on the handle before the
+            # first wait, so a call made after the hand-off sees them.
+            runs: list[tuple[int, bytearray]] = []
+            for offset, data in late:
+                if runs and runs[-1][0] + len(runs[-1][1]) == offset:
+                    runs[-1][1].extend(data)
+                else:
+                    runs.append((offset, bytearray(data)))
+            try:
+                for offset, run in runs:
+                    await core.write(path, bytes(run), offset, fh)
+                if not releases:
+                    await core.flush(path, fh)
+            finally:
+                if forget is not None:
+                    forget()
+                if releases:
+                    await core.release(fh)
+
+        call = (
+            finish if self._caller is None else awaits_as(self._caller, finish)
+        )
+        soon(loop, run_landing(call(core)))
 
     def call(self, name: str, path: str, /, **kwargs: Any) -> Any:
         """Run one workspace function and return its result.
