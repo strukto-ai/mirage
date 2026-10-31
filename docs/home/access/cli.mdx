@@ -106,10 +106,10 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 | --- | --- |
 | `0` | Success. |
 | `1` | A tool failed, a VFS call was refused or failed, or the server could not be reached. |
-| `2` | A usage error, a bad config, a refusal from the server, or a failed or canceled job from `job wait` or `job get`. |
+| `2` | A usage error, a bad config, or a refusal from the server. |
 | `130` | The line was interrupted with Ctrl-C, or a streamed `shell` line was canceled. |
 | `141` | `shell` output went to a pipe that closed, as with `\| head`. |
-| `N` | `shell`, `job wait` and `job get` exit with the line's own status. |
+| `N` | `shell` exits with the line's own status. |
 
 ## Run lines, VFS calls and tools
 
@@ -130,7 +130,6 @@ see [Explain](/home/policy/explain).
 | --- | --- |
 | `--cwd PATH` | Run the line in this directory. |
 | `--runtime NAME` | Run its programs on this [runtime](/home/setup/runtime/overview). |
-| `--bg` | Return a job id at once; see [Jobs](#jobs). |
 | `--json` | Print one `{kind, exit_code, stdout, stderr, refusal}` result instead of streaming. |
 
 - Output streams as raw bytes as it arrives, and piped stdin streams in, so a
@@ -233,15 +232,6 @@ a `workspace_id`.
 | `mirage session cancel ID S` | Cancel the session's running lines. |
 | `mirage session kill ID S` | Kill the session's background jobs. |
 | `mirage session update ID S (-p PROFILE \| --profile-file FILE \| --default-profile)` | Replace the session's profile with a profile's current definition, a profile document, or the default; its cwd, env and history stay. |
-
-## Jobs
-
-| Command | Does |
-| --- | --- |
-| `mirage job list [-w ID]` | List jobs. |
-| `mirage job get JOB` | Show one job and its result. |
-| `mirage job wait JOB [--timeout SECONDS]` | Wait for a job to finish. |
-| `mirage job cancel JOB` | Cancel a job. |
 
 ## Daemon
 

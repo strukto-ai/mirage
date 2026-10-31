@@ -12,7 +12,6 @@
   "session_admin": ["inapp", "http", "cli"],
   "snapshot": ["inapp", "http", "cli"],
   "ask": ["inapp", "http", "cli"],
-  "job": ["http", "cli"],
   "history": ["inapp", "http", "cli"],
   "auth": ["http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh", "ssh_proxy"],
   "server": ["http"]
@@ -30,7 +29,6 @@
   "Explain a line or a VFS call": "explain",
   "Snapshots": "snapshot",
   "Asks": "ask",
-  "Jobs": "job",
   "History": "history"
  },
  "workspace": {
@@ -109,8 +107,8 @@
     {"id": "takes_empty_input", "input": {"command": "wc -l", "stdin": ""}, "expect": {"text": "0\n", "is_error": false}},
     {"id": "keeps_every_byte", "input": {"command": "md5sum", "stdin": {"repeat": "α\u0000\r\n", "times": 240000}}, "expect": {"text": "87b85f6a2c70337c90a0a5f0a7a8fe10  -\n", "is_error": false}},
     {"id": "matches_unicode_in_bulk", "input": {"command": "grep -o α | wc -l", "stdin": {"repeat": "α x\n", "times": 16000}}, "expect": {"text": "16000\n", "is_error": false}},
-    {"id": "streams_into_a_running_line", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "head -n 1", "stream": ["first\n", "second\n"]}, "expect": {"text": "first\n", "is_error": false}},
-    {"id": "starts_before_its_stdin_sends_a_byte", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "echo started", "stream": ["", "unread\n"]}, "expect": {"text": "started\n", "is_error": false}},
+    {"id": "streams_into_a_running_line", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "touch /begun; head -n 1", "stream": ["first\n", "second\n"]}, "expect": {"text": "first\n", "is_error": false}},
+    {"id": "starts_before_its_stdin_sends_a_byte", "accesses": ["inapp", "http", "cli", "ssh"], "input": {"command": "touch /begun; echo started", "stream": ["", "unread\n"]}, "expect": {"text": "started\n", "is_error": false}},
     {"id": "streams_stdin_through_stdout_and_stderr", "accesses": ["inapp", "http", "cli"], "input": {"command": "cat; echo err >&2", "stdin": "hé\u0000世界\n", "output_stream": true}, "expect": {"text": "hé\u0000世界\n\nerr\n", "is_error": false}}
    ]
   },
@@ -238,7 +236,7 @@
    "op": "cancel",
    "setup": [],
    "cases": [
-    {"id": "stops_a_running_line", "input": {"command": "sleep 30"}, "expect": {"text": "canceled"}}
+    {"id": "stops_a_running_line", "input": {"command": "touch /begun; sleep 2; touch /leaked"}, "expect": {"text": "canceled"}}
    ]
   },
   {
@@ -352,21 +350,6 @@
     {"id": "asks_again", "input": {"step": "shell", "id": "w", "session": "agent", "command": "rm /g"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}},
     {"id": "denies_it", "input": {"step": "deny", "id": "w"}, "expect": {"text": "denied"}},
     {"id": "the_retry_is_refused", "input": {"step": "shell", "id": "w", "session": "agent", "command": "rm /g"}, "expect": {"text": "rm: Permission denied\n", "is_error": true}},
-    {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
-   ]
-  },
-  {
-   "id": "job",
-   "op": "job",
-   "cases": [
-    {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
-    {"id": "submits_in_the_background", "input": {"step": "background", "id": "w", "command": "echo hi"}, "expect": {"text": "submitted"}},
-    {"id": "waits_for_it", "input": {"step": "wait"}, "expect": {"text": "done", "stdout": "hi\n"}},
-    {"id": "gets_it", "input": {"step": "get"}, "expect": {"text": "done"}},
-    {"id": "lists_it", "input": {"step": "jobs", "id": "w"}, "expect": {"text": "echo hi"}},
-    {"id": "submits_a_long_line", "input": {"step": "background", "id": "w", "command": "sleep 30"}, "expect": {"text": "submitted"}},
-    {"id": "cancels_it", "input": {"step": "cancel"}, "expect": {"text": "canceling"}},
-    {"id": "waits_for_the_cancel", "input": {"step": "wait"}, "expect": {"text": "canceled", "stdout": ""}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },

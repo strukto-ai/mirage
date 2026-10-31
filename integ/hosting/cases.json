@@ -4,5 +4,5 @@
   {"id": "wget", "command": "wget -qO- {url}", "finish": "cancel"},
   {"id": "substitution_release", "command": "cd /work; value=$(cd /; curl -s {url}); printf '%s:%s\\n' \"$PWD\" \"$value\"", "finish": "release", "parent_cwd": "/work", "stdout": "/work:released\n"},
   {"id": "substitution_cancel", "command": "cd /work; value=$(cd /; curl -s {url}); printf '%s:%s\\n' \"$PWD\" \"$value\"", "finish": "cancel", "parent_cwd": "/work"},
-  {"id": "shell_loop", "command": "for ((i=0;i<100000000;i++)); do :; done", "finish": "cancel"}
+  {"id": "shell_loop", "command": "touch /work/shell_loop-started; for ((i=0;i<100000000;i++)); do :; done", "finish": "cancel"}
 ]
