@@ -224,3 +224,23 @@ describe('session cancel and kill', () => {
     }
   })
 })
+
+describe('max sessions', () => {
+  it('refuses a session past the cap', async () => {
+    const app = buildApp({ maxSessions: 2 })
+    await createWs(app, 'cap')
+    const create = (sid: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/cap/sessions',
+        payload: { session_id: sid },
+      })
+    expect((await create('a')).statusCode).toBe(201)
+    const refused = await create('b')
+    expect(refused.statusCode).toBe(429)
+    expect(refused.json()).toEqual({ detail: 'workspace is at max_sessions (2)' })
+    await app.inject({ method: 'DELETE', url: '/v1/workspaces/cap/sessions/a' })
+    expect((await create('b')).statusCode).toBe(201)
+    await app.close()
+  })
+})

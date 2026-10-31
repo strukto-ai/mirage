@@ -15,7 +15,6 @@
 import { timingSafeEqual } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { createRemoteJWKSet } from 'jose'
-import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 
 import { AuthMode, PROTECTED_RESOURCE_PATH, type AuthConfig } from './config.ts'
 import { JWTVerificationError, verifyJwt } from './jwt.ts'
@@ -32,10 +31,12 @@ declare module 'fastify' {
 }
 
 const BEARER_PREFIX = 'Bearer '
-const PUBLIC_PATHS = new Set(['/v1/health', PROTECTED_RESOURCE_PATH])
+export const PUBLIC_PATHS: ReadonlySet<string> = new Set([
+  '/v1/health',
+  '/v1/ready',
+  PROTECTED_RESOURCE_PATH,
+])
 const JWT_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
-const AUTH_RATE_LIMIT_POINTS = 2000
-const AUTH_RATE_LIMIT_WINDOW_SECONDS = 60
 
 function constantTimeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a)
@@ -70,26 +71,8 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
   // they do not hold, so a key rotation needs no restart.
   const keySet =
     config.jwt?.jwksUrl !== undefined ? createRemoteJWKSet(new URL(config.jwt.jwksUrl)) : undefined
-  const limiter = new RateLimiterMemory({
-    points: AUTH_RATE_LIMIT_POINTS,
-    duration: AUTH_RATE_LIMIT_WINDOW_SECONDS,
-  })
   app.addHook('onRequest', async (req, reply) => {
-    if (PUBLIC_PATHS.has(req.url)) return
-    try {
-      await limiter.consume(req.ip)
-    } catch (e) {
-      if (e instanceof RateLimiterRes) {
-        reply.header('Retry-After', String(Math.ceil(e.msBeforeNext / 1000)))
-        console.warn(`rate-limiting request from ${req.ip}`)
-        await reply.code(429).send({ detail: 'Too Many Requests' })
-        return
-      }
-      throw e
-    }
-  })
-  app.addHook('onRequest', async (req, reply) => {
-    if (PUBLIC_PATHS.has(req.url)) return
+    if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
     const token = extractBearer(req)
     if (token === undefined) {
       await unauthorized(reply, 'missing bearer token')

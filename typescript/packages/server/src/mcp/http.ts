@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { refused } from '../metrics.ts'
 import {
   createMcpHandler,
   DEFAULT_MAX_REQUEST_BODY_SIZE,
@@ -68,6 +69,10 @@ export class DaemonToolOperations extends McpToolOperations {
   ): Promise<ToolResult> {
     const ws = this.entry.runner.ws
     let answer: ToolResult | undefined
+    if (this.jobs.draining) {
+      refused('shutting_down')
+      return { content: [{ type: 'text', text: 'server is shutting down' }], isError: true }
+    }
     if (!this.entry.acceptingJobs) {
       return { content: [{ type: 'text', text: 'workspace not found' }], isError: true }
     }

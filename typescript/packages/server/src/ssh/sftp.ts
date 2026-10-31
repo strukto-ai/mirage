@@ -54,7 +54,7 @@ export function serveSFTP(
       throw new SFTPStatusError(STATUS.NO_SUCH_FILE, `no such workspace: ${workspaceId}`)
     }
     const ws = found.runner.ws
-    await openSession(ws, sessionId, {}, keyProfile(profile))
+    await openSession(ws, sessionId, {}, keyProfile(profile), registry)
     entry = found
     return new MountCore(ws.vfs, { session: ws.getSession(sessionId), owner: OWNER })
   }

@@ -20,7 +20,7 @@ from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mirage.server.daemon_config import read_daemon_table
-from mirage.server.env import ENV_ALLOWED_HOSTS
+from mirage.server.env import ENV_ALLOWED_HOSTS, ENV_FORWARDED_ALLOW_IPS
 from mirage.server.host_validation_constants import (
     DEFAULT_ALLOWED_HOSTS,
     HOST_PATTERN,
@@ -70,6 +70,31 @@ def resolve_allowed_hosts(
         from_config = read_daemon_table(mirage_home()).get("allowed_hosts")
         raw = str(from_config) if from_config else None
     return parse_allowed_hosts(raw)
+
+
+def resolve_forwarded_allow_ips(
+    forwarded_allow_ips: Iterable[str] | None = None,
+) -> list[str]:
+    """The proxies whose ``X-Forwarded-For`` and ``X-Forwarded-Proto``
+    the server believes, so the client address a rate limit counts is
+    the caller's and not the proxy's. Each entry is an address or a
+    network (``10.0.0.0/8``); ``*`` believes every peer.
+
+    Args:
+        forwarded_allow_ips (Iterable[str] | None): explicit list. If
+            ``None``, falls back to ``$MIRAGE_FORWARDED_ALLOW_IPS``, then
+            the ``forwarded_allow_ips`` key in ``config.toml``
+            ``[daemon]`` (both comma-separated), then none.
+
+    Returns:
+        list[str]: the trusted proxies; empty believes none.
+    """
+    if forwarded_allow_ips is not None:
+        return list(forwarded_allow_ips)
+    raw = os.environ.get(ENV_FORWARDED_ALLOW_IPS) or read_daemon_table(
+        mirage_home()
+    ).get("forwarded_allow_ips")
+    return [ip.strip() for ip in str(raw or "").split(",") if ip.strip()]
 
 
 def strip_port(raw_host: str) -> str:

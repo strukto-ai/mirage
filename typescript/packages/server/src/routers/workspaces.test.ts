@@ -23,6 +23,7 @@ import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/worksp
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { buildApp } from '../app.ts'
+import * as metrics from '../metrics.ts'
 import type * as multipart from '../multipart.ts'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
@@ -133,6 +134,88 @@ describe('workspaces router', () => {
     expect(res.statusCode).toBe(201)
     const body = res.json<{ id: string }>()
     expect(body.id).toMatch(UUID7_RE)
+    await app.close()
+  })
+
+  it('refuses a load past max_sessions', async () => {
+    const reasons: string[] = []
+    const counted = vi.spyOn(metrics, 'refused').mockImplementation((reason) => {
+      reasons.push(reason)
+    })
+    const free = buildApp()
+    const capped = buildApp({ maxSessions: 2 })
+    try {
+      const created = await free.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { id: 'many', config: RAM },
+      })
+      expect(created.statusCode).toBe(201)
+      for (const sid of ['a', 'b']) {
+        const r = await free.inject({
+          method: 'POST',
+          url: '/v1/workspaces/many/sessions',
+          payload: { session_id: sid },
+        })
+        expect(r.statusCode).toBe(201)
+      }
+      const r = await upload(capped, await download(free, 'many'))
+      expect(r.statusCode).toBe(400)
+      expect(r.json()).toEqual({
+        detail: 'load failed: the snapshot holds 3 sessions, past max_sessions (2)',
+      })
+      expect(reasons).toEqual(['max_sessions'])
+      expect(capped.registry.size()).toBe(0)
+    } finally {
+      counted.mockRestore()
+      await free.close()
+      await capped.close()
+    }
+  })
+
+  it('refuses a reopen past max_sessions', async () => {
+    const reasons: string[] = []
+    const counted = vi.spyOn(metrics, 'refused').mockImplementation((reason) => {
+      reasons.push(reason)
+    })
+    const stateRoot = mkdtempSync(join(tmpdir(), 'mir-reopen-'))
+    const free = buildApp({ stateRoot })
+    const capped = buildApp({ stateRoot, maxSessions: 2 })
+    try {
+      const body = { id: 'keep', config: RAM }
+      const created = await free.inject({ method: 'POST', url: '/v1/workspaces', payload: body })
+      expect(created.statusCode).toBe(201)
+      for (const sid of ['a', 'b']) {
+        const r = await free.inject({
+          method: 'POST',
+          url: '/v1/workspaces/keep/sessions',
+          payload: { session_id: sid },
+        })
+        expect(r.statusCode).toBe(201)
+      }
+      const closed = await free.inject({ method: 'POST', url: '/v1/workspaces/keep/close' })
+      expect(closed.statusCode).toBe(200)
+      const r = await capped.inject({ method: 'POST', url: '/v1/workspaces', payload: body })
+      expect(r.statusCode).toBe(400)
+      expect(r.json()).toEqual({
+        detail: 'the saved workspace holds 3 sessions, past max_sessions (2)',
+      })
+      expect(reasons).toEqual(['max_sessions'])
+      expect(capped.registry.size()).toBe(0)
+    } finally {
+      counted.mockRestore()
+      await free.close()
+      await capped.close()
+      rmSync(stateRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('answers 503 while shutting down', async () => {
+    const app = buildApp()
+    app.registry.draining = true
+    const r = await app.inject({ method: 'POST', url: '/v1/workspaces', payload: { config: RAM } })
+    expect(r.statusCode).toBe(503)
+    expect(r.json()).toEqual({ detail: 'server is shutting down' })
     await app.close()
   })
 

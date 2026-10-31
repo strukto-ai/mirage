@@ -51,6 +51,9 @@ class ExecutionTable:
 
     def __init__(self) -> None:
         self._runs: dict[str, _Run] = {}
+        # Set once the server starts shutting down: every door that
+        # submits a line refuses a new one.
+        self.draining = False
         self._closed = False
         self._closing: asyncio.Task[None] | None = None
 
@@ -58,11 +61,22 @@ class ExecutionTable:
         self._prune()
         return self._runs[job_id].record
 
-    def list(self, workspace_id: str | None = None) -> list[ExecutionRecord]:
-        self._prune()
+    def list(
+        self, workspace_id: str | None = None, prune: bool = True
+    ) -> list[ExecutionRecord]:
+        """The executions held, a workspace's when one is named.
+
+        Args:
+            workspace_id (str | None): the workspace, or None for all.
+            prune (bool): drop finished executions past retention first;
+                a reader off the server's loop passes False and reads a
+                snapshot.
+        """
+        if prune:
+            self._prune()
         return [
             run.record
-            for run in self._runs.values()
+            for run in list(self._runs.values())
             if workspace_id is None or run.record.workspace_id == workspace_id
         ]
 

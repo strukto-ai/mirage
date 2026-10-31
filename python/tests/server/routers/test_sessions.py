@@ -336,3 +336,27 @@ async def test_update_session_takes_a_profile_document(tmp_path):
         )
         assert r.status_code == 422
         await client.delete(f"/v1/workspaces/{wid}")
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_at_max_sessions_refuses_another():
+    app = build_app(idle_grace_seconds=10.0, max_sessions=2)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        r = await client.post(
+            f"/v1/workspaces/{wid}/sessions", json={"session_id": "a"}
+        )
+        assert r.status_code == 201, r.text
+        r = await client.post(
+            f"/v1/workspaces/{wid}/sessions", json={"session_id": "b"}
+        )
+        assert r.status_code == 429
+        assert r.json() == {"detail": "workspace is at max_sessions (2)"}
+        await client.delete(f"/v1/workspaces/{wid}/sessions/a")
+        r = await client.post(
+            f"/v1/workspaces/{wid}/sessions", json={"session_id": "b"}
+        )
+        assert r.status_code == 201, r.text
+    await app.state.registry.close_all()

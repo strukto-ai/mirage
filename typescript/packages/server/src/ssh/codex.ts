@@ -952,7 +952,13 @@ export async function serveCodexSocket(
     console.debug(`codex: socket error on ${entry.id}`, err)
   })
   const sessionId = newSessionId()
-  let queue: Promise<CodexChannel | null> = openSession(entry.runner.ws, sessionId).then(
+  let queue: Promise<CodexChannel | null> = openSession(
+    entry.runner.ws,
+    sessionId,
+    {},
+    null,
+    registry,
+  ).then(
     () =>
       new CodexChannel(
         registry,

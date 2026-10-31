@@ -1,6 +1,32 @@
 {
- "baseline": 2650,
+ "baseline": 2649,
  "modules": {
+  "server/app": {
+   "python_only": {
+    "_drain_on_signals": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
+    "_on_signal": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
+    "_start_drain": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
+    "_drain_then_stop": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal."
+   }
+  },
+  "server/metrics": {
+   "typescript_only": {
+    "held": "Python makes the instruments once through functools.cache on _instruments; TypeScript keeps the counter it made in this variable."
+   },
+   "python_only": {
+    "_lock": "Python's OpenTelemetry reader collects on a thread of its own, so the registries are read and changed under a lock; Node's reader runs on the event loop.",
+    "_served": "Python's OpenTelemetry reader collects on a thread of its own, so it reads a copy of the registries taken under the lock; Node's reader runs on the event loop."
+   }
+  },
+  "server/rate_limit": {
+   "python_only": {
+    "RateLimitMiddleware": "Starlette answers 429 in an ASGI middleware; Fastify answers it in the onRequest hook registerRateLimits adds."
+   },
+   "typescript_only": {
+    "measure": "A TypeScript RateLimit is a plain object, so its rate is checked by a function; Python's dataclass checks it as it is built.",
+    "registerRateLimits": "Fastify answers 429 in an onRequest hook this registers; Starlette's twin is RateLimitMiddleware."
+   }
+  },
   "commands/builtin/rg_glob": {
    "typescript_only": {
     "classPart": "A case-insensitive glob folds ASCII letters only, as globset does: Python compiles it with re.IGNORECASE | re.ASCII, and JavaScript's RegExp has no ASCII-only fold, so TypeScript writes each letter's other case into the class itself."

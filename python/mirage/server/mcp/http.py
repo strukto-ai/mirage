@@ -44,6 +44,7 @@ from mirage.server.mcp.progress import (
     collect_execution,
 )
 from mirage.server.mcp.server import MirageMcpServer
+from mirage.server.metrics import refused
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
@@ -114,6 +115,9 @@ class DaemonToolOperations(McpToolOperations):
         async def run(scope: ExecutionScope) -> JsonValue:
             return await runner.call(run_line(scope))
 
+        if self._jobs.draining:
+            refused("shutting_down")
+            return ToolResult("server is shutting down", True)
         if not self._entry.accepting_jobs:
             return ToolResult("workspace not found", True)
         job = self._jobs.submit(

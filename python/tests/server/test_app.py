@@ -14,12 +14,14 @@
 
 import asyncio
 import os
+import signal
 
 import asyncssh
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from mirage.server import app as app_module
+from mirage.server import metrics as metrics_module
 from mirage.server.app import (
     _remove_pid_file,
     _watch_exit,
@@ -161,3 +163,114 @@ async def test_a_configured_entry_point_without_asyncssh_fails_the_start(
         async with app.router.lifespan_context(app):
             pass
     assert not (tmp_path / "daemon.pid").exists()
+    assert app.state.registry not in metrics_module._registries
+
+
+@pytest.mark.asyncio
+async def test_the_lifespan_lets_a_running_line_finish_before_it_closes():
+    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                "/v1/workspaces",
+                json={
+                    "id": "d",
+                    "config": {
+                        "mounts": {"/": {"vfs": "ram", "mode": "write"}}
+                    },
+                },
+            )
+            assert r.status_code == 201, r.text
+        runner = app.state.registry.get("d").runner
+        line = asyncio.ensure_future(
+            runner.call(runner.ws.shell("sleep 0.3; echo done"))
+        )
+        await asyncio.sleep(0.05)
+    assert app.state.registry.draining
+    assert (await (await line).stdout_str()) == "done\n"
+
+
+@pytest.mark.asyncio
+async def test_a_signal_drains_before_the_servers_handler_stops_it(
+    monkeypatch,
+):
+    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
+    stopped = []
+    installed = {}
+    monkeypatch.setattr(
+        signal,
+        "getsignal",
+        lambda signum: lambda sig, frame: stopped.append(sig),
+    )
+    monkeypatch.setattr(signal, "signal", installed.__setitem__)
+    wrapped = app_module._drain_on_signals(app)
+    assert set(wrapped) == set(installed) == {signal.SIGTERM, signal.SIGINT}
+    installed[signal.SIGTERM](signal.SIGTERM, None)
+    installed[signal.SIGINT](signal.SIGINT, None)
+    await asyncio.sleep(0)
+    await app.state.drain_task
+    assert app.state.registry.draining
+    assert stopped == [signal.SIGTERM]
+
+
+@pytest.mark.asyncio
+async def test_without_a_graceful_timeout_the_servers_handlers_stay(
+    monkeypatch,
+):
+    app = build_app(idle_grace_seconds=10.0)
+    installed = {}
+    monkeypatch.setattr(signal, "signal", installed.__setitem__)
+    assert app_module._drain_on_signals(app) == {}
+    assert installed == {}
+
+
+@pytest.mark.asyncio
+async def test_the_lifespan_puts_the_servers_handlers_back():
+    before = signal.getsignal(signal.SIGINT)
+    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
+    async with app.router.lifespan_context(app):
+        assert signal.getsignal(signal.SIGINT) is not before
+    assert signal.getsignal(signal.SIGINT) is before
+
+
+@pytest.mark.asyncio
+async def test_every_close_marks_the_server_shutting_down():
+    app = build_app(idle_grace_seconds=10.0)
+    async with app.router.lifespan_context(app):
+        assert not app.state.registry.draining
+        assert app.state.registry in metrics_module._registries
+    assert app.state.registry.draining
+    assert app.state.registry not in metrics_module._registries
+
+
+@pytest.mark.asyncio
+async def test_metrics_report_the_work_a_shutdown_waits_for(monkeypatch):
+    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
+    seen = []
+    drain = app.state.registry.drain
+
+    async def watched(seconds: float) -> None:
+        seen.append(app.state.registry in metrics_module._registries)
+        await drain(seconds)
+
+    monkeypatch.setattr(app.state.registry, "drain", watched)
+    async with app.router.lifespan_context(app):
+        pass
+    assert seen == [True]
+    assert app.state.registry not in metrics_module._registries
+
+
+@pytest.mark.asyncio
+async def test_a_failed_close_still_stops_reporting_metrics(monkeypatch):
+    app = build_app(idle_grace_seconds=10.0)
+    monkeypatch.setattr(app.state.registry, "close_all", _failing_close)
+    with pytest.raises(RuntimeError, match="close failed"):
+        async with app.router.lifespan_context(app):
+            pass
+    assert app.state.registry not in metrics_module._registries
+
+
+async def _failing_close() -> None:
+    raise RuntimeError("close failed")

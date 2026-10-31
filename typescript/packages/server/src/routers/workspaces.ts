@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { refused } from '../metrics.ts'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
@@ -57,10 +58,6 @@ export interface WorkspaceRoutesDeps {
   stateRoot: string
   /** The S3-like store a snapshot request may name a key in. */
   snapshotStore: S3Config | undefined
-}
-
-const WRITE_RATE_LIMIT = {
-  config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
 }
 
 interface WorkspaceIdParams {
@@ -213,7 +210,12 @@ async function claimed(
   id: string,
   build: () => Promise<unknown>,
 ): Promise<unknown> {
+  if (deps.registry.draining) {
+    refused('shutting_down')
+    return answer(reply, 503, { detail: 'server is shutting down' })
+  }
   if (!deps.registry.hasRoom()) {
+    refused('max_workspaces')
     return answer(reply, 503, {
       detail: `server is at max_workspaces (${String(deps.registry.maxWorkspaces)})`,
     })
@@ -250,6 +252,18 @@ function building(
     if (!admitted) return answer(reply, 409, { detail: `workspace id already exists: ${id}` })
     return claimed(deps, req, reply, id, build)
   })
+}
+
+/**
+ * Why `ws` holds too many sessions for the server, null when it does not;
+ * a refusal is counted. `holder` names what the sessions came from.
+ * Mirrors Python's `_past_session_cap`.
+ */
+function pastSessionCap(ws: Workspace, cap: number | null, holder: string): string | null {
+  const held = ws.listSessions().length
+  if (cap === null || held <= cap) return null
+  refused('max_sessions')
+  return `${holder} holds ${String(held)} sessions, past max_sessions (${String(cap)})`
 }
 
 /** Refuse an id that would name the state root, not a workspace. */
@@ -388,6 +402,23 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           } catch (e) {
             return answer(reply, 400, { detail: (e as Error).message })
           }
+          // Under max_sessions the sessions its store saved are loaded, and
+          // more than the cap refuse the create.
+          const cap = deps.registry.maxSessions
+          if (cap !== null) {
+            let past: string | null
+            try {
+              await ws.ensureSessionsLoaded()
+              past = pastSessionCap(ws, cap, 'the saved workspace')
+            } catch (e) {
+              await ws.close()
+              throw e
+            }
+            if (past !== null) {
+              await ws.close()
+              return answer(reply, 400, { detail: past })
+            }
+          }
           let entry
           try {
             for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
@@ -412,7 +443,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       .map(makeBrief),
   )
 
-  app.post('/v1/workspaces/load', WRITE_RATE_LIMIT, async (req, reply) => {
+  app.post('/v1/workspaces/load', async (req, reply) => {
     const multipart = (req.headers['content-type'] ?? '').startsWith('multipart/')
     let body: LoadWorkspaceRequest
     let source: string | Uint8Array
@@ -489,6 +520,11 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
           return answer(reply, 400, { detail: `snapshot not found: ${String(key)}` })
         }
         return answer(reply, 400, { detail: `load failed: ${(e as Error).message}` })
+      }
+      const past = pastSessionCap(ws, deps.registry.maxSessions, 'the snapshot')
+      if (past !== null) {
+        await ws.close()
+        return answer(reply, 400, { detail: `load failed: ${past}` })
       }
       let entry
       try {
@@ -643,31 +679,27 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       .send(Buffer.from(tar.buffer, tar.byteOffset, tar.byteLength))
   })
 
-  app.post<{ Params: WorkspaceIdParams }>(
-    '/v1/workspaces/:id/snapshot',
-    WRITE_RATE_LIMIT,
-    async (req, reply) => {
-      const { id } = req.params
-      const entry = deps.registry.visible(id, req.account)
-      if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
-      const parsed = SnapshotBodySchema.safeParse(req.body)
-      if (!parsed.success) {
-        return reply.status(400).send({ detail: `bad snapshot request: ${parsed.error.message}` })
-      }
-      if (deps.snapshotStore === undefined) return noStore(reply)
-      const { key } = parsed.data
-      const scoped = storeKey(req.account, key)
-      if (scoped === null) {
-        return reply.status(400).send({ detail: `invalid snapshot key: ${key}` })
-      }
-      let size: number
-      try {
-        size = await entry.runner.ws.snapshot(scoped, { s3: deps.snapshotStore })
-      } catch (e) {
-        if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
-        throw e
-      }
-      return reply.status(200).send({ id, key, size })
-    },
-  )
+  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/snapshot', async (req, reply) => {
+    const { id } = req.params
+    const entry = deps.registry.visible(id, req.account)
+    if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+    const parsed = SnapshotBodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ detail: `bad snapshot request: ${parsed.error.message}` })
+    }
+    if (deps.snapshotStore === undefined) return noStore(reply)
+    const { key } = parsed.data
+    const scoped = storeKey(req.account, key)
+    if (scoped === null) {
+      return reply.status(400).send({ detail: `invalid snapshot key: ${key}` })
+    }
+    let size: number
+    try {
+      size = await entry.runner.ws.snapshot(scoped, { s3: deps.snapshotStore })
+    } catch (e) {
+      if (isBusy(e)) return reply.status(409).send({ detail: (e as Error).message })
+      throw e
+    }
+    return reply.status(200).send({ id, key, size })
+  })
 }

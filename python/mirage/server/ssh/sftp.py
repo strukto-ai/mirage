@@ -54,7 +54,12 @@ def serve_sftp(
             raise asyncssh.SFTPNoSuchFile(f"no such workspace: {workspace_id}")
         ws = found.runner.ws
         await found.runner.call(
-            open_session(ws, session_id, profile=key_profile(conn))
+            open_session(
+                ws,
+                session_id,
+                profile=key_profile(conn),
+                registry=registry,
+            )
         )
         entry = found
         return MountCore(ws.vfs, session=ws.get_session(session_id))

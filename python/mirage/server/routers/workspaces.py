@@ -25,14 +25,15 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
-from mirage import Workspace
+from mirage import Workspace, WorkspaceRunner
 from mirage.concurrency.limiter import run_blocking
 from mirage.config import (
     WorkspaceConfig,
     _load_profile_policy,
     resolve_secrets,
 )
-from mirage.io.network import run_with_network
+from mirage.io.network import NetworkRule, run_with_network
+from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.profile import SessionProfile
 from mirage.secrets.errors import SecretsError
@@ -42,6 +43,7 @@ from mirage.server.clone import (
 )
 from mirage.server.constants import MAX_SNAPSHOT_BYTES
 from mirage.server.io_serde import explanation_to_dict
+from mirage.server.metrics import refused
 from mirage.server.multipart import (
     MAX_REQUEST_PART,
     MAX_SNAPSHOT_PART,
@@ -105,7 +107,11 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
         workspace_id (str): the id being created.
     """
     registry = request.app.state.registry
+    if registry.draining:
+        refused("shutting_down")
+        raise HTTPException(status_code=503, detail="server is shutting down")
     if not registry.has_room():
+        refused("max_workspaces")
         raise HTTPException(
             status_code=503,
             detail=f"server is at max_workspaces ({registry.max_workspaces})",
@@ -150,6 +156,74 @@ async def _building(
             )
         async with _claimed(request, workspace_id):
             yield
+
+
+async def _construct(
+    config: WorkspaceConfig,
+    rule: NetworkRule | None,
+    workspace_id: str,
+    state_root: str,
+    max_sessions: int | None,
+) -> Workspace:
+    """Build a workspace from its config, on the loop that awaits this:
+    its secrets are read, its mounts and runtimes constructed and their
+    backends imported there, not on the server's loop.
+
+    Map runtime entries construct their instances here, so a bad entry
+    fails the create like any other config mistake. A secret the config
+    names is read under the network the workspace will be held to. The
+    server's default store is disk, so a created workspace survives a
+    restart with no infrastructure; a config's own ``store:`` block wins.
+    Under ``max_sessions`` the sessions its store saved are loaded, and
+    more than the cap refuse the create.
+
+    Args:
+        config (WorkspaceConfig): the posted config.
+        rule (NetworkRule | None): the network the workspace is held to.
+        workspace_id (str): the id it is created under.
+        state_root (str): where the default disk store keeps its state.
+        max_sessions (int | None): the server's session cap.
+
+    Raises:
+        ValueError: the saved sessions are past the cap.
+    """
+    kwargs = (
+        await run_with_network(rule, resolve_secrets(config))
+    ).to_workspace_kwargs()
+    kwargs["workspace_id"] = workspace_id
+    if "store" not in kwargs:
+        kwargs["store"] = DiskWorkspaceStateStore(state_root)
+        kwargs["owns_store"] = True
+    ws = Workspace(**kwargs)
+    if max_sessions is None:
+        return ws
+    try:
+        await ws.ensure_sessions_loaded()
+        past = _past_session_cap(ws, max_sessions, "the saved workspace")
+        if past is not None:
+            raise ValueError(past)
+    except BaseException:
+        await ws.close()
+        raise
+    return ws
+
+
+def _past_session_cap(
+    ws: Workspace, cap: int | None, holder: str
+) -> str | None:
+    """Why ``ws`` holds too many sessions for the server, None when it
+    does not; a refusal is counted.
+
+    Args:
+        ws (Workspace): the workspace built.
+        cap (int | None): the server's ``max_sessions``.
+        holder (str): what the sessions came from, for the refusal.
+    """
+    held = len(ws.list_sessions())
+    if cap is None or held <= cap:
+        return None
+    refused("max_sessions")
+    return f"{holder} holds {held} sessions, past max_sessions ({cap})"
 
 
 def store_key(request: Request, key: str) -> str:
@@ -305,17 +379,15 @@ async def create_workspace(
         await _admit(request, written)
         async with _claimed(request, wid):
             try:
-                # Map runtime entries construct their instances here, so a bad
-                # entry (a wasi build dir that does not exist, an unknown
-                # option) fails the create like any other config mistake. A
-                # secret the config names is read under the network the
-                # workspace will be held to.
-                kwargs = (
-                    await run_with_network(
+                runner = await WorkspaceRunner.build(
+                    _construct(
+                        req.config,
                         registry.rule_for(req.config.network),
-                        resolve_secrets(req.config),
+                        wid,
+                        str(request.app.state.state_root),
+                        registry.max_sessions,
                     )
-                ).to_workspace_kwargs()
+                )
             except (
                 FileNotFoundError,
                 ImportError,
@@ -323,27 +395,10 @@ async def create_workspace(
                 ValueError,
                 TypeError,
             ) as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            kwargs["workspace_id"] = wid
-            # Daemon default is disk (a created workspace survives restart with
-            # zero infrastructure, like git init); the library default stays ram.
-            # A config with an explicit store: block always wins.
-            if "store" not in kwargs:
-                kwargs["store"] = DiskWorkspaceStateStore(
-                    str(request.app.state.state_root)
-                )
-                kwargs["owns_store"] = True
-            try:
-                ws = Workspace(**kwargs)
-            except (
-                FileNotFoundError,
-                ImportError,
-                SecretsError,
-                ValueError,
-            ) as e:
-                # Construction failures (a wasi build dir that does not exist, a
-                # missing runtime extra, a `secrets:` block naming a source the
-                # host cannot resolve) are the caller's to fix, not a 500.
+                # Config mistakes (a wasi build dir that does not exist, an
+                # unknown runtime option, a missing runtime extra, a
+                # `secrets:` block naming a source the host cannot resolve)
+                # are the caller's to fix, not a 500.
                 raise HTTPException(status_code=400, detail=str(e))
             try:
                 for prefix, (
@@ -351,17 +406,22 @@ async def create_workspace(
                     mountpoint,
                 ) in req.config.kernel_mounts().items():
                     await run_blocking(
-                        ws.add_fuse_mount, prefix, mountpoint, backend=backend
+                        runner.ws.add_fuse_mount,
+                        prefix,
+                        mountpoint,
+                        backend=backend,
                     )
                 entry = registry.add(
-                    ws, workspace_id=wid, owner=request.state.account
+                    runner, workspace_id=wid, owner=request.state.account
                 )
                 entry.config_digest = digest
             except ValueError as e:
-                await ws.close()
+                await runner.stop()
                 raise HTTPException(status_code=409, detail=str(e))
-            except Exception:
-                await ws.close()
+            except BaseException:
+                # A cancelled create stops the runner too: nothing else
+                # holds it before it is registered.
+                await runner.stop()
                 raise
         return await make_detail(entry)
 
@@ -576,10 +636,14 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             raise HTTPException(
                 status_code=400, detail=f"override build failed: {e}"
             )
-        try:
-            # The snapshot's saved values meet the server's policies as a
-            # live write does, before any of them lands.
+        restored: list[Policy] = []
+
+        # The snapshot's saved values meet the server's policies as a live
+        # write does, before any of them lands; the restore runs on the
+        # loop the workspace will run on.
+        async def restore() -> Workspace:
             async with registry.restoring() as policies:
+                restored.extend(policies)
                 ws = await run_with_network(
                     rule,
                     Workspace.load(
@@ -592,6 +656,14 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                         policies=policies,
                     ),
                 )
+            past = _past_session_cap(ws, registry.max_sessions, "the snapshot")
+            if past is not None:
+                await ws.close()
+                raise ValueError(past)
+            return ws
+
+        try:
+            runner = await WorkspaceRunner.build(restore())
         except PolicyDenied as e:
             raise HTTPException(status_code=403, detail=str(e))
         except FileNotFoundError:
@@ -606,13 +678,13 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
             raise HTTPException(status_code=400, detail=f"load failed: {e}")
         try:
             entry = registry.add(
-                ws,
+                runner,
                 workspace_id=wid,
                 owner=request.state.account,
-                restored_with=policies,
+                restored_with=restored,
             )
         except ValueError as e:
-            await ws.close()
+            await runner.stop()
             raise HTTPException(status_code=409, detail=str(e))
     return await make_detail(entry)
 

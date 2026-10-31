@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readDaemonTable } from './daemon_config.ts'
-import { ENV_ALLOWED_HOSTS } from './env.ts'
+import { ENV_ALLOWED_HOSTS, ENV_FORWARDED_ALLOW_IPS } from './env.ts'
 import {
   DEFAULT_ALLOWED_HOSTS,
   HOST_PATTERN,
@@ -40,6 +40,31 @@ export function resolveAllowedHosts(
   const fromConfig = readDaemonTable(mirageHome(env)).allowed_hosts
   if (fromConfig !== undefined && fromConfig !== '') return parseAllowedHosts(fromConfig)
   return parseAllowedHosts(undefined)
+}
+
+/**
+ * The proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` the server
+ * believes, so the client address a rate limit counts is the caller's and
+ * not the proxy's. Each entry is an address or a network (`10.0.0.0/8`);
+ * `*` believes every peer. Undefined falls back to
+ * `$MIRAGE_FORWARDED_ALLOW_IPS`, then the `forwarded_allow_ips` key in
+ * config.toml's `[daemon]` (both comma-separated), then none. Mirrors
+ * Python's `resolve_forwarded_allow_ips`.
+ */
+export function resolveForwardedAllowIps(
+  forwardedAllowIps?: readonly string[],
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  if (forwardedAllowIps !== undefined) return [...forwardedAllowIps]
+  const fromEnv = env[ENV_FORWARDED_ALLOW_IPS]
+  const raw =
+    fromEnv !== undefined && fromEnv !== ''
+      ? fromEnv
+      : (readDaemonTable(mirageHome(env)).forwarded_allow_ips ?? '')
+  return raw
+    .split(',')
+    .map((ip) => ip.trim())
+    .filter((ip) => ip.length > 0)
 }
 
 export function stripPort(rawHost: string): string {

@@ -50,6 +50,8 @@ dependencies = [
     "jsonschema>=4.26.0",
     "regex>=2026.4.4",
     "multidict>=6.0",
+    "limits>=5.8.0",
+    "opentelemetry-api>=1.45.1",
 ]
 
 [project.urls]
@@ -268,6 +270,7 @@ dev = [
     "google-auth-oauthlib>=1.3.1",
     "tzdata>=2026.5",
     "typesafe-sdk>=0.7.5",
+    "opentelemetry-sdk>=1.45.1",
 ]
 
 # Advisory dead-code finder for local use only. NOT a CI gate and not a
