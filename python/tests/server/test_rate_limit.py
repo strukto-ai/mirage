@@ -195,3 +195,16 @@ async def test_a_bare_upgrade_header_is_still_counted():
         assert (
             await client.get("/v1/workspaces", headers=upgrade)
         ).status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_logs_the_limit_not_the_value(caplog):
+    limits = [RateLimit("header:authorization", "1/minute")]
+    token = {"authorization": "Bearer secret-token"}
+    async with _client(rate_limits=limits) as client:
+        await client.get("/v1/workspaces", headers=token)
+        with caplog.at_level("WARNING", logger="mirage.server.rate_limit"):
+            r = await client.get("/v1/workspaces", headers=token)
+    assert r.status_code == 429
+    assert "secret-token" not in caplog.text
+    assert "header:authorization=1/minute" in caplog.text

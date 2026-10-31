@@ -15,7 +15,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildApp, type BuildAppOptions } from './app.ts'
 import { AuthMode } from './auth/index.ts'
 import { DaemonConfigError } from './daemon_config.ts'
@@ -161,5 +161,33 @@ describe('registerRateLimits around sign-in', () => {
         { url: '/v1/workspaces', headers: { upgrade: 'websocket' } },
       ]),
     ).toEqual([200, 429])
+  })
+})
+
+describe('refusal log', () => {
+  it('names the limit, not the value counted', async () => {
+    const warned: string[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation((message: string) => {
+      warned.push(message)
+    })
+    try {
+      const token = { authorization: 'Bearer secret-token' }
+      expect(
+        await statuses({ rateLimits: [{ key: 'header:authorization', rate: '1/minute' }] }, [
+          { url: '/v1/workspaces', headers: token },
+          { url: '/v1/workspaces', headers: token },
+        ]),
+      ).toEqual([200, 429])
+    } finally {
+      warn.mockRestore()
+    }
+    expect(warned.join('\n')).not.toContain('secret-token')
+    expect(warned).toContain('rate-limiting a request past header:authorization=1/minute')
+  })
+
+  it('leaves readiness public when its URL carries a query', async () => {
+    const app = buildApp({ authConfig: { mode: AuthMode.Local, localToken: 'right' } })
+    expect((await app.inject({ method: 'GET', url: '/v1/ready?probe=1' })).statusCode).toBe(200)
+    await app.close()
   })
 })

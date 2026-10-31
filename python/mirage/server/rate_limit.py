@@ -227,7 +227,12 @@ class RateLimitMiddleware:
                 limit.item, str(at), value
             )
             wait = max(1, math.ceil(stats.reset_time - time.time()))
-            logger.warning("rate-limiting request from %s", value)
+            # The limit, never the value counted, which may be a token.
+            logger.warning(
+                "rate-limiting a request past %s=%s",
+                limit.key if isinstance(limit.key, str) else "function",
+                limit.rate,
+            )
             refused("rate_limit")
             response = JSONResponse(
                 {"detail": "Too Many Requests"},

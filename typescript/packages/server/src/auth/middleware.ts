@@ -72,7 +72,7 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
   const keySet =
     config.jwt?.jwksUrl !== undefined ? createRemoteJWKSet(new URL(config.jwt.jwksUrl)) : undefined
   app.addHook('onRequest', async (req, reply) => {
-    if (PUBLIC_PATHS.has(req.url)) return
+    if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
     const token = extractBearer(req)
     if (token === undefined) {
       await unauthorized(reply, 'missing bearer token')

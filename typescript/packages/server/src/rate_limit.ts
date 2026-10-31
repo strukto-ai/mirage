@@ -152,22 +152,24 @@ export function registerRateLimits(
   if (counted.length === 0) return
   const limiters = counted.map((limit) => {
     const [points, duration] = measure(limit)
-    return { key: limit.key, limiter: new RateLimiterMemory({ points, duration }) }
+    return { limit, limiter: new RateLimiterMemory({ points, duration }) }
   })
   app.addHook('onRequest', async (req, reply) => {
     if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
     // Node marks a request upgraded only when the connection really is,
     // so a bare Upgrade header does not skip the limits.
     if ((req.raw as { upgrade?: boolean }).upgrade === true) return
-    for (const { key, limiter } of limiters) {
-      const by = value(key, req)
+    for (const { limit, limiter } of limiters) {
+      const by = value(limit.key, req)
       if (by === null) continue
       try {
         await limiter.consume(by)
       } catch (e) {
         if (!(e instanceof RateLimiterRes)) throw e
         reply.header('Retry-After', String(Math.max(1, Math.ceil(e.msBeforeNext / 1000))))
-        console.warn(`rate-limiting request from ${by}`)
+        // The limit, never the value counted, which may be a token.
+        const name = typeof limit.key === 'function' ? 'function' : limit.key
+        console.warn(`rate-limiting a request past ${name}=${limit.rate}`)
         refused('rate_limit')
         await reply.code(429).send({ detail: 'Too Many Requests' })
         return

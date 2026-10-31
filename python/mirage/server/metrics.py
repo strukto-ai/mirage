@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+import threading
 import weakref
 from collections.abc import Callable, Iterable
 
@@ -26,6 +27,9 @@ METER_NAME = "mirage.server"
 
 _RUNNING = frozenset({ExecutionStatus.RUNNING, ExecutionStatus.STOPPING})
 _registries: "weakref.WeakSet[WorkspaceRegistry]" = weakref.WeakSet()
+# The OpenTelemetry reader collects on a thread of its own, so the set is
+# read and changed under this lock.
+_lock = threading.Lock()
 
 
 def register_metrics(registry: WorkspaceRegistry) -> Callable[[], None]:
@@ -43,9 +47,15 @@ def register_metrics(registry: WorkspaceRegistry) -> Callable[[], None]:
     Returns:
         Callable[[], None]: stops reporting it.
     """
-    _registries.add(registry)
+    with _lock:
+        _registries.add(registry)
     _instruments()
-    return functools.partial(_registries.discard, registry)
+
+    def forget() -> None:
+        with _lock:
+            _registries.discard(registry)
+
+    return forget
 
 
 def refused(reason: str) -> None:
@@ -111,13 +121,19 @@ def _create(meter: Meter) -> Counter:
     )
 
 
+def _served() -> list[WorkspaceRegistry]:
+    """The registries reported, copied under the lock."""
+    with _lock:
+        return list(_registries)
+
+
 def _workspaces(options: CallbackOptions) -> Iterable[Observation]:
     """The workspaces held.
 
     Args:
         options (CallbackOptions): the collection's options.
     """
-    yield Observation(sum(len(registry) for registry in _registries))
+    yield Observation(sum(len(registry) for registry in _served()))
 
 
 def _limit(options: CallbackOptions) -> Iterable[Observation]:
@@ -126,7 +142,7 @@ def _limit(options: CallbackOptions) -> Iterable[Observation]:
     Args:
         options (CallbackOptions): the collection's options.
     """
-    caps = [r.max_workspaces for r in _registries if r.max_workspaces]
+    caps = [r.max_workspaces for r in _served() if r.max_workspaces]
     if caps:
         yield Observation(sum(caps))
 
@@ -140,7 +156,7 @@ def _sessions(options: CallbackOptions) -> Iterable[Observation]:
     yield Observation(
         sum(
             len(entry.runner.ws.list_sessions())
-            for registry in _registries
+            for registry in _served()
             for entry in registry.list()
         )
     )
@@ -155,7 +171,7 @@ def _running(options: CallbackOptions) -> Iterable[Observation]:
     yield Observation(
         sum(
             1
-            for registry in _registries
+            for registry in _served()
             for job in registry.jobs.list(prune=False)
             if job.status in _RUNNING
         )
@@ -168,4 +184,4 @@ def _shutting_down(options: CallbackOptions) -> Iterable[Observation]:
     Args:
         options (CallbackOptions): the collection's options.
     """
-    yield Observation(int(any(r.draining for r in _registries)))
+    yield Observation(int(any(r.draining for r in _served())))
