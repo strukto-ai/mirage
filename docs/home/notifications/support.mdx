@@ -28,6 +28,7 @@ See the [Python and TypeScript examples](#push-examples).
 | Trello | [Webhooks](https://developer.atlassian.com/cloud/trello/guides/rest-api/webhooks/) | `TrelloEventHook.to_events` | `TrelloEventHook.toEvents` |
 | Notion | [Webhooks](https://developers.notion.com/reference/webhooks) | `NotionEventHook.to_events` | `NotionEventHook.toEvents` |
 | Email | [IMAP IDLE](https://datatracker.ietf.org/doc/html/rfc2177) | `EmailEventHook.to_events` | `EmailEventHook.toEvents` |
+| Box | [Events API](https://developer.box.com/guides/events/user-events/polling), read by your own long poll | `BoxEventHook.to_events` | `BoxEventHook.toEvents` |
 
 ### Push examples
 
@@ -80,13 +81,14 @@ Fetch changed files from the service, on a schedule or after a notification.
 Create `hook` with `vfs.delta_hook()` (Python) or `vfs.deltaHook()` (TypeScript).
 Call `await hook.pull(root, checkpoint)`, send each item in `result.changes`
 to `ws.notify()`, and save `result.checkpoint` for the next call.
+The first call, with `None` (`null` in TypeScript) as the checkpoint, only records a
+baseline: it returns no changes and the checkpoint to start from.
 See the [Python and TypeScript examples](#poll-examples).
 
 | VFS | Notification service | Python | TypeScript |
 | --- | --- | --- | --- |
 | Airtable | [Webhooks API](https://airtable.com/developers/web/api/webhooks-overview) | `vfs.delta_hook()` | `vfs.deltaHook()` |
 | Box | [Long-poll events](https://developer.box.com/guides/events/user-events/polling) | `vfs.delta_hook()` | `vfs.deltaHook()` |
-| Box | [Events API responses](https://developer.box.com/guides/events/user-events/polling) | `BoxEventHook.to_events` | `BoxEventHook.toEvents` |
 | Dropbox | [Webhooks or long polling](https://docs.dropboxapi.com/dropbox-api/docs/detecting-changes) | `vfs.delta_hook()` | `vfs.deltaHook()` |
 | Gmail | [Pub/Sub notifications](https://developers.google.com/workspace/gmail/api/guides/push) | `vfs.delta_hook()` | `vfs.deltaHook()` |
 | Google Calendar | [Push notifications](https://developers.google.com/workspace/calendar/api/guides/push) | `vfs.delta_hook()` | `vfs.deltaHook()` |
