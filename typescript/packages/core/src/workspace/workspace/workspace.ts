@@ -745,9 +745,10 @@ export class Workspace {
   ): Promise<EventDict[]> {
     const { sessionId, since, last, vfs = false } = options
     const kinds = new Set<unknown>(vfs ? [EVENT_COMMAND, EVENT_VFS] : [EVENT_COMMAND])
-    const picked = (await this.observer.events(sessionId)).filter(
+    const picked = (await this.observer.events()).filter(
       (e) =>
         kinds.has(e.type) &&
+        (sessionId === undefined || e.session === sessionId) &&
         (since === undefined || (typeof e.timestamp === 'number' ? e.timestamp : 0) >= since),
     )
     if (last === undefined) return picked

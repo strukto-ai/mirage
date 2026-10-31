@@ -217,20 +217,15 @@ async def test_history_filters_by_session_time_count_and_vfs():
         await ws.close()
 
 
-async def _every_log() -> dict[str, bytes]:
-    raise AssertionError("read every session's log")
-
-
 @pytest.mark.asyncio
-async def test_a_session_history_reads_that_sessions_log_alone(monkeypatch):
+async def test_a_session_history_holds_that_session_alone():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
-        await ws.shell("echo hi > /data/a.txt")
-        ws.create_session("s2")
-        await ws.shell("cat /data/a.txt", session_id="s2")
-        monkeypatch.setattr(ws.observer.store, "read_all", _every_log)
-        assert [e["command"] for e in await ws.history(session_id="s2")] == [
-            "cat /data/a.txt"
-        ]
+        for sid, line in (("s1", "echo one"), ("team/s1", "echo two")):
+            ws.create_session(sid)
+            await ws.shell(line, session_id=sid)
+        assert [
+            e["command"] for e in await ws.history(session_id="s1", last=5)
+        ] == ["echo one"]
     finally:
         await ws.close()

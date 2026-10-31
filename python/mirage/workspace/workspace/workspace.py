@@ -685,8 +685,9 @@ class Workspace:
         kinds = (EVENT_COMMAND, EVENT_VFS) if vfs else (EVENT_COMMAND,)
         picked = [
             e
-            for e in await self.observer.events(session_id)
+            for e in await self.observer.events()
             if e.get("type") in kinds
+            and (session_id is None or e.get("session") == session_id)
             and (since is None or e.get("timestamp", 0) >= since)
         ]
         if last is None:
