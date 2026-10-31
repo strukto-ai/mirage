@@ -41,8 +41,13 @@ COLLECTING = threading.local()
 DEFERRED: WeakKeyDictionary[
     asyncio.AbstractEventLoop, deque[Callable[[], None]]
 ] = WeakKeyDictionary()
-# The loops this thread is running put-off work for now: the work's own
-# calls reach ``run_deferred`` again, which must not start over.
+# One drain of a loop's put-off work at a time: a caller on another
+# thread waits for the one running, whose work may still be landing.
+DRAIN_LOCKS: WeakKeyDictionary[asyncio.AbstractEventLoop, threading.Lock] = (
+    WeakKeyDictionary()
+)
+# The loops this thread is draining now: the work's own calls reach
+# ``run_deferred`` again, which must not start over.
 DRAINING = threading.local()
 
 
@@ -77,29 +82,36 @@ def defer(loop: asyncio.AbstractEventLoop, work: Callable[[], None]) -> None:
 
 def run_deferred(loop: asyncio.AbstractEventLoop) -> None:
     """Run what was put off on ``loop``, in order, from a thread that is
-    not driving it. A failure is logged and the rest still run.
+    not driving it, after any drain another thread is running finishes.
+    A failure is logged and the rest still run.
 
     Args:
         loop (asyncio.AbstractEventLoop): the loop the work drives.
     """
-    pending = DEFERRED.get(loop)
+    lock = DRAIN_LOCKS.get(loop)
+    if not DEFERRED.get(loop) and (lock is None or not lock.locked()):
+        return
     draining: set[asyncio.AbstractEventLoop] = DRAINING.__dict__.setdefault(
         "loops", set()
     )
-    if not pending or loop in draining:
+    if loop in draining:
         return
-    draining.add(loop)
-    try:
-        while pending:
-            work = pending.popleft()
-            try:
-                work()
-            except Exception:
-                logger.debug(
-                    "work put off by a collection failed", exc_info=True
-                )
-    finally:
-        draining.discard(loop)
+    if lock is None:
+        lock = DRAIN_LOCKS.setdefault(loop, threading.Lock())
+    with lock:
+        draining.add(loop)
+        try:
+            pending = DEFERRED.get(loop)
+            while pending:
+                work = pending.popleft()
+                try:
+                    work()
+                except Exception:
+                    logger.debug(
+                        "work put off by a collection failed", exc_info=True
+                    )
+        finally:
+            draining.discard(loop)
 
 
 @contextmanager

@@ -16,6 +16,7 @@ import asyncio
 import errno
 import gc
 import io
+import os
 import sys
 import threading
 import weakref
@@ -547,6 +548,32 @@ def test_writes_a_collection_makes_to_a_live_stream_land_in_order():
             gc.enable()
     log.write(b"after")
     log.close()
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during-after"
+    )
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_descriptor_writes_after_what_a_collection_held_back():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    router = HostFs(ws.vfs, loop)
+    fd = router.open("/data/log", os.O_WRONLY | os.O_CREAT)
+    router.write(fd, b"before-")
+    stream = make_open(ws.vfs, loop, router)(
+        fd, "wb", buffering=0, closefd=False
+    )
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        _WritesWhenCollected(stream)
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+    router.write(fd, b"after")
+    router.close(fd)
     assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
         b"before-during-after"
     )

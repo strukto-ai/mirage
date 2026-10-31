@@ -119,6 +119,8 @@ class Descriptor:
         inode (str): where the links on ``opened`` led as it opened, which
             names its inode however the file is renamed or the link
             changed since; "" names it by ``opened``.
+        late (list[tuple[int, bytes]]): writes a garbage collection held
+            back (``write``), at the offsets they were made at.
     """
 
     files: "RuntimeFiles"
@@ -128,6 +130,7 @@ class Descriptor:
     directory: bool = False
     pos: int = 0
     inode: str = ""
+    late: list[tuple[int, bytes]] = dataclasses.field(default_factory=list)
 
     @property
     def path(self) -> str:
@@ -137,7 +140,18 @@ class Descriptor:
     @property
     def size(self) -> int:
         """The file's length as the handle holds it, its writes counted."""
+        self.landed()
         return self.files.fstat(self.fh).size
+
+    def landed(self) -> None:
+        """Write what a garbage collection held back, in order, once it is
+        over: before anything else reaches the handle, or at the loop's
+        next call from outside (``RuntimeFiles.defer``)."""
+        if not self.late or self.files.held:
+            return
+        late, self.late = self.late, []
+        for offset, data in late:
+            self.files.pwrite(self.fh, offset, data)
 
     def pread(self, offset: int, size: int) -> bytes:
         """Read at an explicit offset without moving the position.
@@ -148,6 +162,7 @@ class Descriptor:
         """
         if size <= 0:
             return b""
+        self.landed()
         return self.files.pread(self.fh, offset, size)
 
     def read(self, size: int | None = None) -> bytes:
@@ -176,6 +191,7 @@ class Descriptor:
             data (bytes): the payload.
         """
         if data:
+            self.landed()
             self.files.pwrite(self.fh, offset, data)
 
     def write(self, data: bytes) -> None:
@@ -185,6 +201,16 @@ class Descriptor:
         Args:
             data (bytes): the payload.
         """
+        if self.files.held:
+            # Inside a collection, which may have interrupted a drive of
+            # the loop, the bytes wait (``landed``); the position moves
+            # now, so a later call on the handle writes after them.
+            if not self.late:
+                self.files.defer(self.landed)
+            self.late.append((self.pos, data))
+            if not self.mode.append:
+                self.pos += len(data)
+            return
         # The end first, as O_APPEND moves to it: a write that fails to
         # find it leaves nothing written.
         if self.mode.append and data:
@@ -220,14 +246,17 @@ class Descriptor:
         Args:
             size (int): the new length.
         """
+        self.landed()
         self.files.ftruncate(self.fh, size)
 
     def land(self) -> None:
         """Land what it wrote, as fsync(2) does."""
+        self.landed()
         self.files.fsync(self.fh)
 
     def close(self) -> None:
         """Land what it wrote and let the core's handle go."""
+        self.landed()
         self.files.close(self.fh)
 
 

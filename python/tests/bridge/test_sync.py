@@ -440,3 +440,40 @@ def test_put_off_work_drains_without_nesting():
     finally:
         loop.close()
     assert len(done) == count
+
+
+def test_a_drain_another_thread_is_running_is_waited_for():
+    loop = asyncio.new_event_loop()
+    owner = threading.Thread(target=loop.run_forever, daemon=True)
+    owner.start()
+    started, release = threading.Event(), threading.Event()
+    order = []
+
+    def slow() -> None:
+        order.append("first")
+        started.set()
+        assert release.wait(5)
+        order.append("first done")
+
+    def second_call() -> None:
+        order.append(run_async_from_sync(_one_turn(), loop))
+
+    defer(loop, slow)
+    defer(loop, lambda: order.append("second"))
+    first = threading.Thread(
+        target=run_async_from_sync, args=(_one_turn(), loop)
+    )
+    first.start()
+    try:
+        assert started.wait(5)
+        second = threading.Thread(target=second_call)
+        second.start()
+        second.join(0.1)
+    finally:
+        release.set()
+    first.join(5)
+    second.join(5)
+    loop.call_soon_threadsafe(loop.stop)
+    owner.join(5)
+    loop.close()
+    assert order == ["first", "first done", "second", 1]

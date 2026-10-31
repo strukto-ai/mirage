@@ -61,11 +61,10 @@ class HandleRaw(io.RawIOBase):
     ``flush`` lands the descriptor's writes on the mount, which a close,
     and a flush through the layers above, comes down to. Inside a
     garbage collection, while its calls drive a shared loop
-    (``RuntimeFiles.held``), it holds writes back and puts a close off
-    until the loop can be driven (``RuntimeFiles.defer``): what it held
-    lands before anything else touches the stream, and a stream the
-    program dropped in a cycle stays open until then, so every layer's
-    last flush still reaches it.
+    (``RuntimeFiles.held``), the descriptor holds its writes back and the
+    stream puts its close off until the loop can be driven
+    (``RuntimeFiles.defer``): a stream the program dropped in a cycle
+    stays open until then, so every layer's last flush still reaches it.
 
     Args:
         handle (Descriptor): the descriptor it reads and writes through.
@@ -98,7 +97,6 @@ class HandleRaw(io.RawIOBase):
         self._writable = writable
         self._release = release
         self._fd = fd
-        self._late: list[bytes] = []
         self._put_off = False
         self.name = handle.opened
         self.mode = mode
@@ -126,15 +124,6 @@ class HandleRaw(io.RawIOBase):
             raise io.UnsupportedOperation("File not open for reading")
         if reading is False and not self._writable:
             raise io.UnsupportedOperation("File not open for writing")
-        self._landed()
-
-    def _landed(self) -> None:
-        """Write what a collection held back, in order, once it is over."""
-        if not self._late or self._handle.files.held:
-            return
-        late, self._late = self._late, []
-        for payload in late:
-            syscall(self._handle.write)(payload)
 
     def seekable(self) -> bool:
         return True
@@ -154,12 +143,7 @@ class HandleRaw(io.RawIOBase):
     def write(self, data: "ReadableBuffer") -> int:
         self._check(reading=False)
         payload = bytes(data)
-        if self._handle.files.held:
-            if not self._late and not self._put_off:
-                self._handle.files.defer(self._landed)
-            self._late.append(payload)
-        else:
-            syscall(self._handle.write)(payload)
+        syscall(self._handle.write)(payload)
         return len(payload)
 
     def seek(self, offset: int, whence: int = 0) -> int:
@@ -188,10 +172,7 @@ class HandleRaw(io.RawIOBase):
 
     def flush(self) -> None:
         super().flush()
-        if self._handle.files.held:
-            return
-        self._landed()
-        if self._writable:
+        if self._writable and not self._handle.files.held:
             syscall(self._handle.land)()
 
     def close(self) -> None:
