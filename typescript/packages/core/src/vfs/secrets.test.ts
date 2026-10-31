@@ -16,10 +16,14 @@ import { describe, expect, it } from 'vitest'
 import { errorSummary } from '../secrets/summary.ts'
 import {
   FIELD_NORMALIZERS,
+  hasRedactedSecret,
   normalizeNonEmpty,
   parseConfigWithSchema,
+  REDACTED_SECRET,
+  redactConfigWithSchema,
   refuseRepeatedFields,
   refuseUnknownKeys,
+  secretStr,
   z,
 } from './secrets.ts'
 
@@ -129,6 +133,22 @@ describe('refuseRepeatedFields', () => {
         })
       }),
     ).toBe('keyPrefix: unrecognized_keys; maxDrainBytes: unrecognized_keys')
+  })
+})
+
+describe('redactConfigWithSchema', () => {
+  it('redacts a record of secrets whole, as Python redacts dict[str, SecretStr]', () => {
+    const schema = z.object({ env: z.record(z.string(), secretStr()), url: z.string() })
+    const redacted = redactConfigWithSchema(schema, { env: { TOKEN: 's' }, url: 'u' })
+    expect(redacted).toEqual({ env: REDACTED_SECRET, url: 'u' })
+    expect(hasRedactedSecret(redacted)).toBe(true)
+  })
+
+  it('leaves a record of plain strings as it is', () => {
+    const schema = z.object({ labels: z.record(z.string(), z.string()) })
+    expect(redactConfigWithSchema(schema, { labels: { team: 'a' } })).toEqual({
+      labels: { team: 'a' },
+    })
   })
 })
 
