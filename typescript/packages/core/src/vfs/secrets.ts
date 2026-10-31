@@ -259,8 +259,11 @@ function redactObjectWithSchema(
   return out
 }
 
+// A record of secrets is one secret field, as Python's dict[str, SecretStr] is.
 function isSecretSchema(schema: SchemaType): boolean {
-  return schemaMeta(unwrapSchema(schema))?.[SECRET_META_KEY] === true
+  const unwrapped = unwrapSchema(schema)
+  if (schemaMeta(unwrapped)?.[SECRET_META_KEY] === true) return true
+  return unwrapped instanceof z.ZodRecord && isSecretSchema(unwrapped.valueType as SchemaType)
 }
 
 function unwrapSchema(schema: SchemaType): SchemaType {

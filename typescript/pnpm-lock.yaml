@@ -197,6 +197,12 @@ importers:
       '@mastra/core':
         specifier: ^1.79.0
         version: 1.79.0(@bufbuild/protobuf@2.13.0)(@grpc/grpc-js@1.14.5)(ai@7.0.153(zod@4.6.7))(effect@3.21.0)(express@5.2.1)(typebox@1.3.27)(zod-to-json-schema@3.25.2(zod@4.6.7))(zod@4.6.7)
+      '@modelcontextprotocol/client':
+        specifier: ^2.3.0
+        version: 2.3.0
+      '@modelcontextprotocol/server':
+        specifier: ^2.3.0
+        version: 2.3.0
       '@openai/agents':
         specifier: ^0.21.0
         version: 0.21.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.3)(undici@8.12.3)(ws@8.21.3)(zod@4.6.7)

@@ -69,6 +69,17 @@ def test_top_level_secret_fields_still_redact():
     assert revealed_config_dump(Inner(token=SecretStr("s")))["token"] == "s"
 
 
+class EnvConfig(BaseModel):
+    env: dict[str, SecretStr] = {}
+    url: str = "u"
+
+
+def test_a_mapping_of_secrets_redacts_whole():
+    data = redacted_config_dump(EnvConfig(env={"TOKEN": SecretStr("s")}))
+    assert data == {"env": REDACTED_SECRET, "url": "u"}
+    assert has_redacted_secret(data)
+
+
 class ProviderConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 

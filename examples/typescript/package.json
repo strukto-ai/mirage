@@ -19,6 +19,8 @@
     "@langchain/langgraph-checkpoint": "^1.1.5",
     "@langchain/langgraph-sdk": "^1.9.29",
     "@mastra/core": "^1.79.0",
+    "@modelcontextprotocol/client": "^2.3.0",
+    "@modelcontextprotocol/server": "^2.3.0",
     "@openai/agents": "^0.21.0",
     "@opencode-ai/plugin": "^1.19.4",
     "@opencode-ai/sdk": "^1.18.34",
