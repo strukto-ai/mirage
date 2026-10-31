@@ -362,7 +362,8 @@ def build_app(
             account, the workspace, a header or a function of the
             request; past one a request answers 429. ``None`` (default)
             reads ``$MIRAGE_RATE_LIMITS`` or the ``rate_limits`` config
-            key, else sets none.
+            key, else allows 1000 requests per minute per IP. An empty
+            list disables the limits.
         forwarded_allow_ips (Sequence[str] | None): the proxies whose
             ``X-Forwarded-For`` names the client, addresses or networks,
             ``*`` for any. ``None`` (default) reads

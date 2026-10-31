@@ -272,6 +272,14 @@ def test_resolved_config_includes_the_ssh_endpoint(monkeypatch, tmp_path):
     assert resolved_config()["ssh_port"] == ("2222", "env MIRAGE_SSH_PORT")
 
 
+def test_resolved_config_shows_the_rate_limits_in_force(monkeypatch, tmp_path):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.delenv("MIRAGE_RATE_LIMITS", raising=False)
+    assert resolved_config()["rate_limits"] == ("ip=1000/minute", "default")
+    (tmp_path / "config.toml").write_text('[daemon]\nrate_limits = ""\n')
+    assert resolved_config()["rate_limits"] == ("", "file")
+
+
 def _store_login(url: str) -> None:
     write_login(
         Login(url=url, access_token="from-login", logged_in_at=time.time())

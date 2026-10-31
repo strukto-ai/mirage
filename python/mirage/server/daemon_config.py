@@ -56,6 +56,7 @@ NUMERIC_KEYS = frozenset(
         "ssh_port",
     }
 )
+DEFAULT_RATE_LIMITS = "ip=1000/minute"
 
 
 class DaemonConfigError(Exception):

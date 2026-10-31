@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import time
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from starlette.requests import Request
+from starlette.testclient import TestClient, WebSocketDenialResponse
 
 from mirage.server import build_app
 from mirage.server.auth import AuthConfig
@@ -63,7 +66,7 @@ def test_a_header_key_names_its_header():
 def test_limits_read_the_env_then_config(monkeypatch, tmp_path):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     monkeypatch.delenv(ENV_RATE_LIMITS, raising=False)
-    assert resolve_rate_limits() == ()
+    assert resolve_rate_limits() == (RateLimit("ip", "1000/minute"),)
     (tmp_path / "config.toml").write_text(
         '[daemon]\nrate_limits = "account=600/minute"\n'
     )
@@ -74,6 +77,9 @@ def test_limits_read_the_env_then_config(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_RATE_LIMITS, "ip=5")
     with pytest.raises(DaemonConfigError, match="rate_limits"):
         resolve_rate_limits()
+    monkeypatch.delenv(ENV_RATE_LIMITS)
+    (tmp_path / "config.toml").write_text('[daemon]\nrate_limits = ""\n')
+    assert resolve_rate_limits() == ()
 
 
 @pytest.mark.asyncio
@@ -163,6 +169,47 @@ def test_an_account_key_counts_the_signed_in_account():
 
 @pytest.mark.no_auth_override
 @pytest.mark.asyncio
+async def test_default_limits_authentication_before_verifying_tokens(
+    monkeypatch, caplog, tmp_path
+):
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
+    monkeypatch.delenv(ENV_RATE_LIMITS, raising=False)
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    caplog.set_level("ERROR", logger="mirage.server.auth.middleware")
+    auth = AuthConfig(mode="local", local_token="right")
+    async with _client(auth_config=auth) as client:
+        for i in range(1000):
+            response = await client.get(
+                "/v1/workspaces",
+                headers={
+                    "authorization": f"Bearer wrong-{i}",
+                    "x-forwarded-for": f"10.0.0.{i % 256}",
+                },
+            )
+            assert response.status_code == 401
+        right = {"authorization": "Bearer right"}
+        refused = await client.get("/v1/workspaces", headers=right)
+        assert refused.status_code == 429
+        assert refused.json() == {"detail": "Too Many Requests"}
+        assert refused.headers["retry-after"] == "60"
+        assert (await client.get("/v1/health")).status_code == 200
+        assert (await client.get("/v1/ready")).status_code == 200
+        now += 61
+        assert (
+            await client.get("/v1/workspaces", headers=right)
+        ).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_empty_list_disables_the_default():
+    async with _client(rate_limits=[]) as client:
+        for _ in range(1001):
+            assert (await client.get("/v1/workspaces")).status_code == 200
+
+
+@pytest.mark.no_auth_override
+@pytest.mark.asyncio
 async def test_an_ip_limit_counts_requests_a_bad_token_brings():
     app = build_app(
         idle_grace_seconds=10.0,
@@ -195,6 +242,25 @@ async def test_a_bare_upgrade_header_is_still_counted():
         assert (
             await client.get("/v1/workspaces", headers=upgrade)
         ).status_code == 429
+
+
+def test_websocket_handshakes_share_the_http_authentication_budget():
+    app = build_app(
+        auth_config=AuthConfig(mode="local", local_token="right"),
+        rate_limits=[RateLimit("ip", "1/minute")],
+    )
+    with TestClient(app, base_url="http://test") as client:
+        for status in (401, 429):
+            with pytest.raises(WebSocketDenialResponse) as denied:
+                with client.websocket_connect(
+                    "/v1/workspaces/missing/ssh",
+                    headers={"authorization": "Bearer wrong"},
+                ):
+                    pytest.fail("an invalid bearer must not open a WebSocket")
+            assert denied.value.status_code == status
+            if status == 429:
+                assert 1 <= int(denied.value.headers["retry-after"]) <= 60
+        assert client.get("/v1/workspaces").status_code == 429
 
 
 @pytest.mark.asyncio
