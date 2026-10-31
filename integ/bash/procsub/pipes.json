@@ -1279,12 +1279,13 @@
         "disk",
         "opfs"
       ],
-      "command": "head -c 1000000 /dev/zero > {mount}/procsub-source; f() { timeout 0.1 tee \"$1\" < {mount}/procsub-source > /dev/null; echo \"st=$?\"; sleep 1; }; f >(sleep 0.3; cat > {mount}/procsub-copy); wait; [ \"$(wc -c < {mount}/procsub-copy)\" -lt 1000000 ] && echo partial; rm {mount}/procsub-source {mount}/procsub-copy",
+      "command": "head -c 1000000 /dev/zero > {mount}/procsub-source; f() { timeout 0.1 tee \"$1\" < {mount}/procsub-source > /dev/null; echo \"st=$?\"; : > {mount}/procsub-go; sleep 1; }; f >(while [ ! -e {mount}/procsub-go ]; do sleep 0.1; done; cat > {mount}/procsub-copy); wait; [ \"$(wc -c < {mount}/procsub-copy)\" -lt 1000000 ] && echo partial; rm {mount}/procsub-source {mount}/procsub-copy {mount}/procsub-go",
       "expect": {
         "exit": 0,
         "stdout": "st=124\npartial\n",
         "stderr": ""
-      }
+      },
+      "note": "The reader starts only once timeout has answered, so tee is still blocked on the full pipe at the deadline however late it fires; a reader that slept a fixed time raced the deadline whenever the line ran slowly."
     },
     {
       "id": "procsub_mv_of_a_tree_holding_a_pipe_refused",
