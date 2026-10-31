@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import type { LineFacts } from '../../types.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { type WordChoices, matchWord, valueClasses } from './word_choice.ts'
@@ -223,6 +224,11 @@ export class ParsedArgs {
   // `tar fQ` both name f, not Q.
   readonly oldOptionNeedsValue: string | null
   readonly builtin: boolean
+  // What a line of this parse does (`lineFacts`), kept beside the parse so
+  // every reader of one command shares one reading and lives and dies with
+  // it; keyed by what a fact reads beyond the parse. Not enumerable, so it
+  // is no part of the parse a comparison or a serialization reads.
+  declare readonly facts: Map<string, LineFacts>
 
   constructor(init: ParsedArgsInit) {
     this.flags = init.flags
@@ -248,6 +254,7 @@ export class ParsedArgs {
     this.typedDests = init.typedDests ?? []
     this.oldOptionNeedsValue = init.oldOptionNeedsValue ?? null
     this.builtin = init.builtin ?? false
+    Object.defineProperty(this, 'facts', { value: new Map<string, LineFacts>() })
   }
 
   paths(): string[] {

@@ -125,26 +125,6 @@ export const JOB_BUILTINS: ReadonlySet<string> = new Set([
   'ps',
 ])
 
-/**
- * The flags a builtin's own grammar reads off its words, as the executor
- * will hand them to its handler; empty for a name with no builtin grammar.
- * A wrapper reads as the program it runs. The facts below are read off this
- * parse rather than scanned from the words, so an abbreviation, a long
- * spelling, a valued option and an option's attached value all read as the
- * handler will read them: `grep --recur` and `grep -d recurse` walk,
- * `grep -ephrase` does not. Mirrors Python's line_flags.
- */
-export function lineFlags(
-  name: string,
-  words: readonly (string | PathSpec)[],
-): Record<string, FlagValue> {
-  const [runs, first] = EXEC_WRAPPERS.get(name) ?? [name, undefined]
-  const spec = SPECS[runs]
-  if (spec === undefined) return {}
-  const argv = words.slice(1).map((w) => (typeof w === 'string' ? w : w.rawPath))
-  return parseToKwargs(parseCommand(spec, first === undefined ? argv : [first, ...argv], '/', runs))
-}
-
 // Commands the router must not resolve the last component for, even
 // under a trailing slash, because none of them acts on the link's
 // target and each says so in its own words. GNU tar strips the slash
@@ -254,7 +234,20 @@ export function lineFacts(
   const argv = typed.map((w) => (typeof w === 'string' ? w : w.rawPath))
   const parsed = parseCommand(spec, argv, cwd, runs)
   const operands = typed.filter((_, i) => parsed.wordRoles[i] === WordKind.OPERAND)
-  return factsOf(name, parseToKwargs(parsed), operands)
+  // The parse is keyed by the words, the cwd (which `mv -t` resolves in) and
+  // the grammar; a fact reads beyond it only the name it was typed as (a
+  // wrapper, a self-resolving command) and which operands are patterns,
+  // never a path's value.
+  const key = JSON.stringify([
+    name,
+    operands.map((w) => typeof w !== 'string' && w.pattern !== null),
+  ])
+  let kept = parsed.facts.get(key)
+  if (kept === undefined) {
+    kept = factsOf(name, parseToKwargs(parsed), operands)
+    parsed.facts.set(key, kept)
+  }
+  return kept
 }
 
 // Options whose argument is a program, so the words after it are that

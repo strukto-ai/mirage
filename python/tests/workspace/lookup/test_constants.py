@@ -12,18 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import copy
+import dataclasses
 import functools
 import inspect
+from collections import Counter
 from collections.abc import Callable
 from typing import NamedTuple
 
 import pytest
 
+import mirage.rs.scan as rs_scan
+from mirage.commands.spec import parser
+from mirage.commands.spec.parser import ParsedArgs
+from mirage.rs.stream import open_stream
 from mirage.types import Follow, MountMode, PathSpec
 from mirage.vfs.call import VfsCall, declared_calls
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import Effect
 from mirage.workspace import Workspace
+from mirage.workspace.lookup import constants
 from mirage.workspace.lookup.constants import line_facts
 
 
@@ -433,3 +441,133 @@ async def test_a_lines_facts_cover_what_it_does_to_the_mounts(line):
 @pytest.mark.asyncio
 async def test_the_recording_sees_follows_and_walks(line, mount):
     assert any(op.mount == mount for op in await _effects(line))
+
+
+class _Reads(NamedTuple):
+    parses: int
+    scans: Counter[tuple[str, str]]
+    facts: int
+
+
+async def _reads(
+    ws: Workspace, line: str, monkeypatch: pytest.MonkeyPatch
+) -> _Reads:
+    parses: list[ParsedArgs] = []
+    scans: Counter[tuple[str, str]] = Counter()
+    facts: list[str] = []
+    read_facts = constants.facts_of
+
+    def parse(*args, **kwargs):
+        parsed = ParsedArgs(*args, **kwargs)
+        parses.append(parsed)
+        return parsed
+
+    def stream(kind, config):
+        scans[str(config["command"]), repr(config["options"])] += 1
+        return open_stream(kind, config)
+
+    def facts_of(name, flags, operands):
+        facts.append(name)
+        return read_facts(name, flags, operands)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(parser, "ParsedArgs", parse)
+        patch.setattr(rs_scan, "open_stream", stream)
+        patch.setattr(constants, "facts_of", facts_of)
+        result = await ws.shell(line, session_id="s")
+        await result.stdout_str()
+    return _Reads(len(parses), scans, len(facts))
+
+
+async def _workspace() -> Workspace:
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session("s")
+    for setup in (
+        "mkdir -p /data/sub /out",
+        "echo a > /data/a.txt",
+        "echo b > /data/sub/b.txt",
+    ):
+        await ws.shell(setup, session_id="s")
+    return ws
+
+
+# Each line's words are its own, so no earlier test's facts are still
+# kept for it; another line may have parsed a word list it shares. Both
+# gates, routing and the handler read one line: its facts are worked out
+# once, each spec parses its words once, and each tape mirage-rs scans
+# is scanned once, the -d grep's gate reads among them. Run again, the
+# line reads all of it from what was kept.
+@pytest.mark.parametrize(
+    "line, parses, tape",
+    [
+        ("grep -r q1 /data", 2, ("grep", "[['recursive', '']]")),
+        (
+            "grep -d recurse q2 /data",
+            2,
+            ("grep", "[['directories', 'recurse']]"),
+        ),
+        (
+            "grep -d skip q3 /data/a.txt",
+            2,
+            ("grep", "[['directories', 'skip']]"),
+        ),
+        (
+            "sort -o /out/q4 /data/a.txt",
+            2,
+            ("sort", "[['output', '/out/q4'], ['', '/data/a.txt']]"),
+        ),
+        ("find /data -name q5", 4, None),
+        ("sed -n /q6/p /data/a.txt", 2, None),
+        ("ls -R /data/sub/q7", 2, None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_line_reads_its_facts_once_and_scans_each_tape_once(
+    line, parses, tape, monkeypatch
+):
+    monkeypatch.setattr(rs_scan, "_SCANS", {})
+    ws = await _workspace()
+    try:
+        first = await _reads(ws, line, monkeypatch)
+        again = await _reads(ws, line, monkeypatch)
+    finally:
+        await ws.close()
+    assert first.facts == 1
+    assert first.parses <= parses
+    assert set(first.scans.values()) <= {1}
+    assert tape is None or first.scans[tape] == 1
+    assert again == _Reads(0, Counter(), 0)
+
+
+@pytest.mark.asyncio
+async def test_no_reader_of_a_line_changes_the_parse_it_shares(monkeypatch):
+    kept: list[tuple[ParsedArgs, ParsedArgs]] = []
+
+    def parse(*args, **kwargs):
+        parsed = ParsedArgs(*args, **kwargs)
+        kept.append((parsed, copy.deepcopy(parsed)))
+        return parsed
+
+    monkeypatch.setattr(parser, "ParsedArgs", parse)
+    ws = await _workspace()
+    try:
+        for line in (
+            "grep -d recurse -m 1 q8 /data",
+            "sort -o /out/q9 /data/a.txt",
+            "find -L /data -name q10",
+            "mv -t /out /data/sub",
+        ):
+            for _ in range(2):
+                await ws.shell(line, session_id="s")
+    finally:
+        await ws.close()
+    assert kept
+    assert [parsed for parsed, _ in kept] == [then for _, then in kept]
+
+
+def test_two_readers_of_a_line_share_one_frozen_reading():
+    words: list[str | PathSpec] = ["sort", "-o", "/out/q11", "/data/a.txt"]
+    facts = line_facts("sort", words, "/")
+    assert line_facts("sort", list(words), "/") is facts
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        facts.writes = False  # type: ignore[misc]

@@ -21,7 +21,6 @@ from mirage.workspace.lookup.constants import (
     end_options_after_program,
     facts_of,
     line_facts,
-    line_flags,
 )
 from mirage.workspace.lookup.lookup import (
     execs,
@@ -48,7 +47,6 @@ __all__ = [
     "NAMESPACE_COMMANDS",
     "facts_of",
     "line_facts",
-    "line_flags",
     "SLASH_KEEPS_LAST",
     "SHELL_CONSUMERS",
     "UNSUPPORTED_BUILTINS",

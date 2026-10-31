@@ -30,3 +30,24 @@ def test_scanned_raises_a_refusal_as_the_usage_error_it_is():
         2,
     )
     assert scanned("grep", [("max_count", "-1")])["max_count"] is None
+
+
+def test_a_readers_change_to_a_kept_scan_stays_its_own():
+    first = scan("cmp", [("ignore_initial", "3K:4")])
+    first["skip"] = []
+    assert scan("cmp", [("ignore_initial", "3K:4")]) == {
+        "limit": None,
+        "skip": [3072, 4],
+    }
+
+
+def test_a_kept_refusal_refuses_every_reader():
+    for _ in range(2):
+        with pytest.raises(StreamRefusal) as caught:
+            scan("cmp", [("bytes", "2é")])
+        result = refused(caught.value)
+        assert (result.exit_code, result.stderr) == (
+            2,
+            "cmp: invalid --bytes value '2é'\n"
+            "cmp: Try 'cmp --help' for more information.\n".encode(),
+        )

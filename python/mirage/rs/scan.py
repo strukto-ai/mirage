@@ -16,11 +16,17 @@ import json
 from collections.abc import Sequence
 
 from mirage.commands.errors import UsageError
+from mirage.commands.spec.constants import PARSE_KEPT_CHARS, PARSES_KEPT
 from mirage.io.types import IOResult
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view, from_byte_view, text_view
 from mirage.types import JsonValue
+
+# What each command's scan answered, by tape; see ``scan``.
+_SCANS: dict[
+    str, dict[tuple[tuple[str, str], ...], bytes | StreamRefusal]
+] = {}
 
 
 def scan(
@@ -45,14 +51,35 @@ def scan(
     Raises:
         StreamRefusal: the first word the command refuses, with the
             command's exit status.
+
+    A tape's answer is kept, per command, as a spec keeps its parses
+    (PARSES_KEPT, PARSE_KEPT_CHARS), so the admission gate and the
+    handler reading one line's options share one scan. It is kept as
+    the text mirage-rs answered and decoded per reader, so no reader sees
+    another's changes.
     """
-    config: dict[str, JsonValue] = {
-        "command": command,
-        "options": [[name, byte_view(text)] for name, text in options],
-    }
-    values: dict[str, JsonValue] = json.loads(
-        open_stream("scan", config).finish()
-    )
+    tape = tuple(options)
+    kept = None
+    answers = None
+    if sum(len(text) for _, text in tape) <= PARSE_KEPT_CHARS:
+        answers = _SCANS.setdefault(command, {})
+        kept = answers.get(tape)
+    if kept is None:
+        config: dict[str, JsonValue] = {
+            "command": command,
+            "options": [[name, byte_view(text)] for name, text in tape],
+        }
+        try:
+            kept = open_stream("scan", config).finish()
+        except StreamRefusal as refusal:
+            kept = refusal
+        if answers is not None:
+            if len(answers) >= PARSES_KEPT:
+                answers.clear()
+            answers[tape] = kept
+    if isinstance(kept, StreamRefusal):
+        raise StreamRefusal(kept.message, kept.output, kept.status)
+    values: dict[str, JsonValue] = json.loads(kept)
     return values
 
 

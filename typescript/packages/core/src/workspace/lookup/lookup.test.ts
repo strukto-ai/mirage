@@ -15,7 +15,7 @@ import { CommandSpec } from '../../commands/spec/types.ts'
 import { CLIHandler } from '../../commands/cli/types.ts'
 import { command } from '../../commands/config.ts'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CLI } from '../../commands/cli/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { Runtime } from '../../runtime/base.ts'
@@ -25,7 +25,10 @@ import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { Follow, MountMode, PathSpec, wordText } from '../../types.ts'
+import { Follow, LineFacts, MountMode, PathSpec, wordText } from '../../types.ts'
+import { ParsedArgs } from '../../commands/spec/parser.ts'
+import * as stream from '../../rs/stream.ts'
+import { SCANS } from '../../rs/scan.ts'
 import { declaredCalls, methodName } from '../../vfs/call.ts'
 import { Effect } from '../../vfs/types.ts'
 import {
@@ -726,5 +729,131 @@ describe('programNote', () => {
       "gcc runs on the workspace's sandbox runtime.",
     )
     expect(programNote('native-tool', session, ws.registry)).toBeNull()
+  })
+})
+
+const MAP_SET = Object.getOwnPropertyDescriptor(Map.prototype, 'set')?.value as (
+  key: unknown,
+  value: unknown,
+) => Map<unknown, unknown>
+
+interface Reads {
+  parses: number
+  scans: Map<string, number>
+  facts: number
+}
+
+// What one run of a line reads afresh: each parse and each LineFacts a
+// reading keeps is stored once as it is made, and each scan opens a stream.
+async function reads(ws: Workspace, line: string): Promise<Reads> {
+  const counted: Reads = { parses: 0, scans: new Map(), facts: 0 }
+  const set = MAP_SET
+  const kept = vi.spyOn(Map.prototype, 'set').mockImplementation(function (
+    this: Map<unknown, unknown>,
+    key: unknown,
+    value: unknown,
+  ) {
+    if (value instanceof ParsedArgs) counted.parses++
+    if (value instanceof LineFacts) counted.facts++
+    return Reflect.apply(set, this, [key, value])
+  })
+  const open = stream.openStreamSync
+  const opened = vi.spyOn(stream, 'openStreamSync').mockImplementation((kind, config, movable) => {
+    if (kind === 'scan') {
+      const tape = JSON.stringify([config.command, config.options])
+      counted.scans.set(tape, (counted.scans.get(tape) ?? 0) + 1)
+    }
+    return open(kind, config, movable)
+  })
+  try {
+    await ws.shell(line, { sessionId: 's' })
+  } finally {
+    kept.mockRestore()
+    opened.mockRestore()
+  }
+  return counted
+}
+
+async function workspace(): Promise<Workspace> {
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+  ws.createSession('s')
+  for (const setup of [
+    'mkdir -p /data/sub /out',
+    'echo a > /data/a.txt',
+    'echo b > /data/sub/b.txt',
+  ])
+    await ws.shell(setup, { sessionId: 's' })
+  return ws
+}
+
+describe('reading a line once', () => {
+  // Each line's words are its own, so no earlier test's facts are still kept
+  // for it; another line may have parsed a word list it shares. Both gates,
+  // routing and the handler read one line: its facts are worked out once,
+  // each spec parses its words once, and each tape mirage-rs scans is
+  // scanned once, the -d grep's gate reads among them. Run again, the line
+  // reads all of it from what was kept.
+  it.each([
+    ['grep -r q1 /data', 2, '["grep",[["recursive",""]]]'],
+    ['grep -d recurse q2 /data', 2, '["grep",[["directories","recurse"]]]'],
+    ['grep -d skip q3 /data/a.txt', 2, '["grep",[["directories","skip"]]]'],
+    ['sort -o /out/q4 /data/a.txt', 2, '["sort",[["output","/out/q4"],["","/data/a.txt"]]]'],
+    ['find /data -name q5', 4, null],
+    ['sed -n /q6/p /data/a.txt', 2, null],
+    ['ls -R /data/sub/q7', 2, null],
+  ] as const)('%s reads its facts once and scans each tape once', async (line, parses, tape) => {
+    SCANS.clear()
+    const ws = await workspace()
+    let first: Reads
+    let again: Reads
+    try {
+      first = await reads(ws, line)
+      again = await reads(ws, line)
+    } finally {
+      await ws.close()
+    }
+    expect(first.facts).toBe(1)
+    expect(first.parses).toBeLessThanOrEqual(parses)
+    expect(new Set(first.scans.values())).toEqual(first.scans.size > 0 ? new Set([1]) : new Set())
+    if (tape !== null) expect(first.scans.get(tape)).toBe(1)
+    expect(again).toEqual({ parses: 0, scans: new Map(), facts: 0 })
+  })
+
+  it('no reader of a line changes the parse it shares', async () => {
+    const kept: [ParsedArgs, unknown][] = []
+    const set = MAP_SET
+    const spy = vi.spyOn(Map.prototype, 'set').mockImplementation(function (
+      this: Map<unknown, unknown>,
+      key: unknown,
+      value: unknown,
+    ) {
+      if (value instanceof ParsedArgs) kept.push([value, structuredClone(value)])
+      return Reflect.apply(set, this, [key, value])
+    })
+    const ws = await workspace()
+    try {
+      for (const line of [
+        'grep -d recurse -m 1 q8 /data',
+        'sort -o /out/q9 /data/a.txt',
+        'find -L /data -name q10',
+        'mv -t /out /data/sub',
+      ]) {
+        for (let round = 0; round < 2; round++) await ws.shell(line, { sessionId: 's' })
+      }
+    } finally {
+      spy.mockRestore()
+      await ws.close()
+    }
+    expect(kept.length).toBeGreaterThan(0)
+    for (const [parsed, then] of kept) expect(parsed).toEqual(then)
+  })
+
+  it('two readers of a line share one frozen reading', () => {
+    const words = ['sort', '-o', '/out/q11', '/data/a.txt']
+    const facts = lineFacts('sort', words, '/')
+    expect(lineFacts('sort', [...words], '/')).toBe(facts)
+    expect(() => {
+      ;(facts as { writes: boolean }).writes = false
+    }).toThrow(TypeError)
   })
 })

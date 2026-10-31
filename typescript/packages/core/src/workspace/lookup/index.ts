@@ -20,7 +20,6 @@ export {
   endOptionsAfterProgram,
   factsOf,
   lineFacts,
-  lineFlags,
 } from './constants.ts'
 export {
   execs,

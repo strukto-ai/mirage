@@ -341,32 +341,6 @@ def end_options_after_program(name: str, words: list[str]) -> list[str]:
     return words
 
 
-def line_flags(
-    name: str, words: Sequence[str | PathSpec]
-) -> Mapping[str, FlagValue]:
-    """The flags a builtin's own grammar reads off its words, as the
-    executor will hand them to its handler; empty for a name with no
-    builtin grammar. A wrapper reads as the program it runs.
-
-    The facts below are read off this parse rather than scanned from the
-    words, so an abbreviation, a long spelling, a valued option and an
-    option's attached value all read as the handler will read them:
-    ``grep --recur`` and ``grep -d recurse`` walk, ``grep -ephrase``
-    does not.
-
-    Args:
-        name (str): command name.
-        words (Sequence[str | PathSpec]): the command's raw words, name
-            first.
-    """
-    runs, *first = EXEC_WRAPPERS.get(name, (name,))
-    spec = SPECS.get(runs)
-    if spec is None:
-        return {}
-    argv = [w if isinstance(w, str) else w.raw_path for w in words[1:]]
-    return parse_to_kwargs(parse_command(spec, [*first, *argv], "/", runs))
-
-
 # Commands the router must not resolve the last component for, even
 # under a trailing slash, because none of them acts on the link's
 # target and each says so in its own words. GNU tar strips the slash
@@ -489,4 +463,18 @@ def line_facts(
         for i, role in enumerate(parsed.word_roles)
         if role is WordKind.OPERAND
     ]
-    return facts_of(name, parse_to_kwargs(parsed), operands)
+    # The parse is keyed by the words, the cwd (which `mv -t` resolves
+    # in) and the grammar; a fact reads beyond it only the name it was
+    # typed as (a wrapper, a self-resolving command) and which operands
+    # are patterns, never a path's value.
+    key = (
+        name,
+        tuple(
+            isinstance(w, PathSpec) and w.pattern is not None for w in operands
+        ),
+    )
+    kept = parsed.facts.get(key)
+    if kept is None:
+        kept = facts_of(name, parse_to_kwargs(parsed), operands)
+        parsed.facts[key] = kept
+    return kept

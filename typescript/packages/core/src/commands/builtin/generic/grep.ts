@@ -111,19 +111,20 @@ export function maxCount(fl: FlagView): number | null {
 
 /**
  * Whether grep walks the directories it meets: -r, -R or a -d naming
- * recurse, the last of the three on the line winning (grep 3.11). A line
- * whose last of the three is a -d word grep refuses at run time walks
- * nothing. Mirrors Python's `recurses`.
+ * recurse, the last of the three on the line winning (grep 3.11). A -d word
+ * is read by the scan the handler reads (`scanValues`), so the gate and the
+ * run share it; a line that scan refuses walks nothing, since grep refuses
+ * it before reading a file. Mirrors Python's `recurses`.
  */
 export function recurses(fl: FlagView): boolean {
   const last = fl.texts('recursive', 'dereference_recursive', 'directories').at(-1)
   if (last === undefined) return false
   if (last[0] !== 'directories') return true
   try {
-    return (scanned('grep', [last]) as unknown as GrepValues).directories === 'recurse'
+    return scanValues(fl).directories === 'recurse'
   } catch (err) {
     if (!(err instanceof UsageError)) throw err
-    console.debug(`grep walks nothing past a refused -d: ${err.message}`)
+    console.debug(`grep walks nothing past a refused option: ${err.message}`)
     return false
   }
 }
