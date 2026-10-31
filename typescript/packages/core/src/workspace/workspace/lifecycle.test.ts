@@ -348,7 +348,7 @@ it.each([
 )
 
 it.each([{ drop: false }, { drop: true }])(
-  'close settles a session load in flight (drop=$drop)',
+  'close settles a discovery record write in flight (drop=$drop)',
   async ({ drop }) => {
     const ws = buildWs()
     const store = ws.stateStore

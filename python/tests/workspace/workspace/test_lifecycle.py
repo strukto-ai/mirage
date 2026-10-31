@@ -835,7 +835,7 @@ async def test_close_settles_pending_profile_persistence(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("drop", [False, True])
-async def test_close_settles_a_session_load_in_flight(monkeypatch, drop):
+async def test_close_settles_a_metadata_write_in_flight(monkeypatch, drop):
     ws = Workspace({})
     store = ws.state_store
     entered, release = asyncio.Event(), asyncio.Event()
