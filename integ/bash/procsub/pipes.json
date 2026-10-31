@@ -916,7 +916,7 @@
         "disk",
         "opfs"
       ],
-      "command": "f() { timeout 0.1 head -c 1 \"$1\"; echo \"st=$?\"; cat \"$1\"; }; f <(sleep 1; printf hello); echo",
+      "command": "f() { timeout 0.1 head -c 1 \"$1\"; echo \"st=$?\"; : > {mount}/procsub-go; cat \"$1\"; }; f <(while [ ! -e {mount}/procsub-go ]; do sleep 0.1; done; printf hello); echo; rm {mount}/procsub-go",
       "expect": {
         "exit": 0,
         "stdout": "st=124\nhello\n",
@@ -961,7 +961,7 @@
         "disk",
         "opfs"
       ],
-      "command": "f() { exec 3<\"$1\"; timeout 0.1 head -c 1 <&3; echo \"st=$?\"; cat \"$1\"; }; f <(sleep 1; printf hello); echo",
+      "command": "f() { exec 3<\"$1\"; timeout 0.1 head -c 1 <&3; echo \"st=$?\"; : > {mount}/procsub-go; cat \"$1\"; }; f <(while [ ! -e {mount}/procsub-go ]; do sleep 0.1; done; printf hello); echo; rm {mount}/procsub-go",
       "expect": {
         "exit": 0,
         "stdout": "st=124\nhello\n",
@@ -976,7 +976,7 @@
         "disk",
         "opfs"
       ],
-      "command": "f() { exec 3<\"$1\"; timeout 0.1 head -c 1 <&3; echo \"st=$?\"; cat <&3; }; f <(sleep 1; printf hello); echo",
+      "command": "f() { exec 3<\"$1\"; timeout 0.1 head -c 1 <&3; echo \"st=$?\"; : > {mount}/procsub-go; cat <&3; }; f <(while [ ! -e {mount}/procsub-go ]; do sleep 0.1; done; printf hello); echo; rm {mount}/procsub-go",
       "expect": {
         "exit": 0,
         "stdout": "st=124\nhello\n",
@@ -1052,7 +1052,7 @@
         "disk",
         "opfs"
       ],
-      "command": "f() { timeout 0.1 cp \"$1\" /dev/procsub-out; echo \"st=$?\"; cat \"$1\"; }; f <(sleep 1; printf hello); echo; [ -s /dev/procsub-out ] && echo wrote || echo empty; rm -f /dev/procsub-out",
+      "command": "f() { timeout 0.1 cp \"$1\" /dev/procsub-out; echo \"st=$?\"; : > {mount}/procsub-go; cat \"$1\"; }; f <(while [ ! -e {mount}/procsub-go ]; do sleep 0.1; done; printf hello); echo; [ -s /dev/procsub-out ] && echo wrote || echo empty; rm -f /dev/procsub-out {mount}/procsub-go",
       "expect": {
         "exit": 0,
         "stdout": "st=124\nhello\nempty\n",
@@ -1341,7 +1341,7 @@
         "disk",
         "opfs"
       ],
-      "command": "f() { timeout 0.1 tar -tf \"$1\"; echo \"st=$?\"; cat \"$1\"; }; f <(sleep 1; printf hello)",
+      "command": "f() { timeout 0.1 tar -tf \"$1\"; echo \"st=$?\"; : > {mount}/procsub-go; cat \"$1\"; }; f <(while [ ! -e {mount}/procsub-go ]; do sleep 0.1; done; printf hello); rm {mount}/procsub-go",
       "expect": {
         "exit": 0,
         "stdout": "st=124\nhello",
