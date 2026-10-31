@@ -445,3 +445,44 @@ def test_work_handed_to_a_closed_loop_is_dropped():
     work = _nothing()
     soon(loop, work)
     assert inspect.getcoroutinestate(work) == inspect.CORO_CLOSED
+
+
+class _HandsOff:
+    """Hands work to a running loop from its finalizer, in a cycle of its
+    own, and notes whether the loop ran it before the collection ended."""
+
+    def __init__(self, loop, events) -> None:
+        self.loop = loop
+        self.events = events
+        self.cycle = self
+
+    def __del__(self) -> None:
+        async def record() -> None:
+            self.events.append("ran")
+
+        soon(self.loop, record())
+        threading.Event().wait(0.05)
+        self.events.append("collection ending")
+
+
+def test_work_handed_off_in_a_collection_waits_for_it_to_end():
+    loop = asyncio.new_event_loop()
+    ready = threading.Event()
+    loop.call_soon(ready.set)
+    owner = threading.Thread(target=loop.run_forever, daemon=True)
+    owner.start()
+    assert ready.wait(5)
+    events = []
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        _HandsOff(loop, events)
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+    asyncio.run_coroutine_threadsafe(handed(), loop).result(5)
+    loop.call_soon_threadsafe(loop.stop)
+    owner.join(5)
+    loop.close()
+    assert events == ["collection ending", "ran"]

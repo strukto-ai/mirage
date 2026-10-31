@@ -34,7 +34,8 @@ AUXILIARY_LOOP: ContextVar[bool] = ContextVar(
 )
 BLOCKED: WeakSet[asyncio.AbstractEventLoop] = WeakSet()
 # Whether the garbage collector is running on this thread now, which
-# ``gc.callbacks`` reports at a collection's start and stop.
+# ``gc.callbacks`` reports at a collection's start and stop, and the work
+# its finalizers handed off, which goes to the loops as it ends.
 COLLECTING = threading.local()
 # What finalizers handed each loop (``soon``), until it ends.
 HANDED: WeakKeyDictionary[
@@ -44,6 +45,9 @@ HANDED: WeakKeyDictionary[
 
 def _on_collection(phase: str, info: dict[str, int]) -> None:
     COLLECTING.now = phase == "start"
+    if phase == "stop":
+        for loop, work in COLLECTING.__dict__.pop("handed", ()):
+            _hand(loop, work)
 
 
 gc.callbacks.append(_on_collection)
@@ -64,15 +68,25 @@ def soon(
 ) -> None:
     """Hand ``work`` to ``loop`` without waiting for it.
 
-    The loop starts it, up to its first wait, in the callback this
-    queues, so it goes before any call made after this one, from any
-    thread; ``handed`` waits for it. Work handed to a closed loop is
-    dropped and logged.
+    Inside a collection it goes to the loop as the collection ends, once
+    every finalizer it runs is done. The loop starts it, up to its first
+    wait, in the callback the hand-off queues, so it goes before any
+    call made after, from any thread; ``handed`` waits for it. Work
+    handed to a closed loop is dropped and logged.
 
     Args:
         loop (asyncio.AbstractEventLoop): the loop that runs it.
         work (Coroutine[Any, Any, None]): what a finalizer could not do.
     """
+    if collecting():
+        COLLECTING.__dict__.setdefault("handed", []).append((loop, work))
+        return
+    _hand(loop, work)
+
+
+def _hand(
+    loop: asyncio.AbstractEventLoop, work: Coroutine[Any, Any, None]
+) -> None:
     done: concurrent.futures.Future[None] = concurrent.futures.Future()
 
     def start() -> None:

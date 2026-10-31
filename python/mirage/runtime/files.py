@@ -468,8 +468,9 @@ class RuntimeFiles:
     ) -> None:
         """Close a stream the garbage collector dropped (``held``) on the
         shared loop, without waiting: the loop writes ``late`` through
-        handle ``fh`` before any call made after this one, then gives an
-        fd's number back and lets the handle go, as a close does.
+        handle ``fh`` before any call made after the hand-off, lands it,
+        and gives an fd's number back and lets the handle go, as a close
+        does, even when a write fails.
 
         Args:
             fh (int): the core's handle.
@@ -486,12 +487,24 @@ class RuntimeFiles:
 
         async def finish(core: MountCore) -> None:
             path = self.path_of(fh)
+            # Adjacent writes go as one, held on the handle before the
+            # first wait, so a call made after the hand-off sees them.
+            runs: list[tuple[int, bytearray]] = []
             for offset, data in late:
-                await core.write(path, data, offset, fh)
-            if forget is not None:
-                forget()
-            if releases:
-                await core.release(fh)
+                if runs and runs[-1][0] + len(runs[-1][1]) == offset:
+                    runs[-1][1].extend(data)
+                else:
+                    runs.append((offset, bytearray(data)))
+            try:
+                for offset, run in runs:
+                    await core.write(path, bytes(run), offset, fh)
+                if not releases:
+                    await core.flush(path, fh)
+            finally:
+                if forget is not None:
+                    forget()
+                if releases:
+                    await core.release(fh)
 
         call = (
             finish if self._caller is None else awaits_as(self._caller, finish)

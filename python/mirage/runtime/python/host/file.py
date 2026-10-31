@@ -64,8 +64,8 @@ class HandleRaw(io.RawIOBase):
     The garbage collector closing it, while its calls drive a shared
     loop (``RuntimeFiles.held``), reaches no loop: the last writes of
     every layer it closes are kept, and the close is handed to the loop
-    (``RuntimeFiles.finish_soon``). Any other call inside a collection
-    is refused.
+    (``RuntimeFiles.finish_soon``). A call the program makes inside a
+    collection is refused (``collected``).
 
     Args:
         handle (Descriptor): the descriptor it reads and writes through.
@@ -124,7 +124,7 @@ class HandleRaw(io.RawIOBase):
             reading (bool | None): the call reads (True) or writes
                 (False); None checks only that the stream is open.
         """
-        if self.closed or (self._handed and not self._handle.files.held):
+        if self.closed:
             raise ValueError("I/O operation on closed file")
         if self._live is not None and not self._live():
             raise OSError(errno.EBADF, os.strerror(errno.EBADF))
@@ -187,51 +187,42 @@ class HandleRaw(io.RawIOBase):
 
     def flush(self) -> None:
         super().flush()
-        if self._writable and not self._handle.files.held:
+        if self._writable and not (self._closing and self._handle.files.held):
             syscall(self._handle.land)()
 
-    def closing(self) -> None:
-        """Note that a layer over this stream is closing, so writes its
-        last flush makes inside a collection are kept (``write``)."""
-        if self._handle.files.held:
-            self._closing = True
-
-    def close_kept(self, layer: io.BufferedIOBase) -> bool:
-        """Whether closing ``layer``, a buffered stream over this one, is
-        the garbage collector finalizing it; if so ``layer`` flushes into
-        the kept writes, this stream's close goes to the loop, and
-        ``layer`` stays open for a text layer the collection finalizes
-        after it, which still flushes through it. A close the program
-        makes inside a collection closes ``layer`` as usual.
+    def collected(self, layer: io.IOBase) -> bool:
+        """Whether ``layer`` (this stream or one over it) is closing inside
+        a garbage collection, as the collector closes it: finalizing it,
+        or closing it from a layer over it that it finalizes. Its last
+        flush is then kept (``write``). A close the program makes inside
+        a collection is refused, before it can wait on a layer's lock
+        that a thread waiting on the loop may hold.
 
         Args:
-            layer (io.BufferedIOBase): the buffered stream being closed.
+            layer (io.IOBase): the layer being closed.
         """
         if not self._handle.files.held:
             return False
+        if not (self._closing or getattr(layer, "_finalizing", False)):
+            raise RuntimeError(
+                "a garbage collection cannot close a file in use"
+            )
         self._closing = True
-        if not getattr(layer, "_finalizing", False):
-            return False
-        layer.flush()
-        self.close()
         return True
 
     def close(self) -> None:
-        held = self._handle.files.held
-        if self.closed or (self._handed and not held):
+        if self.closed or self._handed:
             return
-        if held:
+        if self.collected(self):
             # Left open until the collection ends, so a layer over this
-            # one that it closes later still flushes here.
-            self._closing = True
-            if not self._handed:
-                self._handed = True
-                self._handle.files.finish_soon(
-                    self._handle.fh,
-                    self._late,
-                    self._release is not None,
-                    self._forget,
-                )
+            # one that it finalizes later still flushes here.
+            self._handed = True
+            self._handle.files.finish_soon(
+                self._handle.fh,
+                self._late,
+                self._release is not None,
+                self._forget,
+            )
             return
         try:
             super().close()
@@ -249,8 +240,7 @@ class _LandingWriter(io.BufferedWriter):
         self.raw.flush()
 
     def close(self) -> None:
-        if not cast(HandleRaw, self.raw).close_kept(self):
-            super().close()
+        _close_buffered(self, super().close)
 
 
 class _LandingRandom(io.BufferedRandom):
@@ -261,16 +251,42 @@ class _LandingRandom(io.BufferedRandom):
         self.raw.flush()
 
     def close(self) -> None:
-        if not cast(HandleRaw, self.raw).close_kept(self):
-            super().close()
+        _close_buffered(self, super().close)
+
+
+class _Reader(io.BufferedReader):
+    """A buffered reader closed as ``_close_buffered`` closes one."""
+
+    def close(self) -> None:
+        _close_buffered(self, super().close)
+
+
+def _close_buffered(
+    layer: io.BufferedIOBase, close: Callable[[], None]
+) -> None:
+    """Close a buffered layer; one the garbage collector closes flushes
+    into its raw stream's kept writes and stays open, so a text layer the
+    collection finalizes after it still flushes through it
+    (``HandleRaw.collected``).
+
+    Args:
+        layer (io.BufferedIOBase): the buffered layer.
+        close (Callable[[], None]): its class's own close.
+    """
+    raw = cast(HandleRaw, cast(Any, layer).raw)
+    if not raw.collected(layer):
+        close()
+        return
+    layer.flush()
+    raw.close()
 
 
 class _Text(io.TextIOWrapper):
     """A text stream whose last flush, when the garbage collector closes
-    it, reaches its raw stream as a kept write (``HandleRaw.closing``)."""
+    it, reaches its raw stream as a kept write (``HandleRaw.collected``)."""
 
     def close(self) -> None:
-        cast(HandleRaw, cast(Any, self.buffer).raw).closing()
+        cast(HandleRaw, cast(Any, self.buffer).raw).collected(self)
         super().close()
 
 
@@ -345,7 +361,7 @@ def layered(
     elif facts.writable:
         buffered = _LandingWriter(raw, size)
     else:
-        buffered = io.BufferedReader(raw, size)
+        buffered = _Reader(raw, size)
     if facts.binary:
         return buffered
     text = _Text(

@@ -626,17 +626,64 @@ def test_a_finalizer_writes_into_a_live_streams_buffer():
     loop.close()
 
 
-def test_a_finalizer_closes_a_live_stream_through_its_loop():
+@pytest.mark.parametrize("call", [("close",), ("flush",)])
+def test_a_finalizer_cannot_close_or_flush_a_live_stream(call):
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     loop = asyncio.new_event_loop()
     _, opener = _host(ws, loop)
-    log = opener("/data/log", "wb")
-    log.write(b"landed")
+    log = opener("/data/log", "wb", buffering=0)
+    log.write(b"before-")
     seen = []
-    _collected(lambda: _Finalizes(log, [("close",)], seen))
-    assert seen == [None]
-    with pytest.raises(ValueError, match="closed file"):
-        log.write(b"more")
-    assert run_async_from_sync(ws.vfs.read("/data/log"), loop) == b"landed"
+    _collected(lambda: _Finalizes(log, [call], seen))
+    assert seen == ["RuntimeError"]
+    log.write(b"after")
+    log.close()
+    assert _landed(ws, loop, "/data/log") == b"before-after"
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_collected_stream_over_an_fd_it_leaves_open_lands_its_bytes():
+    from mirage.bridge.sync import handed
+
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, opener = _host(ws, loop)
+    fd = routed["open"]("/data/log", os.O_WRONLY | os.O_CREAT)
+    routed["write"](fd, b"before-")
+    stream = opener(fd, "wb", closefd=False)
+    stream.write(b"landed")
+    _drop_in_cycle(stream)
+    del stream
+    _collected()
+    loop.run_until_complete(handed())
+    assert _landed(ws, loop, "/data/log") == b"before-landed"
+    routed["close"](fd)
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_collected_stream_lets_its_handle_go_when_a_last_write_fails(
+    monkeypatch,
+):
+    from mirage.bridge.sync import handed
+
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    _, opener = _host(ws, loop)
+    stream = opener("/data/f", "wb")
+    stream.write(b"lost")
+    handle = stream.raw._handle
+    core, fh = handle.files._core, handle.fh
+
+    async def failing_write(*args):
+        raise OSError(errno.ENOSPC, "no space")
+
+    monkeypatch.setattr(core, "write", failing_write)
+    _drop_in_cycle(stream)
+    del stream
+    _collected()
+    loop.run_until_complete(handed())
+    assert fh not in core.handles
     loop.run_until_complete(ws.close())
     loop.close()
