@@ -231,6 +231,7 @@ export class Workspace {
   private settleWrites: () => void = () => undefined
   private readonly closers: (() => Promise<void>)[] = []
   private closing: Promise<void> | null = null
+  private metaWrite: Promise<void> | null = null
   private stateDropped = false
   // The stores this workspace's state lives in, whether the state store
   // built them or the caller passed one in directly: delete clears these,
@@ -1220,11 +1221,15 @@ export class Workspace {
    * record resolves first so a minted default session id can adopt the
    * stored pointer before hydration keys off it. The first call also starts
    * stopping what lapsed instances of the workspace left running
-   * (`JobTable.reapLapsed`).
+   * (`JobTable.reapLapsed`). Closing waits for the record's write in
+   * flight, so it never races the state's drop.
    */
   async ensureSessionsLoaded(): Promise<void> {
     this.jobTable.reapLapsed()
-    await this.meta.ensure()
+    this.metaWrite ??= this.meta.ensure().finally(() => {
+      this.metaWrite = null
+    })
+    await this.metaWrite
     await this.sessionManager.ensureLoaded()
   }
 
@@ -2394,6 +2399,9 @@ export class Workspace {
         const error: unknown = result.reason
         executionErrors.push(error)
       }
+    // A discovery record write in flight lands before teardown drops the
+    // state or closes the store.
+    await Promise.allSettled([this.metaWrite])
     this.stateDropped = dropState
     try {
       await closeWorkspace({
