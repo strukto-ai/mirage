@@ -53,13 +53,18 @@ Answer = dict[str, Any]
 CLI_GROUPS = (
     "workspace",
     "session",
-    "job",
     "daemon",
     "config",
     "vfs",
     "tools",
 )
 WAITED = "the line waited for all of its input"
+# A case line touches BEGUN as it starts; a cancel case's line then sleeps
+# CANCEL_SLEEP seconds and touches LEAKED. A session of WATCH's looks.
+BEGUN = "/begun"
+LEAKED = "/leaked"
+CANCEL_SLEEP = 2
+WATCH = "watch"
 HELD = "the access held the output until the line ended"
 STREAM_WAIT = 10.0
 BESIDE_WAIT = 20.0
@@ -103,7 +108,6 @@ async def streamed_answer(
     completed: dict[str, Any] | None = None
     reply.raise_for_status()
     assert reply.headers["content-type"].startswith("application/x-ndjson")
-    assert reply.headers["x-mirage-job-id"]
     async for line in reply.aiter_lines():
         record = json.loads(line)
         assert completed is None, "output arrived after the completion record"
@@ -491,34 +495,48 @@ class Server:
             )
             reply.raise_for_status()
 
-    async def job_seen(
-        self, wid: str, command: str, statuses: tuple[str, ...], timeout: float
-    ) -> str:
-        """Wait until a job of ``command`` shows one of ``statuses``.
-
-        Args:
-            wid (str): the workspace.
-            command (str): the job's line.
-            statuses (tuple[str, ...]): the statuses to wait for.
-            timeout (float): seconds to wait.
+    async def _watch(self, wid: str, command: str) -> int:
+        """Run ``command`` beside the case's line: in a session of its
+        own, since a line sent to the line's session queues behind it.
 
         Returns:
-            str: the status found last, or ``""`` when there was no job.
+            int: the command's exit code.
         """
-        found = ""
-        deadline = time.monotonic() + timeout
         async with self.client() as http:
-            while time.monotonic() < deadline:
-                rows = (
-                    await http.get("/v1/jobs", params={"workspace_id": wid})
-                ).json()
-                found = next(
-                    (r["status"] for r in rows if r["command"] == command), ""
-                )
-                if found in statuses:
-                    break
-                await asyncio.sleep(0.05)
-        return found
+            made = await http.post(
+                f"/v1/workspaces/{wid}/sessions", json={"session_id": WATCH}
+            )
+            assert made.status_code in (201, 409), made.text
+            reply = await http.post(
+                f"/v1/workspaces/{wid}/shell",
+                params={"session_id": WATCH},
+                json={"command": command, "record": False},
+            )
+            reply.raise_for_status()
+            return reply.json()["exit_code"]
+
+    async def begun(self, wid: str, timeout: float) -> bool:
+        """Whether the case's line started within ``timeout``: it touches
+        ``BEGUN`` first."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if await self._watch(wid, f"test -e {BEGUN}") == 0:
+                return True
+            await asyncio.sleep(0.05)
+        return False
+
+    async def cleared(self, wid: str) -> None:
+        """Take a finished case line's markers away for the next case."""
+        await self._watch(wid, f"rm -f {BEGUN} {LEAKED}")
+
+    async def outcome(self, wid: str) -> str:
+        """What came of a cancelled case line. It sleeps, then touches
+        ``LEAKED``, so past its sleep a cancelled one has left none.
+        """
+        await asyncio.sleep(CANCEL_SLEEP + 0.5)
+        leaked = await self._watch(wid, f"test -e {LEAKED}") == 0
+        await self.cleared(wid)
+        return "finished" if leaked else "canceled"
 
 
 class Gate:
@@ -799,35 +817,6 @@ class HttpSteps:
             "POST", f"/v1/workspaces/{wid}/asks/{ask}", json={"answer": "deny"}
         )
 
-    async def background(self, wid: str, command: str) -> str:
-        reply = await self._ok(
-            "POST",
-            f"/v1/workspaces/{wid}/shell",
-            params={"background": "true"},
-            json={"command": command},
-        )
-        return reply["job_id"]
-
-    async def wait(self, job: str) -> tuple[str, str]:
-        reply = await self._ok(
-            "POST", f"/v1/jobs/{job}/wait", json={"timeout_s": 60}
-        )
-        return reply["status"], (reply.get("result") or {}).get("stdout", "")
-
-    async def status(self, job: str) -> str:
-        return (await self._ok("GET", f"/v1/jobs/{job}"))["status"]
-
-    async def job_commands(self, wid: str) -> list[str]:
-        return [
-            j["command"]
-            for j in await self._ok(
-                "GET", "/v1/jobs", params={"workspace_id": wid}
-            )
-        ]
-
-    async def cancel(self, job: str) -> None:
-        await self._ok("DELETE", f"/v1/jobs/{job}")
-
 
 class CliSteps:
     """The admin steps through the ``mirage`` CLI."""
@@ -1023,35 +1012,6 @@ class CliSteps:
     async def deny(self, wid: str, ask: str) -> None:
         await self._json("workspace", "deny", wid, ask)
 
-    async def background(self, wid: str, command: str) -> str:
-        return (
-            await self._json(
-                "shell", "-w", wid, "--bg", "-c", command, tty=True
-            )
-        )["job_id"]
-
-    async def wait(self, job: str) -> tuple[str, str]:
-        code, out, err = await run(
-            self.server.cli("job", "wait", job, "--timeout", "60"),
-            self.server.env(),
-        )
-        reply = json.loads(out)
-        return reply["status"], (reply.get("result") or {}).get("stdout", "")
-
-    async def status(self, job: str) -> str:
-        code, out, err = await run(
-            self.server.cli("job", "get", job), self.server.env()
-        )
-        return json.loads(out)["status"]
-
-    async def job_commands(self, wid: str) -> list[str]:
-        return [
-            j["command"] for j in await self._json("job", "list", "-w", wid)
-        ]
-
-    async def cancel(self, job: str) -> None:
-        await self._json("job", "cancel", job)
-
 
 def _headings(markdown: str) -> str:
     """The paths a VFS.md names, one per row of its first table.
@@ -1215,7 +1175,6 @@ async def run_steps(
     """
     declared = {_prefix(p) for p in config["mounts"]}
     named: set[str] = set()
-    jobs: list[str] = []
     answers: list[Answer] = []
     try:
         for case in suite["cases"]:
@@ -1340,21 +1299,6 @@ async def run_steps(
                 pending = await steps.asks(wid)
                 await getattr(steps, kind)(wid, pending[0][0])
                 answer = {"text": {"allow": "allowed", "deny": "denied"}[kind]}
-            elif kind == "background":
-                jobs.append(await steps.background(wid, step["command"]))
-                answer = {"text": "submitted"}
-            elif kind == "wait":
-                status, stdout = await steps.wait(jobs[-1])
-                answer = {"text": status, "stdout": stdout}
-            elif kind == "get":
-                answer = {"text": await steps.status(jobs[-1])}
-            elif kind == "jobs":
-                answer = {
-                    "text": "\n".join(sorted(await steps.job_commands(wid)))
-                }
-            elif kind == "cancel":
-                await steps.cancel(jobs[-1])
-                answer = {"text": "canceling"}
             else:
                 raise ValueError(f"unknown step {kind}")
             answers.append(answer)
@@ -1364,7 +1308,7 @@ async def run_steps(
 
 
 STEP_OPS = frozenset(
-    {"workspace", "session_admin", "snapshot", "ask", "job", "history"}
+    {"workspace", "session_admin", "snapshot", "ask", "history"}
 )
 
 
@@ -1730,7 +1674,6 @@ class Http:
             "session_admin",
             "snapshot",
             "ask",
-            "job",
             "history",
         }
     )
@@ -1888,11 +1831,9 @@ class Http:
                 )
             except httpx.TimeoutException:
                 pass
-            return {
-                "text": await self.server.job_seen(
-                    wid, step["command"], ("canceled",), 15
-                )
-            }
+            if not await self.server.begun(wid, 15):
+                return {"text": "the line never started"}
+            return {"text": await self.server.outcome(wid)}
         raise ValueError(op)
 
     async def stream(
@@ -1912,10 +1853,7 @@ class Http:
                 f'{disposition}; name="stdin"; filename="stdin.bin"\r\n\r\n'
                 f"{first}"
             ).encode()
-            seen = await self.server.job_seen(
-                wid, step["command"], ("running", "done"), STREAM_WAIT
-            )
-            waited = seen not in ("running", "done")
+            waited = not await self.server.begun(wid, STREAM_WAIT)
             yield ("".join(rest) + f"\r\n--{boundary}--\r\n").encode()
 
         reply = await http.post(
@@ -1926,6 +1864,7 @@ class Http:
             },
         )
         reply.raise_for_status()
+        await self.server.cleared(wid)
         if waited:
             return {"text": WAITED, "is_error": True}
         return io_answer(reply.json())
@@ -1948,7 +1887,6 @@ class Cli:
             "session_admin",
             "snapshot",
             "ask",
-            "job",
             "history",
         }
     )
@@ -2119,13 +2057,12 @@ class Cli:
         assert process.stdin is not None
         process.stdin.write(first.encode())
         await process.stdin.drain()
-        seen = await self.server.job_seen(
-            wid, step["command"], ("running", "done"), STREAM_WAIT
-        )
+        seen = await self.server.begun(wid, STREAM_WAIT)
         process.stdin.write("".join(rest).encode())
         process.stdin.close()
         out, err = await asyncio.wait_for(process.communicate(), 60)
-        if seen not in ("running", "done"):
+        await self.server.cleared(wid)
+        if not seen:
             return {"text": WAITED, "is_error": True}
         return io_answer(json.loads(out))
 
@@ -2151,16 +2088,16 @@ class Cli:
             elif process.stdin is not None:
                 process.stdin.write(b"\n")
                 await process.stdin.drain()
-            await self.server.job_seen(wid, line, ("running",), 15)
+            begun = await self.server.begun(wid, 15)
             process.send_signal(signal.SIGINT)
             code = await asyncio.wait_for(process.wait(), 15)
             if tty:
                 os.close(master)
-            status = await self.server.job_seen(wid, line, ("canceled",), 15)
+            status = await self.server.outcome(wid) if begun else "unstarted"
             results.append(
                 "canceled"
                 if code == 130 and status == "canceled"
-                else f"exit {code}, job {status}"
+                else f"exit {code}, line {status}"
             )
         return results[0] if results[0] == results[1] else " / ".join(results)
 
@@ -2262,11 +2199,9 @@ async def mcp_case(
             )
         except TimeoutError:
             pass
-        return {
-            "text": await server.job_seen(
-                wid, step["command"], ("canceled",), 15
-            )
-        }
+        if not await server.begun(wid, 15):
+            return {"text": "the line never started"}
+        return {"text": await server.outcome(wid)}
     else:
         raise ValueError(op)
     if step.get("progress"):
@@ -2382,7 +2317,8 @@ class Rpc:
                         params=params,
                     )
                 )
-                await self.server.job_seen(wid, command, ("running",), 15)
+                if not await self.server.begun(wid, 15):
+                    return "the line never started"
                 await http.post(
                     url,
                     json={
@@ -2393,9 +2329,7 @@ class Rpc:
                     params=params,
                 )
                 await running
-                return await self.server.job_seen(
-                    wid, command, ("canceled",), 15
-                )
+                return await self.server.outcome(wid)
 
             async def held(command: str, cwd: str) -> Awaitable[Answer]:
                 return asyncio.ensure_future(
@@ -2436,7 +2370,8 @@ class RpcStdio(Rpc):
                 await stream.send(
                     rpc_request(900, "shell", {"command": command})
                 )
-                await self.server.job_seen(wid, command, ("running",), 15)
+                if not await self.server.begun(wid, 15):
+                    return "the line never started"
                 await stream.send(
                     {
                         "jsonrpc": "2.0",
@@ -2445,9 +2380,7 @@ class RpcStdio(Rpc):
                     }
                 )
                 await stream.receive(900)
-                return await self.server.job_seen(
-                    wid, command, ("canceled",), 15
-                )
+                return await self.server.outcome(wid)
 
             async def held(command: str, cwd: str) -> Awaitable[Answer]:
                 stream.next_id += 1

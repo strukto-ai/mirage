@@ -1,5 +1,5 @@
 {
- "baseline": 2632,
+ "baseline": 2614,
  "modules": {
   "server/app": {
    "python_only": {
@@ -429,8 +429,6 @@
   },
   "cli/shell": {
    "python_only": {
-    "_Pipe": "The TypeScript CLI builds the streamed multipart body in DaemonClient.requestUpload (cli/client.ts); Python hands httpx the parts, with stdin wrapped so httpx sends it chunked.",
-    "_upload": "The TypeScript CLI builds the streamed multipart body in DaemonClient.requestUpload (cli/client.ts); Python hands httpx the parts, with stdin wrapped so httpx sends it chunked.",
     "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
     "shell_cmd": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function."
    },
@@ -441,8 +439,7 @@
   "server/routers/shell": {
    "python_only": {
     "_finish_upload": "TypeScript keeps it as ShellUpload.finish.",
-    "_parse_json_body": "TypeScript parses a JSON body inline with ShellRequestSchema.",
-    "_read_all": "TypeScript reads a background upload whole through readPart."
+    "_parse_json_body": "TypeScript parses a JSON body inline with ShellRequestSchema."
    },
    "typescript_only": {
     "ShellUpload": "Python holds the upload's reader task and its stdin as locals of the route.",

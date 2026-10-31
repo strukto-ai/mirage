@@ -63,14 +63,12 @@ profile is the one the config's `profile:` names, else the one called
 
 ## Cancel
 
-Through the server, every line runs as a job. `GET /v1/jobs` lists them, and a cancelled one ends as `canceled`.
-
 | Way in | Cancel a running line with |
 | --- | --- |
 | CLI, SSH | Ctrl-C |
 | MCP | `notifications/cancelled` |
 | RPC | `$/cancelRequest` |
-| HTTP | A dropped request, or `DELETE /v1/jobs/{id}` |
+| HTTP | A dropped request |
 
 To stop a whole session or workspace, whichever way its lines came in:
 

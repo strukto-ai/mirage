@@ -168,7 +168,7 @@ account.
 | `mirage.workspace.count` | up-down counter | Workspaces it holds. |
 | `mirage.workspace.limit` | up-down counter | Its `max_workspaces`, when set. |
 | `mirage.session.count` | up-down counter | Sessions across its workspaces. |
-| `mirage.job.running` | up-down counter | [Jobs](#jobs) running. |
+| `mirage.job.running` | up-down counter | Shell lines running. |
 | `mirage.server.shutting_down` | gauge | `1` while it shuts down. |
 | `mirage.request.refused` | counter | Requests refused for a server limit, by `reason`: `rate_limit`, `max_sessions`, `max_workspaces` or `shutting_down`. |
 
@@ -487,13 +487,12 @@ Each call acts as the session `?session_id=` names, the default one when absent.
 <ParamField body="runtime" type="string">Run the line on this [runtime](/home/setup/runtime/overview), by name, instead of the one routing picks.</ParamField>
 <ParamField body="record" type="boolean" default="true">Add the line to the session's history. `false` leaves it out.</ParamField>
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
-<ParamField query="background" type="boolean" default="false">Return HTTP 202 Accepted with `{job_id, workspace_id, submitted_at}` immediately.</ParamField>
 <ParamField query="explain" type="boolean" default="false">Return the line's explanation without executing it.</ParamField>
-<ParamField query="stream" type="boolean" default="false">Stream stdout, stderr and final status as NDJSON. Cannot be combined with background or explain.</ParamField>
+<ParamField query="stream" type="boolean" default="false">Stream stdout, stderr and final status as NDJSON. Cannot be combined with explain.</ParamField>
 
-Returns `{kind, exit_code, stdout, stderr, refusal}` when the line ends, with
-the job id in the `X-Mirage-Job-Id` header. Closing the request cancels the
-line. With `explain`, send only `command`.
+Returns `{kind, exit_code, stdout, stderr, refusal}` when the line ends.
+Closing the request cancels the line. To run a line in the background, end it
+with `&` and use the session's `jobs`, `wait` and `kill`. With `explain`, send only `command`.
 
 **Stdin.** Post `multipart/form-data`: a `request` part with the JSON body, then
 a `stdin` part of up to 64 MiB. The line reads it as it arrives.
@@ -653,49 +652,6 @@ input.
 
 Returns `{text, is_error}`. Failed tool executions still return HTTP 200 with `is_error` set.
 
-## Jobs
-
-Every shell line is a job: `pending`, `running`, then `done`, `failed` or `canceled`.
-Routes that return a job yield this object:
-
-<ResponseField name="job_id" type="string">The job id.</ResponseField>
-<ResponseField name="workspace_id" type="string">Its workspace.</ResponseField>
-<ResponseField name="session_id" type="string">Its session.</ResponseField>
-<ResponseField name="command" type="string">The line.</ResponseField>
-<ResponseField name="status" type="string">`pending`, `running`, `done`, `failed` or `canceled`.</ResponseField>
-<ResponseField name="cancel_requested" type="boolean">Whether a cancel was asked for.</ResponseField>
-<ResponseField name="submitted_at, started_at, finished_at" type="number | null">Unix times, in seconds; `null` until reached.</ResponseField>
-<ResponseField name="result" type="object | null">Get and wait only: the line's [shell result](#run-a-shell-line) once it ends.</ResponseField>
-<ResponseField name="error" type="string | null">Get and wait only: why the job failed.</ResponseField>
-
-### List jobs
-
-<Badge color="blue">GET</Badge> `/v1/jobs`
-
-<ParamField query="workspace_id" type="string">Only this workspace's jobs.</ParamField>
-
-Returns a list of jobs (omitting `result` and `error`).
-
-### Get a job
-
-<Badge color="blue">GET</Badge> `/v1/jobs/{job_id}`
-
-Returns the job object.
-
-### Wait for a job
-
-<Badge color="green">POST</Badge> `/v1/jobs/{job_id}/wait`
-
-<ParamField body="timeout_s" type="number">Seconds to wait. On timeout, returns the job in its current state without canceling it.</ParamField>
-
-Returns the job object.
-
-### Cancel a job
-
-<Badge color="red">DELETE</Badge> `/v1/jobs/{job_id}`
-
-Returns `{"job_id": "exec_01a1...", "canceled": true}`.
-
 ## Asks
 
 An ask refuses the current action and records a pending decision. List pending asks, allow or deny one, then retry the refused line or VFS call in the same session; resolving alone does not resume the original request. See [Asks](/home/policy/policies#asks).
@@ -790,12 +746,12 @@ Set one of the JWKS URL or a fixed key, not both.
 ### Accounts
 
 In `jwt` mode, a token's `sub` is its account, and an account reaches only the
-workspaces it created. Another account's workspace, session, job or ask returns
+workspaces it created. Another account's workspace, session or ask returns
 HTTP 404 Not Found, matching a missing resource. An [SSH key](/home/access/ssh#auth-optional)
 joins an account with its `mirage-account` option.
 
 <Accordion title="What else an account changes">
-  - `GET /v1/workspaces` and `GET /v1/jobs` list only the caller's.
+  - `GET /v1/workspaces` lists only the caller's.
   - A stored workspace reopens after a restart only for its owner. One stored
     before the server used `jwt` mode has no owner, and no account can create
     its id.

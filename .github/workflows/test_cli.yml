@@ -223,13 +223,9 @@ jobs:
             $MIRAGE shell --json -w smoke -c 'set -o pipefail; false | echo done'
 
           echo
-          echo "--- background + job wait"
-          submit=$($MIRAGE shell -w smoke --bg -c 'false')
-          echo "submit response:"
-          echo "$submit" | sed 's/^/  /'
-          JID=$(echo "$submit" | jq -r .job_id)
-          echo "job id: $JID"
-          check "job wait on failing job" 1 1 $MIRAGE job wait "$JID"
+          echo "--- background + wait"
+          check "wait on a failing background line" 1 1 \
+            $MIRAGE shell --json -w smoke -c 'false & wait $!'
 
           echo
           echo "--- shell composition (&& and ||)"
@@ -638,13 +634,9 @@ jobs:
             $MIRAGE shell --json -w smoke -c 'set -o pipefail; false | echo done'
 
           echo
-          echo "--- background + job wait"
-          submit=$($MIRAGE shell -w smoke --bg -c 'false')
-          echo "submit response:"
-          echo "$submit" | sed 's/^/  /'
-          JID=$(echo "$submit" | jq -r .job_id)
-          echo "job id: $JID"
-          check "job wait on failing job" 1 1 $MIRAGE job wait "$JID"
+          echo "--- background + wait"
+          check "wait on a failing background line" 1 1 \
+            $MIRAGE shell --json -w smoke -c 'false & wait $!'
 
           echo
           echo "--- shell composition (&& and ||)"

@@ -18,7 +18,9 @@ import httpx
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 SHELL = "/v1/workspaces/interrupt/shell"
-TERMINAL = {"done", "failed", "canceled"}
+# The lines under test run in the work session, so a cancel of it reaches
+# them alone, and a line queued there runs only once theirs has ended.
+CANCEL = "/v1/workspaces/interrupt/sessions/work/cancel"
 BOUNDARY = b"mirage-interrupt"
 
 
@@ -44,34 +46,41 @@ async def healthy(client):
     assert peer["stdout"] == "alive\n", peer
 
 
-async def settled(client, job_id, canceled=True):
+async def settled(client):
+    """Wait for the work session's line to end: a line queued behind it
+    runs only then."""
     async with asyncio.timeout(3):
-        while True:
-            job = await checked(client, "GET", f"/v1/jobs/{job_id}")
-            if job["status"] in TERMINAL:
-                break
-            await asyncio.sleep(0.025)
-    if canceled:
-        assert job["status"] == "canceled", job
+        await shell(client, "true", params={"session_id": "work"})
     await healthy(client)
-    return job
 
 
-async def cancel(client, job_id, required=True):
-    await checked(client, "DELETE", f"/v1/jobs/{job_id}")
-    return await settled(client, job_id, required)
+async def cancel(client):
+    """Cancel the work session's line; answers once it has ended."""
+    canceled = await checked(client, "POST", CANCEL)
+    await healthy(client)
+    return canceled["canceled"]
 
 
-async def find_job(client, command):
+async def started(client, marker):
+    """Wait for a line that touches ``marker`` first to start."""
     async with asyncio.timeout(3):
-        while True:
-            jobs = await checked(
-                client, "GET", "/v1/jobs", params={"workspace_id": "interrupt"}
+        while (
+            await shell(
+                client, f"test -e {marker}", params={"session_id": "peer"}
             )
-            found = [job for job in jobs if job["command"] == command]
-            if found:
-                return found[-1]["job_id"]
+        )["exit_code"]:
             await asyncio.sleep(0.025)
+
+
+async def working(client, command):
+    """Run ``command`` in the work session, answering its status code."""
+    response = await client.post(
+        SHELL,
+        params={"session_id": "work"},
+        json={"command": command, "record": False},
+        timeout=30,
+    )
+    return response.status_code
 
 
 @asynccontextmanager
@@ -134,12 +143,13 @@ async def server(host):
                             },
                         },
                     )
-                    await checked(
-                        client,
-                        "POST",
-                        "/v1/workspaces/interrupt/sessions",
-                        json={"session_id": "peer"},
-                    )
+                    for session in ("peer", "work"):
+                        await checked(
+                            client,
+                            "POST",
+                            "/v1/workspaces/interrupt/sessions",
+                            json={"session_id": session},
+                        )
                     yield client, port
             except BaseException:
                 print(log_path.read_text()[-6000:], file=sys.stderr)
@@ -209,15 +219,18 @@ async def seed(client):
 
 
 async def cpu(client, case):
-    job = await shell(client, case["command"], params={"background": "true"})
+    line = asyncio.create_task(working(client, case["command"]))
     # Poll during finite work too: waiting until it finishes would hide starvation.
     for _ in range(10):
         await asyncio.sleep(0.1)
         async with asyncio.timeout(0.75):
             await healthy(client)
-    result = await cancel(client, job["job_id"], case["canceled"])
-    if not case["canceled"]:
-        assert result["status"] != "failed", result
+    await cancel(client)
+    status = await asyncio.wait_for(line, 3)
+    if case["canceled"]:
+        assert status == 499, status
+    else:
+        assert status in (200, 499), status
     same = await shell(client, "echo reusable")
     assert same["stdout"] == "reusable\n", same
 
@@ -260,9 +273,10 @@ async def network(client, case):
     try:
         port = listener.sockets[0].getsockname()[1]
         command = case["command"].format(url=f"http://127.0.0.1:{port}/slow")
-        job = await shell(client, command, params={"background": "true"})
+        line = asyncio.create_task(working(client, command))
         await asyncio.wait_for(accepted.wait(), 3)
-        await cancel(client, job["job_id"])
+        await cancel(client)
+        assert await asyncio.wait_for(line, 3) == 499
         await asyncio.wait_for(closed.wait(), 2)
     finally:
         listener.close()
@@ -301,7 +315,7 @@ async def raw_request(port, prefix, length, stream, multipart_body=True):
         if multipart_body
         else "application/json"
     )
-    path = SHELL + ("?stream=true" if stream else "")
+    path = SHELL + "?session_id=work" + ("&stream=true" if stream else "")
     headers = (
         f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
         f"Content-Type: {content_type}\r\nContent-Length: {length}\r\n"
@@ -318,19 +332,20 @@ async def raw_request(port, prefix, length, stream, multipart_body=True):
 
 async def disconnected(client, port, stream, explicit=False):
     marker = f"/after-{stream}-{explicit}"
-    command = f"sleep 1; echo leaked > {marker}"
+    begun = f"/begun-{stream}-{explicit}"
+    command = f"touch {begun}; sleep 1; echo leaked > {marker}"
     prefix = multipart(command) + b"x" * 1048576
     async with raw_request(port, prefix, len(prefix) + 1000000, stream) as (
         _,
         writer,
     ):
-        job_id = await find_job(client, command)
+        await started(client, begun)
         await asyncio.sleep(0.15)
         if explicit:
-            await cancel(client, job_id)
+            assert await cancel(client) == 1
         else:
             writer.transport.abort()
-            await settled(client, job_id)
+            await settled(client)
         await asyncio.sleep(1.1)
         result = await shell(client, f"test -e {marker}")
         assert result["exit_code"] == 1, result
@@ -353,16 +368,21 @@ async def response_body(reader, head=b""):
 
 
 async def malformed(client, port, stream, running=False):
-    command = ("cat; " if running else "") + f"echo early-{stream}-{running}"
+    begun = f"/begun-malformed-{stream}-{running}"
+    command = (
+        f"touch {begun}; "
+        + ("cat; " if running else "")
+        + f"echo early-{stream}-{running}"
+    )
     prefix = multipart(command) + b"hello"
     async with raw_request(port, prefix, len(prefix) + 1, stream) as (
         reader,
         writer,
     ):
-        job_id = await find_job(client, command)
+        await started(client, begun)
         head = b""
         if not running:
-            await settled(client, job_id, False)
+            await settled(client)
         if stream and not running:
             head = await asyncio.wait_for(reader.readuntil(b'"status"'), 3)
         writer.write(b"Z")
@@ -406,14 +426,15 @@ async def input_output(client, port, case):
 
 
 async def oversized(client, port, stream):
-    command = "sleep 60"
+    begun = f"/begun-oversized-{stream}"
+    command = f"touch {begun}; sleep 60"
     prefix = multipart(command)
     size = 64 * 1024 * 1024 + 1
     async with raw_request(port, prefix, len(prefix) + size, stream) as (
         reader,
         writer,
     ):
-        job_id = await find_job(client, command)
+        await started(client, begun)
         chunk = b"x" * (256 * 1024)
         for _ in range(size // len(chunk)):
             writer.write(chunk)
@@ -429,17 +450,16 @@ async def oversized(client, port, stream):
             ), terminal
         else:
             assert b" 413 " in headers, (headers, body)
-        await settled(client, job_id)
-        await healthy(client)
+        await settled(client)
 
 
 async def unread(client, port):
-    command = "seq inf"
+    command = "touch /begun-unread; seq inf"
     body = json.dumps({"command": command, "record": False}).encode()
     async with raw_request(port, body, len(body), True, False):
-        job_id = await find_job(client, command)
+        await started(client, "/begun-unread")
         await asyncio.sleep(0.75)
-        await cancel(client, job_id)
+        assert await cancel(client) == 1
 
 
 async def run(hosts, selected):
