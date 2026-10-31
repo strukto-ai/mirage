@@ -55,7 +55,7 @@ By default the daemon is one process, and one thread holds every workspace. With
 
 `worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. TypeScript defaults to threads. Python defaults to threads on an interpreter without the GIL (3.14t) and to processes otherwise, since threads under the GIL take turns.
 
-The daemon answers `/v1/health` and `/v1/ready` itself, merges the lists of workspaces and jobs, and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker. The SSH port is one server's, so it does not combine with workers yet.
+The daemon answers `/v1/health` and `/v1/ready` itself, merges the lists from `GET /v1/workspaces` and `GET /v1/jobs` (a job is one shell command run in a workspace), and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker. The SSH port is one server's, so it does not combine with workers yet.
 
 ## Started by the CLI
 
