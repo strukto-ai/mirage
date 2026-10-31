@@ -887,6 +887,43 @@ async def test_close_settles_a_metadata_write_in_flight(monkeypatch, drop):
         await ws.close()
 
 
+def test_sync_exit_leaves_a_metadata_write_to_its_blocked_loop(monkeypatch):
+    owner = asyncio.new_event_loop()
+    exited = threading.Event()
+    results = []
+
+    async def exit_during_write():
+        ws = Workspace({})
+        store = ws.state_store
+        entered, release = asyncio.Event(), asyncio.Event()
+        cas_set_meta = store.cas_set_meta
+
+        async def delayed_meta(*args):
+            entered.set()
+            await release.wait()
+            return await cas_set_meta(*args)
+
+        monkeypatch.setattr(store, "cas_set_meta", delayed_meta)
+        with ws:
+            loading = asyncio.ensure_future(ws.ensure_sessions_loaded())
+            await entered.wait()
+        exited.set()
+        release.set()
+        results.extend(await asyncio.gather(loading, return_exceptions=True))
+
+    worker = threading.Thread(
+        target=owner.run_until_complete,
+        args=(exit_during_write(),),
+        daemon=True,
+    )
+    worker.start()
+    assert exited.wait(10)
+    worker.join(10)
+    assert not worker.is_alive()
+    owner.close()
+    assert len(results) == 1
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "surface,streaming",

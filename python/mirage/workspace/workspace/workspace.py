@@ -1689,8 +1689,8 @@ class Workspace:
                 closes.
             blocked_loop (asyncio.AbstractEventLoop | None): the loop a
                 sync ``with`` block is exiting inside; its runners are
-                cancelled but not joined, since they cannot run until
-                this returns.
+                cancelled but not joined, and a metadata write there is
+                not waited for, since neither can run until this returns.
         """
         # Stop lifecycle mutations before teardown yields or captures its
         # close lists. Keep _closed separate so runtime journals can still
@@ -1706,8 +1706,9 @@ class Workspace:
         )
         # A metadata record write in flight lands before teardown drops
         # the state or closes the store.
-        async with self._meta_lock:
-            pass
+        if blocked_loop is None:
+            async with self._meta_lock:
+                pass
         async with self._close_lock:
             if self._async_closed:
                 if self._close_error is not None:
