@@ -633,9 +633,17 @@ export class WorkerProxy {
         return
       }
       const building = peeked.id === undefined ? undefined : pool.building(peeked.id)
-      const elsewhere = (live && home !== source) || (building !== undefined && building !== source)
-      if (source !== null && elsewhere) {
+      if (source !== null && building !== undefined && building !== source) {
         send(res, 409, { detail: `workspace id already exists: ${String(peeked.id)}` })
+        return
+      }
+      // A clone builds on its source's worker, so an id another worker
+      // holds, even closed with its jobs, stays there: a create reaches it.
+      if (source !== null && home?.dead === false && home !== source) {
+        const detail = live
+          ? `workspace id already exists: ${String(peeked.id)}`
+          : `workspace id was used on another worker; create it there instead: ${String(peeked.id)}`
+        send(res, 409, { detail })
         return
       }
       const worker = source ?? (home?.dead === false ? home : undefined) ?? pool.random()
@@ -830,7 +838,7 @@ export class WorkerProxy {
     const lines = [`${req.method ?? 'GET'} ${req.url ?? '/'} HTTP/${req.httpVersion}`]
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const name = req.rawHeaders[i] ?? ''
-      if (name.toLowerCase() !== 'x-forwarded-for')
+      if (!['x-forwarded-for', COUNTED_HEADER].includes(name.toLowerCase()))
         lines.push(`${name}: ${req.rawHeaders[i + 1] ?? ''}`)
     }
     lines.push(`X-Forwarded-For: ${this.client(req)}`)
@@ -942,7 +950,9 @@ function answered(request: ClientRequest): Promise<Answer> {
 function headersFor(req: IncomingMessage, client: string): OutgoingHttpHeaders {
   const headers: OutgoingHttpHeaders = {}
   for (const [name, value] of Object.entries(req.headers)) {
-    if (!HOP_BY_HOP.has(name) && name !== 'x-forwarded-for' && value !== undefined) {
+    // Only the daemon says a request was counted.
+    const own = name === 'x-forwarded-for' || name === COUNTED_HEADER
+    if (!HOP_BY_HOP.has(name) && !own && value !== undefined) {
       headers[name] = value
     }
   }
@@ -1064,7 +1074,8 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
       read.push(chunk)
       size += chunk.byteLength
       yield chunk
-      // Checked here too, since bytes before the first part make no event.
+      // Checked once the chunk is parsed: it may end the request part and
+      // run past the limit, and bytes before the first part make no event.
       if (size > MAX_REQUEST_PART) return
     }
     done = true
@@ -1087,7 +1098,6 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
       } else if (event.kind === 'end' && name === 'request') {
         named = true
       }
-      if (size > MAX_REQUEST_PART) break
     }
   } catch (error) {
     // A malformed body goes on as it is, for the worker to refuse.

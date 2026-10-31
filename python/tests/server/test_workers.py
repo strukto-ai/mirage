@@ -237,6 +237,15 @@ async def test_a_create_under_a_held_id_or_config_workspace_id_goes_to_its_worke
         )
         assert building.status_code == 409
         settle()
+        closed = await d.client.post("/v1/workspaces/n/close")
+        assert closed.status_code == 200
+        held = await d.client.post("/v1/workspaces/a/clone", json={"id": "n"})
+        assert held.status_code == 409
+        again = await d.client.post(
+            "/v1/workspaces", json={"id": "n", "config": CONFIG}
+        )
+        assert again.status_code == 201
+        assert "n" in _ids(d)[1]
 
 
 @pytest.mark.asyncio
@@ -337,6 +346,11 @@ async def test_a_request_counts_once_after_its_caller_check(monkeypatch):
         assert made.status_code == 201
         assert (await d.client.get("/v1/workspaces/a")).status_code == 200
         assert (await d.client.get("/v1/workspaces/a")).status_code == 429
+        # A client that learned the token still counts.
+        forged = await d.client.get(
+            "/v1/workspaces/a", headers={"x-mirage-counted": d.pool.token}
+        )
+        assert forged.status_code == 429
 
 
 @pytest.mark.asyncio
@@ -397,7 +411,7 @@ async def test_a_shell_answers_while_its_stdin_still_uploads():
 
 @pytest.mark.asyncio
 async def test_a_multipart_load_is_read_up_to_its_request_part(monkeypatch):
-    _place_on(monkeypatch, 0, 1)
+    _place_on(monkeypatch, 0, 1, 0)
     async with _daemon() as d:
         await d.client.post(
             "/v1/workspaces", json={"id": "a", "config": CONFIG}
@@ -446,6 +460,21 @@ async def test_a_multipart_load_is_read_up_to_its_request_part(monkeypatch):
         )
         assert twice.status_code == 400
         assert _ids(d) == [["a"], ["r"]]
+        # One chunk ends the request part and runs past the limit.
+        whole = (
+            b'--b\r\nContent-Disposition: form-data; name="request"\r\n\r\n'
+            b'{"id": "big"}\r\n--b\r\nContent-Disposition: form-data; '
+            b'name="snapshot"; filename="s.tar"\r\n\r\n'
+            + tar
+            + bytes(2 * 1024 * 1024)
+            + b"\r\n--b--\r\n"
+        )
+        big = await d.client.post(
+            "/v1/workspaces/load",
+            content=whole,
+            headers={"content-type": "multipart/form-data; boundary=b"},
+        )
+        assert big.status_code == 201
 
 
 @pytest.mark.asyncio

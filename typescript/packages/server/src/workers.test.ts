@@ -238,6 +238,12 @@ describe('WorkerProxy', () => {
     const settle = d.pool.claim('x', building)
     expect((await call(`${d.url}/v1/workspaces/n/clone`, 'POST', { id: 'x' })).status).toBe(409)
     settle()
+    expect((await call(`${d.url}/v1/workspaces/n/close`, 'POST')).status).toBe(200)
+    expect((await call(`${d.url}/v1/workspaces/a/clone`, 'POST', { id: 'n' })).status).toBe(409)
+    expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'n', config: CONFIG })).status).toBe(
+      201,
+    )
+    expect(ids(d)[1]).toContain('n')
   })
 
   it('sends creates of one id racing each other to one worker', async () => {
@@ -318,6 +324,11 @@ describe('WorkerProxy', () => {
     )
     expect((await call(`${d.url}/v1/workspaces/a`, 'GET')).status).toBe(200)
     expect((await call(`${d.url}/v1/workspaces/a`, 'GET')).status).toBe(429)
+    // A client that learned the token still counts.
+    const forged = await fetch(`${d.url}/v1/workspaces/a`, {
+      headers: { 'x-mirage-counted': d.pool.token },
+    })
+    expect(forged.status).toBe(429)
   })
 
   it("counts a clone against its source's workspace limit", async () => {

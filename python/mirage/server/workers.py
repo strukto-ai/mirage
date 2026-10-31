@@ -809,15 +809,28 @@ class WorkerProxy:
                     },
                 )
             building = pool.building(named) if named is not None else None
-            elsewhere = (live and home is not source) or (
-                building is not None and building is not source
-            )
-            if source is not None and elsewhere:
+            if source is not None and building not in (None, source):
                 return await _send(
                     send,
                     409,
                     {"detail": f"workspace id already exists: {named}"},
                 )
+            # A clone builds on its source's worker, so an id another
+            # worker holds, even closed with its jobs, stays there: a
+            # create reaches it.
+            if (
+                source is not None
+                and home is not None
+                and not home.dead
+                and home is not source
+            ):
+                detail = (
+                    f"workspace id already exists: {named}"
+                    if live
+                    else "workspace id was used on another worker; "
+                    f"create it there instead: {named}"
+                )
+                return await _send(send, 409, {"detail": detail})
             alive = home if home is not None and not home.dead else None
             worker = source or alive or pool.random()
             if worker is None:
@@ -1280,7 +1293,8 @@ def _headers_for(scope: Scope) -> list[tuple[str, str]]:
         (k, v)
         for k, v in headers
         if k not in HOP_BY_HOP
-        and k not in ("x-forwarded-for", "content-length")
+        # Only the daemon says a request was counted.
+        and k not in ("x-forwarded-for", "content-length", COUNTED_HEADER)
     ]
     kept.append(("x-forwarded-for", client[0] if client else ""))
     return kept
@@ -1416,8 +1430,9 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
             chunks.append(chunk)
             size += len(chunk)
             yield chunk
-            # Checked here too, since bytes before the first part make no
-            # event.
+            # Checked once the chunk is parsed: it may end the request part
+            # and run past the limit, and bytes before the first part make
+            # no event.
             if size > MAX_REQUEST_PART:
                 return
 
@@ -1444,8 +1459,6 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
                 request.append(bytes(value))
             elif kind == PartEvent.END and name == b"request":
                 named = True
-            if size > MAX_REQUEST_PART:
-                break
     except HTTPException as exc:
         # A malformed body goes on as it is, for the worker to refuse.
         logger.debug("mirage: a load body did not parse: %s", exc.detail)
