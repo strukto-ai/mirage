@@ -71,6 +71,7 @@ from mirage.io.memory import MAX_MEMORY, MemoryBudget
 from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
+from mirage.observe.log_entry import EVENT_COMMAND, EVENT_VFS
 from mirage.observe.observer import Observer
 from mirage.observe.store import ObserverStore
 from mirage.policy import (
@@ -662,13 +663,37 @@ class Workspace:
             self._registry.release_clocks()
             raise
 
-    async def history(self) -> list[dict[str, Any]]:
-        """Command events recorded by the hidden recorder.
+    async def history(
+        self,
+        session_id: str | None = None,
+        since: int | None = None,
+        last: int | None = None,
+        vfs: bool = False,
+    ) -> list[dict[str, Any]]:
+        """What the hidden recorder holds, oldest first: a ``command``
+        entry for every line run, and with ``vfs`` a ``vfs`` entry for
+        every call a line made to a mount.
+
+        Args:
+            session_id (str | None): only this session's entries.
+            since (int | None): only entries at or after this epoch
+                millisecond.
+            last (int | None): only the newest this many entries.
+            vfs (bool): include the ``vfs`` entries.
 
         Returns:
-            list[dict]: All sessions' command events, timestamp order.
+            list[dict]: The entries, timestamp order.
         """
-        return await self.observer.command_events()
+        kinds = (EVENT_COMMAND, EVENT_VFS) if vfs else (EVENT_COMMAND,)
+        picked = [
+            e
+            for e in await self.observer.events(session_id)
+            if e.get("type") in kinds
+            and (since is None or e.get("timestamp", 0) >= since)
+        ]
+        if last is None:
+            return picked
+        return picked[max(0, len(picked) - last) :]
 
     async def explain(
         self, line: str, session_id: str = ""

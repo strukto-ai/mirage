@@ -760,6 +760,16 @@ class HttpSteps:
             "POST", "/v1/workspaces/load", json={"key": key, "id": to}
         )
 
+    async def history(
+        self, wid: str, vfs: bool, last: int | None
+    ) -> list[dict[str, Any]]:
+        params: dict[str, str] = {"vfs": "true"} if vfs else {}
+        if last is not None:
+            params["last"] = str(last)
+        return await self._ok(
+            "GET", f"/v1/workspaces/{wid}/history", params=params
+        )
+
     async def asks(self, wid: str) -> list[tuple[str, str]]:
         return [
             (a["id"], a["reason"])
@@ -983,6 +993,16 @@ class CliSteps:
     async def store_load(self, key: str, to: str) -> None:
         await self._json("workspace", "load", "--key", key, "--id", to)
 
+    async def history(
+        self, wid: str, vfs: bool, last: int | None
+    ) -> list[dict[str, Any]]:
+        args = ["workspace", "history", wid]
+        if vfs:
+            args.append("--vfs")
+        if last is not None:
+            args += ["--last", str(last)]
+        return await self._json(*args)
+
     async def asks(self, wid: str) -> list[tuple[str, str]]:
         return [
             (a["id"], a["reason"])
@@ -1152,6 +1172,11 @@ class InAppSteps:
             key, s3=S3Config(**self.store)
         )
 
+    async def history(
+        self, wid: str, vfs: bool, last: int | None
+    ) -> list[dict[str, Any]]:
+        return await self.workspaces[wid].history(last=last, vfs=vfs)
+
     async def asks(self, wid: str) -> list[tuple[str, str]]:
         return [
             (d.id, d.reason) for d in self.workspaces[wid].decisions.pending()
@@ -1292,6 +1317,18 @@ async def run_steps(
                         reason for _, reason in await steps.asks(wid)
                     )
                 }
+            elif kind == "history":
+                entries = await steps.history(
+                    wid, step.get("vfs", False), step.get("last")
+                )
+                answer = {
+                    "text": "\n".join(
+                        e["command"]
+                        if e["type"] == "command"
+                        else f"{e['vfs']} {e['path']}"
+                        for e in entries
+                    )
+                }
             elif kind == "explain":
                 outcome, code = await steps.explain(
                     wid, step["session"], step["command"]
@@ -1324,7 +1361,9 @@ async def run_steps(
     return answers
 
 
-STEP_OPS = frozenset({"workspace", "session_admin", "snapshot", "ask", "job"})
+STEP_OPS = frozenset(
+    {"workspace", "session_admin", "snapshot", "ask", "job", "history"}
+)
 
 
 def _entries(path: str, names: list[str]) -> list[str]:
@@ -1473,6 +1512,7 @@ class InAppPython:
             "session_admin",
             "snapshot",
             "ask",
+            "history",
         }
     )
 
@@ -1689,6 +1729,7 @@ class Http:
             "snapshot",
             "ask",
             "job",
+            "history",
         }
     )
 
@@ -1906,6 +1947,7 @@ class Cli:
             "snapshot",
             "ask",
             "job",
+            "history",
         }
     )
 

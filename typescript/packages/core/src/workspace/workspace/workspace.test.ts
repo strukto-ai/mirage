@@ -373,7 +373,7 @@ describe('a manual clock workspace', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
       const events = await ws.observer.events()
       const types = new Set(events.map((e) => e.type))
-      for (const type of ['op', 'command', 'clear']) expect(types.has(type)).toBe(true)
+      for (const type of ['vfs', 'command', 'clear']) expect(types.has(type)).toBe(true)
       expect(new Set(events.map((e) => e.timestamp))).toEqual(
         new Set([1_000_000_000, 1_000_005_000, 1_000_010_000]),
       )

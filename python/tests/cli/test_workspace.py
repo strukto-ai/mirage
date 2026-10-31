@@ -21,6 +21,7 @@ from typer.testing import CliRunner
 
 from mirage.cli import workspace as workspace_cli
 from mirage.cli.workspace import (
+    _format_history,
     _format_workspace_explanation,
     _resolve_config_arg,
 )
@@ -202,3 +203,68 @@ def test_an_explained_create_reads_as_its_verdict_and_answers():
     )
     allowed = {"outcome": "allow", "reason": "", "answers": []}
     assert _format_workspace_explanation(allowed) == "[allow]"
+
+
+def test_history_asks_for_what_its_options_name(fake):
+    fake.answer = _FakeResponse(200, b"[]")
+    result = _invoke(
+        "history",
+        "w",
+        "--session",
+        "s1",
+        "--since",
+        "5",
+        "--last",
+        "2",
+        "--vfs",
+    )
+    assert result.exit_code == 0, result.output
+    method, path, kwargs = fake.calls[0]
+    assert (method, path, kwargs["params"]) == (
+        "GET",
+        "/v1/workspaces/w/history",
+        {"session_id": "s1", "since": "5", "last": "2", "vfs": "true"},
+    )
+
+
+def test_history_reads_as_one_row_per_entry():
+    lines = _format_history(
+        [
+            {
+                "type": "vfs",
+                "session": "s1",
+                "timestamp": 0,
+                "vfs": "read",
+                "path": "/d/a",
+            },
+            {
+                "type": "command",
+                "session": "s1",
+                "timestamp": 1000,
+                "command": "cat /d/a",
+                "exit_code": 0,
+            },
+        ]
+    ).splitlines()
+    assert [line.split() for line in lines] == [
+        ["TIME", "SESSION", "EXIT", "ENTRY"],
+        ["1970-01-01", "00:00:00", "s1", "read", "/d/a"],
+        ["1970-01-01", "00:00:01", "s1", "0", "cat", "/d/a"],
+    ]
+    assert _format_history([]) == "No history."
+
+
+def test_a_multiline_command_stays_on_its_row():
+    table = _format_history(
+        [
+            {
+                "type": "command",
+                "session": "s1",
+                "timestamp": 0,
+                "command": "cat <<EOF\nhi\nEOF",
+                "exit_code": 0,
+            }
+        ]
+    )
+    assert table.splitlines()[1].split()[-1] == "<<EOF\\nhi\\nEOF"
+    assert len(table.splitlines()) == 2

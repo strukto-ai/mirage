@@ -32,7 +32,7 @@ describe('renderBashHistory', () => {
   it('ignores non-command events', () => {
     const events: EventDict[] = [
       { type: 'clear', session: 's1', timestamp: 1000 },
-      { type: 'op', session: 's1', timestamp: 2000, op: 'read' },
+      { type: 'vfs', session: 's1', timestamp: 2000, vfs: 'read' },
     ]
     expect(renderBashHistory(events)).toBe('')
   })

@@ -28,9 +28,9 @@ def test_from_op_record():
         duration_ms=45,
     )
     entry = LogEntry.from_op_record(rec, session="sess-1")
-    assert entry.type == "op"
+    assert entry.type == "vfs"
     assert entry.session == "sess-1"
-    assert entry.op == "read"
+    assert entry.vfs == "read"
     assert entry.path == "/data/file.csv"
     assert entry.source == "s3"
     assert entry.bytes == 1024
@@ -49,7 +49,7 @@ def _command_entry(cwd: str | None = None) -> LogEntry:
     )
 
 
-def test_to_json_line_op():
+def test_to_json_line_vfs():
     rec = OpRecord(
         op="read",
         path="/f.csv",
@@ -61,8 +61,8 @@ def test_to_json_line_op():
     entry = LogEntry.from_op_record(rec, session="s")
     line = entry.to_json_line()
     parsed = json.loads(line)
-    assert parsed["type"] == "op"
-    assert parsed["op"] == "read"
+    assert parsed["type"] == "vfs"
+    assert parsed["vfs"] == "read"
     assert "command" not in parsed
 
 

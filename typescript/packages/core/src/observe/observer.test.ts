@@ -60,9 +60,9 @@ describe('Observer', () => {
       string,
       unknown
     >
-    expect(parsed.type).toBe('op')
+    expect(parsed.type).toBe('vfs')
     expect(parsed.session).toBe('sess-1')
-    expect(parsed.op).toBe('read')
+    expect(parsed.vfs).toBe('read')
   })
 
   it('logExecution writes a command JSONL line', async () => {
@@ -348,5 +348,32 @@ describe('a damaged history file', () => {
     await store.append(path, new TextEncoder().encode(raw))
     const shown = await o.sessionCommandEvents('s1')
     expect(shown.map((e) => e.command)).toEqual(['first', 'a\u2028b\u0085c'])
+  })
+
+  it('names one flat log for each session id', async () => {
+    const store = new RAMObserverStore()
+    const o = new Observer(store, new ManualClock(NEW_YEAR))
+    for (const session of ['s1', 'team/s1', '../x']) {
+      await o.logCommandText(`echo ${session}`, session)
+    }
+    expect([...store.files.keys()].sort()).toEqual([
+      '/2021-01-01/..%2Fx.jsonl',
+      '/2021-01-01/s1.jsonl',
+      '/2021-01-01/team%2Fs1.jsonl',
+    ])
+    expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['echo s1'])
+  })
+
+  it('files a long session id under a bounded name', async () => {
+    const store = new RAMObserverStore()
+    const o = new Observer(store, new ManualClock(NEW_YEAR))
+    const [long, longer] = ['\u00e9'.repeat(50), '\u00e9'.repeat(51)]
+    for (const session of [long, longer]) {
+      await o.logCommandText(`echo ${String(session.length)}`, session)
+    }
+    const names = [...store.files.keys()].map((key) => key.split('/').at(-1) ?? '')
+    expect(names).toHaveLength(2)
+    expect(names.every((name) => new TextEncoder().encode(name).length <= 255)).toBe(true)
+    expect((await o.sessionCommandEvents(long)).map((e) => e.command)).toEqual(['echo 50'])
   })
 })

@@ -40,7 +40,7 @@ def test_render_bash_history_gnu_format():
 def test_render_bash_history_ignores_non_command_events():
     events = [
         {"type": "clear", "session": "s1", "timestamp": 1000},
-        {"type": "op", "session": "s1", "timestamp": 2000, "op": "read"},
+        {"type": "vfs", "session": "s1", "timestamp": 2000, "vfs": "read"},
     ]
     assert render_bash_history(events) == ""
 

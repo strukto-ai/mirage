@@ -137,6 +137,53 @@ describe('workspaces router', () => {
     await app.close()
   })
 
+  it('reads what the workspace ran', async () => {
+    const app = buildApp()
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { id: 'h', config: RAM },
+      })
+      expect(created.statusCode).toBe(201)
+      for (const command of ['echo hi > /a.txt', 'cat /a.txt']) {
+        const r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces/h/shell',
+          payload: { command },
+        })
+        expect(r.statusCode).toBe(200)
+      }
+      const read = async (qs: string) =>
+        await app.inject({ method: 'GET', url: `/v1/workspaces/h/history${qs}` })
+      const all = await read('')
+      expect(all.statusCode).toBe(200)
+      expect(all.json<{ command: string }[]>().map((e) => e.command)).toEqual([
+        'echo hi > /a.txt',
+        'cat /a.txt',
+      ])
+      expect(
+        (await read('?vfs=true'))
+          .json<{ type: string; vfs?: string }[]>()
+          .map((e) => [e.type, e.vfs ?? null]),
+      ).toEqual([
+        ['vfs', 'write'],
+        ['command', null],
+        ['vfs', 'read'],
+        ['command', null],
+      ])
+      expect((await read('?last=1')).json<{ command: string }[]>().map((e) => e.command)).toEqual([
+        'cat /a.txt',
+      ])
+      expect((await read('?last=-1')).statusCode).toBe(400)
+      expect(
+        (await app.inject({ method: 'GET', url: '/v1/workspaces/nope/history' })).statusCode,
+      ).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('refuses a load past max_sessions', async () => {
     const reasons: string[] = []
     const counted = vi.spyOn(metrics, 'refused').mockImplementation((reason) => {

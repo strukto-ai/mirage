@@ -86,7 +86,7 @@ async def test_execution_identity_links_pipeline_threaded_cli_and_observation():
         assert seen[0] is not None and seen[0] != "exec-request"
         events = await ws.observer.events()
         assert events[-1]["execution_id"] == "exec-request"
-        ops = [event for event in events if event["type"] == "op"]
+        ops = [event for event in events if event["type"] == "vfs"]
         assert ops and all(event.get("execution_id") for event in ops)
     finally:
         await ws.close()

@@ -7,6 +7,9 @@ icon: clock-rotate-left
 The history store records every command a session runs at the top level. The
 `history` builtin and `/.bash_history` are two views of that one record, and a
 [policy](/home/policy/policies) reads it as `/.bash_history`.
+From outside, `ws.history()`, [`GET /v1/workspaces/{id}/history`](/home/access/http#read-a-workspaces-history)
+and `mirage workspace history` read every session's record, with each line's
+mount calls when asked.
 
 History is kept per session. A workspace built again shows a session's
 history once it has that session again: keep the

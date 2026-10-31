@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass
 
 from mirage.observe.record import OpRecord
 
-EVENT_OP = "op"
+EVENT_VFS = "vfs"
 EVENT_COMMAND = "command"
 EVENT_CLEAR = "clear"
 EVENT_DELETE = "delete"
@@ -26,18 +26,19 @@ STDOUT_TRUNCATE = 4096
 
 @dataclass
 class LogEntry:
-    """Unified log entry for ops, commands, and history control events.
+    """Unified log entry for vfs calls, commands, and history control events.
 
     Args:
-        type (str): One of EVENT_OP, EVENT_COMMAND, EVENT_CLEAR,
+        type (str): One of EVENT_VFS, EVENT_COMMAND, EVENT_CLEAR,
             EVENT_DELETE.
         session (str): Session ID.
         timestamp (int): UTC epoch milliseconds.
-        op (str | None): Operation name (for type="op").
-        path (str | None): Virtual path (for type="op").
-        source (str | None): VFS name (for type="op").
-        bytes (int | None): Bytes transferred (for type="op").
-        duration_ms (int | None): Duration in ms (for type="op").
+        vfs (str | None): The vfs call, such as read or write (for
+            type="vfs").
+        path (str | None): Virtual path (for type="vfs").
+        source (str | None): VFS name (for type="vfs").
+        bytes (int | None): Bytes transferred (for type="vfs").
+        duration_ms (int | None): Duration in ms (for type="vfs").
         command (str | None): Shell command (for type="command").
         exit_code (int | None): Exit code (for type="command").
         stdout (str | None): Truncated stdout (for type="command").
@@ -49,7 +50,7 @@ class LogEntry:
     session: str
     timestamp: int
     cwd: str | None = None
-    op: str | None = None
+    vfs: str | None = None
     path: str | None = None
     source: str | None = None
     bytes: int | None = None
@@ -77,11 +78,11 @@ class LogEntry:
             LogEntry: Unified log entry.
         """
         return LogEntry(
-            type=EVENT_OP,
+            type=EVENT_VFS,
             session=session,
             timestamp=rec.timestamp,
             cwd=cwd,
-            op=rec.op,
+            vfs=rec.op,
             path=rec.path,
             source=rec.source,
             bytes=rec.bytes,

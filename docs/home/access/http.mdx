@@ -305,6 +305,25 @@ Returns an array of workspace summaries:
 
 Returns the workspace object.
 
+### Read a workspace's history
+
+<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/history`
+
+<ParamField query="session_id" type="string">Only this session's entries.</ParamField>
+<ParamField query="since" type="integer">Only entries at or after this time, in epoch milliseconds.</ParamField>
+<ParamField query="last" type="integer">Only the newest this many entries.</ParamField>
+<ParamField query="vfs" type="boolean" default="false">Add a `vfs` entry for each call a line made to a mount.</ParamField>
+
+Returns what the workspace ran, oldest first: a `command` entry for every
+line, and with `vfs`, the mount calls each line made just before it.
+
+```json
+[
+  {"type": "vfs", "vfs": "read", "path": "/data/a.txt", "source": "s3", "bytes": 6, "duration_ms": 12, "session": "s1", "timestamp": 1792630121060},
+  {"type": "command", "command": "cat /data/a.txt", "exit_code": 0, "stdout": "hello\n", "cwd": "/", "session": "s1", "timestamp": 1792630121061}
+]
+```
+
 ### Delete a workspace
 
 <Badge color="red">DELETE</Badge> `/v1/workspaces/{id}`
