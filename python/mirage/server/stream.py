@@ -71,7 +71,7 @@ class ShellResponse(Response):
     ) -> None:
         super().__init__(
             media_type="application/x-ndjson",
-            headers={"X-Mirage-Job-Id": job.id, "Connection": "close"},
+            headers={"Connection": "close"},
         )
         del self.headers["content-length"]
         self._execution = execution

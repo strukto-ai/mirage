@@ -1370,18 +1370,14 @@ describe('workspace cancel, kill and close', () => {
         url: `/v1/workspaces/${wid}/shell?session_id=a`,
         payload: { command: 'sleep 30 &' },
       })
-      const jobId = (
-        await app.inject({
-          method: 'POST',
-          url: `/v1/workspaces/${wid}/shell?background=true`,
-          payload: { command: 'sleep 30' },
-        })
-      ).json<{ job_id: string }>().job_id
+      void app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${wid}/shell`,
+        payload: { command: 'sleep 30' },
+      })
       for (let i = 0; i < 500; i += 1) {
-        const job = (await app.inject({ method: 'GET', url: `/v1/jobs/${jobId}` })).json<{
-          status: string
-        }>()
-        if (job.status === 'running') break
+        const job = app.jobs.list(wid).find((record) => record.command === 'sleep 30')
+        if (job?.status === 'running') break
         await new Promise((resolve) => setTimeout(resolve, 10))
       }
       expect(

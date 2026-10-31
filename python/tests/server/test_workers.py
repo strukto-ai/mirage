@@ -170,7 +170,7 @@ async def test_each_new_workspace_goes_to_a_worker_at_random(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_workspaces_requests_and_jobs_go_to_its_worker(monkeypatch):
+async def test_a_workspaces_requests_go_to_its_worker(monkeypatch):
     _place_on(monkeypatch, 0, 1)
     async with _daemon() as d:
         await d.client.post(
@@ -184,15 +184,6 @@ async def test_a_workspaces_requests_and_jobs_go_to_its_worker(monkeypatch):
             json={"command": "echo hi > /data/x; cat /data/x"},
         )
         assert ran.json()["stdout"] == "hi\n"
-        started = await d.client.post(
-            "/v1/workspaces/b/shell?background=true",
-            json={"command": "echo bg"},
-        )
-        job = started.json()["job_id"]
-        got = await d.client.get(f"/v1/jobs/{job}")
-        assert got.status_code == 200
-        assert got.json()["workspace_id"] == "b"
-        assert (await d.client.get("/v1/jobs/nope")).status_code == 404
         missing = await d.client.post(
             "/v1/workspaces/nope/shell", json={"command": "true"}
         )

@@ -52,12 +52,6 @@ class ShellRequest(BaseModel):
     record: bool = True
 
 
-class BackgroundResponse(BaseModel):
-    job_id: str
-    workspace_id: str
-    submitted_at: float
-
-
 def _build_shell_kwargs(
     req: ShellRequest, stdin: ByteSource | None
 ) -> dict[str, Any]:
@@ -101,19 +95,18 @@ async def _invoke_shell(
 async def shell(
     workspace_id: str,
     request: Request,
-    background: bool = Query(False),
     session_id: str | None = Query(None),
     explain: bool = Query(False),
     stream: bool = Query(False),
 ) -> Response:
     entry = require_entry(request, workspace_id)
-    if stream and (background or explain):
+    if stream and explain:
         raise HTTPException(
             status_code=400,
-            detail="stream cannot be combined with background or explain",
+            detail="stream cannot be combined with explain",
         )
     if explain:
-        return await _explained(entry, request, session_id, background)
+        return await _explained(entry, request, session_id)
     await session_of(entry, session_id)
     jobs = request.app.state.jobs
     content_type = request.headers.get("content-type", "")
@@ -133,9 +126,7 @@ async def shell(
             )
         )
         req_obj, part = await started
-        if part is not None and background:
-            stdin = await _read_all(part)
-        elif part is not None:
+        if part is not None:
             stdin = LoopStdin(part, asyncio.get_running_loop())
     else:
         req_obj = await _parse_json_body(request)
@@ -165,8 +156,6 @@ async def shell(
             if stream:
                 hand(None)
 
-    if background and upload is not None:
-        await upload
     if jobs.draining or not entry.accepting_jobs:
         if upload is not None:
             await _finish_upload(upload, part)
@@ -186,17 +175,6 @@ async def shell(
         return ShellResponse(
             opened, entry.runner.loop, jobs, job, request, upload, part
         )
-    if background:
-        return Response(
-            content=BackgroundResponse(
-                job_id=job.id,
-                workspace_id=workspace_id,
-                submitted_at=job.submitted_at,
-            ).model_dump_json(),
-            media_type="application/json",
-            status_code=202,
-            headers={"X-Mirage-Job-Id": job.id},
-        )
     job = await wait_attended(jobs, job.id, request, upload)
     if upload is not None:
         await _finish_upload(upload, part)
@@ -211,7 +189,6 @@ async def shell(
         content=await run_blocking(json.dumps, job.result),
         media_type="application/json",
         status_code=200,
-        headers={"X-Mirage-Job-Id": job.id},
     )
 
 
@@ -219,18 +196,16 @@ async def _explained(
     entry: WorkspaceEntry,
     request: Request,
     session_id: str | None,
-    background: bool,
 ) -> Response:
     """What a line would do as a session, without running any of it
     (``session.explain.shell``). Only the line is read: stdin, a working
-    directory, a runtime or a background job would change what runs,
-    which an explanation cannot follow, so each is refused.
+    directory or a runtime would change what runs, which an explanation
+    cannot follow, so each is refused.
 
     Args:
         entry (WorkspaceEntry): the workspace.
         request (Request): the request, carrying the JSON body.
         session_id (str | None): the session; None is the default.
-        background (bool): whether the caller asked for a job.
     """
     content_type = request.headers.get("content-type", "")
     req_obj = (
@@ -238,11 +213,10 @@ async def _explained(
         if content_type.startswith("multipart/")
         else await _parse_json_body(request)
     )
-    if req_obj is None or background or req_obj.cwd or req_obj.runtime:
+    if req_obj is None or req_obj.cwd or req_obj.runtime:
         raise HTTPException(
             status_code=400,
-            detail="explain takes the line alone: "
-            "no stdin, cwd, runtime or background",
+            detail="explain takes the line alone: no stdin, cwd or runtime",
         )
     session = await session_of(entry, session_id)
     said = await entry.runner.call(session.explain.shell(req_obj.command))
@@ -306,13 +280,6 @@ async def _finish_upload(
         raise
     except Exception as exc:
         logger.debug("shell upload ended early: %r", exc)
-
-
-async def _read_all(part: UploadStdin) -> bytes:
-    chunks: list[bytes] = []
-    while data := await part.read():
-        chunks.append(data)
-    return b"".join(chunks)
 
 
 async def _read_shell_body(

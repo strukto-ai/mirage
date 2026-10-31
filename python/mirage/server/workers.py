@@ -65,7 +65,7 @@ READY_SECONDS = 60
 EXIT_SECONDS = 10
 # A request that needs no workspace and answers only a signed-in caller:
 # what a worker says to it says whether the caller may go on.
-AUTH_PROBE = "/v1/jobs?workspace_id=-"
+AUTH_PROBE = "/v1/workspaces"
 # What FastAPI reads as false in a query flag.
 _FALSE = frozenset({"0", "f", "false", "n", "no", "off"})
 # Headers that belong to one connection, which are not passed on.
@@ -348,8 +348,8 @@ class ThreadWorker(Worker):
 class WorkerPool:
     """The workers and which holds each workspace.
 
-    A workspace's worker outlives its close, so its jobs and a create
-    under its id reach the worker that has them; a delete forgets it.
+    A workspace's worker outlives its close, so a create under its id
+    reaches the worker that has its state; a delete forgets it.
     Mirrors TypeScript's ``WorkerPool``.
 
     Args:
@@ -705,20 +705,11 @@ class WorkerProxy:
             )
             self.exit()
             return
-        if resource == "jobs":
-            if workspace_id is None:
-                query = parse_qs(scope.get("query_string", b"").decode())
-                owner = query.get("workspace_id")
-                if owner:
-                    worker = pool.home(owner[0]) or first
-                    return await self._pass(worker, scope, receive, send)
-                return await self._gather(scope, send, "submitted_at")
-            return await self._find(scope, receive, send, first)
         if resource != "workspaces":
             return await self._pass(first, scope, receive, send)
         if workspace_id is None:
             if method == "GET":
-                return await self._gather(scope, send, "created_at")
+                return await self._gather(scope, send)
             # An explain builds nothing, so it holds no slot.
             query = parse_qs(scope.get("query_string", b"").decode())
             explain = query.get("explain", ["false"])[-1].lower()
@@ -816,8 +807,7 @@ class WorkerProxy:
                     {"detail": f"workspace id already exists: {named}"},
                 )
             # A clone builds on its source's worker, so an id another
-            # worker holds, even closed with its jobs, stays there: a
-            # create reaches it.
+            # worker holds, even closed, stays there: a create reaches it.
             if (
                 source is not None
                 and home is not None
@@ -862,8 +852,8 @@ class WorkerProxy:
                 pool.reserved -= 1
             self._idle_check()
 
-    async def _gather(self, scope: Scope, send: Send, order: str) -> None:
-        """A list: every worker's, merged in ``order``."""
+    async def _gather(self, scope: Scope, send: Send) -> None:
+        """The workspace list: every worker's, merged by creation time."""
         running = [w for w in self.pool.workers if not w.dead]
         answers = await asyncio.gather(
             *(self._fetch(w, scope, b"") for w in running)
@@ -872,27 +862,8 @@ class WorkerProxy:
             if answer.status != 200:
                 return await _reply(send, answer)
         items = [item for a in answers for item in json.loads(a.body)]
-        items.sort(key=lambda item: float(item.get(order) or 0))
+        items.sort(key=lambda item: float(item.get("created_at") or 0))
         await _send(send, 200, items)
-
-    async def _find(
-        self, scope: Scope, receive: Receive, send: Send, first: Worker
-    ) -> None:
-        """A job's request: the worker that knows the job answers."""
-        refused = await self._refused(scope, first)
-        if refused is not None:
-            return await _reply(send, refused)
-        body = await _read_up_to(receive, MAX_REQUEST_PART)
-        if body is None:
-            return await _send(send, 413, {"detail": "request body too large"})
-        answer: _Answer | None = None
-        for worker in self.pool.workers:
-            if worker.dead:
-                continue
-            answer = await self._fetch(worker, scope, body, counted=True)
-            if answer.status != 404:
-                break
-        await _reply(send, answer or _UNAVAILABLE)
 
     async def _refused(
         self, scope: Scope, worker: Worker | None
@@ -1397,18 +1368,6 @@ async def _chunks(receive: Receive) -> AsyncIterator[bytes]:
             yield message["body"]
         if not message.get("more_body"):
             return
-
-
-async def _read_up_to(receive: Receive, limit: int) -> bytes | None:
-    """The whole request body, None past ``limit`` bytes."""
-    read: list[bytes] = []
-    size = 0
-    async for chunk in _chunks(receive):
-        size += len(chunk)
-        if size > limit:
-            return None
-        read.append(chunk)
-    return b"".join(read)
 
 
 async def _peek(scope: Scope, receive: Receive) -> _Peeked:

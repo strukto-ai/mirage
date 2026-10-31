@@ -193,7 +193,7 @@ describe('WorkerProxy', () => {
     })
   })
 
-  it("sends a workspace's requests and jobs to its worker", async () => {
+  it("sends a workspace's requests to its worker", async () => {
     d = await daemon()
     placeOn(0, 1)
     await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })
@@ -202,14 +202,6 @@ describe('WorkerProxy', () => {
       command: 'echo hi > /data/x; cat /data/x',
     })
     expect(ran.json).toMatchObject({ exit_code: 0, stdout: 'hi\n' })
-    const started = await call(`${d.url}/v1/workspaces/b/shell?background=true`, 'POST', {
-      command: 'echo bg',
-    })
-    const job = (started.json as { job_id: string }).job_id
-    const got = await call(`${d.url}/v1/jobs/${job}`, 'GET')
-    expect(got.status).toBe(200)
-    expect(got.json).toMatchObject({ job_id: job, workspace_id: 'b' })
-    expect((await call(`${d.url}/v1/jobs/nope`, 'GET')).status).toBe(404)
     const missing = await call(`${d.url}/v1/workspaces/nope/shell`, 'POST', { command: 'true' })
     expect(missing.status).toBe(404)
   })

@@ -52,7 +52,7 @@ const READY_SECONDS = 60
 const EXIT_SECONDS = 10
 // A request that needs no workspace and answers only a signed-in caller:
 // what a worker says to it says whether the caller may go on.
-const AUTH_PROBE = '/v1/jobs?workspace_id=-'
+const AUTH_PROBE = '/v1/workspaces'
 // What a request gets when no worker can answer it.
 const UNAVAILABLE = { detail: 'worker unavailable' }
 // Headers that belong to one connection, which are not passed on.
@@ -292,8 +292,8 @@ export interface WorkerPoolOptions {
 
 /**
  * The workers and which holds each workspace. A workspace's worker
- * outlives its close, so its jobs and a create under its id reach the
- * worker that has them; a delete forgets it. Mirrors Python's
+ * outlives its close, so a create under its id reaches the worker that
+ * has its state; a delete forgets it. Mirrors Python's
  * `WorkerPool`.
  */
 export class WorkerPool {
@@ -550,17 +550,9 @@ export class WorkerProxy {
       this.options.exit()
       return
     }
-    if (resource === 'jobs') {
-      if (id === undefined) {
-        const owner = url.searchParams.get('workspace_id')
-        if (owner !== null) return this.pass(pool.home(owner) ?? first, req, res)
-        return this.gather(req, res, 'submitted_at')
-      }
-      return this.find(req, res, first)
-    }
     if (resource !== 'workspaces') return this.pass(first, req, res)
     if (id === undefined) {
-      if (method === 'GET') return this.gather(req, res, 'created_at')
+      if (method === 'GET') return this.gather(req, res)
       // An explain builds nothing, so it holds no slot.
       const explain = url.searchParams.get('explain')
       if (method === 'POST' && explain !== null && explain !== 'false') {
@@ -643,7 +635,7 @@ export class WorkerProxy {
         return
       }
       // A clone builds on its source's worker, so an id another worker
-      // holds, even closed with its jobs, stays there: a create reaches it.
+      // holds, even closed, stays there: a create reaches it.
       if (source !== null && home?.dead === false && home !== source) {
         const detail = live
           ? `workspace id already exists: ${String(peeked.id)}`
@@ -679,8 +671,8 @@ export class WorkerProxy {
     }
   }
 
-  /** A list: every worker's, merged in `order`. */
-  private async gather(req: IncomingMessage, res: ServerResponse, order: string): Promise<void> {
+  /** The workspace list: every worker's, merged by creation time. */
+  private async gather(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const running = this.options.pool.workers.filter((worker) => !worker.dead)
     const answers = await Promise.all(running.map((worker) => this.fetch(worker, req, null)))
     const failed = answers.find((answer) => answer.status !== 200)
@@ -690,32 +682,9 @@ export class WorkerProxy {
     }
     const items = answers.flatMap((answer) => JSON.parse(answer.body.toString()) as unknown[])
     const key = (item: unknown): number =>
-      Number((item as Record<string, unknown> | null)?.[order] ?? 0)
+      Number((item as Record<string, unknown> | null)?.created_at ?? 0)
     items.sort((a, b) => key(a) - key(b))
     send(res, 200, items)
-  }
-
-  /** A job's request: the worker that knows the job answers. */
-  private async find(req: IncomingMessage, res: ServerResponse, first: Worker): Promise<void> {
-    const refused = await this.refused(req, first)
-    if (refused !== null) {
-      reply(res, refused)
-      return
-    }
-    const body = await readUpTo(req, MAX_REQUEST_PART)
-    if (body === null) {
-      discard(req)
-      send(res, 413, { detail: 'request body too large' })
-      return
-    }
-    let last: Answer | null = null
-    for (const worker of this.options.pool.workers) {
-      if (worker.dead) continue
-      last = await this.fetch(worker, req, body, false, true)
-      if (last.status !== 404) break
-    }
-    if (last === null) send(res, 502, UNAVAILABLE)
-    else reply(res, last)
   }
 
   /**
@@ -1008,18 +977,6 @@ function idOf(body: Buffer): string | undefined {
     console.debug('mirage: a create body is not JSON:', (error as Error).name)
     return undefined
   }
-}
-
-/** The whole of `req`, null past `limit` bytes. */
-async function readUpTo(req: IncomingMessage, limit: number): Promise<Buffer | null> {
-  const read: Buffer[] = []
-  let size = 0
-  for await (const chunk of chunks(req)) {
-    size += chunk.byteLength
-    if (size > limit) return null
-    read.push(chunk)
-  }
-  return Buffer.concat(read)
 }
 
 /**

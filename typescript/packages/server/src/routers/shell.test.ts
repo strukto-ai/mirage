@@ -29,14 +29,9 @@ async function createWs(app: ReturnType<typeof buildApp>, id: string): Promise<v
 }
 
 describe('execute router', () => {
-  it.each([
-    ['ram', false],
-    ['ram', true],
-    ['disk', false],
-    ['disk', true],
-  ] as const)(
-    'preserves large multipart stdin on %s (background=%s)',
-    async (vfs, background) => {
+  it.each(['ram', 'disk'] as const)(
+    'preserves large multipart stdin on %s',
+    async (vfs) => {
       const root = await mkdtemp(join(tmpdir(), 'execute-stdin-'))
       const app = buildApp()
       try {
@@ -61,26 +56,17 @@ describe('execute router', () => {
         expect(stdin.length).toBeGreaterThan(1024 * 1024)
         const form = new FormData()
         const request = JSON.stringify({ command: 'cat > input.bin', cwd: '/work', record: false })
-        form.set(
-          'request',
-          background ? new Blob([request], { type: 'application/json' }) : request,
-        )
+        form.set('request', request)
         form.set('stdin', new Blob([stdin]), 'stdin.bin')
         const upload = new Request('http://localhost', { method: 'POST', body: form })
         const result = await app.inject({
           method: 'POST',
-          url: `/v1/workspaces/large-stdin/shell?background=${String(background)}`,
+          url: '/v1/workspaces/large-stdin/shell',
           headers: { 'content-type': upload.headers.get('content-type') ?? '' },
           payload: Buffer.from(await upload.arrayBuffer()),
         })
-        expect(result.statusCode).toBe(background ? 202 : 200)
-        if (background) {
-          const job = result.json<{ job_id: string }>()
-          const waited = await app.inject({ method: 'POST', url: `/v1/jobs/${job.job_id}/wait` })
-          expect(waited.json<{ status: string }>().status).toBe('done')
-        } else {
-          expect(result.json<{ exit_code: number }>().exit_code).toBe(0)
-        }
+        expect(result.statusCode).toBe(200)
+        expect(result.json<{ exit_code: number }>().exit_code).toBe(0)
         const read = await app.inject({
           method: 'POST',
           url: '/v1/workspaces/large-stdin/shell',
@@ -117,8 +103,7 @@ describe('execute router', () => {
           expect(result.json<{ stdout: string }>().stdout.trim()).toBe('0')
         }
       }
-      const jobs = await app.inject({ method: 'GET', url: '/v1/jobs?workspace_id=multipart-empty' })
-      expect(jobs.json<unknown[]>()).toHaveLength(1)
+      expect(app.jobs.list('multipart-empty')).toHaveLength(1)
     } finally {
       await app.close()
     }
@@ -133,7 +118,6 @@ describe('execute router', () => {
       payload: { command: 'echo hi' },
     })
     expect(res.statusCode).toBe(200)
-    expect(res.headers['x-mirage-job-id']).toMatch(/^exec_/)
     const body = res.json<{ kind: string; stdout: string; exit_code: number }>()
     expect(body.kind).toBe('io')
     expect(body.stdout.trim()).toBe('hi')
@@ -239,50 +223,6 @@ describe('execute router', () => {
     await app.close()
   })
 
-  it('POST /v1/jobs/:id/wait accepts an empty body', async () => {
-    const app = buildApp()
-    await createWs(app, 'ewait')
-    const submit = await app.inject({
-      method: 'POST',
-      url: '/v1/workspaces/ewait/shell?background=true',
-      payload: { command: 'echo hi' },
-    })
-    const { job_id: jobId } = submit.json<{ job_id: string }>()
-    const res = await app.inject({ method: 'POST', url: `/v1/jobs/${jobId}/wait` })
-    expect(res.statusCode).toBe(200)
-    await app.close()
-  })
-
-  it('background=true returns 202 + job_id', async () => {
-    const app = buildApp()
-    await createWs(app, 'ew2')
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/workspaces/ew2/shell?background=true',
-      payload: { command: 'echo hi' },
-    })
-    expect(res.statusCode).toBe(202)
-    const body = res.json<{ job_id: string }>()
-    expect(body.job_id).toMatch(/^exec_/)
-    expect(res.headers['x-mirage-job-id']).toBe(body.job_id)
-    await app.close()
-  })
-
-  it('GET /v1/jobs lists jobs filtered by workspace', async () => {
-    const app = buildApp()
-    await createWs(app, 'ew3')
-    await app.inject({
-      method: 'POST',
-      url: '/v1/workspaces/ew3/shell',
-      payload: { command: 'echo hi' },
-    })
-    const res = await app.inject({ method: 'GET', url: '/v1/jobs?workspace_id=ew3' })
-    const body = res.json<{ workspace_id: string }[]>()
-    expect(body.length).toBeGreaterThan(0)
-    expect(body[0]?.workspace_id).toBe('ew3')
-    await app.close()
-  })
-
   it('answers 499 when a synchronous execute job is canceled', async () => {
     const app = buildApp()
     await createWs(app, 'ecancel')
@@ -329,10 +269,7 @@ describe('a foreground shell request', () => {
       await expect(running).rejects.toThrow()
       let status = ''
       for (let i = 0; i < 100; i++) {
-        const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=drop`)).json()) as {
-          status: string
-        }[]
-        status = jobs[0]?.status ?? ''
+        status = app.jobs.list('drop')[0]?.status ?? ''
         if (status === 'canceled') break
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
@@ -380,10 +317,7 @@ describe('a foreground shell request', () => {
           )
           controller.enqueue(text.encode('first\n'))
           for (let i = 0; i < 250 && !running; i++) {
-            const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=streamed`)).json()) as {
-              status: string
-            }[]
-            running = jobs.some((j) => j.status === 'running')
+            running = app.jobs.list('streamed').some((j) => j.status === 'running')
             await new Promise((resolve) => setTimeout(resolve, 20))
           }
           controller.enqueue(text.encode(`second\n${END}`))
@@ -448,10 +382,7 @@ describe('a foreground shell request', () => {
             text.encode(requestPart('cat > /out.txt') + part('stdin', 'stdin.bin')),
           )
           for (let i = 0; i < 250 && !running; i++) {
-            const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=early`)).json()) as {
-              status: string
-            }[]
-            running = jobs.some((j) => j.status === 'running')
+            running = app.jobs.list('early').some((j) => j.status === 'running')
             await new Promise((resolve) => setTimeout(resolve, 20))
           }
           controller.enqueue(text.encode(`late\n${END}`))
@@ -637,18 +568,14 @@ it.each(['', 'x'.repeat(128 * 1024 + 1)])(
         status: 'done',
         result: { exit_code: 1, stdout: '', stderr: '' },
       })
-      const job = await app.inject({
-        method: 'GET',
-        url: `/v1/jobs/${String(response.headers['x-mirage-job-id'])}`,
-      })
-      expect(job.json<{ status: string }>().status).toBe('done')
+      expect(app.jobs.list().at(-1)?.status).toBe('done')
     } finally {
       await app.close()
     }
   },
 )
 
-it.each(['background', 'explain'])(
+it.each(['explain'])(
   'refuses streaming with %s before submitting work',
   async (other) => {
     const app = buildApp()
@@ -660,8 +587,7 @@ it.each(['background', 'explain'])(
         payload: { command: 'echo no' },
       })
       expect(result.statusCode).toBe(400)
-      const jobs = await app.inject({ method: 'GET', url: '/v1/jobs' })
-      expect(jobs.json()).toEqual([])
+      expect(app.jobs.list()).toEqual([])
     } finally {
       await app.close()
     }
@@ -680,26 +606,20 @@ it('streams a prefix before completion and joins cancellation after disconnect',
       body: JSON.stringify({ command: 'echo ready; sleep 30' }),
       signal: stop.signal,
     })
-    const jobId = response.headers.get('X-Mirage-Job-Id') ?? ''
     if (response.body === null) throw new Error('missing response body')
     const reader = (response.body as ReadableStream<Uint8Array>).getReader()
     const first = await reader.read()
     expect(new TextDecoder().decode(first.value)).toContain(
       Buffer.from('ready\n').toString('base64'),
     )
-    expect(
-      (await (await fetch(`${base}/v1/jobs/${jobId}`)).json()) as { status: string },
-    ).toMatchObject({ status: 'running' })
+    const [job] = app.jobs.list('early-stream')
+    if (job === undefined) throw new Error('the line made no job')
+    expect(job.status).toBe('running')
     stop.abort()
     await reader.cancel().catch(() => undefined)
-    const waited = await fetch(`${base}/v1/jobs/${jobId}/wait`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ timeout_s: 3 }),
-    })
-    const final = (await waited.json()) as { status: string; finished_at: number | null }
+    const final = await app.jobs.wait(job.id, 3)
     expect(final.status).toBe('canceled')
-    expect(typeof final.finished_at).toBe('number')
+    expect(typeof final.finishedAt).toBe('number')
   } finally {
     await app.close()
   }

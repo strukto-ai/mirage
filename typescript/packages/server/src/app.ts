@@ -40,7 +40,6 @@ import { registerShellRoutes } from './routers/shell.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerVfsRoutes } from './routers/vfs.ts'
 import { registerHealthRoutes } from './routers/health.ts'
-import { registerJobsRoutes } from './routers/jobs.ts'
 import { registerDocumentsRoutes } from './routers/documents.ts'
 import { registerOAuthRoutes } from './routers/oauth.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
@@ -186,7 +185,6 @@ export function buildApp(options: BuildAppOptions = {}) {
   registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })
   registerShellRoutes(app, { registry, jobs })
-  registerJobsRoutes(app, { jobs, registry })
   const mcp = registerMcpRoutes(app, registry, jobs)
   registerRpcRoutes(app, registry, jobs, mcp)
   registerToolsRoutes(app, { mcp })

@@ -38,11 +38,11 @@ const CALLS: Readonly<Record<string, boolean>> = { tools: false, all: true }
  * The tool table as the daemon serves it: through its own API.
  *
  * `shell` is a job, submitted to the daemon's execution table the way
- * `POST /shell` submits one, so an MCP command is listed by `/v1/jobs`,
- * can be cancelled there, and is recorded like any other. The caller's
- * `signal` (an MCP client's cancel) cancels the job too. The other tools
- * run through the session's own table (`session.tools`), so a read
- * through any entry point guards a write through another.
+ * `POST /shell` submits one, so an MCP command drains at shutdown and is
+ * recorded like any other. The caller's `signal` (an MCP client's cancel)
+ * cancels the job too. The other tools run through the session's own
+ * table (`session.tools`), so a read through any entry point guards a
+ * write through another.
  */
 export class DaemonToolOperations extends McpToolOperations {
   constructor(

@@ -90,10 +90,8 @@ describe('the RPC endpoint', () => {
     await post(url, request(1, 'shell', { command: 'mkdir /d && cd /d' }), '?session_id=agent')
     const pwd = await post(url, request(2, 'shell', { command: 'pwd' }), '?session_id=agent')
     expect(((await pwd.json()) as { result: { stdout: string } }).result.stdout).toBe('/d\n')
-    const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=${id}`)).json()) as {
-      session_id: string
-    }[]
-    expect(new Set(jobs.map((job) => job.session_id))).toEqual(new Set(['agent']))
+    const jobs = apps.flatMap((app) => app.jobs.list(id))
+    expect(new Set(jobs.map((job) => job.sessionId))).toEqual(new Set(['agent']))
   })
 
   it('lets $/cancelRequest reach a running shell', async () => {
@@ -112,10 +110,7 @@ describe('the RPC endpoint', () => {
     expect(answer.error.code).toBe(-32800)
     let status = ''
     for (let i = 0; i < 100; i++) {
-      const jobs = (await (await fetch(`${base}/v1/jobs?workspace_id=${id}`)).json()) as {
-        status: string
-      }[]
-      status = jobs[0]?.status ?? ''
+      status = apps.flatMap((app) => app.jobs.list(id))[0]?.status ?? ''
       if (status === 'canceled') break
       await new Promise((resolve) => setTimeout(resolve, 50))
     }

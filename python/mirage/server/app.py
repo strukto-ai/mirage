@@ -70,7 +70,6 @@ from mirage.server.routers import (
     asks,
     documents,
     health,
-    jobs,
     oauth,
     sessions,
     shell,
@@ -435,7 +434,6 @@ def build_app(
     app.include_router(ssh.router)
     app.include_router(tools.router)
     app.include_router(vfs.router)
-    app.include_router(jobs.router)
     app.include_router(health.router)
     app.include_router(oauth.router)
     app.state.mcp = register_mcp_routes(
