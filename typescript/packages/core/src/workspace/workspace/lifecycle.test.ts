@@ -347,6 +347,67 @@ it.each([
   },
 )
 
+it.each([{ drop: false }, { drop: true }])(
+  'close settles a session load in flight (drop=$drop)',
+  async ({ drop }) => {
+    const ws = buildWs()
+    const store = ws.stateStore
+    const events: string[] = []
+    let enter = (): void => undefined
+    let resume = (): void => undefined
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    const casSetMeta = store.casSetMeta.bind(store)
+    const dropState = store.drop.bind(store)
+    const closeStore = store.close.bind(store)
+    vi.spyOn(store, 'casSetMeta').mockImplementation(async (...args) => {
+      enter()
+      await release
+      try {
+        return await casSetMeta(...args)
+      } finally {
+        events.push('meta-written')
+      }
+    })
+    vi.spyOn(store, 'drop').mockImplementation(async (workspaceId) => {
+      events.push('state-dropped')
+      await dropState(workspaceId)
+    })
+    vi.spyOn(store, 'close').mockImplementation(async () => {
+      events.push('store-closed')
+      await closeStore()
+    })
+    const loading = ws.ensureSessionsLoaded()
+    let closing: Promise<void> | undefined
+    try {
+      await entered
+      closing = drop ? ws.delete() : ws.close()
+      const finished = await Promise.race([
+        closing.then(() => true),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => {
+            resolve(false)
+          }, 30)
+        }),
+      ])
+      expect(finished).toBe(false)
+      expect(events).toEqual([])
+      resume()
+      await loading
+      await closing
+      expect(events).toEqual(['meta-written', ...(drop ? ['state-dropped'] : []), 'store-closed'])
+    } finally {
+      resume()
+      await Promise.allSettled([loading, closing])
+      await ws.close()
+    }
+  },
+)
+
 it.each(
   ['op', 'command', 'df'].flatMap((surface) =>
     (surface === 'df' ? [false] : [false, true]).flatMap((streaming) =>

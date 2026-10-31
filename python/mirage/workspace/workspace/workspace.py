@@ -354,6 +354,7 @@ class Workspace:
         self._state_dropped = False
         self._close_error: BaseException | None = None
         self._close_lock = asyncio.Lock()
+        self._load_lock = asyncio.Lock()
         self._sync_bridge = SyncBridge()
         # mounts reused from another live workspace (copy() / load
         # VFS overrides) stay open here; their origin closes them.
@@ -1703,6 +1704,10 @@ class Workspace:
             *(execution.aclose() for execution in executions),
             return_exceptions=True,
         )
+        # A session load in flight writes the metadata record; it lands
+        # before teardown drops the state or closes the store.
+        async with self._load_lock:
+            pass
         async with self._close_lock:
             if self._async_closed:
                 if self._close_error is not None:
@@ -2390,12 +2395,14 @@ class Workspace:
         The discovery record resolves first so a minted default session
         id can adopt the stored pointer before hydration keys off it. The
         first call also starts stopping what lapsed instances of the
-        workspace left running (``JobTable.reap_lapsed``).
+        workspace left running (``JobTable.reap_lapsed``). Closing waits
+        for a load in flight, so its writes never race the state's drop.
         """
         self._sync_bridge.observe()
         self.job_table.reap_lapsed()
-        await self._meta.ensure()
-        await self._session_mgr.ensure_loaded()
+        async with self._load_lock:
+            await self._meta.ensure()
+            await self._session_mgr.ensure_loaded()
 
     @property
     def workspace_id(self) -> str:

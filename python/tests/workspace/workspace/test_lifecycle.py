@@ -834,6 +834,60 @@ async def test_close_settles_pending_profile_persistence(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("drop", [False, True])
+async def test_close_settles_a_session_load_in_flight(monkeypatch, drop):
+    ws = Workspace({})
+    store = ws.state_store
+    entered, release = asyncio.Event(), asyncio.Event()
+    events = []
+    cas_set_meta = store.cas_set_meta
+    drop_state = store.drop
+    close_store = store.close
+
+    async def delayed_meta(*args):
+        entered.set()
+        await release.wait()
+        try:
+            return await cas_set_meta(*args)
+        finally:
+            events.append("meta-written")
+
+    async def tracked_drop(workspace_id):
+        events.append("state-dropped")
+        await drop_state(workspace_id)
+
+    async def tracked_close():
+        events.append("store-closed")
+        await close_store()
+
+    monkeypatch.setattr(store, "cas_set_meta", delayed_meta)
+    monkeypatch.setattr(store, "drop", tracked_drop)
+    monkeypatch.setattr(store, "close", tracked_close)
+    loading = asyncio.create_task(ws.ensure_sessions_loaded())
+    closing = None
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        closing = asyncio.create_task(ws.delete() if drop else ws.close())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(closing), timeout=0.03)
+        assert events == []
+        release.set()
+        await asyncio.wait_for(loading, 5)
+        await asyncio.wait_for(closing, 5)
+        assert events == [
+            "meta-written",
+            *(["state-dropped"] if drop else []),
+            "store-closed",
+        ]
+    finally:
+        release.set()
+        await asyncio.gather(loading, return_exceptions=True)
+        if closing is not None:
+            await asyncio.gather(closing, return_exceptions=True)
+        await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "surface,streaming",
     [
