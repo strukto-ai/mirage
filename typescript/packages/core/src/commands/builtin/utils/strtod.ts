@@ -18,17 +18,9 @@
 // groups are the sign, the hex float, the decimal float, inf and nan. A match
 // is the longest number at the front of a word, which is what strtod
 // consumes; a GNU tool that reads its value through xstrtod refuses any
-// leftover, trailing blanks included, so it reads with strtodWhole (`tail -s
-// $'1\r'` is an invalid number of seconds).
+// leftover, trailing blanks included.
 export const STRTOD =
   /^[ \t\n\v\f\r]*([+-]?)(?:(0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?)|((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)|([iI][nN][fF](?:[iI][nN][iI][tT][yY])?)|([nN][aA][nN](?:\([0-9A-Za-z_]*\))?))/
-
-// A STRTOD match spanning the whole word, as xstrtod demands, or null.
-// Mirrors Python's strtod_whole.
-export function strtodWhole(text: string): RegExpExecArray | null {
-  const found = STRTOD.exec(text)
-  return found !== null && found[0].length === text.length ? found : null
-}
 
 // A hex float such as 0x1.8p3, rounded once from its exact mantissa to the
 // nearest double, ties to even, as Python's float.fromhex rounds it, and

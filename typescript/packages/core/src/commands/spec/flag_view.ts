@@ -16,7 +16,6 @@ import { compileSpec, argumentDest } from './compile.ts'
 import { flagKwargName, OPERAND, REFUSED, SPELLED } from './constants.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { PathSpec } from '../../types.ts'
-import { UsageError } from '../errors.ts'
 import type { CommandSpec, FlagValue, ParsedFlagValue } from './types.ts'
 
 // The tape records what the parser scanned, so its values are the parser's
@@ -227,35 +226,6 @@ export class FlagView {
       throw new Error(`flag '${name}' expects a number, got '${value}'`)
     }
     return Number.parseFloat(text.replaceAll('_', ''))
-  }
-
-  /**
-   * An integer option read and refused the way its program does. Each program
-   * scans its own numbers (a whole decimal word, C's `strtol`, `atoi`) and
-   * words its own refusal, so both come from the caller: `scan` is the
-   * program's reader, null for a text it does not take, and a scanned value
-   * outside `low`..`high` is refused the same way, through `refusal`, with
-   * `exitCode`. Values are bigints so a range check at the 64-bit edge is
-   * exact. An integer value is scanned as its digits (`asText`). Undefined
-   * when the option is absent. Mirrors Python's `as_number`.
-   */
-  asNumber(
-    name: string,
-    scan: (text: string) => bigint | null,
-    refusal: (text: string, value: bigint | null) => string,
-    bounds: { readonly low?: bigint; readonly high?: bigint; readonly exitCode?: number } = {},
-  ): bigint | undefined {
-    const text = this.asText(name)
-    if (text === undefined) return undefined
-    const value = scan(text)
-    if (
-      value === null ||
-      (bounds.low !== undefined && value < bounds.low) ||
-      (bounds.high !== undefined && value > bounds.high)
-    ) {
-      throw new UsageError(refusal(text, value), bounds.exitCode ?? 1)
-    }
-    return value
   }
 
   /**

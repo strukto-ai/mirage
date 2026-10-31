@@ -13,13 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { headerAggregate } from '../../aggregators.ts'
-import { tailGeneric } from '../../generic/tail.ts'
+import { parseFlags, tailGeneric } from '../../generic/tail.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStat, dirAwareStream, fileSize, resolveOrEmpty } from '../files.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 
 const tail: CommandFn = async (_accessor, paths, texts, ctx) => {
+  const parsed = parseFlags(ctx.flags)
+  if (parsed instanceof IOResult) return [null, parsed]
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   const backendStat = dirAwareStat(files, ctx)
@@ -29,6 +32,7 @@ const tail: CommandFn = async (_accessor, paths, texts, ctx) => {
     return row.with({ size: await readSize(path) })
   }
   return tailGeneric(
+    parsed,
     resolved,
     texts,
     ctx,

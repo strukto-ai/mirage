@@ -78,7 +78,7 @@ def test_n_takes_base_zero_digits_and_gnu_size_suffixes(raw, value):
 )
 def test_n_refuses_naming_the_long_option(raw):
     # diffutils 3.10 takes no od block or char suffix, no Q or R (newer
-    # than its gnulib), and caps a count at INTMAX: each is an invalid
+    # than its gnulib), and caps a count at 2**63 - 1: each is an invalid
     # value, exit 2, with diffutils' prefixed Try-help line.
     assert _refusal({"bytes": raw}) == (
         f"cmp: invalid --bytes value '{raw}'{_HINT}".encode(),

@@ -22,14 +22,6 @@ import { parseCommand, parseToKwargs } from './parser.ts'
 
 // Mirrors python/tests/commands/spec/test_types.py.
 
-function scan(text: string): bigint | null {
-  return /^\d+$/.test(text) ? BigInt(text) : null
-}
-
-function refusal(text: string, value: bigint | null): string {
-  return `cmd: bad '${text}' (${value === null ? 'null' : String(value)})`
-}
-
 describe('FlagView', () => {
   it('reads each flag shape at its declared type', () => {
     const path = PathSpec.fromStrPath('hidden/../file', undefined, '/repo')
@@ -55,30 +47,10 @@ describe('FlagView', () => {
     expect(fl.asList('files')).toEqual([])
   })
 
-  it('asNumber refuses in the words and status the caller gives', () => {
-    const fl = new FlagView({ n: '5', x: 'abc', big: '9', zero: '0' })
-    expect(fl.asNumber('n', scan, refusal, { low: 1n, high: 8n })).toBe(5n)
-    expect(fl.asNumber('absent', scan, refusal)).toBeUndefined()
-    for (const [name, message] of [
-      ['x', "cmd: bad 'abc' (null)"],
-      ['big', "cmd: bad '9' (9)"],
-      ['zero', "cmd: bad '0' (0)"],
-    ] as const) {
-      expect(() => fl.asNumber(name, scan, refusal, { low: 1n, high: 8n, exitCode: 2 })).toThrow(
-        expect.objectContaining({ message, exitCode: 2 }),
-      )
-    }
-  })
-
   it('reads an integer value as its digits', () => {
     const fl = new FlagView({ n: 5, big: 9, switch: true })
     expect(fl.asText('n')).toBe('5')
     expect(fl.asText('switch')).toBeUndefined()
-    expect(fl.asNumber('n', scan, refusal, { low: 1n, high: 8n })).toBe(5n)
-    expect(fl.asNumber('switch', scan, refusal)).toBeUndefined()
-    expect(() => fl.asNumber('big', scan, refusal, { low: 1n, high: 8n })).toThrow(
-      expect.objectContaining({ message: "cmd: bad '9' (9)" }),
-    )
   })
 
   it('answers its fallback only for an absent flag', () => {
@@ -198,11 +170,33 @@ describe('FlagView.typedOrder', () => {
   })
 })
 
+function view(name: string, ...words: string[]): FlagView {
+  return new FlagView(parseToKwargs(parseCommand(specOf(name), words, '/', name)), specOf(name))
+}
+
 function jqView(...words: string[]): FlagView {
   return new FlagView(parseToKwargs(parseCommand(specOf('jq'), words, '/', 'jq')), specOf('jq'))
 }
 
 describe('FlagView.texts', () => {
+  it('reads a numeric shorthand where it was typed', () => {
+    expect(view('tail', '-n', 'x', '-4').texts('n')).toEqual([
+      ['n', 'x'],
+      ['n', '4'],
+    ])
+    expect(view('head', '-4', '-n', 'x').texts('lines')).toEqual([
+      ['lines', '4'],
+      ['lines', 'x'],
+    ])
+  })
+
+  it('reads a digit cluster count where it was typed', () => {
+    expect(view('grep', '-C', '1', '-i5', 'p').texts('context')).toEqual([
+      ['context', '1'],
+      ['context', '5'],
+    ])
+  })
+
   it('leaves out a switch that is off', () => {
     const fl = new FlagView({ verbose: false, quiet: true, bytes: '4' }, specOf('cmp'))
     expect(fl.texts('verbose', 'quiet', 'bytes')).toEqual([

@@ -2,13 +2,25 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.generic.head import head, head_generic, head_multi
+from mirage.commands.builtin.generic.head import (
+    HeadFlags,
+    head,
+    head_generic,
+    head_multi,
+    parse_flags,
+)
 from mirage.commands.config import Context
 from mirage.errors.fs import eacces, efbig
 from mirage.io.stream import close_quietly
 from mirage.io.types import materialize
 from mirage.types import FileStat, FileType, PathSpec
 from tests.commands.builtin.conftest import TrackedSource as _Tracked
+
+
+async def _head_generic(paths, texts, ctx, *args, **kwargs):
+    parsed = parse_flags(ctx.flags)
+    assert isinstance(parsed, HeadFlags)
+    return await head_generic(parsed, paths, texts, ctx, *args, **kwargs)
 
 
 async def _drain(gen):
@@ -180,7 +192,7 @@ async def test_head_asks_first_lines_for_a_line_count(flags, asked):
         calls.append(n)
         return b"a\nb\n"
 
-    out, io = await head_generic(
+    out, io = await _head_generic(
         [PathSpec.from_str_path("/t")],
         [],
         Context(flags=flags),
@@ -201,7 +213,7 @@ async def test_head_reads_a_file_first_lines_leaves_to_the_read():
     async def first_lines(p: PathSpec, n: int) -> None:
         return None
 
-    out, _ = await head_generic(
+    out, _ = await _head_generic(
         [PathSpec.from_str_path("/t")],
         [],
         Context(flags={"lines": "2"}),
@@ -218,7 +230,7 @@ async def test_head_reads_standard_input_without_first_lines():
     async def first_lines(p: PathSpec, n: int) -> bytes:
         raise AssertionError(f"asked first_lines of {p.virtual}")
 
-    out, io = await head_generic(
+    out, io = await _head_generic(
         [PathSpec.from_str_path("-")],
         [],
         Context(flags={"lines": "1"}, stdin=b"in\nmore\n"),
@@ -232,7 +244,7 @@ async def test_head_reads_standard_input_without_first_lines():
 
 @pytest.mark.asyncio
 async def test_head_reports_a_failed_operand_and_prints_the_next():
-    out, io = await head_generic(
+    out, io = await _head_generic(
         [PathSpec.from_str_path("/big"), PathSpec.from_str_path("/small")],
         [],
         Context(flags={"lines": "1"}),
@@ -261,7 +273,7 @@ async def test_head_reports_a_failed_operand_and_prints_the_next():
 async def test_head_prints_no_header_for_an_operand_it_may_not_open(
     names, expected
 ):
-    out, io = await head_generic(
+    out, io = await _head_generic(
         [PathSpec.from_str_path(name) for name in names],
         [],
         Context(flags={"lines": "1"}),
@@ -295,7 +307,7 @@ async def test_head_prints_no_header_for_an_operand_it_may_not_open(
 async def test_head_v_keeps_one_failure_when_the_reader_stops_at_the_header(
     name, header, stderr
 ):
-    out, io = await head_generic(
+    out, io = await _head_generic(
         [PathSpec.from_str_path(name)],
         [],
         Context(flags={"lines": "1", "verbose": True}),

@@ -64,6 +64,7 @@ export async function runDu(
   follow?: FollowOperands,
 ): Promise<CrossResult> {
   const rendering = parseFlags({ stdin: null, flags: bag, cwd: PathSpec.fromStrPath(cwd) })
+  if (rendering instanceof IOResult) return [null, rendering]
   const bounded = new FlagView(bag, specOf('du')).asBool('one_file_system')
   const measuring = Object.fromEntries(Object.entries(bag).filter(([k]) => !RENDERING.has(k)))
   // Each start is then one mount's own part, and keeps only what that mount

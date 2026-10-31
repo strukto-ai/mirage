@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.tree import tree_generic
+from mirage.commands.builtin.generic.tree import parse_flags, tree_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.tree import tree_walk
@@ -29,12 +29,16 @@ async def tree(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths)
     readdir, stat = tree_walk(
         files.read_tree, files.readdir, files.stat, False
     )
     return await tree_generic(
+        parsed,
         resolved,
         list(texts),
         ctx,

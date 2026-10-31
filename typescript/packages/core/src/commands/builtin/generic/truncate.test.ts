@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 
+import { IOResult } from '../../../io/types.ts'
 import { ContentType, FileStat, FileType, PathSpec } from '../../../types.ts'
 import { enoent } from '../../../errors/fs.ts'
-import { UsageError } from '../../errors.ts'
-import { truncateGeneric } from './truncate.ts'
+import { parseFlags, truncateGeneric, type TruncateFlags } from './truncate.ts'
+
+const DEC = new TextDecoder()
 
 function fPath(): PathSpec {
   return new PathSpec({
@@ -27,11 +29,22 @@ function fPath(): PathSpec {
   })
 }
 
-async function runTruncate(size: string, current = 10): Promise<number[]> {
+// The flags as the builder reads them, before any operand.
+function flagsOf(size: string, noCreate = false): TruncateFlags {
+  const flags = parseFlags({ size, no_create: noCreate })
+  if (flags instanceof IOResult) throw new Error(`truncate refused ${size}`)
+  return flags
+}
+
+// What `truncate -s size` asks of a file of `current` bytes, or its refusal as
+// [exit, stderr], the file untouched.
+async function runTruncate(size: string, current = 10): Promise<number[] | [number, string]> {
+  const flags = parseFlags({ size })
+  if (flags instanceof IOResult) return [flags.exitCode, DEC.decode(flags.stderr as Uint8Array)]
   const lengths: number[] = []
   await truncateGeneric(
     [fPath()],
-    { size, noCreate: false },
+    flags,
     () =>
       Promise.resolve(
         new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT, size: current }),
@@ -48,6 +61,10 @@ describe('truncate sizes', () => {
   it('resolves plain and operation sizes', async () => {
     expect(await runTruncate('10', 0)).toEqual([10])
     expect(await runTruncate('%4', 10)).toEqual([12])
+    expect(await runTruncate('%4', 0)).toEqual([0])
+    expect(await runTruncate('/4', 10)).toEqual([8])
+    expect(await runTruncate('>4', 10)).toEqual([10])
+    expect(await runTruncate('-20', 10)).toEqual([0])
   })
 
   it('accepts the full GNU suffix alphabet', async () => {
@@ -74,12 +91,10 @@ describe('truncate sizes', () => {
   // A sign after <, >, / or % is refused as a second relative modifier
   // before the number is read, not reported as an invalid number.
   it.each(['<+4', '<\t+4'])("refuses '%s' as multiple relative modifiers", async (value) => {
-    await expect(runTruncate(value)).rejects.toThrow(
-      new UsageError(
-        "truncate: multiple relative modifiers specified\nTry 'truncate --help' for more information.",
-        1,
-      ),
-    )
+    expect(await runTruncate(value)).toEqual([
+      1,
+      "truncate: multiple relative modifiers specified\nTry 'truncate --help' for more information.\n",
+    ])
   })
 
   // The digits must follow the sign immediately: no second sign, no gap,
@@ -89,22 +104,7 @@ describe('truncate sizes', () => {
     ['<abc', 'abc'],
     ['4\t', '4\\t'],
   ])("rejects '%s' as an invalid number without touching the file", async (value, quoted) => {
-    const truncateCalls: number[] = []
-    await expect(
-      truncateGeneric(
-        [fPath()],
-        { size: value, noCreate: false },
-        () =>
-          Promise.resolve(
-            new FileStat({ name: 'f', type: FileType.FILE, content: ContentType.TEXT, size: 10 }),
-          ),
-        (_p, length) => {
-          truncateCalls.push(length)
-          return Promise.resolve()
-        },
-      ),
-    ).rejects.toThrow(new UsageError(`truncate: Invalid number: '${quoted}'`, 1))
-    expect(truncateCalls).toEqual([])
+    expect(await runTruncate(value)).toEqual([1, `truncate: Invalid number: '${quoted}'\n`])
   })
 
   it('bounds off_t asymmetrically', async () => {
@@ -112,19 +112,43 @@ describe('truncate sizes', () => {
     expect(await runTruncate('8191P', 0)).toEqual([8191 * 1024 ** 5])
     expect(await runTruncate('-8E', 10)).toEqual([0])
     expect(await runTruncate('-9223372036854775808', 10)).toEqual([0])
-    await expect(runTruncate('8E')).rejects.toThrow(
-      new UsageError("truncate: Invalid number: '8E': Value too large for defined data type", 1),
-    )
-    await expect(runTruncate('9223372036854775808')).rejects.toThrow(
-      new UsageError(
-        "truncate: Invalid number: '9223372036854775808': Value too large for defined data type",
-        1,
-      ),
-    )
+    expect(await runTruncate('8E')).toEqual([
+      1,
+      "truncate: Invalid number: '8E': Value too large for defined data type\n",
+    ])
+    expect(await runTruncate('9223372036854775808')).toEqual([
+      1,
+      "truncate: Invalid number: '9223372036854775808': Value too large for defined data type\n",
+    ])
   })
 
   it('rejects division by zero', async () => {
-    await expect(runTruncate('/0')).rejects.toThrow(new UsageError('truncate: division by zero', 1))
+    expect(await runTruncate('/0')).toEqual([1, 'truncate: division by zero\n'])
+  })
+
+  it('requires a size', () => {
+    const flags = parseFlags({})
+    if (!(flags instanceof IOResult)) throw new Error('truncate read no size')
+    expect([flags.exitCode, DEC.decode(flags.stderr as Uint8Array)]).toEqual([
+      1,
+      "truncate: you must specify either '--size' or '--reference'\n" +
+        "Try 'truncate --help' for more information.\n",
+    ])
+  })
+
+  // A size past 2**53 is exact: the refusal of a length the backend cannot
+  // take names the size asked for, where a double would round it.
+  it('names a size past 2**53 exactly', async () => {
+    const [, io] = await truncateGeneric(
+      [fPath()],
+      flagsOf('+9007199254740993', true),
+      () => Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE, size: 2 })),
+      () => Promise.reject(Object.assign(new Error('EINVAL'), { code: 'EINVAL' })),
+    )
+    expect([io.exitCode, DEC.decode(io.stderr as Uint8Array)]).toEqual([
+      1,
+      "truncate: failed to truncate '/f' at 9007199254740995 bytes: Invalid argument\n",
+    ])
   })
 })
 
@@ -149,7 +173,7 @@ describe('truncate operands', () => {
     }
     const [, io] = await truncateGeneric(
       [operand('/missing/'), operand('/nodir/x', '/nodir/x'), operand('/missing')],
-      { size: '4', noCreate: false },
+      flagsOf('4'),
       stat,
       truncate,
     )
@@ -161,7 +185,7 @@ describe('truncate operands', () => {
     )
     const [, kept] = await truncateGeneric(
       [operand('/missing')],
-      { size: '4', noCreate: true },
+      flagsOf('4', true),
       stat,
       truncate,
     )
@@ -175,7 +199,7 @@ it('passes no-create to the mutation after a successful stat', async () => {
   const path = PathSpec.fromStrPath('/file')
   const [, result] = await truncateGeneric(
     [path],
-    { size: '2', noCreate: true },
+    flagsOf('2', true),
     () => Promise.resolve(new FileStat({ name: 'file', type: FileType.FILE, size: 4 })),
     (_path, _length, noCreate) => {
       calls.push(noCreate)

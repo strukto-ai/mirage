@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { STRTOD, strtodDouble, strtodWhole } from './strtod.ts'
+import { STRTOD, strtodDouble } from './strtod.ts'
 
 function double(text: string): number {
   const found = STRTOD.exec(text)
@@ -43,18 +43,6 @@ describe('strtod', () => {
     ['x1', null],
   ])('reads the longest number at the front of %j', (text, consumed) => {
     expect(STRTOD.exec(text)?.[0] ?? null).toBe(consumed)
-  })
-
-  it.each([
-    ['3', true],
-    [' 3', true],
-    ['0x10', true],
-    ['3 ', false],
-    ['1\r', false],
-    ['1.5.2', false],
-    ['', false],
-  ])('whole %j: %s', (text, whole) => {
-    expect(strtodWhole(text) !== null).toBe(whole)
   })
 
   it.each([

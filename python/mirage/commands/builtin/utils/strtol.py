@@ -28,7 +28,6 @@ DECIMAL = re.compile(rf"{C_SPACE}([+-]?)([0-9]+)")
 BASE0 = re.compile(rf"{C_SPACE}([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)")
 LONG_MIN = -(2**63)
 LONG_MAX = 2**63 - 1
-ULONG_MAX = 2**64 - 1
 INT_MAX = 2**31 - 1
 # What GNU 9.7 appends after a refused number that scanned, measured under
 # LC_ALL=C: ERANGE for a value outside the option's range and
@@ -83,26 +82,6 @@ def strtol(text: str) -> tuple[int, str]:
     return max(LONG_MIN, min(LONG_MAX, signed)), text[match.end() :]
 
 
-def strtoul(text: str) -> tuple[int, str]:
-    """C's ``strtoul(text, &end, 0)``: the value and the text at ``end``.
-
-    A minus negates in unsigned arithmetic, so ``-1`` is ``ULONG_MAX``,
-    and a value past ``ULONG_MAX`` saturates there.
-
-    Args:
-        text (str): the operand as typed.
-    """
-    match = BASE0.match(text)
-    if match is None:
-        return 0, text
-    value = parse_base0(match.group(2))
-    if value > ULONG_MAX:
-        return ULONG_MAX, text[match.end() :]
-    if match.group(1) == "-":
-        value = -value % (ULONG_MAX + 1)
-    return value, text[match.end() :]
-
-
 def bounded_decimal(digits: str, bound: int) -> int | None:
     """ASCII decimal ``digits`` as a number, None when it is ``bound`` or
     more.
@@ -122,23 +101,11 @@ def bounded_decimal(digits: str, bound: int) -> int | None:
     return value if value < bound else None
 
 
-def c_int(value: int) -> int:
-    """``value`` as C's ``(int)`` cast leaves it: its low 32 bits, signed.
-
-    Args:
-        value (int): the wider integer.
-    """
-    return (value + 2**31) % 2**32 - 2**31
-
-
 __all__ = [
     "EOVERFLOW_REASON",
     "ERANGE_REASON",
     "INT_MAX",
-    "ULONG_MAX",
     "bounded_decimal",
-    "c_int",
     "signed_decimal",
     "strtol",
-    "strtoul",
 ]

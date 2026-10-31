@@ -19,7 +19,6 @@ import pytest
 from mirage.commands.builtin.utils.strtod import (
     STRTOD,
     strtod_double,
-    strtod_whole,
 )
 
 
@@ -55,22 +54,6 @@ def _double(text: str) -> float:
 def test_strtod_reads_the_longest_number_at_the_front(text, consumed):
     found = STRTOD.match(text)
     assert (None if found is None else found.group(0)) == consumed
-
-
-@pytest.mark.parametrize(
-    "text,whole",
-    [
-        ("3", True),
-        (" 3", True),
-        ("0x10", True),
-        ("3 ", False),
-        ("1\r", False),
-        ("1.5.2", False),
-        ("", False),
-    ],
-)
-def test_strtod_whole_refuses_any_leftover(text, whole):
-    assert (strtod_whole(text) is not None) is whole
 
 
 @pytest.mark.parametrize(
