@@ -59,11 +59,7 @@ import {
   type RunSingle,
 } from '../../../commands/builtin/generic/crossmount/index.ts'
 import { fanOutTraversal, runWithFanout, shouldFanOut } from '../fanout.ts'
-import {
-  findExprTail,
-  parseFindExpression,
-  type FindExpr,
-} from '../../../commands/builtin/find_parse.ts'
+import { parseFind, type FindExpr } from '../../../rs/find.ts'
 import { resolveNewerRefs } from '../find_refs.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
 import { UsageError } from '../../../commands/errors.ts'
@@ -136,7 +132,7 @@ const JOB_HANDLERS: Record<
 async function finishFind(
   stdout: ByteSource | null,
   io: IOResult,
-  texts: readonly string[],
+  expr: FindExpr,
   registry: MountRegistry,
   context: EvaluationContext,
   executeFn: ExecuteFn | undefined,
@@ -151,7 +147,7 @@ async function finishFind(
   const [newStdout, actionErr, actionExit] = await applyFindActions(
     stdout,
     io.records,
-    texts,
+    expr,
     registry,
     session.cwd,
     {
@@ -626,12 +622,33 @@ export async function handleCommand(
     routingScopes = mergeScopes(routed, flagScopes).filter((s) => s.walkError !== 'ENOENT')
   }
 
-  let findExprTokens: string[] | null = null
+  let findExpr: FindExpr | null = null
   if (!borrowed && cmdName === 'find') {
-    findExprTokens = findExprTail(rawArgv)
-    let findExpr: FindExpr
     try {
-      findExpr = parseFindExpression(findExprTokens)
+      const parsedFind = parseFind(spelledWords(parts.slice(1)))
+      // Every -newer reference is statted through the dispatcher here,
+      // once, before the expression is bound.
+      let newerTimes: number[] = []
+      const refs = parsedFind.newer
+      if (refs.length > 0) {
+        let refErr: Uint8Array | null
+        ;[newerTimes, refErr] = await resolveNewerRefs(
+          refs,
+          registry,
+          session.cwd,
+          (path) => pathStat(dispatch, path),
+          namespace ?? null,
+          dereferences(cmdName, parts),
+        )
+        if (refErr !== null) {
+          return [
+            null,
+            new IOResult({ exitCode: 1, stderr: refErr }),
+            new ExecutionNode({ command: cmdStr, stderr: refErr, exitCode: 1 }),
+          ]
+        }
+      }
+      findExpr = parsedFind.bind(newerTimes)
     } catch (err) {
       if (err instanceof UsageError) {
         const errBytes = encodeText(`${err.message}\n`)
@@ -642,27 +659,6 @@ export async function handleCommand(
         ]
       }
       throw err
-    }
-    if (findExpr.newer.length > 0) {
-      // Every -newer reference is statted through the dispatcher here,
-      // once, before any backend parses the expression.
-      const [rewritten, refErr] = await resolveNewerRefs(
-        findExprTokens,
-        findExpr.newer,
-        registry,
-        session.cwd,
-        (path) => pathStat(dispatch, path),
-        namespace ?? null,
-        dereferences(cmdName, parts),
-      )
-      if (refErr !== null) {
-        return [
-          null,
-          new IOResult({ exitCode: 1, stderr: refErr }),
-          new ExecutionNode({ command: cmdStr, stderr: refErr, exitCode: 1 }),
-        ]
-      }
-      findExprTokens = rewritten
     }
   }
 
@@ -692,7 +688,7 @@ export async function handleCommand(
         session.cwd,
       )
     let csFlags = csParsed.flagKwargs
-    const csTexts = findExprTokens ?? csParsed.texts
+    const csTexts = findExpr !== null ? rawArgv.slice(findExpr.start) : csParsed.texts
     const csRefusal = optionError(cmdName, csParsed)
     if (csRefusal !== null) {
       const [msg, code] = csRefusal
@@ -706,7 +702,7 @@ export async function handleCommand(
     // mount but is not an input. Parsed operands preserve aliases, order, and
     // repeated path values. find's expression is not the spec's grammar, so
     // its start points are the words classified as paths.
-    let csScopes = findExprTokens !== null ? pathScopes : csParsed.paths
+    let csScopes = findExpr !== null ? pathScopes : csParsed.paths
     if (RELAY_COMMANDS.has(cmdName)) {
       // STREAM and FANOUT (and a custom command's reducer) run each operand
       // natively on its mount, which expands the operand's glob. RELAY sees every operand at once (wc's
@@ -731,7 +727,10 @@ export async function handleCommand(
       )
     }
     const runSingle: RunSingle = (name, ps, ts, fk, opts) =>
-      runOnMount(runCtx, name, ps, ts, fk, opts ?? {})
+      runOnMount(runCtx, name, ps, ts, fk, {
+        ...(findExpr !== null ? { find: findExpr } : {}),
+        ...opts,
+      })
     // A per-operand native run is single-mount by construction, so a
     // traversal operand holding nested mounts has to fan out inside it,
     // exactly as the same operand would on a line of its own.
@@ -745,6 +744,7 @@ export async function handleCommand(
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
       follow,
+      findExpr ?? undefined,
     )
     const [csStdout0, csIo] = await handleCrossMount(
       cmdName,
@@ -772,11 +772,11 @@ export async function handleCommand(
       exitCode: csIo.exitCode,
     })
     let csStdout = csStdout0
-    if (findExprTokens !== null) {
+    if (findExpr !== null) {
       csStdout = await finishFind(
         csStdout,
         csIo,
-        csTexts,
+        findExpr,
         registry,
         context,
         executeFn,
@@ -890,14 +890,14 @@ export async function handleCommand(
       new ExecutionNode({ command: cmdStr, exitCode: code, stderr: msg }),
     ]
   }
-  const texts = findExprTokens ?? textsRaw
+  const texts = findExpr !== null ? rawArgv.slice(findExpr.start) : textsRaw
   // The start points are the path words before the expression; the
   // spec's rest slot would otherwise read an -exec word as one.
   const paths =
-    findExprTokens !== null
-      ? findStartPoints(parts.slice(1), findExprTokens, mount.specFor(cmdName), session.cwd)
+    findExpr !== null
+      ? findStartPoints(parts.slice(1), findExpr.start, mount.specFor(cmdName), session.cwd)
       : parsedPaths
-  if (findExprTokens !== null) {
+  if (findExpr !== null) {
     // `multiple: true` on find value-flags makes parseToKwargs emit arrays;
     // bespoke backend wrappers read these as scalars. Migrated backends read
     // the expression from `texts` and ignore flagKwargs.
@@ -930,15 +930,20 @@ export async function handleCommand(
       mergeSignals(signal, context.frame.abortSignal),
       dispatch,
       (name, ps, ts, fk, opts) =>
-        runOnMount(runCtx, name, ps, ts, fk, { ...opts, argv: spelledWords(parts.slice(1)) }),
+        runOnMount(runCtx, name, ps, ts, fk, {
+          ...(findExpr !== null ? { find: findExpr } : {}),
+          ...opts,
+          argv: spelledWords(parts.slice(1)),
+        }),
       follow,
+      findExpr ?? undefined,
     )
     let fanOut = fanOut0
-    if (findExprTokens !== null) {
+    if (findExpr !== null) {
       fanOut = await finishFind(
         fanOut,
         fanIo,
-        texts,
+        findExpr,
         registry,
         context,
         executeFn,
@@ -965,13 +970,14 @@ export async function handleCommand(
     mount,
     resolveHint: routingScopes[0] ?? null,
     argv: spelledWords(parts.slice(1)),
+    ...(findExpr !== null ? { find: findExpr } : {}),
   })
   let stdout = rawStdout
-  if (findExprTokens !== null) {
+  if (findExpr !== null) {
     stdout = await finishFind(
       stdout,
       io,
-      texts,
+      findExpr,
       registry,
       context,
       executeFn,

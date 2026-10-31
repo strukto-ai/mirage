@@ -15,6 +15,12 @@
 from datetime import datetime, timezone
 from stat import filemode
 
+from mirage.commands.builtin.types import (
+    PrintfDirective,
+    PrintfLiteral,
+    PrintfPart,
+    PrintfTime,
+)
 from mirage.commands.builtin.utils.identity import (
     Identity,
     group_name,
@@ -33,18 +39,6 @@ from mirage.utils.stat_view import (
     content_size,
 )
 
-_PRINTF_ESCAPES = {
-    "n": "\n",
-    "t": "\t",
-    "r": "\r",
-    "0": "\0",
-    "\\": "\\",
-    "a": "\a",
-    "b": "\b",
-    "f": "\f",
-    "v": "\v",
-}
-_STAT_DIRECTIVES = frozenset("syYmMTuUgG")
 # One mode per kind, spelled from the same constants every stat
 # translator uses (utils/stat_view.py); links are 777 the way ls draws
 # them.
@@ -55,23 +49,6 @@ _KIND_MODE = {
     "p": FIFO_MODE,
     "f": FILE_MODE,
 }
-
-
-def printf_needs_stat(fmt: str) -> bool:
-    """Whether a -printf format reads anything off the entry's stat.
-
-    Args:
-        fmt (str): the format string as typed.
-    """
-    i = 0
-    while i < len(fmt) - 1:
-        if fmt[i] == "%" and fmt[i + 1] in _STAT_DIRECTIVES:
-            return True
-        if fmt[i] in ("%", "\\"):
-            i += 2
-            continue
-        i += 1
-    return False
 
 
 def _relative_part(row: str, search: PathSpec) -> str:
@@ -183,27 +160,6 @@ def _time_fields(ts: float) -> dict[str, str]:
     }
 
 
-def _expand_time(
-    letter: str, ts: float, directive_src: str, warnings: list[str]
-) -> str:
-    rendered = _time_fields(ts).get(letter)
-    if rendered is not None:
-        return rendered
-    # GNU prints a letter or digit it has no field for as `%<char>`,
-    # silently; anything else is an unrecognized directive.
-    if letter.isascii() and letter.isalnum():
-        return f"%{letter}"
-    _warn_unrecognized(directive_src, warnings)
-    return directive_src
-
-
-def _warn_unrecognized(src: str, warnings: list[str]) -> None:
-    kind = "escape" if src.startswith("\\") else "format directive"
-    line = f"find: warning: unrecognized {kind} '{src}'"
-    if line not in warnings:
-        warnings.append(line)
-
-
 def _mode_bits(st: FileStat | None, kind: str) -> int:
     # The kind fixes the type bits; a reported mode (chmod overlay, a
     # backend that knows) supplies the permission bits, else the
@@ -215,109 +171,90 @@ def _mode_bits(st: FileStat | None, kind: str) -> int:
 
 
 def expand_printf(
-    fmt: str,
+    parts: tuple[PrintfPart, ...],
     row: str,
     search: PathSpec,
     st: FileStat | None,
-    warnings: list[str],
     target: FileStat | None = None,
     identity: Identity | None = None,
 ) -> str:
-    """Expand one -printf format against one result row.
+    """Render one compiled -printf format against one result row.
 
     Directives cover what GNU's find agents actually use: the path family
     (%p %P %f %h %d), the stat family (%s %y %Y %m %M), the owner family
     (%u %U %g %G, which read the entry's uid and gid and fall back to
     the workspace user and the session's profile, the same rule
     ``ls -l`` draws its columns by), %T times, and the backslash
-    escapes. An unrecognized directive or escape renders
-    literally and adds GNU's warning line once, exit code untouched --
-    which is GNU's own behavior. Times render in UTC (mirage timestamps
-    are zone-carrying ISO strings; GNU renders the local zone). ``%Y``
-    on a symlink row reports the target's kind, ``N`` when the link
-    dangles; on any other row it is ``%y``.
+    escapes, which mirage-rs expanded when it compiled the format. Times
+    render in UTC (mirage timestamps are zone-carrying ISO strings; GNU
+    renders the local zone). ``%Y`` on a symlink row reports the target's
+    kind, ``N`` when the link dangles; on any other row it is ``%y``.
 
     Args:
-        fmt (str): the format string as typed.
+        parts (tuple[PrintfPart, ...]): the format as literal runs and
+            directives.
         row (str): the display row (operand-respelled).
         search (PathSpec): the start point the row came from.
         st (FileStat | None): the row's stat, when the format needs one.
-        warnings (list[str]): sink for GNU's warning lines, deduplicated.
         target (FileStat | None): a symlink row's resolved target stat,
             None when the link dangles; ignored for non-link rows.
         identity (Identity | None): who the session is, for the owner
             family on an entry that reports no owner of its own.
     """
     out: list[str] = []
-    i = 0
-    n = len(fmt)
     kind = printf_kind(st)
-    while i < n:
-        ch = fmt[i]
-        if ch == "\\" and i + 1 < n:
-            nxt = fmt[i + 1]
-            if nxt in _PRINTF_ESCAPES:
-                out.append(_PRINTF_ESCAPES[nxt])
-            else:
-                _warn_unrecognized(f"\\{nxt}", warnings)
-                out.append(fmt[i : i + 2])
-            i += 2
-            continue
-        if ch != "%" or i + 1 >= n:
-            out.append(ch)
-            i += 1
-            continue
-        code = fmt[i + 1]
-        i += 2
-        if code == "%":
-            out.append("%")
-        elif code == "p":
-            out.append(row)
-        elif code == "P":
-            out.append(_relative_part(row, search))
-        elif code == "f":
-            trimmed = row.rstrip("/")
-            out.append(trimmed.rsplit("/", 1)[-1] if trimmed else "/")
-        elif code == "h":
-            trimmed = row.rstrip("/")
-            if "/" not in trimmed:
-                out.append("." if trimmed else "/")
-            else:
-                head = trimmed.rsplit("/", 1)[0]
-                out.append(head if head else "/")
-        elif code == "d":
-            rel = _relative_part(row, search)
-            out.append("0" if not rel else str(rel.count("/") + 1))
-        elif code == "s":
-            out.append(str(content_size(st) if st is not None else 0))
-        elif code == "y":
-            out.append("U" if st is None else kind)
-        elif code == "Y":
-            if st is None:
-                out.append("U")
-            elif kind == "l":
-                out.append("N" if target is None else printf_kind(target))
-            else:
-                out.append(kind)
-        elif code in ("u", "U"):
-            out.append(
-                owner_name(st.uid if st is not None else None, identity)
-            )
-        elif code in ("g", "G"):
-            out.append(
-                group_name(st.gid if st is not None else None, identity)
-            )
-        elif code == "m":
-            out.append(format(_mode_bits(st, kind) & ALL_MODE_BITS, "o"))
-        elif code == "M":
-            out.append(filemode(_mode_bits(st, kind)))
-        elif code == "T" and i < n:
-            letter = fmt[i]
-            i += 1
-            out.append(
-                _expand_time(letter, _mtime_epoch(st), f"%T{letter}", warnings)
-            )
+    for part in parts:
+        if isinstance(part, PrintfLiteral):
+            out.append(part.text)
+        elif isinstance(part, PrintfTime):
+            out.append(_time_fields(_mtime_epoch(st))[part.letter])
         else:
-            _warn_unrecognized(f"%{code}", warnings)
-            out.append(f"%{code}")
+            out.append(
+                _directive(part, row, search, st, target, identity, kind)
+            )
     return "".join(out)
+
+
+def _directive(
+    part: PrintfDirective,
+    row: str,
+    search: PathSpec,
+    st: FileStat | None,
+    target: FileStat | None,
+    identity: Identity | None,
+    kind: str,
+) -> str:
+    code = part.code
+    if code == "p":
+        return row
+    if code == "P":
+        return _relative_part(row, search)
+    if code == "f":
+        trimmed = row.rstrip("/")
+        return trimmed.rsplit("/", 1)[-1] if trimmed else "/"
+    if code == "h":
+        trimmed = row.rstrip("/")
+        if "/" not in trimmed:
+            return "." if trimmed else "/"
+        head = trimmed.rsplit("/", 1)[0]
+        return head if head else "/"
+    if code == "d":
+        rel = _relative_part(row, search)
+        return "0" if not rel else str(rel.count("/") + 1)
+    if code == "s":
+        return str(content_size(st) if st is not None else 0)
+    if code == "y":
+        return "U" if st is None else kind
+    if code == "Y":
+        if st is None:
+            return "U"
+        if kind == "l":
+            return "N" if target is None else printf_kind(target)
+        return kind
+    if code in ("u", "U"):
+        return owner_name(st.uid if st is not None else None, identity)
+    if code in ("g", "G"):
+        return group_name(st.gid if st is not None else None, identity)
+    if code == "m":
+        return format(_mode_bits(st, kind) & ALL_MODE_BITS, "o")
+    return filemode(_mode_bits(st, kind))

@@ -84,6 +84,8 @@ export enum Cmd {
   REALPATH = 'realpath',
 }
 
+import type { FindExpr } from '../../../../rs/find.ts'
+
 export type { DispatchFn } from '../../../../runtime/types.ts'
 
 export type CrossResult = [ByteSource | null, IOResult]
@@ -92,6 +94,8 @@ interface RunSingleOpts {
   signal?: AbortSignal
   stdin?: ByteSource | null
   resolveHint?: PathSpec | null
+  // find's expression, parsed once for the line.
+  find?: FindExpr
 }
 
 export type RunSingle = (

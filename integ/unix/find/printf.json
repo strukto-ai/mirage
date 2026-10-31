@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "%Q\n",
-        "stderr": "find: warning: unrecognized format directive '%Q'\n"
+        "stderr": "find: warning: unrecognized format directive `%Q'\n"
       }
     },
     {
@@ -123,6 +123,86 @@
       "flags": [
         "printf"
       ]
+    },
+    {
+      "id": "find_printf_unknown_escape_warns",
+      "seq": 19990170,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -maxdepth 0 -printf 'x\\q\\n'",
+      "expect": {
+        "exit": 0,
+        "stdout": "x\\q\n",
+        "stderr": "find: warning: unrecognized escape `\\q'\n"
+      }
+    },
+    {
+      "id": "find_printf_warns_per_occurrence",
+      "seq": 19990171,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -maxdepth 0 -printf '\\q\\q'",
+      "expect": {
+        "exit": 0,
+        "stdout": "\\q\\q",
+        "stderr": "find: warning: unrecognized escape `\\q'\nfind: warning: unrecognized escape `\\q'\n"
+      }
+    },
+    {
+      "id": "find_printf_warns_without_a_match",
+      "seq": 19990172,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -name nomatch -printf '%z'",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "find: warning: unrecognized format directive `%z'\n"
+      }
+    },
+    {
+      "id": "find_printf_percent_at_end",
+      "seq": 19990173,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -printf 'abc%'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: error: % at end of format string\n"
+      }
+    },
+    {
+      "id": "find_printf_warning_before_the_error",
+      "seq": 19990174,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs"
+      ],
+      "command": "find /data -maxdepth 0 -printf '\\q%'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: warning: unrecognized escape `\\q'\nfind: error: % at end of format string\n"
+      }
     }
   ]
 }

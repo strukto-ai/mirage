@@ -9,13 +9,14 @@ use serde_json::{Value as Json, json};
 use crate::head;
 use crate::printf::number::parse_float;
 use crate::scan::{Typed, Values, last, unknown};
+use crate::word::{self, Choice};
 use crate::{StreamError, quoted};
 
 /// Seconds between polls when `-s` is not typed.
 const SLEEP_INTERVAL: f64 = 1.0;
 
 /// `--follow`'s words, in the order GNU lists them back.
-const FOLLOW: [&str; 2] = ["descriptor", "name"];
+const FOLLOW: &[Choice] = &[&["descriptor"], &["name"]];
 
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     if let Some((name, _)) = options
@@ -53,29 +54,8 @@ fn count(raw: &[u8], value: i64) -> Json {
     json!({"count": value.unsigned_abs(), "from_start": raw.first() == Some(&b'+')})
 }
 
-/// `--follow`'s word as argmatch reads it: one of `FOLLOW`, or a prefix of
-/// just one.
 fn follow(raw: &[u8]) -> Result<&'static str, StreamError> {
-    if let Some(word) = FOLLOW.iter().find(|word| word.as_bytes() == raw) {
-        return Ok(word);
-    }
-    let matches: Vec<&str> = FOLLOW
-        .into_iter()
-        .filter(|word| word.as_bytes().starts_with(raw))
-        .collect();
-    if let [word] = matches[..] {
-        return Ok(word);
-    }
-    let kind = if matches.is_empty() {
-        "invalid"
-    } else {
-        "ambiguous"
-    };
-    let refused = format!(
-        "tail: {kind} argument '{}' for '--follow'\nValid arguments are:\n  - 'descriptor'\n  - 'name'\nTry 'tail --help' for more information.",
-        quoted(raw)
-    );
-    Err(StreamError::refusal(refused.as_bytes(), 1))
+    word::choose("tail", "--follow", raw, FOLLOW, 1)
 }
 
 /// `-s` as `xstrtod` reads it: the whole word one C-locale `strtod`

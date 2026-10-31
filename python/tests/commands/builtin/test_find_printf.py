@@ -1,9 +1,24 @@
-from mirage.commands.builtin.find_printf import (
-    expand_printf,
-    printf_needs_stat,
-)
+from mirage.commands.builtin.find_printf import expand_printf
 from mirage.commands.builtin.utils.identity import Identity
+from mirage.rs.find import parse_find_expression
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+
+
+def _compiled(fmt):
+    action = parse_find_expression(["-printf", fmt])
+    return action.actions[0]
+
+
+def _expand(fmt, row, search, st, warnings, target=None, identity=None):
+    expr = parse_find_expression(["-printf", fmt])
+    warnings.extend(expr.warnings)
+    return expand_printf(
+        expr.actions[0].parts, row, search, st, target, identity
+    )
+
+
+def printf_needs_stat(fmt):
+    return _compiled(fmt).needs_stat
 
 
 def _spec(virtual: str, raw: str | None = None) -> PathSpec:
@@ -48,7 +63,7 @@ def test_expand_path_directives():
     search = _spec("/data")
     row = "/data/sub/b.txt"
     assert (
-        expand_printf("%p|%P|%f|%h|%d\n", row, search, None, warnings)
+        _expand("%p|%P|%f|%h|%d\n", row, search, None, warnings)
         == "/data/sub/b.txt|sub/b.txt|b.txt|/data/sub|2\n"
     )
     assert warnings == []
@@ -57,11 +72,9 @@ def test_expand_path_directives():
 def test_expand_stat_directives():
     warnings: list[str] = []
     search = _spec("/data")
-    out = expand_printf(
-        "%s %y %m %M\n", "/data/a.txt", search, _stat(), warnings
-    )
+    out = _expand("%s %y %m %M\n", "/data/a.txt", search, _stat(), warnings)
     assert out == "6 f 644 -rw-r--r--\n"
-    dir_out = expand_printf(
+    dir_out = _expand(
         "%y %m\n", "/data/sub", search, _stat(0, FileType.DIRECTORY), warnings
     )
     assert dir_out == "d 755\n"
@@ -74,7 +87,7 @@ def test_expand_owner_directives():
     # No uid/gid on the entry: the owner and the group are the session's
     # profile, the rule ls -l draws its columns by.
     assert (
-        expand_printf(
+        _expand(
             "%u %U %g %G\n",
             "/data/a.txt",
             search,
@@ -87,7 +100,7 @@ def test_expand_owner_directives():
     # A reported owner wins; `-` when nothing names one.
     owned = _stat().model_copy(update={"uid": 501, "gid": "staff"})
     assert (
-        expand_printf(
+        _expand(
             "%u %g\n",
             "/data/a.txt",
             search,
@@ -98,8 +111,7 @@ def test_expand_owner_directives():
         == "501 staff\n"
     )
     assert (
-        expand_printf("%u %g\n", "/data/a.txt", search, _stat(), warnings)
-        == "- -\n"
+        _expand("%u %g\n", "/data/a.txt", search, _stat(), warnings) == "- -\n"
     )
     assert warnings == []
 
@@ -115,12 +127,12 @@ def test_expand_reported_mode_over_default():
         mode=0o600,
     )
     assert (
-        expand_printf("%m %M\n", "/data/a.txt", search, st, warnings)
+        _expand("%m %M\n", "/data/a.txt", search, st, warnings)
         == "600 -rw-------\n"
     )
     d = FileStat(name="sub", size=0, type=FileType.DIRECTORY, mode=0o700)
     assert (
-        expand_printf("%m %M\n", "/data/sub", search, d, warnings)
+        _expand("%m %M\n", "/data/sub", search, d, warnings)
         == "700 drwx------\n"
     )
 
@@ -130,7 +142,7 @@ def test_expand_capital_y_reports_target_kind():
     search = _spec("/data")
     link = _stat(5, FileType.SYMLINK)
     assert (
-        expand_printf(
+        _expand(
             "%y %Y\n",
             "/data/lnk",
             search,
@@ -141,12 +153,11 @@ def test_expand_capital_y_reports_target_kind():
         == "l d\n"
     )
     assert (
-        expand_printf("%y %Y\n", "/data/lnk", search, link, warnings, None)
+        _expand("%y %Y\n", "/data/lnk", search, link, warnings, None)
         == "l N\n"
     )
     assert (
-        expand_printf("%y %Y\n", "/data/a.txt", search, _stat(), warnings)
-        == "f f\n"
+        _expand("%y %Y\n", "/data/a.txt", search, _stat(), warnings) == "f f\n"
     )
 
 
@@ -154,12 +165,10 @@ def test_expand_time_directives():
     warnings: list[str] = []
     search = _spec("/data")
     assert (
-        expand_printf(
-            "%TY-%Tm-%Td\n", "/data/a.txt", search, _stat(), warnings
-        )
+        _expand("%TY-%Tm-%Td\n", "/data/a.txt", search, _stat(), warnings)
         == "2026-08-16\n"
     )
-    epoch = expand_printf("%T@\n", "/data/a.txt", search, _stat(), warnings)
+    epoch = _expand("%T@\n", "/data/a.txt", search, _stat(), warnings)
     assert epoch == "1786887930.0000000000\n"
     assert len(epoch.strip().split(".")[1]) == 10
 
@@ -172,9 +181,7 @@ def test_expand_time_keeps_a_fraction_to_its_microseconds():
         modified="2024-03-05T14:07:09.123000+00:00",
     )
     assert (
-        expand_printf(
-            "%T@|%TS|%Ts\n", "/data/a.txt", _spec("/data"), fractional, []
-        )
+        _expand("%T@|%TS|%Ts\n", "/data/a.txt", _spec("/data"), fractional, [])
         == "1709647629.1230000000|09.1230000000|1709647629\n"
     )
 
@@ -187,9 +194,7 @@ def test_expand_time_takes_a_fraction_before_1970_from_the_calendar():
         modified="1969-12-31T23:59:59.750000+00:00",
     )
     assert (
-        expand_printf(
-            "%T@|%TS|%T+\n", "/data/a.txt", _spec("/data"), before, []
-        )
+        _expand("%T@|%TS|%T+\n", "/data/a.txt", _spec("/data"), before, [])
         == "-1.7500000000|59.7500000000|1969-12-31+23:59:59.7500000000\n"
     )
 
@@ -198,21 +203,17 @@ def test_expand_escapes_and_unknown():
     warnings: list[str] = []
     search = _spec("/data")
     assert (
-        expand_printf("A\\tB\\n", "/data/a.txt", search, None, warnings)
-        == "A\tB\n"
+        _expand("A\\tB\\n", "/data/a.txt", search, None, warnings) == "A\tB\n"
     )
-    assert (
-        expand_printf("%Q\n", "/data/a.txt", search, None, warnings) == "%Q\n"
-    )
-    assert warnings == ["find: warning: unrecognized format directive '%Q'"]
-    expand_printf("%Q %Q\n", "/data/a.txt", search, None, warnings)
-    assert len(warnings) == 1
+    assert _expand("%Q\n", "/data/a.txt", search, None, warnings) == "%Q\n"
+    assert warnings == ["find: warning: unrecognized format directive `%Q'"]
+    _expand("%Q %Q\n", "/data/a.txt", search, None, warnings)
+    assert len(warnings) == 3
 
 
 def test_expand_root_row():
     warnings: list[str] = []
     search = _spec("/data")
     assert (
-        expand_printf("%P|%d|%f\n", "/data", search, None, warnings)
-        == "|0|data\n"
+        _expand("%P|%d|%f\n", "/data", search, None, warnings) == "|0|data\n"
     )

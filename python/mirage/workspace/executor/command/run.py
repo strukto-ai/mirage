@@ -26,6 +26,7 @@ from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
+from mirage.rs.find import FindExpr
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import (
     CommandRuntime,
@@ -131,7 +132,7 @@ def line_runtime_for(
 
 def find_start_points(
     argv: list[str | PathSpec],
-    expr_tokens: list[str],
+    start: int,
     spec: CommandSpec | None,
     cwd: str,
 ) -> list[PathSpec]:
@@ -145,12 +146,12 @@ def find_start_points(
 
     Args:
         argv (list[str | PathSpec]): the classified words after `find`.
-        expr_tokens (list[str]): the expression tail, as `find_expr_tail`
-            cut it off the same words.
+        start (int): where mirage-rs found the expression to begin in the
+            same words.
         spec (CommandSpec | None): find's spec on the mount.
         cwd (str): the session's working directory.
     """
-    head = argv[: len(argv) - len(expr_tokens)]
+    head = argv[:start]
     return parse_flags(head, spec, "find", cwd).paths
 
 
@@ -198,6 +199,7 @@ async def run_on_mount(
     argv: tuple[str, ...] = (),
     execute_fn: ExecuteLine | None = None,
     follow: FollowOperands | None = None,
+    find: FindExpr | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run one already-parsed command on the mount that owns its paths.
 
@@ -230,6 +232,8 @@ async def run_on_mount(
             handler reaches as ``opts.shell``; None outside a workspace.
         follow (FollowOperands | None): the line's operand resolution,
             which the command's globs give their matches.
+        find (FindExpr | None): find's expression, parsed once for the
+            line, which its handler reads in place of ``texts``.
     """
     session = context.session
     if mount is None:
@@ -307,6 +311,7 @@ async def run_on_mount(
                     else None
                 ),
                 argv=argv,
+                find=find,
             ),
         )
     except UsageError as exc:

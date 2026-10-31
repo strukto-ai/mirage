@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.ls import ls_generic
+from mirage.commands.builtin.generic.ls import ls_generic, ls_options
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.tree import tree_walk
@@ -31,6 +31,7 @@ async def ls(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    options = ls_options(ctx.flags)
     files = command_files(ctx, paths)
     if not paths:
         paths = [
@@ -50,7 +51,7 @@ async def ls(
         FlagView(ctx.flags, spec=SPECS["ls"]).as_bool("recursive")
         and files.answers("read_tree"),
     )
-    return await ls_generic(resolved, list(texts), ctx, readdir, stat)
+    return await ls_generic(resolved, list(texts), ctx, readdir, stat, options)
 
 
 BUILDER = GenericCommand("ls", ls)

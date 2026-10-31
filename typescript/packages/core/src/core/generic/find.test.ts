@@ -20,7 +20,7 @@ import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { modifiedTs, walkFind, type WalkFindDeps } from './find.ts'
 import { isEnoent } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { parseFindExpression } from '../../commands/builtin/find_parse.ts'
+import { parseFindExpression } from '../../rs/find.ts'
 
 function enoent(p: string): Error {
   const e = new Error(`ENOENT: ${p}`) as Error & { code: string }

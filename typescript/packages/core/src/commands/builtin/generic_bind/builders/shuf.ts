@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NO_WRITE_OP, shufGeneric } from '../../generic/shuf.ts'
+import { NO_WRITE_OP, parseFlags, shufGeneric } from '../../generic/shuf.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { type GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
 
@@ -21,6 +22,8 @@ export const BUILDER: GenericCommand = {
   write: true,
   read: true,
   fn: async (_accessor, paths, texts, ctx) => {
+    const parsed = parseFlags(ctx.flags)
+    if (parsed instanceof IOResult) return [null, parsed]
     const files = commandFiles(ctx, paths)
     const resolved = await resolveOrEmpty(files, paths)
     return shufGeneric(
@@ -34,6 +37,7 @@ export const BUILDER: GenericCommand = {
         if (!files.answers('write')) throw new Error(NO_WRITE_OP)
         return files.write(p, data)
       },
+      parsed,
     )
   },
 }

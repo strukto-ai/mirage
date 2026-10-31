@@ -32,7 +32,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument 'abc' to '-maxdepth'\n"
+        "stderr": "find: Expected a positive decimal integer argument to -maxdepth, but got 'abc'\n"
       },
       "flags": [
         "maxdepth"
@@ -70,7 +70,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument 'xx' to '-mindepth'\n"
+        "stderr": "find: Expected a positive decimal integer argument to -mindepth, but got 'xx'\n"
       },
       "flags": [
         "mindepth"
@@ -260,7 +260,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument 'abc' to '-mtime'\n"
+        "stderr": "find: invalid argument `abc' to `-mtime'\n"
       },
       "flags": [
         "mtime"
@@ -298,7 +298,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: unknown predicate '-regex'\n"
+        "stderr": "find: unknown predicate `-regex'\n"
       },
       "flags": [
         "regex"
@@ -336,7 +336,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: unknown predicate '-boguspredicate'\n"
+        "stderr": "find: unknown predicate `-boguspredicate'\n"
       },
       "flags": [
         "boguspredicate"
@@ -488,7 +488,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument '12abc' to '-maxdepth'\n"
+        "stderr": "find: Expected a positive decimal integer argument to -maxdepth, but got '12abc'\n"
       },
       "flags": [
         "maxdepth"
@@ -526,7 +526,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument '2x' to '-mindepth'\n"
+        "stderr": "find: Expected a positive decimal integer argument to -mindepth, but got '2x'\n"
       },
       "flags": [
         "mindepth"
@@ -602,11 +602,616 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "find: invalid argument '3x' to '-mtime'\n"
+        "stderr": "find: invalid argument `3x' to `-mtime'\n"
       },
       "flags": [
         "mtime"
       ]
+    },
+    {
+      "id": "find_maxdepth_underscore",
+      "seq": 19990150,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -maxdepth 1_0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: Expected a positive decimal integer argument to -maxdepth, but got '1_0'\n"
+      },
+      "flags": [
+        "maxdepth"
+      ]
+    },
+    {
+      "id": "find_maxdepth_negative",
+      "seq": 19990151,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -maxdepth -1",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: Expected a positive decimal integer argument to -maxdepth, but got '-1'\n"
+      },
+      "flags": [
+        "maxdepth"
+      ]
+    },
+    {
+      "id": "find_maxdepth_past_int_max",
+      "seq": 19990152,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -maxdepth 2147483648",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: 2147483648: Numerical result out of range\n"
+      },
+      "flags": [
+        "maxdepth"
+      ]
+    },
+    {
+      "id": "find_mindepth_underscore",
+      "seq": 19990153,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -mindepth 1_0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: Expected a positive decimal integer argument to -mindepth, but got '1_0'\n"
+      },
+      "flags": [
+        "mindepth"
+      ]
+    },
+    {
+      "id": "find_mtime_underscore",
+      "seq": 19990154,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -mtime 1_0",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument `1_0' to `-mtime'\n"
+      },
+      "flags": [
+        "mtime"
+      ]
+    },
+    {
+      "id": "find_type_unknown_letter",
+      "seq": 19990155,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -type zz",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: Unknown argument to -type: z\n"
+      },
+      "flags": [
+        "type"
+      ]
+    },
+    {
+      "id": "find_type_needs_comma",
+      "seq": 19990156,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -type ff",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: Must separate multiple arguments to -type using: ','\n"
+      },
+      "flags": [
+        "type"
+      ]
+    },
+    {
+      "id": "find_type_list",
+      "seq": 19990157,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -maxdepth 0 -type f,d",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n",
+        "stderr": ""
+      },
+      "flags": [
+        "type",
+        "maxdepth"
+      ]
+    },
+    {
+      "id": "find_missing_argument",
+      "seq": 19990158,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: missing argument to `-name'\n"
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_newer_missing_argument",
+      "seq": 19990159,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -newer",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: missing argument to `-newer'\n"
+      },
+      "flags": [
+        "newer"
+      ]
+    },
+    {
+      "id": "find_open_paren",
+      "seq": 19990160,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data \\( -name a",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid expression; I was expecting to find a ')' somewhere but did not see one.\n"
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_extra_close_paren",
+      "seq": 19990161,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name a \\)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: you have too many ')'\n"
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_empty_parens",
+      "seq": 19990162,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data \\( \\)",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid expression; empty parentheses are not allowed.\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "find_binary_operator_first",
+      "seq": 19990163,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -o -name a",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid expression; you have used a binary operator '-o' with nothing before it.\n"
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_word_after_expression",
+      "seq": 19990164,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -name a b",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: paths must precede expression: `b'\n"
+      },
+      "flags": [
+        "name"
+      ]
+    },
+    {
+      "id": "find_exec_semicolon_first",
+      "seq": 19990165,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -exec ';'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument `;' to `-exec'\n"
+      },
+      "flags": []
     }
   ]
 }

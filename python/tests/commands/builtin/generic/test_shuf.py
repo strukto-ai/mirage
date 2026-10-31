@@ -27,9 +27,9 @@ from mirage.utils.ids import SeededIdSource
 # Pinned by shuf.test.ts too: one seed shuffles the same way on both
 # hosts.
 CASES = [
-    ({"input_range": "1-1000", "count": 5}, [], "263\n510\n609\n684\n499\n"),
+    ({"input_range": (1, 1000), "count": 5}, [], "263\n510\n609\n684\n499\n"),
     (
-        {"input_range": "1-18446744073709551615", "count": 3},
+        {"input_range": (1, 18446744073709551615), "count": 3},
         [],
         "11217175675983945601\n2690887512640883574\n14695936735223002468\n",
     ),

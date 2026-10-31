@@ -17,6 +17,7 @@ import { runDu } from '../../commands/builtin/generic/crossmount/du.ts'
 import { runFind } from '../../commands/builtin/generic/crossmount/find.ts'
 import { handleCrossMount } from '../../commands/builtin/generic/crossmount/route.ts'
 import type { RunSingle, DispatchFn } from '../../commands/builtin/generic/crossmount/types.ts'
+import type { FindExpr } from '../../rs/find.ts'
 import { runDispatch } from '../../commands/builtin/generic_bind/dispatch.ts'
 import { UsageError } from '../../commands/errors.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
@@ -55,6 +56,7 @@ function ownPart(
   cwd: string,
   vfs: Files | undefined,
   follow: FollowOperands | undefined,
+  find: FindExpr | undefined,
 ): RunSingle {
   return async (cmdName, paths, texts, bag, opts) => {
     try {
@@ -77,6 +79,7 @@ function ownPart(
         follow,
         registry.diff,
         registry.ids,
+        opts?.find ?? find,
       )
     }
     return runSingle(cmdName, paths, texts, bag, opts ?? {})
@@ -120,19 +123,22 @@ export async function fanOutTraversal(
   // The line's operand resolution, which a walk through the dispatcher's
   // globs take.
   follow?: FollowOperands,
+  // find's expression, parsed once for the line.
+  find?: FindExpr,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   signal?.throwIfAborted()
   if (dispatch === undefined || native === undefined)
     throw new Error('traversal requires dispatcher and native execution')
   let stdout: ByteSource | null
   let io: IOResult
-  const part = ownPart(native, registry, dispatch, cwd, vfs, follow)
+  const part = ownPart(native, registry, dispatch, cwd, vfs, follow, find)
   try {
     if (cmdName === 'find') {
       ;[stdout, io] = await runFind(
         paths,
         texts,
         flagKwargs,
+        find,
         dispatch,
         part,
         cwd,
@@ -233,13 +239,15 @@ export function runWithFanout(
   // The line's operand resolution, which a walk through the dispatcher's
   // globs take.
   follow?: FollowOperands,
+  // find's expression, parsed once for the line.
+  find?: FindExpr,
 ): RunSingle {
   return async (cmdName, paths, texts, flagKwargs, opts) => {
     const stdin = opts?.stdin ?? null
     if (!shouldFanOut(cmdName, paths, flagKwargs, registry)) {
       const run =
         TRAVERSAL_CMDS.has(cmdName) && dispatch !== undefined
-          ? ownPart(runSingle, registry, dispatch, cwd, vfs, follow)
+          ? ownPart(runSingle, registry, dispatch, cwd, vfs, follow, find)
           : runSingle
       return run(cmdName, paths, texts, flagKwargs, opts ?? {})
     }
@@ -268,6 +276,7 @@ export function runWithFanout(
       dispatch,
       runSingle,
       follow,
+      opts?.find ?? find,
     )
     return [stdout, io]
   }

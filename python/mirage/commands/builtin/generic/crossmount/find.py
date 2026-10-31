@@ -12,14 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.constants import (
-    EXEC_BATCH_END,
-    EXEC_END,
-    FIND_EXEC_PREDICATES,
-    FIND_VALUE_PREDICATES,
-    OPERAND_CONCURRENCY,
-)
-from mirage.commands.builtin.find_parse import parse_find_expression
+from dataclasses import replace
+
+from mirage.commands.builtin.constants import OPERAND_CONCURRENCY
 from mirage.commands.builtin.generic.crossmount.constants import (
     DISPATCH_BUILDERS,
 )
@@ -40,6 +35,7 @@ from mirage.concurrency.limiter import bounded_map
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, PathRecord
+from mirage.rs.find import FindExpr, parse_find_expression
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.path import respell_one
@@ -52,68 +48,29 @@ from mirage.workspace.files import Files
 WALK_WIDE = frozenset({"-prune", "-empty", "-xdev", "-mount"})
 
 
-def predicates(texts: list[str]) -> list[tuple[int, str]]:
-    """Each word of a find expression that is not another word's argument.
-
-    Args:
-        texts (list[str]): The expression words.
-    """
-    found: list[tuple[int, str]] = []
-    i = 0
-    while i < len(texts):
-        found.append((i, texts[i]))
-        if texts[i] in FIND_VALUE_PREDICATES:
-            i += 1
-        elif texts[i] in FIND_EXEC_PREDICATES:
-            i += 1
-            while i < len(texts) and not (
-                texts[i] == EXEC_END
-                or (texts[i] == EXEC_BATCH_END and texts[i - 1] == "{}")
-            ):
-                i += 1
-        i += 1
-    return found
-
-
 def shifted(
-    texts: list[str],
-    flags: dict[str, FlagValue],
+    expr: FindExpr,
     depth: int,
-    maxdepth: int | None,
-    mindepth: int | None,
     alone: bool = False,
-) -> tuple[list[str], dict[str, FlagValue]] | None:
+) -> FindExpr | None:
     """The expression for a start point ``depth`` levels below the operand.
 
     Its depth limits count from that start point. None when the limits
     leave it nothing to print.
 
     Args:
-        texts (list[str]): The expression words.
-        flags (dict[str, FlagValue]): The parsed flags.
+        expr (FindExpr): The parsed expression.
         depth (int): Levels between the operand and the start point.
-        maxdepth (int | None): The expression's ``-maxdepth``.
-        mindepth (int | None): The expression's ``-mindepth``.
         alone (bool): Match the start point only, not what lies below.
     """
+    maxdepth, mindepth = expr.maxdepth, expr.mindepth
     if maxdepth is not None and depth > maxdepth:
         return None
     if alone and mindepth is not None and depth < mindepth:
         return None
     top = 0 if alone else None if maxdepth is None else maxdepth - depth
     bottom = None if mindepth is None else max(0, mindepth - depth)
-    limits = {"-maxdepth": top, "-mindepth": bottom}
-    words = list(texts)
-    bag = dict(flags)
-    for i, word in predicates(texts):
-        limit = limits.get(word)
-        if limit is not None:
-            words[i + 1] = str(limit)
-            bag[word.lstrip("-")] = str(limit)
-    if alone and "maxdepth" not in bag:
-        words = ["-maxdepth", "0", *words]
-        bag["maxdepth"] = "0"
-    return words, bag
+    return replace(expr, maxdepth=top, mindepth=bottom)
 
 
 def joints(path: PathSpec, starts: list[PathSpec]) -> list[PathSpec]:
@@ -149,6 +106,7 @@ async def run_find(
     paths: list[PathSpec],
     texts: list[str],
     flags: dict[str, FlagValue],
+    find: FindExpr | None,
     dispatch: DispatchFn,
     run_single: RunSingle,
     cwd: str,
@@ -175,6 +133,8 @@ async def run_find(
         paths (list[PathSpec]): Operands in command-line order.
         texts (list[str]): The expression words.
         flags (dict[str, FlagValue]): The parsed flags.
+        find (FindExpr | None): The expression parsed once for the line;
+            parsed from ``texts`` when the caller holds none.
         dispatch (DispatchFn): Workspace operations, for the one walk.
         run_single (RunSingle): Runs one start point on its mount alone.
         cwd (str): The session's working directory.
@@ -184,9 +144,10 @@ async def run_find(
             which the one walk's globs take.
     """
     mounts = mount_view(vfs)
+    expr = find if find is not None else parse_find_expression(texts)
     if (
         mounts is None
-        or WALK_WIDE & {word for _, word in predicates(texts)}
+        or WALK_WIDE & set(expr.predicates)
         or FlagView(flags, spec=SPECS["find"]).as_bool("L")
     ):
         return await run_dispatch(
@@ -199,9 +160,9 @@ async def run_find(
             vfs,
             stdin,
             follow=follow,
+            find=expr,
         )
-    expr = parse_find_expression(list(texts))
-    plan: list[tuple[int, PathSpec, bool, list[str], dict[str, FlagValue]]]
+    plan: list[tuple[int, PathSpec, bool, FindExpr]]
     plan = []
     for index, path in enumerate(paths):
         base = path.virtual.rstrip("/")
@@ -212,30 +173,31 @@ async def run_find(
             depth = (
                 0 if start is path else start.virtual[len(base) :].count("/")
             )
-            limited = shifted(
-                texts, flags, depth, expr.maxdepth, expr.mindepth, alone
-            )
+            limited = shifted(expr, depth, alone)
             if limited is not None:
-                plan.append((index, start, alone, *limited))
+                plan.append((index, start, alone, limited))
 
     async def search(
-        step: tuple[int, PathSpec, bool, list[str], dict[str, FlagValue]],
+        step: tuple[int, PathSpec, bool, FindExpr],
     ) -> IOResult:
-        _, start, alone, words, bag = step
+        _, start, alone, limited = step
         if alone:
             out, io = await run_dispatch(
                 DISPATCH_BUILDERS["find"],
                 [start],
-                words,
-                bag,
+                texts,
+                flags,
                 dispatch,
                 cwd,
                 vfs,
                 stdin,
                 follow=follow,
+                find=limited,
             )
         else:
-            out, io = await run_single("find", [start], words, bag)
+            out, io = await run_single(
+                "find", [start], texts, flags, find=limited
+            )
         await materialize(out)
         return io
 
@@ -253,6 +215,7 @@ async def run_find(
             vfs,
             stdin,
             follow=follow,
+            find=expr,
         )
     between = [
         {step[1].virtual for step in plan if step[0] == index and step[2]}
@@ -267,7 +230,7 @@ async def run_find(
     done = [(step, io) for step, io, keep in zip(plan, ios, kept) if keep]
     runs: list[list[PathSpec]] = [[] for _ in paths]
     merged = IOResult()
-    for (index, start, alone, _, _), io in done:
+    for (index, start, alone, _), io in done:
         owner = mounts.root_of(start.virtual)
         runs[index].extend(
             record.path

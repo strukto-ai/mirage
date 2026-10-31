@@ -16,10 +16,6 @@ import functools
 from collections.abc import Sequence
 from typing import Any
 
-from mirage.commands.builtin.find_parse import (
-    find_expr_tail,
-    parse_find_expression,
-)
 from mirage.commands.builtin.generic.crossmount import (
     handle_cross_mount,
     is_cross_mount,
@@ -50,6 +46,7 @@ from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.policy.types import HandOff
+from mirage.rs.find import FindExpr, parse_find
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -180,7 +177,7 @@ def _operand_mounts(
 async def _finish_find(
     stdout: ByteSource | None,
     io: IOResult,
-    texts: list[str],
+    expr: FindExpr,
     registry: MountRegistry,
     context: EvaluationContext,
     execute_fn: ExecuteLine | None,
@@ -202,7 +199,7 @@ async def _finish_find(
     Args:
         stdout (ByteSource | None): the rendered rows.
         io (IOResult): the selection's result, amended in place.
-        texts (list[str]): the expression tokens.
+        expr (FindExpr): the parsed expression.
         registry (MountRegistry): used to route per-match dispatch.
         context (EvaluationContext): the session the line runs under.
         execute_fn (ExecuteLine | None): runs an ``-exec`` line.
@@ -219,7 +216,7 @@ async def _finish_find(
     stdout, action_err, action_exit = await _apply_find_actions(
         stdout,
         io.records,
-        texts,
+        expr,
         registry,
         session.cwd,
         execute_fn=execute_fn,
@@ -694,11 +691,31 @@ async def handle_command(
             if s.walk_error != "ENOENT"
         ]
 
-    find_expr_tokens: list[str] | None = None
+    find_expr: FindExpr | None = None
     if not borrowed and cmd_name == "find":
-        find_expr_tokens = find_expr_tail(raw_argv)
         try:
-            find_expr = parse_find_expression(find_expr_tokens)
+            parsed = parse_find(spelled_words(parts[1:]))
+            # Every -newer reference is statted through the dispatcher
+            # here, once, before the expression is bound.
+            newer_times: list[float] = []
+            if parsed.newer and dispatch is not None:
+                newer_times, ref_err = await resolve_newer_refs(
+                    parsed.newer,
+                    registry,
+                    session.cwd,
+                    functools.partial(path_stat, dispatch),
+                    namespace,
+                    dereferences(cmd_name, parts),
+                )
+                if ref_err is not None:
+                    return (
+                        None,
+                        IOResult(exit_code=1, stderr=ref_err),
+                        ExecutionNode(
+                            command=cmd_str, exit_code=1, stderr=ref_err
+                        ),
+                    )
+            find_expr = parsed.bind(newer_times)
         except UsageError as exc:
             msg = f"{exc}\n"
             return (
@@ -710,26 +727,6 @@ async def handle_command(
                     stderr=encode_text(msg),
                 ),
             )
-        if find_expr.newer and dispatch is not None:
-            # Every -newer reference is statted through the dispatcher
-            # here, once, before any backend parses the expression.
-            find_expr_tokens, ref_err = await resolve_newer_refs(
-                find_expr_tokens,
-                find_expr.newer,
-                registry,
-                session.cwd,
-                functools.partial(path_stat, dispatch),
-                namespace,
-                dereferences(cmd_name, parts),
-            )
-            if ref_err is not None:
-                return (
-                    None,
-                    IOResult(exit_code=1, stderr=ref_err),
-                    ExecutionNode(
-                        command=cmd_str, exit_code=1, stderr=ref_err
-                    ),
-                )
 
     # Path-valued flags count: `cp -t /other/mount/dir src` spans mounts
     # exactly like a positional destination would.
@@ -759,8 +756,8 @@ async def handle_command(
             session.cwd,
         )
         cross_texts = (
-            find_expr_tokens
-            if find_expr_tokens is not None
+            raw_argv[find_expr.start :]
+            if find_expr is not None
             else cross_parsed.texts
         )
         cross_refusal = option_error(cmd_name, cross_parsed)
@@ -780,7 +777,7 @@ async def handle_command(
         # is not the spec's grammar, so its start points are the words
         # classified as paths.
         cross_scopes = (
-            path_scopes if find_expr_tokens is not None else cross_parsed.paths
+            path_scopes if find_expr is not None else cross_parsed.paths
         )
         cross_flags = cross_parsed.flag_kwargs
         if cmd_name in RELAY_COMMANDS:
@@ -817,6 +814,7 @@ async def handle_command(
             namespace,
             execute_fn=execute_fn,
             follow=follow,
+            find=find_expr,
         )
         # A per-operand native run is single-mount by construction, so a
         # traversal operand holding nested mounts has to fan out inside
@@ -839,6 +837,7 @@ async def handle_command(
             ),
             dispatch=dispatch,
             follow=follow,
+            find=find_expr,
         )
         stdout, io = await handle_cross_mount(
             cmd_name,
@@ -865,11 +864,11 @@ async def handle_command(
             ids=registry.ids,
             follow=follow,
         )
-        if find_expr_tokens is not None:
+        if find_expr is not None:
             stdout = await _finish_find(
                 stdout,
                 io,
-                cross_texts,
+                find_expr,
                 registry,
                 context,
                 execute_fn,
@@ -982,13 +981,13 @@ async def handle_command(
             ExecutionNode(command=cmd_str, exit_code=code, stderr=refusal_msg),
         )
 
-    if find_expr_tokens is not None:
-        texts = find_expr_tokens
+    if find_expr is not None:
+        texts = raw_argv[find_expr.start :]
         flag_kwargs = scalar_find_flags(flag_kwargs)
         # The start points are the path words before the expression;
         # the spec's rest slot would otherwise read an -exec word as one.
         paths = find_start_points(
-            parts[1:], find_expr_tokens, mount.spec_for(cmd_name), session.cwd
+            parts[1:], find_expr.start, mount.spec_for(cmd_name), session.cwd
         )
 
     warn_bytes = (
@@ -1034,14 +1033,16 @@ async def handle_command(
                 namespace,
                 argv=spelled_words(parts[1:]),
                 execute_fn=execute_fn,
+                find=find_expr,
             ),
             follow=follow,
+            find=find_expr,
         )
-        if find_expr_tokens is not None:
+        if find_expr is not None:
             stdout = await _finish_find(
                 stdout,
                 io,
-                texts,
+                find_expr,
                 registry,
                 context,
                 execute_fn,
@@ -1073,12 +1074,13 @@ async def handle_command(
         argv=spelled_words(parts[1:]),
         execute_fn=execute_fn,
         follow=follow,
+        find=find_expr,
     )
-    if find_expr_tokens is not None:
+    if find_expr is not None:
         stdout = await _finish_find(
             stdout,
             io,
-            texts,
+            find_expr,
             registry,
             context,
             execute_fn,

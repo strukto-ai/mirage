@@ -15,7 +15,6 @@
 import dataclasses
 from collections.abc import Mapping, Sequence
 
-from mirage.commands.builtin.find_parse import find_expr_tail
 from mirage.commands.builtin.generic.awk import is_assignment
 from mirage.commands.builtin.generic.grep import recurses
 from mirage.commands.builtin.generic.program import FILE_KEYS
@@ -33,6 +32,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandSpec, WordKind
 from mirage.io.types import ByteSource, DeviceInput
 from mirage.policy.types import CommandWord
+from mirage.rs.find import find_layout
 from mirage.types import PathSpec
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
@@ -104,7 +104,7 @@ def default_cwd_operand(
     if cmd_name == "find":
         # Only the words before the expression can be start points: an
         # `-exec` command word or a `-newer` reference is the parser's.
-        argv = argv[: len(argv) - len(find_expr_tail(argv))]
+        argv = argv[: find_layout(argv).start]
     parsed = parse_command(spec, argv, cwd, cmd_name)
     if parsed.paths():
         return None

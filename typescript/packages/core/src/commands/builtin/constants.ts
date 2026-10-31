@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RowActionKind } from '../../core/generic/find_eval.ts'
 import { ContentType } from '../../types.ts'
 
 export enum PatternType {
@@ -101,60 +100,6 @@ export const AWK_USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file .
 
 // The word an `-exec` argument that stands for the match is spelled as.
 export const EXEC_PLACEHOLDER = '{}'
-// The two terminators of an `-exec` argument list: `;` ends a per-match
-// run, `+` ends a batched run and only when it follows a word holding `{}`.
-export const EXEC_END = ';'
-export const EXEC_BATCH_END = '+'
-
-export const FIND_VALUE_PREDICATES = new Set([
-  '-name',
-  '-iname',
-  '-path',
-  '-type',
-  '-size',
-  '-mtime',
-  '-maxdepth',
-  '-mindepth',
-  '-printf',
-  '-newer',
-  '-newermt',
-])
-
-// `-exec` takes every word up to its terminator, so it is neither a value
-// predicate nor a bare one.
-export const FIND_EXEC_PREDICATES = new Set(['-exec'])
-
-export const FIND_BARE_PREDICATES = new Set([
-  '-empty',
-  '-print',
-  '-print0',
-  '-delete',
-  '-ls',
-  '-depth',
-  '-xdev',
-  '-mount',
-  '-prune',
-])
-
-export const FIND_OPERATORS = new Set(['-not', '!', '-o', '-or', '-a', '-and', '(', ')'])
-
-export const FIND_EXPRESSION_TOKENS: ReadonlySet<string> = new Set([
-  ...FIND_VALUE_PREDICATES,
-  ...FIND_BARE_PREDICATES,
-  ...FIND_OPERATORS,
-  ...FIND_EXEC_PREDICATES,
-])
-
-export const FIND_VALID_TYPES: ReadonlySet<string> = new Set(['b', 'c', 'd', 'p', 'f', 'l', 's'])
-
-export const FIND_MAX_DEPTH = 100
-
-export const FIND_ROW_ACTIONS: ReadonlyMap<string, RowActionKind> = new Map([
-  ['-print', 'print'],
-  ['-print0', 'print0'],
-  ['-ls', 'ls'],
-  ['-delete', 'delete'],
-])
 
 // How many per-mount runs of one cross-mount line are in flight at once.
 export const OPERAND_CONCURRENCY = 4

@@ -14,16 +14,13 @@
 
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
-from mirage.utils.dates import iso_timestamp, timestamp_iso
+from mirage.utils.dates import iso_timestamp
 from mirage.utils.path import CycleError
 from mirage.view.types import StatPath
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
-
-NEWER = "-newer"
-NEWERMT = "-newermt"
 
 
 def missing_reference_line(ref: str) -> bytes:
@@ -91,28 +88,25 @@ async def reference_stat(
 
 
 async def resolve_newer_refs(
-    tokens: list[str],
     refs: list[str],
     registry: MountRegistry,
     cwd: str,
     stat_path: StatPath,
     namespace: Namespace | None = None,
     follow: bool = False,
-) -> tuple[list[str], bytes | None]:
-    """Rewrite every ``-newer FILE`` in an expression into ``-newermt``.
+) -> tuple[list[float], bytes | None]:
+    """Each ``-newer FILE`` reference's modification time.
 
-    A backend's find op sees the expression as tokens and can stat
-    nothing outside its own mount, while the reference may live on any
-    mount and carry a namespace-overlay mtime (a ``touch -d`` on a
-    backend that stores none). So the executor resolves each reference
-    through the dispatcher once, before any backend parses the
-    expression, and hands down a timestamp that needs no further I/O.
+    A backend's find op can stat nothing outside its own mount, while the
+    reference may live on any mount and carry a namespace-overlay mtime (a
+    ``touch -d`` on a backend that stores none). So the executor resolves
+    each reference through the dispatcher once, before it binds the parsed
+    expression, and the tree holds a timestamp that needs no further I/O.
     A reference that does not exist is GNU's error, exit 1, and no walk
     runs; so is a symlink loop under ``-H`` or ``-L``, in GNU's other
     words.
 
     Args:
-        tokens (list[str]): the expression tokens as typed.
         refs (list[str]): the reference operands, in expression order.
         registry (MountRegistry): mount registry, for classification.
         cwd (str): the session's working directory.
@@ -125,35 +119,24 @@ async def resolve_newer_refs(
             link itself.
 
     Returns:
-        The rewritten tokens and None, or the tokens untouched and the
+        The times in epoch seconds and None, or an empty list and the
         error line for the first reference that does not exist.
     """
-    times: list[str] = []
+    times: list[float] = []
     for ref in refs:
         scope = classify_bare_path(ref, registry, cwd)
         virtual = scope.virtual if isinstance(scope, PathSpec) else ref
         try:
             stat = await reference_stat(virtual, stat_path, namespace, follow)
         except CycleError:
-            return tokens, loop_reference_line(ref)
+            return [], loop_reference_line(ref)
         if stat is None:
-            return tokens, missing_reference_line(ref)
+            return [], missing_reference_line(ref)
         # A reference with no reported mtime is never "older" than
         # anything: the epoch bound admits every dated entry, which is
         # the most a backend without times can honestly say.
-        times.append(timestamp_iso(_modified_or_epoch(stat.modified)) or "")
-    rewritten: list[str] = []
-    i = 0
-    n = 0
-    while i < len(tokens):
-        if tokens[i] == NEWER and i + 1 < len(tokens) and n < len(times):
-            rewritten.extend((NEWERMT, times[n]))
-            n += 1
-            i += 2
-            continue
-        rewritten.append(tokens[i])
-        i += 1
-    return rewritten, None
+        times.append(_modified_or_epoch(stat.modified))
+    return times, None
 
 
 def _modified_or_epoch(modified: str | None) -> float:

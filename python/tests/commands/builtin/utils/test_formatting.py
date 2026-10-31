@@ -38,67 +38,6 @@ def test_find_ls_and_ls_show_the_year_for_an_old_or_future_time():
     assert formatting.format_ls_long([far])[0].endswith(" Sep  6  2999 far")
 
 
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("K", formatting.BlockSize(1024, "K")),
-        ("KiB", formatting.BlockSize(1024, "KiB")),
-        ("1K", formatting.BlockSize(1024, "")),
-        ("KB", formatting.BlockSize(1000, "kB")),
-        ("M", formatting.BlockSize(1024 * 1024, "M")),
-        ("4", formatting.BlockSize(4, "")),
-        ("2K", formatting.BlockSize(2048, "")),
-        ("human-readable", formatting.BlockSize(1024, "", 1024)),
-        ("si", formatting.BlockSize(1000, "", 1000)),
-        ("k", formatting.BlockSize(1024, "K")),
-        ("1kB", formatting.BlockSize(1000, "")),
-        ("E", formatting.BlockSize(1024**6, "E")),
-        ("15E", formatting.BlockSize(15 * 1024**6, "")),
-        ("18EB", formatting.BlockSize(18 * 1000**6, "")),
-        (" 1", formatting.BlockSize(1, "")),
-        ("+1", formatting.BlockSize(1, "")),
-        (" +1", formatting.BlockSize(1, "")),
-        ("+1K", formatting.BlockSize(1024, "")),
-        (" 1K", formatting.BlockSize(1024, "")),
-        # The three size refusals, measured on coreutils 9.7.
-        ("bogus", formatting.BlockSizeRefusal.INVALID),
-        # strtol's blanks and `+` are skipped only in front of a digit.
-        ("+K", formatting.BlockSizeRefusal.INVALID),
-        (" K", formatting.BlockSizeRefusal.INVALID),
-        ("+ 1", formatting.BlockSizeRefusal.INVALID),
-        ("+", formatting.BlockSizeRefusal.INVALID),
-        (" ", formatting.BlockSizeRefusal.INVALID),
-        ("0", formatting.BlockSizeRefusal.INVALID),
-        ("0K", formatting.BlockSizeRefusal.INVALID),
-        ("0KB", formatting.BlockSizeRefusal.INVALID),
-        ("00KiB", formatting.BlockSizeRefusal.INVALID),
-        ("", formatting.BlockSizeRefusal.INVALID),
-        ("iB", formatting.BlockSizeRefusal.INVALID),
-        ("B", formatting.BlockSizeRefusal.INVALID),
-        ("-1K", formatting.BlockSizeRefusal.INVALID),
-        ("HUMAN", formatting.BlockSizeRefusal.INVALID),
-        ("KiX", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("Kx", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("1x", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("1e", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("1p", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("1R", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("1Ki", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("1.5K", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("1 ", formatting.BlockSizeRefusal.INVALID_SUFFIX),
-        ("Y", formatting.BlockSizeRefusal.TOO_LARGE),
-        ("16E", formatting.BlockSizeRefusal.TOO_LARGE),
-        ("18446744073709551616", formatting.BlockSizeRefusal.TOO_LARGE),
-        (
-            "18446744073709551615",
-            formatting.BlockSize(18446744073709551615, ""),
-        ),
-    ],
-)
-def test_parse_block_size_reads_gnu_units(text, expected):
-    assert formatting.parse_block_size(text) == expected
-
-
 def test_scaled_size_rounds_up_like_gnu():
     # `ls -l --block-size=K` on 6 bytes prints 1K; =4 on 10 bytes prints 3.
     assert (

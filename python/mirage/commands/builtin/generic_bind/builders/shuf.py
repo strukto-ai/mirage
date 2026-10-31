@@ -31,9 +31,11 @@ async def shuf(
 ) -> tuple[ByteSource | None, IOResult]:
     """Run shuf over resolved operands; mirrors shufGeneric.
 
-    The refusals are caught here rather than left to the executor's
-    catch-all, which is what the TypeScript twin does: `shufGeneric`
-    returns an `IOResult` for a bad `-n` or `-i`, so a direct call
+    The flags are read before any operand is resolved, and a refusal
+    from them is returned as it is. The later ones (an operand beside
+    ``-i``, more lines than shuf will hold) are caught here rather than
+    left to the executor's catch-all, which is what the TypeScript twin
+    does: `shufGeneric` returns an `IOResult` for them, so a direct call
     (a unit test, an embedder) got a raised exception on this host and a
     value on that one. The bytes and the exit code are identical either
     way inside a workspace -- `format_fs_error` emits an
@@ -67,8 +69,10 @@ async def _shuf(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    files = command_files(ctx, paths)
     parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
+    files = command_files(ctx, paths)
     if paths:
         paths = await files.resolve_glob(paths)
     return await generic_shuf(

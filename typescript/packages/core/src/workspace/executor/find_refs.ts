@@ -22,9 +22,6 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
-export const NEWER = '-newer'
-export const NEWERMT = '-newermt'
-
 /** GNU's line for a `-newer` reference that does not exist. */
 export function missingReferenceLine(ref: string): Uint8Array {
   return encodeText(`find: '${ref}': No such file or directory\n`)
@@ -68,31 +65,29 @@ export async function referenceStat(
 }
 
 /**
- * Rewrite every `-newer FILE` in an expression into `-newermt`.
+ * Each `-newer FILE` reference's modification time.
  *
- * A backend's find op sees the expression as tokens and can stat nothing
- * outside its own mount, while the reference may live on any mount and
- * carry a namespace-overlay mtime (a `touch -d` on a backend that stores
- * none). So the executor resolves each reference through the dispatcher
- * once, before any backend parses the expression, and hands down a
- * timestamp that needs no further I/O. A reference that does not exist is
- * GNU's error, exit 1, and no walk runs; so is a symlink loop under `-H`
- * or `-L`, in GNU's other words. `follow` is whether the leading
- * `-H`/`-L` follows a reference that is a symlink; `-P`, the default,
- * reads the link itself. Returns the rewritten tokens and null, or the
- * tokens untouched and the error line for the first reference that does
- * not exist.
+ * A backend's find op can stat nothing outside its own mount, while the
+ * reference may live on any mount and carry a namespace-overlay mtime (a
+ * `touch -d` on a backend that stores none). So the executor resolves each
+ * reference through the dispatcher once, before it binds the parsed
+ * expression, and the tree holds a timestamp that needs no further I/O. A
+ * reference that does not exist is GNU's error, exit 1, and no walk runs;
+ * so is a symlink loop under `-H` or `-L`, in GNU's other words. `follow`
+ * is whether the leading `-H`/`-L` follows a reference that is a symlink;
+ * `-P`, the default, reads the link itself. Returns the times in epoch
+ * seconds and null, or an empty list and the error line for the first
+ * reference that does not exist.
  */
 export async function resolveNewerRefs(
-  tokens: readonly string[],
   refs: readonly string[],
   registry: MountRegistry,
   cwd: string,
   statPath: StatPath,
   namespace: Namespace | null = null,
   follow = false,
-): Promise<[string[], Uint8Array | null]> {
-  const times: string[] = []
+): Promise<[number[], Uint8Array | null]> {
+  const times: number[] = []
   for (const ref of refs) {
     const scope = classifyBarePath(ref, registry, cwd)
     const virtual = typeof scope === 'string' ? ref : scope.virtual
@@ -100,28 +95,14 @@ export async function resolveNewerRefs(
     try {
       stat = await referenceStat(virtual, statPath, namespace, follow)
     } catch (err) {
-      if (err instanceof CycleError) return [[...tokens], loopReferenceLine(ref)]
+      if (err instanceof CycleError) return [[], loopReferenceLine(ref)]
       throw err
     }
-    if (stat === null) return [[...tokens], missingReferenceLine(ref)]
+    if (stat === null) return [[], missingReferenceLine(ref)]
     // A reference with no reported mtime is never "older" than anything:
     // the epoch bound admits every dated entry, which is the most a
     // backend without times can honestly say.
-    const ts = isoTimestamp(stat.modified) ?? 0
-    times.push(new Date(ts * 1000).toISOString())
+    times.push(isoTimestamp(stat.modified) ?? 0)
   }
-  const rewritten: string[] = []
-  let i = 0
-  let n = 0
-  while (i < tokens.length) {
-    if (tokens[i] === NEWER && i + 1 < tokens.length && n < times.length) {
-      rewritten.push(NEWERMT, times[n] ?? '')
-      n += 1
-      i += 2
-      continue
-    }
-    rewritten.push(tokens[i] ?? '')
-    i += 1
-  }
-  return [rewritten, null]
+  return [times, null]
 }

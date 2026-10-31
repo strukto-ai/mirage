@@ -40,36 +40,17 @@ function stat(virtual: string | PathSpec): Promise<FileStat | null> {
 }
 
 describe('resolveNewerRefs', () => {
-  it('rewrites -newer into -newermt', async () => {
+  it('reads each reference as its modification time', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-    const [tokens, err] = await resolveNewerRefs(
-      ['-newer', 'ref', '-name', 'x', '-newer', '/w/ref'],
-      ['ref', '/w/ref'],
-      ws.registry,
-      '/w',
-      stat,
-    )
+    const [times, err] = await resolveNewerRefs(['ref', '/w/ref'], ws.registry, '/w', stat)
     expect(err).toBeNull()
-    expect(tokens).toEqual([
-      '-newermt',
-      '2020-01-01T00:00:00.000Z',
-      '-name',
-      'x',
-      '-newermt',
-      '2020-01-01T00:00:00.000Z',
-    ])
+    expect(times).toEqual([1577836800, 1577836800])
   })
 
   it("reports a missing reference in GNU's words", async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-    const [tokens, err] = await resolveNewerRefs(
-      ['-newer', 'nope'],
-      ['nope'],
-      ws.registry,
-      '/w',
-      stat,
-    )
-    expect(tokens).toEqual(['-newer', 'nope'])
+    const [times, err] = await resolveNewerRefs(['nope'], ws.registry, '/w', stat)
+    expect(times).toEqual([])
     expect(new TextDecoder().decode(err ?? new Uint8Array())).toBe(
       "find: 'nope': No such file or directory\n",
     )

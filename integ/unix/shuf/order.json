@@ -178,7 +178,7 @@
       ]
     },
     {
-      "id": "shuf_a_bad_n_between_two_i_wins",
+      "id": "shuf_a_bad_n_between_two_i_is_named_first",
       "seq": 991047,
       "targets": [
         "ram",
@@ -206,13 +206,48 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "shuf: multiple -i options specified\n"
+        "stderr": "shuf: invalid line count: 'abc'\n"
       },
       "flags": [
         "i",
         "n"
+      ]
+    },
+    {
+      "id": "shuf_keeps_the_least_of_several_counts",
+      "seq": 19996005,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
-      "note": "Deliberate divergence: GNU names the count, validating the line in getopt order. mirage checks every value of an accumulating option in the order the options were first typed, so the second -i is seen before -n; keeping the line's own order would take a per-occurrence record across options, which neither argparse nor the parser keeps."
+      "command": "shuf -i 1-9 -n 1 -n 4 | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "i",
+        "n"
+      ]
     },
     {
       "id": "shuf_refuses_two_different_outputs",
