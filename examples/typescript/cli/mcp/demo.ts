@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { deepStrictEqual, ok } from 'node:assert/strict'
+import { deepStrictEqual, ok, rejects } from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { setTimeout } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { type CLI, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
@@ -107,6 +108,16 @@ async function main(): Promise<void> {
     ws.registerCli('name', NAME, {})
     const refused = await ws.shell(`name add-numbers '{'`)
     ok(refused.stderrText.startsWith('name add-numbers: invalid JSON'), refused.stderrText)
+
+    const marker = join(out, 'written')
+    const slow = `demo slow-write '${JSON.stringify({ path: marker })}'`
+    const running = ws.shell(slow)
+    for (let tries = 0; tries < 200 && !existsSync(`${marker}.started`); tries++) await setTimeout(50)
+    await ws.cancel()
+    await rejects(running, { name: 'AbortError' })
+    console.log(`$ ${slow}\n^C`)
+    await setTimeout(3000)
+    ok(!existsSync(marker), 'the cancelled tool still wrote')
   } finally {
     await ws.close()
     rmSync(out, { recursive: true, force: true })

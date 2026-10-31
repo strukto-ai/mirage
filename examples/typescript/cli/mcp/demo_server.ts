@@ -12,13 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { writeFileSync } from 'node:fs'
+import { setTimeout } from 'node:timers/promises'
+
 import { McpServer } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { z } from 'zod'
 
 // A deterministic MCP server over stdio, so the converters run without
-// credentials or network access. Its three tools cover a flat input, a
-// nested input and a tool that reports an error.
+// credentials or network access. Its tools cover a flat input, a nested
+// input, a tool that reports an error and a slow write to cancel.
 const server = new McpServer({ name: 'demo', version: '1.0.0' })
 
 server.registerTool(
@@ -63,4 +66,20 @@ server.registerTool(
   },
 )
 
+server.registerTool(
+  'slow_write',
+  {
+    description: 'Write PATH.started, then PATH two seconds later.',
+    inputSchema: z.object({ path: z.string() }),
+  },
+  async ({ path }) => {
+    writeFileSync(`${path}.started`, '')
+    await setTimeout(2000)
+    writeFileSync(path, '')
+    return { content: [{ type: 'text', text: path }] }
+  },
+)
+
+// A stdio server exits when its client closes stdin, as Python's SDK does.
+process.stdin.on('end', () => process.exit(0))
 await server.connect(new StdioServerTransport())

@@ -85,7 +85,12 @@ function refuse(message: string, exitCode: number): CommandFnResult {
   return [null, new IOResult({ exitCode, stderr: enc.encode(`${message}\n`) })]
 }
 
-async function callTool(tool: string, accessor: Accessor, texts: string[]): Promise<CommandFnResult> {
+async function callTool(
+  tool: string,
+  accessor: Accessor,
+  texts: string[],
+  signal: AbortSignal,
+): Promise<CommandFnResult> {
   const prefix = `${NAME} ${tool.replaceAll('_', '-')}`
   if (texts.length > 1) return refuse(`${prefix}: takes one JSON object`, 2)
   let args: unknown = {}
@@ -107,8 +112,8 @@ async function callTool(tool: string, accessor: Accessor, texts: string[]): Prom
   let result
   let failure: unknown[] = []
   try {
-    await client.connect(transport(config, log))
-    result = await client.callTool({ name: tool, arguments: args as Record<string, unknown> })
+    await client.connect(transport(config, log), { signal })
+    result = await client.callTool({ name: tool, arguments: args as Record<string, unknown> }, { signal })
   } catch (error) {
     failure = [error]
   } finally {
@@ -145,7 +150,8 @@ const cli = new CLI({
     TOOLS.map((tool) => [
       tool.name.replaceAll('_', '-'),
       new CLIHandler({
-        fn: (accessor, _paths, texts) => callTool(tool.name, accessor, texts),
+        fn: (accessor, _paths, texts, ctx) =>
+          callTool(tool.name, accessor, texts, ctx.signal ?? AbortSignal.any([])),
         write: tool.annotations.readOnlyHint !== true,
       }),
     ]),

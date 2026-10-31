@@ -14,6 +14,7 @@
 
 import asyncio
 import importlib.util
+import json
 import shlex
 import subprocess
 import sys
@@ -25,6 +26,7 @@ import mcp_to_mirage
 from mcp_to_cli import check_names, fetch_tools, fill
 
 from mirage import CLI, RAMVFS, MountMode, Workspace
+from mirage.utils.abort import MirageAbortError
 
 # Converts demo_server.py both ways, then runs the same lines through the
 # real CLI (a subprocess) and the virtual CLI (inside a workspace) and
@@ -134,6 +136,21 @@ async def main() -> None:
             result = await ws.shell("name add-numbers '{'")
             stderr = await result.stderr_str()
             assert stderr.startswith("name add-numbers: invalid JSON"), stderr
+
+            marker = Path(out) / "written"
+            line = f"demo slow-write '{json.dumps({'path': str(marker)})}'"
+            running = asyncio.create_task(ws.shell(line))
+            started = Path(f"{marker}.started")
+            while not started.exists() and not running.done():
+                await asyncio.sleep(0.05)
+            await ws.cancel()
+            try:
+                await running
+                raise AssertionError(f"{line} was not cancelled")
+            except MirageAbortError:
+                print(f"$ {line}\n^C")
+            await asyncio.sleep(3)
+            assert not marker.exists(), "the cancelled tool still wrote"
         finally:
             await ws.close()
 
