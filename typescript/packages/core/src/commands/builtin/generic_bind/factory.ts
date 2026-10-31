@@ -15,7 +15,7 @@
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { IOResult } from '../../../io/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-import type { PathSpec } from '../../../types.ts'
+import { LineFacts, type PathSpec } from '../../../types.ts'
 import {
   type CommandFn,
   type Command,
@@ -25,7 +25,7 @@ import {
 } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { guardInput } from '../utils/limit.ts'
-import type { GenericCommand } from './adapter.ts'
+import type { FactsFn, GenericCommand } from './adapter.ts'
 import { BUILDERS } from './builders/index.ts'
 import { type Reading, withReading } from './files.ts'
 
@@ -99,4 +99,13 @@ export function genericReading(
   const b = BY_NAME.get(name)
   if (b === undefined) throw new Error(`no generic command named '${name}'`)
   return new CommandCatalog(bind(b, options.vfs, options.stream ?? null)).require(name)
+}
+
+/**
+ * What the generic command `name` declares a line of it does; a name with no
+ * generic command declares nothing (`new LineFacts()`). Mirrors Python's
+ * `declared_facts`.
+ */
+export function declaredFacts(name: string): LineFacts | FactsFn {
+  return BY_NAME.get(name)?.facts ?? new LineFacts()
 }

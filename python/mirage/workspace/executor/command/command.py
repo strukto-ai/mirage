@@ -53,7 +53,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.job_table import JobTable
-from mirage.types import PathSpec, Producer
+from mirage.types import Follow, PathSpec, Producer
 from mirage.view.types import StatPath
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.links.links import operand_follow
@@ -108,7 +108,7 @@ from mirage.workspace.files import Files
 from mirage.workspace.lookup import (
     JOB_BUILTINS,
     Consumer,
-    dereferences,
+    line_facts,
     lookup,
     runs_as,
 )
@@ -348,7 +348,11 @@ async def handle_command(
     )
     follow = (
         operand_follow(
-            namespace.session_links(session), dispatch, cmd_name, parts
+            namespace.session_links(session),
+            dispatch,
+            cmd_name,
+            parts,
+            session.cwd,
         )
         if namespace is not None
         else None
@@ -713,7 +717,8 @@ async def handle_command(
                     session.cwd,
                     functools.partial(path_stat, dispatch),
                     namespace,
-                    dereferences(cmd_name, parts),
+                    line_facts(cmd_name, parts, session.cwd).follows
+                    is not Follow.NONE,
                 )
                 if ref_err is not None:
                     return (
@@ -848,6 +853,7 @@ async def handle_command(
             dispatch=dispatch,
             follow=follow,
             find=find_expr,
+            words=parts,
         )
         stdout, io = await handle_cross_mount(
             cmd_name,
@@ -1012,7 +1018,7 @@ async def handle_command(
         else None
     )
     if not borrowed and _should_fan_out(
-        cmd_name, paths, flag_kwargs, registry
+        cmd_name, paths, parts, session.cwd, registry
     ):
         # The name plane's facts plus the dispatcher-backed start-point
         # stat. A start point only the namespace serves (a nested

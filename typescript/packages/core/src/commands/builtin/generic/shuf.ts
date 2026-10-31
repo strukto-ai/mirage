@@ -21,7 +21,7 @@ import { quoteText } from '../../quote.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { refused, scan } from '../../../rs/scan.ts'
-import { PathSpec } from '../../../types.ts'
+import { LineFacts, PathSpec } from '../../../types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -415,4 +415,11 @@ export async function shufGeneric(
     return [null, new IOResult()]
   }
   return [result, new IOResult()]
+}
+
+/**
+ * A shuf line writes only the file `-o` names. Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: fl.raw('output') !== undefined })
 }

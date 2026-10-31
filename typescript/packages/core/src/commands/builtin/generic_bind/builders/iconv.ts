@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { iconvGeneric } from '../../generic/iconv.ts'
+import { facts, iconvGeneric } from '../../generic/iconv.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -25,6 +25,7 @@ const iconv: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'iconv',
+  facts: facts,
   write: true,
   fn: iconv,
 }

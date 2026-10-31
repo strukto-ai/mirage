@@ -21,6 +21,7 @@ import {
   type ComputeSize,
   type DuEntries,
   duGeneric,
+  facts,
 } from '../../generic/du.ts'
 import { rstripSlash, stripSlash } from '../../../../utils/slash.ts'
 import type { LinkView, MountView } from '../../../../view/types.ts'
@@ -339,5 +340,6 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'du',
+  facts: facts,
   fn: du,
 }

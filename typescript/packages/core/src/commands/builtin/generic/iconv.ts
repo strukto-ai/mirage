@@ -23,7 +23,7 @@ import { StreamRefusal } from '../../../rs/errors.ts'
 import { closeStream, mergeOutput, openStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { byteView, encodeText, fromByteView } from '../../../shell/bytes.ts'
-import type { PathSpec } from '../../../types.ts'
+import { LineFacts, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { neverOpened, stdinStream } from '../utils/stream.ts'
 
@@ -130,4 +130,11 @@ export async function iconvGeneric(
     return [null, io]
   }
   return [converted, io]
+}
+
+/**
+ * An iconv line writes only the file `-o` names. Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: fl.raw('output') !== undefined })
 }

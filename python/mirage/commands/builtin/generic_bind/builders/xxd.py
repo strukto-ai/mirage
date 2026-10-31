@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.xxd import parse_flags, xxd_generic
+from mirage.commands.builtin.generic.xxd import facts, parse_flags, xxd_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -47,4 +47,4 @@ async def xxd(
     )
 
 
-BUILDER = GenericCommand("xxd", xxd, write=True, read=True)
+BUILDER = GenericCommand("xxd", xxd, write=True, read=True, facts=facts)

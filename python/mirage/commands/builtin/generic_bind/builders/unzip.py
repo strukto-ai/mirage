@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.unzip import unzip_generic
+from mirage.commands.builtin.generic.unzip import facts, unzip_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import dispatch_of
@@ -43,4 +43,4 @@ async def unzip(
     )
 
 
-BUILDER = GenericCommand("unzip", unzip, write=True)
+BUILDER = GenericCommand("unzip", unzip, write=True, facts=facts)

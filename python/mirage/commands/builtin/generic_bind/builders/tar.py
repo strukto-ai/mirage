@@ -17,7 +17,11 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import (
     transfer_primitives,
 )
-from mirage.commands.builtin.generic.tar import parse_flags, tar_generic
+from mirage.commands.builtin.generic.tar import (
+    facts,
+    parse_flags,
+    tar_generic,
+)
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.archive_io import (
     is_dir_of,
@@ -78,4 +82,4 @@ async def tar(
     )
 
 
-BUILDER = GenericCommand("tar", tar, write=True)
+BUILDER = GenericCommand("tar", tar, write=True, facts=facts)

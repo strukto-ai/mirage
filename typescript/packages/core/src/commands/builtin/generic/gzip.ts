@@ -19,7 +19,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec, type StatFn } from '../../../types.ts'
+import { LineFacts, PathSpec, type StatFn } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { gzipCompressStream } from '../../../utils/compress.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
@@ -206,4 +206,9 @@ export async function gzipGeneric(
     return [null, io]
   }
   return [body, io]
+}
+
+/** A gzip line replaces its file operands unless `-c`. Mirrors Python's `facts`. */
+export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: operands.length > 0 && !fl.asBool('c') })
 }

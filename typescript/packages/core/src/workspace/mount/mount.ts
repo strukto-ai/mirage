@@ -652,7 +652,7 @@ export class MountEntry {
    * the next. The directory probe a run makes (`pickHandlers`) is not made,
    * so a directory named like a file counts its filetype handler too.
    * `builtins` is false when the line's options leave mirage's own handlers
-   * nothing to write (`changesFiles`); a user command counts either way.
+   * nothing to write (`LineFacts.writes`); a user command counts either way.
    * Mirrors Python's MountEntry.may_write.
    */
   mayWrite(cmdName: string, extension: string | null = null, builtins = true): boolean {

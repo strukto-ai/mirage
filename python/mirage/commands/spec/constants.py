@@ -131,8 +131,9 @@ OPERAND = ""
 # operand after ',' (coreutils 9.7). uniq's loop does as well: `uniq a b c
 # -f x` refuses the extra operand, `uniq -f x a b c` the count. Info-ZIP's
 # unzip reads its words in order too: -x takes every operand after it, up to
-# a -d (UnZip 6.00).
-IN_ORDER_OPERANDS = frozenset({"jq", "join", "uniq", "unzip"})
+# a -d (UnZip 6.00). find reads its link options only before the first start
+# point, so `find -L x` follows and `find x -L` does not (findutils 4.10).
+IN_ORDER_OPERANDS = frozenset({"find", "jq", "join", "uniq", "unzip"})
 
 # The option words an IN_ORDER_OPERANDS program's own loop reads by their
 # spelling, so the tape keeps each one where it was typed, as (SPELLED,

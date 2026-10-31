@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import aclosing
 
 from mirage.commands.builtin.utils.stream import (
@@ -17,7 +17,7 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import merge_output, open_stream
 from mirage.shell.bytes import byte_view, encode_text, from_byte_view
-from mirage.types import PathSpec, PolymorphicReadFn
+from mirage.types import LineFacts, PathSpec, PolymorphicReadFn
 
 
 async def iconv_generic(
@@ -114,4 +114,14 @@ async def iconv_generic(
     return converted, io
 
 
-__all__ = ["iconv_generic"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """An iconv line writes only the file ``-o`` names.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(writes=fl.raw("output") is not None)
+
+
+__all__ = ["facts", "iconv_generic"]

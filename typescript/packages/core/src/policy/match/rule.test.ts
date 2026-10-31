@@ -27,6 +27,7 @@ import { WordKind } from '../../commands/spec/types.ts'
 import { decide } from './decide.ts'
 import { ioReach, ioRefusal, opRuling, skippedAtDispatch } from './rule.ts'
 import { CALLS } from '../../workspace/dispatcher/constants.ts'
+import { lineFacts } from '../../workspace/lookup/index.ts'
 import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
 
 function callOf(name: string): VfsCall {
@@ -200,7 +201,13 @@ describe('rules', () => {
       new CommandWord(command, WordKind.NAME),
       ...paths.map((p) => new CommandWord(p.rawPath, WordKind.OPERAND, null, p)),
     ]
-    return ctx(command, { paths, words, argv: operands, tokens: [command, ...operands] })
+    return ctx(command, {
+      paths,
+      words,
+      argv: operands,
+      tokens: [command, ...operands],
+      subtree: lineFacts(command, [command, ...operands], '/').subtree,
+    })
   }
 
   it('a subtree command on the directory holding the scope matches', () => {

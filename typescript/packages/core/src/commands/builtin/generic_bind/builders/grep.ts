@@ -17,7 +17,7 @@ import { treeWalk } from '../../utils/tree.ts'
 import type { FileStat } from '../../../../types.ts'
 
 import { prefixAggregate } from '../../aggregators.ts'
-import { grepGeneric } from '../../generic/grep.ts'
+import { facts, grepGeneric } from '../../generic/grep.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -45,6 +45,7 @@ const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'grep',
+  facts: facts,
   read: true,
   aggregate: prefixAggregate,
   fn: grep,

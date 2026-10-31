@@ -17,6 +17,8 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import {
   FileType,
+  Follow,
+  LineFacts,
   type MoveStrategy,
   type NativeMove,
   type PrimitiveMove,
@@ -727,4 +729,17 @@ async function targetIsFifo(stat: StatFn, target: PathSpec): Promise<boolean> {
     console.debug(`mv: target ${target.virtual} gave no stat: ${String(err)}`)
     return false
   }
+}
+
+/**
+ * An mv line moves each source with everything under it, never through a
+ * link, into the directory `-t` names if it names one. Mirrors Python's
+ * `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({
+    follows: Follow.NONE,
+    subtree: true,
+    moveTarget: fl.asStr('target_directory') ?? null,
+  })
 }

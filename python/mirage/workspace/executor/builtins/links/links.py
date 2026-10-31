@@ -28,15 +28,14 @@ from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import DotWalkLoop, FsCondition
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, LsLinkMode, PathSpec
+from mirage.types import FileStat, FileType, Follow, PathSpec
 from mirage.utils.path import CycleError
 from mirage.view.types import FollowOperands, NamespaceLinks
 from mirage.workspace.executor.builtins.shared import fail
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.lookup.constants import (
     SLASH_KEEPS_LAST,
-    follows_last_component,
-    ls_link_mode,
+    line_facts,
 )
 from mirage.workspace.mount.namespace.probe import stat_or_none
 
@@ -195,6 +194,7 @@ def operand_follow(
     dispatch: DispatchFn,
     name: str,
     words: Sequence[str | PathSpec],
+    cwd: str,
 ) -> FollowOperands:
     """The pathname resolution a line gives its operands, as one call.
 
@@ -215,20 +215,17 @@ def operand_follow(
         name (str): command name.
         words (Sequence[str | PathSpec]): the command's raw words, name
             first.
+        cwd (str): the session's working directory.
     """
-    ls_mode = ls_link_mode(words) if name == "ls" else None
-    follow_last = (
-        ls_mode is LsLinkMode.ALL
-        if ls_mode is not None
-        else follows_last_component(name, list(words))
-    )
+    follows = line_facts(name, words, cwd).follows
+    follow_last = follows is Follow.LAST
     slash_follows = name not in SLASH_KEEPS_LAST
 
     async def follow(items: list[str | PathSpec]) -> list[str | PathSpec]:
         if not links.symlink_targets():
             return items
         out = follow_paths(links, items, follow_last, slash_follows)
-        if ls_mode is LsLinkMode.DIRECTORY:
+        if follows is Follow.DIRECTORY:
             out = await follow_directory_links(links, dispatch, out)
         return out
 

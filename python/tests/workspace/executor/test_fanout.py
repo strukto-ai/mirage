@@ -30,30 +30,37 @@ def _nested() -> Workspace:
 
 
 @pytest.mark.parametrize(
-    "cmd, flags, expected",
+    "words, expected",
     [
-        ("find", {}, True),
-        ("du", {}, True),
-        ("du", {"one_file_system": True}, False),
-        ("ls", {}, False),
-        ("ls", {"recursive": True}, True),
-        ("grep", {}, False),
-        ("grep", {"recursive": True}, True),
-        ("cat", {}, False),
+        (["find"], True),
+        (["du"], True),
+        (["du", "-x"], False),
+        (["ls"], False),
+        (["ls", "-R"], True),
+        (["grep", "x"], False),
+        (["grep", "-r", "x"], True),
+        (["cat"], False),
     ],
 )
-def test_a_walk_fans_out_over_a_nested_mount(cmd, flags, expected):
+def test_a_walk_fans_out_over_a_nested_mount(words, expected):
     ws = _nested()
     path = PathSpec.from_str_path("/base")
-    assert _should_fan_out(cmd, [path], flags, ws._registry) is expected
+    assert (
+        _should_fan_out(words[0], [path], [*words, path], "/", ws._registry)
+        is expected
+    )
 
 
 def test_no_nested_mount_and_a_refused_operand_stay_single():
     ws = _nested()
     other = PathSpec.from_str_path("/other")
-    assert not _should_fan_out("find", [other], {}, ws._registry)
+    assert not _should_fan_out(
+        "find", [other], ["find", other], "/", ws._registry
+    )
     refused = replace(PathSpec.from_str_path("/base"), walk_error="ENOENT")
-    assert not _should_fan_out("find", [refused], {}, ws._registry)
+    assert not _should_fan_out(
+        "find", [refused], ["find", refused], "/", ws._registry
+    )
 
 
 @pytest.mark.asyncio

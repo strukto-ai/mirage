@@ -1121,7 +1121,11 @@ async def _route_argv(
     #    command meets ELOOP at its op and words it per operand.
     if namespace.nodes and operands:
         operands = await operand_follow(
-            namespace.session_links(session), dispatch, name, argv.words
+            namespace.session_links(session),
+            dispatch,
+            name,
+            argv.words,
+            session.cwd,
         )(operands)
         argv = argv.with_operands(operands)
 

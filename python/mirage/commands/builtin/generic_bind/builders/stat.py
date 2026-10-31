@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.stat import stat_generic
+from mirage.commands.builtin.generic.stat import facts, stat_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.config import Context
@@ -34,4 +34,4 @@ async def stat(
     return await stat_generic(resolved, list(texts), ctx, stat_fn)
 
 
-BUILDER = GenericCommand("stat", stat)
+BUILDER = GenericCommand("stat", stat, facts=facts)

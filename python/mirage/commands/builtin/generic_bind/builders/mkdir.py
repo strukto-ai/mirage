@@ -42,7 +42,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import FileType, PathSpec, WalkProbe
+from mirage.types import FileType, Follow, LineFacts, PathSpec, WalkProbe
 from mirage.utils.mode import DEFAULT_DIR_MODE, parse_chmod
 from mirage.utils.path import CycleError, norm, parent, walk_nodes
 from mirage.view.types import LinkView
@@ -323,4 +323,6 @@ async def _enter_node(
     return None
 
 
-BUILDER = GenericCommand("mkdir", mkdir, write=True)
+BUILDER = GenericCommand(
+    "mkdir", mkdir, write=True, facts=LineFacts(follows=Follow.NONE)
+)

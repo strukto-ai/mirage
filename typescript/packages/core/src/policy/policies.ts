@@ -145,7 +145,7 @@ async function transferLines(
   if (spec === undefined) return null
   const parsed = parseCommand(spec, [...ctx.argv], ctx.cwd, subject)
   const flags = new FlagView(parseToKwargs(parsed), spec)
-  const named = flags.asStr('target_directory') ?? null
+  const named = ctx.moveTarget ?? null
   const operands = operandPaths(ctx)
   const directory =
     named === null ? undefined : ctx.paths.find((p) => named === p.rawPath || named === p.virtual)

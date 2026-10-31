@@ -1038,6 +1038,7 @@ async function routeArgv(
       dispatch,
       name,
       argv.words,
+      session.cwd,
     )(operands)
     argv = argv.withOperands(operands)
   }

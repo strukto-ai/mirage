@@ -54,6 +54,7 @@ from mirage.commands.spec.word_choice import (
     match_word,
     value_classes,
 )
+from mirage.types import LineFacts
 from mirage.utils.path import resolve_path
 
 
@@ -186,6 +187,13 @@ class ParsedArgs:
     old_option_needs_value: str | None = None
     # Whether ``spec`` is the builtin's own grammar (is_builtin_grammar).
     builtin: bool = False
+    # What a line of this parse does (``line_facts``), kept beside the
+    # parse so every reader of one command shares one reading and lives
+    # and dies with it; keyed by what a fact reads beyond the parse, at
+    # most PARSES_KEPT of them.
+    facts: dict[Hashable, LineFacts] = field(
+        default_factory=dict, compare=False, repr=False
+    )
 
     def paths(self) -> list[str]:
         return [v for v, k in self.args if k == "path"]

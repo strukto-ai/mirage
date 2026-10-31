@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { gunzipGeneric } from '../../generic/gunzip.ts'
+import { facts, gunzipGeneric } from '../../generic/gunzip.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -32,6 +32,7 @@ const gunzip: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'gunzip',
+  facts: facts,
   write: true,
   fn: gunzip,
 }

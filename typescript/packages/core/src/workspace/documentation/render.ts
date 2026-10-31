@@ -31,6 +31,7 @@ import { unlistedService } from '../node/admission.ts'
 import type { SessionState } from '../session/session.ts'
 import { ASKS, CHANGES, INTRO, READS, REFUSED, WALKS } from './constants.ts'
 import type { Change } from './types.ts'
+import { lineFacts } from '../lookup/index.ts'
 
 const SHARED: ReadonlySet<string> = new Set(
   [...GENERIC_COMMANDS, ...GENERAL_COMMANDS].map((c) => c.name),
@@ -78,7 +79,15 @@ function allowed(
   const [command, ...argv] = words
   if (command === undefined) return true
   const paths = inside ? [PathSpec.fromStrPath(`${cwd.replace(/\/+$/, '')}/<file>`)] : []
-  const ctx = { command, paths, argv, cwd }
+  const facts = lineFacts(command, words, cwd)
+  const ctx = {
+    command,
+    paths,
+    argv,
+    cwd,
+    subtree: facts.subtree,
+    moveTarget: facts.moveTarget,
+  }
   if (registry !== null && unlistedService(ctx, registry, session)) return false
   return decide(ctx, session.commands).outcome !== Outcome.DENY
 }

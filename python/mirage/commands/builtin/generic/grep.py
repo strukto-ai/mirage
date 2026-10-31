@@ -64,7 +64,13 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.regex import LineRegex
 from mirage.rs.scan import scanned
 from mirage.shell.bytes import utf8_locale
-from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
+from mirage.types import (
+    FileStat,
+    FileType,
+    LineFacts,
+    PathSpec,
+    PolymorphicReadFn,
+)
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
 from mirage.view.namespace_view import followed_stat
@@ -145,8 +151,9 @@ def recurses(fl: FlagView) -> bool:
     """Whether grep walks the directories it meets: -r, -R or a -d naming
     recurse, the last of the three on the line winning (grep 3.11).
 
-    A line whose last of the three is a -d word grep refuses at run time
-    walks nothing.
+    A -d word is read by the scan the handler reads (``scan_values``),
+    so the gate and the run share it; a line that scan refuses walks
+    nothing, since grep refuses it before reading a file.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
@@ -157,9 +164,9 @@ def recurses(fl: FlagView) -> bool:
     if typed[-1][0] != "directories":
         return True
     try:
-        return scanned("grep", typed[-1:])["directories"] == "recurse"
+        return scan_values(fl)["directories"] == "recurse"
     except UsageError as exc:
-        logger.debug("grep walks nothing past a refused -d: %s", exc)
+        logger.debug("grep walks nothing past a refused option: %s", exc)
         return False
 
 
@@ -500,3 +507,15 @@ async def grep_generic(
                 )
 
     return run(), io
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A grep line walks, and reads, below the directories it names when
+    it recurses (``recurses``).
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    walks = recurses(fl)
+    return LineFacts(walks=walks, reads_subtree=walks)

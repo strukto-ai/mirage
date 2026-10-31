@@ -634,6 +634,18 @@ export interface CommandContext {
    * reads as false.
    */
   write?: boolean
+  /**
+   * Whether an operand is a whole subtree the command moves or removes
+   * (`rm`, `rmdir`, `mv`), so a path rule judges an ancestor of its scope
+   * as the scope. Absent reads as false.
+   */
+  subtree?: boolean
+  /**
+   * The directory a `cp` or `mv` line names by option (`-t`,
+   * `--target-directory`), as its grammar reads the line and resolved in
+   * `cwd`; null when it names none. Absent reads as null.
+   */
+  moveTarget?: string | null
   /** The session, read only: a write through it is refused. Filled when a method is asked. */
   session?: SessionView
   /**

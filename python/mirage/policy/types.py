@@ -801,6 +801,13 @@ class CommandContext:
             options let it write (``sort -o`` writes, ``sort`` does
             not). False for a shell builtin, a function, an external
             program and an unknown name.
+        subtree (bool): whether an operand is a whole subtree the
+            command moves or removes (``rm``, ``rmdir``, ``mv``), so a
+            path rule judges an ancestor of its scope as the scope.
+        move_target (str | None): the directory a ``cp`` or ``mv``
+            line names by option (``-t``, ``--target-directory``), as
+            its grammar reads the line and resolved in ``cwd``; None
+            when it names none.
         session (SessionView | None): the session, read only: a write
             through it is refused. Filled when a method is asked.
         vfs (FileView | None): the session's files, read only: a write is
@@ -823,6 +830,8 @@ class CommandContext:
     tool: bool = True
     walks: bool = False
     write: bool = False
+    subtree: bool = False
+    move_target: str | None = None
     session: SessionView | None = None
     vfs: FileView | None = None
     caller: PolicyCaller | None = None

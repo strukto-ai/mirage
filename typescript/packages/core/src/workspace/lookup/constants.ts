@@ -12,17 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { recurses } from '../../commands/builtin/generic/grep.ts'
 import { linkMode } from '../../commands/builtin/generic/ls.ts'
-import { walksDescendantMounts } from '../../commands/builtin/generic/rg.ts'
-import { sedWrites } from '../../commands/builtin/generic/sed.ts'
-import { FlagView, SPECS, parseCommand } from '../../commands/spec/index.ts'
+import { declaredFacts } from '../../commands/builtin/generic_bind/factory.ts'
+import { FlagView, SPECS, WordKind, parseCommand } from '../../commands/spec/index.ts'
 import { parseToKwargs } from '../../commands/spec/parser.ts'
 import type { FlagValue } from '../../commands/spec/types.ts'
 import { compileSpec } from '../../commands/spec/compile.ts'
+import { PARSES_KEPT } from '../../commands/spec/constants.ts'
 import { BUILTIN_GROUP } from '../../shell/constants.ts'
 import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
-import { type LsLinkMode, PathSpec } from '../../types.ts'
+import { Follow, LineFacts, type LsLinkMode, type PathSpec } from '../../types.ts'
 
 // Bash builtins the parser accepts but the executor cannot honor; they
 // still lookup to the shell layer so the error names a capability gap.
@@ -127,222 +126,6 @@ export const JOB_BUILTINS: ReadonlySet<string> = new Set([
   'ps',
 ])
 
-// Commands with lstat semantics: they act on the symlink entry itself,
-// so dispatch must not rewrite their operands through the link table.
-// `stat`, `file` and `du` are here because GNU lstats for all three,
-// but each takes -L to dereference after all, which `dereferences`
-// reads back out of the command line.
-//
-// `tar` and `zip` are here for a different reason and deliberately
-// carry no DEREFERENCE_FLAGS entry: they dereference too, but their
-// planner has to be the one doing it. Rewriting the operand up here
-// would hand the planner a target it can no longer tell was reached
-// through a link, so `tar` could not store a symlink member at all and
-// neither archiver could apply its own cross-mount refusal or ELOOP
-// wording. tar's -h and zip's -y are read by the planner instead.
-const NO_FOLLOW_COMMANDS: ReadonlySet<string> = new Set([
-  'rm',
-  'mv',
-  'ln',
-  'readlink',
-  'rmdir',
-  'unlink',
-  'stat',
-  'file',
-  'du',
-  'find',
-  'tar',
-  'zip',
-])
-
-// Per-command option that turns a no-follow command back into a following
-// one (GNU's -L), then the one that takes it back, the last of the two
-// winning: `du -LP` does not follow, `du -PL` does, and so for file's -L
-// and -h (file 5.46). Each is the option's dest in the command's spec,
-// read off the parsed line, so a long spelling and its abbreviation count
-// as the short one does (`stat --deref`).
-const DEREFERENCE_FLAGS: Record<string, readonly string[]> = {
-  stat: ['dereference'],
-  file: ['L', 'h'],
-  du: ['L', 'P'],
-}
-
-// find states its link policy as a leading option rather than a flag,
-// and the last one wins: `find -L -P x` does not follow, `find -P -L x`
-// does. -P (no follow) is the default; -H dereferences the start point
-// only and -L dereferences everything, so both follow the operand. Only
-// the run of options before the first operand counts, which is where GNU
-// accepts them.
-const LAST_WINS_LINK_OPTIONS: Record<string, Record<string, boolean>> = {
-  find: { '-P': false, '-H': true, '-L': true },
-}
-
-// Resolve a leading run of link options to its last one's mode. The
-// lookup doubles as the loop's stop condition, so the first word that is
-// not a link option ends the run without a second membership test.
-function lastLinkOption(
-  words: readonly (string | PathSpec)[],
-  policy: Record<string, boolean>,
-): boolean {
-  let follows = false
-  for (const word of words.slice(1)) {
-    if (typeof word !== 'string') break
-    const mode = policy[word]
-    if (mode === undefined) break
-    follows = mode
-  }
-  return follows
-}
-
-// Whether a no-follow command was asked to dereference after all.
-export function dereferences(name: string, words: readonly (string | PathSpec)[]): boolean {
-  const policy = LAST_WINS_LINK_OPTIONS[name]
-  if (policy !== undefined) return lastLinkOption(words, policy)
-  const options = DEREFERENCE_FLAGS[name]
-  if (options === undefined) return false
-  const fl = new FlagView(lineFlags(name, words), SPECS[name])
-  return fl.typedOrder(...options).at(-1) === options[0]
-}
-
-/**
- * Which command-line links an `ls` line resolves before it lists. Read off
- * the parsed line rather than scanned, because ls's own rule turns on the
- * last of several options, some of them valued and any of them abbreviated
- * (`--cl`, `--indicator-style=classify`); the rule itself is the ls
- * generic's `linkMode`. Mirrors Python's ls_link_mode.
- */
-export function lsLinkMode(words: readonly (string | PathSpec)[]): LsLinkMode {
-  return linkMode(new FlagView(lineFlags('ls', words), SPECS.ls))
-}
-
-/**
- * The flags a builtin's own grammar reads off its words, as the executor
- * will hand them to its handler; empty for a name with no builtin grammar.
- * A wrapper reads as the program it runs. The facts below are read off this
- * parse rather than scanned from the words, so an abbreviation, a long
- * spelling, a valued option and an option's attached value all read as the
- * handler will read them: `grep --recur` and `grep -d recurse` walk,
- * `grep -ephrase` does not. Mirrors Python's line_flags.
- */
-export function lineFlags(
-  name: string,
-  words: readonly (string | PathSpec)[],
-): Record<string, FlagValue> {
-  const [runs, first] = EXEC_WRAPPERS.get(name) ?? [name, undefined]
-  const spec = SPECS[runs]
-  if (spec === undefined) return {}
-  const argv = words.slice(1).map((w) => (typeof w === 'string' ? w : w.rawPath))
-  return parseToKwargs(parseCommand(spec, first === undefined ? argv : [first, ...argv], '/', runs))
-}
-
-/**
- * Whether a command's traversal enters the mounts below its operands; a
- * wrapper walks as the program it runs. What the admission gate stamps as
- * `CommandContext.walks`, so a mount rule can speak on an ancestor operand,
- * and what the executor's fan-out reruns in each descendant mount: one
- * answer for both, so a line the fan-out carries into a mount is one its
- * rule was asked about. `du -x`, `tree -x` and `rg --one-file-system` keep
- * to the operand's mount. `tar` and `zip` walk too but refuse to cross a
- * mount boundary, so a mount rule has nothing to say about them. Mirrors
- * Python's walks_mounts.
- */
-export function walksMounts(name: string, bag: Record<string, FlagValue>): boolean {
-  const runs = EXEC_WRAPPERS.get(name)?.[0] ?? name
-  if (runs === 'find') return true
-  if (runs === 'rg') return walksDescendantMounts(bag)
-  if (!['du', 'tree', 'ls', 'grep'].includes(runs)) return false
-  const fl = new FlagView(bag, SPECS[runs])
-  if (runs === 'du') return !fl.asBool('one_file_system')
-  if (runs === 'tree') return !fl.asBool('x')
-  if (runs === 'ls') return fl.asBool('recursive')
-  return recurses(fl)
-}
-
-/**
- * Whether a command reads below the paths its words name: every walk,
- * whether or not it crosses into the mounts below (`du -x`,
- * `rg --one-file-system` read their own mount's subtree), plus the subtree
- * readers that stop at a mount boundary (`tar -c`, `zip -r`, `cp -r`,
- * `cp -a`). What the whole-line gate reads: a runtime does its own walking
- * where no entry gate follows, so a path rule that scopes such a command
- * refuses the captured line instead of running it unguarded. Mirrors
- * Python's reads_subtrees.
- */
-export function readsSubtrees(name: string, bag: Record<string, FlagValue>): boolean {
-  const runs = EXEC_WRAPPERS.get(name)?.[0] ?? name
-  if (['find', 'du', 'tree', 'rg'].includes(runs)) return true
-  if (runs === 'grep' || runs === 'ls') return walksMounts(runs, bag)
-  if (!['tar', 'zip', 'cp'].includes(name)) return false
-  const fl = new FlagView(bag, SPECS[name])
-  if (name === 'tar') return fl.asBool('create')
-  if (name === 'zip') return fl.asBool('r')
-  return ['r', 'recursive', 'archive'].some((d) => fl.asBool(d))
-}
-
-// The builtins whose declared write `changesFiles` narrows by line.
-const NARROWED_WRITES: ReadonlySet<string> = new Set([
-  'sort',
-  'shuf',
-  'iconv',
-  'uniq',
-  'xxd',
-  'tee',
-  'mktemp',
-  'tar',
-  'unzip',
-  'gzip',
-  'gunzip',
-  'sed',
-])
-
-/**
- * Whether this run of a builtin may change files, read off its words: the
- * narrowing of a builtin's declared `write` that its options make. `sort
- * -o`, `shuf -o` and `iconv -o` write their output file and `uniq` and
- * `xxd` their second operand, which a pattern operand may name; `sed` writes under `-i`, a `w` file in its
- * script or a script file (unread here, so assumed to); `tar` writes to
- * create or extract, not to list or to extract to stdout; `unzip` writes
- * unless it lists, tests or pipes; `gzip` and `gunzip` write a file operand
- * unless `-c` or `-t`; `tee` writes the files it names; `mktemp -u` creates
- * nothing. Every other name may write whenever its handler declares so.
- * An operand classified as a path carries whether it is a pattern still to
- * expand. Mirrors Python's changes_files.
- */
-export function changesFiles(name: string, words: readonly (string | PathSpec)[]): boolean {
-  const spec = SPECS[name]
-  if (!NARROWED_WRITES.has(name) || spec === undefined) return true
-  const argv = words.slice(1).map((w) => (typeof w === 'string' ? w : w.rawPath))
-  const parsed = parseCommand(spec, argv, '/', name)
-  const bag = parseToKwargs(parsed)
-  const fl = new FlagView(bag, spec)
-  const operands = parsed.args.length
-  switch (name) {
-    case 'sort':
-    case 'shuf':
-    case 'iconv':
-      return fl.raw('output') !== undefined
-    case 'uniq':
-    case 'xxd':
-      // A pattern the backend expands may name the output file too; a quoted
-      // name is no pattern.
-      return operands > 1 || words.slice(1).some((w) => w instanceof PathSpec && w.pattern !== null)
-    case 'tee':
-      return operands > 0
-    case 'mktemp':
-      return !fl.asBool('dry_run')
-    case 'tar':
-      return fl.asBool('create') || (fl.asBool('extract') && !fl.asBool('to_stdout'))
-    case 'unzip':
-      return !['args_l', 't', 'v', 'p', 'Z'].some((d) => fl.asBool(d))
-    case 'gzip':
-      return operands > 0 && !fl.asBool('c')
-    case 'gunzip':
-      return operands > 0 && !(fl.asBool('c') || fl.asBool('t'))
-    default:
-      return sedWrites(bag, parsed.texts())
-  }
-}
-
 // Commands the router must not resolve the last component for, even
 // under a trailing slash, because none of them acts on the link's
 // target and each says so in its own words. GNU tar strips the slash
@@ -391,19 +174,83 @@ const SELF_RESOLVING: ReadonlySet<string> = new Set([
   'setfattr',
 ])
 
-// Whether a command resolves its operand's final component itself. The
-// directory prefix is resolved for every command, so this is only about
-// the last one: open(2) semantics (true) against lstat(2) (false). A
-// trailing slash overrides a false per operand, which is `followPaths`'
-// job because the slash is a property of the operand rather than of the
-// command.
-export function followsLastComponent(name: string, words: readonly (string | PathSpec)[]): boolean {
-  // A link to a directory is resolved only once a stat has shown where it
-  // leads, which the router does itself; what this answers for ls is whether
-  // the line may resolve one at all.
-  if (name === 'ls') return lsLinkMode(words) !== 'none'
-  if (SELF_RESOLVING.has(name)) return false
-  return !NO_FOLLOW_COMMANDS.has(name) || dereferences(name, words)
+const LS_FOLLOWS: Readonly<Record<LsLinkMode, Follow>> = {
+  all: Follow.LAST,
+  directory: Follow.DIRECTORY,
+  none: Follow.NONE,
+}
+
+/**
+ * An ls line resolves the command-line links `linkMode` says, and walks, and
+ * reads, below its operands under `-R`. Mirrors Python's `_ls_facts`.
+ */
+function lsFacts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  const recursive = fl.asBool('recursive')
+  return new LineFacts({
+    follows: LS_FOLLOWS[linkMode(fl)],
+    walks: recursive,
+    readsSubtree: recursive,
+  })
+}
+
+/**
+ * What a line of a builtin does, read off its parsed flags by the command's
+ * own facts; a wrapper does what the program it runs does. Mirrors Python's
+ * `facts_of`.
+ */
+export function factsOf(
+  name: string,
+  bag: Record<string, FlagValue>,
+  operands: readonly (string | PathSpec)[],
+): LineFacts {
+  const runs = EXEC_WRAPPERS.get(name)?.[0] ?? name
+  const declared = runs === 'ls' ? lsFacts : declaredFacts(runs)
+  const facts =
+    declared instanceof LineFacts ? declared : declared(new FlagView(bag, SPECS[runs]), operands)
+  if (SELF_RESOLVING.has(name)) return facts.with({ follows: Follow.NONE })
+  return facts
+}
+
+/**
+ * What a command line does, read off its words by the command's own grammar
+ * and facts (`factsOf`), so an abbreviation, a long spelling and an option's
+ * attached value read as the handler will read them: `grep --recur` and
+ * `grep -d recurse` walk, `grep -ephrase` does not. A command that decides
+ * its operand's last component itself (`SELF_RESOLVING`) follows no link.
+ * An operand classified as a path carries whether it is a pattern still to
+ * expand; `cwd` is what a path option's value (`mv -t`) resolves against.
+ * Mirrors Python's `line_facts`.
+ */
+export function lineFacts(
+  name: string,
+  words: readonly (string | PathSpec)[],
+  cwd: string,
+): LineFacts {
+  const [runs, first] = EXEC_WRAPPERS.get(name) ?? [name, undefined]
+  const spec = SPECS[runs]
+  if (spec === undefined || (runs !== 'ls' && declaredFacts(runs) instanceof LineFacts)) {
+    return factsOf(name, {}, [])
+  }
+  const typed = first === undefined ? words.slice(1) : [first, ...words.slice(1)]
+  const argv = typed.map((w) => (typeof w === 'string' ? w : w.rawPath))
+  const parsed = parseCommand(spec, argv, cwd, runs)
+  const operands = typed.filter((_, i) => parsed.wordRoles[i] === WordKind.OPERAND)
+  // The parse is keyed by the words, the cwd (which `mv -t` resolves in) and
+  // the grammar; a fact reads beyond it only the name it was typed as (a
+  // wrapper, a self-resolving command) and which operands are patterns,
+  // never a path's value. A word list typed with its patterns quoted every
+  // way keeps PARSES_KEPT readings, as a spec does.
+  const key = JSON.stringify([
+    name,
+    operands.map((w) => typeof w !== 'string' && w.pattern !== null),
+  ])
+  let kept = parsed.facts.get(key)
+  if (kept === undefined) {
+    kept = factsOf(name, parseToKwargs(parsed), operands)
+    if (parsed.facts.size >= PARSES_KEPT) parsed.facts.clear()
+    parsed.facts.set(key, kept)
+  }
+  return kept
 }
 
 // Options whose argument is a program, so the words after it are that

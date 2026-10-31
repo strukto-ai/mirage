@@ -14,7 +14,7 @@
 
 import { extraOperandError, missingOperandError } from '../../../spec/usage.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { FileType } from '../../../../types.ts'
+import { FileType, Follow, LineFacts } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import type { CommandFn } from '../../../config.ts'
@@ -90,6 +90,7 @@ const unlink: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'unlink',
+  facts: new LineFacts({ follows: Follow.NONE }),
   write: true,
   fn: unlink,
 }

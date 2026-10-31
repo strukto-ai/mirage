@@ -27,7 +27,7 @@ import {
   runStream,
   type OpenStream,
 } from '../../../rs/stream.ts'
-import { PathSpec, type JsonValue } from '../../../types.ts'
+import { LineFacts, PathSpec, type JsonValue } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
@@ -516,4 +516,11 @@ export async function sortGeneric(
     return [new Uint8Array(), new IOResult()]
   }
   return [await ordered.output(), new IOResult()]
+}
+
+/**
+ * A sort line writes only the file `-o` names. Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: fl.raw('output') !== undefined })
 }

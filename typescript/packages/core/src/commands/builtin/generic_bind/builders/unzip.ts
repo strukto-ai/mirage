@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { unzipGeneric } from '../../generic/unzip.ts'
+import { facts, unzipGeneric } from '../../generic/unzip.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -26,6 +26,7 @@ const unzip: CommandFn = async (_accessor, paths, texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'unzip',
+  facts: facts,
   write: true,
   fn: unzip,
 }

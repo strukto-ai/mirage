@@ -18,7 +18,7 @@ import { type ClosedPipe, IOResult, materialize, type ByteSource } from '../../.
 import { chunks } from '../../../io/cooperative.ts'
 import { ByteWriter } from '../../../io/writer.ts'
 import { PipeClosed } from '../../../io/errors.ts'
-import type { PathSpec, StatFn } from '../../../types.ts'
+import { LineFacts, type PathSpec, type StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { eisdir, enotdir, fsError, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
@@ -479,4 +479,9 @@ async function* teeStream(
     const stderr = errors.join('')
     io.stderr = stderr.length > 0 ? encodeText(stderr) : null
   }
+}
+
+/** A tee line writes the files it names. Mirrors Python's `facts`. */
+export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: operands.length > 0 })
 }

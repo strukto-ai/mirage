@@ -23,7 +23,7 @@ import { YieldBudget } from '../../../io/yield_budget.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { singleChunk } from '../utils/operands.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { LineFacts, type PathSpec } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
@@ -436,4 +436,17 @@ export async function xxdGeneric(
   }
   const io = new IOResult()
   return [(await render()) ?? xxdReverseStream(source, io, plain), io]
+}
+
+function namesOutput(operands: readonly (string | PathSpec)[]): boolean {
+  return operands.length > 1 || operands.some((w) => typeof w !== 'string' && w.pattern !== null)
+}
+
+/**
+ * An xxd line writes its second operand, which a pattern the backend
+ * expands may name too; a quoted name is no pattern. Mirrors Python's
+ * `facts`.
+ */
+export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: namesOutput(operands) })
 }

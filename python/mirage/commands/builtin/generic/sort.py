@@ -1,4 +1,10 @@
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from contextlib import aclosing
 from dataclasses import dataclass
 from enum import Enum
@@ -21,7 +27,7 @@ from mirage.io.yield_budget import YieldBudget
 from mirage.rs import StreamRefusal, open_stream, run_stream
 from mirage.rs.scan import refused, scan
 from mirage.rs.stream import OpenStream, chain_output, close_stream
-from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
+from mirage.types import JsonValue, LineFacts, PathSpec, PolymorphicReadFn
 from mirage.utils.quote import shell_quote
 
 # The options sort's grammar in mirage-rs reads.
@@ -542,4 +548,14 @@ async def sort_generic(
     return await ordered.output(), IOResult()
 
 
-__all__ = ["sort_generic"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A sort line writes only the file ``-o`` names.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(writes=fl.raw("output") is not None)
+
+
+__all__ = ["facts", "sort_generic"]

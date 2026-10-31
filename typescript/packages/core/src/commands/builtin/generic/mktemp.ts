@@ -18,7 +18,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { UsageError } from '../../errors.ts'
 import { quoteText } from '../../quote.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { LineFacts, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { eexist, fsStrerror, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { extraOperandError } from '../../spec/usage.ts'
@@ -206,4 +206,9 @@ export async function mktempGeneric(
   }
   const result: ByteSource = ENC.encode(name + '\n')
   return [result, new IOResult()]
+}
+
+/** A mktemp line creates its file unless `-u`. Mirrors Python's `facts`. */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: !fl.asBool('dry_run') })
 }

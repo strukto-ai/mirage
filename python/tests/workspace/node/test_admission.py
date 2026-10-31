@@ -25,10 +25,11 @@ from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.profile import PathsBlock, SessionProfile
 from mirage.policy.types import AdmissionRules, CommandContext, CommandRule
 from mirage.shell.parse import parse
-from mirage.types import MountMode
+from mirage.types import Follow, MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.expand.classify import classify_parts
+from mirage.workspace.lookup import line_facts
 from mirage.workspace.node.admission import (
     Admitted,
     admit,
@@ -82,7 +83,14 @@ async def _virtuals(ws: Workspace, name: str, *args: str) -> list[str]:
     words = await classify_parts([name, *args], ws._registry, "/")
     return [
         p.virtual
-        for p in policy_scopes(name, list(args), words[1:], ws._namespace, "/")
+        for p in policy_scopes(
+            name,
+            list(args),
+            words[1:],
+            line_facts(name, words, "/").follows is not Follow.NONE,
+            ws._namespace,
+            "/",
+        )
     ]
 
 
@@ -116,7 +124,9 @@ async def test_policy_scopes_follow_links_only_for_a_following_command():
         words = await classify_parts(["cat", "/data/link"], ws._registry, "/")
         assert [
             p.virtual
-            for p in policy_scopes("cat", ["/data/link"], words[1:], None, "/")
+            for p in policy_scopes(
+                "cat", ["/data/link"], words[1:], True, None, "/"
+            )
         ] == ["/data/link"]
     finally:
         await ws.close()

@@ -29,14 +29,6 @@ DEFAULT_ASK_REASON = "no standing approval"
 # policy sits below vfs, so it cannot read the declarations itself.
 SUBTREE_OPS = frozenset({"rename", "rmdir", "rm_r"})
 
-# Commands whose operand is a whole subtree they move or remove, so a
-# path rule judges the operand the way it judges a SUBTREE_OPS op: the
-# directory holding the scope, or any ancestor of it, is the scope.
-# Only the destroyers: a reader given an ancestor (``grep -r``, ``du``,
-# ``tar``) is the command tier's I/O to refuse file by file, not a line
-# to refuse whole.
-SUBTREE_COMMANDS = frozenset({"rm", "rmdir", "mv"})
-
 # Ops that read an entry's metadata and nothing of its content, which a
 # deny rule lets through at the dispatcher: deny means present and
 # refused, not absent, so a listing shows the entry's name and size

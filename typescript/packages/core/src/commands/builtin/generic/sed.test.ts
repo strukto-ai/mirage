@@ -20,7 +20,9 @@ import { PathSpec } from '../../../types.ts'
 import { eisdir } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { sedGeneric, sedWrites } from './sed.ts'
+import { facts, sedGeneric } from './sed.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
 import { Files } from '../../../workspace/files.ts'
 
 const DEC = new TextDecoder()
@@ -42,7 +44,11 @@ describe('sed usage reporting', () => {
   })
 })
 
-describe('sedWrites', () => {
+function writes(flags: Record<string, FlagValue>, texts: string[]): boolean {
+  return facts(new FlagView(flags, specOf('sed')), texts).writes
+}
+
+describe('sed line writes', () => {
   it.each<[Record<string, FlagValue>, string[], boolean]>([
     [{}, ['p'], false],
     [{}, ['w /o'], true],
@@ -51,8 +57,8 @@ describe('sedWrites', () => {
     [{ e: ['k', 'w /o'] }, [], false],
     [{ i: true }, ['p'], true],
     [{}, [], false],
-  ])('%j %j writes: %s', (flags, texts, writes) => {
-    expect(sedWrites(flags, texts)).toBe(writes)
+  ])('%j %j writes: %s', (flags, texts, expected) => {
+    expect(writes(flags, texts)).toBe(expected)
   })
 })
 
@@ -145,11 +151,11 @@ it('does not retain many empty scripts in the write cache', () => {
   const open = vi.spyOn(stream, 'openStreamSync')
   try {
     const scripts = Array<string>(5000).fill('')
-    expect(sedWrites({ e: scripts }, [])).toBe(false)
-    expect(sedWrites({ e: scripts }, [])).toBe(false)
+    expect(writes({ e: scripts }, [])).toBe(false)
+    expect(writes({ e: scripts }, [])).toBe(false)
     expect(open).toHaveBeenCalledTimes(2)
-    expect(sedWrites({ e: ['# small cache test'] }, [])).toBe(false)
-    expect(sedWrites({ e: ['# small cache test'] }, [])).toBe(false)
+    expect(writes({ e: ['# small cache test'] }, [])).toBe(false)
+    expect(writes({ e: ['# small cache test'] }, [])).toBe(false)
     expect(open).toHaveBeenCalledTimes(3)
   } finally {
     open.mockRestore()

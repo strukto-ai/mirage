@@ -173,7 +173,7 @@ async def transfer_lines(
     spec = SPECS[subject]
     parsed = parse_command(spec, list(ctx.argv), ctx.cwd, subject)
     flags = FlagView(parse_to_kwargs(parsed), spec=spec)
-    named = flags.as_str("target_directory")
+    named = ctx.move_target
     operands = operand_paths(ctx)
     directory = next(
         (

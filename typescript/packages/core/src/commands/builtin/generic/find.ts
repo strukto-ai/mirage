@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { specOf } from '../../spec/builtins.ts'
+import { OPERAND } from '../../spec/constants.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { type FindOptions, modifiedTs } from '../../../core/generic/find.ts'
@@ -28,7 +29,7 @@ import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/path
 import { IOResult, type PathRecord } from '../../../io/types.ts'
 import { UsageError } from '../../errors.ts'
 import { parseFindExpression, type FindExpr } from '../../../rs/find.ts'
-import { FileType, PathSpec, type FileStat } from '../../../types.ts'
+import { FileType, Follow, LineFacts, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { respellOne, respellRaw } from '../../../utils/path.ts'
@@ -563,4 +564,19 @@ export function findGeneric(
     }
   }
   return Promise.resolve([stream(), io])
+}
+
+/**
+ * A find line walks every mount below its start points, and follows a start
+ * point that is a link under `-H` or `-L`: the last of `-P`, `-H` and `-L`
+ * typed before the first start point wins, where GNU reads them (findutils
+ * 4.10). Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  let follows: Follow = Follow.NONE
+  for (const [name] of fl.occurrences(OPERAND, 'P', 'H', 'L')) {
+    if (name === OPERAND) break
+    follows = name === 'P' ? Follow.NONE : Follow.LAST
+  }
+  return new LineFacts({ follows, walks: true, readsSubtree: true })
 }

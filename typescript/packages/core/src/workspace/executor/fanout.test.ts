@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import type { FlagValue } from '../../commands/spec/types.ts'
 import { Limit, MountMode, PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -27,34 +26,35 @@ function nested(): Workspace {
 }
 
 it.each([
-  ['find', {}, true],
-  ['du', {}, true],
-  ['du', { one_file_system: true }, false],
-  ['ls', {}, false],
-  ['ls', { recursive: true }, true],
-  ['grep', {}, false],
-  ['grep', { recursive: true }, true],
-  ['cat', {}, false],
-] as [string, Record<string, FlagValue>, boolean][])(
-  'a walk fans out over a nested mount: %s %j',
-  async (cmd, flags, expected) => {
+  [['find'], true],
+  [['du'], true],
+  [['du', '-x'], false],
+  [['ls'], false],
+  [['ls', '-R'], true],
+  [['grep', 'x'], false],
+  [['grep', '-r', 'x'], true],
+  [['cat'], false],
+] as [[string, ...string[]], boolean][])(
+  'a walk fans out over a nested mount: %j',
+  async (words, expected) => {
     const ws = nested()
     const path = PathSpec.fromStrPath('/base')
-    expect(shouldFanOut(cmd, [path], flags, ws.registry)).toBe(expected)
+    expect(shouldFanOut(words[0], [path], [...words, path], '/', ws.registry)).toBe(expected)
     await ws.close()
   },
 )
 
 it('no nested mount and a refused operand stay single', async () => {
   const ws = nested()
-  expect(shouldFanOut('find', [PathSpec.fromStrPath('/other')], {}, ws.registry)).toBe(false)
+  const other = PathSpec.fromStrPath('/other')
+  expect(shouldFanOut('find', [other], ['find', other], '/', ws.registry)).toBe(false)
   const refused = new PathSpec({
     virtual: '/base',
     directory: '/base',
     vfsPath: 'base',
     walkError: 'ENOENT',
   })
-  expect(shouldFanOut('find', [refused], {}, ws.registry)).toBe(false)
+  expect(shouldFanOut('find', [refused], ['find', refused], '/', ws.registry)).toBe(false)
   await ws.close()
 })
 

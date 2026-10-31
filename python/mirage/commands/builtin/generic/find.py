@@ -1,4 +1,10 @@
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 from functools import partial
 
@@ -16,6 +22,7 @@ from mirage.commands.builtin.utils.paths import (
 from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.generic import find_eval
@@ -27,7 +34,14 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, PathRecord
 from mirage.rs.find import FindExpr, parse_find_expression
-from mirage.types import FileStat, FileType, FindType, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    FindType,
+    Follow,
+    LineFacts,
+    PathSpec,
+)
 from mirage.utils.path import respell_one, respell_raw
 from mirage.view.types import LinkView, StatPath
 
@@ -596,3 +610,21 @@ async def find_walk_generic(
             io.exit_code = 1
 
     return stream(), io
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A find line walks every mount below its start points, and follows
+    a start point that is a link under ``-H`` or ``-L``: the last of
+    ``-P``, ``-H`` and ``-L`` typed before the first start point wins,
+    where GNU reads them (findutils 4.10).
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    follows = Follow.NONE
+    for name, _ in fl.occurrences(OPERAND, "P", "H", "L"):
+        if name == OPERAND:
+            break
+        follows = Follow.NONE if name == "P" else Follow.LAST
+    return LineFacts(follows=follows, walks=True, reads_subtree=True)

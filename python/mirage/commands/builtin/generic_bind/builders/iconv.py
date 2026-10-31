@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.iconv import iconv_generic
+from mirage.commands.builtin.generic.iconv import facts, iconv_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -42,4 +42,4 @@ async def iconv(
     )
 
 
-BUILDER = GenericCommand("iconv", iconv, write=True)
+BUILDER = GenericCommand("iconv", iconv, write=True, facts=facts)

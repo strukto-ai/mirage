@@ -70,7 +70,7 @@ from mirage.vfs.dev import DevVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.view.types import SessionAccess
 from mirage.workspace.cli import CLIRegistry
-from mirage.workspace.lookup.constants import changes_files
+from mirage.workspace.lookup.constants import line_facts
 from mirage.workspace.mount.backends import backend_commands
 from mirage.workspace.mount.errors import (
     MountCommandAmbiguous,
@@ -919,7 +919,7 @@ class MountRegistry:
         )
         if len(candidates) < 2:
             return candidates, candidates[0] if candidates else None
-        builtins = changes_files(cmd_name, [cmd_name, *argv])
+        builtins = line_facts(cmd_name, [cmd_name, *argv], cwd).writes
         writable: list[MountEntry] = []
         readers: list[MountEntry] = []
         named_trees: set[MountEntry] = set()
