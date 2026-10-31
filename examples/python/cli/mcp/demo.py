@@ -141,7 +141,9 @@ async def main() -> None:
             line = f"demo slow-write '{json.dumps({'path': str(marker)})}'"
             running = asyncio.create_task(ws.shell(line))
             started = Path(f"{marker}.started")
-            while not started.exists() and not running.done():
+            for _ in range(200):
+                if started.exists() or running.done():
+                    break
                 await asyncio.sleep(0.05)
             await ws.cancel()
             try:
