@@ -113,6 +113,7 @@ async function main(): Promise<void> {
     const slow = `demo slow-write '${JSON.stringify({ path: marker })}'`
     const running = ws.shell(slow)
     for (let tries = 0; tries < 200 && !existsSync(`${marker}.started`); tries++) await setTimeout(50)
+    ok(existsSync(`${marker}.started`), `${slow} never started`)
     await ws.cancel()
     await rejects(running, { name: 'AbortError' })
     console.log(`$ ${slow}\n^C`)

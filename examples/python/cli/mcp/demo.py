@@ -145,6 +145,7 @@ async def main() -> None:
                 if started.exists() or running.done():
                     break
                 await asyncio.sleep(0.05)
+            assert started.exists(), f"{line} never started"
             await ws.cancel()
             try:
                 await running
