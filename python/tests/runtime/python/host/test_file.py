@@ -801,3 +801,45 @@ def test_a_read_a_collection_interrupts_reads_every_byte(monkeypatch):
     assert loop.run_until_complete(ws.vfs.read("/data/big")) == content + b"S"
     loop.run_until_complete(ws.close())
     loop.close()
+
+
+def test_a_collection_on_a_running_owner_never_waits_for_a_file(monkeypatch):
+    # A write holds the descriptor while it waits on the loop; the loop's
+    # collection runs a finalizer writing to the same stream.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    owner = threading.Thread(target=loop.run_forever, daemon=True)
+    owner.start()
+    _, opener = _host(ws, loop)
+    live = opener("/data/log", "wb", buffering=0)
+    core = live._handle.files._core
+    write = core.write
+    seen = []
+
+    async def collecting_write(*args):
+        monkeypatch.setattr(core, "write", write)
+        gc.collect()
+        return await write(*args)
+
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        _Finalizes(live, [("write", b"during-")], seen)
+        monkeypatch.setattr(core, "write", collecting_write)
+        writer = threading.Thread(
+            target=live.write, args=(b"before-",), daemon=True
+        )
+        writer.start()
+        writer.join(10)
+    finally:
+        if enabled:
+            gc.enable()
+    assert not writer.is_alive()
+    assert seen == ["RuntimeError"]
+    live.close()
+    landed = asyncio.run_coroutine_threadsafe(ws.vfs.read("/data/log"), loop)
+    assert landed.result(10) == b"before-"
+    asyncio.run_coroutine_threadsafe(ws.close(), loop).result(10)
+    loop.call_soon_threadsafe(loop.stop)
+    owner.join(10)
+    loop.close()

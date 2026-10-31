@@ -147,14 +147,21 @@ class Descriptor:
         The outermost use first runs, in order, the closes the garbage
         collector put off on streams over it (``HandleRaw.closes_later``),
         so nothing reads or moves it before they land; one put off during
-        a use waits for the next. Inside a collection they all wait. A
-        close that fails is logged.
+        a use waits for the next. Inside a collection they all wait, and
+        the use itself never waits: the thread holding the descriptor may
+        be waiting on the loop the collection interrupted, so a use held
+        elsewhere is refused. A close that fails is logged.
         """
-        with self.lock:
+        held = self.files.held
+        if not self.lock.acquire(blocking=not held):
+            raise RuntimeError(
+                "a garbage collection cannot wait for a file in use"
+            )
+        try:
             outermost = not self.depth
             self.depth += 1
             try:
-                while outermost and self.waiting and not self.files.held:
+                while outermost and self.waiting and not held:
                     close = self.waiting.pop(0)
                     try:
                         close()
@@ -163,6 +170,8 @@ class Descriptor:
                 yield
             finally:
                 self.depth -= 1
+        finally:
+            self.lock.release()
 
     def settle(self) -> None:
         """Run the closes put off on streams over it now (``used``)."""
