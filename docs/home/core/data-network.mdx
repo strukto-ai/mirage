@@ -58,7 +58,7 @@ Tables list common supported flags. Use `man COMMAND` or `COMMAND --help` for th
 
 **Limits:** These are HTTP tools, with no full curl or Wget option set. Recursive Wget downloads (`-r`, `--mirror`) are unsupported. `curl -4/-6` are accepted, but the host transport chooses the address family. `wget -T` uses one request deadline rather than separate DNS, connect, and read timers; zero disables it.
 
-`curl -b` sends cookies: `NAME=VALUE` data goes as given, and any other value names a cookie file to read; repeat it to combine several. `curl -c FILE` writes every cookie to `FILE` (`-` for stdout) in curl's Netscape format, after any transfer that ran, failed ones included, so a login carries across separate `curl` calls. Cookie files are virtual files, read and written through the mount like `-o`. Cookie matching follows curl, with these differences: a public suffix such as `co.uk` is not refused as a cookie domain, because the public suffix list cannot ship with Mirage (a one-label suffix such as `com` is); an `Expires` date understands only RFC 822 zone names; a `-H 'Cookie: ...'` header and the jar's cookies go out joined on one `Cookie` line; and in the browser, whose `fetch` drops a `Cookie` header and hides `Set-Cookie`, `-b` and `-c` send and keep no cookies.
+`curl -b` sends cookies from a virtual file, or `NAME=VALUE` as given; `curl -c FILE` saves them after the request, so a login carries across `curl` calls. In the browser both are no-ops, and public suffixes such as `co.uk` are not checked.
 
 `curl -F` sends one URL-encoded text field; repeated `-F` keeps only the last field, and `@FILE` is literal text. Multipart file uploads are unsupported.
 
