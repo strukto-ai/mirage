@@ -936,9 +936,11 @@ async def execute_node(
     session = context.session
     # The job list the subtree runs on in place of the bound one: a
     # background job's own, as bash's forked job starts with none of its
-    # shell's, so a bare `wait` in it never waits on itself.
+    # shell's, so a bare `wait` in it never waits on itself. The lines it
+    # runs (`eval`, `source`, its EXIT action) see that list too.
     if jobs is not None:
         job_table = jobs
+        execute_fn = partial(execute_fn, job_table=jobs)
     execution_scope = execution_scope or ExecutionScope(
         execution_id=new_execution_id(registry.ids)
     )

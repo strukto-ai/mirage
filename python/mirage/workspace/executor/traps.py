@@ -283,7 +283,11 @@ async def _run_action(
             action,
             session_id=session.session_id,
             stdin=stdin,
-            call_stack=call_stack if call_stack is not None else CallStack(),
+            call_stack=(
+                call_stack
+                if call_stack is not None
+                else CallStack(session.shell_nesting)
+            ),
         )
     except (ExitSignal, ReturnSignal) as sig:
         sig.unrouted = True
@@ -353,7 +357,11 @@ async def run_exit_trap(
             action,
             session_id=session.session_id,
             stdin=stdin,
-            call_stack=call_stack if call_stack is not None else CallStack(),
+            call_stack=(
+                call_stack
+                if call_stack is not None
+                else CallStack(session.shell_nesting)
+            ),
         )
         stdout = await materialize(io.stdout)
         stderr = await materialize(io.stderr)

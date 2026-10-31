@@ -60,10 +60,13 @@ describe('function nesting limit', () => {
     ])
   })
 
-  it.each(['100', '0', '-1', '3x', ''])('FUNCNEST=%j never raises the limit', async (value) => {
-    const [, err, code] = await run(`FUNCNEST="${value}"; f() { f; }; f`)
-    expect([err, code]).toEqual([refused('f', NESTING_MAX), 1])
-  })
+  it.each(['100', '0', '-1', '3x', '', '9'.repeat(5000)])(
+    'FUNCNEST=%# never raises the limit',
+    async (value) => {
+      const [, err, code] = await run(`FUNCNEST="${value}"; f() { f; }; f`)
+      expect([err, code]).toEqual([refused('f', NESTING_MAX), 1])
+    },
+  )
 
   it('a sourced file is not a function level', async () => {
     expect(

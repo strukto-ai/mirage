@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "wait; echo $?; (sleep 0.2 & { wait; echo \"in $?\"; } & j=$!; wait \"$j\"; echo mid; wf() { wait; echo \"fn $?\"; }; wf & wait; echo done)",
+      "command": "wait; echo $?; (sleep 0.2 & { wait; echo \"in $?\"; } & j=$!; wait \"$j\"; echo mid; wf() { wait; echo \"fn $?\"; }; wf & wait; { sleep 0.1 & eval wait; echo \"ev $?\"; trap 'wait; echo trapped' EXIT; } & wait; echo done)",
       "expect": {
         "exit": 0,
-        "stdout": "0\nin 0\nmid\nfn 0\ndone\n",
+        "stdout": "0\nin 0\nmid\nfn 0\nev 0\ntrapped\ndone\n",
         "stderr": ""
       }
     },

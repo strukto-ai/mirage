@@ -413,11 +413,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( nbf() { echo f; }; nbg() { echo g; }; export -f nbf; bash -c 'nbf; nbg' 2>/dev/null; echo rc=$?; env -i bash -c nbf 2>/dev/null; echo rc=$?; env bash -c nbf; nbf() { echo 2; }; bash -c nbf; export -nf nbf; bash -c nbf 2>/dev/null; echo rc=$?; export -f nbf; unset -f nbf; nbf() { echo 3; }; bash -c nbf 2>/dev/null; echo rc=$?; nbr() { bash -c nbr; }; export -f nbr; nbr; echo rc=$? )",
+      "command": "( nbf() { echo f; }; nbg() { echo g; }; export -f nbf; bash -c 'nbf; nbg' 2>/dev/null; echo rc=$?; env -i bash -c nbf 2>/dev/null; echo rc=$?; env bash -c nbf; nbf() { echo 2; }; bash -c nbf; export -nf nbf; bash -c nbf 2>/dev/null; echo rc=$?; export -f nbf; unset -f nbf; nbf() { echo 3; }; bash -c nbf 2>/dev/null; echo rc=$?; nbr() { bash -c nbr; }; export -f nbr; nbr; echo rc=$?; nbt() { bash -c 'trap nbt EXIT'; }; export -f nbt; nbt; echo rc=$? )",
       "expect": {
         "exit": 0,
-        "stdout": "f\nrc=127\nrc=127\nf\n2\nrc=127\nrc=127\nrc=1\n",
-        "stderr": "bash: nbr: maximum nesting level exceeded (32)\n"
+        "stdout": "f\nrc=127\nrc=127\nf\n2\nrc=127\nrc=127\nrc=1\nrc=0\n",
+        "stderr": "bash: nbr: maximum nesting level exceeded (32)\nbash: nbt: maximum nesting level exceeded (32)\n"
       }
     },
     {

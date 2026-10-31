@@ -193,7 +193,7 @@ export async function handleBash(
   if (script === null) {
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
-  const cs = callStack ?? new CallStack()
+  const cs = callStack ?? new CallStack(session.shellNesting)
   cs.admit(name)
   context = new EvaluationContext(session.newShell(), context.frame.fork(), context)
   session = context.session

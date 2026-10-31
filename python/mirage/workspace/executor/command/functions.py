@@ -57,8 +57,10 @@ def _funcnest_limit(session: SessionState) -> int:
     value = session.env.get("FUNCNEST")
     if value is None or not is_count_word(value):
         return NESTING_MAX
-    limit = int(value)
-    return limit if 0 < limit < NESTING_MAX else NESTING_MAX
+    limit = int(value.strip().lstrip("+-").lstrip("0") or "0")
+    return (
+        limit if "-" not in value and 0 < limit < NESTING_MAX else NESTING_MAX
+    )
 
 
 async def run_shell_function(
@@ -103,7 +105,11 @@ async def run_shell_function(
             line of the shell; None where nothing can run one.
     """
     session = context.session
-    cs = call_stack if call_stack is not None else CallStack()
+    cs = (
+        call_stack
+        if call_stack is not None
+        else CallStack(session.shell_nesting)
+    )
     # bash refuses the call before it enters the function, and abandons
     # the rest of the line as it does after an expansion error.
     limit = _funcnest_limit(session)

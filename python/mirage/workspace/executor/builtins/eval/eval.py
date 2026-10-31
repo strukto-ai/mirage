@@ -47,7 +47,11 @@ async def handle_eval(
         call_stack (CallStack | None): the caller's frames.
     """
     script = " ".join(args)
-    cs = call_stack if call_stack is not None else CallStack()
+    cs = (
+        call_stack
+        if call_stack is not None
+        else CallStack(session.shell_nesting)
+    )
     try:
         with cs.nested("eval"):
             io = await execute_fn(

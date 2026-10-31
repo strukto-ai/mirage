@@ -75,7 +75,7 @@ export async function runShellFunction(
   executeFn: ExecuteStringFn | null = null,
 ): Promise<Result> {
   const session = context.session
-  const cs = callStack ?? new CallStack()
+  const cs = callStack ?? new CallStack(session.shellNesting)
   // bash refuses the call before it enters the function, and abandons the
   // rest of the line as it does after an expansion error.
   const limit = funcnestLimit(session)
