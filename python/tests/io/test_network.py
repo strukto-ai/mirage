@@ -24,6 +24,9 @@ from mirage.io.network import (
     network_bound,
     network_layer,
     network_lets,
+    network_route,
+    network_routes,
+    network_rule,
     run_with_network,
 )
 from mirage.policy.profile import SessionProfile
@@ -41,6 +44,8 @@ from mirage.vfs.ram import RAMVFS
             {"allowed_domains": ["*"], "denied_domains": ["evil.test"]},
             {"allow": ["*"], "deny": ["evil.test"]},
         ),
+        ({"routes": {"a.com:80": "10.0.0.1:8080"}}, None),
+        ({"allowed_domains": ["a.com"], "routes": {}}, {"allow": ["a.com"]}),
     ],
 )
 def test_a_setting_adds_its_layer(setting, layer):
@@ -55,6 +60,8 @@ def test_a_setting_adds_its_layer(setting, layer):
         {"allow": ["a.com"]},
         {"deny": ["a.com"]},
         {"allowed_domains": "a.com"},
+        {"routes": ["a.com:80"]},
+        {"routes": {"a.com:80": 8080}},
     ],
 )
 def test_a_bad_setting_is_refused(setting):
@@ -65,6 +72,61 @@ def test_a_bad_setting_is_refused(setting):
 def test_a_bad_entry_is_refused():
     with pytest.raises(ValueError, match="is not an address, a range"):
         NetworkRule([{"allow": ["10.0.0.0/33"]}])
+
+
+def test_a_route_sends_a_host_and_port_to_the_end_it_names():
+    rule = NetworkRule(
+        [],
+        routes={
+            "localhost:5003": "127.0.0.1:61001",
+            "Svc.Test.:80": "[::1]:8080",
+            "[::1]:22": "jump.test:2222",
+        },
+    )
+    assert rule.route("localhost", 5003) == ("127.0.0.1", 61001)
+    assert rule.route("LOCALHOST.", 5003) == ("127.0.0.1", 61001)
+    assert rule.route("localhost", 5004) is None
+    assert rule.route("svc.test", 80) == ("::1", 8080)
+    assert rule.route("[::1]", 22) == ("jump.test", 2222)
+    assert rule.route("::1", 22) == ("jump.test", 2222)
+
+
+@pytest.mark.parametrize(
+    ("routes", "message"),
+    [
+        ({"localhost": "127.0.0.1:1"}, 'route "localhost" is not host:port'),
+        (
+            {"localhost:5003": "127.0.0.1"},
+            'route "127.0.0.1" is not host:port',
+        ),
+        ({"localhost:0": "127.0.0.1:1"}, "is not host:port"),
+        ({"localhost:65536": "127.0.0.1:1"}, "is not host:port"),
+        ({"::1:80": "127.0.0.1:1"}, "is not host:port"),
+        (
+            {"a.test:80": "b.test:80", "B.test:80": "c.test:80"},
+            "goes to b.test:80, which is routed too",
+        ),
+    ],
+)
+def test_a_bad_route_is_refused(routes, message):
+    with pytest.raises(ValueError, match=message):
+        NetworkRule([], routes=routes)
+
+
+@pytest.mark.asyncio
+async def test_routes_alone_build_a_rule_the_bound_call_answers_by():
+    setting = {"routes": {"localhost:5003": "127.0.0.1:61001"}}
+    assert network_routes(setting) == setting["routes"]
+    assert network_routes(False) == {}
+    rule = network_rule(setting)
+    assert rule is not None and rule.layers == ()
+    assert network_rule({"routes": {}}) is None
+    assert network_route("localhost", 5003) is None
+
+    async def ask() -> tuple[str, int] | None:
+        return network_route("localhost", 5003)
+
+    assert await run_with_network(rule, ask()) == ("127.0.0.1", 61001)
 
 
 @pytest.mark.asyncio
@@ -145,6 +207,93 @@ async def test_a_name_is_judged_by_the_host_it_was_asked_for(port):
     assert await _curl(port, allowed, "localhost") == 0
     other = {"allowed_domains": ["example.com"]}
     assert await _curl(port, other, "localhost") == 7
+
+
+async def _fetched(network, url: str) -> int:
+    ws = Workspace({"/data": RAMVFS()}, network=network)
+    try:
+        return (await ws.shell(f"curl -sS {url}")).exit_code
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_routed_connection_goes_where_its_route_names(port):
+    to = f"127.0.0.1:{port}"
+    routes = {"routes": {"svc.test:5003": to}}
+    assert await _fetched(routes, "http://svc.test:5003/") == 0
+    spelled = {"routes": {"SVC.test.:5003": to}}
+    assert await _fetched(spelled, "http://svc.test:5003/") == 0
+    held = {"allowed_domains": [to], "routes": {"localhost:5003": to}}
+    assert await _fetched(held, "http://localhost:5003/") == 0
+    assert await _fetched(held, "http://localhost:5004/") == 7
+    assert await _fetched(held, f"http://127.0.0.1:{port + 1}/") == 7
+    target = {
+        "allowed_domains": ["localhost"],
+        "routes": {"localhost:5003": to},
+    }
+    assert await _fetched(target, "http://localhost:5003/") == 7
+
+
+@pytest.mark.asyncio
+async def test_each_workspace_sends_the_same_address_to_its_own_end(port):
+    async def other_answer(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        await reader.read(1024)
+        writer.write(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n"
+            b"Connection: close\r\n\r\nother\n"
+        )
+        await writer.drain()
+        writer.close()
+
+    other = await asyncio.start_server(other_answer, "127.0.0.1", 0)
+    at = other.sockets[0].getsockname()[1]
+    t1 = Workspace(
+        {"/data": RAMVFS()},
+        network={"routes": {"localhost:5003": f"127.0.0.1:{port}"}},
+    )
+    t2 = Workspace(
+        {"/data": RAMVFS()},
+        network={"routes": {"localhost:5003": f"127.0.0.1:{at}"}},
+    )
+
+    async def read(ws: Workspace) -> str:
+        io = await ws.shell("curl -sS http://localhost:5003/")
+        return await io.stdout_str()
+
+    try:
+        assert await asyncio.gather(read(t1), read(t2), read(t1)) == [
+            "ok\n",
+            "other\n",
+            "ok\n",
+        ]
+    finally:
+        await t1.close()
+        await t2.close()
+        other.close()
+        await other.wait_closed()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_routes_its_sessions_over_the_workspace(port):
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        network={"routes": {"svc.test:5003": "127.0.0.1:1"}},
+        profiles={
+            "agent": {
+                "network": {"routes": {"svc.test:5003": f"127.0.0.1:{port}"}}
+            },
+        },
+    )
+    ws.create_session("a", profile="agent")
+    line = "curl -sS http://svc.test:5003/"
+    try:
+        assert (await ws.shell(line, session_id="a")).exit_code == 0
+        assert (await ws.shell(line)).exit_code == 7
+    finally:
+        await ws.close()
 
 
 def test_names_sharing_an_address_keep_their_own_ports():

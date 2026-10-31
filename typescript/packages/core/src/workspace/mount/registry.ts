@@ -16,7 +16,7 @@ import type { DiffComputer } from '../../rs/diff_types.ts'
 import type { SessionAccess } from '../../view/types.ts'
 import { IOConfig } from '../../io/config.ts'
 import type { MemoryBudget } from '../../io/memory.ts'
-import { NetworkRule, networkLayer, type NetworkSetting } from '../../io/network.ts'
+import { NetworkRule, networkLayer, networkRoutes, type NetworkSetting } from '../../io/network.ts'
 import { backendCommands } from './backends.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { ProcessView } from '../../process/view.ts'
@@ -240,17 +240,25 @@ export class MountRegistry {
 
   /**
    * The rule a session's lines are held to: the workspace's, narrowed by the
-   * `network` its profile states, built once per setting. Mirrors Python's
-   * `MountRegistry.network_of`.
+   * `network` its profile states, its routes over the workspace's, built once
+   * per setting. Mirrors Python's `MountRegistry.network_of`.
    */
   networkOf(setting: NetworkSetting | null): NetworkRule | null {
     const layer = setting === null ? null : networkLayer(setting)
-    if (layer === null) return this.network
-    const key = JSON.stringify(layer)
+    const routes = setting === null ? {} : networkRoutes(setting)
+    if (layer === null && Object.keys(routes).length === 0) return this.network
+    const key = JSON.stringify([layer, routes])
     let held = this.narrowed.get(key)
     if (held?.[0] !== this.network) {
       const base = this.network
-      held = [base, new NetworkRule([...(base?.layers ?? []), layer], base?.metadata ?? false)]
+      held = [
+        base,
+        new NetworkRule(
+          [...(base?.layers ?? []), ...(layer === null ? [] : [layer])],
+          base?.metadata ?? false,
+          { ...base?.routes, ...routes },
+        ),
+      ]
       this.narrowed.set(key, held)
       this.watch?.()
     }

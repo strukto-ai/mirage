@@ -44,6 +44,7 @@ from mirage.io.network import (
     NetworkRule,
     NetworkSetting,
     network_layer,
+    network_routes,
     watch_network,
 )
 from mirage.observe.observer import Observer
@@ -292,23 +293,28 @@ class MountRegistry:
 
     def network_of(self, setting: NetworkSetting | None) -> NetworkRule | None:
         """The rule a session's lines are held to: the workspace's,
-        narrowed by the ``network`` its profile states, built once per
-        setting.
+        narrowed by the ``network`` its profile states, its routes over
+        the workspace's, built once per setting.
 
         Args:
             setting (NetworkSetting | None): the session's profile's
                 ``network``; None for none.
         """
         layer = None if setting is None else network_layer(setting)
-        if layer is None:
+        routes = {} if setting is None else network_routes(setting)
+        if layer is None and not routes:
             return self.network
-        key = json.dumps(layer, sort_keys=True)
+        key = json.dumps([layer, routes], sort_keys=True)
         held = self._networks.get(key)
         if held is None or held[0] is not self.network:
             base = self.network
             rule = NetworkRule(
-                [*(base.layers if base is not None else ()), layer],
+                [
+                    *(base.layers if base is not None else ()),
+                    *(() if layer is None else (layer,)),
+                ],
                 base is not None and base.metadata,
+                {**(base.routes if base is not None else {}), **routes},
             )
             watch_network()
             held = (base, rule)

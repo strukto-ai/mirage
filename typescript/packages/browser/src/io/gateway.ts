@@ -21,7 +21,7 @@ import {
 } from '@struktoai/mirage-core/policy/policies'
 import type { NetworkContext, NetworkEnd } from '@struktoai/mirage-core/policy/types'
 import type { Limit } from '@struktoai/mirage-core/types'
-import { REACHING, watchNetwork } from './network.ts'
+import { REACHING, portOf, routed, watchNetwork } from './network.ts'
 
 let watching = false
 
@@ -69,16 +69,11 @@ async function through(
   live.forEach((egress, at) => {
     if (answers[at] === true && egress.policies !== null) owners.set(egress.policies, egress)
   })
+  input = routed(input)
   const target = new URL(input instanceof Request ? input.url : input, globalThis.location.href)
   if (owners.size === 0 || !REACHING.has(target.protocol)) return send(input, init)
   const host = target.hostname
-  // A URL leaves its scheme's own port unwritten.
-  const port =
-    target.port !== ''
-      ? Number(target.port)
-      : target.protocol === 'https:' || target.protocol === 'wss:'
-        ? 443
-        : 80
+  const port = portOf(target)
   const started = Date.now()
   const sent =
     init?.body !== undefined

@@ -31,7 +31,12 @@ from mirage.cache.index.config import IndexConfig, RedisIndexConfig
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.config import IOConfig
-from mirage.io.network import NetworkRule, NetworkSetting, network_layer
+from mirage.io.network import (
+    NetworkRule,
+    NetworkSetting,
+    network_layer,
+    network_routes,
+)
 from mirage.policy.constants import METHODS
 from mirage.policy.profile import (
     ProfilePolicy,
@@ -697,7 +702,7 @@ class WorkspaceConfig(BaseModel):
     max_memory: str | int | None = None
     # Where the workspace's connections may go: true for anywhere, false
     # for nowhere, or {allow: [hosts and ranges]}.
-    network: bool | dict[str, list[str]] = True
+    network: bool | dict[str, list[str] | dict[str, str]] = True
     # Installed CLIs, fully separate from mounts: key = installed head
     # word, value names a registered CLI plus its own config.
     clis: dict[str, CLIBlock] | None = None
@@ -767,11 +772,16 @@ class WorkspaceConfig(BaseModel):
     @classmethod
     def _v_network(cls, v: Any) -> NetworkSetting:
         layer = network_layer(v)
-        NetworkRule([layer] if layer is not None else [])
+        NetworkRule(
+            [layer] if layer is not None else [], False, network_routes(v)
+        )
         return (
             bool(v)
             if isinstance(v, bool)
-            else {key: list(entries) for key, entries in v.items()}
+            else {
+                key: dict(value) if key == "routes" else list(value)
+                for key, value in v.items()
+            }
         )
 
     @model_validator(mode="after")

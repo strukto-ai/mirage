@@ -362,6 +362,55 @@
         "stdout": "hello from http\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "curl_network_route_sends_a_name_to_the_fixture",
+      "seq": 330514,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-14",
+      "session_profiles": {
+        "net-14": {
+          "network": {
+            "routes": {
+              "svc.test:5003": "{http_host}"
+            }
+          }
+        }
+      },
+      "command": "curl -s http://svc.test:5003/hello",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello from http\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "curl_network_route_is_judged_where_it_goes",
+      "seq": 330515,
+      "targets": [
+        "http-ram"
+      ],
+      "session": "net-15",
+      "session_profiles": {
+        "net-15": {
+          "network": {
+            "allowed_domains": [
+              "svc.test"
+            ],
+            "routes": {
+              "svc.test:5003": "{http_host}"
+            }
+          }
+        }
+      },
+      "command": "curl -s http://svc.test:5003/hello; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=7\n",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -439,13 +440,15 @@ async def stat_check(ws, check: dict) -> str:
 
 
 def bind_mount(case: dict, mount_path: str) -> dict:
-    """Substitute {mount} and {http} in a case with run-time values.
+    """Substitute {mount}, {http} and {http_host} in a case with run-time
+    values.
 
     {mount} lets one case assert a behavior that every backend shares while
     each target keeps its own mount path. {http} carries the fixture HTTP
-    server's base URL, which is only known once the server has bound a port.
-    Cases without a token are returned untouched, so this is inert for the
-    existing suite.
+    server's base URL, which is only known once the server has bound a port,
+    and {http_host} its host and port, which a session profile's network
+    routes name. Cases without a token are returned untouched, so this is
+    inert for the existing suite.
 
     Args:
         case (dict): case as loaded from disk.
@@ -454,15 +457,22 @@ def bind_mount(case: dict, mount_path: str) -> dict:
     Returns:
         dict: the case with the tokens replaced in command and expectations.
     """
+    http = os.environ.get("HTTP_ENDPOINT", "")
     tokens = {
         "{mount}": mount_path.rstrip("/"),
-        "{http}": os.environ.get("HTTP_ENDPOINT", ""),
+        "{http_host}": urlsplit(http).netloc,
+        "{http}": http,
     }
     encoded = json.dumps(case)
     tokens = {t: v for t, v in tokens.items() if t in encoded}
     if not tokens:
         return case
     bound = dict(case)
+    if "session_profiles" in bound:
+        profiles = json.dumps(bound["session_profiles"])
+        for token, value in tokens.items():
+            profiles = profiles.replace(token, value)
+        bound["session_profiles"] = json.loads(profiles)
     if "command" in bound:
         for token, value in tokens.items():
             bound["command"] = bound["command"].replace(token, value)

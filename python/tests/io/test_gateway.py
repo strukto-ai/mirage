@@ -142,6 +142,15 @@ async def test_a_name_reaches_the_hooks_as_its_host(port):
 
 
 @pytest.mark.asyncio
+async def test_the_hooks_see_the_end_a_route_names(port):
+    watch = _Watch()
+    network = {"routes": {"svc.test:5003": f"127.0.0.1:{port}"}}
+    line = "curl -sS http://svc.test:5003/"
+    assert await _held(port, line, watch, network=network) == 0
+    assert (watch.asked[0].address, watch.asked[0].port) == ("127.0.0.1", port)
+
+
+@pytest.mark.asyncio
 async def test_post_network_sees_how_each_connection_went(port):
     watch = _Watch()
     line = (

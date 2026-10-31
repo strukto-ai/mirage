@@ -18,6 +18,9 @@ import {
   networkBound,
   networkLayer,
   networkLets,
+  networkRoute,
+  networkRoutes,
+  networkRule,
   runWithNetwork,
   sameNetwork,
   type NetworkSetting,
@@ -43,6 +46,18 @@ describe('sameNetwork', () => {
       { denied_domains: ['a.com', 'b.com'], allowed_domains: ['*'] },
       true,
     ],
+    [true, { routes: {} }, true],
+    [
+      { routes: { 'a.com:80': '10.0.0.1:8080' } },
+      { routes: { 'A.com.:80': '10.0.0.1:8080' } },
+      true,
+    ],
+    [
+      { routes: { 'a.com:80': '10.0.0.1:8080' } },
+      { routes: { 'a.com:80': '10.0.0.1:8081' } },
+      false,
+    ],
+    [{ routes: { 'a.com:80': '10.0.0.1:8080' } }, true, false],
   ])('%o and %o: %s', (a, b, same) => {
     expect(sameNetwork(a, b)).toBe(same)
   })
@@ -58,16 +73,23 @@ describe('networkLayer', () => {
       { allowed_domains: ['*'], denied_domains: ['evil.test'] },
       { allow: ['*'], deny: ['evil.test'] },
     ],
+    [{ routes: { 'a.com:80': '10.0.0.1:8080' } }, null],
+    [{ allowed_domains: ['a.com'], routes: {} }, { allow: ['a.com'] }],
   ])('adds the layer of %o', (setting, layer) => {
     expect(networkLayer(setting)).toEqual(layer)
   })
 
-  it.each(['off', {}, { allow: ['a.com'] }, { deny: ['a.com'] }, { allowed_domains: 'a.com' }])(
-    'refuses %o',
-    (setting) => {
-      expect(() => networkLayer(setting)).toThrow(/network is true, false or/)
-    },
-  )
+  it.each([
+    'off',
+    {},
+    { allow: ['a.com'] },
+    { deny: ['a.com'] },
+    { allowed_domains: 'a.com' },
+    { routes: ['a.com:80'] },
+    { routes: { 'a.com:80': 8080 } },
+  ])('refuses %o', (setting) => {
+    expect(() => networkLayer(setting)).toThrow(/network is true, false or/)
+  })
 })
 
 describe('NetworkRule', () => {
@@ -75,6 +97,47 @@ describe('NetworkRule', () => {
     expect(() => new NetworkRule([{ allow: ['10.0.0.0/33'] }])).toThrow(
       /is not an address, a range/,
     )
+  })
+
+  it('routes a host and port to the end it names', () => {
+    const rule = new NetworkRule([], false, {
+      'localhost:5003': '127.0.0.1:61001',
+      'Svc.Test.:80': '[::1]:8080',
+      '[::1]:22': 'jump.test:2222',
+    })
+    expect(rule.route('localhost', 5003)).toEqual(['127.0.0.1', 61001])
+    expect(rule.route('LOCALHOST.', 5003)).toEqual(['127.0.0.1', 61001])
+    expect(rule.route('localhost', 5004)).toBeNull()
+    expect(rule.route('svc.test', 80)).toEqual(['::1', 8080])
+    expect(rule.route('[::1]', 22)).toEqual(['jump.test', 2222])
+    expect(rule.route('::1', 22)).toEqual(['jump.test', 2222])
+  })
+
+  it.each([
+    [{ localhost: '127.0.0.1:1' }, /route "localhost" is not host:port/],
+    [{ 'localhost:5003': '127.0.0.1' }, /route "127.0.0.1" is not host:port/],
+    [{ 'localhost:0': '127.0.0.1:1' }, /is not host:port/],
+    [{ 'localhost:65536': '127.0.0.1:1' }, /is not host:port/],
+    [{ '::1:80': '127.0.0.1:1' }, /is not host:port/],
+    [
+      { 'a.test:80': 'b.test:80', 'B.test:80': 'c.test:80' },
+      /goes to b.test:80, which is routed too/,
+    ],
+  ])('refuses the routes %o', (routes, message) => {
+    expect(() => new NetworkRule([], false, routes)).toThrow(message)
+  })
+
+  it('is built for routes alone, which the bound call answers by', async () => {
+    const setting = { routes: { 'localhost:5003': '127.0.0.1:61001' } }
+    expect(networkRoutes(setting)).toEqual(setting.routes)
+    expect(networkRoutes(false)).toEqual({})
+    const rule = networkRule(setting)
+    expect(rule?.layers).toEqual([])
+    expect(networkRule({ routes: {} })).toBeNull()
+    expect(networkRoute('localhost', 5003)).toBeNull()
+    expect(
+      await runWithNetwork(rule, () => Promise.resolve(networkRoute('localhost', 5003))),
+    ).toEqual(['127.0.0.1', 61001])
   })
 
   it('holds only the call it is bound to', async () => {

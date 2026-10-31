@@ -34,6 +34,7 @@ from mirage.io.network import (
     answers,
     named,
     relay_at,
+    routed,
     run_with_network,
     watch_network,
 )
@@ -501,8 +502,9 @@ def _started() -> _Gateway:
 
 
 def _through(sock: socket.socket, address: Any) -> Any:
-    """Where ``sock`` connects: the gateway, holding where it was going,
-    when a policy listens for the connection; else ``address`` itself.
+    """Where ``sock`` connects: the gateway, holding where it was going
+    (where a route names, for a routed one), when a policy listens for
+    the connection; else that end itself.
 
     Args:
         sock (socket.socket): the connecting socket.
@@ -511,6 +513,7 @@ def _through(sock: socket.socket, address: Any) -> Any:
     Raises:
         PermissionError: EACCES, the workspace's rule refuses it.
     """
+    address = routed(sock, address)
     live = live_egress()
     egress = live[-1] if live else None
     if (
