@@ -61,3 +61,12 @@ def test_a_long_run_of_switches_is_not_kept(monkeypatch):
     scan("grep", switches)
     scan("grep", switches[:1])
     assert list(rs_scan._SCANS["grep"]) == [(("recursive", ""),)]
+
+
+def test_a_kept_refusal_holds_no_traceback(monkeypatch):
+    monkeypatch.setattr(rs_scan, "_SCANS", {})
+    with pytest.raises(StreamRefusal):
+        scan("cmp", [("bytes", "2é")])
+    kept = rs_scan._SCANS["cmp"][(("bytes", "2é"),)]
+    assert isinstance(kept, StreamRefusal)
+    assert kept.__traceback__ is None

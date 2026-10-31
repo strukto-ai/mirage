@@ -40,7 +40,8 @@ export const SCANS = new Map<string, Map<string, string | StreamRefusal>>()
  * reading one line's options share one scan; each entry counts its name, its
  * value and one more toward PARSE_KEPT_CHARS, so a run of switches is bounded
  * too. It is kept as the text mirage-rs answered and decoded per reader, so no
- * reader sees another's changes. Mirrors Python's `scan`.
+ * reader sees another's changes; a refusal is kept as a copy never thrown, as
+ * Python keeps no traceback of the refused call. Mirrors Python's `scan`.
  */
 export function scan(
   command: string,
@@ -71,7 +72,7 @@ export function scan(
       }
     } catch (err) {
       if (!(err instanceof StreamRefusal)) throw err
-      kept = err
+      kept = new StreamRefusal(err.message, err.output, err.status)
     }
     if (answers !== undefined) {
       if (answers.size >= PARSES_KEPT) answers.clear()

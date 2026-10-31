@@ -57,7 +57,8 @@ def scan(
     handler reading one line's options share one scan; each entry counts
     its name, its value and one more toward PARSE_KEPT_CHARS, so a run of
     switches is bounded too. It is kept as the text mirage-rs answered and
-    decoded per reader, so no reader sees another's changes.
+    decoded per reader, so no reader sees another's changes; a refusal is
+    kept as a copy never raised, so no traceback holds the refused call.
     """
     tape = tuple(options)
     kept = None
@@ -75,7 +76,9 @@ def scan(
         try:
             kept = open_stream("scan", config).finish()
         except StreamRefusal as refusal:
-            kept = refusal
+            kept = StreamRefusal(
+                refusal.message, refusal.output, refusal.status
+            )
         if answers is not None:
             if len(answers) >= PARSES_KEPT:
                 answers.clear()
