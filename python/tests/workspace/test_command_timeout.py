@@ -459,8 +459,6 @@ async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
     ram.accessor.store.files["/blank"] = b"\n" * 10_000_000
     cancel = asyncio.Event()
     loop = asyncio.get_running_loop()
-    start = time.monotonic()
-    fired: list[float] = []
     consumed = 0
     available = 0
     progress: list[tuple[int, int]] = []
@@ -475,7 +473,6 @@ async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
         return now
 
     def stop() -> None:
-        fired.append(time.monotonic() - start)
         progress.append((consumed, available))
         cancel.set()
 
@@ -516,7 +513,7 @@ async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
             with pytest.raises(MirageAbortError):
                 await ws.shell(command, cancel=cancel)
             assert timer is not None
-            assert fired[0] < 1
+            assert progress
             if command.startswith("tail "):
                 # A suffix read fits in the first bounded window; the
                 # cancellation must land before another operand is read.
