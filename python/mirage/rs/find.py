@@ -411,6 +411,25 @@ class FindParse:
         """The ``-newer`` references, as typed, in expression order."""
         return [text_view(_str(ref)) for ref in _array(self.values["newer"])]
 
+    def date_refusal(self) -> tuple[int, UsageError] | None:
+        """The first ``-newermt`` text that is no date, in expression order.
+
+        GNU reads ``-newer`` and ``-newermt`` left to right, so the
+        references typed before that date are statted first and their
+        error, if any, is the one reported.
+
+        Returns:
+            How many ``-newer`` references precede the date, with GNU's
+            refusal of it; None when every date reads.
+        """
+        for entry in _array(self.values["dates"]):
+            date, before = _array(entry)
+            try:
+                parse_newermt(text_view(_str(date)))
+            except UsageError as exc:
+                return _int(before), exc
+        return None
+
     def bind(
         self, newer_times: Sequence[float] = (), now: float | None = None
     ) -> FindExpr:

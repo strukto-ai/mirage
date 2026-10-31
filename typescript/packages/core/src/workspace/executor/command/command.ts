@@ -628,9 +628,11 @@ export async function handleCommand(
     try {
       const parsedFind = parseFind(spelledWords(parts.slice(1)))
       // Every -newer reference is statted through the dispatcher here,
-      // once, before the expression is bound.
+      // once, before the expression is bound; a date GNU refuses stops the
+      // stats at the references typed before it.
+      const badDate = parsedFind.dateRefusal()
+      const refs = badDate === null ? parsedFind.newer : parsedFind.newer.slice(0, badDate[0])
       let newerTimes: number[] = []
-      const refs = parsedFind.newer
       if (refs.length > 0) {
         let refErr: Uint8Array | null
         ;[newerTimes, refErr] = await resolveNewerRefs(
@@ -649,6 +651,7 @@ export async function handleCommand(
           ]
         }
       }
+      if (badDate !== null) throw badDate[1]
       findExpr = parsedFind.bind(newerTimes)
     } catch (err) {
       if (err instanceof UsageError) {

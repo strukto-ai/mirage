@@ -322,6 +322,7 @@ struct Parsed {
     uses_empty: bool,
     actions: Vec<Action>,
     newer: Vec<Vec<u8>>,
+    dates: Vec<(Vec<u8>, usize)>,
     depth_first: bool,
     predicates: Vec<Vec<u8>>,
     warnings: Vec<Vec<u8>>,
@@ -353,6 +354,15 @@ impl Parsed {
         values.insert(
             "newer".to_owned(),
             Json::Array(self.newer.iter().map(|w| json!(byte_text(w))).collect()),
+        );
+        values.insert(
+            "dates".to_owned(),
+            Json::Array(
+                self.dates
+                    .iter()
+                    .map(|(date, after)| json!([byte_text(date), after]))
+                    .collect(),
+            ),
         );
         values.insert("depth_first".to_owned(), json!(self.depth_first));
         values.insert(
@@ -388,6 +398,7 @@ struct Parser<'a> {
     uses_empty: bool,
     actions: Vec<Action>,
     newer: Vec<Vec<u8>>,
+    dates: Vec<(Vec<u8>, usize)>,
     depth_first: bool,
     predicates: Vec<Vec<u8>>,
     warnings: Vec<Vec<u8>>,
@@ -411,6 +422,7 @@ impl<'a> Parser<'a> {
             uses_empty: false,
             actions: Vec::new(),
             newer: Vec::new(),
+            dates: Vec::new(),
             depth_first: false,
             predicates: Vec::new(),
             warnings: Vec::new(),
@@ -427,6 +439,7 @@ impl<'a> Parser<'a> {
                 uses_empty: self.uses_empty,
                 actions: self.actions,
                 newer: self.newer,
+                dates: self.dates,
                 depth_first: self.depth_first,
                 predicates: self.predicates,
                 warnings: self.warnings,
@@ -736,6 +749,7 @@ impl<'a> Parser<'a> {
             b"-newermt" => {
                 self.check_window_placement(tok)?;
                 self.newer_token = Some(tok);
+                self.dates.push((value.to_vec(), self.newer.len()));
                 Ok(Node::Time(Time::Newermt(value.to_vec()), self.fold()))
             }
             _ => {
@@ -986,10 +1000,15 @@ fn mtime(spec: &[u8]) -> Result<(u8, f64), Fail> {
         .rposition(|b| !is_blank(b))
         .map_or(from, |at| at + 1);
     let digits = &body[from..to];
+    let invalid = || say(&[b"find: invalid argument `", spec, b"' to `-mtime'"]);
     if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return Err(say(&[b"find: invalid argument `", spec, b"' to `-mtime'"]));
+        return Err(invalid());
     }
-    let days = byte_text(digits).parse::<f64>().unwrap_or(f64::MAX);
+    let days = byte_text(digits)
+        .parse::<f64>()
+        .ok()
+        .filter(|days| days.is_finite())
+        .ok_or_else(invalid)?;
     Ok((cmp, days))
 }
 
@@ -1267,6 +1286,9 @@ mod tests {
             ]})
         );
         assert_eq!(read["newer"], json!(["r"]));
+        assert_eq!(read["dates"], json!([["2020-01-01", 0]]));
+        let read = parse(&["-newer", "r", "-newermt", "nope"]);
+        assert_eq!(read["dates"], json!([["nope", 1]]));
         assert_eq!(parse(&["-mtime", "2"])["tree"]["cmp"], json!("="));
         assert_eq!(parse(&["-mtime", " 2 "])["tree"]["days"], json!(2.0));
         assert_eq!(
@@ -1277,12 +1299,17 @@ mod tests {
 
     #[test]
     fn a_time_refusal_is_gnus() {
-        for spec in ["abc", "", "+", "1_0", "2x", "1,5"] {
+        let past_a_double = "9".repeat(400);
+        for spec in ["abc", "", "+", "1_0", "2x", "1,5", &past_a_double] {
             assert_eq!(
                 refuse(&["-mtime", spec]),
                 format!("find: invalid argument `{spec}' to `-mtime'")
             );
         }
+        assert_eq!(
+            parse(&["-mtime", "99999999999999999999"])["tree"]["days"],
+            json!(1e20)
+        );
         assert_eq!(
             refuse(&["-newer", "a", "-o", "-name", "b"]),
             "find: -newer is supported only in a top-level -a chain, not under -o, ! or parentheses"

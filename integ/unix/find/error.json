@@ -1212,6 +1212,114 @@
         "stderr": "find: invalid argument `;' to `-exec'\n"
       },
       "flags": []
+    },
+    {
+      "id": "find_newermt_refused_before_a_later_newer_reference",
+      "seq": 19996007,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -newermt nope -newer /data/missing",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: I cannot figure out how to interpret 'nope' as a date or time\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "find_newer_reference_refused_before_a_later_newermt",
+      "seq": 19996008,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -newer /data/missing -newermt nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: '/data/missing': No such file or directory\n"
+      },
+      "flags": []
+    },
+    {
+      "id": "find_mtime_past_a_double_is_invalid",
+      "seq": 19996009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "find /data -mtime 9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "find: invalid argument `9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999' to `-mtime'\n"
+      },
+      "flags": []
     }
   ]
 }

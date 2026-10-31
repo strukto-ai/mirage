@@ -304,6 +304,26 @@ export class FindParse {
   }
 
   /**
+   * The first `-newermt` text that is no date, in expression order, with
+   * how many `-newer` references precede it; null when every date reads.
+   * GNU reads `-newer` and `-newermt` left to right, so the references
+   * typed before that date are statted first and their error, if any, is
+   * the one reported.
+   */
+  dateRefusal(): [number, UsageError] | null {
+    for (const entry of array(this.values.dates)) {
+      const [date, before] = array(entry)
+      try {
+        parseNewermt(textView(str(date)))
+      } catch (err) {
+        if (err instanceof UsageError) return [int(before), err]
+        throw err
+      }
+    }
+    return null
+  }
+
+  /**
    * The expression with its time tests resolved. `newerTimes` is each
    * `-newer` reference's mtime in epoch seconds, in order; empty leaves
    * every `-newer` a test that always holds, as one the executor could not

@@ -697,11 +697,18 @@ async def handle_command(
         try:
             parsed = parse_find(spelled_words(parts[1:]))
             # Every -newer reference is statted through the dispatcher
-            # here, once, before the expression is bound.
+            # here, once, before the expression is bound; a date GNU
+            # refuses stops the stats at the references typed before it.
+            bad_date = parsed.date_refusal()
+            refs = (
+                parsed.newer
+                if bad_date is None
+                else parsed.newer[: bad_date[0]]
+            )
             newer_times: list[float] = []
-            if parsed.newer and dispatch is not None:
+            if refs and dispatch is not None:
                 newer_times, ref_err = await resolve_newer_refs(
-                    parsed.newer,
+                    refs,
                     registry,
                     session.cwd,
                     functools.partial(path_stat, dispatch),
@@ -716,6 +723,8 @@ async def handle_command(
                             command=cmd_str, exit_code=1, stderr=ref_err
                         ),
                     )
+            if bad_date is not None:
+                raise bad_date[1]
             find_expr = parsed.bind(newer_times)
         except UsageError as exc:
             msg = f"{exc}\n"
