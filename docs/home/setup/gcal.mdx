@@ -1,0 +1,93 @@
+---
+title: Google Calendar
+icon: calendar
+description: Virtualize Google Calendar calendars and events as JSON files.
+---
+
+The Google Calendar VFS mounts every calendar the account can see as a
+directory of date buckets, with one JSON file per event. It uses the same
+OAuth credentials as the other Google mounts; enable the Google Calendar API
+and its scope as described in [Google Workspace Setup](/home/setup/google).
+
+For SDK guides, see [Google Calendar (Python)](/python/vfs/gcal) and [Google Calendar (TypeScript)](/typescript/setup/gcal).
+
+## Connect
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import asyncio
+    import os
+
+    from mirage import MountMode, Workspace
+    from mirage.vfs.gcal import GCalConfig, GCalVFS
+
+
+    async def main() -> None:
+        config = GCalConfig(
+            client_id=os.environ["GOOGLE_CLIENT_ID"],
+            client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+            refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+        )
+        ws = Workspace({"/gcal": GCalVFS(config)}, mode=MountMode.READ)
+        result = await ws.shell("ls /gcal/primary")
+        print(await result.stdout_str(), end="")
+        await ws.close()
+
+
+    asyncio.run(main())
+    ```
+  </Tab>
+  <Tab title="TypeScript">
+    ```typescript
+    import { GCalVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+
+    const ws = new Workspace({
+      '/gcal': new GCalVFS({
+        clientId: process.env.GOOGLE_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
+      }),
+    }, { mode: MountMode.READ })
+    const result = await ws.shell('ls /gcal/primary')
+    process.stdout.write(result.stdoutText)
+    await ws.close()
+    ```
+  </Tab>
+  <Tab title="YAML">
+    ```yaml
+    mounts:
+      /gcal:
+        vfs: gcal
+        mode: read
+        config:
+          client_id: ${GOOGLE_CLIENT_ID}
+          client_secret: ${GOOGLE_CLIENT_SECRET}
+          refresh_token: ${GOOGLE_REFRESH_TOKEN}
+    ```
+  </Tab>
+</Tabs>
+
+## Browse events
+
+```text
+/gcal/
+  primary/
+    calendar.json
+    <YYYY-MM-DD>/
+      <event-id>__<HHMM-HHMM>_<title>.gcal.json
+  <name>__<calendar-id>/
+    ...
+```
+
+The primary calendar is always `primary`; every other calendar directory ends
+in `__<calendar-id>`. Each date directory holds the events of one day by
+default; set `bucket_days` to `7` or `30` for week or month buckets. Without
+`start_time` or `end_time`, a calendar lists all of its history up to 90 days
+after today.
+
+Use `ls` and date globs such as `ls /gcal/primary/2026-11-*` to find events,
+then `cat` or `jq` to read the Calendar API payload. On a mount in write mode,
+`rm` an event file to delete that event for every attendee; that needs the
+`owner` or `writer` role on its calendar. Create and edit events with the
+[`gws calendar`](/home/setup/cli/gws) CLI.

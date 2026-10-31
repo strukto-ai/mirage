@@ -155,6 +155,7 @@
                 "icon": "folder-open",
                 "pages": [
                   "home/setup/google",
+                  "home/setup/gcal",
                   "home/setup/onedrive",
                   "home/setup/sharepoint",
                   "home/setup/dropbox",
@@ -429,6 +430,7 @@
                   "python/vfs/gdocs",
                   "python/vfs/gsheets",
                   "python/vfs/gslides",
+                  "python/vfs/gcal",
                   "python/vfs/onedrive",
                   "python/vfs/sharepoint",
                   "python/vfs/box",
@@ -616,6 +618,7 @@
                   "typescript/setup/gdocs",
                   "typescript/setup/gsheets",
                   "typescript/setup/gslides",
+                  "typescript/setup/gcal",
                   "typescript/setup/onedrive",
                   "typescript/setup/sharepoint",
                   "typescript/setup/dropbox",
