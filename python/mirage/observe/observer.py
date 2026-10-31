@@ -16,6 +16,7 @@ import json
 import logging
 from dataclasses import replace
 from typing import Any
+from urllib.parse import quote
 
 from mirage.context.session_context import current_execution_id
 from mirage.io.types import IOResult
@@ -34,6 +35,16 @@ from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.dates import utc_date_folder
 
 logger = logging.getLogger(__name__)
+
+
+def _session_file(session: str) -> str:
+    """The name a session's log goes under in each day: its id
+    percent-quoted, so no id spans folders or ends like another's.
+
+    Args:
+        session (str): the session id.
+    """
+    return f"{quote(session, safe='')}.jsonl"
 
 
 def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:
@@ -131,7 +142,9 @@ class Observer:
             session (str): the session the next entry belongs to.
         """
         if session not in self._newest:
-            files = await self._store.read_matching(f"/{session}.jsonl")
+            files = await self._store.read_matching(
+                f"/{_session_file(session)}"
+            )
             found = _newest_stamp(_parse_files(files))
             self._newest[session] = _later(found, self._newest.get(session))
         return self._newest[session]
@@ -143,7 +156,9 @@ class Observer:
         self._newest[entry.session] = entry.timestamp
         line = (entry.to_json_line() + "\n").encode()
         day = utc_date_folder(entry.timestamp / 1000)
-        await self._store.append(f"/{day}/{entry.session}.jsonl", line)
+        await self._store.append(
+            f"/{day}/{_session_file(entry.session)}", line
+        )
 
     async def log_op(
         self,
@@ -257,8 +272,9 @@ class Observer:
             )
         )
 
-    async def events(self) -> list[dict[str, Any]]:
-        """All recorded events across sessions, in timestamp order.
+    async def events(self, session: str | None = None) -> list[dict[str, Any]]:
+        """All recorded events, in timestamp order: every session's, or
+        only ``session``'s, read from its own log alone.
 
         Timestamps are UTC epoch milliseconds. The sort is stable over
         the per-file line order, so events that share a millisecond
@@ -266,10 +282,18 @@ class Observer:
         were appended in; append order within a session file is the
         contract.
 
+        Args:
+            session (str | None): only this session's events.
+
         Returns:
             list[dict]: Parsed LogEntry dicts.
         """
-        out = _parse_files(await self._store.read_all())
+        files = (
+            await self._store.read_all()
+            if session is None
+            else await self._store.read_matching(f"/{_session_file(session)}")
+        )
+        out = _parse_files(files)
         out.sort(key=lambda e: e.get("timestamp", 0))
         return out
 
@@ -299,7 +323,7 @@ class Observer:
         Returns:
             list[dict]: Events with type == EVENT_COMMAND.
         """
-        files = await self._store.read_matching(f"/{session}.jsonl")
+        files = await self._store.read_matching(f"/{_session_file(session)}")
         entries = _parse_files(files)
         last_clear = -1
         for i, e in enumerate(entries):
@@ -358,5 +382,6 @@ class Observer:
         self._newest = {session: written for session in by_session}
         for session, lines in by_session.items():
             await self._store.write(
-                f"/{day}/{session}.jsonl", ("\n".join(lines) + "\n").encode()
+                f"/{day}/{_session_file(session)}",
+                ("\n".join(lines) + "\n").encode(),
             )

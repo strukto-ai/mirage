@@ -349,4 +349,18 @@ describe('a damaged history file', () => {
     const shown = await o.sessionCommandEvents('s1')
     expect(shown.map((e) => e.command)).toEqual(['first', 'a\u2028b\u0085c'])
   })
+
+  it('names one flat log for each session id', async () => {
+    const store = new RAMObserverStore()
+    const o = new Observer(store, new ManualClock(NEW_YEAR))
+    for (const session of ['s1', 'team/s1', '../x']) {
+      await o.logCommandText(`echo ${session}`, session)
+    }
+    expect([...store.files.keys()].sort()).toEqual([
+      '/2021-01-01/..%2Fx.jsonl',
+      '/2021-01-01/s1.jsonl',
+      '/2021-01-01/team%2Fs1.jsonl',
+    ])
+    expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['echo s1'])
+  })
 })

@@ -41,6 +41,19 @@ const KNOWN_EVENTS = new Set<string>([EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, 
 
 export type EventDict = Record<string, unknown>
 
+/**
+ * The name a session's log goes under in each day: its id percent-quoted
+ * as Python's `quote(safe="")` does, so no id spans folders or ends like
+ * another's. Mirrors Python's `_session_file`.
+ */
+function sessionFile(session: string): string {
+  const quoted = encodeURIComponent(session).replace(
+    /[!'()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
+  return `${quoted}.jsonl`
+}
+
 function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
   const out: EventDict[] = []
   const decoder = new TextDecoder('utf-8', { fatal: false })
@@ -123,7 +136,9 @@ export class Observer {
   private async floor(session: string): Promise<number | null> {
     const known = this.newest.get(session)
     if (known !== undefined) return known
-    const found = newestStamp(parseFiles(await this._store.readMatching(`/${session}.jsonl`)))
+    const found = newestStamp(
+      parseFiles(await this._store.readMatching(`/${sessionFile(session)}`)),
+    )
     const floor = later(found, this.newest.get(session) ?? null)
     this.newest.set(session, floor)
     return floor
@@ -137,7 +152,10 @@ export class Observer {
         : entry
     this.newest.set(stamped.session, stamped.timestamp)
     const line = new TextEncoder().encode(stamped.toJsonLine() + '\n')
-    await this._store.append(`/${utcDateFolder(stamped.timestamp)}/${stamped.session}.jsonl`, line)
+    await this._store.append(
+      `/${utcDateFolder(stamped.timestamp)}/${sessionFile(stamped.session)}`,
+      line,
+    )
   }
 
   async logOp(rec: OpRecord, session: string, cwd?: string): Promise<void> {
@@ -206,12 +224,17 @@ export class Observer {
   }
 
   /**
-   * All recorded events across sessions, in timestamp order. Stable over
-   * the per-file line order, so events that share a millisecond (one
-   * line's ops plus its command entry) keep append order.
+   * All recorded events, in timestamp order: every session's, or only
+   * `session`'s, read from its own log alone. Stable over the per-file
+   * line order, so events that share a millisecond (one line's ops plus
+   * its command entry) keep append order.
    */
-  async events(): Promise<EventDict[]> {
-    const out = parseFiles(await this._store.readAll())
+  async events(session?: string): Promise<EventDict[]> {
+    const out = parseFiles(
+      await (session === undefined
+        ? this._store.readAll()
+        : this._store.readMatching(`/${sessionFile(session)}`)),
+    )
     out.sort((a, b) => eventTimestamp(a) - eventTimestamp(b))
     return out
   }
@@ -228,7 +251,7 @@ export class Observer {
    * renumbers subsequent entries, GNU behavior).
    */
   async sessionCommandEvents(session: string): Promise<EventDict[]> {
-    const entries = parseFiles(await this._store.readMatching(`/${session}.jsonl`))
+    const entries = parseFiles(await this._store.readMatching(`/${sessionFile(session)}`))
     let lastClear = -1
     entries.forEach((e, i) => {
       if (e.type === EVENT_CLEAR) lastClear = i
@@ -273,7 +296,7 @@ export class Observer {
     for (const session of bySession.keys()) this.newest.set(session, written)
     for (const [session, lines] of bySession) {
       await this._store.write(
-        `/${day}/${session}.jsonl`,
+        `/${day}/${sessionFile(session)}`,
         new TextEncoder().encode(lines.join('\n') + '\n'),
       )
     }

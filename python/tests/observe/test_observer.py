@@ -355,3 +355,17 @@ def test_an_entry_whose_command_holds_a_line_separator_is_kept():
     asyncio.run(store.append(path, raw.encode()))
     shown = asyncio.run(obs.session_command_events("s1"))
     assert [e["command"] for e in shown] == ["first", "a\u2028b\u0085c"]
+
+
+def test_a_session_id_names_one_flat_log():
+    store = RAMObserverStore()
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    for session in ("s1", "team/s1", "../x"):
+        asyncio.run(obs.log_command_text(f"echo {session}", session))
+    assert sorted(store.files) == [
+        "/2021-01-01/..%2Fx.jsonl",
+        "/2021-01-01/s1.jsonl",
+        "/2021-01-01/team%2Fs1.jsonl",
+    ]
+    listed = asyncio.run(obs.session_command_events("s1"))
+    assert [e["command"] for e in listed] == ["echo s1"]
