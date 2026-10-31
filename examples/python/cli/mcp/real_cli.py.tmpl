@@ -127,15 +127,29 @@ def is_number(word):
     return re.fullmatch(r"-[0-9]+", word) is not None
 
 
+def group_refusal(word):
+    if not word.startswith("--"):
+        return f"unknown option: {word[:2]}"
+    name, equals, _ = word.partition("=")
+    if equals and asks_help(name):
+        return "error: option '--help' takes no value"
+    return f"unknown option: {name}"
+
+
 def main(argv):
-    if not argv:
+    if argv[:1] == ["--"]:
+        argv = argv[1:]
+        if not argv:
+            sys.stdout.write(group_help())
+            return 1
+    elif not argv:
         sys.stdout.write(group_help())
         return 1
-    if asks_help(argv[0]):
+    elif asks_help(argv[0]):
         sys.stdout.write(group_help())
         return 0
-    if argv[0].startswith("-") and argv[0] != "-":
-        return refuse(f"unknown option: {argv[0]}\n\n{group_help()}".rstrip(), 129)
+    elif argv[0].startswith("-") and argv[0] != "-":
+        return refuse(f"{group_refusal(argv[0])}\n\n{group_help()}".rstrip(), 129)
     command, rest = argv[0], argv[1:]
     tool = COMMANDS.get(command)
     if tool is None:
@@ -145,25 +159,29 @@ def main(argv):
             1,
         )
     prefix = f"{NAME} {command}"
+    options = rest[:rest.index("--")] if "--" in rest else rest
+    if any(asks_help(word) or re.fullmatch(r"-h+", word) for word in options):
+        sys.stdout.write(tool_help(command, tool))
+        return 0
     words = []
     for index, word in enumerate(rest):
         if word == "--":
             words += rest[index + 1:]
             break
-        if asks_help(word):
-            sys.stdout.write(tool_help(command, tool))
-            return 0
         if word.startswith("--"):
+            name, equals, _ = word.partition("=")
+            problem = (
+                "option '--help' doesn't allow an argument"
+                if equals and asks_help(name)
+                else f"unrecognized option '{word}'"
+            )
             return refuse(
-                f"{prefix}: unrecognized option '{word}'\n"
+                f"{prefix}: {problem}\n"
                 f"Try '{prefix} --help' for more information.",
                 2,
             )
         if word.startswith("-") and len(word) > 1 and not is_number(word):
             bad = [letter for letter in word[1:] if letter != "h"]
-            if not bad:
-                sys.stdout.write(tool_help(command, tool))
-                return 0
             return refuse(
                 f"{prefix}: invalid option -- '{bad[0]}'\n"
                 f"Try '{prefix} --help' for more information.",

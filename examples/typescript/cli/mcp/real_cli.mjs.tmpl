@@ -102,17 +102,28 @@ function isNumber(word) {
   return /^-[0-9]+$/.test(word)
 }
 
+function groupRefusal(word) {
+  if (!word.startsWith('--')) return `unknown option: ${word.slice(0, 2)}`
+  const [name] = word.split('=', 1)
+  if (word.includes('=') && asksHelp(name)) return "error: option '--help' takes no value"
+  return `unknown option: ${name}`
+}
+
 async function main(argv) {
-  if (argv.length === 0) {
+  if (argv[0] === '--') {
+    argv = argv.slice(1)
+    if (argv.length === 0) {
+      process.stdout.write(groupHelp())
+      return 1
+    }
+  } else if (argv.length === 0) {
     process.stdout.write(groupHelp())
     return 1
-  }
-  if (asksHelp(argv[0])) {
+  } else if (asksHelp(argv[0])) {
     process.stdout.write(groupHelp())
     return 0
-  }
-  if (argv[0].startsWith('-') && argv[0] !== '-') {
-    return refuse(`unknown option: ${argv[0]}\n\n${groupHelp()}`.trimEnd(), 129)
+  } else if (argv[0].startsWith('-') && argv[0] !== '-') {
+    return refuse(`${groupRefusal(argv[0])}\n\n${groupHelp()}`.trimEnd(), 129)
   }
   const [command, ...rest] = argv
   const tool = COMMANDS.get(command)
@@ -120,25 +131,27 @@ async function main(argv) {
     return refuse(`${NAME}: '${command}' is not a ${NAME} command. See '${NAME} --help'.`, 1)
   }
   const prefix = `${NAME} ${command}`
+  const options = rest.includes('--') ? rest.slice(0, rest.indexOf('--')) : rest
+  if (options.some((word) => asksHelp(word) || /^-h+$/.test(word))) {
+    process.stdout.write(toolHelp(command, tool))
+    return 0
+  }
   const words = []
   for (const [index, word] of rest.entries()) {
     if (word === '--') {
       words.push(...rest.slice(index + 1))
       break
     }
-    if (asksHelp(word)) {
-      process.stdout.write(toolHelp(command, tool))
-      return 0
-    }
     if (word.startsWith('--')) {
-      return refuse(`${prefix}: unrecognized option '${word}'\nTry '${prefix} --help' for more information.`, 2)
+      const [name] = word.split('=', 1)
+      const problem =
+        word.includes('=') && asksHelp(name)
+          ? "option '--help' doesn't allow an argument"
+          : `unrecognized option '${word}'`
+      return refuse(`${prefix}: ${problem}\nTry '${prefix} --help' for more information.`, 2)
     }
     if (word.startsWith('-') && word.length > 1 && !isNumber(word)) {
       const bad = [...word.slice(1)].filter((letter) => letter !== 'h')
-      if (bad.length === 0) {
-        process.stdout.write(toolHelp(command, tool))
-        return 0
-      }
       return refuse(`${prefix}: invalid option -- '${bad[0]}'\nTry '${prefix} --help' for more information.`, 2)
     }
     words.push(word)
