@@ -192,6 +192,10 @@ Conditional appends may refuse a competing update. Conflicts return an error
 without retrying the append or rerunning the command. Existing-file appends under
 `unconditional` remain last-write-wins.
 
+### S3-compatible stores
+
+On AWS S3 and the provider VFSes built on it (R2, GCS, Wasabi and the rest), a conditional mount conditions writes, copies and deletes; a provider that ignores a copy or delete condition runs it unconditioned. MinIO, and the `s3` VFS pointed at a non-AWS endpoint, condition only writes, so they refuse what would copy or delete within the mount (`cp`, `mv`, `rm`, `find -delete`) with `ENOTSUP`. A TypeScript browser mount signed by presigned URLs cannot declare `write: conditional`.
+
 `read: pinned` and `write: staged` are reserved names. A mount that declares
 either is refused when it mounts.
 

@@ -166,9 +166,7 @@ aws s3api put-bucket-cors --bucket "$CEPH_BUCKET" \
 
 See the [Ceph VFS](/python/vfs/ceph) docs for the equivalent Python wiring.
 
-## Conditional writes
-
-Under `write: conditional`, writes, copies and deletes carry the version of the file mirage read, as on [S3](/typescript/setup/s3), and one that lost its condition fails with `STALE_WRITE`. Mirage conditions copies and deletes on this mount, so the provider must honour `If-Match` on them; one that ignores it runs them unconditioned. The `s3` VFS pointed at this provider's endpoint conditions only writes and refuses copies and deletes with `ENOTSUP`. A browser mount signed by presigned URLs cannot carry a condition, so it cannot declare `write: conditional`.
+For `write: conditional` on this provider, see [S3-compatible stores](/home/configuration#s3-compatible-stores).
 
 ## VFS.md
 
