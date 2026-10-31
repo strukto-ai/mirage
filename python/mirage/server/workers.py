@@ -11,52 +11,42 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-"""The daemon as a front and worker processes.
-
-With ``workers`` above 1 the daemon's process is a front: it starts that
-many workers, each the whole server on a socket of its own, and hands
-each new workspace to the worker holding the fewest. Every request about
-a workspace goes to the worker holding it, so each worker's workspaces
-share its interpreter and nothing else. Lists, health and readiness are
-the front's own, over every worker. On Linux, ``cpus`` pins worker i to
-the i-th CPU of the list, with ``taskset``.
-"""
 
 import asyncio
+import functools
 import json
 import logging
 import os
-import re
+import random
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs
 
 import httpx
+import uvicorn
 from fastapi import HTTPException
-from starlette.types import Receive, Scope, Send
+from starlette.types import Message, Receive, Scope, Send
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from websockets.asyncio.client import unix_connect
 from websockets.exceptions import ConnectionClosed
 
+from mirage.server.app import build_app
 from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
 from mirage.server.env import (
-    ENV_CPUS,
     ENV_FORWARDED_ALLOW_IPS,
     ENV_WORKER_SOCKET,
+    ENV_WORKER_TYPE,
     ENV_WORKERS,
 )
-from mirage.server.multipart import (
-    MAX_REQUEST_PART,
-    MAX_SNAPSHOT_PART,
-    PartEvent,
-    part_events,
-)
+from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.paths import mirage_home
 
 logger = logging.getLogger(__name__)
@@ -66,11 +56,10 @@ READY_SECONDS = 60
 # How long a stopped worker has to exit before it is killed, past the
 # graceful timeout it drains for.
 EXIT_SECONDS = 10
-# How long the front waits before starting a worker that exited again.
-RESTART_SECONDS = 1
-# The most CPUs one range of a ``cpus`` list may name.
-MAX_CPUS = 4096
-# Headers that belong to one connection, which the front does not pass on.
+# A request that needs no workspace and answers only a signed-in caller:
+# what a worker says to it says whether the caller may go on.
+AUTH_PROBE = "/v1/jobs?workspace_id=-"
+# Headers that belong to one connection, which are not passed on.
 HOP_BY_HOP = frozenset(
     {
         "connection",
@@ -82,61 +71,21 @@ HOP_BY_HOP = frozenset(
         "upgrade",
     }
 )
-# One item of a ``cpus`` list: a CPU or a range of them.
-CPU_RANGE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$")
 
 
-def parse_cpu_list(text: str) -> list[int]:
-    """The CPUs a ``cpus`` setting names, in order: ``0-3,6`` is 0, 1,
-    2, 3 and 6. Mirrors TypeScript's ``parseCpuList``.
+class WorkerType(StrEnum):
+    """What a worker is: a process of its own, or a thread of the
+    daemon's."""
 
-    Args:
-        text (str): the CPU list.
-
-    Raises:
-        DaemonConfigError: ``text`` is not a CPU list.
-    """
-    cpus: list[int] = []
-    for item in text.split(","):
-        match = CPU_RANGE.match(item)
-        first = int(match.group(1)) if match else -1
-        last = int(match.group(2)) if match and match.group(2) else first
-        if first < 0 or last < first or last - first >= MAX_CPUS:
-            raise DaemonConfigError(
-                f"cpus must be a CPU list such as 0-3,6, got {text!r}"
-            )
-        for cpu in range(first, last + 1):
-            if cpu not in cpus:
-                cpus.append(cpu)
-    return cpus
-
-
-def resolve_cpus(cpus: str | None = None) -> list[int] | None:
-    """The CPUs the workers are pinned to: ``cpus`` when given, else
-    ``$MIRAGE_CPUS``, else the ``cpus`` key in config.toml's ``[daemon]``
-    table, else None for none. Mirrors TypeScript's ``resolveCpus``.
-
-    Args:
-        cpus (str | None): the CPU list the caller set.
-
-    Raises:
-        DaemonConfigError: the setting is not a CPU list.
-    """
-    value: Any = cpus
-    if value is None:
-        value = os.environ.get(ENV_CPUS) or read_daemon_table(
-            mirage_home()
-        ).get("cpus")
-        if value is None or value == "":
-            return None
-    return parse_cpu_list(str(value))
+    PROCESS = "process"
+    THREAD = "thread"
 
 
 def resolve_workers(workers: int | None = None) -> int:
-    """How many worker processes the daemon runs: ``workers`` when given,
-    else ``$MIRAGE_WORKERS``, else the ``workers`` key in config.toml's
-    ``[daemon]`` table, else one per CPU of ``cpus``, else 1, a daemon of
-    one process. Mirrors TypeScript's ``resolveWorkers``.
+    """How many workers the daemon runs: ``workers`` when given, else
+    ``$MIRAGE_WORKERS``, else the ``workers`` key in config.toml's
+    ``[daemon]`` table, else 1, a daemon that holds every workspace
+    itself. Mirrors TypeScript's ``resolveWorkers``.
 
     Args:
         workers (int | None): the count the caller set.
@@ -150,8 +99,7 @@ def resolve_workers(workers: int | None = None) -> int:
             mirage_home()
         ).get("workers")
         if value is None or value == "":
-            cpus = resolve_cpus()
-            return 1 if cpus is None else len(cpus)
+            return 1
     try:
         count = int(value) if not isinstance(value, (bool, float)) else 0
     except ValueError:
@@ -163,52 +111,239 @@ def resolve_workers(workers: int | None = None) -> int:
     return count
 
 
-@dataclass(eq=False)
-class Worker:
-    """One worker process: the whole server, on a socket of its own.
+def resolve_worker_type(worker_type: str | None = None) -> WorkerType:
+    """What the workers are: ``worker_type`` when given, else
+    ``$MIRAGE_WORKER_TYPE``, else the ``worker_type`` key in config.toml's
+    ``[daemon]`` table, else threads on an interpreter without the GIL
+    (3.14t) and processes on one with it, whose threads would take turns.
+    Mirrors TypeScript's ``resolveWorkerType``.
 
-    Attributes:
+    Args:
+        worker_type (str | None): the type the caller set.
+
+    Raises:
+        DaemonConfigError: the type is neither process nor thread.
+    """
+    value: Any = worker_type
+    if value is None:
+        value = os.environ.get(ENV_WORKER_TYPE) or read_daemon_table(
+            mirage_home()
+        ).get("worker_type")
+        if value is None or value == "":
+            gil = getattr(sys, "_is_gil_enabled", lambda: True)()
+            return WorkerType.PROCESS if gil else WorkerType.THREAD
+    try:
+        return WorkerType(value)
+    except ValueError:
+        raise DaemonConfigError(
+            f"worker_type must be process or thread, got {value!r}"
+        ) from None
+
+
+class Worker:
+    """One worker: the whole server, on a socket of its own. A worker that
+    exits stays gone, and so do its workspaces. Mirrors TypeScript's
+    ``Worker``.
+
+    Args:
         index (int): its place in the pool.
         socket (str): the Unix socket it serves on.
-        cpu (int | None): the CPU it is pinned to, None when it is not.
-        process (asyncio.subprocess.Process | None): the running process.
-        live (set[str]): the ids of the workspaces it holds.
-        building (int): the creates in flight on it.
+        host (str): a Host it accepts, for its health check.
     """
 
-    index: int
-    socket: str
-    cpu: int | None
-    process: asyncio.subprocess.Process | None = None
-    live: set[str] = field(default_factory=set)
-    building: int = 0
-    client: httpx.AsyncClient | None = None
+    def __init__(self, index: int, socket: str, host: str) -> None:
+        self.index = index
+        self.socket = socket
+        self.host = host
+        self.live: set[str] = set()
+        self.dead = False
+        self.on_exit: Callable[[], None] = lambda: None
+        self._client: httpx.AsyncClient | None = None
 
     def http(self) -> httpx.AsyncClient:
         """The HTTP client that reaches it."""
-        if self.client is None:
-            self.client = httpx.AsyncClient(
+        if self._client is None:
+            self._client = httpx.AsyncClient(
                 transport=httpx.AsyncHTTPTransport(uds=self.socket),
-                base_url="http://localhost",
+                base_url=f"http://{self.host}",
                 timeout=None,
             )
-        return self.client
+        return self._client
+
+    async def start(self) -> None:
+        """Start it and wait until it answers."""
+        await self._launch()
+        deadline = time.monotonic() + READY_SECONDS
+        while True:
+            if self.dead:
+                raise RuntimeError(
+                    f"mirage: worker {self.index} exited as it started"
+                )
+            if await _answers(self):
+                return
+            if time.monotonic() > deadline:
+                await self.stop(0)
+                raise RuntimeError(
+                    f"mirage: worker {self.index} did not answer"
+                )
+            await asyncio.sleep(0.1)
+
+    async def stop(self, graceful_timeout: float) -> None:
+        """Stop it: it drains for ``graceful_timeout``, then exits or is
+        ended.
+
+        Args:
+            graceful_timeout (float): how long its lines get to finish.
+        """
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        """Close the client that reaches it."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def _launch(self) -> None:
+        raise NotImplementedError
+
+    def _exited(self, code: int | None) -> None:
+        if self.dead:
+            return
+        self.dead = True
+        self.on_exit()
+        if code != 0:
+            logger.error("mirage: worker %d exited (%s)", self.index, code)
+
+
+class ProcessWorker(Worker):
+    """A worker in a process of its own: the daemon module served by
+    uvicorn on its socket. Mirrors TypeScript's ``ProcessWorker``.
+
+    Args:
+        index (int): its place in the pool.
+        socket (str): the Unix socket it serves on.
+        host (str): a Host it accepts, for its health check.
+        env (dict[str, str]): its environment.
+    """
+
+    def __init__(
+        self, index: int, socket: str, host: str, env: dict[str, str]
+    ) -> None:
+        super().__init__(index, socket, host)
+        self._env = env
+        self._process: asyncio.subprocess.Process | None = None
+        self._watcher: asyncio.Task[None] | None = None
+
+    async def _launch(self) -> None:
+        env = {
+            **self._env,
+            ENV_WORKER_SOCKET: self.socket,
+            ENV_WORKERS: "1",
+            # Only the daemon reaches a worker's socket, and it names the
+            # client it served.
+            ENV_FORWARDED_ALLOW_IPS: "*",
+        }
+        # A worker exits when its stdin closes: the daemon is gone.
+        self._process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "mirage.server.daemon:app",
+            "--uds",
+            self.socket,
+            "--log-level",
+            "warning",
+            env=env,
+            stdin=asyncio.subprocess.PIPE,
+        )
+        self._watcher = asyncio.create_task(self._watch(self._process))
+
+    async def _watch(self, process: asyncio.subprocess.Process) -> None:
+        self._exited(await process.wait())
+
+    async def stop(self, graceful_timeout: float) -> None:
+        process = self._process
+        if process is None or self.dead:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(
+                process.wait(), graceful_timeout + EXIT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+        if self._watcher is not None:
+            await self._watcher
+
+
+class ThreadWorker(Worker):
+    """A worker on a thread of the daemon's, with an event loop of its
+    own. Its threads run beside the daemon's only on an interpreter
+    without the GIL. Mirrors TypeScript's ``ThreadWorker``.
+
+    Args:
+        index (int): its place in the pool.
+        socket (str): the Unix socket it serves on.
+        host (str): a Host it accepts, for its health check.
+    """
+
+    def __init__(self, index: int, socket: str, host: str) -> None:
+        super().__init__(index, socket, host)
+        self._server: uvicorn.Server | None = None
+        self._thread: threading.Thread | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def _launch(self) -> None:
+        # Only the daemon reaches a worker's socket, and it names the
+        # client it served; the daemon keeps the cap.
+        app = build_app(max_workspaces=sys.maxsize, forwarded_allow_ips=["*"])
+        self._server = uvicorn.Server(
+            uvicorn.Config(app, uds=self.socket, log_level="warning")
+        )
+        self._loop = asyncio.get_running_loop()
+        self._thread = threading.Thread(
+            target=self._run,
+            args=(self._server,),
+            name=f"mirage-worker-{self.index}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self, server: uvicorn.Server) -> None:
+        code = 0
+        try:
+            asyncio.run(server.serve())
+        except BaseException:
+            logger.exception("mirage: worker %d failed", self.index)
+            code = 1
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(self._exited, code)
+
+    async def stop(self, graceful_timeout: float) -> None:
+        server, thread = self._server, self._thread
+        if server is None or thread is None or self.dead:
+            return
+        server.should_exit = True
+        await asyncio.to_thread(thread.join, graceful_timeout + EXIT_SECONDS)
+        if thread.is_alive():
+            server.force_exit = True
+            await asyncio.to_thread(thread.join)
+        self._exited(0)
 
 
 class WorkerPool:
-    """The worker processes and which holds each workspace.
+    """The workers and which holds each workspace.
 
-    A workspace's home outlives its close, so its jobs and a create under
-    its id reach the worker that has them; a delete forgets it. Mirrors
-    TypeScript's ``WorkerPool``.
+    A workspace's worker outlives its close, so its jobs and a create
+    under its id reach the worker that has them; a delete forgets it.
+    Mirrors TypeScript's ``WorkerPool``.
 
     Args:
         count (int): how many workers to run.
-        cpus (Sequence[int] | None): the CPUs to pin them to, in order;
-            None pins none.
-        command (Sequence[str]): the command a worker runs; ``{socket}``
-            in it is the worker's socket.
-        env (dict[str, str]): the workers' environment.
+        worker_type (WorkerType): what they are.
+        env (dict[str, str]): a process worker's environment.
+        host (str): a Host the workers accept, for their health checks.
         graceful_timeout (float): how long a stopped worker drains its
             lines for.
     """
@@ -216,64 +351,79 @@ class WorkerPool:
     def __init__(
         self,
         count: int,
-        cpus: Sequence[int] | None,
-        command: Sequence[str],
+        worker_type: WorkerType,
         env: dict[str, str],
+        host: str,
         graceful_timeout: float,
     ) -> None:
-        if cpus is not None and not sys.platform.startswith("linux"):
-            logger.warning(
-                "mirage: cpus pins workers on Linux only; "
-                "the workers run unpinned"
-            )
-            cpus = None
-        if cpus is not None and shutil.which("taskset") is None:
-            raise DaemonConfigError(
-                "cpus pins workers with taskset, which is not on PATH"
-            )
-        self._command = list(command)
-        self._env = dict(env)
         self._graceful_timeout = graceful_timeout
         self._directory = tempfile.mkdtemp(prefix="mirage-workers-")
         self._homes: dict[str, Worker] = {}
+        self._pending: dict[str, Worker] = {}
         self._stopping = False
-        self._watchers: set[asyncio.Task[None]] = set()
+        # Creates being answered, each holding a slot under max_workspaces.
+        self.reserved = 0
         self.on_lost: Callable[[], None] = lambda: None
-        self.workers = [
-            Worker(
-                index=i,
-                socket=str(Path(self._directory) / f"{i}.sock"),
-                cpu=cpus[i % len(cpus)] if cpus else None,
+        self.workers: list[Worker] = []
+        for i in range(count):
+            socket = str(Path(self._directory) / f"{i}.sock")
+            worker: Worker = (
+                ProcessWorker(i, socket, host, env)
+                if worker_type == WorkerType.PROCESS
+                else ThreadWorker(i, socket, host)
             )
-            for i in range(count)
-        ]
+            worker.on_exit = functools.partial(self._lost, worker)
+            self.workers.append(worker)
 
     async def start(self) -> None:
         """Start every worker and wait until each answers."""
-        await asyncio.gather(*(self._launch(w) for w in self.workers))
+        await asyncio.gather(*(w.start() for w in self.workers))
 
     async def stop(self) -> None:
-        """Stop every worker: each drains, then exits or is killed."""
+        """Stop every worker: each drains, then exits or is ended."""
         self._stopping = True
-        await asyncio.gather(*(self._halt(w) for w in self.workers))
+        await asyncio.gather(
+            *(w.stop(self._graceful_timeout) for w in self.workers)
+        )
         for worker in self.workers:
-            if worker.client is not None:
-                await worker.client.aclose()
-                worker.client = None
+            await worker.close()
         shutil.rmtree(self._directory, ignore_errors=True)
 
+    def first(self) -> Worker | None:
+        """The first worker still running, which answers what no
+        workspace owns."""
+        return next((w for w in self.workers if not w.dead), None)
+
+    def random(self) -> Worker | None:
+        """A worker still running, at random: where a new workspace
+        goes."""
+        running = [w for w in self.workers if not w.dead]
+        return random.choice(running) if running else None
+
     def home(self, workspace_id: str) -> Worker | None:
-        """The worker holding or last holding ``workspace_id``, else None.
+        """The worker holding, last holding or now creating
+        ``workspace_id``, else None.
 
         Args:
             workspace_id (str): the workspace.
         """
-        return self._homes.get(workspace_id)
+        return self._homes.get(workspace_id) or self._pending.get(workspace_id)
 
-    def least_loaded(self) -> Worker:
-        """The worker a new workspace goes to: the one holding the
-        fewest."""
-        return min(self.workers, key=lambda w: len(w.live) + w.building)
+    def claim(self, workspace_id: str, worker: Worker) -> Callable[[], None]:
+        """Send the creates of ``workspace_id`` to ``worker`` until the
+        returned call.
+
+        Args:
+            workspace_id (str): the id being created.
+            worker (Worker): the worker creating it.
+        """
+        self._pending[workspace_id] = worker
+
+        def settle() -> None:
+            if self._pending.get(workspace_id) is worker:
+                del self._pending[workspace_id]
+
+        return settle
 
     def adopt(self, workspace_id: str, worker: Worker) -> None:
         """Record ``workspace_id`` as held by ``worker``.
@@ -282,6 +432,8 @@ class WorkerPool:
             workspace_id (str): the workspace.
             worker (Worker): the worker that built it.
         """
+        if worker.dead:
+            return
         previous = self._homes.get(workspace_id)
         if previous is not None and previous is not worker:
             previous.live.discard(workspace_id)
@@ -289,7 +441,7 @@ class WorkerPool:
         worker.live.add(workspace_id)
 
     def release(self, workspace_id: str) -> None:
-        """Record ``workspace_id`` as closed: its home stays.
+        """Record ``workspace_id`` as closed: its worker stays its home.
 
         Args:
             workspace_id (str): the workspace.
@@ -308,90 +460,22 @@ class WorkerPool:
         self._homes.pop(workspace_id, None)
 
     def held(self) -> int:
-        """How many workspaces the workers hold, and how many are being
-        built."""
-        return sum(len(w.live) + w.building for w in self.workers)
+        """How many workspaces the workers hold, those being created among
+        them."""
+        return self.count() + self.reserved
 
-    def live(self) -> int:
+    def count(self) -> int:
         """How many workspaces the workers hold."""
         return sum(len(w.live) for w in self.workers)
 
-    async def _launch(self, worker: Worker) -> None:
-        argv = [
-            arg.replace("{socket}", worker.socket) for arg in self._command
-        ]
-        if worker.cpu is not None:
-            argv = ["taskset", "-c", str(worker.cpu), *argv]
-        env = {
-            **self._env,
-            ENV_WORKER_SOCKET: worker.socket,
-            ENV_WORKERS: "1",
-            # Only the front reaches a worker's socket, and it names the
-            # client it served.
-            ENV_FORWARDED_ALLOW_IPS: "*",
-        }
-        # A worker exits when its stdin closes: the front is gone.
-        process = await asyncio.create_subprocess_exec(
-            *argv, env=env, stdin=asyncio.subprocess.PIPE
-        )
-        worker.process = process
-        watcher = asyncio.create_task(self._watch(worker, process))
-        self._watchers.add(watcher)
-        watcher.add_done_callback(self._watchers.discard)
-        deadline = time.monotonic() + READY_SECONDS
-        while True:
-            if worker.process is not process:
-                raise RuntimeError(
-                    f"mirage: worker {worker.index} exited as it started"
-                )
-            if await _answers(worker):
-                return
-            if time.monotonic() > deadline:
-                process.kill()
-                raise RuntimeError(
-                    f"mirage: worker {worker.index} did not answer"
-                )
-            await asyncio.sleep(0.1)
-
-    async def _watch(
-        self, worker: Worker, process: asyncio.subprocess.Process
-    ) -> None:
-        code = await process.wait()
-        if worker.process is process:
-            worker.process = None
+    def _lost(self, worker: Worker) -> None:
+        """A worker that exited: its workspaces are gone with it."""
         if self._stopping:
             return
-        # A worker that exited: its workspaces are gone, and it starts
-        # again.
-        logger.error(
-            "mirage: worker %d exited (%s); restarting it", worker.index, code
-        )
-        for workspace_id in [
-            i for i, home in self._homes.items() if home is worker
-        ]:
+        for workspace_id in [i for i, w in self._homes.items() if w is worker]:
             del self._homes[workspace_id]
         worker.live.clear()
         self.on_lost()
-        await asyncio.sleep(RESTART_SECONDS)
-        if self._stopping:
-            return
-        try:
-            await self._launch(worker)
-        except RuntimeError as exc:
-            logger.error("%s", exc)
-
-    async def _halt(self, worker: Worker) -> None:
-        process = worker.process
-        if process is None or process.returncode is not None:
-            return
-        process.terminate()
-        try:
-            await asyncio.wait_for(
-                process.wait(), self._graceful_timeout + EXIT_SECONDS
-            )
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
 
 
 @dataclass
@@ -405,7 +489,7 @@ class _Answer:
 
 @dataclass
 class _Peeked:
-    """A request's body as far as the front read it.
+    """A request's body as far as it was read.
 
     Attributes:
         head (bytes): what was read, sent on first.
@@ -418,9 +502,18 @@ class _Peeked:
     id: str | None
 
 
-class Front:
-    """The front: an ASGI app that sends each request to the worker
-    holding its workspace. Mirrors TypeScript's ``Front``.
+_UNAVAILABLE = _Answer(
+    502,
+    [("content-type", "application/json")],
+    b'{"detail":"worker unavailable"}',
+)
+
+
+class WorkerProxy:
+    """The daemon's server when it runs workers: an ASGI app that sends
+    each request to the worker holding its workspace and answers health,
+    readiness and lists over all of them. Mirrors TypeScript's
+    ``WorkerProxy``.
 
     Args:
         pool (WorkerPool): the workers, started with the app.
@@ -443,10 +536,10 @@ class Front:
         pid_file: Path | None = None,
     ) -> None:
         self.pool = pool
-        self.pid_file = pid_file
         self.max_workspaces = max_workspaces
         self.idle_grace_seconds = idle_grace_seconds
         self.exit = exit
+        self.pid_file = pid_file
         self.draining = False
         self._idle: asyncio.TimerHandle | None = None
         self._started_at = time.time()
@@ -494,7 +587,9 @@ class Front:
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
         pool = self.pool
-        first = pool.workers[0]
+        first = pool.first()
+        if first is None:
+            return await _reply(send, _UNAVAILABLE)
         parts = _path_parts(scope["path"])
         method = scope["method"]
         if parts[:1] != ["v1"]:
@@ -508,9 +603,9 @@ class Front:
                 200,
                 {
                     "status": "ok",
-                    "workspaces": pool.live(),
+                    "workspaces": pool.count(),
                     "uptime_s": round(time.time() - self._started_at, 3),
-                    "workers": len(pool.workers),
+                    "workers": sum(1 for w in pool.workers if not w.dead),
                 },
             )
         if resource == "ready" and len(parts) == 2 and method == "GET":
@@ -518,7 +613,7 @@ class Front:
                 "shutting_down"
                 if self.draining
                 else "ready"
-                if self._has_room(own=False)
+                if self._has_room(1)
                 else "full"
             )
             return await _send(
@@ -526,7 +621,7 @@ class Front:
             )
         if resource == "shutdown" and len(parts) == 2 and method == "POST":
             # A worker answers whether the caller may stop the daemon.
-            answer = await self._fetch(first, scope, await _read_all(receive))
+            answer = await self._fetch(first, scope, b"", receive)
             if answer.status != 200:
                 return await _reply(send, answer)
             await _send(
@@ -542,7 +637,7 @@ class Front:
                     worker = pool.home(owner[0]) or first
                     return await self._pass(worker, scope, receive, send)
                 return await self._gather(scope, send, "submitted_at")
-            return await self._find(scope, receive, send)
+            return await self._find(scope, receive, send, first)
         if resource != "workspaces":
             return await self._pass(first, scope, receive, send)
         if workspace_id is None:
@@ -554,20 +649,19 @@ class Front:
         if workspace_id == "load" and len(parts) == 3 and method == "POST":
             return await self._create(scope, receive, send, None)
         home = pool.home(workspace_id)
-        if home is None:
+        if home is None or home.dead:
             return await self._pass(first, scope, receive, send)
         if action == "clone" and len(parts) == 4 and method == "POST":
             return await self._create(scope, receive, send, home)
-        if action is None and method == "DELETE":
-            answer = await self._fetch(home, scope, await _read_all(receive))
+        deletes = action is None and method == "DELETE"
+        closes = action == "close" and len(parts) == 4 and method == "POST"
+        if deletes or closes:
+            answer = await self._fetch(home, scope, b"", receive)
             if answer.status < 300:
-                pool.forget(workspace_id)
-                self._idle_check()
-            return await _reply(send, answer)
-        if action == "close" and len(parts) == 4 and method == "POST":
-            answer = await self._fetch(home, scope, await _read_all(receive))
-            if answer.status < 300:
-                pool.release(workspace_id)
+                if deletes:
+                    pool.forget(workspace_id)
+                else:
+                    pool.release(workspace_id)
                 self._idle_check()
             return await _reply(send, answer)
         return await self._pass(home, scope, receive, send)
@@ -579,55 +673,76 @@ class Front:
         send: Send,
         source: Worker | None,
     ) -> None:
-        """A create, load or clone: to the worker already holding the id
-        it names, else to ``source``'s for a clone, else to the least
-        loaded."""
+        """A create, load or clone: to the worker holding or creating the
+        id it names, else to ``source``'s for a clone, else to a worker at
+        random."""
         pool = self.pool
         if self.draining:
             return await _send(
                 send, 503, {"detail": "server is shutting down"}
             )
-        if not self._has_room(own=False):
-            return await _send(
-                send,
-                503,
-                {
-                    "detail": "server is at max_workspaces "
-                    f"({self.max_workspaces})"
-                },
-            )
-        peeked = await _peek(scope, receive)
-        named = peeked.id
-        held = pool.home(named) if named is not None else None
-        if (
-            source is not None
-            and held is not None
-            and held is not source
-            and named in held.live
-        ):
-            return await _send(
-                send, 409, {"detail": f"workspace id already exists: {named}"}
-            )
-        worker = source or held or pool.least_loaded()
-        worker.building += 1
-        self._cancel_idle()
+        # The slot is held before anything is awaited, so creates racing
+        # each other cannot pass max_workspaces.
+        pool.reserved += 1
+        reserved = True
         try:
-            answer = await self._fetch(
-                worker, scope, peeked.head, receive if peeked.more else None
-            )
-            if answer.status == 201:
-                made = _id_of(answer.body)
-                if made is not None:
-                    pool.adopt(made, worker)
-            await _reply(send, answer)
+            refused = await self._refused(scope, source or pool.first())
+            if refused is not None:
+                return await _reply(send, refused)
+            peeked = await _peek(scope, receive)
+            named = peeked.id
+            home = pool.home(named) if named is not None else None
+            live = home is not None and named in home.live
+            if live:
+                # A retry of a live id builds nothing: its worker answers it.
+                pool.reserved -= 1
+                reserved = False
+            elif not self._has_room(0):
+                return await _send(
+                    send,
+                    503,
+                    {
+                        "detail": "server is at max_workspaces "
+                        f"({self.max_workspaces})"
+                    },
+                )
+            if source is not None and live and home is not source:
+                return await _send(
+                    send,
+                    409,
+                    {"detail": f"workspace id already exists: {named}"},
+                )
+            alive = home if home is not None and not home.dead else None
+            worker = source or alive or pool.random()
+            if worker is None:
+                return await _reply(send, _UNAVAILABLE)
+            settle = pool.claim(named, worker) if named is not None else None
+            self._cancel_idle()
+            try:
+                answer = await self._fetch(
+                    worker,
+                    scope,
+                    peeked.head,
+                    receive if peeked.more else None,
+                )
+                if answer.status == 201:
+                    made = _id_of(answer.body)
+                    if made is not None:
+                        pool.adopt(made, worker)
+                await _reply(send, answer)
+            finally:
+                if settle is not None:
+                    settle()
         finally:
-            worker.building -= 1
+            if reserved:
+                pool.reserved -= 1
             self._idle_check()
 
     async def _gather(self, scope: Scope, send: Send, order: str) -> None:
         """A list: every worker's, merged in ``order``."""
+        running = [w for w in self.pool.workers if not w.dead]
         answers = await asyncio.gather(
-            *(self._fetch(w, scope, b"") for w in self.pool.workers)
+            *(self._fetch(w, scope, b"") for w in running)
         )
         for answer in answers:
             if answer.status != 200:
@@ -636,20 +751,52 @@ class Front:
         items.sort(key=lambda item: float(item.get(order) or 0))
         await _send(send, 200, items)
 
-    async def _find(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def _find(
+        self, scope: Scope, receive: Receive, send: Send, first: Worker
+    ) -> None:
         """A job's request: the worker that knows the job answers."""
-        body = await _read_all(receive)
+        refused = await self._refused(scope, first)
+        if refused is not None:
+            return await _reply(send, refused)
+        body = await _read_up_to(receive, MAX_REQUEST_PART)
+        if body is None:
+            return await _send(send, 413, {"detail": "request body too large"})
         answer: _Answer | None = None
         for worker in self.pool.workers:
+            if worker.dead:
+                continue
             answer = await self._fetch(worker, scope, body)
             if answer.status != 404:
                 break
-        assert answer is not None
-        await _reply(send, answer)
+        await _reply(send, answer or _UNAVAILABLE)
 
-    def _has_room(self, own: bool) -> bool:
+    async def _refused(
+        self, scope: Scope, worker: Worker | None
+    ) -> _Answer | None:
+        """A worker's refusal of the caller, asked before a body is read:
+        None when the caller may go on."""
+        if worker is None:
+            return None
+        headers = [
+            (k, v)
+            for k, v in _headers_for(scope)
+            if k not in ("content-length", "content-type")
+        ]
+        try:
+            response = await worker.http().get(AUTH_PROBE, headers=headers)
+        except httpx.TransportError as exc:
+            logger.debug(
+                "mirage: worker %d did not answer: %s", worker.index, exc
+            )
+            return _UNAVAILABLE
+        if response.status_code not in (401, 403):
+            return None
+        return _answered(response)
+
+    def _has_room(self, extra: int) -> bool:
+        """Whether ``extra`` more workspaces fit under ``max_workspaces``."""
         cap = self.max_workspaces
-        return cap is None or self.pool.held() + (0 if own else 1) <= cap
+        return cap is None or self.pool.held() + extra <= cap
 
     def _request(
         self, worker: Worker, scope: Scope, content: Any
@@ -658,40 +805,69 @@ class Front:
         query = scope.get("query_string", b"")
         url = path.decode("latin-1") + ("?" + query.decode() if query else "")
         return worker.http().build_request(
-            scope["method"],
-            url,
-            headers=_headers_for(scope),
-            content=content,
+            scope["method"], url, headers=_headers_for(scope), content=content
         )
 
     async def _pass(
         self, worker: Worker, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        """Pass a request through to ``worker``, streaming both ways."""
-        request = self._request(worker, scope, _chunks(receive))
-        try:
-            response = await worker.http().send(request, stream=True)
-        except httpx.TransportError:
-            return await _send(send, 502, {"detail": "worker unavailable"})
-        try:
-            await send(
-                {
-                    "type": "http.response.start",
-                    "status": response.status_code,
-                    "headers": _passable(response.headers.raw),
-                }
-            )
-            async for chunk in response.aiter_raw():
+        """Pass a request through to ``worker``, streaming both ways. A
+        client gone before the answer ends stops the worker's side too."""
+        sent = asyncio.Event()
+
+        async def body() -> AsyncIterator[bytes]:
+            async for chunk in _chunks(receive):
+                yield chunk
+            sent.set()
+
+        async def answer() -> None:
+            request = self._request(worker, scope, body())
+            try:
+                response = await worker.http().send(request, stream=True)
+            except httpx.TransportError as exc:
+                logger.debug(
+                    "mirage: worker %d did not answer: %s", worker.index, exc
+                )
+                return await _reply(send, _UNAVAILABLE)
+            try:
                 await send(
                     {
-                        "type": "http.response.body",
-                        "body": chunk,
-                        "more_body": True,
+                        "type": "http.response.start",
+                        "status": response.status_code,
+                        "headers": _passable(response.headers.raw),
                     }
                 )
-            await send({"type": "http.response.body", "body": b""})
+                async for chunk in response.aiter_raw():
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": chunk,
+                            "more_body": True,
+                        }
+                    )
+                await send({"type": "http.response.body", "body": b""})
+            finally:
+                await response.aclose()
+
+        async def gone() -> None:
+            await sent.wait()
+            while True:
+                message: Message = await receive()
+                if message["type"] == "http.disconnect":
+                    return
+
+        answering = asyncio.create_task(answer())
+        watching = asyncio.create_task(gone())
+        try:
+            done, _ = await asyncio.wait(
+                [answering, watching], return_when=asyncio.FIRST_COMPLETED
+            )
         finally:
-            await response.aclose()
+            watching.cancel()
+            if not answering.done():
+                answering.cancel()
+        if answering in done:
+            await answering
 
     async def _fetch(
         self,
@@ -714,18 +890,12 @@ class Front:
             response = await worker.http().send(
                 self._request(worker, scope, content)
             )
-        except httpx.TransportError:
-            payload = json.dumps(
-                {"detail": "worker unavailable"}, separators=(",", ":")
-            ).encode()
-            return _Answer(
-                502, [("content-type", "application/json")], payload
+        except httpx.TransportError as exc:
+            logger.debug(
+                "mirage: worker %d did not answer: %s", worker.index, exc
             )
-        return _Answer(
-            response.status_code,
-            [(k.decode(), v.decode()) for k, v in response.headers.raw],
-            response.content,
-        )
+            return _UNAVAILABLE
+        return _answered(response)
 
     async def _websocket(
         self, scope: Scope, receive: Receive, send: Send
@@ -737,12 +907,22 @@ class Front:
             if len(parts) > 2 and parts[1] == "workspaces"
             else None
         )
-        worker = home or self.pool.workers[0]
+        worker = (
+            home if home is not None and not home.dead else self.pool.first()
+        )
+        if worker is None:
+            await send({"type": "websocket.close", "code": 1011})
+            return
+        headers = _headers_for(scope)
+        host = next((v for k, v in headers if k == "host"), worker.host)
         query = scope.get("query_string", b"").decode()
-        uri = "ws://worker" + scope["path"] + ("?" + query if query else "")
-        headers = [
+        path = (scope.get("raw_path") or scope["path"].encode()).decode(
+            "latin-1"
+        )
+        uri = f"ws://{host}{path}" + ("?" + query if query else "")
+        kept = [
             (k, v)
-            for k, v in _headers_for(scope)
+            for k, v in headers
             if not k.startswith("sec-websocket-") and k != "host"
         ]
         await receive()
@@ -750,11 +930,14 @@ class Front:
             upstream = await unix_connect(
                 worker.socket,
                 uri,
-                additional_headers=headers,
+                additional_headers=kept,
                 subprotocols=scope.get("subprotocols") or None,
                 max_size=None,
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug(
+                "mirage: worker %d refused a WebSocket: %s", worker.index, exc
+            )
             await send({"type": "websocket.close", "code": 1011})
             return
         await send(
@@ -770,8 +953,8 @@ class Front:
                         )
                     else:
                         await send({"type": "websocket.send", "text": message})
-            except ConnectionClosed:
-                pass
+            except ConnectionClosed as exc:
+                logger.debug("mirage: a worker's WebSocket closed: %s", exc)
             await send({"type": "websocket.close", "code": 1000})
 
         async def up() -> None:
@@ -818,7 +1001,7 @@ class Front:
             self._idle = None
 
 
-def build_front(
+def build_worker_proxy(
     pool: WorkerPool,
     max_workspaces: int | None,
     proxies: Sequence[str],
@@ -826,8 +1009,8 @@ def build_front(
     exit: Callable[[], None],
     pid_file: Path | None = None,
 ) -> Any:
-    """The front over ``pool``, as an ASGI app that starts and stops it.
-    Mirrors TypeScript's ``buildFront``.
+    """The daemon's server over ``pool``, as an ASGI app that starts and
+    stops it. Mirrors TypeScript's ``buildWorkerProxy``.
 
     Args:
         pool (WorkerPool): the workers.
@@ -841,17 +1024,19 @@ def build_front(
         pid_file (Path | None): where the daemon's pid is written while it
             runs.
     """
-    front = Front(pool, max_workspaces, idle_grace_seconds, exit, pid_file)
+    proxy = WorkerProxy(
+        pool, max_workspaces, idle_grace_seconds, exit, pid_file
+    )
     if not proxies:
-        return front
+        return proxy
     return ProxyHeadersMiddleware(
-        cast(Any, front), trusted_hosts=list(proxies)
+        cast(Any, proxy), trusted_hosts=list(proxies)
     )
 
 
 def _path_parts(path: str) -> list[str]:
-    """The decoded segments of a request's path."""
-    return [unquote(segment) for segment in path.split("/")[1:]]
+    """The segments of a request's path, which ASGI has decoded."""
+    return path.split("/")[1:]
 
 
 async def _answers(worker: Worker) -> bool:
@@ -861,6 +1046,15 @@ async def _answers(worker: Worker) -> bool:
     except httpx.TransportError:
         return False
     return response.status_code == 200
+
+
+def _answered(response: httpx.Response) -> _Answer:
+    """A worker's whole answer."""
+    return _Answer(
+        response.status_code,
+        [(k.decode(), v.decode()) for k, v in response.headers.raw],
+        response.content,
+    )
 
 
 def _headers_for(scope: Scope) -> list[tuple[str, str]]:
@@ -918,10 +1112,18 @@ async def _reply(send: Send, answer: _Answer) -> None:
 
 
 def _id_of(body: bytes) -> str | None:
+    """The workspace id a create names: its ``id``, else its config's
+    ``workspace_id``."""
     try:
-        made = json.loads(body).get("id")
-    except (ValueError, AttributeError):
+        parsed = json.loads(body)
+    except ValueError:
         return None
+    if not isinstance(parsed, dict):
+        return None
+    config = parsed.get("config")
+    made = parsed.get("id")
+    if made is None and isinstance(config, dict):
+        made = config.get("workspace_id")
     return made if isinstance(made, str) else None
 
 
@@ -936,14 +1138,23 @@ async def _chunks(receive: Receive) -> AsyncIterator[bytes]:
             return
 
 
-async def _read_all(receive: Receive) -> bytes:
-    return b"".join([chunk async for chunk in _chunks(receive)])
+async def _read_up_to(receive: Receive, limit: int) -> bytes | None:
+    """The whole request body, None past ``limit`` bytes."""
+    read: list[bytes] = []
+    size = 0
+    async for chunk in _chunks(receive):
+        size += len(chunk)
+        if size > limit:
+            return None
+        read.append(chunk)
+    return b"".join(read)
 
 
 async def _peek(scope: Scope, receive: Receive) -> _Peeked:
-    """Read a create's body until the workspace id it names is known: a
-    JSON body whole, up to ``MAX_REQUEST_PART``, or a multipart load's
-    parts up to the end of its ``request`` part.
+    """Read a create's body, up to ``MAX_REQUEST_PART``, until the
+    workspace id it names is known: a JSON body whole, or a multipart
+    load's parts up to the end of its ``request`` part. Past the limit the
+    id is not known.
 
     Returns:
         _Peeked: what was read, whether more follows, and the id.
@@ -955,22 +1166,6 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
     chunks: list[bytes] = []
     size = 0
     more = True
-    if not content_type.startswith("multipart/"):
-        while more:
-            message = await receive()
-            chunk = message.get("body", b"")
-            more = (
-                bool(message.get("more_body"))
-                and message["type"] == "http.request"
-            )
-            chunks.append(chunk)
-            size += len(chunk)
-            if size > MAX_REQUEST_PART:
-                return _Peeked(b"".join(chunks), more, None)
-        head = b"".join(chunks)
-        return _Peeked(head, False, _id_of(head))
-    # The parts are read from what has arrived; the request part's JSON
-    # names the id.
 
     async def read() -> AsyncIterator[bytes]:
         nonlocal more, size
@@ -985,6 +1180,12 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
             size += len(chunk)
             yield chunk
 
+    if not content_type.startswith("multipart/"):
+        async for _ in read():
+            if size > MAX_REQUEST_PART:
+                return _Peeked(b"".join(chunks), more, None)
+        head = b"".join(chunks)
+        return _Peeked(head, False, _id_of(head))
     request: list[bytes] = []
     name = b""
     events = part_events(read(), content_type)
@@ -998,11 +1199,11 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
                 request.append(bytes(value))
             elif kind == PartEvent.END and name == b"request":
                 break
-            if size > MAX_REQUEST_PART + MAX_SNAPSHOT_PART:
+            if size > MAX_REQUEST_PART:
                 break
-    except HTTPException:
+    except HTTPException as exc:
         # A malformed body goes on as it is, for the worker to refuse.
-        pass
+        logger.debug("mirage: a load body did not parse: %s", exc.detail)
     finally:
         await events.aclose()
     return _Peeked(b"".join(chunks), more, _id_of(b"".join(request)))

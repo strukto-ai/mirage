@@ -1184,8 +1184,9 @@
   },
   "server/workers": {
    "typescript_only": {
-    "FrontOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
-    "WorkerPoolOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments."
+    "WorkerProxyOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
+    "WorkerPoolOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
+    "WorkerOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments."
    }
   }
  }

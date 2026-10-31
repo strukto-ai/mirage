@@ -27,7 +27,6 @@ from mirage.server.env import (
     ENV_MAX_SESSIONS,
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
-    ENV_WORKSPACE_MAX_MEMORY,
 )
 from mirage.server.registry import (
     Claim,
@@ -36,7 +35,6 @@ from mirage.server.registry import (
     resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
-    resolve_workspace_max_memory,
 )
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.record.disk import DiskRecordClient
@@ -330,37 +328,4 @@ async def test_a_drain_deadline_counts_a_capture_it_waits_behind():
     with pytest.raises(MirageAbortError):
         await line
     await snapshot
-    await registry.close_all()
-
-
-def test_workspace_max_memory_reads_the_env_then_config(monkeypatch, tmp_path):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv(ENV_WORKSPACE_MAX_MEMORY, raising=False)
-    assert resolve_workspace_max_memory() is None
-    (tmp_path / "config.toml").write_text(
-        '[daemon]\nworkspace_max_memory = "256M"\n'
-    )
-    assert resolve_workspace_max_memory() == 256 << 20
-    monkeypatch.setenv(ENV_WORKSPACE_MAX_MEMORY, "1G")
-    assert resolve_workspace_max_memory() == 1 << 30
-
-
-@pytest.mark.parametrize("value", ["0", "lots"])
-def test_workspace_max_memory_must_be_a_positive_size(monkeypatch, value):
-    monkeypatch.setenv(ENV_WORKSPACE_MAX_MEMORY, value)
-    with pytest.raises(DaemonConfigError):
-        resolve_workspace_max_memory()
-
-
-@pytest.mark.asyncio
-async def test_workspace_max_memory_caps_a_workspace_asking_more():
-    registry = WorkspaceRegistry(workspace_max_memory=1000)
-    limits = []
-    for i, max_memory in enumerate(["1G", None, 500]):
-        ws = Workspace(
-            {"/": (RAMVFS(), MountMode.WRITE)}, max_memory=max_memory
-        )
-        entry = registry.add(ws, f"w{i}")
-        limits.append(entry.runner.ws.registry.memory.limit)
-    assert limits == [1000, 1000, 500]
     await registry.close_all()

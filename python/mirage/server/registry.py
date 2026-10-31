@@ -26,7 +26,6 @@ from typing import Any, Iterable
 
 from mirage import Workspace, WorkspaceRunner
 from mirage.config import load_policy_file
-from mirage.io.memory import MemoryBudget
 from mirage.io.network import NetworkRule, NetworkSetting, network_rule
 from mirage.policy.base import Policy
 from mirage.policy.policies import Policies
@@ -45,13 +44,11 @@ from mirage.server.env import (
     ENV_MAX_SESSIONS,
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
-    ENV_WORKSPACE_MAX_MEMORY,
 )
 from mirage.server.jobs import ExecutionTable
 from mirage.server.paths import mirage_home
 from mirage.types import JsonValue
 from mirage.utils.ids import new_workspace_id
-from mirage.utils.size import parse_limit
 from mirage.workspace.record.disk import DiskRecordClient
 
 logger = logging.getLogger(__name__)
@@ -124,40 +121,6 @@ def resolve_max_sessions(max_sessions: int | None = None) -> int | None:
         DaemonConfigError: the cap is not a positive whole number.
     """
     return _cap(max_sessions, ENV_MAX_SESSIONS, "max_sessions")
-
-
-def resolve_workspace_max_memory(
-    workspace_max_memory: str | int | None = None,
-) -> int | None:
-    """The most each workspace's ``max_memory`` may be, in bytes:
-    ``workspace_max_memory`` when given, else
-    ``$MIRAGE_WORKSPACE_MAX_MEMORY``, else the ``workspace_max_memory``
-    key in config.toml's ``[daemon]`` table, else no cap. A size takes a
-    unit (``256M``, ``1G``). Mirrors TypeScript's
-    ``resolveWorkspaceMaxMemory``.
-
-    Args:
-        workspace_max_memory (str | int | None): the cap the caller set.
-
-    Raises:
-        DaemonConfigError: the cap is not a positive size.
-    """
-    value: Any = workspace_max_memory
-    if value is None:
-        value = os.environ.get(ENV_WORKSPACE_MAX_MEMORY) or read_daemon_table(
-            mirage_home()
-        ).get("workspace_max_memory")
-        if value is None or value == "":
-            return None
-    try:
-        size = parse_limit(value, "workspace_max_memory")
-    except (TypeError, ValueError) as e:
-        raise DaemonConfigError(str(e)) from e
-    if size < 1:
-        raise DaemonConfigError(
-            f"workspace_max_memory must be a positive size, got {value!r}"
-        )
-    return size
 
 
 def _cap(given: int | None, env: str, key: str) -> int | None:
@@ -278,7 +241,6 @@ class WorkspaceRegistry:
         policies: Sequence[Policy] = (),
         programs: ProfileScripts | None = None,
         max_sessions: int | None = None,
-        workspace_max_memory: int | None = None,
     ) -> None:
         """Construct an empty registry.
 
@@ -304,14 +266,10 @@ class WorkspaceRegistry:
                 programs, by method, which answer the same way.
             max_sessions (int | None): the most sessions each workspace
                 holds, its default among them; None for no cap.
-            workspace_max_memory (int | None): the most bytes each
-                workspace's ``max_memory`` may be; None for no cap. A
-                workspace asking more, or no cap, runs under this.
         """
         self._entries: dict[str, WorkspaceEntry] = {}
         self.max_workspaces = max_workspaces
         self.max_sessions = max_sessions
-        self.workspace_max_memory = workspace_max_memory
         self.policies = tuple(policies)
         self._programs = {
             method: scripts
@@ -639,14 +597,6 @@ class WorkspaceRegistry:
         for policy in self.policies:
             ws.policies.add(policy)
         ws.registry.network = self.rule_for(ws.network)
-        # The server's ceiling on each workspace's memory: one asking
-        # more, or no cap, runs under it.
-        memory = ws.registry.memory
-        ceiling = self.workspace_max_memory
-        if ceiling is not None and (memory is None or memory.limit > ceiling):
-            ws.registry.memory = MemoryBudget(
-                ceiling, ws.registry.held_in_memory
-            )
         # An account reaches only the workspaces it owns, so every
         # method's caller is the owner's account.
         ws.policies.account = owner

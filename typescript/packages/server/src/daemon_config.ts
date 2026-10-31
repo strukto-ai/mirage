@@ -43,8 +43,7 @@ export const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   'ssh_host_key_file',
   'ssh_authorized_keys',
   'workers',
-  'cpus',
-  'workspace_max_memory',
+  'worker_type',
 ])
 export const NUMERIC_KEYS: ReadonlySet<string> = new Set([
   'idle_grace_seconds',

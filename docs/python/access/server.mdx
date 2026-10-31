@@ -41,7 +41,6 @@ uvicorn.run(app, host="127.0.0.1", port=8765)
 | `policies` | none | The server's own [policies](/home/access/http#server-policies): each answers `pre_workspace` before a workspace is built, and is registered on every workspace the app builds. |
 | `policy_file` | `MIRAGE_POLICY_FILE`, else the `policy_file` key, else none | A file of policy programs that answer the same way. |
 | `max_sessions` | `MIRAGE_MAX_SESSIONS`, else the `max_sessions` key, else no cap | The most sessions each workspace holds, its default session among them. A new session past it, over HTTP or SSH, answers 429. |
-| `workspace_max_memory` | `MIRAGE_WORKSPACE_MAX_MEMORY`, else the `workspace_max_memory` key, else no cap | The most each workspace's `max_memory` may be, a size such as `256M`. A workspace asking more, or no cap, runs under it. |
 | `rate_limits` | `MIRAGE_RATE_LIMITS`, else the `rate_limits` key, else none | A list of `RateLimit(key, rate)`. See [Rate limits](/home/access/http#rate-limits). |
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS`, else the `forwarded_allow_ips` key, else none | The proxies, addresses or networks, whose `X-Forwarded-For` names the client. `["*"]` believes any. |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT`, else the `graceful_timeout` key, else `0` | Seconds running lines get to finish on SIGTERM or SIGINT before they are cancelled. New work is refused meanwhile. |
@@ -53,11 +52,11 @@ uvicorn.run(app, host="127.0.0.1", port=8765)
 
 ## Workers
 
-With `workers` above 1 (`MIRAGE_WORKERS`, or the `workers` key), the daemon is a front for that many worker processes. Each worker is the whole server on a Unix socket of its own. A new workspace goes to the worker holding the fewest, and every request about a workspace goes to the worker holding it, so the workspaces on one worker share its event loop and nothing else. The front answers `/v1/health` and `/v1/ready` itself, merges the lists of workspaces and jobs, and holds `max_workspaces` across all the workers. A worker that exits takes its workspaces with it and starts again.
+By default the daemon is one process, and one thread holds every workspace. With `workers` above 1 (`MIRAGE_WORKERS`, or the `workers` key), it runs that many workers, each the whole server on a Unix socket of its own, and its own server passes each request to the worker holding the workspace. A new workspace goes to a worker at random. The workspaces on one worker share its event loop, and the OS spreads the workers over the CPUs.
 
-`cpus` (`MIRAGE_CPUS`, or the `cpus` key) is a CPU list such as `0-3,6`. On Linux it pins worker i to the i-th CPU of the list with `taskset`, and with `workers` unset it starts one worker per CPU. Elsewhere the workers run unpinned. The SSH port and rate limits are one process's, so neither combines with workers yet.
+`worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. TypeScript defaults to threads. Python defaults to threads on an interpreter without the GIL (3.14t) and to processes otherwise, since threads under the GIL take turns.
 
-`workspace_max_memory` (`MIRAGE_WORKSPACE_MAX_MEMORY`, or the `workspace_max_memory` key) caps each workspace's `max_memory`, with or without workers: a workspace asking more, or no cap, runs under it. It counts what the RAM mounts store, what a command builds and each Monty run; a Pyodide or WASI interpreter keeps its own `max_memory`.
+The daemon answers `/v1/health` and `/v1/ready` itself, merges the lists of workspaces and jobs, and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. The SSH port and rate limits are one server's, so neither combines with workers yet.
 
 ## Started by the CLI
 

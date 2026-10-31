@@ -31,7 +31,6 @@ from mirage.server.daemon_config import (
 )
 from mirage.server.env import (
     ENV_ALLOWED_HOSTS,
-    ENV_CPUS,
     ENV_DAEMON_PORT,
     ENV_FORWARDED_ALLOW_IPS,
     ENV_GRACEFUL_TIMEOUT,
@@ -40,8 +39,8 @@ from mirage.server.env import (
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
     ENV_RATE_LIMITS,
+    ENV_WORKER_TYPE,
     ENV_WORKERS,
-    ENV_WORKSPACE_MAX_MEMORY,
 )
 from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
 from mirage.server.paths import mirage_home
@@ -65,9 +64,8 @@ _ENV_FOR_KEY = {
     "graceful_timeout": ENV_GRACEFUL_TIMEOUT,
     "max_workspaces": ENV_MAX_WORKSPACES,
     "max_sessions": ENV_MAX_SESSIONS,
-    "workspace_max_memory": ENV_WORKSPACE_MAX_MEMORY,
     "workers": ENV_WORKERS,
-    "cpus": ENV_CPUS,
+    "worker_type": ENV_WORKER_TYPE,
     "rate_limits": ENV_RATE_LIMITS,
     "policy_file": ENV_POLICY_FILE,
     "port": ENV_DAEMON_PORT,
@@ -178,9 +176,8 @@ def _default_for_key(key: str) -> str:
         "graceful_timeout": "0",
         "max_workspaces": "",
         "max_sessions": "",
-        "workspace_max_memory": "",
         "workers": "1",
-        "cpus": "",
+        "worker_type": "",
         "rate_limits": "",
         "policy_file": "",
         "port": "8765",

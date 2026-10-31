@@ -26,7 +26,10 @@ from fastapi import FastAPI
 from mirage.server.app import build_app
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import ENV_IDLE_GRACE_SECONDS, ENV_WORKER_SOCKET
-from mirage.server.host_validation import resolve_forwarded_allow_ips
+from mirage.server.host_validation import (
+    resolve_allowed_hosts,
+    resolve_forwarded_allow_ips,
+)
 from mirage.server.paths import pid_file_path
 from mirage.server.rate_limit import resolve_rate_limits
 from mirage.server.registry import (
@@ -36,8 +39,8 @@ from mirage.server.registry import (
 from mirage.server.ssh.config import resolve_ssh_config
 from mirage.server.workers import (
     WorkerPool,
-    build_front,
-    resolve_cpus,
+    build_worker_proxy,
+    resolve_worker_type,
     resolve_workers,
 )
 
@@ -70,37 +73,31 @@ def _tune_interpreter() -> None:
     sys.setswitchinterval(SWITCH_INTERVAL)
 
 
-def _watch_front() -> None:
-    """Stop this worker once its stdin closes: the front is gone."""
+def _watch_daemon() -> None:
+    """Stop this worker once its stdin closes: the daemon is gone."""
     sys.stdin.buffer.read()
     _exit()
 
 
-def _front() -> Any:
-    """The front of ``workers`` worker processes, each this module served
-    by uvicorn on a socket of its own. The daemon's SSH port and rate
-    limits are one process's, so neither is taken with workers yet."""
+def _workers_proxy() -> Any:
+    """The daemon's server, sending each workspace's requests to one of
+    ``workers`` workers. The daemon's SSH port and rate limits are one
+    server's, so neither is taken with workers yet."""
     if resolve_ssh_config().port is not None:
         raise DaemonConfigError("ssh_port does not combine with workers yet")
     if resolve_rate_limits():
         raise DaemonConfigError("rate_limits do not combine with workers yet")
+    host = next(
+        (h for h in resolve_allowed_hosts(None) if "*" not in h), "localhost"
+    )
     pool = WorkerPool(
         count=_workers,
-        cpus=resolve_cpus(),
-        command=[
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "mirage.server.daemon:app",
-            "--uds",
-            "{socket}",
-            "--log-level",
-            "warning",
-        ],
+        worker_type=resolve_worker_type(),
         env=dict(os.environ),
+        host=host,
         graceful_timeout=resolve_graceful_timeout(),
     )
-    return build_front(
+    return build_worker_proxy(
         pool,
         max_workspaces=resolve_max_workspaces(),
         proxies=resolve_forwarded_allow_ips(),
@@ -115,12 +112,12 @@ _workers = 1 if _worker_socket else resolve_workers()
 app: Any
 
 if _workers > 1:
-    app = _front()
+    app = _workers_proxy()
 else:
     if _worker_socket:
-        # A worker of a front: as many workspaces as the front sends it,
-        # the front keeping the daemon's cap, idle exit and pid file.
-        threading.Thread(target=_watch_front, daemon=True).start()
+        # A process worker: as many workspaces as the daemon sends it, the
+        # daemon keeping the cap, idle exit and pid file.
+        threading.Thread(target=_watch_daemon, daemon=True).start()
         app = build_app(max_workspaces=sys.maxsize)
     else:
         app = build_app(

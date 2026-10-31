@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { resolve } from 'node:path'
-import { MemoryBudget } from '@struktoai/mirage-core/io/memory'
 import {
   networkRule,
   type NetworkRule,
@@ -31,7 +30,6 @@ import {
 } from '@struktoai/mirage-core/policy/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
-import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
 import { watchNetwork } from '@struktoai/mirage-node/io/network'
@@ -41,7 +39,6 @@ import {
   ENV_MAX_SESSIONS,
   ENV_MAX_WORKSPACES,
   ENV_POLICY_FILE,
-  ENV_WORKSPACE_MAX_MEMORY,
 } from './env.ts'
 import { ExecutionTable } from './jobs.ts'
 import { mirageHome } from './paths.ts'
@@ -108,11 +105,6 @@ export interface WorkspaceRegistryOptions {
   programs?: ProfileScripts
   /** The most sessions each workspace holds, its default among them; null for no cap. */
   maxSessions?: number | null
-  /**
-   * The most bytes each workspace's `max_memory` may be, in bytes; null
-   * for no cap. A workspace asking more, or no cap, runs under this.
-   */
-  workspaceMaxMemory?: number | null
 }
 
 /**
@@ -139,40 +131,6 @@ export function resolveMaxSessions(
   env: Record<string, string | undefined> = process.env,
 ): number | null {
   return cap(maxSessions, env, ENV_MAX_SESSIONS, 'max_sessions')
-}
-
-/**
- * The most each workspace's `max_memory` may be, in bytes:
- * `workspaceMaxMemory` when given, else `$MIRAGE_WORKSPACE_MAX_MEMORY`,
- * else the `workspace_max_memory` key in config.toml's `[daemon]` table,
- * else no cap. A size takes a unit (`256M`, `1G`). Mirrors Python's
- * `resolve_workspace_max_memory`.
- */
-export function resolveWorkspaceMaxMemory(
-  workspaceMaxMemory?: string | number | null,
-  env: Record<string, string | undefined> = process.env,
-): number | null {
-  let value: string | number | undefined = workspaceMaxMemory ?? undefined
-  if (value === undefined) {
-    const fromEnv = env[ENV_WORKSPACE_MAX_MEMORY]
-    value =
-      fromEnv !== undefined && fromEnv !== ''
-        ? fromEnv
-        : readDaemonTable(mirageHome(env)).workspace_max_memory
-    if (value === undefined || value === '') return null
-  }
-  let bytes: number
-  try {
-    bytes = parseLimit(value, 'workspace_max_memory')
-  } catch (e) {
-    throw new DaemonConfigError((e as Error).message)
-  }
-  if (bytes < 1) {
-    throw new DaemonConfigError(
-      `workspace_max_memory must be a positive size, got ${JSON.stringify(value)}`,
-    )
-  }
-  return bytes
 }
 
 /**
@@ -270,7 +228,6 @@ export class WorkspaceRegistry {
   private readonly owners: DiskRecordClient | null
   readonly maxWorkspaces: number | null
   readonly maxSessions: number | null
-  readonly workspaceMaxMemory: number | null
   readonly policies: readonly Policy[]
   private readonly programs: ProfileScripts
   private readonly admissionPrograms: ScriptPolicy
@@ -279,7 +236,6 @@ export class WorkspaceRegistry {
   constructor(options: WorkspaceRegistryOptions = {}) {
     this.maxWorkspaces = options.maxWorkspaces ?? null
     this.maxSessions = options.maxSessions ?? null
-    this.workspaceMaxMemory = options.workspaceMaxMemory ?? null
     this.policies = [...(options.policies ?? [])]
     this.programs = Object.fromEntries(
       Object.entries(options.programs ?? {}).filter(([method]) => method !== 'preWorkspace'),
@@ -517,14 +473,6 @@ export class WorkspaceRegistry {
     for (const policy of restoredWith) ws.policies.remove(policy)
     for (const policy of this.policies) ws.policies.add(policy)
     ws.registry.network = this.ruleFor(ws.network)
-    // The server's ceiling on each workspace's memory: one asking more,
-    // or no cap, runs under it.
-    const memory = ws.registry.memory
-    const ceiling = this.workspaceMaxMemory
-    if (ceiling !== null && (memory === null || memory.limit > ceiling)) {
-      const mounts = ws.registry
-      mounts.memory = new MemoryBudget(ceiling, () => mounts.heldInMemory())
-    }
     // An account reaches only the workspaces it owns, so every method's
     // caller is the owner's account.
     ws.policies.account = owner

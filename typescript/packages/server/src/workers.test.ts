@@ -12,49 +12,67 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildApp, type MirageApp } from './app.ts'
 import { DaemonConfigError } from './daemon_config.ts'
-import { ENV_CPUS, ENV_HOME, ENV_WORKERS } from './env.ts'
-import { buildFront, type Front, parseCpuList, resolveWorkers, WorkerPool } from './workers.ts'
+import { ENV_HOME, ENV_WORKER_TYPE, ENV_WORKERS } from './env.ts'
+import {
+  buildWorkerProxy,
+  resolveWorkers,
+  resolveWorkerType,
+  WorkerPool,
+  type WorkerProxy,
+  WorkerType,
+} from './workers.ts'
 
-describe('parseCpuList', () => {
-  it('reads CPUs and ranges in order, once each', () => {
-    expect(parseCpuList('0-3,6')).toEqual([0, 1, 2, 3, 6])
-    expect(parseCpuList(' 4 , 1-2, 2 ')).toEqual([4, 1, 2])
-  })
-
-  it.each(['', 'a', '3-1', '-1', '0-99999'])('refuses %j', (text) => {
-    expect(() => parseCpuList(text)).toThrow(DaemonConfigError)
-  })
-})
+const ENTRY = join(dirname(fileURLToPath(import.meta.url)), 'bin', 'daemon.ts')
+const CONFIG = { mounts: { '/data': { vfs: 'ram', mode: 'write' } } }
 
 describe('resolveWorkers', () => {
-  it('reads the env, then config, then one per CPU of cpus, else 1', async () => {
+  it('reads the env, then config, else 1', async () => {
     const home = await mkdtemp(join(tmpdir(), 'mir-workers-'))
     try {
       const env = { [ENV_HOME]: home }
       expect(resolveWorkers(undefined, env)).toBe(1)
-      expect(resolveWorkers(undefined, { ...env, [ENV_CPUS]: '0-2' })).toBe(3)
       await writeFile(join(home, 'config.toml'), '[daemon]\nworkers = 4\n')
       expect(resolveWorkers(undefined, env)).toBe(4)
       expect(resolveWorkers(undefined, { ...env, [ENV_WORKERS]: '2' })).toBe(2)
       expect(resolveWorkers(8, env)).toBe(8)
-      expect(() => resolveWorkers(undefined, { [ENV_WORKERS]: '0' })).toThrow(/workers/)
+      expect(() => resolveWorkers(undefined, { [ENV_WORKERS]: '0' })).toThrow(DaemonConfigError)
     } finally {
       await rm(home, { recursive: true, force: true })
     }
   })
 })
 
-/** Two in-process workers on the pool's sockets, behind a front. */
+describe('resolveWorkerType', () => {
+  it('reads the env, then config, else threads', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mir-workers-'))
+    try {
+      const env = { [ENV_HOME]: home }
+      expect(resolveWorkerType(undefined, env)).toBe(WorkerType.Thread)
+      await writeFile(join(home, 'config.toml'), '[daemon]\nworker_type = "process"\n')
+      expect(resolveWorkerType(undefined, env)).toBe(WorkerType.Process)
+      expect(resolveWorkerType(undefined, { ...env, [ENV_WORKER_TYPE]: 'thread' })).toBe(
+        WorkerType.Thread,
+      )
+      expect(() => resolveWorkerType('cpu', env)).toThrow(DaemonConfigError)
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+})
+
+/** Two servers on the pool's sockets, in this process, behind the proxy. */
 interface Daemon {
-  front: Front
-  workers: MirageApp[]
+  proxy: WorkerProxy
+  apps: MirageApp[]
   url: string
   exited: () => number
 }
@@ -62,15 +80,17 @@ interface Daemon {
 async function daemon(maxWorkspaces: number | null = null): Promise<Daemon> {
   const pool = new WorkerPool({
     count: 2,
-    cpus: null,
-    command: [process.execPath],
+    type: WorkerType.Process,
+    entry: ENTRY,
+    execArgv: [],
     env: {},
+    host: 'localhost',
     gracefulTimeout: 0,
   })
-  const workers = pool.workers.map(() => buildApp({ maxWorkspaces: Number.MAX_SAFE_INTEGER }))
-  await Promise.all(workers.map((app, i) => app.listen({ path: pool.workers[i]?.socket ?? '' })))
+  const apps = pool.workers.map(() => buildApp({ maxWorkspaces: Number.MAX_SAFE_INTEGER }))
+  await Promise.all(apps.map((app, i) => app.listen({ path: pool.workers[i]?.socket ?? '' })))
   let exits = 0
-  const front = buildFront({
+  const proxy = buildWorkerProxy({
     pool,
     maxWorkspaces,
     proxies: [],
@@ -79,9 +99,9 @@ async function daemon(maxWorkspaces: number | null = null): Promise<Daemon> {
       exits += 1
     },
   })
-  await front.listen(0, '127.0.0.1')
-  const { port } = front.server.address() as AddressInfo
-  return { front, workers, url: `http://127.0.0.1:${String(port)}`, exited: () => exits }
+  await proxy.listen(0, '127.0.0.1')
+  const { port } = proxy.server.address() as AddressInfo
+  return { proxy, apps, url: `http://127.0.0.1:${String(port)}`, exited: () => exits }
 }
 
 async function call(
@@ -99,9 +119,15 @@ async function call(
   return { status: res.status, json: text === '' ? null : (JSON.parse(text) as unknown) }
 }
 
-const CONFIG = { mounts: { '/data': { vfs: 'ram', mode: 'write' } } }
+/** Where the next new workspaces go: worker 0 or worker 1, in order. */
+function placeOn(...indexes: number[]): void {
+  const spy = vi.spyOn(Math, 'random')
+  for (const index of indexes) spy.mockReturnValueOnce(index === 0 ? 0 : 0.99)
+}
 
-describe('Front', () => {
+const ids = (d: Daemon): string[][] => d.apps.map((app) => app.registry.list().map((e) => e.id))
+
+describe('WorkerProxy', () => {
   let d: Daemon
 
   beforeEach(() => {
@@ -109,22 +135,21 @@ describe('Front', () => {
   })
 
   afterEach(async () => {
-    await d.front.close()
-    await Promise.all(d.workers.map((app) => app.close()))
+    vi.restoreAllMocks()
+    await d.proxy.close()
+    await Promise.all(d.apps.map((app) => app.close()))
     vi.unstubAllEnvs()
   })
 
-  it('puts each new workspace on the worker holding the fewest', async () => {
+  it('puts each new workspace on a worker at random, and lists them all', async () => {
     d = await daemon()
+    placeOn(1, 0, 1)
     for (const id of ['a', 'b', 'c']) {
       expect((await call(`${d.url}/v1/workspaces`, 'POST', { id, config: CONFIG })).status).toBe(
         201,
       )
     }
-    expect(d.workers.map((app) => app.registry.list().map((e) => e.id))).toEqual([
-      ['a', 'c'],
-      ['b'],
-    ])
+    expect(ids(d)).toEqual([['b'], ['a', 'c']])
     const listed = (await call(`${d.url}/v1/workspaces`, 'GET')).json as { id: string }[]
     expect(listed.map((w) => w.id)).toEqual(['a', 'b', 'c'])
     expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({
@@ -135,6 +160,7 @@ describe('Front', () => {
 
   it("sends a workspace's requests and jobs to its worker", async () => {
     d = await daemon()
+    placeOn(0, 1)
     await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })
     await call(`${d.url}/v1/workspaces`, 'POST', { id: 'b', config: CONFIG })
     const ran = await call(`${d.url}/v1/workspaces/b/shell`, 'POST', {
@@ -149,31 +175,62 @@ describe('Front', () => {
     expect(got.status).toBe(200)
     expect(got.json).toMatchObject({ job_id: job, workspace_id: 'b' })
     expect((await call(`${d.url}/v1/jobs/nope`, 'GET')).status).toBe(404)
-    expect(
-      (await call(`${d.url}/v1/workspaces/nope/shell`, 'POST', { command: 'true' })).status,
-    ).toBe(404)
+    const missing = await call(`${d.url}/v1/workspaces/nope/shell`, 'POST', { command: 'true' })
+    expect(missing.status).toBe(404)
   })
 
-  it('sends a create under a held id to the worker holding it', async () => {
+  it('sends a create under a held id, or its config workspace_id, to its worker', async () => {
     d = await daemon()
+    placeOn(0, 1)
     await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })
-    await call(`${d.url}/v1/workspaces`, 'POST', { id: 'b', config: CONFIG })
+    await call(`${d.url}/v1/workspaces`, 'POST', { config: { ...CONFIG, workspace_id: 'n' } })
+    expect(ids(d)).toEqual([['a'], ['n']])
     expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })).status).toBe(
       200,
     )
+    const again = { config: { ...CONFIG, workspace_id: 'n' } }
+    expect((await call(`${d.url}/v1/workspaces`, 'POST', again)).status).toBe(200)
     const other = { mounts: { '/other': { vfs: 'ram', mode: 'write' } } }
     expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: other })).status).toBe(
       409,
     )
-    expect(d.workers.map((app) => app.registry.size())).toEqual([1, 1])
-    const cloned = await call(`${d.url}/v1/workspaces/b/clone`, 'POST', { id: 'b2' })
-    expect(cloned.status).toBe(201)
-    expect(d.workers[1]?.registry.has('b2')).toBe(true)
-    expect((await call(`${d.url}/v1/workspaces/b/clone`, 'POST', { id: 'a' })).status).toBe(409)
+    expect(ids(d)).toEqual([['a'], ['n']])
+    expect((await call(`${d.url}/v1/workspaces/n/clone`, 'POST', { id: 'n2' })).status).toBe(201)
+    expect(ids(d)[1]).toContain('n2')
+    expect((await call(`${d.url}/v1/workspaces/n/clone`, 'POST', { id: 'a' })).status).toBe(409)
+  })
+
+  it('sends creates of one id racing each other to one worker', async () => {
+    d = await daemon()
+    placeOn(0, 1)
+    const both = await Promise.all([
+      call(`${d.url}/v1/workspaces`, 'POST', { id: 'same', config: CONFIG }),
+      call(`${d.url}/v1/workspaces`, 'POST', { id: 'same', config: CONFIG }),
+    ])
+    expect(both.map((r) => r.status).sort()).toEqual([200, 201])
+    expect(ids(d).flat()).toEqual(['same'])
+  })
+
+  it('holds max_workspaces across workers, and lets a retry of a live id through', async () => {
+    d = await daemon(2)
+    const racing = await Promise.all(
+      ['a', 'b', 'c'].map((id) => call(`${d.url}/v1/workspaces`, 'POST', { id, config: CONFIG })),
+    )
+    expect(racing.map((r) => r.status).sort()).toEqual([201, 201, 503])
+    const live = (await call(`${d.url}/v1/workspaces`, 'GET')).json as { id: string }[]
+    const [kept, other] = live.map((w) => w.id)
+    const retry = await call(`${d.url}/v1/workspaces`, 'POST', { id: kept, config: CONFIG })
+    expect(retry.status).toBe(200)
+    expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'full' })
+    expect((await call(`${d.url}/v1/workspaces/${String(kept)}`, 'DELETE')).status).toBe(200)
+    expect((await call(`${d.url}/v1/workspaces/${String(other)}/close`, 'POST')).status).toBe(200)
+    expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 0 })
+    expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'ready' })
   })
 
   it('reads a multipart load up to its request part, and routes what it loads', async () => {
     d = await daemon()
+    placeOn(0, 1)
     await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })
     await call(`${d.url}/v1/workspaces/a/shell`, 'POST', { command: 'echo kept > /data/x' })
     const tar = await (await fetch(`${d.url}/v1/workspaces/a/snapshot`)).arrayBuffer()
@@ -182,22 +239,9 @@ describe('Front', () => {
     form.append('snapshot', new Blob([tar]), 'snapshot.tar')
     const loaded = await fetch(`${d.url}/v1/workspaces/load`, { method: 'POST', body: form })
     expect(loaded.status).toBe(201)
-    expect(d.workers[1]?.registry.has('r')).toBe(true)
+    expect(ids(d)[1]).toContain('r')
     const read = await call(`${d.url}/v1/workspaces/r/shell`, 'POST', { command: 'cat /data/x' })
     expect(read.json).toMatchObject({ stdout: 'kept\n' })
-  })
-
-  it('counts deletes and closes, and holds max_workspaces across workers', async () => {
-    d = await daemon(2)
-    await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })
-    await call(`${d.url}/v1/workspaces`, 'POST', { id: 'b', config: CONFIG })
-    const full = await call(`${d.url}/v1/workspaces`, 'POST', { id: 'c', config: CONFIG })
-    expect(full).toEqual({ status: 503, json: { detail: 'server is at max_workspaces (2)' } })
-    expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'full' })
-    expect((await call(`${d.url}/v1/workspaces/a`, 'DELETE')).status).toBe(200)
-    expect((await call(`${d.url}/v1/workspaces/b/close`, 'POST')).status).toBe(200)
-    expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 0 })
-    expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'ready' })
   })
 
   it('stops the daemon on a shutdown its worker lets through', async () => {
@@ -206,4 +250,54 @@ describe('Front', () => {
     expect(res.json).toMatchObject({ status: 'shutting_down', pid: process.pid })
     expect(d.exited()).toBe(1)
   })
+})
+
+describe.each([WorkerType.Process, WorkerType.Thread])('%s workers', (type) => {
+  it('serve, lose their workspaces when one stops, and leave nothing behind', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mir-workers-'))
+    const pool = new WorkerPool({
+      count: 2,
+      type,
+      entry: ENTRY,
+      execArgv: ['--experimental-transform-types', '--no-warnings'],
+      env: { ...process.env, MIRAGE_HOME: home },
+      host: 'localhost',
+      gracefulTimeout: 0,
+    })
+    await pool.start()
+    const proxy = buildWorkerProxy({
+      pool,
+      maxWorkspaces: null,
+      proxies: [],
+      idleGraceSeconds: 60,
+      exit: () => undefined,
+    })
+    try {
+      await proxy.listen(0, '127.0.0.1')
+      const url = `http://127.0.0.1:${String((proxy.server.address() as AddressInfo).port)}`
+      placeOn(0, 1)
+      await call(`${url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })
+      await call(`${url}/v1/workspaces`, 'POST', { id: 'b', config: CONFIG })
+      const ran = await call(`${url}/v1/workspaces/b/shell`, 'POST', { command: 'echo hi' })
+      expect(ran.json).toMatchObject({ stdout: 'hi\n' })
+      await pool.workers[1]?.stop(0)
+      expect(pool.workers[1]?.dead).toBe(true)
+      expect((await call(`${url}/v1/health`, 'GET')).json).toMatchObject({
+        workspaces: 1,
+        workers: 1,
+      })
+      const gone = await call(`${url}/v1/workspaces/b/shell`, 'POST', { command: 'true' })
+      expect(gone.status).toBe(404)
+      const kept = await call(`${url}/v1/workspaces/a/shell`, 'POST', { command: 'true' })
+      expect(kept.status).toBe(200)
+      const made = await call(`${url}/v1/workspaces`, 'POST', { id: 'c', config: CONFIG })
+      expect(made.status).toBe(201)
+    } finally {
+      vi.restoreAllMocks()
+      await proxy.close()
+      await rm(home, { recursive: true, force: true })
+    }
+    expect(pool.workers.every((worker) => worker.dead)).toBe(true)
+    expect(existsSync(dirname(pool.workers[0]?.socket ?? ''))).toBe(false)
+  }, 120_000)
 })

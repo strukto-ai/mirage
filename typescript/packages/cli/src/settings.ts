@@ -20,7 +20,6 @@ import { CONFIG_ENV_KEYS } from '@struktoai/mirage-server/auth/config'
 import { defaultTokenFile, readTokenFile } from '@struktoai/mirage-server/auth/storage'
 import {
   ENV_ALLOWED_HOSTS,
-  ENV_CPUS,
   ENV_DAEMON_PORT,
   ENV_FORWARDED_ALLOW_IPS,
   ENV_GRACEFUL_TIMEOUT,
@@ -29,8 +28,8 @@ import {
   ENV_MAX_WORKSPACES,
   ENV_POLICY_FILE,
   ENV_RATE_LIMITS,
+  ENV_WORKER_TYPE,
   ENV_WORKERS,
-  ENV_WORKSPACE_MAX_MEMORY,
 } from '@struktoai/mirage-server/env'
 import {
   ALLOWED_KEYS,
@@ -137,9 +136,8 @@ const ENV_FOR_KEY: Record<string, string> = {
   graceful_timeout: ENV_GRACEFUL_TIMEOUT,
   max_workspaces: ENV_MAX_WORKSPACES,
   max_sessions: ENV_MAX_SESSIONS,
-  workspace_max_memory: ENV_WORKSPACE_MAX_MEMORY,
   workers: ENV_WORKERS,
-  cpus: ENV_CPUS,
+  worker_type: ENV_WORKER_TYPE,
   rate_limits: ENV_RATE_LIMITS,
   policy_file: ENV_POLICY_FILE,
   port: ENV_DAEMON_PORT,
@@ -166,9 +164,8 @@ function defaultForKey(key: string, home: string): string {
     graceful_timeout: '0',
     max_workspaces: '',
     max_sessions: '',
-    workspace_max_memory: '',
     workers: '1',
-    cpus: '',
+    worker_type: '',
     rate_limits: '',
     policy_file: '',
     port: '8765',
