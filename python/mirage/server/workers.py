@@ -20,6 +20,7 @@ import os
 import random
 import secrets
 import shutil
+import signal
 import sys
 import tempfile
 import threading
@@ -28,6 +29,7 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from types import FrameType
 from typing import Any, cast
 from urllib.parse import parse_qs, quote
 
@@ -416,6 +418,10 @@ class WorkerPool:
         running = [w for w in self.workers if not w.dead]
         return random.choice(running) if running else None
 
+    def building(self, workspace_id: str) -> Worker | None:
+        """The worker now creating ``workspace_id``, else None."""
+        return self._pending.get(workspace_id)
+
     def home(self, workspace_id: str) -> Worker | None:
         """The worker holding, last holding or now creating
         ``workspace_id``, else None.
@@ -565,6 +571,7 @@ class WorkerProxy:
         self.draining = False
         self._idle: asyncio.TimerHandle | None = None
         self._started_at = time.time()
+        self._closing: asyncio.Future[None] | None = None
         pool.on_lost = self._idle_check
 
     async def __call__(
@@ -578,6 +585,9 @@ class WorkerProxy:
             await self._handle(scope, receive, send)
 
     async def _lifespan(self, receive: Receive, send: Send) -> None:
+        wrapped: dict[
+            signal.Signals, Callable[[int, FrameType | None], Any]
+        ] = {}
         while True:
             message = await receive()
             if message["type"] == "lifespan.startup":
@@ -595,15 +605,59 @@ class WorkerProxy:
                 if self.pid_file is not None:
                     self.pid_file.parent.mkdir(parents=True, exist_ok=True)
                     self.pid_file.write_text(str(os.getpid()))
+                wrapped = self._close_on_signals()
                 await send({"type": "lifespan.startup.complete"})
             elif message["type"] == "lifespan.shutdown":
-                self.draining = True
-                self._cancel_idle()
-                await self.pool.stop()
+                for signum, stop in wrapped.items():
+                    signal.signal(signum, stop)
+                await self.close()
                 if self.pid_file is not None:
                     self.pid_file.unlink(missing_ok=True)
                 await send({"type": "lifespan.shutdown.complete"})
                 return
+
+    async def close(self) -> None:
+        """Refuse new work and stop the workers, once."""
+        self.draining = True
+        self._cancel_idle()
+        if self._closing is None:
+            self._closing = asyncio.ensure_future(self.pool.stop())
+        await self._closing
+
+    def _close_on_signals(
+        self,
+    ) -> dict[signal.Signals, Callable[[int, FrameType | None], Any]]:
+        """Have SIGTERM and SIGINT start stopping the workers before the
+        server's own handlers run: the server then waits for the requests
+        they answer, which end as the workers drain, within
+        ``graceful_timeout``. Only the main thread may set a handler.
+
+        Returns:
+            dict[signal.Signals, Callable[[int, FrameType | None], Any]]:
+                the handlers it wrapped, to put back as the app stops.
+        """
+        if threading.current_thread() is not threading.main_thread():
+            return {}
+        loop = asyncio.get_running_loop()
+        wrapped = {}
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            stop = signal.getsignal(signum)
+            if not callable(stop):
+                continue
+            wrapped[signum] = stop
+
+            def closing(
+                number: int,
+                frame: FrameType | None,
+                stop: Callable[[int, FrameType | None], Any] = stop,
+            ) -> None:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(self.close())
+                )
+                stop(number, frame)
+
+            signal.signal(signum, closing)
+        return wrapped
 
     async def _handle(
         self, scope: Scope, receive: Receive, send: Send
@@ -684,9 +738,12 @@ class WorkerProxy:
         closes = action == "close" and len(parts) == 4 and method == "POST"
         if deletes or closes:
             answer = await self._fetch(home, scope, b"", receive)
-            # A delete that fails may still have removed the workspace.
+            # A close or delete that fails in the worker may still have
+            # removed the workspace. A refusal (4xx) leaves it, and may hide
+            # it from this caller, so only a 5xx is checked.
             gone = answer.status < 300 or (
-                deletes and not await self._holds(home, scope, workspace_id)
+                answer.status >= 500
+                and not await self._holds(home, scope, workspace_id)
             )
             if gone:
                 if deletes:
@@ -751,7 +808,11 @@ class WorkerProxy:
                         f"({self.max_workspaces})"
                     },
                 )
-            if source is not None and live and home is not source:
+            building = pool.building(named) if named is not None else None
+            elsewhere = (live and home is not source) or (
+                building is not None and building is not source
+            )
+            if source is not None and elsewhere:
                 return await _send(
                     send,
                     409,

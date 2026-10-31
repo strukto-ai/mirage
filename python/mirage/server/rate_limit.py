@@ -201,7 +201,8 @@ class RateLimitMiddleware:
     token is counted too, and after it, with ``signed_in``, for those
     keyed on the account or a function, which may read the signed-in
     account. WebSocket handshakes count too; public paths are not counted,
-    nor, on a worker, a request the daemon already counted.
+    nor, on a worker, a request the daemon already counted, but by its
+    workspace.
 
     Args:
         app (ASGIApp): downstream ASGI app.
@@ -233,12 +234,16 @@ class RateLimitMiddleware:
             not self.rate_limits
             or scope["type"] not in ("http", "websocket")
             or scope["path"] in PUBLIC_PATHS
-            or (self._token is not None and _is_counted(scope, self._token))
         ):
             await self.app(scope, receive, send)
             return
+        counted = self._token is not None and _is_counted(scope, self._token)
         request = HTTPConnection(scope)
         for at, limit in enumerate(self.rate_limits):
+            # The daemon's check names no workspace, so those limits still
+            # count.
+            if counted and limit.key != "workspace":
+                continue
             value = _value(limit.key, request)
             if value is None or await self._limiter.hit(
                 limit.item, str(at), value

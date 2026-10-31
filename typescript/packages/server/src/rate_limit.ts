@@ -154,7 +154,8 @@ function value(key: RateLimit['key'], request: FastifyRequest): string | null {
  * counted too, and after it, with `signedIn`, for those keyed on the account
  * or a function, which may read the signed-in account. WebSocket handshakes
  * count too; public paths are not counted, nor, on a worker, a request the
- * daemon already counted. Mirrors Python's `RateLimitMiddleware`.
+ * daemon already counted, but by its workspace. Mirrors Python's
+ * `RateLimitMiddleware`.
  */
 export function registerRateLimits(
   app: FastifyInstance,
@@ -170,7 +171,9 @@ export function registerRateLimits(
     const limiter = new RateLimiterMemory({ points, duration })
     app.addHook('onRequest', async (req, reply) => {
       if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
-      if (token !== undefined && isCounted(req.headers[COUNTED_HEADER], token)) return
+      // The daemon's check names no workspace, so those limits still count.
+      const skips = limit.key !== 'workspace' && token !== undefined
+      if (skips && isCounted(req.headers[COUNTED_HEADER], token)) return
       const by = limit.key === 'ip' ? req.ip : value(limit.key, req)
       if (by === null) return
       try {

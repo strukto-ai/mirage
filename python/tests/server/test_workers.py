@@ -90,6 +90,7 @@ def _place_on(monkeypatch, *indexes: int) -> None:
 @dataclass
 class _Daemon:
     proxy: WorkerProxy
+    pool: WorkerPool
     apps: list[FastAPI]
     client: AsyncClient
     exits: list[int]
@@ -139,7 +140,7 @@ async def _daemon(
         async with AsyncClient(
             transport=ASGITransport(app=proxy), base_url="http://test"
         ) as client:
-            yield _Daemon(proxy, apps, client, exits)
+            yield _Daemon(proxy, pool, apps, client, exits)
     finally:
         for server in servers:
             server.should_exit = True
@@ -230,6 +231,12 @@ async def test_a_create_under_a_held_id_or_config_workspace_id_goes_to_its_worke
         assert "n2" in _ids(d)[1]
         taken = await d.client.post("/v1/workspaces/n/clone", json={"id": "a"})
         assert taken.status_code == 409
+        settle = d.pool.claim("x", d.pool.workers[0])
+        building = await d.client.post(
+            "/v1/workspaces/n/clone", json={"id": "x"}
+        )
+        assert building.status_code == 409
+        settle()
 
 
 @pytest.mark.asyncio
@@ -330,6 +337,18 @@ async def test_a_request_counts_once_after_its_caller_check(monkeypatch):
         assert made.status_code == 201
         assert (await d.client.get("/v1/workspaces/a")).status_code == 200
         assert (await d.client.get("/v1/workspaces/a")).status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_a_clone_counts_against_its_sources_workspace_limit():
+    async with _daemon(rate_limits=[RateLimit("workspace", "1/minute")]) as d:
+        await d.client.post(
+            "/v1/workspaces", json={"id": "a", "config": CONFIG}
+        )
+        first = await d.client.post("/v1/workspaces/a/clone", json={"id": "b"})
+        assert first.status_code == 201
+        again = await d.client.post("/v1/workspaces/a/clone", json={"id": "c"})
+        assert again.status_code == 429
 
 
 @pytest.mark.asyncio

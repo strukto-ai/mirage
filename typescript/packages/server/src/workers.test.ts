@@ -74,6 +74,7 @@ describe('resolveWorkerType', () => {
 /** Two servers on the pool's sockets, in this process, behind the proxy. */
 interface Daemon {
   proxy: WorkerProxy
+  pool: WorkerPool
   apps: MirageApp[]
   url: string
   exited: () => number
@@ -110,7 +111,7 @@ async function daemon(
   })
   await proxy.listen(0, '127.0.0.1')
   const { port } = proxy.server.address() as AddressInfo
-  return { proxy, apps, url: `http://127.0.0.1:${String(port)}`, exited: () => exits }
+  return { proxy, pool, apps, url: `http://127.0.0.1:${String(port)}`, exited: () => exits }
 }
 
 async function call(
@@ -232,6 +233,11 @@ describe('WorkerProxy', () => {
     expect((await call(`${d.url}/v1/workspaces/n/clone`, 'POST', { id: 'n2' })).status).toBe(201)
     expect(ids(d)[1]).toContain('n2')
     expect((await call(`${d.url}/v1/workspaces/n/clone`, 'POST', { id: 'a' })).status).toBe(409)
+    const building = d.pool.workers[0]
+    if (building === undefined) throw new Error('no worker 0')
+    const settle = d.pool.claim('x', building)
+    expect((await call(`${d.url}/v1/workspaces/n/clone`, 'POST', { id: 'x' })).status).toBe(409)
+    settle()
   })
 
   it('sends creates of one id racing each other to one worker', async () => {
@@ -312,6 +318,13 @@ describe('WorkerProxy', () => {
     )
     expect((await call(`${d.url}/v1/workspaces/a`, 'GET')).status).toBe(200)
     expect((await call(`${d.url}/v1/workspaces/a`, 'GET')).status).toBe(429)
+  })
+
+  it("counts a clone against its source's workspace limit", async () => {
+    d = await daemon(null, [{ key: 'workspace', rate: '1/minute' }])
+    await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })
+    expect((await call(`${d.url}/v1/workspaces/a/clone`, 'POST', { id: 'b' })).status).toBe(201)
+    expect((await call(`${d.url}/v1/workspaces/a/clone`, 'POST', { id: 'c' })).status).toBe(429)
   })
 
   it('reads a multipart load up to its request part, and routes what it loads', async () => {

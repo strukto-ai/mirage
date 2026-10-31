@@ -355,6 +355,11 @@ export class WorkerPool {
     return running[Math.floor(Math.random() * running.length)]
   }
 
+  /** The worker now creating `id`, else undefined. */
+  building(id: string): Worker | undefined {
+    return this.pending.get(id)
+  }
+
   /** The worker holding, last holding or now creating `id`, else undefined. */
   home(id: string): Worker | undefined {
     return this.homes.get(id) ?? this.pending.get(id)
@@ -569,8 +574,11 @@ export class WorkerProxy {
     const closes = action === 'close' && parts.length === 4 && method === 'POST'
     if (deletes || closes) {
       const answer = await this.fetch(home, req, null, true)
-      // A delete that fails may still have removed the workspace.
-      const gone = answer.status < 300 || (deletes && !(await this.holds(home, req, id)))
+      // A close or delete that fails in the worker may still have removed
+      // the workspace. A refusal (4xx) leaves it, and may hide it from this
+      // caller, so only a 5xx is checked.
+      const gone =
+        answer.status < 300 || (answer.status >= 500 && !(await this.holds(home, req, id)))
       if (gone) {
         if (deletes) pool.forget(id)
         else pool.release(id)
@@ -624,7 +632,9 @@ export class WorkerProxy {
         })
         return
       }
-      if (source !== null && live && home !== source) {
+      const building = peeked.id === undefined ? undefined : pool.building(peeked.id)
+      const elsewhere = (live && home !== source) || (building !== undefined && building !== source)
+      if (source !== null && elsewhere) {
         send(res, 409, { detail: `workspace id already exists: ${String(peeked.id)}` })
         return
       }
