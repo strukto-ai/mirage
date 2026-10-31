@@ -16,6 +16,7 @@ import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { PathSpec, FileStat } from '../../../../types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import type { AggregateFn } from '../../../config.ts'
+import type { FindExpr } from '../../../../rs/find.ts'
 
 // How a cross-mount command combines per-mount work.
 //
@@ -92,6 +93,8 @@ interface RunSingleOpts {
   signal?: AbortSignal
   stdin?: ByteSource | null
   resolveHint?: PathSpec | null
+  // find's expression, parsed once for the line.
+  find?: FindExpr
 }
 
 export type RunSingle = (

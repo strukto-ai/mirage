@@ -46,16 +46,57 @@ class RowAction:
 
 
 @dataclass(frozen=True, slots=True)
+class PrintfLiteral:
+    """A run of ``-printf`` output that is the same for every row.
+
+    Args:
+        text (str): the text, escapes already expanded.
+    """
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class PrintfDirective:
+    """A ``%`` directive a row renders: ``%p``, ``%s``, ``%y`` and so on.
+
+    Args:
+        code (str): the letter after the ``%``.
+    """
+
+    code: str
+
+
+@dataclass(frozen=True, slots=True)
+class PrintfTime:
+    """A ``%T`` directive: the row's modification time in one field.
+
+    Args:
+        letter (str): the letter after ``%T``.
+    """
+
+    letter: str
+
+
+PrintfPart = PrintfLiteral | PrintfDirective | PrintfTime
+
+
+@dataclass(frozen=True, slots=True)
 class PrintfAction:
     """One ``-printf`` action: each row it reaches, rendered through a
-    format.
+    format compiled once by mirage-rs.
 
     Args:
         format (str): the format as typed, escapes and directives
             unexpanded.
+        parts (tuple[PrintfPart, ...]): the format as literal runs and
+            directives.
+        needs_stat (bool): a directive reads the row's stat.
     """
 
     format: str
+    parts: tuple[PrintfPart, ...] = ()
+    needs_stat: bool = False
 
 
 FindAction = ExecAction | RowAction | PrintfAction

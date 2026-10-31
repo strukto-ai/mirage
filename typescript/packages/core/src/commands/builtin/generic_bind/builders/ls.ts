@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lsGeneric } from '../../generic/ls.ts'
+import { lsGeneric, parseFlags } from '../../generic/ls.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { treeWalk } from '../../utils/tree.ts'
@@ -22,10 +22,12 @@ import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
 
 const ls: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const fl = new FlagView(ctx.flags, specOf('ls'))
+  const flags = parseFlags(fl)
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   // Only -R reads whole subtrees; a plain listing reads one level.
-  const recursive = new FlagView(ctx.flags, specOf('ls')).asBool('recursive')
+  const recursive = fl.asBool('recursive')
   const [readdir, stat] = treeWalk<string[], FileStat>(
     files.readTree,
     files.readdir,
@@ -33,7 +35,7 @@ const ls: CommandFn = async (_accessor, paths, _texts, ctx) => {
     recursive && files.answers('read_tree'),
     files.signal,
   )
-  return lsGeneric(resolved, ctx, readdir, stat)
+  return lsGeneric(resolved, ctx, readdir, stat, undefined, flags)
 }
 
 export const BUILDER: GenericCommand = {

@@ -27,7 +27,7 @@ import {
 import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/paths.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
 import { UsageError } from '../../errors.ts'
-import { parseDepth, parseFindExpression, parseMtime, parseSize } from '../find_parse.ts'
+import { parseFindExpression, type FindExpr } from '../../../rs/find.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
@@ -303,23 +303,27 @@ export function findGeneric(
   // (namespace symlinks), and collapsing anything else to "no filter" would
   // make the flag form print every entry where python prints none.
   const findType: string | null = typeFlag
-  let maxDepth: number | null = null
-  let minDepth: number | null = null
-  let minSize: number | null = null
-  let maxSize: number | null = null
-  let mtimeMin: number | null = null
-  let mtimeMax: number | null = null
+  const expr: FindExpr | null = ctx.find ?? (texts.length > 0 ? parseFindExpression(texts) : null)
+  const flagWords = [
+    ...(maxDepthFlag !== null ? ['-maxdepth', maxDepthFlag] : []),
+    ...(minDepthFlag !== null ? ['-mindepth', minDepthFlag] : []),
+    ...(sizeFlag !== null ? ['-size', sizeFlag] : []),
+    ...(mtimeFlag !== null ? ['-mtime', mtimeFlag] : []),
+  ]
+  let limits: FindExpr | null = null
   try {
-    maxDepth = maxDepthFlag !== null ? parseDepth(maxDepthFlag, '-maxdepth') : null
-    minDepth = minDepthFlag !== null ? parseDepth(minDepthFlag, '-mindepth') : null
-    ;[minSize, maxSize] = sizeFlag !== null ? parseSize(sizeFlag) : [null, null]
-    ;[mtimeMin, mtimeMax] = mtimeFlag !== null ? parseMtime(mtimeFlag) : [null, null]
+    limits = expr === null && flagWords.length > 0 ? parseFindExpression(flagWords) : null
   } catch (err) {
     if (err instanceof UsageError) return Promise.resolve(invalidFindArg(err.message))
     throw err
   }
+  const maxDepth = limits?.maxDepth ?? null
+  const minDepth = limits?.minDepth ?? null
+  const minSize = limits?.minSize ?? null
+  const maxSize = limits?.maxSize ?? null
+  const mtimeMin = limits?.mtimeMin ?? null
+  const mtimeMax = limits?.mtimeMax ?? null
   const emptyFlag = parsed.empty
-  const expr = texts.length > 0 ? parseFindExpression(texts) : null
   // With a stat wired, the mtime window is applied by the overlay-
   // aware post-filter below, not pushed into the core: backend cores
   // only see native times and would drop files whose mtime lives in

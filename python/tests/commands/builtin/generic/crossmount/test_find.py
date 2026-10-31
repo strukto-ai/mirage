@@ -18,7 +18,6 @@ import pytest
 
 from mirage.commands.builtin.generic.crossmount.find import (
     joints,
-    predicates,
     shifted,
 )
 from mirage.commands.config import command
@@ -26,6 +25,7 @@ from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
 from mirage.io import IOResult
 from mirage.io.types import PathRecord
+from mirage.rs.find import parse_find_expression
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -74,24 +74,25 @@ async def _workspace(*fns) -> Workspace:
     return ws
 
 
-def test_predicates_skip_the_words_a_predicate_takes():
-    words = ["-name", "-prune", "-exec", "echo", "-empty", ";", "-print"]
-    assert predicates(words) == [(0, "-name"), (2, "-exec"), (6, "-print")]
+def test_predicates_name_every_test_the_expression_reads():
+    expr = parse_find_expression(
+        ["-name", "-prune", "-exec", "echo", "-empty", ";", "-print"]
+    )
+    assert expr.predicates == ["-name", "-exec", "-print"]
 
 
 def test_shifted_counts_the_limits_from_the_start_point():
-    words = ["-maxdepth", "3", "-mindepth", "2", "-name", "x"]
-    flags = {"maxdepth": "3", "mindepth": "2", "name": "x"}
-    assert shifted(words, flags, 2, 3, 2) == (
-        ["-maxdepth", "1", "-mindepth", "0", "-name", "x"],
-        {"maxdepth": "1", "mindepth": "0", "name": "x"},
+    expr = parse_find_expression(
+        ["-maxdepth", "3", "-mindepth", "2", "-name", "x"]
     )
-    assert shifted(words, flags, 4, 3, 2) is None
-    assert shifted(words, flags, 1, 3, 2, alone=True) is None
-    assert shifted(["-type", "d"], {"type": "d"}, 1, None, None, True) == (
-        ["-maxdepth", "0", "-type", "d"],
-        {"type": "d", "maxdepth": "0"},
-    )
+    moved = shifted(expr, 2)
+    assert moved is not None
+    assert (moved.maxdepth, moved.mindepth, moved.tree) == (1, 0, expr.tree)
+    assert shifted(expr, 4) is None
+    assert shifted(expr, 1, alone=True) is None
+    alone = shifted(parse_find_expression(["-type", "d"]), 1, True)
+    assert alone is not None
+    assert (alone.maxdepth, alone.mindepth) == (0, None)
 
 
 def test_joints_are_the_directories_between_the_operand_and_its_mounts():

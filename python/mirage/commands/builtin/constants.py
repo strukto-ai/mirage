@@ -13,10 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import Mapping
 from enum import Enum
 
-from mirage.core.generic.find_eval import RowActionKind
 from mirage.types import ContentType
 
 
@@ -106,75 +104,6 @@ AWK_USAGE = "awk: usage: awk [-F fs] [-v var=val] 'program' [file ...]"
 
 # The word an `-exec` argument that stands for the match is spelled as.
 EXEC_PLACEHOLDER = "{}"
-# The two terminators of an `-exec` argument list: `;` ends a per-match
-# run, `+` ends a batched run and only when it follows a bare `{}`.
-EXEC_END = ";"
-EXEC_BATCH_END = "+"
-
-FIND_VALUE_PREDICATES = frozenset(
-    {
-        "-name",
-        "-iname",
-        "-path",
-        "-type",
-        "-size",
-        "-mtime",
-        "-maxdepth",
-        "-mindepth",
-        "-printf",
-        "-newer",
-        "-newermt",
-    }
-)
-
-# `-exec` takes every word up to its terminator, so it is neither a
-# value predicate nor a bare one.
-FIND_EXEC_PREDICATES = frozenset({"-exec"})
-
-FIND_BARE_PREDICATES = frozenset(
-    {
-        "-empty",
-        "-print",
-        "-print0",
-        "-delete",
-        "-ls",
-        "-depth",
-        "-xdev",
-        "-mount",
-        "-prune",
-    }
-)
-
-FIND_OPERATORS = frozenset(
-    {
-        "-not",
-        "!",
-        "-o",
-        "-or",
-        "-a",
-        "-and",
-        "(",
-        ")",
-    }
-)
-
-FIND_EXPRESSION_TOKENS = (
-    FIND_VALUE_PREDICATES
-    | FIND_BARE_PREDICATES
-    | FIND_OPERATORS
-    | FIND_EXEC_PREDICATES
-)
-
-FIND_VALID_TYPES = frozenset({"b", "c", "d", "p", "f", "l", "s"})
-
-FIND_MAX_DEPTH = 100
-
-FIND_ROW_ACTIONS: Mapping[str, RowActionKind] = {
-    "-print": "print",
-    "-print0": "print0",
-    "-ls": "ls",
-    "-delete": "delete",
-}
 
 # How many per-mount runs of one cross-mount line are in flight at once.
 OPERAND_CONCURRENCY = 4

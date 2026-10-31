@@ -1,5 +1,5 @@
 {
- "baseline": 2649,
+ "baseline": 2633,
  "modules": {
   "server/app": {
    "python_only": {
@@ -1185,7 +1185,8 @@
   },
   "commands/builtin/generic/ls": {
    "typescript_only": {
-    "versionSortConfig": "The version-sort configuration is read once: Python's _version_sort carries functools.cache, and TypeScript keeps the value in this binding."
+    "versionSortConfig": "The version-sort configuration is read once: Python's _version_sort carries functools.cache, and TypeScript keeps the value in this binding.",
+    "oneOf": "A scanned word is checked against its union here; Python's enums refuse an unknown word when the scan's value is built from them."
    }
   }
  }

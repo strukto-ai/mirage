@@ -20,7 +20,8 @@ import { type FileStat, MountMode, PathSpec } from '../../../../types.ts'
 import { eacces } from '../../../../errors/fs.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { joints, predicates, shifted } from './find.ts'
+import { parseFindExpression } from '../../../../rs/find.ts'
+import { joints, shifted } from './find.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -80,28 +81,20 @@ function workspace(rows = true, outer = new RAMVFS()): Workspace {
   return ws
 }
 
-it('skips the words a predicate takes', () => {
-  const words = ['-name', '-prune', '-exec', 'echo', '-empty', ';', '-print']
-  expect(predicates(words)).toEqual([
-    [0, '-name'],
-    [2, '-exec'],
-    [6, '-print'],
-  ])
+it('names every test the expression reads', () => {
+  const expr = parseFindExpression(['-name', '-prune', '-exec', 'echo', '-empty', ';', '-print'])
+  expect(expr.predicates).toEqual(['-name', '-exec', '-print'])
 })
 
 it('counts the depth limits from the start point', () => {
-  const words = ['-maxdepth', '3', '-mindepth', '2', '-name', 'x']
-  const bag = { maxdepth: '3', mindepth: '2', name: 'x' }
-  expect(shifted(words, bag, 2, 3, 2)).toEqual([
-    ['-maxdepth', '1', '-mindepth', '0', '-name', 'x'],
-    { maxdepth: '1', mindepth: '0', name: 'x' },
-  ])
-  expect(shifted(words, bag, 4, 3, 2)).toBeNull()
-  expect(shifted(words, bag, 1, 3, 2, true)).toBeNull()
-  expect(shifted(['-type', 'd'], { type: 'd' }, 1, null, null, true)).toEqual([
-    ['-maxdepth', '0', '-type', 'd'],
-    { type: 'd', maxdepth: '0' },
-  ])
+  const expr = parseFindExpression(['-maxdepth', '3', '-mindepth', '2', '-name', 'x'])
+  const moved = shifted(expr, 2)
+  expect(moved).not.toBeNull()
+  expect([moved?.maxDepth, moved?.minDepth, moved?.tree]).toEqual([1, 0, expr.tree])
+  expect(shifted(expr, 4)).toBeNull()
+  expect(shifted(expr, 1, true)).toBeNull()
+  const alone = shifted(parseFindExpression(['-type', 'd']), 1, true)
+  expect([alone?.maxDepth, alone?.minDepth]).toEqual([0, null])
 })
 
 it('names the directories between the operand and its mounts', () => {

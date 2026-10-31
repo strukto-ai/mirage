@@ -26,12 +26,15 @@ import {
   LS_MINOR_PROBLEM,
   LS_OK,
   exitStatusFor,
+  linkMode,
   lsGeneric,
   parseFlags,
   sortByVersion,
   typeIndicator,
 } from './ls.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
+import { UsageError } from '../../errors.ts'
+import type { LsIndicator, LsLinkMode } from '../../../types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
@@ -463,6 +466,88 @@ describe('lsGeneric parseFlags', () => {
       .split('.')
       .reduce<unknown>((at, name) => (at as Record<string, unknown>)[name], parsed)
     expect(value).toBe(expected)
+  })
+})
+
+describe('lsGeneric option values', () => {
+  const view = (flags: Record<string, FlagValue>): FlagView => new FlagView(flags, specOf('ls'))
+
+  it.each<[Record<string, FlagValue>, LsIndicator]>([
+    [{ classify: true }, 'classify'],
+    [{ classify: 'never' }, 'none'],
+    [{ classify: 'always', p: true }, 'slash'],
+    [{ p: true, indicator_style: 'c' }, 'classify'],
+    [{ file_type: true, classify: 'no' }, 'none'],
+  ])('the last indicator spelling wins (%o)', (flags, indicator) => {
+    expect(parseFlags(view(flags)).indicator).toBe(indicator)
+  })
+
+  it.each<[Record<string, FlagValue>, boolean]>([
+    [{ hyperlink: true }, true],
+    [{ hyperlink: 'never' }, false],
+    [{ color: true }, false],
+    [{ color: 'never' }, false],
+  ])('a bare WHEN option reads as always (%o)', (flags, hyperlink) => {
+    expect(parseFlags(view(flags)).hyperlink).toBe(hyperlink)
+  })
+
+  it.each<[Record<string, FlagValue>, unknown]>([
+    [{ block_size: 'K' }, { divisor: 1024, suffix: 'K', humanBase: null }],
+    [{ block_size: 'KB' }, { divisor: 1000, suffix: 'kB', humanBase: null }],
+    [{ block_size: '2K' }, { divisor: 2048, suffix: '', humanBase: null }],
+    [{ block_size: 'human-readable' }, { divisor: 1024, suffix: '', humanBase: 1024 }],
+    [{ block_size: 'si' }, { divisor: 1000, suffix: '', humanBase: 1000 }],
+    [{ block_size: 'K', human_readable: true }, null],
+    [
+      { human_readable: true, block_size: 'K' },
+      { divisor: 1024, suffix: 'K', humanBase: null },
+    ],
+  ])('the later of -h and --block-size wins (%o)', (flags, block) => {
+    expect(parseFlags(view(flags)).columns.blockSize).toEqual(block)
+  })
+
+  it.each<[Record<string, FlagValue>, string, number]>([
+    [{ block_size: 'x' }, "ls: invalid --block-size argument 'x'", 2],
+    [{ block_size: '1x' }, "ls: invalid suffix in --block-size argument '1x'", 2],
+    [{ block_size: '16E' }, "ls: --block-size argument '16E' too large", 2],
+    [{ block_size: 'x', human_readable: true }, "ls: invalid --block-size argument 'x'", 2],
+    [
+      { sort: 'n' },
+      "ls: ambiguous argument 'n' for '--sort'\nValid arguments are:\n" +
+        "  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n" +
+        "  - 'extension'\n  - 'name'\n  - 'width'\n" +
+        "Try 'ls --help' for more information.",
+      1,
+    ],
+    [{ time: 'x', sort: 'y' }, "ls: invalid argument 'x' for '--time'", 1],
+    [{ color: 'x' }, "ls: invalid argument 'x' for '--color'", 1],
+    [{ classify: '' }, "ls: ambiguous argument '' for '--classify'", 1],
+    [{ time_style: 'x' }, "ls: invalid argument 'x' for 'time style'", 2],
+  ])('refuses what GNU refuses (%o)', (flags, message, status) => {
+    let refusal: unknown
+    try {
+      parseFlags(view(flags))
+    } catch (err) {
+      refusal = err
+    }
+    expect(refusal).toBeInstanceOf(UsageError)
+    expect((refusal as UsageError).message.startsWith(message)).toBe(true)
+    expect((refusal as UsageError).exitCode).toBe(status)
+  })
+
+  it('keeps a time style format byte for byte', () => {
+    const style = '+%Y\u00e9\u00ff'
+    expect(parseFlags(view({ time_style: style })).columns.timeStyle).toBe(style)
+  })
+
+  it.each<[Record<string, FlagValue>, LsLinkMode]>([
+    [{ classify: true }, 'none'],
+    [{ classify: 'x' }, 'directory'],
+    [{ sort: 'x', classify: true }, 'none'],
+    [{ indicator_style: 'classify' }, 'none'],
+    [{ classify: true, dereference: true }, 'all'],
+  ])('linkMode leaves a refused indicator unclassified (%o)', (flags, mode) => {
+    expect(linkMode(view(flags))).toBe(mode)
   })
 })
 

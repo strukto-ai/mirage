@@ -14,11 +14,11 @@
 
 from collections.abc import Mapping, Sequence
 
-from mirage.commands.builtin.find_parse import exec_spans
 from mirage.commands.cli.walk import walk
 from mirage.commands.spec import SPECS, constants
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, ValueType
+from mirage.rs.find import find_layout
 from mirage.utils.glob_walk import unmark_globs
 from mirage.workspace.mount import MountRegistry
 
@@ -135,7 +135,7 @@ def spec_word_kinds(
         ).word_kinds
     )
     if name == "find":
-        for start, end in exec_spans(literal):
+        for start, end in find_layout(literal).spans:
             for i in range(start, end + 1):
                 kinds[i] = "str"
     return kinds

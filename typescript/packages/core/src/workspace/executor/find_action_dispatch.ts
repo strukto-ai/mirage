@@ -18,11 +18,7 @@ import { resolvePath } from '../../utils/path.ts'
 import { enoent, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
-import {
-  expandPrintf,
-  printfNeedsStat,
-  type PrintfStatFacts,
-} from '../../commands/builtin/find_printf.ts'
+import { expandPrintf, type PrintfStatFacts } from '../../commands/builtin/find_printf.ts'
 import { printfKind } from '../../core/generic/find_eval.ts'
 import { modifiedTs } from '../../core/generic/find.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
@@ -38,11 +34,7 @@ import { lookupAll } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { StatPath } from '../../view/types.ts'
 import { SharedStdin } from '../../io/stream.ts'
-import {
-  execActions,
-  type FindExpr,
-  parseFindExpression,
-} from '../../commands/builtin/find_parse.ts'
+import type { FindExpr } from '../../rs/find.ts'
 import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
 import type { ExecAction, FindAction, PrintfAction } from '../../commands/builtin/types.ts'
 import type { ExecuteFn } from '../expand/types.ts'
@@ -303,16 +295,15 @@ function printfRow(
   path: string,
   base: string,
   st: PrintfStatFacts | null,
-  warnings: string[],
   identity: Identity | null,
 ): Uint8Array {
-  return encodeText(expandPrintf(action.format, path, base, st, warnings, identity))
+  return encodeText(expandPrintf(action.parts, path, base, st, identity))
 }
 
 /** Whether an action reads the row's stat: `-ls`, and a `-printf` whose
  * format names a stat directive (%s %y %m %T ...). */
 function readsStat(action: FindAction): boolean {
-  return action.kind === 'ls' || (action.kind === 'printf' && printfNeedsStat(action.format))
+  return action.kind === 'ls' || (action.kind === 'printf' && action.stat)
 }
 
 /** The spelling a start point's rows are measured from (%P, %d); with no
@@ -412,17 +403,16 @@ function hasActions(expr: FindExpr): boolean {
 export async function applyFindActions(
   stdout: ByteSource | null,
   records: readonly PathRecord[] | null,
-  texts: readonly string[],
+  expr: FindExpr,
   registry: MountRegistry,
   cwd: string,
   options: FindActionOptions = {},
 ): Promise<[ByteSource | null, Uint8Array, number]> {
-  const expr = parseFindExpression([...texts])
   const reorders = expr.depthFirst
   if (stdout === null || !(hasActions(expr) || reorders)) return [stdout, new Uint8Array(), 0]
   const executeFn = options.executeFn
-  const execs = execActions(expr.actions)
-  if (execs.length > 0 && executeFn === undefined) {
+  const hasExec = expr.actions.some((a) => a.kind === 'exec')
+  if (hasExec && executeFn === undefined) {
     return [null, encodeText('find: -exec: no shell to run the command\n'), 1]
   }
   const session = options.session ?? getCurrentSession()
@@ -435,7 +425,9 @@ export async function applyFindActions(
   const once =
     options.stdin === undefined || options.stdin === null ? null : new SharedStdin(options.stdin)
   await materialize(stdout)
-  if (records === null) return [null, encodeText('find: actions require structured matches\n'), 1]
+  if (records === null) {
+    return [null, encodeText('find: actions require structured matches\n'), 1]
+  }
   // The rows arrive in operand order, each naming the start point it was
   // found under, whose spelling it carries.
   const matches = (
@@ -451,7 +443,6 @@ export async function applyFindActions(
   // implicit action -depth reorders.
   const actions: FindAction[] = expr.actions.length > 0 ? expr.actions : [{ kind: 'print' }]
   const errors: Uint8Array[] = []
-  const warnings: string[] = []
   const out: Uint8Array[] = []
   const batches = new Map<number, string[]>()
   let exitCode = 0
@@ -503,11 +494,11 @@ export async function applyFindActions(
         }
         out.push(
           action.kind === 'printf'
-            ? printfRow(action, path, base, await printfFacts(match, held, vfs), warnings, identity)
+            ? printfRow(action, path, base, await printfFacts(match, held, vfs), identity)
             : lsRow(match, held, identity),
         )
       } else if (action.kind === 'printf') {
-        out.push(printfRow(action, path, base, null, warnings, identity))
+        out.push(printfRow(action, path, base, null, identity))
       } else if (action.kind === 'delete') {
         // A structural row is skipped, not refused, the way Unix leaves
         // a mount point in place.
@@ -542,8 +533,5 @@ export async function applyFindActions(
       exitCode = 1
   }
   const body = concat(out)
-  // GNU warns about a directive it cannot render once, ahead of anything
-  // the actions report.
-  const warned = warnings.map((line) => encodeText(`${line}\n`))
-  return [body.byteLength > 0 ? body : null, concat([...warned, ...errors]), exitCode]
+  return [body.byteLength > 0 ? body : null, concat(errors), exitCode]
 }

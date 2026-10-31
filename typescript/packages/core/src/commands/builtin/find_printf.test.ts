@@ -13,7 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { expandPrintf, printfNeedsStat } from './find_printf.ts'
+import { parseFindExpression } from '../../rs/find.ts'
+import { expandPrintf as render, type PrintfStatFacts } from './find_printf.ts'
+import type { Identity } from './utils/identity.ts'
+
+function compiled(fmt: string) {
+  const expr = parseFindExpression(['-printf', fmt])
+  const action = expr.actions[0]
+  if (action?.kind !== 'printf') throw new Error('not a -printf')
+  return { action, warnings: expr.warnings }
+}
+
+function expandPrintf(
+  fmt: string,
+  row: string,
+  base: string,
+  st: PrintfStatFacts | null,
+  warnings: string[],
+  identity: Identity | null = null,
+): string {
+  const { action, warnings: found } = compiled(fmt)
+  warnings.push(...found)
+  return render(action.parts, row, base, st, identity)
+}
+
+function printfNeedsStat(fmt: string): boolean {
+  return compiled(fmt).action.stat
+}
 
 describe('expandPrintf', () => {
   const stat = {
@@ -137,12 +163,15 @@ describe('expandPrintf', () => {
     expect(expandPrintf('%TG|%TV\n', '/data/a.txt', '/data', first, [])).toBe('4|53\n')
   })
 
-  it('handles escapes and warns once per unknown directive', () => {
+  it('handles escapes and warns per unknown directive in GNU words', () => {
     const warnings: string[] = []
     expect(expandPrintf('A\\tB\\n', '/data/a.txt', '/data', null, warnings)).toBe('A\tB\n')
     expect(expandPrintf('%Q\n', '/data/a.txt', '/data', null, warnings)).toBe('%Q\n')
     expect(expandPrintf('%Q\n', '/data/a.txt', '/data', null, warnings)).toBe('%Q\n')
-    expect(warnings).toEqual(["find: warning: unrecognized format directive '%Q'"])
+    expect(warnings).toEqual([
+      "find: warning: unrecognized format directive `%Q'",
+      "find: warning: unrecognized format directive `%Q'",
+    ])
   })
 
   it('renders the start row at depth 0', () => {

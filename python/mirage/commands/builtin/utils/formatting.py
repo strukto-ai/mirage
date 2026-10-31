@@ -17,9 +17,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone, tzinfo
-from enum import Enum
 
-from mirage.commands.builtin.constants import UINTMAX
 from mirage.commands.builtin.utils import constants
 from mirage.commands.builtin.utils.identity import (
     UNKNOWN_NAME,
@@ -45,14 +43,6 @@ from mirage.utils.stat_view import (
 
 logger = logging.getLogger(__name__)
 
-# GNU's --block-size units: the letter, its 1024-based factor and the two
-# suffixes it prints (K for KiB, kB for KB). GNU's size table, which
-# takes every letter in upper case and only k, m, g and t in lower case;
-# R and Q are not in it (coreutils 9.7 refuses `--block-size=1R`).
-BLOCK_UNITS = "KMGTPEZY"
-_LOWER_BLOCK_UNITS = "kmgt"
-_C_SPACE = " \t\n\v\f\r"
-LS_TIME_STYLES = ("full-iso", "long-iso", "iso", "locale")
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 # The fraction of a second as the stamp spells it.
 _FRACTION = re.compile(r"\d\d:\d\d:\d\d\.(\d+)")
@@ -102,98 +92,6 @@ class LsColumns:
 
 
 DEFAULT_COLUMNS = LsColumns()
-
-
-class BlockSizeRefusal(Enum):
-    """Which of GNU's three ``--block-size`` refusals a value earned.
-
-    Three ways a size can fail, which ls words differently: a word it
-    cannot read a number or a unit out of (``x``, ``0``, ``iB``, an
-    empty value), a number followed by something that is not a unit
-    (``1x``, ``1.5K``, ``Kx``, a trailing blank), and a value past
-    UINTMAX_MAX (``Y`` alone is 2**80). The suffix test outranks the
-    overflow test: a value that fails both is worded as the suffix
-    failure.
-    """
-
-    INVALID = "invalid"
-    INVALID_SUFFIX = "invalid suffix"
-    TOO_LARGE = "too large"
-
-
-def _block_unit_power(letter: str) -> int | None:
-    """The 1024-power a unit letter stands for, or None for a non-unit.
-
-    Args:
-        letter (str): one character of the value.
-    """
-    if letter in BLOCK_UNITS or letter in _LOWER_BLOCK_UNITS:
-        return BLOCK_UNITS.index(letter.upper()) + 1
-    return None
-
-
-def parse_block_size(text: str) -> BlockSize | BlockSizeRefusal:
-    """GNU's ``--block-size=SIZE`` grammar, or which refusal it earns.
-
-    ``human-readable`` and ``si`` pick the two ``-h`` scales; otherwise
-    an optional count is followed by an optional unit letter, ``B``
-    making it decimal (``KB`` is 1000 and prints ``kB``) and ``iB``
-    keeping it binary. The count is read the way strtoumax reads it:
-    leading blanks and one ``+`` are skipped, a ``-`` is not a sign
-    here. A zero count is refused under any unit, as GNU refuses ``0K``
-    the way it refuses ``0``, and a product past UINTMAX_MAX is too
-    large. Measured on coreutils 9.7: ``ls --block-size=`` with ``x``,
-    ``0K``, ``iB``, ``B``, ``-1K`` and ``''`` is invalid; with ``1x``,
-    ``1e``, ``Kx``, ``1Ki``, ``1.5K``, ``1R`` and ``'1 '`` is an invalid
-    suffix; with ``Y``, ``16E`` and ``18446744073709551616`` is too
-    large. Deliberate divergence: strtoumax reads a ``0x`` or ``0``
-    prefix as hexadecimal or octal (``010`` is 8 blocks), mirage reads
-    every count in decimal.
-
-    Args:
-        text (str): the option value as typed.
-    """
-    if text == "human-readable":
-        return BlockSize(1024, "", 1024)
-    if text == "si":
-        return BlockSize(1000, "", 1000)
-    # strtol's prefix: leading C blanks and one `+` are skipped only in
-    # front of a digit (`' +1'` is 1) and never in front of a bare unit
-    # (`+K` and `' K'` are refused, coreutils 9.7).
-    body = text.lstrip(_C_SPACE).removeprefix("+")
-    if body != text and not body[:1].isdigit():
-        return BlockSizeRefusal.INVALID
-    i = 0
-    while i < len(body) and body[i] in "0123456789":
-        i += 1
-    digits, unit = body[:i], body[i:]
-    if not digits and (not unit or _block_unit_power(unit[0]) is None):
-        return BlockSizeRefusal.INVALID
-    count = int(digits) if digits else 1
-    factor = 1
-    shown = ""
-    if unit:
-        letter, rest = unit[0], unit[1:]
-        power = _block_unit_power(letter)
-        if power is None:
-            return BlockSizeRefusal.INVALID_SUFFIX
-        upper = letter.upper()
-        if rest == "":
-            factor, shown = 1024**power, upper
-        elif rest == "B":
-            factor, shown = 1000**power, ("k" if upper == "K" else upper) + "B"
-        elif rest == "iB":
-            factor, shown = 1024**power, upper + "iB"
-        else:
-            return BlockSizeRefusal.INVALID_SUFFIX
-    if count * factor > UINTMAX:
-        return BlockSizeRefusal.TOO_LARGE
-    if count == 0:
-        return BlockSizeRefusal.INVALID
-    # The unit is echoed after each size only when the value was a bare
-    # unit: `K` prints `4K`, `KiB` prints `4KiB`, `1K` and `2K` print
-    # `4` and `2` (coreutils 9.7).
-    return BlockSize(count * factor, shown if not digits else "")
 
 
 def scaled_size(n: int, block: BlockSize | None, human: bool) -> str:

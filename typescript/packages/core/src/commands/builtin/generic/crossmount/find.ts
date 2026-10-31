@@ -12,14 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  EXEC_BATCH_END,
-  EXEC_END,
-  FIND_EXEC_PREDICATES,
-  FIND_VALUE_PREDICATES,
-  OPERAND_CONCURRENCY,
-} from '../../constants.ts'
-import { parseFindExpression } from '../../find_parse.ts'
+import { OPERAND_CONCURRENCY } from '../../constants.ts'
+import { parseFindExpression, type FindExpr } from '../../../../rs/find.ts'
 import { DISPATCH_BUILDERS } from './constants.ts'
 import { mountStarts, reached } from './scopes.ts'
 import type { CrossResult, RunSingle } from './types.ts'
@@ -42,26 +36,6 @@ import { mountView } from '../../utils/links.ts'
 // answer them for the whole tree, so such a line keeps the one walk.
 export const WALK_WIDE: ReadonlySet<string> = new Set(['-prune', '-empty', '-xdev', '-mount'])
 
-/** Each word of a find expression that is not another word's argument. */
-export function predicates(texts: readonly string[]): [number, string][] {
-  const found: [number, string][] = []
-  for (let i = 0; i < texts.length; i++) {
-    const word = texts[i] ?? ''
-    found.push([i, word])
-    if (FIND_VALUE_PREDICATES.has(word)) {
-      i += 1
-    } else if (FIND_EXEC_PREDICATES.has(word)) {
-      i += 1
-      while (
-        i < texts.length &&
-        !(texts[i] === EXEC_END || (texts[i] === EXEC_BATCH_END && texts[i - 1] === '{}'))
-      )
-        i += 1
-    }
-  }
-  return found
-}
-
 /**
  * The expression for a start point `depth` levels below the operand.
  *
@@ -69,36 +43,13 @@ export function predicates(texts: readonly string[]): [number, string][] {
  * point only, not what lies below. Null when the limits leave it nothing to
  * print.
  */
-export function shifted(
-  texts: readonly string[],
-  bag: Record<string, FlagValue>,
-  depth: number,
-  maxDepth: number | null,
-  minDepth: number | null,
-  alone = false,
-): [string[], Record<string, FlagValue>] | null {
+export function shifted(expr: FindExpr, depth: number, alone = false): FindExpr | null {
+  const { maxDepth, minDepth } = expr
   if (maxDepth !== null && depth > maxDepth) return null
   if (alone && minDepth !== null && depth < minDepth) return null
   const top = alone ? 0 : maxDepth === null ? null : maxDepth - depth
   const bottom = minDepth === null ? null : Math.max(0, minDepth - depth)
-  const limits = new Map([
-    ['-maxdepth', top],
-    ['-mindepth', bottom],
-  ])
-  let words = [...texts]
-  const limited: Record<string, FlagValue> = { ...bag }
-  for (const [i, word] of predicates(texts)) {
-    const limit = limits.get(word) ?? null
-    if (limit !== null) {
-      words[i + 1] = String(limit)
-      limited[word.slice(1)] = String(limit)
-    }
-  }
-  if (alone && !('maxdepth' in limited)) {
-    words = ['-maxdepth', '0', ...words]
-    limited.maxdepth = '0'
-  }
-  return [words, limited]
+  return { ...expr, maxDepth: top, minDepth: bottom }
 }
 
 /**
@@ -155,6 +106,7 @@ export async function runFind(
   paths: readonly PathSpec[],
   texts: readonly string[],
   bag: Record<string, FlagValue>,
+  find: FindExpr | undefined,
   dispatch: DispatchFn,
   runSingle: RunSingle,
   cwd: string,
@@ -166,22 +118,36 @@ export async function runFind(
 ): Promise<CrossResult> {
   const builder = DISPATCH_BUILDERS.get('find')
   if (builder === undefined) throw new Error('No dispatch builder for find')
+  const expr = find ?? parseFindExpression(texts)
   const walk = (): Promise<CrossResult> =>
-    runDispatch(builder, paths, texts, bag, dispatch, cwd, vfs, stdin, signal, [], follow)
+    runDispatch(
+      builder,
+      paths,
+      texts,
+      bag,
+      dispatch,
+      cwd,
+      vfs,
+      stdin,
+      signal,
+      [],
+      follow,
+      undefined,
+      undefined,
+      expr,
+    )
   const mounts = mountView(vfs)
   if (
     mounts === undefined ||
-    predicates(texts).some(([, word]) => WALK_WIDE.has(word)) ||
+    expr.predicates.some((word) => WALK_WIDE.has(word)) ||
     new FlagView(bag, specOf('find')).asBool('L')
   )
     return walk()
-  const expr = parseFindExpression([...texts])
   const plan: {
     index: number
     start: PathSpec
     alone: boolean
-    words: string[]
-    bag: Record<string, FlagValue>
+    limited: FindExpr
   }[] = []
   paths.forEach((path, index) => {
     const base = path.virtual.replace(/\/+$/, '')
@@ -193,8 +159,8 @@ export async function runFind(
     for (const [start, alone] of steps) {
       const depth =
         start === path ? 0 : (start.virtual.slice(base.length).match(/\//g) ?? []).length
-      const limited = shifted(texts, bag, depth, expr.maxDepth, expr.minDepth, alone)
-      if (limited !== null) plan.push({ index, start, alone, words: limited[0], bag: limited[1] })
+      const limited = shifted(expr, depth, alone)
+      if (limited !== null) plan.push({ index, start, alone, limited })
     }
   })
   const ios = await boundedMap(
@@ -204,8 +170,8 @@ export async function runFind(
         ? await runDispatch(
             builder,
             [step.start],
-            step.words,
-            step.bag,
+            texts,
+            bag,
             dispatch,
             cwd,
             vfs,
@@ -213,14 +179,14 @@ export async function runFind(
             signal,
             [],
             follow,
+            undefined,
+            undefined,
+            step.limited,
           )
-        : await runSingle(
-            'find',
-            [step.start],
-            step.words,
-            step.bag,
-            signal === undefined ? {} : { signal },
-          )
+        : await runSingle('find', [step.start], [...texts], bag, {
+            find: step.limited,
+            ...(signal === undefined ? {} : { signal }),
+          })
       await materialize(out)
       return io
     },

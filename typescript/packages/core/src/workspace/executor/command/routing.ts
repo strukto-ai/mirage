@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { findExprTail } from '../../../commands/builtin/find_parse.ts'
+import { findLayout } from '../../../rs/find.ts'
 import { recurses } from '../../../commands/builtin/generic/grep.ts'
 import { FILE_KEYS } from '../../../commands/builtin/generic/program.ts'
 import type { CLI } from '../../../commands/cli/types.ts'
@@ -89,7 +89,7 @@ export function defaultCwdOperand(
   if (cmdName === 'find') {
     // Only the words before the expression can be start points: an
     // `-exec` command word or a `-newer` reference is the parser's.
-    argv = argv.slice(0, argv.length - findExprTail(argv).length)
+    argv = argv.slice(0, findLayout(argv).start)
   }
   const parsed = parseCommand(spec, argv, cwd, cmdName)
   if (parsed.paths().length > 0) return null

@@ -13,11 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.constants import EXEC_PLACEHOLDER
-from mirage.commands.builtin.find_parse import FindExpr, parse_find_expression
-from mirage.commands.builtin.find_printf import (
-    expand_printf,
-    printf_needs_stat,
-)
+from mirage.commands.builtin.find_printf import expand_printf
 from mirage.commands.builtin.types import (
     ExecAction,
     FindAction,
@@ -38,6 +34,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import SharedStdin, materialize
 from mirage.io.types import ByteSource, PathRecord
+from mirage.rs.find import FindExpr
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
@@ -321,7 +318,6 @@ async def _printf_row(
     start: PathSpec,
     st: FileStat | None,
     vfs: Files | None,
-    warnings: list[str],
     identity: Identity | None,
 ) -> bytes:
     """Render one accepted row through a ``-printf`` format.
@@ -339,7 +335,6 @@ async def _printf_row(
             the format names no stat directive.
         vfs (Files | None): the name plane's facts, for a symlink
             row's target.
-        warnings (list[str]): sink for GNU's warning lines.
         identity (Identity | None): who the session is, for the owner
             directives on an entry that reports no owner of its own.
     """
@@ -353,11 +348,10 @@ async def _printf_row(
     )
     return encode_text(
         expand_printf(
-            action.format,
+            action.parts,
             ps.raw_path or ps.virtual,
             start,
             st,
-            warnings,
             target,
             identity,
         )
@@ -372,7 +366,7 @@ def _reads_stat(action: FindAction) -> bool:
         action (FindAction): the action.
     """
     if isinstance(action, PrintfAction):
-        return printf_needs_stat(action.format)
+        return action.needs_stat
     return isinstance(action, RowAction) and action.kind == "ls"
 
 
@@ -449,7 +443,7 @@ def _structural(path: PathSpec, registry: MountRegistry) -> bool:
 async def _apply_find_actions(
     stdout: ByteSource | None,
     records: list[PathRecord] | None,
-    texts: list[str],
+    expr: FindExpr,
     registry: MountRegistry,
     cwd: str,
     *,
@@ -507,7 +501,7 @@ async def _apply_find_actions(
         records (list[PathRecord] | None): matches before rendering,
             each with the start point it was found under, in operand
             order.
-        texts (list[str]): the expression tokens, already validated.
+        expr (FindExpr): the expression, parsed once for the line.
         registry (MountRegistry): used to route per-match dispatch.
         cwd (str): cwd forwarded to per-match sub-dispatch.
         execute_fn (ExecuteLine | None): runs an ``-exec`` line in the
@@ -536,15 +530,22 @@ async def _apply_find_actions(
             working directory.
     """
     once = SharedStdin(stdin) if stdin is not None else None
-    expr = parse_find_expression(list(texts))
     reorders = expr.depth_first
     if stdout is None or not (_has_actions(expr) or reorders):
         return stdout, b"", 0
     await materialize(stdout)
     if expr.execs and execute_fn is None:
-        return None, b"find: -exec: no shell to run the command\n", 1
+        return (
+            None,
+            b"find: -exec: no shell to run the command\n",
+            1,
+        )
     if records is None:
-        return None, b"find: actions require structured matches\n", 1
+        return (
+            None,
+            b"find: actions require structured matches\n",
+            1,
+        )
     # The rows arrive in operand order, each naming the start point it was
     # found under; with no operand that is the working directory, which
     # prints as `.`.
@@ -572,7 +573,6 @@ async def _apply_find_actions(
     # implicit action -depth reorders.
     actions = expr.actions or [RowAction("print")]
     errors: list[bytes] = []
-    warnings: list[str] = []
     out: list[bytes] = []
     batches: dict[int, list[str]] = {}
     exit_code = 0
@@ -619,7 +619,7 @@ async def _apply_find_actions(
                     break
                 out.append(
                     await _printf_row(
-                        action, match, start, held, vfs, warnings, identity
+                        action, match, start, held, vfs, identity
                     )
                     if isinstance(action, PrintfAction)
                     else _ls_row(match, held, identity)
@@ -627,7 +627,7 @@ async def _apply_find_actions(
             elif isinstance(action, PrintfAction):
                 out.append(
                     await _printf_row(
-                        action, match, start, None, vfs, warnings, identity
+                        action, match, start, None, vfs, identity
                     )
                 )
             elif action.kind == "delete":
@@ -662,7 +662,4 @@ async def _apply_find_actions(
         ):
             exit_code = 1
     body = b"".join(out)
-    # GNU warns about a directive it cannot render once, ahead of anything
-    # the actions report.
-    warned = [encode_text(f"{line}\n") for line in warnings]
-    return (body if body else None), b"".join(warned + errors), exit_code
+    return (body if body else None), b"".join(errors), exit_code

@@ -38,11 +38,17 @@ describe('@struktoai/mirage-node Workspace', () => {
   })
 
   it.each([
-    ['-maxdepth abc', "find: invalid argument 'abc' to '-maxdepth'"],
-    ['-mindepth xx', "find: invalid argument 'xx' to '-mindepth'"],
+    [
+      '-maxdepth abc',
+      "find: Expected a positive decimal integer argument to -maxdepth, but got 'abc'",
+    ],
+    [
+      '-mindepth xx',
+      "find: Expected a positive decimal integer argument to -mindepth, but got 'xx'",
+    ],
     ["-size ''", 'find: invalid null argument to -size'],
     ['-size abc', "find: Invalid argument `abc' to -size"],
-    ['-mtime abc', "find: invalid argument 'abc' to '-mtime'"],
+    ['-mtime abc', "find: invalid argument `abc' to `-mtime'"],
   ])('find %s exits 1 with a clean stderr instead of crashing', async (expr, message) => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     const res = await ws.shell(`find / ${expr}`)
