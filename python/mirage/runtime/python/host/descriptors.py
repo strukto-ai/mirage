@@ -183,6 +183,17 @@ class Descriptors:
         )
         return layered(raw, facts, mode, encoding, errors, newline, buffering)
 
+    def forget(self, fd: int) -> None:
+        """Give a descriptor's number back, leaving its handle to whoever
+        lets it go: the part of a close that reaches no loop, which a
+        close inside a garbage collection makes (``HandleRaw``).
+
+        Args:
+            fd (int): a mounted descriptor.
+        """
+        if self._open.pop(fd, None) is not None:
+            self._host.close(fd)
+
     def close(self, fd: int) -> None:
         """Land a descriptor's writes and give its number back.
 
@@ -235,6 +246,7 @@ class Descriptors:
             lambda: self._open.get(fd) is desc,
             (lambda: self.close(fd)) if closefd else None,
             fd,
+            (lambda: self.forget(fd)) if closefd else None,
         )
         return layered(raw, facts, mode, encoding, errors, newline, buffering)
 

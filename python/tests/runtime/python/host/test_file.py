@@ -14,15 +14,21 @@
 
 import asyncio
 import errno
+import gc
 import io
+import os
+import sys
+import threading
+import weakref
 
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.bridge.sync import handed, run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
-from mirage.runtime.python.host.fs import HostFs
+from mirage.runtime.python.host.fs import HostFs, os_routing
 from mirage.runtime.python.host.open import make_open
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -409,3 +415,271 @@ def test_unbuffered_reads_recheck_retained_bytes_and_preserve_position(
         reset_current_session(token)
         loop.run_until_complete(ws.close())
         loop.close()
+
+
+async def _one_turn() -> int:
+    return 1
+
+
+class _Finalizes:
+    """Makes calls on a live stream from its finalizer, in a cycle of its
+    own, and keeps what each answered, or the class of what it raised."""
+
+    def __init__(self, stream, calls, seen) -> None:
+        self.stream = stream
+        self.calls = calls
+        self.seen = seen
+        self.cycle = self
+
+    def __del__(self) -> None:
+        for name, *args in self.calls:
+            try:
+                self.seen.append(getattr(self.stream, name)(*args))
+            except Exception as exc:
+                self.seen.append(type(exc).__name__)
+
+
+def _collected(build=None) -> None:
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        if build is not None:
+            build()
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def _drop_in_cycle(stream) -> None:
+    cycle = [stream]
+    cycle.append(cycle)
+
+
+def _host(ws, loop):
+    """The routed ``os`` calls and ``open`` a program reaches."""
+    router = HostFs(ws.vfs, loop)
+    return os_routing(router), make_open(ws.vfs, loop, router)
+
+
+def _landed(ws, loop, path):
+    return loop.run_until_complete(ws.vfs.read(path))
+
+
+@pytest.mark.parametrize(
+    "mode,buffering,seed,payload,landed",
+    [
+        ("wb", 0, b"", b"landed", b"landed"),
+        ("ab", -1, b"kept-", b"landed", b"kept-landed"),
+        ("w", -1, b"", "landed", b"landed"),
+    ],
+)
+def test_a_stream_the_collector_closes_lands_at_its_loops_next_call(
+    monkeypatch, mode, buffering, seed, payload, landed
+):
+    # The collection runs where run_forever has not yet marked the loop
+    # running, after run_until_complete registered its stop: a close
+    # driving the loop there would take that stop and the drive would
+    # never return. The program runs on a thread only so a regression
+    # fails here instead of hanging the suite.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(ws.vfs.write("/data/f", seed))
+    _, opener = _host(ws, loop)
+    hooks = sys.get_asyncgen_hooks
+    armed, driven = threading.Event(), threading.Event()
+    dropped: list[weakref.ref] = []
+    collected = []
+    read = []
+
+    def collecting_hooks():
+        if armed.is_set():
+            armed.clear()
+            gc.collect()
+            collected.append(dropped[0]() is None)
+        return hooks()
+
+    def program() -> None:
+        stream = opener("/data/f", mode, buffering=buffering)
+        stream.write(payload)
+        dropped.append(weakref.ref(stream))
+        _drop_in_cycle(stream)
+        del stream
+        collected.append(dropped[0]() is None)
+        armed.set()
+        assert run_async_from_sync(_one_turn(), loop) == 1
+        read.append(run_async_from_sync(ws.vfs.read("/data/f"), loop))
+        driven.set()
+
+    enabled = gc.isenabled()
+    gc.disable()
+    monkeypatch.setattr(sys, "get_asyncgen_hooks", collecting_hooks)
+    try:
+        threading.Thread(target=program, daemon=True).start()
+        assert driven.wait(10)
+    finally:
+        monkeypatch.undo()
+        if enabled:
+            gc.enable()
+    assert collected == [False, True]
+    assert read == [landed]
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_collected_stream_lands_at_the_next_call_on_a_running_owner():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        with ws:
+            stream = open("/data/f", "wb")
+            stream.write(b"landed")
+            _drop_in_cycle(stream)
+            del stream
+            gc.collect()
+            with open("/data/f", "rb") as reader:
+                assert reader.read() == b"landed"
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def test_a_collected_stream_with_no_shared_loop_closes_in_place():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    stream = make_open(ws.vfs)("/data/f", "wb", buffering=0)
+    stream.write(b"landed")
+    _drop_in_cycle(stream)
+    del stream
+    _collected()
+    assert asyncio.run(ws.vfs.read("/data/f")) == b"landed"
+
+
+def _shared_fd(ws, loop):
+    """An fd holding ``before-``, a live stream over it, and two collected
+    buffered streams over it whose ``one-`` and ``two-`` wait to land."""
+    routed, opener = _host(ws, loop)
+    fd = routed["open"]("/data/log", os.O_WRONLY | os.O_CREAT)
+    routed["write"](fd, b"before-")
+    live = opener(fd, "wb", buffering=0, closefd=False)
+    siblings = [opener(fd, "wb", closefd=False) for _ in range(2)]
+    siblings[0].write(b"one-")
+    siblings[1].write(b"two-")
+    for _ in range(2):
+        _drop_in_cycle(siblings.pop(0))
+        _collected()
+    return routed, fd, live
+
+
+def test_collected_streams_over_an_fd_land_in_order_before_its_next_write():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, fd, _ = _shared_fd(ws, loop)
+    routed["write"](fd, b"after")
+    routed["close"](fd)
+    assert _landed(ws, loop, "/data/log") == b"before-one-two-after"
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_bare_truncate_keeps_what_collected_streams_over_its_fd_wrote():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, fd, live = _shared_fd(ws, loop)
+    assert live.truncate() == len(b"before-one-two-")
+    live.close()
+    routed["close"](fd)
+    assert _landed(ws, loop, "/data/log") == b"before-one-two-"
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_finalizer_cannot_reach_the_loop_through_a_live_stream():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    _, opener = _host(ws, loop)
+    log = opener("/data/log", "wb", buffering=0)
+    log.write(b"before-")
+    seen = []
+    _collected(lambda: _Finalizes(log, [("write", b"during-")], seen))
+    assert seen == ["RuntimeError"]
+    log.write(b"after")
+    log.close()
+    assert _landed(ws, loop, "/data/log") == b"before-after"
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_finalizer_writes_into_a_live_streams_buffer():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    _, opener = _host(ws, loop)
+    log = opener("/data/log", "wb")
+    log.write(b"before-")
+    seen = []
+    _collected(lambda: _Finalizes(log, [("write", b"during-")], seen))
+    assert seen == [7]
+    log.write(b"after")
+    log.close()
+    assert _landed(ws, loop, "/data/log") == b"before-during-after"
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+@pytest.mark.parametrize("call", [("close",), ("flush",)])
+def test_a_finalizer_cannot_close_or_flush_a_live_stream(call):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    _, opener = _host(ws, loop)
+    log = opener("/data/log", "wb", buffering=0)
+    log.write(b"before-")
+    seen = []
+    _collected(lambda: _Finalizes(log, [call], seen))
+    assert seen == ["RuntimeError"]
+    log.write(b"after")
+    log.close()
+    assert _landed(ws, loop, "/data/log") == b"before-after"
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_collected_stream_over_an_fd_it_leaves_open_lands_its_bytes():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    routed, opener = _host(ws, loop)
+    fd = routed["open"]("/data/log", os.O_WRONLY | os.O_CREAT)
+    routed["write"](fd, b"before-")
+    stream = opener(fd, "wb", closefd=False)
+    stream.write(b"landed")
+    _drop_in_cycle(stream)
+    del stream
+    _collected()
+    loop.run_until_complete(handed())
+    assert _landed(ws, loop, "/data/log") == b"before-landed"
+    routed["close"](fd)
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+async def _failing_write(*args):
+    raise OSError(errno.ENOSPC, "no space")
+
+
+def test_a_collected_stream_lets_its_handle_go_when_a_last_write_fails(
+    monkeypatch,
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    _, opener = _host(ws, loop)
+    stream = opener("/data/f", "wb")
+    stream.write(b"lost")
+    handle = stream.raw._handle
+    core, fh = handle.files._core, handle.fh
+    monkeypatch.setattr(core, "write", _failing_write)
+    _drop_in_cycle(stream)
+    del stream
+    _collected()
+    loop.run_until_complete(handed())
+    assert fh not in core.handles
+    loop.run_until_complete(ws.close())
+    loop.close()

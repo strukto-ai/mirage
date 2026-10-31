@@ -36,7 +36,7 @@ from typing import Any, BinaryIO, Literal, TypeVar, overload
 
 from pydantic import BaseModel
 
-from mirage.bridge.sync import SyncBridge
+from mirage.bridge.sync import SyncBridge, handed
 from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import NULL_INDEX, IndexConfig
@@ -1735,6 +1735,9 @@ class Workspace:
             *(execution.aclose() for execution in executions),
             return_exceptions=True,
         )
+        # A stream the garbage collector closed handed its close to this
+        # loop (``mirage.bridge.sync.soon``); it lands before the mounts go.
+        await handed()
         # A metadata record write in flight lands before teardown drops
         # the state or closes the store; its lock settles on the loop the
         # write runs on.

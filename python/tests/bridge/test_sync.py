@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import inspect
 import subprocess
 import sys
@@ -11,8 +12,10 @@ from mirage.bridge.sync import (
     BLOCKED,
     SyncBridge,
     blocking,
+    handed,
     on_auxiliary_loop,
     run_async_from_sync,
+    soon,
 )
 from mirage.core.api.client import SessionPool
 
@@ -379,3 +382,166 @@ async def test_blocking_marks_the_running_loop_for_its_call():
             assert loop in BLOCKED
         assert loop in BLOCKED
     assert loop not in BLOCKED
+
+
+async def _nothing() -> None:
+    return None
+
+
+def test_a_collection_neither_drives_nor_waits_on_a_loop():
+    loop = asyncio.new_event_loop()
+    refused = []
+
+    def during(phase, info):
+        if phase == "start" and not refused:
+            with pytest.raises(RuntimeError, match="garbage collection"):
+                run_async_from_sync(_nothing(), loop)
+            refused.append(loop.is_running())
+
+    gc.callbacks.append(during)
+    try:
+        gc.collect()
+    finally:
+        gc.callbacks.remove(during)
+        loop.close()
+    assert refused == [False]
+
+
+def test_handed_work_starts_before_a_later_call():
+    loop = asyncio.new_event_loop()
+    events = []
+
+    async def record(name: str) -> None:
+        events.append(name)
+
+    try:
+        soon(loop, record("handed"))
+        run_async_from_sync(record("later"), loop)
+    finally:
+        loop.close()
+    assert events == ["handed", "later"]
+
+
+def test_handed_waits_for_work_handed_to_its_loop():
+    loop = asyncio.new_event_loop()
+    events = []
+
+    async def slow() -> None:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        events.append("done")
+
+    try:
+        soon(loop, slow())
+        loop.run_until_complete(handed())
+    finally:
+        loop.close()
+    assert events == ["done"]
+
+
+def test_work_handed_to_a_closed_loop_is_dropped():
+    loop = asyncio.new_event_loop()
+    loop.close()
+    work = _nothing()
+    soon(loop, work)
+    assert inspect.getcoroutinestate(work) == inspect.CORO_CLOSED
+
+
+class _HandsOff:
+    """Hands work to a running loop from its finalizer, in a cycle of its
+    own, and notes whether the loop ran it before the collection ended."""
+
+    def __init__(self, loop, events) -> None:
+        self.loop = loop
+        self.events = events
+        self.cycle = self
+
+    def __del__(self) -> None:
+        async def record() -> None:
+            self.events.append("ran")
+
+        soon(self.loop, record())
+        threading.Event().wait(0.05)
+        self.events.append("collection ending")
+
+
+def test_work_handed_off_in_a_collection_waits_for_it_to_end():
+    loop = asyncio.new_event_loop()
+    ready = threading.Event()
+    loop.call_soon(ready.set)
+    owner = threading.Thread(target=loop.run_forever, daemon=True)
+    owner.start()
+    assert ready.wait(5)
+    events = []
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        _HandsOff(loop, events)
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+    asyncio.run_coroutine_threadsafe(handed(), loop).result(5)
+    loop.call_soon_threadsafe(loop.stop)
+    owner.join(5)
+    loop.close()
+    assert events == ["collection ending", "ran"]
+
+
+class _HoldsCollection:
+    """Hands work to a loop from its finalizer, in a cycle of its own,
+    then keeps its collection going until ``go`` is set."""
+
+    def __init__(self, loop, events, handed_off, go) -> None:
+        self.loop = loop
+        self.events = events
+        self.handed_off = handed_off
+        self.go = go
+        self.cycle = self
+
+    def __del__(self) -> None:
+        async def record() -> None:
+            self.events.append("ran")
+
+        soon(self.loop, record())
+        self.handed_off.set()
+        self.go.wait(5)
+
+
+def _collect_holding(loop, events, handed_off, go) -> None:
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        _HoldsCollection(loop, events, handed_off, go)
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def test_handed_waits_for_work_a_collection_on_another_thread_holds():
+    loop = asyncio.new_event_loop()
+    events = []
+    handed_off = threading.Event()
+    go = threading.Event()
+    collector = threading.Thread(
+        target=_collect_holding, args=(loop, events, handed_off, go)
+    )
+
+    async def teardown() -> None:
+        waiting = asyncio.ensure_future(handed())
+        await asyncio.sleep(0.05)
+        events.append("still waiting" if not waiting.done() else "returned")
+        go.set()
+        await waiting
+        events.append("handed")
+
+    collector.start()
+    try:
+        assert handed_off.wait(5)
+        loop.run_until_complete(teardown())
+    finally:
+        go.set()
+        collector.join(5)
+        loop.close()
+    assert events == ["still waiting", "ran", "handed"]
