@@ -52,4 +52,12 @@ describe('gcal VFS', () => {
     expect(parseBucket(bucket, size)).not.toBeNull()
     expect(name.startsWith('2026-08-11_')).toBe(size > 1)
   })
+
+  it('buckets by day when constructed without bucketDays', async () => {
+    const vfs = new GCalVFS({ accessToken: 't' })
+    expect(vfs.config.bucketDays).toBe(1)
+    const text = await new Workspace({ '/cal': vfs }).vfsMd()
+    expect(text).toContain('/primary/2026-08-11/<eventId>__0900-1030_Team_Standup.gcal.json')
+    expect(text).toContain('A bucket is one local day')
+  })
 })
