@@ -41,6 +41,9 @@ COLLECTING = threading.local()
 DEFERRED: WeakKeyDictionary[
     asyncio.AbstractEventLoop, deque[Callable[[], None]]
 ] = WeakKeyDictionary()
+# The loops this thread is running put-off work for now: the work's own
+# calls reach ``run_deferred`` again, which must not start over.
+DRAINING = threading.local()
 
 
 def _on_collection(phase: str, info: dict[str, int]) -> None:
@@ -62,8 +65,8 @@ def collecting() -> bool:
 
 def defer(loop: asyncio.AbstractEventLoop, work: Callable[[], None]) -> None:
     """Put off synchronous work that drives ``loop`` until something
-    outside any drive of it runs ``run_deferred``: the next drive
-    ``run_async_from_sync`` starts on it, or the workspace's close.
+    outside any drive of it runs ``run_deferred``: the next call
+    ``run_async_from_sync`` makes for it, or the workspace's close.
 
     Args:
         loop (asyncio.AbstractEventLoop): the loop the work drives.
@@ -80,12 +83,23 @@ def run_deferred(loop: asyncio.AbstractEventLoop) -> None:
         loop (asyncio.AbstractEventLoop): the loop the work drives.
     """
     pending = DEFERRED.get(loop)
-    while pending:
-        work = pending.popleft()
-        try:
-            work()
-        except Exception:
-            logger.debug("work put off by a collection failed", exc_info=True)
+    draining: set[asyncio.AbstractEventLoop] = DRAINING.__dict__.setdefault(
+        "loops", set()
+    )
+    if not pending or loop in draining:
+        return
+    draining.add(loop)
+    try:
+        while pending:
+            work = pending.popleft()
+            try:
+                work()
+            except Exception:
+                logger.debug(
+                    "work put off by a collection failed", exc_info=True
+                )
+    finally:
+        draining.discard(loop)
 
 
 @contextmanager
@@ -138,8 +152,8 @@ def run_async_from_sync(
     refused: the collection may have interrupted a drive of that same
     loop, which driving it again from inside would end early (the nested
     run takes its stop), and waiting on it can block on itself. A file's
-    finalizer puts its close off instead (``defer``), and an idle loop's
-    next drive runs what was put off on it first.
+    finalizer puts its close off instead (``defer``), and the next call
+    for that loop from outside it runs what was put off first.
 
     Args:
         awaitable (Awaitable[T]): The asynchronous operation to run.
@@ -166,6 +180,7 @@ def run_async_from_sync(
 
     if loop is not None and loop is not running_loop:
         if loop.is_running():
+            run_deferred(loop)
             future = asyncio.run_coroutine_threadsafe(
                 _await_result(awaitable), loop
             )

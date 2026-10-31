@@ -387,6 +387,10 @@ async def _one_turn() -> int:
     return 1
 
 
+def _fails() -> None:
+    raise RuntimeError("put off and failed")
+
+
 def test_a_collection_neither_drives_nor_waits_on_a_loop():
     loop = asyncio.new_event_loop()
     refused = []
@@ -410,17 +414,29 @@ def test_the_next_drive_runs_what_was_put_off_first_in_order():
     loop = asyncio.new_event_loop()
     events = []
 
-    def fails() -> None:
-        raise RuntimeError("put off and failed")
-
     async def drive() -> None:
         events.append("drive")
 
     defer(loop, lambda: events.append("first"))
-    defer(loop, fails)
+    defer(loop, _fails)
     defer(loop, lambda: events.append(run_async_from_sync(_one_turn(), loop)))
     try:
         run_async_from_sync(drive(), loop)
     finally:
         loop.close()
     assert events == ["first", 1, "drive"]
+
+
+def test_put_off_work_drains_without_nesting():
+    loop = asyncio.new_event_loop()
+    count = 2 * sys.getrecursionlimit()
+    done = []
+    for _ in range(count):
+        defer(
+            loop, lambda: done.append(run_async_from_sync(_one_turn(), loop))
+        )
+    try:
+        run_async_from_sync(_one_turn(), loop)
+    finally:
+        loop.close()
+    assert len(done) == count

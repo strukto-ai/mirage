@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from mirage.bridge.sync import defer, run_async_from_sync
+from mirage.bridge.sync import collecting, defer, run_async_from_sync
 from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import ConcurrencyLimiter
@@ -446,10 +446,18 @@ class RuntimeFiles:
                 raise
             raise renumbered from exc
 
+    @property
+    def held(self) -> bool:
+        """Whether a call made now must be put off (``defer``): the
+        garbage collector runs on this thread, and the calls drive a
+        shared loop it may have interrupted. With no shared loop each call
+        runs on a loop of its own, which nothing else is driving."""
+        return self._loop is not None and collecting()
+
     def defer(self, work: Callable[[], None]) -> None:
-        """Put off work a finalizer cannot do in place until the loop can
-        be driven (``mirage.bridge.sync.defer``); with no shared loop it
-        runs now, on a loop of its own.
+        """Put off work a finalizer cannot do in place until the shared
+        loop can be driven (``mirage.bridge.sync.defer``); with none it
+        runs now.
 
         Args:
             work (Callable[[], None]): what the finalizer put off.

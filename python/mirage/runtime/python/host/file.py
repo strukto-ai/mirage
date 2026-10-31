@@ -19,7 +19,6 @@ import os
 from collections.abc import Callable
 from typing import IO, TYPE_CHECKING, Any, cast
 
-from mirage.bridge.sync import collecting
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.runtime.files import Descriptor
@@ -60,10 +59,13 @@ class HandleRaw(io.RawIOBase):
     The same layering CPython puts over a real file: a buffered stream
     over this raw one, and a text stream over that for a text mode. Its
     ``flush`` lands the descriptor's writes on the mount, which a close,
-    and a flush through the layers above, comes down to. A close the
-    garbage collector makes (a stream the program dropped in a cycle)
-    keeps what is written to it and puts the close off until its loop
-    can be driven (``defer``), so every layer's last flush still lands.
+    and a flush through the layers above, comes down to. Inside a
+    garbage collection, while its calls drive a shared loop
+    (``RuntimeFiles.held``), it holds writes back and puts a close off
+    until the loop can be driven (``RuntimeFiles.defer``): what it held
+    lands before anything else touches the stream, and a stream the
+    program dropped in a cycle stays open until then, so every layer's
+    last flush still reaches it.
 
     Args:
         handle (Descriptor): the descriptor it reads and writes through.
@@ -124,6 +126,15 @@ class HandleRaw(io.RawIOBase):
             raise io.UnsupportedOperation("File not open for reading")
         if reading is False and not self._writable:
             raise io.UnsupportedOperation("File not open for writing")
+        self._landed()
+
+    def _landed(self) -> None:
+        """Write what a collection held back, in order, once it is over."""
+        if not self._late or self._handle.files.held:
+            return
+        late, self._late = self._late, []
+        for payload in late:
+            syscall(self._handle.write)(payload)
 
     def seekable(self) -> bool:
         return True
@@ -143,7 +154,9 @@ class HandleRaw(io.RawIOBase):
     def write(self, data: "ReadableBuffer") -> int:
         self._check(reading=False)
         payload = bytes(data)
-        if collecting():
+        if self._handle.files.held:
+            if not self._late and not self._put_off:
+                self._handle.files.defer(self._landed)
             self._late.append(payload)
         else:
             syscall(self._handle.write)(payload)
@@ -175,13 +188,16 @@ class HandleRaw(io.RawIOBase):
 
     def flush(self) -> None:
         super().flush()
-        if self._writable and not collecting():
+        if self._handle.files.held:
+            return
+        self._landed()
+        if self._writable:
             syscall(self._handle.land)()
 
     def close(self) -> None:
         if self.closed or self._put_off:
             return
-        if collecting():
+        if self._handle.files.held:
             # Left open, so a layer above finalized after this one
             # still writes its buffer here.
             self._put_off = True
@@ -194,14 +210,9 @@ class HandleRaw(io.RawIOBase):
                 syscall(self._release)()
 
     def _finish(self) -> None:
-        """Write and close what a collection put off, outside it."""
+        """Close what a collection put off, outside it."""
         self._put_off = False
-        try:
-            for payload in self._late:
-                syscall(self._handle.write)(payload)
-        finally:
-            self._late.clear()
-            self.close()
+        self.close()
 
 
 class _LandingWriter(io.BufferedWriter):

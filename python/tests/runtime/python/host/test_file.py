@@ -420,6 +420,22 @@ async def _one_turn() -> int:
     return 1
 
 
+class _WritesWhenCollected:
+    """Writes to a live stream from its finalizer, in a cycle of its own."""
+
+    def __init__(self, stream) -> None:
+        self.stream = stream
+        self.cycle = self
+
+    def __del__(self) -> None:
+        self.stream.write(b"during-")
+
+
+def _drop_in_cycle(stream) -> None:
+    cycle = [stream]
+    cycle.append(cycle)
+
+
 @pytest.mark.parametrize(
     "mode,buffering,seed,landed",
     [
@@ -476,5 +492,63 @@ def test_a_stream_the_collector_closes_lands_at_its_loops_next_drive(
             gc.enable()
     assert collected == [False, True]
     assert read == [landed]
+    loop.run_until_complete(ws.close())
+    loop.close()
+
+
+def test_a_collected_stream_lands_at_the_next_call_on_a_running_owner():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        with ws:
+            stream = open("/data/f", "wb")
+            stream.write(b"landed")
+            _drop_in_cycle(stream)
+            del stream
+            gc.collect()
+            with open("/data/f", "rb") as reader:
+                assert reader.read() == b"landed"
+    finally:
+        if enabled:
+            gc.enable()
+
+
+def test_a_collected_stream_with_no_shared_loop_closes_in_place():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    stream = make_open(ws.vfs)("/data/f", "wb", buffering=0)
+    stream.write(b"landed")
+    _drop_in_cycle(stream)
+    del stream
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+    assert asyncio.run(ws.vfs.read("/data/f")) == b"landed"
+
+
+def test_writes_a_collection_makes_to_a_live_stream_land_in_order():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    log = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))(
+        "/data/log", "wb", buffering=0
+    )
+    log.write(b"before-")
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        _WritesWhenCollected(log)
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+    log.write(b"after")
+    log.close()
+    assert loop.run_until_complete(ws.vfs.read("/data/log")) == (
+        b"before-during-after"
+    )
     loop.run_until_complete(ws.close())
     loop.close()
