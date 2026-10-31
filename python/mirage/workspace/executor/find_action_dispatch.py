@@ -530,23 +530,20 @@ async def _apply_find_actions(
             working directory.
     """
     once = SharedStdin(stdin) if stdin is not None else None
-    # GNU warns about a format it cannot render while it parses, ahead of
-    # anything the actions report.
-    warned = [encode_text(f"{line}\n") for line in expr.warnings]
     reorders = expr.depth_first
     if stdout is None or not (_has_actions(expr) or reorders):
-        return stdout, b"".join(warned), 0
+        return stdout, b"", 0
     await materialize(stdout)
     if expr.execs and execute_fn is None:
         return (
             None,
-            b"".join(warned) + b"find: -exec: no shell to run the command\n",
+            b"find: -exec: no shell to run the command\n",
             1,
         )
     if records is None:
         return (
             None,
-            b"".join(warned) + b"find: actions require structured matches\n",
+            b"find: actions require structured matches\n",
             1,
         )
     # The rows arrive in operand order, each naming the start point it was
@@ -665,4 +662,4 @@ async def _apply_find_actions(
         ):
             exit_code = 1
     body = b"".join(out)
-    return (body if body else None), b"".join(warned + errors), exit_code
+    return (body if body else None), b"".join(errors), exit_code

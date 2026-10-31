@@ -16,6 +16,7 @@ import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import type { PathSpec, FileStat } from '../../../../types.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import type { AggregateFn } from '../../../config.ts'
+import type { FindExpr } from '../../../../rs/find.ts'
 
 // How a cross-mount command combines per-mount work.
 //
@@ -83,8 +84,6 @@ export enum Cmd {
   ZIP = 'zip',
   REALPATH = 'realpath',
 }
-
-import type { FindExpr } from '../../../../rs/find.ts'
 
 export type { DispatchFn } from '../../../../runtime/types.ts'
 

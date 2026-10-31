@@ -187,12 +187,13 @@ describe('parseFindExpression', () => {
     expect([e.minSize, e.maxSize]).toEqual(bounds)
   })
 
-  it.each(['18446744073709551615c', '18446744073709551615', '18446744073709551615G'])(
-    'takes -size %s, since GNU bounds the number alone',
-    (spec) => {
-      expect(parseFindExpression(['-size', spec]).maxSize).toBeGreaterThan(0)
-    },
-  )
+  it.each([
+    ['18446744073709551615c', 18446744073709551615n],
+    ['18446744073709551615', 18446744073709551615n * 512n],
+    ['18446744073709551615G', 18446744073709551615n * 1024n ** 3n],
+  ])('takes -size %s, since GNU bounds the number alone', (spec, bound) => {
+    expect(parseFindExpression(['-size', spec]).maxSize).toBe(Number(bound))
+  })
 
   it.each([
     ['', 'find: invalid null argument to -size'],

@@ -111,6 +111,14 @@ function optInt(value: JsonValue | undefined): number | null {
   return value === null || value === undefined ? null : int(value)
 }
 
+function optBound(value: JsonValue | undefined): number | null {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'string') {
+    throw new TypeError(`find: mirage-rs answered ${JSON.stringify(value)}, not a bound`)
+  }
+  return Number(value)
+}
+
 function words(argv: readonly string[]): [string, string][] {
   return argv.map((word) => [OPERAND, word])
 }
@@ -310,8 +318,8 @@ export class FindParse {
       tree,
       maxDepth: optInt(this.values.maxdepth),
       minDepth: optInt(this.values.mindepth),
-      minSize: optInt(this.values.min_size),
-      maxSize: optInt(this.values.max_size),
+      minSize: optBound(this.values.min_size),
+      maxSize: optBound(this.values.max_size),
       mtimeMin,
       mtimeMax,
       usesEmpty: flag(this.values.uses_empty),

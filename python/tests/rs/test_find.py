@@ -126,6 +126,12 @@ def test_repeated_mtime_windows_merge_to_union():
     assert expr.mtime_max - expr.mtime_min == pytest.approx(3 * 86400, abs=1)
 
 
+@pytest.mark.parametrize("unit,factor", [("c", 1), ("", 512), ("G", 1024**3)])
+def test_size_takes_uintmax_in_any_unit(unit, factor):
+    expr = parse_find_expression(["-size", f"{2**64 - 1}{unit}"])
+    assert expr.max_size == (2**64 - 1) * factor
+
+
 def test_size_rounds_up_to_unit():
     # GNU -size -1k keeps only empty files; 1k keeps 1..1024 bytes;
     # +1k excludes a file of exactly 1024 bytes.

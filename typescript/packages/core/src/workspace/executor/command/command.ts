@@ -162,9 +162,10 @@ async function finishFind(
       ...(signal !== undefined ? { signal } : {}),
     },
   )
-  if (actionErr.length > 0) {
+  const warned = expr.warnings.map((line) => encodeText(`${line}\n`))
+  if (warned.length > 0 || actionErr.length > 0) {
     const existing = await materialize(io.stderr)
-    io.stderr = concat([existing, actionErr])
+    io.stderr = concat([...warned, existing, actionErr])
   }
   if (io.exitCode === 0) io.exitCode = actionExit
   return newStdout

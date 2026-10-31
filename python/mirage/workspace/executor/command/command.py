@@ -234,9 +234,10 @@ async def _finish_find(
         stdin=stdin,
         starts=starts,
     )
-    if action_err:
+    warned = b"".join(encode_text(f"{line}\n") for line in expr.warnings)
+    if warned or action_err:
         existing = await materialize(io.stderr) if io.stderr else b""
-        io.stderr = existing + action_err
+        io.stderr = warned + existing + action_err
     if io.exit_code == 0:
         io.exit_code = action_exit
     return stdout

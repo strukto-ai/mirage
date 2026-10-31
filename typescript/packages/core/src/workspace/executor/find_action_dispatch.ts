@@ -408,15 +408,12 @@ export async function applyFindActions(
   cwd: string,
   options: FindActionOptions = {},
 ): Promise<[ByteSource | null, Uint8Array, number]> {
-  // GNU warns about a format it cannot render while it parses, ahead of
-  // anything the actions report.
-  const warned = expr.warnings.map((line) => encodeText(`${line}\n`))
   const reorders = expr.depthFirst
-  if (stdout === null || !(hasActions(expr) || reorders)) return [stdout, concat(warned), 0]
+  if (stdout === null || !(hasActions(expr) || reorders)) return [stdout, new Uint8Array(), 0]
   const executeFn = options.executeFn
   const hasExec = expr.actions.some((a) => a.kind === 'exec')
   if (hasExec && executeFn === undefined) {
-    return [null, concat([...warned, encodeText('find: -exec: no shell to run the command\n')]), 1]
+    return [null, encodeText('find: -exec: no shell to run the command\n'), 1]
   }
   const session = options.session ?? getCurrentSession()
   const vfs = options.vfs ?? null
@@ -429,7 +426,7 @@ export async function applyFindActions(
     options.stdin === undefined || options.stdin === null ? null : new SharedStdin(options.stdin)
   await materialize(stdout)
   if (records === null) {
-    return [null, concat([...warned, encodeText('find: actions require structured matches\n')]), 1]
+    return [null, encodeText('find: actions require structured matches\n'), 1]
   }
   // The rows arrive in operand order, each naming the start point it was
   // found under, whose spelling it carries.
@@ -536,5 +533,5 @@ export async function applyFindActions(
       exitCode = 1
   }
   const body = concat(out)
-  return [body.byteLength > 0 ? body : null, concat([...warned, ...errors]), exitCode]
+  return [body.byteLength > 0 ? body : null, concat(errors), exitCode]
 }

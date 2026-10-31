@@ -327,13 +327,6 @@ struct Parsed {
     warnings: Vec<Vec<u8>>,
 }
 
-fn integer(value: i128) -> Json {
-    i64::try_from(value)
-        .map(Json::from)
-        .or_else(|_| u64::try_from(value).map(Json::from))
-        .unwrap_or_else(|_| json!(value as f64))
-}
-
 impl Parsed {
     fn values(&self) -> Values {
         let mut values = Values::new();
@@ -342,11 +335,15 @@ impl Parsed {
         values.insert("mindepth".to_owned(), json!(self.mindepth));
         values.insert(
             "min_size".to_owned(),
-            self.size.0.map_or(Json::Null, integer),
+            self.size
+                .0
+                .map_or(Json::Null, |n| Json::from(n.to_string())),
         );
         values.insert(
             "max_size".to_owned(),
-            self.size.1.map_or(Json::Null, integer),
+            self.size
+                .1
+                .map_or(Json::Null, |n| Json::from(n.to_string())),
         );
         values.insert("uses_empty".to_owned(), json!(self.uses_empty));
         values.insert(
@@ -1206,14 +1203,14 @@ mod tests {
     #[test]
     fn a_size_is_inclusive_byte_bounds_in_its_unit() {
         for (spec, bounds) in [
-            ("+50c", (json!(51), Json::Null)),
-            ("-2c", (Json::Null, json!(1))),
-            ("2c", (json!(2), json!(2))),
-            ("1k", (json!(1), json!(1024))),
-            ("+1", (json!(513), Json::Null)),
-            ("-1", (Json::Null, json!(0))),
-            ("0", (json!(-511), json!(0))),
-            ("+ 1c", (json!(2), Json::Null)),
+            ("+50c", (json!("51"), Json::Null)),
+            ("-2c", (Json::Null, json!("1"))),
+            ("2c", (json!("2"), json!("2"))),
+            ("1k", (json!("1"), json!("1024"))),
+            ("+1", (json!("513"), Json::Null)),
+            ("-1", (Json::Null, json!("0"))),
+            ("0", (json!("-511"), json!("0"))),
+            ("+ 1c", (json!("2"), Json::Null)),
         ] {
             let read = parse(&["-size", spec]);
             assert_eq!(
@@ -1222,8 +1219,11 @@ mod tests {
                 "{spec}"
             );
         }
-        let top = parse(&["-size", "18446744073709551615c"]);
-        assert_eq!(top["max_size"], json!(u64::MAX));
+        let top = parse(&["-size", "18446744073709551615G"]);
+        assert_eq!(
+            top["max_size"],
+            json!((i128::from(u64::MAX) << 30).to_string())
+        );
     }
 
     #[test]

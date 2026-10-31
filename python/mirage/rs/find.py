@@ -166,9 +166,9 @@ def _opt_int(value: JsonValue) -> int | None:
 def _opt_bound(value: JsonValue) -> int | None:
     if value is None:
         return None
-    if isinstance(value, float):
-        return int(value)
-    return _int(value)
+    if not isinstance(value, str):
+        raise TypeError(f"find: mirage-rs answered {value!r}, not a bound")
+    return int(value)
 
 
 def _words(argv: Sequence[str]) -> list[tuple[str, str]]:
