@@ -1183,17 +1183,25 @@
     "oneOf": "A scanned word is checked against its union here; Python's enums refuse an unknown word when the scan's value is built from them."
    }
   },
-  "server/workers": {
+  "server/workers/http": {
    "typescript_only": {
-    "WorkerProxyOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
-    "WorkerPoolOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
-    "WorkerOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
     "discard": "Node pauses a body the daemon stopped reading, so its connection waits; an ASGI server reads the rest itself."
    },
    "python_only": {
-    "_FALSE": "FastAPI reads several spellings of a false flag; the TypeScript router takes only true and false.",
-    "_framed": "Python passes requests with h11, which needs the body's framing and Host set by hand; Node's http client sets them.",
-    "_target": "Python builds a request's path and query from the ASGI scope; Node's request carries them as one URL."
+    "framed": "Python passes requests with h11, which needs the body's framing and Host set by hand; Node's http client sets them.",
+    "target": "Python builds a request's path and query from the ASGI scope; Node's request carries them as one URL."
+   }
+  },
+  "server/workers/proxy": {
+   "python_only": {
+    "_FALSE": "FastAPI reads several spellings of a false flag; the TypeScript router takes only true and false."
+   }
+  },
+  "server/workers/types": {
+   "typescript_only": {
+    "WorkerProxyOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
+    "WorkerPoolOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
+    "WorkerOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments."
    }
   },
   "observe/observer": {

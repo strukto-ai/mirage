@@ -27,63 +27,22 @@ import uvicorn
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from mirage.server import workers
 from mirage.server.app import build_app
-from mirage.server.daemon_config import DaemonConfigError
-from mirage.server.env import ENV_WORKER_TOKEN, ENV_WORKER_TYPE, ENV_WORKERS
+from mirage.server.env import ENV_WORKER_TOKEN
 from mirage.server.rate_limit import RateLimit
-from mirage.server.workers import (
-    WorkerPool,
-    WorkerProxy,
-    WorkerType,
-    build_worker_proxy,
-    resolve_worker_type,
-    resolve_workers,
-)
+from mirage.server.workers import pool as placement
+from mirage.server.workers.pool import WorkerPool
+from mirage.server.workers.proxy import WorkerProxy, build_worker_proxy
+from mirage.server.workers.types import WorkerType
 
 CONFIG = {"mounts": {"/data": {"vfs": "ram", "mode": "write"}}}
-
-
-def test_resolve_workers_reads_the_env_then_config_else_one(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv(ENV_WORKERS, raising=False)
-    assert resolve_workers() == 1
-    (tmp_path / "config.toml").write_text("[daemon]\nworkers = 4\n")
-    assert resolve_workers() == 4
-    monkeypatch.setenv(ENV_WORKERS, "2")
-    assert resolve_workers() == 2
-    assert resolve_workers(8) == 8
-    monkeypatch.setenv(ENV_WORKERS, "0")
-    with pytest.raises(DaemonConfigError, match="workers"):
-        resolve_workers()
-
-
-def test_resolve_worker_type_reads_the_env_then_config_else_by_the_gil(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
-    monkeypatch.delenv(ENV_WORKER_TYPE, raising=False)
-    monkeypatch.setattr(sys, "_is_gil_enabled", lambda: True, raising=False)
-    assert resolve_worker_type() == WorkerType.PROCESS
-    monkeypatch.setattr(sys, "_is_gil_enabled", lambda: False, raising=False)
-    assert resolve_worker_type() == WorkerType.THREAD
-    (tmp_path / "config.toml").write_text(
-        '[daemon]\nworker_type = "process"\n'
-    )
-    assert resolve_worker_type() == WorkerType.PROCESS
-    monkeypatch.setenv(ENV_WORKER_TYPE, "thread")
-    assert resolve_worker_type() == WorkerType.THREAD
-    with pytest.raises(DaemonConfigError, match="worker_type"):
-        resolve_worker_type("cpu")
 
 
 def _place_on(monkeypatch, *indexes: int) -> None:
     """Where the next new workspaces go: worker 0 or worker 1, in order."""
     order = list(indexes)
     monkeypatch.setattr(
-        workers.random, "choice", lambda running: running[order.pop(0)]
+        placement.random, "choice", lambda running: running[order.pop(0)]
     )
 
 

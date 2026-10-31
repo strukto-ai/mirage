@@ -14,62 +14,21 @@
 
 import { existsSync } from 'node:fs'
 import { request } from 'node:http'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildApp, type MirageApp } from './app.ts'
-import { DaemonConfigError } from './daemon_config.ts'
-import { ENV_HOME, ENV_WORKER_TOKEN, ENV_WORKER_TYPE, ENV_WORKERS } from './env.ts'
-import type { RateLimit } from './rate_limit.ts'
-import {
-  buildWorkerProxy,
-  resolveWorkers,
-  resolveWorkerType,
-  WorkerPool,
-  type WorkerProxy,
-  WorkerType,
-} from './workers.ts'
+import { buildApp, type MirageApp } from '../app.ts'
+import { ENV_WORKER_TOKEN } from '../env.ts'
+import type { RateLimit } from '../rate_limit.ts'
+import { WorkerPool } from './pool.ts'
+import { buildWorkerProxy, type WorkerProxy } from './proxy.ts'
+import { WorkerType } from './types.ts'
 
-const ENTRY = join(dirname(fileURLToPath(import.meta.url)), 'bin', 'daemon.ts')
+const ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'daemon.ts')
 const CONFIG = { mounts: { '/data': { vfs: 'ram', mode: 'write' } } }
-
-describe('resolveWorkers', () => {
-  it('reads the env, then config, else 1', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'mir-workers-'))
-    try {
-      const env = { [ENV_HOME]: home }
-      expect(resolveWorkers(undefined, env)).toBe(1)
-      await writeFile(join(home, 'config.toml'), '[daemon]\nworkers = 4\n')
-      expect(resolveWorkers(undefined, env)).toBe(4)
-      expect(resolveWorkers(undefined, { ...env, [ENV_WORKERS]: '2' })).toBe(2)
-      expect(resolveWorkers(8, env)).toBe(8)
-      expect(() => resolveWorkers(undefined, { [ENV_WORKERS]: '0' })).toThrow(DaemonConfigError)
-    } finally {
-      await rm(home, { recursive: true, force: true })
-    }
-  })
-})
-
-describe('resolveWorkerType', () => {
-  it('reads the env, then config, else threads', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'mir-workers-'))
-    try {
-      const env = { [ENV_HOME]: home }
-      expect(resolveWorkerType(undefined, env)).toBe(WorkerType.Thread)
-      await writeFile(join(home, 'config.toml'), '[daemon]\nworker_type = "process"\n')
-      expect(resolveWorkerType(undefined, env)).toBe(WorkerType.Process)
-      expect(resolveWorkerType(undefined, { ...env, [ENV_WORKER_TYPE]: 'thread' })).toBe(
-        WorkerType.Thread,
-      )
-      expect(() => resolveWorkerType('cpu', env)).toThrow(DaemonConfigError)
-    } finally {
-      await rm(home, { recursive: true, force: true })
-    }
-  })
-})
 
 /** Two servers on the pool's sockets, in this process, behind the proxy. */
 interface Daemon {
