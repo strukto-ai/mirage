@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import inspect
 import subprocess
 import sys
@@ -7,6 +8,7 @@ from contextvars import ContextVar
 
 import pytest
 
+from mirage import MountMode, Workspace
 from mirage.bridge.sync import (
     BLOCKED,
     SyncBridge,
@@ -15,6 +17,9 @@ from mirage.bridge.sync import (
     run_async_from_sync,
 )
 from mirage.core.api.client import SessionPool
+from mirage.runtime.python.host.fs import HostFs
+from mirage.runtime.python.host.open import make_open
+from mirage.vfs.ram import RAMVFS
 
 SHUTDOWN_REPRO = """
 import asyncio
@@ -379,3 +384,47 @@ async def test_blocking_marks_the_running_loop_for_its_call():
             assert loop in BLOCKED
         assert loop in BLOCKED
     assert loop not in BLOCKED
+
+
+async def _one_turn() -> int:
+    return 1
+
+
+async def _others_settled() -> None:
+    others = asyncio.all_tasks() - {asyncio.current_task()}
+    await asyncio.gather(*others)
+
+
+def test_a_file_the_collector_closes_never_drives_the_loop_it_interrupted(
+    monkeypatch,
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    opener = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))
+    hooks = sys.get_asyncgen_hooks
+    armed, driven = threading.Event(), threading.Event()
+
+    def collecting_hooks():
+        if armed.is_set():
+            armed.clear()
+            gc.collect()
+        return hooks()
+
+    def program() -> None:
+        dropped = opener("/data/f", "wb", buffering=0)
+        dropped.write(b"landed")
+        cycle = [dropped]
+        cycle.append(cycle)
+        del dropped, cycle
+        armed.set()
+        assert run_async_from_sync(_one_turn(), loop) == 1
+        driven.set()
+
+    monkeypatch.setattr(sys, "get_asyncgen_hooks", collecting_hooks)
+    threading.Thread(target=program, daemon=True).start()
+    assert driven.wait(10)
+    monkeypatch.undo()
+    loop.run_until_complete(_others_settled())
+    assert loop.run_until_complete(ws.vfs.read("/data/f")) == b"landed"
+    loop.run_until_complete(ws.close())
+    loop.close()

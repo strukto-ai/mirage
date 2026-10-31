@@ -14,21 +14,35 @@
 
 import asyncio
 import concurrent.futures
+import gc
+import logging
 import threading
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial, wraps
-from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
+from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
 from weakref import WeakSet
 
 from mirage.concurrency.limiter import run_blocking, settle
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 AUXILIARY_LOOP: ContextVar[bool] = ContextVar(
     "mirage_auxiliary_loop", default=False
 )
 BLOCKED: WeakSet[asyncio.AbstractEventLoop] = WeakSet()
+# Whether the garbage collector is running on this thread now, which
+# ``gc.callbacks`` reports at a collection's start and stop.
+COLLECTING = threading.local()
+
+
+def _on_collection(phase: str, info: dict[str, int]) -> None:
+    COLLECTING.now = phase == "start"
+
+
+gc.callbacks.append(_on_collection)
 
 
 @contextmanager
@@ -59,6 +73,13 @@ def _run_in_new_loop(awaitable: Awaitable[T]) -> T:
     return asyncio.run(on_auxiliary_loop(partial(_await_result, awaitable)))
 
 
+def _queued_done(done: concurrent.futures.Future[Any]) -> None:
+    if not done.cancelled() and done.exception() is not None:
+        logger.debug(
+            "a call queued from a collection failed", exc_info=done.exception()
+        )
+
+
 def run_async_from_sync(
     awaitable: Awaitable[T],
     loop: asyncio.AbstractEventLoop | None = None,
@@ -77,6 +98,14 @@ def run_async_from_sync(
     foreground owner. This fallback cannot safely wait on shared async
     locks; workspace agent adapters use ``SyncBridge`` instead.
 
+    A call made while the garbage collector runs on this thread (a
+    dropped file's last writes and its close, from its finalizer) is
+    queued on the shared loop and answers None, since nothing reads what
+    it answers. The collection may have interrupted anything, a drive of
+    that same loop included: driving it again from inside ends that
+    drive early, the nested run taking its stop, and waiting on it can
+    block on itself.
+
     Args:
         awaitable (Awaitable[T]): The asynchronous operation to run.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
@@ -91,6 +120,12 @@ def run_async_from_sync(
         if isinstance(awaitable, Coroutine):
             awaitable.close()
         raise RuntimeError("The owner event loop is closed")
+
+    if loop is not None and getattr(COLLECTING, "now", False):
+        asyncio.run_coroutine_threadsafe(
+            _await_result(awaitable), loop
+        ).add_done_callback(_queued_done)
+        return cast(T, None)
 
     if loop is not None and loop is not running_loop:
         if loop.is_running():
