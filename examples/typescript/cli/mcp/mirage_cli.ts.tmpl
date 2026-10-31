@@ -135,7 +135,7 @@ function leaf(tool: Tool): CommandSpec {
   })
 }
 
-export const __ATTR__ = new CLI({
+const cli = new CLI({
   spec: new CommandSpec({
     name: NAME,
     description: `${NAME} MCP server tools`,
@@ -152,3 +152,6 @@ export const __ATTR__ = new CLI({
   ),
   configModel: ServerConfig,
 })
+
+// An export alias binds no local name, so any --name is safe here.
+export { cli as __ATTR__ }

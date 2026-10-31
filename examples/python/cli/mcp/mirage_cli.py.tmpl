@@ -17,9 +17,9 @@ from mirage import CLI, Argument, CLIHandler, CommandSpec, Context, PathSpec
 from mirage.accessor import NOOPAccessor
 from mirage.io import IOResult
 
-NAME = __NAME_LITERAL__
-SERVER = __SERVER__
-TOOLS = __TOOLS__
+_NAME = __NAME_LITERAL__
+_SERVER = __SERVER__
+_TOOLS = __TOOLS__
 
 
 class ServerConfig(BaseModel):
@@ -27,9 +27,9 @@ class ServerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    command: list[str] | None = SERVER.get("command")
-    cwd: str | None = SERVER.get("cwd")
-    url: str | None = SERVER.get("url")
+    command: list[str] | None = _SERVER.get("command")
+    cwd: str | None = _SERVER.get("cwd")
+    url: str | None = _SERVER.get("url")
     env: dict[str, SecretStr] = {}
 
 
@@ -83,7 +83,7 @@ async def call_tool(
     texts: list[str],
     ctx: Context,
 ) -> tuple[bytes | None, IOResult]:
-    prefix = f"{NAME} {tool.replace('_', '-')}"
+    prefix = f"{_NAME} {tool.replace('_', '-')}"
     if len(texts) > 1:
         return refuse(f"{prefix}: takes one JSON object", 2)
     try:
@@ -102,7 +102,7 @@ async def call_tool(
             errlog.seek(0)
             server_log = "".join(errlog.readlines()[-20:])
             reason = "; ".join(causes(error))
-            return refuse(f"{server_log}{NAME}: MCP server failed: {reason}", 1)
+            return refuse(f"{server_log}{_NAME}: MCP server failed: {reason}", 1)
     out = render(result).encode()
     if result.is_error:
         return None, IOResult(exit_code=1, stderr=out)
@@ -126,16 +126,16 @@ def leaf(tool: dict[str, Any]) -> CommandSpec:
 
 __ATTR__ = CLI(
     spec=CommandSpec(
-        name=NAME,
-        description=f"{NAME} MCP server tools",
-        subcommands=tuple(leaf(tool) for tool in TOOLS),
+        name=_NAME,
+        description=f"{_NAME} MCP server tools",
+        subcommands=tuple(leaf(tool) for tool in _TOOLS),
     ),
     handlers={
         tool["name"].replace("_", "-"): CLIHandler(
             fn=functools.partial(call_tool, tool["name"]),
             write=not tool["annotations"].get("readOnlyHint", False),
         )
-        for tool in TOOLS
+        for tool in _TOOLS
     },
     config_model=ServerConfig,
 )

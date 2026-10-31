@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { deepStrictEqual } from 'node:assert/strict'
+import { deepStrictEqual, ok } from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -100,6 +100,13 @@ async function main(): Promise<void> {
     const result = await ws.shell(line)
     deepStrictEqual(result.stdoutText, '42\n')
     console.log(`$ ${line}\n42`)
+
+    const clash = join(out, 'name_cli.ts')
+    writeFileSync(clash, fill(MIRAGE_TEMPLATE, 'name', SERVER, tools))
+    const { NAME } = (await import(pathToFileURL(clash).href)) as { NAME: CLI }
+    ws.registerCli('name', NAME, {})
+    const refused = await ws.shell(`name add-numbers '{'`)
+    ok(refused.stderrText.startsWith('name add-numbers: invalid JSON'), refused.stderrText)
   } finally {
     await ws.close()
     rmSync(out, { recursive: true, force: true })
