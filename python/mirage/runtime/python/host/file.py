@@ -61,6 +61,12 @@ class HandleRaw(io.RawIOBase):
     ``flush`` lands the descriptor's writes on the mount, which a close,
     and a flush through the layers above, comes down to.
 
+    The garbage collector closing it, while its calls drive a shared
+    loop (``RuntimeFiles.held``), reaches no loop: the last writes of
+    every layer it closes are kept, and the close is handed to the loop
+    (``RuntimeFiles.finish_soon``). A call the program makes inside a
+    collection is refused (``collected``).
+
     Args:
         handle (Descriptor): the descriptor it reads and writes through.
         readable (bool): whether the mode reads.
@@ -73,6 +79,9 @@ class HandleRaw(io.RawIOBase):
             owns; None for a plain open.
         fd (int | None): the descriptor a stream over one answers
             ``fileno`` with; None for a plain open, which has none.
+        forget (Callable[[], None] | None): the part of ``release`` that
+            reaches no loop (the descriptor's number given back), which a
+            close inside a collection makes; None when there is none.
     """
 
     def __init__(
@@ -84,6 +93,7 @@ class HandleRaw(io.RawIOBase):
         live: Callable[[], bool] | None = None,
         release: Callable[[], None] | None = None,
         fd: int | None = None,
+        forget: Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         self._handle = handle
@@ -92,6 +102,10 @@ class HandleRaw(io.RawIOBase):
         self._writable = writable
         self._release = release
         self._fd = fd
+        self._forget = forget
+        self._late: list[tuple[int, bytes]] = []
+        self._closing = False
+        self._handed = False
         self.name = handle.opened
         self.mode = mode
 
@@ -137,7 +151,14 @@ class HandleRaw(io.RawIOBase):
     def write(self, data: "ReadableBuffer") -> int:
         self._check(reading=False)
         payload = bytes(data)
-        syscall(self._handle.write)(payload)
+        if self._closing and self._handle.files.held:
+            # A collected stream's last flush: kept for its close, at the
+            # position it reached, which moves as a write moves it.
+            self._late.append((self._handle.pos, payload))
+            if not self._handle.mode.append:
+                self._handle.pos += len(payload)
+        else:
+            syscall(self._handle.write)(payload)
         return len(payload)
 
     def seek(self, offset: int, whence: int = 0) -> int:
@@ -166,11 +187,42 @@ class HandleRaw(io.RawIOBase):
 
     def flush(self) -> None:
         super().flush()
-        if self._writable:
+        if self._writable and not (self._closing and self._handle.files.held):
             syscall(self._handle.land)()
 
+    def collected(self, layer: io.IOBase) -> bool:
+        """Whether ``layer`` (this stream or one over it) is closing inside
+        a garbage collection, as the collector closes it: finalizing it,
+        or closing it from a layer over it that it finalizes. Its last
+        flush is then kept (``write``). A close the program makes inside
+        a collection is refused, before it can wait on a layer's lock
+        that a thread waiting on the loop may hold.
+
+        Args:
+            layer (io.IOBase): the layer being closed.
+        """
+        if not self._handle.files.held:
+            return False
+        if not (self._closing or getattr(layer, "_finalizing", False)):
+            raise RuntimeError(
+                "a garbage collection cannot close a file in use"
+            )
+        self._closing = True
+        return True
+
     def close(self) -> None:
-        if self.closed:
+        if self.closed or self._handed:
+            return
+        if self.collected(self):
+            # Left open until the collection ends, so a layer over this
+            # one that it finalizes later still flushes here.
+            self._handed = True
+            self._handle.files.finish_soon(
+                self._handle.fh,
+                self._late,
+                self._release is not None,
+                self._forget,
+            )
             return
         try:
             super().close()
@@ -187,6 +239,9 @@ class _LandingWriter(io.BufferedWriter):
         super().flush()
         self.raw.flush()
 
+    def close(self) -> None:
+        _close_buffered(self, super().close)
+
 
 class _LandingRandom(io.BufferedRandom):
     """``_LandingWriter`` for a mode that reads and writes."""
@@ -194,6 +249,45 @@ class _LandingRandom(io.BufferedRandom):
     def flush(self) -> None:
         super().flush()
         self.raw.flush()
+
+    def close(self) -> None:
+        _close_buffered(self, super().close)
+
+
+class _Reader(io.BufferedReader):
+    """A buffered reader closed as ``_close_buffered`` closes one."""
+
+    def close(self) -> None:
+        _close_buffered(self, super().close)
+
+
+def _close_buffered(
+    layer: io.BufferedIOBase, close: Callable[[], None]
+) -> None:
+    """Close a buffered layer; one the garbage collector closes flushes
+    into its raw stream's kept writes and stays open, so a text layer the
+    collection finalizes after it still flushes through it
+    (``HandleRaw.collected``).
+
+    Args:
+        layer (io.BufferedIOBase): the buffered layer.
+        close (Callable[[], None]): its class's own close.
+    """
+    raw = cast(HandleRaw, cast(Any, layer).raw)
+    if not raw.collected(layer):
+        close()
+        return
+    layer.flush()
+    raw.close()
+
+
+class _Text(io.TextIOWrapper):
+    """A text stream whose last flush, when the garbage collector closes
+    it, reaches its raw stream as a kept write (``HandleRaw.collected``)."""
+
+    def close(self) -> None:
+        cast(HandleRaw, cast(Any, self.buffer).raw).collected(self)
+        super().close()
 
 
 def text_encoding(
@@ -267,10 +361,10 @@ def layered(
     elif facts.writable:
         buffered = _LandingWriter(raw, size)
     else:
-        buffered = io.BufferedReader(raw, size)
+        buffered = _Reader(raw, size)
     if facts.binary:
         return buffered
-    text = io.TextIOWrapper(
+    text = _Text(
         buffered,
         encoding=encoding,
         errors=errors if errors is not None else "strict",

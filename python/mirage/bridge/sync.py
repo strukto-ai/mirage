@@ -14,21 +14,118 @@
 
 import asyncio
 import concurrent.futures
+import gc
+import logging
 import threading
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial, wraps
 from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
-from weakref import WeakSet
+from weakref import WeakKeyDictionary, WeakSet
 
 from mirage.concurrency.limiter import run_blocking, settle
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 AUXILIARY_LOOP: ContextVar[bool] = ContextVar(
     "mirage_auxiliary_loop", default=False
 )
 BLOCKED: WeakSet[asyncio.AbstractEventLoop] = WeakSet()
+# Whether the garbage collector is running on this thread now, which
+# ``gc.callbacks`` reports at a collection's start and stop, and the work
+# its finalizers handed off, which goes to the loops as it ends.
+COLLECTING = threading.local()
+# What finalizers handed each loop (``soon``), until it ends.
+HANDED: WeakKeyDictionary[
+    asyncio.AbstractEventLoop, set[concurrent.futures.Future[None]]
+] = WeakKeyDictionary()
+
+
+def _on_collection(phase: str, info: dict[str, int]) -> None:
+    COLLECTING.now = phase == "start"
+    if phase == "stop":
+        for loop, work, done in COLLECTING.__dict__.pop("handed", ()):
+            _start(loop, work, done)
+
+
+gc.callbacks.append(_on_collection)
+
+
+def collecting() -> bool:
+    """Whether the garbage collector is running on this thread now.
+
+    A finalizer it runs (a dropped file's close) may have interrupted
+    anything, a drive of a shared loop included, so it neither drives
+    one nor waits on one: it hands its work to the loop (``soon``).
+    """
+    return bool(getattr(COLLECTING, "now", False))
+
+
+def soon(
+    loop: asyncio.AbstractEventLoop, work: Coroutine[Any, Any, None]
+) -> None:
+    """Hand ``work`` to ``loop`` without waiting for it.
+
+    Inside a collection it goes to the loop as the collection ends, once
+    every finalizer it runs is done. The loop starts it, up to its first
+    wait, in the callback the hand-off queues, so it goes before any
+    call made after, from any thread. ``handed`` waits for it from the
+    hand-off on, even before the collection ends. Work handed to a
+    closed loop is dropped and logged.
+
+    Args:
+        loop (asyncio.AbstractEventLoop): the loop that runs it.
+        work (Coroutine[Any, Any, None]): what a finalizer could not do.
+    """
+    done: concurrent.futures.Future[None] = concurrent.futures.Future()
+    pending = HANDED.setdefault(loop, set())
+    pending.add(done)
+    done.add_done_callback(pending.discard)
+    if collecting():
+        COLLECTING.__dict__.setdefault("handed", []).append((loop, work, done))
+        return
+    _start(loop, work, done)
+
+
+def _start(
+    loop: asyncio.AbstractEventLoop,
+    work: Coroutine[Any, Any, None],
+    done: concurrent.futures.Future[None],
+) -> None:
+    def start() -> None:
+        task = asyncio.Task(work, loop=loop, eager_start=True)
+        task.add_done_callback(partial(_hand_back, done))
+
+    try:
+        loop.call_soon_threadsafe(start)
+    except RuntimeError:
+        work.close()
+        done.cancel()
+        logger.debug("work handed to a closed loop", exc_info=True)
+
+
+def _hand_back(
+    done: concurrent.futures.Future[None], task: asyncio.Task[None]
+) -> None:
+    if task.cancelled():
+        done.cancel()
+    elif (exc := task.exception()) is not None:
+        logger.debug("handed work failed", exc_info=exc)
+        done.set_exception(exc)
+    else:
+        done.set_result(None)
+
+
+async def handed() -> None:
+    """Wait for the work finalizers handed the running loop (``soon``)."""
+    pending = HANDED.get(asyncio.get_running_loop())
+    if pending:
+        await asyncio.gather(
+            *(asyncio.wrap_future(done) for done in list(pending)),
+            return_exceptions=True,
+        )
 
 
 @contextmanager
@@ -77,6 +174,12 @@ def run_async_from_sync(
     foreground owner. This fallback cannot safely wait on shared async
     locks; workspace agent adapters use ``SyncBridge`` instead.
 
+    A call made while the garbage collector runs on this thread is
+    refused: the collection may have interrupted a drive of that same
+    loop, which driving it again from inside would end early (the nested
+    run takes its stop), and waiting on it can block on itself. A file's
+    finalizer hands its close to the loop instead (``soon``).
+
     Args:
         awaitable (Awaitable[T]): The asynchronous operation to run.
         loop (asyncio.AbstractEventLoop | None): Shared event loop.
@@ -91,6 +194,14 @@ def run_async_from_sync(
         if isinstance(awaitable, Coroutine):
             awaitable.close()
         raise RuntimeError("The owner event loop is closed")
+
+    if loop is not None and collecting():
+        if isinstance(awaitable, Coroutine):
+            awaitable.close()
+        raise RuntimeError(
+            "a garbage collection cannot drive the loop it may have "
+            "interrupted"
+        )
 
     if loop is not None and loop is not running_loop:
         if loop.is_running():
