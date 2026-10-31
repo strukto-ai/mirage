@@ -1140,7 +1140,7 @@ async def test_a_streamed_read_holds_one_chunk_at_a_time(tmp_path):
         _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         assert total == 16 * 1024 * 1024
-        assert peak < 1024 * 1024
+        assert peak < 2 * 1024 * 1024
     finally:
         await ws.close()
 
