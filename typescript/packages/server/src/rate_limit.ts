@@ -15,7 +15,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 import { PUBLIC_PATHS } from './auth/middleware.ts'
-import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
+import { DEFAULT_RATE_LIMITS, DaemonConfigError, readDaemonTable } from './daemon_config.ts'
 import { ENV_RATE_LIMITS } from './env.ts'
 import { refused } from './metrics.ts'
 import { mirageHome } from './paths.ts'
@@ -103,8 +103,9 @@ export function resolveRateLimits(
   }
   const fromEnv = env[ENV_RATE_LIMITS]
   const text =
-    fromEnv !== undefined && fromEnv !== '' ? fromEnv : readDaemonTable(mirageHome(env)).rate_limits
-  if (text === undefined) return [{ key: 'ip', rate: '1000/minute' }]
+    fromEnv !== undefined && fromEnv !== ''
+      ? fromEnv
+      : (readDaemonTable(mirageHome(env)).rate_limits ?? DEFAULT_RATE_LIMITS)
   try {
     return parseRateLimits(text)
   } catch (err) {

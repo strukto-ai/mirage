@@ -438,6 +438,22 @@ describe('resolvedConfig', () => {
   })
 })
 
+describe('resolvedConfig rate limits', () => {
+  it('shows the default and an explicit empty value from the file', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mirage-cli-resolved-'))
+    try {
+      expect(resolvedConfig({ MIRAGE_HOME: home }).rate_limits).toEqual([
+        'ip=1000/minute',
+        'default',
+      ])
+      writeFileSync(join(home, 'config.toml'), '[daemon]\nrate_limits = ""\n')
+      expect(resolvedConfig({ MIRAGE_HOME: home }).rate_limits).toEqual(['', 'file'])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('resolvedConfig port', () => {
   it('defaults to 8765 and honors MIRAGE_DAEMON_PORT', () => {
     const home = mkdtempSync(join(tmpdir(), 'mirage-cli-resolved-'))

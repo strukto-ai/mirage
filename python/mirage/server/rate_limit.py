@@ -33,7 +33,11 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mirage.server.auth.middleware import PUBLIC_PATHS
-from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
+from mirage.server.daemon_config import (
+    DEFAULT_RATE_LIMITS,
+    DaemonConfigError,
+    read_daemon_table,
+)
 from mirage.server.env import ENV_RATE_LIMITS
 from mirage.server.metrics import refused
 from mirage.server.paths import mirage_home
@@ -143,9 +147,7 @@ def resolve_rate_limits(
         return tuple(rate_limits)
     text = os.environ.get(ENV_RATE_LIMITS) or read_daemon_table(
         mirage_home()
-    ).get("rate_limits")
-    if text is None:
-        return (RateLimit("ip", "1000/minute"),)
+    ).get("rate_limits", DEFAULT_RATE_LIMITS)
     try:
         return tuple(parse_rate_limits(str(text)))
     except ValueError as exc:

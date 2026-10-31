@@ -31,6 +31,7 @@ import {
 } from '@struktoai/mirage-server/env'
 import {
   ALLOWED_KEYS,
+  DEFAULT_RATE_LIMITS,
   DaemonConfigError,
   NUMERIC_KEYS,
   parseDaemonTable,
@@ -160,7 +161,7 @@ function defaultForKey(key: string, home: string): string {
     graceful_timeout: '0',
     max_workspaces: '',
     max_sessions: '',
-    rate_limits: '',
+    rate_limits: DEFAULT_RATE_LIMITS,
     policy_file: '',
     port: '8765',
     ssh_port: '',
@@ -187,7 +188,7 @@ export function resolvedConfig(
       }
     }
     const fileValue = table[key]
-    if (fileValue !== undefined && fileValue !== '') {
+    if (fileValue !== undefined && (fileValue !== '' || key === 'rate_limits')) {
       out[key] = [fileValue, 'file']
     } else {
       out[key] = [defaultForKey(key, home), 'default']

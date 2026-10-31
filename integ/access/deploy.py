@@ -161,12 +161,17 @@ class Deployment:
         return (self.home / "auth_token").read_text().strip()
 
     def server_env(self) -> dict[str, str]:
-        """The settings the server reads, as a deployment sets them."""
+        """The settings the server reads, as a deployment sets them.
+
+        Every client of the battery shares one address, so the per-address
+        rate limit gets a budget the battery never reaches.
+        """
         env = {
             **clean_env(),
             "MIRAGE_HOME": str(self.home),
             "MIRAGE_DAEMON_PORT": str(self.port),
             "MIRAGE_IDLE_GRACE_SECONDS": "600",
+            "MIRAGE_RATE_LIMITS": "ip=1000000/minute",
             "MIRAGE_SSH_PORT": str(self.ssh_port),
             "MIRAGE_SSH_HOST_KEY_FILE": str(self.root / "host_key"),
             "MIRAGE_SSH_AUTHORIZED_KEYS": str(self.root / "authorized_keys"),
