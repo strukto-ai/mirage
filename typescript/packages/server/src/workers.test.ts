@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { existsSync } from 'node:fs'
+import { request } from 'node:http'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -228,6 +229,40 @@ describe('WorkerProxy', () => {
     expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'ready' })
   })
 
+  it('refuses a caller the worker refuses, and holds no slot while a body uploads', async () => {
+    d = await daemon(1)
+    const { port } = d.proxy.server.address() as AddressInfo
+    const open = (host: string): Promise<number> & { finish: () => void } => {
+      const req = request({
+        port,
+        method: 'POST',
+        path: '/v1/workspaces',
+        headers: { host, 'content-type': 'application/json' },
+      })
+      const done = new Promise<number>((resolve, reject) => {
+        req.once('response', (res) => {
+          res.resume()
+          resolve(res.statusCode ?? 0)
+        })
+        req.once('error', reject)
+      })
+      req.write('{"id": "slow", ')
+      return Object.assign(done, {
+        finish: () => req.end(`"config": ${JSON.stringify(CONFIG)}}`),
+      })
+    }
+    const refused = open('evil.example')
+    expect(await refused).toBe(400)
+    const slow = open('localhost')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'a', config: CONFIG })).status).toBe(
+      201,
+    )
+    slow.finish()
+    expect(await slow).toBe(503)
+    expect(ids(d).flat()).toEqual(['a'])
+  })
+
   it('reads a multipart load up to its request part, and routes what it loads', async () => {
     d = await daemon()
     placeOn(0, 1)
@@ -242,6 +277,12 @@ describe('WorkerProxy', () => {
     expect(ids(d)[1]).toContain('r')
     const read = await call(`${d.url}/v1/workspaces/r/shell`, 'POST', { command: 'cat /data/x' })
     expect(read.json).toMatchObject({ stdout: 'kept\n' })
+    const late = new FormData()
+    late.append('snapshot', new Blob([new Uint8Array(2 * 1024 * 1024)]), 'snapshot.tar')
+    late.append('request', JSON.stringify({ id: 'a' }))
+    const lost = await fetch(`${d.url}/v1/workspaces/load`, { method: 'POST', body: late })
+    expect(lost.status).toBe(413)
+    expect(ids(d)).toEqual([['a'], ['r']])
   })
 
   it('stops the daemon on a shutdown its worker lets through', async () => {

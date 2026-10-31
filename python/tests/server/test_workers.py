@@ -264,6 +264,39 @@ async def test_max_workspaces_holds_across_workers_and_lets_a_retry_through():
 
 
 @pytest.mark.asyncio
+async def test_a_refused_caller_and_an_uploading_body_hold_no_slot():
+    async with _daemon(max_workspaces=1) as d:
+        refused = await d.client.post(
+            "/v1/workspaces",
+            json={"id": "x", "config": CONFIG},
+            headers={"host": "evil.example"},
+        )
+        assert refused.status_code == 400
+        finish = asyncio.Event()
+
+        async def body() -> AsyncIterator[bytes]:
+            yield b'{"id": "slow", '
+            await finish.wait()
+            yield f'"config": {json.dumps(CONFIG)}}}'.encode()
+
+        slow = asyncio.create_task(
+            d.client.post(
+                "/v1/workspaces",
+                content=body(),
+                headers={"content-type": "application/json"},
+            )
+        )
+        await asyncio.sleep(0.1)
+        made = await d.client.post(
+            "/v1/workspaces", json={"id": "a", "config": CONFIG}
+        )
+        assert made.status_code == 201
+        finish.set()
+        assert (await slow).status_code == 503
+        assert [i for ids in _ids(d) for i in ids] == ["a"]
+
+
+@pytest.mark.asyncio
 async def test_a_multipart_load_is_read_up_to_its_request_part(monkeypatch):
     _place_on(monkeypatch, 0, 1)
     async with _daemon() as d:
@@ -287,6 +320,15 @@ async def test_a_multipart_load_is_read_up_to_its_request_part(monkeypatch):
             "/v1/workspaces/r/shell", json={"command": "cat /data/x"}
         )
         assert read.json()["stdout"] == "kept\n"
+        lost = await d.client.post(
+            "/v1/workspaces/load",
+            files=[
+                ("snapshot", ("snapshot.tar", bytes(2 * 1024 * 1024))),
+                ("request", (None, json.dumps({"id": "a"}))),
+            ],
+        )
+        assert lost.status_code == 413
+        assert _ids(d) == [["a"], ["r"]]
 
 
 @pytest.mark.asyncio

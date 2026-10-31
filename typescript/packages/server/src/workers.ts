@@ -119,7 +119,11 @@ export interface WorkerOptions {
   socket: string
   /** The daemon's entry, which runs as the worker. */
   entry: string
-  execArgv: readonly string[]
+  /**
+   * Node's flags for the worker; undefined takes the daemon's. A thread
+   * cannot take V8 flags such as `--max-old-space-size` here.
+   */
+  execArgv?: readonly string[]
   env: Record<string, string | undefined>
   /** A Host the worker accepts, for its health check. */
   host: string
@@ -185,7 +189,8 @@ class ProcessWorker extends Worker {
   private child: ChildProcess | null = null
 
   protected launch(env: Record<string, string | undefined>): void {
-    const child = spawn(process.execPath, [...this.options.execArgv, this.options.entry], {
+    const execArgv = this.options.execArgv ?? process.execArgv
+    const child = spawn(process.execPath, [...execArgv, this.options.entry], {
       env,
       // A worker exits when its stdin closes: the daemon is gone.
       stdio: ['pipe', 'inherit', 'inherit'],
@@ -226,9 +231,10 @@ class ThreadWorker extends Worker {
   private thread: Thread | null = null
 
   protected launch(env: Record<string, string | undefined>): void {
+    const { execArgv } = this.options
     const thread = new Thread(this.options.entry, {
       env,
-      execArgv: [...this.options.execArgv],
+      ...(execArgv === undefined ? {} : { execArgv: [...execArgv] }),
       workerData: { socket: this.socket },
     })
     this.thread = thread
@@ -263,7 +269,11 @@ export interface WorkerPoolOptions {
   type: WorkerType
   /** The daemon's entry, which each worker runs. */
   entry: string
-  execArgv: readonly string[]
+  /**
+   * Node's flags for each worker; undefined takes the daemon's. A thread
+   * cannot take V8 flags such as `--max-old-space-size` here.
+   */
+  execArgv?: readonly string[]
   env: Record<string, string | undefined>
   /** A Host the workers accept, for their health checks. */
   host: string
@@ -407,6 +417,8 @@ interface Peeked {
   more: boolean
   /** The workspace id the body names, if it names one. */
   id: string | undefined
+  /** Whether the body passed `MAX_REQUEST_PART` before naming its id. */
+  lost: boolean
 }
 
 /**
@@ -557,14 +569,7 @@ export class WorkerProxy {
       send(res, 503, { detail: 'server is shutting down' })
       return
     }
-    // The slot is held before anything is awaited, so creates racing each
-    // other cannot pass max_workspaces.
-    pool.reserved += 1
-    let reserved = true
-    const unreserve = (): void => {
-      if (reserved) pool.reserved -= 1
-      reserved = false
-    }
+    let reserved = false
     try {
       const refused = await this.refused(req, source ?? pool.first())
       if (refused !== null) {
@@ -572,11 +577,17 @@ export class WorkerProxy {
         return
       }
       const peeked = await peek(req)
+      if (peeked.lost) {
+        send(res, 413, {
+          detail: `the workspace id must come in the body's first ${String(MAX_REQUEST_PART)} bytes`,
+        })
+        return
+      }
       const home = peeked.id === undefined ? undefined : pool.home(peeked.id)
       const live = home?.live.has(peeked.id ?? '') === true
-      // A retry of a live id builds nothing: its worker answers it.
-      if (live) unreserve()
-      else if (!this.hasRoom(0)) {
+      // A retry of a live id goes to its worker even when full, but holds a
+      // slot too: the worker may close that id first and build it again.
+      if (!live && !this.hasRoom(1)) {
         send(res, 503, {
           detail: `server is at max_workspaces (${String(this.options.maxWorkspaces)})`,
         })
@@ -591,6 +602,10 @@ export class WorkerProxy {
         send(res, 502, UNAVAILABLE)
         return
       }
+      // Nothing is awaited between the check above and here, so creates
+      // racing each other cannot pass max_workspaces.
+      pool.reserved += 1
+      reserved = true
       const settle = peeked.id === undefined ? () => undefined : pool.claim(peeked.id, worker)
       this.cancelIdle()
       try {
@@ -604,7 +619,7 @@ export class WorkerProxy {
         settle()
       }
     } finally {
-      unreserve()
+      if (reserved) pool.reserved -= 1
       this.idleCheck()
     }
   }
@@ -659,7 +674,7 @@ export class WorkerProxy {
     const probe = this.open(worker, 'GET', AUTH_PROBE, headers)
     probe.end()
     const answer = await answered(probe)
-    return answer.status === 401 || answer.status === 403 ? answer : null
+    return answer.status < 300 ? null : answer
   }
 
   /** Whether `extra` more workspaces fit under `max_workspaces`. */
@@ -955,10 +970,12 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
     for await (const chunk of chunks(req)) {
       read.push(chunk)
       size += chunk.byteLength
-      if (size > MAX_REQUEST_PART) return { head: Buffer.concat(read), more: true, id: undefined }
+      if (size > MAX_REQUEST_PART) {
+        return { head: Buffer.concat(read), more: true, id: undefined, lost: true }
+      }
     }
     const head = Buffer.concat(read)
-    return { head, more: false, id: idOf(head) }
+    return { head, more: false, id: idOf(head), lost: false }
   }
   let done = false
   const kept = async function* (): AsyncGenerator<Buffer> {
@@ -971,14 +988,19 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
   }
   const request: Buffer[] = []
   let name = ''
+  let named = false
   try {
     for await (const event of partEvents(kept(), type)) {
       if (event.kind === 'begin') {
-        if (name === 'request') break
+        if (name === 'request') {
+          named = true
+          break
+        }
         name = event.name
       } else if (event.kind === 'data' && name === 'request') {
         request.push(Buffer.from(event.data))
       } else if (event.kind === 'end' && name === 'request') {
+        named = true
         break
       }
       if (size > MAX_REQUEST_PART) break
@@ -987,5 +1009,10 @@ async function peek(req: IncomingMessage): Promise<Peeked> {
     // A malformed body goes on as it is, for the worker to refuse.
     console.debug('mirage: a load body did not parse:', error)
   }
-  return { head: Buffer.concat(read), more: !done, id: idOf(Buffer.concat(request)) }
+  return {
+    head: Buffer.concat(read),
+    more: !done,
+    id: idOf(Buffer.concat(request)),
+    lost: !named && size > MAX_REQUEST_PART,
+  }
 }

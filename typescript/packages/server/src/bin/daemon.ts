@@ -105,7 +105,6 @@ async function serveWorkers(
     count: workers,
     type: resolveWorkerType(),
     entry: process.argv[1] ?? '',
-    execArgv: process.execArgv,
     env: process.env,
     host,
     gracefulTimeout,

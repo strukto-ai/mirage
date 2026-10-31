@@ -495,11 +495,14 @@ class _Peeked:
         head (bytes): what was read, sent on first.
         more (bool): whether more of the body follows.
         id (str | None): the workspace id the body names, if it names one.
+        lost (bool): whether the body passed ``MAX_REQUEST_PART`` before
+            naming its id.
     """
 
     head: bytes
     more: bool
     id: str | None
+    lost: bool = False
 
 
 _UNAVAILABLE = _Answer(
@@ -681,23 +684,28 @@ class WorkerProxy:
             return await _send(
                 send, 503, {"detail": "server is shutting down"}
             )
-        # The slot is held before anything is awaited, so creates racing
-        # each other cannot pass max_workspaces.
-        pool.reserved += 1
-        reserved = True
+        reserved = False
         try:
             refused = await self._refused(scope, source or pool.first())
             if refused is not None:
                 return await _reply(send, refused)
             peeked = await _peek(scope, receive)
+            if peeked.lost:
+                return await _send(
+                    send,
+                    413,
+                    {
+                        "detail": "the workspace id must come in the body's "
+                        f"first {MAX_REQUEST_PART} bytes"
+                    },
+                )
             named = peeked.id
             home = pool.home(named) if named is not None else None
             live = home is not None and named in home.live
-            if live:
-                # A retry of a live id builds nothing: its worker answers it.
-                pool.reserved -= 1
-                reserved = False
-            elif not self._has_room(0):
+            # A retry of a live id goes to its worker even when full, but
+            # holds a slot too: the worker may close that id first and
+            # build it again.
+            if not live and not self._has_room(1):
                 return await _send(
                     send,
                     503,
@@ -716,6 +724,10 @@ class WorkerProxy:
             worker = source or alive or pool.random()
             if worker is None:
                 return await _reply(send, _UNAVAILABLE)
+            # Nothing is awaited between the check above and here, so
+            # creates racing each other cannot pass max_workspaces.
+            pool.reserved += 1
+            reserved = True
             settle = pool.claim(named, worker) if named is not None else None
             self._cancel_idle()
             try:
@@ -789,7 +801,7 @@ class WorkerProxy:
                 "mirage: worker %d did not answer: %s", worker.index, exc
             )
             return _UNAVAILABLE
-        if response.status_code not in (401, 403):
+        if response.status_code < 300:
             return None
         return _answered(response)
 
@@ -1183,21 +1195,24 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
     if not content_type.startswith("multipart/"):
         async for _ in read():
             if size > MAX_REQUEST_PART:
-                return _Peeked(b"".join(chunks), more, None)
+                return _Peeked(b"".join(chunks), more, None, lost=True)
         head = b"".join(chunks)
         return _Peeked(head, False, _id_of(head))
     request: list[bytes] = []
     name = b""
+    named = False
     events = part_events(read(), content_type)
     try:
         async for kind, value in events:
             if kind == PartEvent.BEGIN:
                 if name == b"request":
+                    named = True
                     break
                 name = value
             elif kind == PartEvent.DATA and name == b"request":
                 request.append(bytes(value))
             elif kind == PartEvent.END and name == b"request":
+                named = True
                 break
             if size > MAX_REQUEST_PART:
                 break
@@ -1206,4 +1221,9 @@ async def _peek(scope: Scope, receive: Receive) -> _Peeked:
         logger.debug("mirage: a load body did not parse: %s", exc.detail)
     finally:
         await events.aclose()
-    return _Peeked(b"".join(chunks), more, _id_of(b"".join(request)))
+    return _Peeked(
+        b"".join(chunks),
+        more,
+        _id_of(b"".join(request)),
+        lost=not named and size > MAX_REQUEST_PART,
+    )
