@@ -16,14 +16,32 @@ import gc
 import os
 import signal
 import sys
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 
 from mirage.server.app import build_app
-from mirage.server.env import ENV_IDLE_GRACE_SECONDS
+from mirage.server.daemon_config import DaemonConfigError
+from mirage.server.env import ENV_IDLE_GRACE_SECONDS, ENV_WORKER_SOCKET
+from mirage.server.host_validation import (
+    resolve_allowed_hosts,
+    resolve_forwarded_allow_ips,
+)
 from mirage.server.paths import pid_file_path
+from mirage.server.registry import (
+    resolve_graceful_timeout,
+    resolve_max_workspaces,
+)
+from mirage.server.ssh.config import resolve_ssh_config
+from mirage.server.workers import (
+    WorkerPool,
+    build_worker_proxy,
+    resolve_worker_type,
+    resolve_workers,
+)
 
 GC_YOUNG_THRESHOLD = 10_000
 SWITCH_INTERVAL = 0.001
@@ -54,24 +72,67 @@ def _tune_interpreter() -> None:
     sys.setswitchinterval(SWITCH_INTERVAL)
 
 
-app = build_app(
-    idle_grace_seconds=_idle_grace,
-    on_idle_exit=_exit,
-    pid_file=pid_file_path(),
-)
-_serve = app.router.lifespan_context
+def _watch_daemon() -> None:
+    """Stop this worker once its stdin closes: the daemon is gone."""
+    sys.stdin.buffer.read()
+    _exit()
 
 
-@asynccontextmanager
-async def _lifespan(served: FastAPI) -> AsyncIterator[None]:
-    """The app's lifespan, entered once the interpreter is tuned.
+def _workers_proxy() -> Any:
+    """The daemon's server, sending each workspace's requests to one of
+    ``workers`` workers. The daemon's SSH port is one server's, so it is
+    not taken with workers yet; each worker counts its own rate limits."""
+    if resolve_ssh_config().port is not None:
+        raise DaemonConfigError("ssh_port does not combine with workers yet")
+    allowed_hosts = resolve_allowed_hosts(None)
+    host = next((h for h in allowed_hosts if "*" not in h), "localhost")
+    pool = WorkerPool(
+        count=_workers,
+        worker_type=resolve_worker_type(),
+        env=dict(os.environ),
+        host=host,
+        graceful_timeout=resolve_graceful_timeout(),
+    )
+    return build_worker_proxy(
+        pool,
+        max_workspaces=resolve_max_workspaces(),
+        proxies=resolve_forwarded_allow_ips(),
+        allowed_hosts=allowed_hosts,
+        idle_grace_seconds=_idle_grace,
+        exit=_exit,
+        pid_file=pid_file_path(),
+    )
 
-    Args:
-        served (FastAPI): the daemon app.
-    """
-    _tune_interpreter()
-    async with _serve(served):
-        yield
 
+_worker_socket = os.environ.get(ENV_WORKER_SOCKET)
+_workers = 1 if _worker_socket else resolve_workers()
+app: Any
 
-app.router.lifespan_context = _lifespan
+if _workers > 1:
+    app = _workers_proxy()
+else:
+    if _worker_socket:
+        # A process worker: as many workspaces as the daemon sends it, the
+        # daemon keeping the cap, idle exit and pid file.
+        threading.Thread(target=_watch_daemon, daemon=True).start()
+        app = build_app(max_workspaces=sys.maxsize)
+    else:
+        app = build_app(
+            idle_grace_seconds=_idle_grace,
+            on_idle_exit=_exit,
+            pid_file=pid_file_path(),
+        )
+    _serve = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def _lifespan(served: FastAPI) -> AsyncIterator[None]:
+        """The app's lifespan, entered once the interpreter is tuned.
+
+        Args:
+            served (FastAPI): the daemon app.
+        """
+        _tune_interpreter()
+        async with _serve(served):
+            yield
+
+    app.router.lifespan_context = _lifespan

@@ -12,17 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { timingSafeEqual } from 'node:crypto'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 import { PUBLIC_PATHS } from './auth/middleware.ts'
 import { DEFAULT_RATE_LIMITS, DaemonConfigError, readDaemonTable } from './daemon_config.ts'
-import { ENV_RATE_LIMITS } from './env.ts'
+import { ENV_RATE_LIMITS, ENV_WORKER_TOKEN } from './env.ts'
 import { refused } from './metrics.ts'
 import { mirageHome } from './paths.ts'
 
 const PER: Readonly<Record<string, number>> = { second: 1, minute: 60, hour: 3600, day: 86400 }
 const KEYS: ReadonlySet<string> = new Set(['ip', 'account', 'workspace'])
 const HEADER = 'header:'
+
+/**
+ * The header on a request the daemon already counted, when it runs
+ * workers: its value is the workers' `$MIRAGE_WORKER_TOKEN`.
+ */
+export const COUNTED_HEADER = 'x-mirage-counted'
 
 /**
  * At most `rate` requests for each value of `key`.
@@ -113,6 +120,12 @@ export function resolveRateLimits(
   }
 }
 
+/** Whether `header` is the workers' `token`. */
+function isCounted(header: string | string[] | undefined, token: string): boolean {
+  if (typeof header !== 'string' || header.length !== token.length) return false
+  return timingSafeEqual(Buffer.from(header), Buffer.from(token))
+}
+
 /** What `request` is counted as under `key`, null when nothing. */
 function value(key: RateLimit['key'], request: FastifyRequest): string | null {
   if (typeof key === 'function') return key(request)
@@ -140,7 +153,8 @@ function value(key: RateLimit['key'], request: FastifyRequest): string | null {
  * the address, the workspace or a header, so a caller with a bad token is
  * counted too, and after it, with `signedIn`, for those keyed on the account
  * or a function, which may read the signed-in account. WebSocket handshakes
- * count too; public paths are not counted. Mirrors Python's
+ * count too; public paths are not counted, nor, on a worker, a request the
+ * daemon already counted, but by its workspace. Mirrors Python's
  * `RateLimitMiddleware`.
  */
 export function registerRateLimits(
@@ -151,11 +165,15 @@ export function registerRateLimits(
   const counted = rateLimits.filter(
     (limit) => (typeof limit.key === 'function' || limit.key === 'account') === signedIn,
   )
+  const token = process.env[ENV_WORKER_TOKEN]
   for (const limit of counted) {
     const [points, duration] = measure(limit)
     const limiter = new RateLimiterMemory({ points, duration })
     app.addHook('onRequest', async (req, reply) => {
       if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
+      // The daemon's check names no workspace, so those limits still count.
+      const skips = limit.key !== 'workspace' && token !== undefined
+      if (skips && isCounted(req.headers[COUNTED_HEADER], token)) return
       const by = limit.key === 'ip' ? req.ip : value(limit.key, req)
       if (by === null) return
       try {

@@ -321,6 +321,8 @@ mirage login
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
 | `max_workspaces` | `MIRAGE_MAX_WORKSPACES` | no cap; past it a new workspace answers 503 |
 | `max_sessions` | `MIRAGE_MAX_SESSIONS` | no cap; past it a new session answers 429 |
+| `workers` | `MIRAGE_WORKERS` | `1`; see [Workers](/typescript/access/server#workers) |
+| `worker_type` | `MIRAGE_WORKER_TYPE` | `thread` in TypeScript; in Python, `thread` without the GIL, else `process` |
 | `rate_limits` | `MIRAGE_RATE_LIMITS` | `ip=1000/minute`; see [Rate limits](/home/access/http#rate-limits) |
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |

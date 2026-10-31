@@ -49,6 +49,14 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | `pidFile` | `$MIRAGE_HOME/daemon.pid` | PID file path, exposed as `app.pidFile`. Only the daemon writes it. |
 | `onIdleExit` | a no-op | Called when the last workspace has been gone `idleGraceSeconds` (30), or on `POST /v1/shutdown`. |
 
+## Workers
+
+By default the daemon is one process, and one thread holds every workspace. With `workers` above 1 (`MIRAGE_WORKERS`, or the `workers` key), it runs that many workers, each the whole server on a Unix socket of its own, and its own server passes each request to the worker holding the workspace. A new workspace goes to a worker at random. The workspaces on one worker share its event loop, and the OS spreads the workers over the CPUs.
+
+`worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. TypeScript defaults to threads. Python defaults to threads on an interpreter without the GIL (3.14t) and to processes otherwise, since threads under the GIL take turns.
+
+The daemon answers `/v1/health` and `/v1/ready` itself, merges the lists from `GET /v1/workspaces` and `GET /v1/jobs` (a job is one shell command run in a workspace), and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker. The SSH port is one server's, so it does not combine with workers yet.
+
 ## Started by the CLI
 
 `@struktoai/mirage-cli` runs the same app as a daemon, `mirage-daemon`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the two daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, and exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last workspace is deleted. It listens on `MIRAGE_DAEMON_PORT`, the `port` setting, or `8765`. Its settings are on the [CLI page](/home/access/cli#config).

@@ -933,6 +933,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@fastify/proxy-addr':
+        specifier: ^5.1.0
+        version: 5.1.0
       '@fastify/websocket':
         specifier: ^11.3.3
         version: 11.3.3
