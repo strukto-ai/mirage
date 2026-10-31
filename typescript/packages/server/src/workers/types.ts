@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type IncomingHttpHeaders } from 'node:http'
-import type { WorkerPool } from './pool.ts'
+import type { IncomingHttpHeaders } from 'node:http'
 
 /** What a worker is: a process of its own, or a thread of the daemon's. */
 export enum WorkerType {
@@ -52,19 +51,6 @@ export interface WorkerPoolOptions {
   host: string
   /** How long a stopped worker drains its lines for. */
   gracefulTimeout: number
-}
-
-export interface WorkerProxyOptions {
-  pool: WorkerPool
-  /** The most workspaces the workers hold together; null for no cap. */
-  maxWorkspaces: number | null
-  /** The proxies whose `X-Forwarded-For` names the client. */
-  proxies: readonly string[]
-  /** The Hosts it answers, as the workers do. */
-  allowedHosts: readonly string[]
-  idleGraceSeconds: number
-  /** Stops the daemon: after idling, or on a shutdown a worker let through. */
-  exit: () => void
 }
 
 /** What a worker answered, whole. */
