@@ -924,6 +924,57 @@ def test_sync_exit_leaves_a_metadata_write_to_its_blocked_loop(monkeypatch):
     assert len(results) == 1
 
 
+def test_sync_exit_waits_for_a_metadata_write_on_the_owner_loop(monkeypatch):
+    caller = asyncio.new_event_loop()
+    entered, release, exited = (threading.Event() for _ in range(3))
+    events = []
+
+    async def exit_during_write():
+        ws = Workspace({})
+        store = ws.state_store
+        cas_set_meta = store.cas_set_meta
+        close_store = store.close
+
+        async def delayed_meta(*args):
+            entered.set()
+            await asyncio.to_thread(release.wait, 10)
+            try:
+                return await cas_set_meta(*args)
+            finally:
+                events.append("meta-written")
+
+        async def tracked_close():
+            events.append("store-closed")
+            await close_store()
+
+        monkeypatch.setattr(store, "cas_set_meta", delayed_meta)
+        monkeypatch.setattr(store, "close", tracked_close)
+        with ws:
+            asyncio.run_coroutine_threadsafe(
+                ws.ensure_sessions_loaded(), ws._vfs_loop
+            )
+            await asyncio.to_thread(entered.wait, 10)
+        exited.set()
+
+    worker = threading.Thread(
+        target=caller.run_until_complete,
+        args=(exit_during_write(),),
+        daemon=True,
+    )
+    worker.start()
+    try:
+        assert entered.wait(10)
+        assert not exited.wait(0.05)
+        assert events == []
+    finally:
+        release.set()
+    assert exited.wait(10)
+    worker.join(10)
+    assert not worker.is_alive()
+    caller.close()
+    assert events == ["meta-written", "store-closed"]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "surface,streaming",

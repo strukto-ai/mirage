@@ -355,6 +355,7 @@ class Workspace:
         self._close_error: BaseException | None = None
         self._close_lock = asyncio.Lock()
         self._meta_lock = asyncio.Lock()
+        self._meta_loop: asyncio.AbstractEventLoop | None = None
         self._sync_bridge = SyncBridge()
         # mounts reused from another live workspace (copy() / load
         # VFS overrides) stay open here; their origin closes them.
@@ -1706,7 +1707,7 @@ class Workspace:
         )
         # A metadata record write in flight lands before teardown drops
         # the state or closes the store.
-        if blocked_loop is None:
+        if blocked_loop is None or self._meta_loop is not blocked_loop:
             async with self._meta_lock:
                 pass
         async with self._close_lock:
@@ -2403,7 +2404,11 @@ class Workspace:
         self._sync_bridge.observe()
         self.job_table.reap_lapsed()
         async with self._meta_lock:
-            await self._meta.ensure()
+            self._meta_loop = asyncio.get_running_loop()
+            try:
+                await self._meta.ensure()
+            finally:
+                self._meta_loop = None
         await self._session_mgr.ensure_loaded()
 
     @property
