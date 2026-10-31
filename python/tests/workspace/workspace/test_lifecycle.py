@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import gc
 import io
 import os
 import threading
@@ -32,6 +33,8 @@ from mirage.commands.spec import Argument, CommandSpec
 from mirage.core.api.client import SessionPool
 from mirage.io import IOResult
 from mirage.runtime.base import Runtime
+from mirage.runtime.python.host.fs import HostFs
+from mirage.runtime.python.host.open import make_open
 from mirage.shell.console import (
     Channel,
     ConsoleChunk,
@@ -885,6 +888,37 @@ async def test_close_settles_a_metadata_write_in_flight(monkeypatch, drop):
         if closing is not None:
             await asyncio.gather(closing, return_exceptions=True)
         await ws.close()
+
+
+def test_close_lands_a_stream_a_collection_put_off(monkeypatch):
+    vfs = RAMVFS()
+    ws = Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    opener = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))
+    at_close = []
+    close_vfs = vfs.close
+
+    async def snapshot_close():
+        at_close.append(vfs._store.files.get("/f"))
+        await close_vfs()
+
+    monkeypatch.setattr(vfs, "close", snapshot_close)
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        stream = opener("/data/f", "wb", buffering=0)
+        stream.write(b"landed")
+        cycle = [stream]
+        cycle.append(cycle)
+        del stream, cycle
+        gc.collect()
+    finally:
+        if enabled:
+            gc.enable()
+    assert vfs._store.files.get("/f") == b""
+    loop.run_until_complete(ws.close())
+    loop.close()
+    assert at_close == [b"landed"]
 
 
 def test_sync_exit_leaves_a_metadata_write_to_its_blocked_loop(monkeypatch):

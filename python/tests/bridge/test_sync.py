@@ -8,18 +8,15 @@ from contextvars import ContextVar
 
 import pytest
 
-from mirage import MountMode, Workspace
 from mirage.bridge.sync import (
     BLOCKED,
     SyncBridge,
     blocking,
+    defer,
     on_auxiliary_loop,
     run_async_from_sync,
 )
 from mirage.core.api.client import SessionPool
-from mirage.runtime.python.host.fs import HostFs
-from mirage.runtime.python.host.open import make_open
-from mirage.vfs.ram import RAMVFS
 
 SHUTDOWN_REPRO = """
 import asyncio
@@ -390,41 +387,40 @@ async def _one_turn() -> int:
     return 1
 
 
-async def _others_settled() -> None:
-    others = asyncio.all_tasks() - {asyncio.current_task()}
-    await asyncio.gather(*others)
-
-
-def test_a_file_the_collector_closes_never_drives_the_loop_it_interrupted(
-    monkeypatch,
-):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+def test_a_collection_neither_drives_nor_waits_on_a_loop():
     loop = asyncio.new_event_loop()
-    opener = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))
-    hooks = sys.get_asyncgen_hooks
-    armed, driven = threading.Event(), threading.Event()
+    refused = []
 
-    def collecting_hooks():
-        if armed.is_set():
-            armed.clear()
-            gc.collect()
-        return hooks()
+    def during(phase, info):
+        if phase == "start" and not refused:
+            with pytest.raises(RuntimeError, match="garbage collection"):
+                run_async_from_sync(_one_turn(), loop)
+            refused.append(loop.is_running())
 
-    def program() -> None:
-        dropped = opener("/data/f", "wb", buffering=0)
-        dropped.write(b"landed")
-        cycle = [dropped]
-        cycle.append(cycle)
-        del dropped, cycle
-        armed.set()
-        assert run_async_from_sync(_one_turn(), loop) == 1
-        driven.set()
+    gc.callbacks.append(during)
+    try:
+        gc.collect()
+    finally:
+        gc.callbacks.remove(during)
+        loop.close()
+    assert refused == [False]
 
-    monkeypatch.setattr(sys, "get_asyncgen_hooks", collecting_hooks)
-    threading.Thread(target=program, daemon=True).start()
-    assert driven.wait(10)
-    monkeypatch.undo()
-    loop.run_until_complete(_others_settled())
-    assert loop.run_until_complete(ws.vfs.read("/data/f")) == b"landed"
-    loop.run_until_complete(ws.close())
-    loop.close()
+
+def test_the_next_drive_runs_what_was_put_off_first_in_order():
+    loop = asyncio.new_event_loop()
+    events = []
+
+    def fails() -> None:
+        raise RuntimeError("put off and failed")
+
+    async def drive() -> None:
+        events.append("drive")
+
+    defer(loop, lambda: events.append("first"))
+    defer(loop, fails)
+    defer(loop, lambda: events.append(run_async_from_sync(_one_turn(), loop)))
+    try:
+        run_async_from_sync(drive(), loop)
+    finally:
+        loop.close()
+    assert events == ["first", 1, "drive"]

@@ -14,11 +14,16 @@
 
 import asyncio
 import errno
+import gc
 import io
+import sys
+import threading
+import weakref
 
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.bridge.sync import run_async_from_sync
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
@@ -409,3 +414,67 @@ def test_unbuffered_reads_recheck_retained_bytes_and_preserve_position(
         reset_current_session(token)
         loop.run_until_complete(ws.close())
         loop.close()
+
+
+async def _one_turn() -> int:
+    return 1
+
+
+@pytest.mark.parametrize(
+    "mode,buffering,seed,landed",
+    [
+        ("wb", 0, b"", b"landed"),
+        ("ab", -1, b"kept-", b"kept-landed"),
+    ],
+)
+def test_a_stream_the_collector_closes_lands_at_its_loops_next_drive(
+    monkeypatch, mode, buffering, seed, landed
+):
+    # The collection runs where run_forever has not yet marked the loop
+    # running, after run_until_complete registered its stop: a close
+    # driving the loop there would take that stop and the drive would
+    # never return.
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(ws.vfs.write("/data/f", seed))
+    opener = make_open(ws.vfs, loop, HostFs(ws.vfs, loop))
+    hooks = sys.get_asyncgen_hooks
+    armed, driven = threading.Event(), threading.Event()
+    dropped: list[weakref.ref] = []
+    collected = []
+    read = []
+
+    def collecting_hooks():
+        if armed.is_set():
+            armed.clear()
+            gc.collect()
+            collected.append(dropped[0]() is None)
+        return hooks()
+
+    def program() -> None:
+        stream = opener("/data/f", mode, buffering=buffering)
+        stream.write(b"landed")
+        dropped.append(weakref.ref(stream))
+        cycle = [stream]
+        cycle.append(cycle)
+        del stream, cycle
+        collected.append(dropped[0]() is None)
+        armed.set()
+        assert run_async_from_sync(_one_turn(), loop) == 1
+        read.append(run_async_from_sync(ws.vfs.read("/data/f"), loop))
+        driven.set()
+
+    enabled = gc.isenabled()
+    gc.disable()
+    monkeypatch.setattr(sys, "get_asyncgen_hooks", collecting_hooks)
+    try:
+        threading.Thread(target=program, daemon=True).start()
+        assert driven.wait(10)
+    finally:
+        monkeypatch.undo()
+        if enabled:
+            gc.enable()
+    assert collected == [False, True]
+    assert read == [landed]
+    loop.run_until_complete(ws.close())
+    loop.close()

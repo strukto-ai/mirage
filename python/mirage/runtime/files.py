@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from mirage.bridge.sync import run_async_from_sync
+from mirage.bridge.sync import defer, run_async_from_sync
 from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import ConcurrencyLimiter
@@ -445,6 +445,19 @@ class RuntimeFiles:
             if renumbered is exc:
                 raise
             raise renumbered from exc
+
+    def defer(self, work: Callable[[], None]) -> None:
+        """Put off work a finalizer cannot do in place until the loop can
+        be driven (``mirage.bridge.sync.defer``); with no shared loop it
+        runs now, on a loop of its own.
+
+        Args:
+            work (Callable[[], None]): what the finalizer put off.
+        """
+        if self._loop is None:
+            work()
+            return
+        defer(self._loop, work)
 
     def call(self, name: str, path: str, /, **kwargs: Any) -> Any:
         """Run one workspace function and return its result.

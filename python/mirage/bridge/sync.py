@@ -17,12 +17,13 @@ import concurrent.futures
 import gc
 import logging
 import threading
+from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial, wraps
-from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
-from weakref import WeakSet
+from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar
+from weakref import WeakKeyDictionary, WeakSet
 
 from mirage.concurrency.limiter import run_blocking, settle
 
@@ -36,6 +37,10 @@ BLOCKED: WeakSet[asyncio.AbstractEventLoop] = WeakSet()
 # Whether the garbage collector is running on this thread now, which
 # ``gc.callbacks`` reports at a collection's start and stop.
 COLLECTING = threading.local()
+# What a collection put off on each loop (``defer``), in order.
+DEFERRED: WeakKeyDictionary[
+    asyncio.AbstractEventLoop, deque[Callable[[], None]]
+] = WeakKeyDictionary()
 
 
 def _on_collection(phase: str, info: dict[str, int]) -> None:
@@ -43,6 +48,44 @@ def _on_collection(phase: str, info: dict[str, int]) -> None:
 
 
 gc.callbacks.append(_on_collection)
+
+
+def collecting() -> bool:
+    """Whether the garbage collector is running on this thread now.
+
+    A finalizer it runs (a dropped file's close) may have interrupted
+    anything, a drive of a shared loop included, so it neither drives
+    one nor waits on one: it puts its work off (``defer``).
+    """
+    return bool(getattr(COLLECTING, "now", False))
+
+
+def defer(loop: asyncio.AbstractEventLoop, work: Callable[[], None]) -> None:
+    """Put off synchronous work that drives ``loop`` until something
+    outside any drive of it runs ``run_deferred``: the next drive
+    ``run_async_from_sync`` starts on it, or the workspace's close.
+
+    Args:
+        loop (asyncio.AbstractEventLoop): the loop the work drives.
+        work (Callable[[], None]): what a finalizer could not do in place.
+    """
+    DEFERRED.setdefault(loop, deque()).append(work)
+
+
+def run_deferred(loop: asyncio.AbstractEventLoop) -> None:
+    """Run what was put off on ``loop``, in order, from a thread that is
+    not driving it. A failure is logged and the rest still run.
+
+    Args:
+        loop (asyncio.AbstractEventLoop): the loop the work drives.
+    """
+    pending = DEFERRED.get(loop)
+    while pending:
+        work = pending.popleft()
+        try:
+            work()
+        except Exception:
+            logger.debug("work put off by a collection failed", exc_info=True)
 
 
 @contextmanager
@@ -73,13 +116,6 @@ def _run_in_new_loop(awaitable: Awaitable[T]) -> T:
     return asyncio.run(on_auxiliary_loop(partial(_await_result, awaitable)))
 
 
-def _queued_done(done: concurrent.futures.Future[Any]) -> None:
-    if not done.cancelled() and done.exception() is not None:
-        logger.debug(
-            "a call queued from a collection failed", exc_info=done.exception()
-        )
-
-
 def run_async_from_sync(
     awaitable: Awaitable[T],
     loop: asyncio.AbstractEventLoop | None = None,
@@ -98,13 +134,12 @@ def run_async_from_sync(
     foreground owner. This fallback cannot safely wait on shared async
     locks; workspace agent adapters use ``SyncBridge`` instead.
 
-    A call made while the garbage collector runs on this thread (a
-    dropped file's last writes and its close, from its finalizer) is
-    queued on the shared loop and answers None, since nothing reads what
-    it answers. The collection may have interrupted anything, a drive of
-    that same loop included: driving it again from inside ends that
-    drive early, the nested run taking its stop, and waiting on it can
-    block on itself.
+    A call made while the garbage collector runs on this thread is
+    refused: the collection may have interrupted a drive of that same
+    loop, which driving it again from inside would end early (the nested
+    run takes its stop), and waiting on it can block on itself. A file's
+    finalizer puts its close off instead (``defer``), and an idle loop's
+    next drive runs what was put off on it first.
 
     Args:
         awaitable (Awaitable[T]): The asynchronous operation to run.
@@ -121,11 +156,13 @@ def run_async_from_sync(
             awaitable.close()
         raise RuntimeError("The owner event loop is closed")
 
-    if loop is not None and getattr(COLLECTING, "now", False):
-        asyncio.run_coroutine_threadsafe(
-            _await_result(awaitable), loop
-        ).add_done_callback(_queued_done)
-        return cast(T, None)
+    if loop is not None and collecting():
+        if isinstance(awaitable, Coroutine):
+            awaitable.close()
+        raise RuntimeError(
+            "a garbage collection cannot drive the loop it may have "
+            "interrupted"
+        )
 
     if loop is not None and loop is not running_loop:
         if loop.is_running():
@@ -134,6 +171,7 @@ def run_async_from_sync(
             )
             return future.result()
         if running_loop is None:
+            run_deferred(loop)
             return loop.run_until_complete(_await_result(awaitable))
         with concurrent.futures.ThreadPoolExecutor(1) as pool:
             return pool.submit(

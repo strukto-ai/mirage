@@ -36,7 +36,7 @@ from typing import Any, BinaryIO, Literal, TypeVar, overload
 
 from pydantic import BaseModel
 
-from mirage.bridge.sync import SyncBridge
+from mirage.bridge.sync import DEFERRED, SyncBridge, run_deferred
 from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import NULL_INDEX, IndexConfig
@@ -1730,14 +1730,17 @@ class Workspace:
             *(execution.aclose() for execution in executions),
             return_exceptions=True,
         )
+        # A file the garbage collector closed put its writes off to the
+        # loop's next drive; they land before teardown closes the mounts.
+        loop = asyncio.get_running_loop()
+        if DEFERRED.get(loop):
+            await run_blocking(run_deferred, loop)
         # A metadata record write in flight lands before teardown drops
         # the state or closes the store; its lock settles on the loop the
         # write runs on.
         writer = self._meta_loop
         if blocked_loop is None or writer is not blocked_loop:
-            await on_loop(
-                self._meta_settled(), writer or asyncio.get_running_loop()
-            )
+            await on_loop(self._meta_settled(), writer or loop)
         async with self._close_lock:
             if self._async_closed:
                 if self._close_error is not None:
