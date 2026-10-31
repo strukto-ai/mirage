@@ -623,10 +623,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(echo a & echo b & wait) 2>/dev/null",
+      "command": "( (sleep 0.1; echo a) & (sleep 0.1; echo b) & wait; echo joined) 2>/dev/null | grep -nv '^[ab]$'",
       "expect": {
         "exit": 0,
-        "stdout": "a\nb\n",
+        "stdout": "3:joined\n",
         "stderr": ""
       }
     },
