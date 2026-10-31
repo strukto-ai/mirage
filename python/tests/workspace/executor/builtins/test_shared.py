@@ -38,6 +38,7 @@ from mirage.workspace.executor.builtins.shared import (
     refusal,
     require_view,
     split_value_flags,
+    status_of,
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import session_view
@@ -167,6 +168,15 @@ def test_is_count_word():
     assert is_count_word("+3")
     assert not is_count_word("x")
     assert not is_count_word("-")
+
+
+def test_count_words_past_python_digit_limit():
+    zeros = "0" * 5000
+    assert is_count_word(f" {zeros}3 ")
+    assert status_of(f"-{zeros}3") == 253
+    assert is_count_word(str(2**63 - 1)) and is_count_word(str(-(2**63)))
+    assert not is_count_word(str(2**63))
+    assert not is_count_word("9" * 5000)
 
 
 # bash 5.2 stops `read -d` and `mapfile -d` at the first byte of the

@@ -58,7 +58,7 @@ async def test_funcnest_lowers_the_limit():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("value", ["100", "0", "-1", "3x", ""])
+@pytest.mark.parametrize("value", ["100", "0", "-1", "3x", "", "9" * 5000])
 async def test_funcnest_never_raises_the_limit(value: str):
     _, err, code = await _run(f'FUNCNEST="{value}"; f() {{ f; }}; f')
     assert (err, code) == (_refused("f", NESTING_MAX), 1)

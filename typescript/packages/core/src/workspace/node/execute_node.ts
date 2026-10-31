@@ -177,7 +177,14 @@ function withOpts(base: ExecuteNodeDeps, opts?: ExecuteNodeOpts): ExecuteNodeDep
   if (opts.sink !== undefined) next.sink = opts.sink
   if (opts.signal !== undefined) next.signal = opts.signal
   if (opts.executionScope !== undefined) next.executionScope = opts.executionScope
-  if (opts.jobTable !== undefined) next.jobTable = opts.jobTable
+  if (opts.jobTable !== undefined) {
+    // The lines the subtree runs (`eval`, `source`, an EXIT action) see
+    // its job list too.
+    const { jobTable } = opts
+    const inner = next.executeFn
+    next.jobTable = jobTable
+    next.executeFn = (cmd, o) => inner(cmd, { jobTable, ...o })
+  }
   if (opts.handed !== undefined) next = withHandOff(next, opts.handed)
   return next
 }

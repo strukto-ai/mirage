@@ -215,7 +215,11 @@ async def handle_bash(
             stdin = None
     if script is None:
         return None, IOResult(), ExecutionNode(command=name, exit_code=0)
-    cs = call_stack if call_stack is not None else CallStack()
+    cs = (
+        call_stack
+        if call_stack is not None
+        else CallStack(session.shell_nesting)
+    )
     cs.admit(name)
     context = EvaluationContext(
         context.session.new_shell(), context.frame.fork(), context

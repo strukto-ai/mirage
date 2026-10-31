@@ -235,7 +235,7 @@ async function runAction(
       sessionId: session.sessionId,
       session,
       stdin,
-      callStack: callStack ?? new CallStack(),
+      callStack: callStack ?? new CallStack(session.shellNesting),
     })
   } catch (err) {
     if (err instanceof ExitSignal || err instanceof ReturnSignal) err.unrouted = true
@@ -299,7 +299,7 @@ export async function runExitTrap(
       sessionId: session.sessionId,
       session,
       stdin,
-      callStack: callStack ?? new CallStack(),
+      callStack: callStack ?? new CallStack(session.shellNesting),
     })
     stdout = await materialize(io.stdout)
     stderr = await io.materializeStderr()

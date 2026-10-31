@@ -331,9 +331,15 @@ def is_count_word(word: str) -> bool:
     Args:
         word (str): the word to test.
     """
-    return COUNT_WORD_RE.fullmatch(word) is not None and (
-        -(2**63) <= int(word) < 2**63
-    )
+    if COUNT_WORD_RE.fullmatch(word) is None:
+        return False
+    # A 64-bit value has at most 19 digits past its leading zeros, which
+    # also keeps a long run of them out of Python's int() digit limit.
+    digits = word.strip().lstrip("+-").lstrip("0")
+    if len(digits) > 19:
+        return False
+    value = int(digits or "0")
+    return value <= 2**63 if "-" in word else value < 2**63
 
 
 def status_of(word: str) -> int:
@@ -342,7 +348,8 @@ def status_of(word: str) -> int:
     Args:
         word (str): a word ``is_count_word`` accepted.
     """
-    return int(word) % 256
+    value = int(word.strip().lstrip("+-").lstrip("0") or "0")
+    return (-value if "-" in word else value) % 256
 
 
 def builtin_error(name: str, message: str) -> bytes:

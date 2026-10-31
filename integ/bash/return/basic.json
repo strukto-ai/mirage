@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "f() { return x; }; f 2>&1; echo code=$?; (g() { if true; then echo early; return 3; fi; echo no; }; g; echo code=$?; h() { for i in 1; do echo loop; return 4; done; }; x=$(h); echo \"[$x] $?\"); rp() { (echo s; return 5; echo no); echo rc=$?; echo a | return 6; echo rc=$?; { echo in; return 3; } | cat; echo rc=$?; }; rp; for i in 1 2; do echo a | break; continue | cat; echo got$i; done\nrnf() { return -- 3; }; rnf; echo \"a=$?\"; rng() { return ' 7 '; }; rng; echo \"b=$?\"; return 2>&1; echo \"c=$?\"",
+      "command": "f() { return x; }; f 2>&1; echo code=$?; (g() { if true; then echo early; return 3; fi; echo no; }; g; echo code=$?; h() { for i in 1; do echo loop; return 4; done; }; x=$(h); echo \"[$x] $?\"); rp() { (echo s; return 5; echo no); echo rc=$?; echo a | return 6; echo rc=$?; { echo in; return 3; } | cat; echo rc=$?; }; rp; for i in 1 2; do echo a | break; continue | cat; echo got$i; done\nrnf() { return -- 3; }; rnf; echo \"a=$?\"; rng() { return ' 7 '; }; rng; echo \"b=$?\"; return 2>&1; echo \"c=$?\"; rz() { return $(printf '%05000d' 3); }; rz; echo \"d=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "bash: return: x: numeric argument required\ncode=2\nearly\ncode=3\n[loop] 4\ns\nrc=5\nrc=6\nin\nrc=0\ngot1\ngot2\na=3\nb=7\nbash: return: can only `return' from a function or sourced script\nc=2\n",
+        "stdout": "bash: return: x: numeric argument required\ncode=2\nearly\ncode=3\n[loop] 4\ns\nrc=5\nrc=6\nin\nrc=0\ngot1\ngot2\na=3\nb=7\nbash: return: can only `return' from a function or sourced script\nc=2\nd=3\n",
         "stderr": ""
       }
     }

@@ -32,7 +32,7 @@ export async function handleEval(
   session: SessionState,
   stdin: ByteSource | null = null,
   sink?: JobConsole,
-  callStack: CallStack = new CallStack(),
+  callStack: CallStack = new CallStack(session.shellNesting),
 ): Promise<Result> {
   const script = args.join(' ')
   let io: IOResult
