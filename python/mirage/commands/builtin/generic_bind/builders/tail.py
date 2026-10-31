@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import header_aggregate
-from mirage.commands.builtin.generic.tail import tail_generic
+from mirage.commands.builtin.generic.tail import parse_flags, tail_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -33,6 +33,9 @@ async def tail(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
     backend_stat = dir_aware_stat(files, ctx)
@@ -43,6 +46,7 @@ async def tail(
         return row.model_copy(update={"size": await read_size(path)})
 
     return await tail_generic(
+        parsed,
         resolved,
         list(texts),
         ctx,

@@ -14,7 +14,7 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import header_aggregate
-from mirage.commands.builtin.generic.head import head_generic
+from mirage.commands.builtin.generic.head import head_generic, parse_flags
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -32,9 +32,13 @@ async def head(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
+    parsed = parse_flags(ctx.flags)
+    if isinstance(parsed, IOResult):
+        return None, parsed
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
     return await head_generic(
+        parsed,
         resolved,
         list(texts),
         ctx,

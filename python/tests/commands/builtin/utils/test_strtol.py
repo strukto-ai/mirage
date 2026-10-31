@@ -17,10 +17,8 @@ import pytest
 from mirage.commands.builtin.utils.strtol import (
     atoi,
     bounded_decimal,
-    c_int,
     signed_decimal,
     strtol,
-    strtoul,
 )
 
 
@@ -44,21 +42,6 @@ def test_strtol_reads_base_zero_and_leaves_the_rest(raw, value):
 
 
 @pytest.mark.parametrize(
-    "raw,value",
-    [
-        ("", (0, "")),
-        ("0x10", (16, "")),
-        ("-1", (2**64 - 1, "")),
-        ("99999999999999999999", (2**64 - 1, "")),
-        ("3x", (3, "x")),
-        ("  ", (0, "  ")),
-    ],
-)
-def test_strtoul_negates_unsigned_and_saturates(raw, value):
-    assert strtoul(raw) == value
-
-
-@pytest.mark.parametrize(
     "raw,signed",
     [
         ("5", 5),
@@ -75,17 +58,10 @@ def test_signed_decimal_reads_a_whole_decimal_word(raw, signed):
     assert signed_decimal(raw) == signed
 
 
-def test_c_int_keeps_the_low_32_bits_signed():
-    assert c_int(2**32 + 1) == 1
-    assert c_int(2**64 - 1) == -1
-    assert c_int(2**31) == -(2**31)
-
-
 def test_scanners_read_a_number_past_the_int_digit_limit():
     digits = "9" * 5000
     assert signed_decimal("-" + digits) == -(10**5000 - 1)
     assert strtol(digits) == (2**63 - 1, "")
-    assert strtoul(digits) == (2**64 - 1, "")
 
 
 @pytest.mark.parametrize(

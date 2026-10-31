@@ -17,14 +17,25 @@ import { describe, expect, it } from 'vitest'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { runWithMountGate } from '../../../context/session_context.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
-import type { Context } from '../../config.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
-import { treeGeneric } from './tree.ts'
+import { parseFlags, treeGeneric as generic } from './tree.ts'
 import { readers } from '../../../test-utils.ts'
 
 const DEC = new TextDecoder()
+
+type Operands<T> = T extends [unknown, ...infer R] ? R : never
+
+// tree as its builder runs it: the options read first, a refusal returned.
+async function treeGeneric(
+  ...args: Operands<Parameters<typeof generic>>
+): Promise<CommandFnResult> {
+  const parsed = parseFlags(args[1].flags)
+  if (parsed instanceof IOResult) return [null, parsed]
+  return generic(parsed, ...args)
+}
 
 const FOLDERS = new Set(['/', '/docs', '/.secret'])
 
@@ -238,5 +249,28 @@ describe('treeGeneric across a nested mount', () => {
     expect(DEC.decode(out)).toBe(
       ['/base', '|-- inner', '`-- top.txt', '', '2 directories, 1 file', ''].join('\n'),
     )
+  })
+})
+
+// tree reads -L as strtoul at base 0 cast to an int, and refuses a level under
+// 1 whatever was typed, exit 1. Mirrors test_tree.py.
+describe('tree -L', () => {
+  it.each([
+    ['2', 2],
+    ['0x10', 16],
+    ['010', 8],
+  ])('reads %j as %s', (raw, level) => {
+    const parsed = parseFlags({ L: raw })
+    if (parsed instanceof IOResult) throw new Error('tree refused a level')
+    expect(parsed.maxDepth).toBe(level)
+  })
+
+  it.each(['0', '-1', 'x', ''])('refuses %j', (raw) => {
+    const parsed = parseFlags({ L: raw })
+    if (!(parsed instanceof IOResult)) throw new Error('tree read a refused level')
+    expect([parsed.exitCode, DEC.decode(parsed.stderr as Uint8Array)]).toEqual([
+      1,
+      'tree: Invalid level, must be greater than 0.\n',
+    ])
   })
 })

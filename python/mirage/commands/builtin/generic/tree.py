@@ -7,7 +7,6 @@ from functools import partial
 from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
-from mirage.commands.builtin.utils.strtol import c_int, strtoul
 from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -16,6 +15,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import MISS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import enoent
 from mirage.io.types import ByteSource, IOResult
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused, scan
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
@@ -430,29 +431,24 @@ class TreeFlags:
     one_file_system: bool = False
 
 
-def _level(text: str) -> int:
-    """``-L`` as tree 2.2.1 reads it: C ``strtoul`` at base 0, as an int.
+def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags | IOResult:
+    """tree's options, ``-L`` read by mirage-rs before any operand is
+    resolved.
 
     Args:
-        text (str): the value as typed.
+        flags (Mapping[str, FlagValue]): the parsed flags.
+
+    Returns:
+        TreeFlags | IOResult: the flags, or tree's refusal of a level.
     """
-    return c_int(strtoul(text)[0])
-
-
-def _level_refusal(text: str, value: int | None) -> str:
-    """tree's one refusal for a level under 1, whatever was typed.
-
-    Args:
-        text (str): the value as typed.
-        value (int | None): what it scanned to.
-    """
-    return "tree: Invalid level, must be greater than 0."
-
-
-def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags:
     fl = FlagView(flags, spec=SPECS["tree"])
+    try:
+        level = scan("tree", fl.texts("L"))["L"]
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    assert level is None or isinstance(level, int)
     return TreeFlags(
-        max_depth=fl.as_number("L", _level, _level_refusal, low=1),
+        max_depth=level,
         show_hidden=fl.as_bool("a"),
         ignore_pattern=fl.as_str("args_I"),
         dirs_only=fl.as_bool("d"),
@@ -462,6 +458,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> TreeFlags:
 
 
 async def tree_generic(
+    parsed: TreeFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -472,16 +469,16 @@ async def tree_generic(
     """Run tree over resolved operands.
 
     Args:
+        parsed (TreeFlags): the options, read before the operands were.
         paths (list[PathSpec]): the operands.
         texts (list[str]): the raw words.
-        ctx (Context): the parsed flags.
+        ctx (Context): the dispatcher context.
         readdir (ReaddirFn): the walk's readdir.
         stat (Stat): the walk's stat.
         unbounded (tuple[ReaddirFn, Stat] | None): the walk to take when
             no ``-L`` bounds it (one the mount answers whole), else
             ``readdir`` and ``stat``.
     """
-    parsed = parse_flags(ctx.flags)
     if unbounded is not None and parsed.max_depth is None:
         readdir, stat = unbounded
     return await tree(

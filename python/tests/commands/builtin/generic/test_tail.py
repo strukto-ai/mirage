@@ -5,17 +5,19 @@ from contextlib import suppress
 import pytest
 
 from mirage.commands.builtin.generic.tail import (
+    TailFlags,
     parse_flags,
     tail,
     tail_generic,
     tail_multi,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
+from mirage.commands.spec.types import FlagValue
 from mirage.errors.fs import eacces, efbig, enoent
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import close_quietly
+from mirage.io.types import IOResult
 from mirage.shell.console import Channel
 from mirage.types import (
     FileStat,
@@ -29,6 +31,12 @@ from mirage.utils.key_prefix import mount_key
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.e2e.s3_mock import patch_s3_multi
+
+
+async def _tail_generic(paths, texts, ctx, *args, **kwargs):
+    parsed = parse_flags(ctx.flags)
+    assert isinstance(parsed, TailFlags)
+    return await tail_generic(parsed, paths, texts, ctx, *args, **kwargs)
 
 
 async def _drain(gen):
@@ -144,26 +152,36 @@ QUOTED_WORDS = [
 ]
 
 
+def _flags(flags: dict[str, FlagValue]) -> TailFlags:
+    parsed = parse_flags(flags)
+    assert isinstance(parsed, TailFlags)
+    return parsed
+
+
+def _refusal(flags: dict[str, FlagValue]) -> tuple[str, int]:
+    parsed = parse_flags(flags)
+    assert isinstance(parsed, IOResult)
+    assert isinstance(parsed.stderr, bytes)
+    return parsed.stderr.decode(), parsed.exit_code
+
+
 @pytest.mark.parametrize("value,escaped", QUOTED_WORDS)
 def test_follow_refusal_quotes_the_word(value, escaped):
-    with pytest.raises(UsageError) as exc:
-        parse_flags({"follow": value})
-    assert str(exc.value) == (
+    assert _refusal({"follow": value}) == (
         f"tail: invalid argument '{escaped}' for '--follow'\n"
         "Valid arguments are:\n"
         "  - 'descriptor'\n"
         "  - 'name'\n"
-        "Try 'tail --help' for more information."
+        "Try 'tail --help' for more information.\n",
+        1,
     )
-    assert exc.value.exit_code == 1
 
 
 @pytest.mark.parametrize("value,escaped", QUOTED_WORDS)
 def test_sleep_interval_refusal_quotes_the_word(value, escaped):
-    with pytest.raises(ValueError) as exc:
-        parse_flags({"sleep_interval": f"1{value}"})
-    assert str(exc.value) == (
-        f"tail: invalid number of seconds: '1{escaped}'\n"
+    assert _refusal({"sleep_interval": f"1{value}"}) == (
+        f"tail: invalid number of seconds: '1{escaped}'\n",
+        1,
     )
 
 
@@ -180,7 +198,7 @@ def test_sleep_interval_refusal_quotes_the_word(value, escaped):
 )
 def test_sleep_interval_accepts_every_strtod_spelling(value):
     """strtod takes LEADING whitespace, hex floats and `inf` (exit 0)."""
-    assert parse_flags({"sleep_interval": value}).interval >= 0
+    assert _flags({"sleep_interval": value}).interval >= 0
 
 
 @pytest.mark.parametrize(
@@ -200,19 +218,16 @@ def test_sleep_interval_refuses_what_gnu_refuses(value):
     `nan` parses and is then refused by GNU's own `0 <= s`, while `inf`
     passes both.
     """
-    with pytest.raises(ValueError):
-        parse_flags({"sleep_interval": value})
+    assert _refusal({"sleep_interval": value})[1] == 1
 
 
 # `tail --follow=d` and `--follow=n` both exit 0 (measured, coreutils
 # 9.4): the two candidates share no prefix, so one letter is enough.
 def test_follow_accepts_an_unambiguous_prefix():
-    assert parse_flags({"follow": "d"}).follow
-    assert not parse_flags({"follow": "d"}).follow_name
-    assert parse_flags({"follow": "n"}).follow_name
-    with pytest.raises(UsageError) as exc:
-        parse_flags({"follow": "nn"})
-    assert str(exc.value).startswith(
+    assert _flags({"follow": "d"}).follow
+    assert not _flags({"follow": "d"}).follow_name
+    assert _flags({"follow": "n"}).follow_name
+    assert _refusal({"follow": "nn"})[0].startswith(
         "tail: invalid argument 'nn' for '--follow'\n"
     )
 
@@ -256,7 +271,7 @@ async def test_tail_heads_no_operand_whose_open_is_refused():
         return opened()
 
     fs = _Growing({"/locked": b"", "/small": b""})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/locked", "/small"),
         [],
         Context(flags={"lines": "1"}),
@@ -283,7 +298,7 @@ async def test_tail_reports_a_failed_operand_and_prints_the_next(
         return b"ok\n"
 
     fs = _Growing({"/big": b"", "/gone": b"", "/small": b""})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/big", "/gone", "/small"),
         [],
         Context(flags={"lines": "1"}),
@@ -390,7 +405,7 @@ def _follow_opts(**flags) -> Context:
 @pytest.mark.asyncio
 async def test_follow_prints_what_a_file_gains_and_notes_truncation():
     fs = _Growing({"/d/log": b"l1\nl2\n"})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/log"), [], _follow_opts(), fs.stat, fs.read, fs.read_range
     )
 
@@ -413,7 +428,7 @@ async def test_follow_prints_what_a_file_gains_and_notes_truncation():
 @pytest.mark.asyncio
 async def test_follow_reads_whole_when_the_backend_has_no_range():
     fs = _Growing({"/d/log": b"a\n"})
-    stream, _ = await tail_generic(
+    stream, _ = await _tail_generic(
         _paths("/d/log"), [], _follow_opts(), fs.stat, fs.read
     )
 
@@ -430,7 +445,7 @@ async def test_follow_reads_whole_when_the_backend_has_no_range():
 @pytest.mark.asyncio
 async def test_follow_reads_a_size_unknown_file_whole_every_poll():
     fs = _Growing({"/d/log": b"a\n"}, sized=False)
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/log"), [], _follow_opts(), fs.stat, fs.read, fs.read_range
     )
 
@@ -450,7 +465,7 @@ async def test_follow_reads_a_size_unknown_file_whole_every_poll():
 @pytest.mark.asyncio
 async def test_follow_prints_a_repeated_operand_once_per_occurrence():
     fs = _Growing({"/d/f": b"l1\n"})
-    stream, _ = await tail_generic(
+    stream, _ = await _tail_generic(
         _paths("/d/f", "/d/f"),
         [],
         _follow_opts(),
@@ -478,7 +493,7 @@ async def test_follow_names_a_raw_byte_file_in_its_first_header():
     # writes the name it was given. Mirrored in tail.test.ts.
     name = "/d/x" + chr(0xDCFF)
     fs = _Growing({name: b"l1\n"})
-    stream, _ = await tail_generic(
+    stream, _ = await _tail_generic(
         _paths(name),
         [],
         _follow_opts(v=True),
@@ -541,7 +556,7 @@ async def test_follow_name_with_retry_waits_for_a_directory_to_be_replaced():
     # without giving up, keeps the name, and announces `has become
     # accessible` once a file stands there.
     fs = _Growing({"/d/dir": None})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/dir"),
         [],
         _follow_opts(F=True),
@@ -581,7 +596,7 @@ async def test_follow_gives_up_on_a_directory_without_name_retry(
     # Pinned on coreutils 9.7: without --retry the suffix says so; a
     # descriptor follow with --retry drops the suffix but gives up too.
     fs = _Growing({"/d/dir": None})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/dir"),
         [],
         _follow_opts(**flags),
@@ -604,7 +619,7 @@ async def test_retry_without_follow_warns_and_tails_anyway():
     # printed as if --retry were not there, and the status is the
     # operands' own.
     fs = _Growing({"/d/f": b"l1\nl2\n"})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/f"),
         [],
         Context(flags={"retry": True, "n": "1"}),
@@ -619,7 +634,7 @@ async def test_retry_without_follow_warns_and_tails_anyway():
         b"only when following\n"
     )
     assert io.exit_code == 0
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/nope"),
         [],
         Context(flags={"retry": True}),
@@ -638,7 +653,7 @@ async def test_retry_without_follow_warns_and_tails_anyway():
 @pytest.mark.asyncio
 async def test_follow_switches_headers_as_files_take_turns():
     fs = _Growing({"/d/p": b"p\n", "/d/q": b"q\n"})
-    stream, _ = await tail_generic(
+    stream, _ = await _tail_generic(
         _paths("/d/p", "/d/q"),
         [],
         _follow_opts(),
@@ -667,7 +682,7 @@ async def test_follow_switches_headers_as_files_take_turns():
 @pytest.mark.asyncio
 async def test_retry_waits_for_a_file_to_appear():
     fs = _Growing({})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/later"),
         [],
         Context(flags={"F": True, "sleep_interval": "0.02"}),
@@ -691,7 +706,7 @@ async def test_retry_waits_for_a_file_to_appear():
 @pytest.mark.asyncio
 async def test_retry_under_a_descriptor_covers_the_initial_open_only():
     fs = _Growing({})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/later"),
         [],
         Context(
@@ -725,7 +740,7 @@ async def test_retry_under_a_descriptor_covers_the_initial_open_only():
 @pytest.mark.asyncio
 async def test_follow_by_name_reports_a_file_that_vanishes():
     fs = _Growing({"/d/gone": b"x\n"})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/gone"),
         [],
         _follow_opts(follow="name"),
@@ -751,25 +766,23 @@ async def test_follow_by_name_reports_a_file_that_vanishes():
 
 
 def test_follow_flags_parse_gnu_spellings():
-    parsed = parse_flags({"F": True})
+    parsed = _flags({"F": True})
     assert parsed.follow and parsed.follow_name and parsed.retry
-    assert parse_flags({"follow": "name"}).follow_name
-    assert not parse_flags({"follow": True}).follow_name
+    assert _flags({"follow": "name"}).follow_name
+    assert not _flags({"follow": True}).follow_name
     # Scan order is dict order: the later of -f/--follow and -F picks the
     # mode, and -F's --retry half stays on either way.
-    later_descriptor = parse_flags({"F": True, "follow": "descriptor"})
+    later_descriptor = _flags({"F": True, "follow": "descriptor"})
     assert later_descriptor.follow and later_descriptor.retry
     assert not later_descriptor.follow_name
-    later_f = parse_flags({"F": True, "follow": True})
+    later_f = _flags({"F": True, "follow": True})
     assert later_f.retry and not later_f.follow_name
-    later_big_f = parse_flags({"follow": True, "F": True})
+    later_big_f = _flags({"follow": True, "F": True})
     assert later_big_f.retry and later_big_f.follow_name
-    only_retry = parse_flags({"follow": "name", "retry": True})
+    only_retry = _flags({"follow": "name", "retry": True})
     assert only_retry.follow_name and only_retry.retry
-    assert not parse_flags({"retry": True}).follow
-    assert (
-        parse_flags({"follow": True, "sleep_interval": "0.5"}).interval == 0.5
-    )
+    assert not _flags({"retry": True}).follow
+    assert _flags({"follow": True, "sleep_interval": "0.5"}).interval == 0.5
 
 
 @pytest.mark.asyncio
@@ -783,7 +796,7 @@ async def test_follow_name_with_retry_waits_out_a_directory_replacing_the_file(
     # `has become accessible`. A size-unknown backend must not read the
     # directory whole to find that out.
     fs = _Growing({"/d/f": b"a\n"}, sized=sized)
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/f"),
         [],
         _follow_opts(F=True),
@@ -813,7 +826,7 @@ async def test_follow_name_with_retry_waits_out_a_directory_replacing_the_file(
 async def test_follow_descriptor_prints_nothing_while_a_directory_stands_there():
     # GNU keeps reading the descriptor it opened, which gains nothing.
     fs = _Growing({"/d/f": b"a\n"})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/f"), [], _follow_opts(), fs.stat, fs.read, fs.read_range
     )
     assert stream is not None
@@ -839,7 +852,7 @@ async def test_follow_name_treats_a_read_that_finds_nothing_as_inaccessible(
     # takes the same road as a failed stat, `has become inaccessible`,
     # and picks the name up again from the start when it is back.
     fs = _GoneAtRead({"/d/f": b"a\n"}, sized=sized)
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/f"),
         [],
         _follow_opts(F=True),
@@ -874,7 +887,7 @@ async def test_retry_waits_for_an_operand_whose_first_read_fails(flags):
     # follow too.
     fs = _GoneAtRead({"/d/f": b"a\n"})
     fs.trip = True
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/f"),
         [],
         _follow_opts(**flags),
@@ -901,7 +914,7 @@ async def test_retry_waits_for_an_operand_whose_first_read_fails(flags):
 async def test_follow_without_retry_gives_up_on_a_failed_first_read():
     fs = _GoneAtRead({"/d/f": b"a\n"})
     fs.trip = True
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/f"),
         [],
         _follow_opts(f=True),
@@ -922,7 +935,7 @@ async def test_follow_without_retry_gives_up_on_a_failed_first_read():
 @pytest.mark.asyncio
 async def test_follow_name_without_retry_gives_up_on_a_read_that_finds_nothing():
     fs = _GoneAtRead({"/d/f": b"a\n"})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/f"),
         [],
         _follow_opts(follow="name"),
@@ -960,7 +973,7 @@ async def test_follow_infinite_interval_never_polls():
     nothing after it.
     """
     fs = _Growing({"/d/log": b"l1\nl2\n"})
-    stream, io = await tail_generic(
+    stream, io = await _tail_generic(
         _paths("/d/log"),
         [],
         _follow_opts(sleep_interval="inf"),
@@ -1001,7 +1014,7 @@ async def test_tail_asks_last_lines_for_a_count_from_the_end(flags, asked):
         calls.append(n)
         return b"c\n"
 
-    stream, _ = await tail_generic(
+    stream, _ = await _tail_generic(
         _paths("/d/log"),
         [],
         Context(flags=flags),
@@ -1034,7 +1047,7 @@ async def test_follow_streams_what_the_mount_hands_over_first_print_included():
         asked.append((n, interval))
         return added()
 
-    stream, _ = await tail_generic(
+    stream, _ = await _tail_generic(
         _paths("/d/log"),
         [],
         _follow_opts(n="1"),
@@ -1077,7 +1090,7 @@ async def test_a_reader_that_stops_at_the_header_closes_the_follow():
     async def follow(p: PathSpec, n: int, interval: float):
         return _Added()
 
-    stream, _ = await tail_generic(
+    stream, _ = await _tail_generic(
         _paths("/d/log"),
         [],
         _follow_opts(n="1", v=True),
@@ -1104,7 +1117,7 @@ async def test_a_polled_follow_reads_its_first_print_whole():
     async def follow(p: PathSpec, n: int, interval: float) -> None:
         return None
 
-    stream, _ = await tail_generic(
+    stream, _ = await _tail_generic(
         _paths("/d/log"),
         [],
         _follow_opts(n="1"),
@@ -1158,7 +1171,7 @@ async def test_seekable_tail_keeps_only_a_range_window(
             yield (block + block[:8])[shift : shift + count]
 
     async def run():
-        source, io = await tail_generic(
+        source, io = await _tail_generic(
             _paths("/d/log"), [], Context(flags=flags), stat, read, read_range
         )
         seen = 0
@@ -1189,7 +1202,7 @@ async def test_a_zero_stat_size_does_not_hide_streamed_bytes(flags):
         )
         yield b""
 
-    source, io = await tail_generic(
+    source, io = await _tail_generic(
         _paths("/pipe"), [], Context(flags=flags), stat, read, read_range
     )
     assert await _drain(source) == b"last"

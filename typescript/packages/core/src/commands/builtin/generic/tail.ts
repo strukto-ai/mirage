@@ -21,18 +21,14 @@ import type { FlagValue } from '../../spec/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { abortable } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { FileType, type FileStat, type PathSpec, type ReadStreamFn } from '../../../types.ts'
-import { wordRefusalError } from '../../spec/usage.ts'
-import { UsageError } from '../../errors.ts'
-import { matchWord } from '../../spec/word_choice.ts'
-import type { CommandFnResult, Context } from '../../config.ts'
 import {
-  normalizeCounts,
-  numberFlagError,
-  parseCounts,
-  parseSeconds,
-  type TailCounts,
-} from '../tail_counts.ts'
+  FileType,
+  type FileStat,
+  type JsonValue,
+  type PathSpec,
+  type ReadStreamFn,
+} from '../../../types.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { enoent, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
 import { shellQuote } from '../../../utils/quote.ts'
@@ -40,19 +36,47 @@ import { reportFsError, splitOpened } from '../utils/operands.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
 import { checkMemory } from '../../../io/memory.ts'
-import { quoteText } from '../../quote.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import { dispatchOf } from '../utils/links.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused, scan } from '../../../rs/scan.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 type Stat = (p: PathSpec) => Promise<FileStat>
 
-const DEFAULT_SLEEP_INTERVAL = 1
-// The --follow words, in the order GNU lists them back.
-const FOLLOW_ARGS = ['descriptor', 'name'] as const
+/**
+ * `-n`/`-c` split by the end they count from. A leading `+` counts forward
+ * from the start, 1-indexed, so `+0` and `+1` both mean the whole input; any
+ * other spelling counts back from the end. Mirrors Python's `TailCounts`.
+ */
+export interface TailCounts {
+  readonly lines: number | null
+  readonly fromLine: number | null
+  readonly byteCount: number | null
+  readonly fromByte: number | null
+}
+
+/**
+ * Fill in whatever a caller left off a `TailCounts`.
+ *
+ * The struct is a plain object, so a caller that omits a field — or a
+ * JavaScript one that passes something else entirely — supplies undefined,
+ * and a bare `!== null` test waves that straight into the first branch,
+ * where `slice(NaN)` quietly returns the whole input. Python's twin is a
+ * dataclass whose four fields all default to None and has no such hole;
+ * reading every field through `?? null` gives this side the same floor.
+ */
+export function normalizeCounts(counts: TailCounts): TailCounts {
+  return {
+    lines: counts.lines ?? null,
+    fromLine: counts.fromLine ?? null,
+    byteCount: counts.byteCount ?? null,
+    fromByte: counts.fromByte ?? null,
+  }
+}
 
 /** -f/--follow[=HOW], -F, --retry and -s as tail reads them. */
 export interface FollowFlags {
@@ -62,20 +86,13 @@ export interface FollowFlags {
   readonly interval: number
 }
 
-// -f, --follow[=HOW] and -F. A bad HOW is GNU's word-choice refusal; -F is
-// --follow=name --retry. The mode is whichever of -f/--follow and -F came
-// last, GNU's own order (`-F --follow=descriptor` follows the descriptor),
-// while -F's --retry half stays on either way.
-export function followFlags(fl: FlagView): FollowFlags | UsageError {
+// -f, --follow[=HOW] and -F as (follow, by name, retry), `how` the --follow
+// word mirage-rs read, if typed. -F is --follow=name --retry. The mode is
+// whichever of -f/--follow and -F came last, GNU's own order
+// (`-F --follow=descriptor` follows the descriptor), while -F's --retry half
+// stays on either way.
+function followFlags(fl: FlagView, how: string | null): [boolean, boolean, boolean] {
   const raw: unknown = fl.raw('follow')
-  let how: string | null = null
-  if (typeof raw === 'string') {
-    const match = matchWord(raw, FOLLOW_ARGS)
-    if (!match.matched) {
-      return wordRefusalError('tail', '--follow', raw, FOLLOW_ARGS, undefined, match.kind)
-    }
-    how = match.word
-  }
   const typed = fl
     .typedOrder('follow', 'F')
     .filter((k) =>
@@ -83,20 +100,17 @@ export function followFlags(fl: FlagView): FollowFlags | UsageError {
     )
   const follow = typed.length > 0
   const byName = follow && (typed[typed.length - 1] === 'F' || how === 'name')
-  const retry = fl.asBool('retry') || typed.includes('F')
-  const rawSeconds = fl.asStr('sleep_interval')
-  let interval = DEFAULT_SLEEP_INTERVAL
-  if (rawSeconds !== undefined) {
-    const seconds = parseSeconds(rawSeconds)
-    // GNU's two-part test: the whole word must read as a number, then the
-    // number must be at least 0. NaN is not, so it is refused, while `inf`
-    // passes both and is ACCEPTED (measured, coreutils 9.4).
-    if (seconds === null || !(0 <= seconds)) {
-      return new UsageError(`tail: invalid number of seconds: '${quoteText(rawSeconds)}'`, 1)
-    }
-    interval = seconds
+  return [follow, byName, fl.asBool('retry') || typed.includes('F')]
+}
+
+// A count mirage-rs read, `{count, from_start}` or null, as (from the end,
+// from the start).
+function countsOf(value: JsonValue | undefined): [number | null, number | null] {
+  if (value === null) return [null, null]
+  if (typeof value !== 'object' || Array.isArray(value) || typeof value.count !== 'number') {
+    throw new Error(`tail: mirage-rs read a count as ${JSON.stringify(value)}`)
   }
-  return { follow, byName, retry, interval }
+  return value.from_start === true ? [null, value.count] : [value.count, null]
 }
 
 // Append a follow-time diagnostic to the result's stderr. A following
@@ -686,31 +700,56 @@ const STDIN_BY_NAME = "tail: cannot follow '-' by name\n"
 const APPEARED = 'has appeared;  following new file'
 const ACCESSIBLE = 'has become accessible'
 
-// The tail flag bag, parsed once; a refused value is its message.
-interface TailFlags {
+export interface TailFlags {
   readonly counts: TailCounts
   readonly quiet: boolean
   readonly verbose: boolean
   readonly following: FollowFlags
 }
 
-function parseFlags(bag: Record<string, FlagValue>): TailFlags | UsageError {
+/**
+ * tail's options, the values read by mirage-rs before any operand is resolved:
+ * the flags, or tail's refusal of a value. Mirrors Python's `parse_flags`.
+ */
+export function parseFlags(bag: Record<string, FlagValue>): TailFlags | IOResult {
   const fl = new FlagView(bag, specOf('tail'))
-  const nRaw = fl.asStr('n') ?? null
-  const cRaw = fl.asStr('c') ?? null
-  const numErr = numberFlagError('tail', nRaw, cRaw)
-  if (numErr !== null) return new UsageError(numErr.replace(/\n$/, ''), 1)
-  const following = followFlags(fl)
-  if (following instanceof UsageError) return following
+  const raw = fl.raw('follow')
+  const typed = fl.texts('n', 'c', 'sleep_interval')
+  if (typeof raw === 'string') typed.push(['follow', raw])
+  let values
+  try {
+    values = scan('tail', typed)
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  const how = values.follow
+  if (how !== null && typeof how !== 'string') {
+    throw new Error(`tail: mirage-rs read --follow as ${JSON.stringify(how)}`)
+  }
+  const [follow, byName, retry] = followFlags(fl, how)
   // The last of -q and -v decides, as in GNU tail, and so does the last of
-  // -n and -c once both have parsed.
+  // -n and -c.
   const headers = fl.typedOrder('q', 'v').at(-1)
   const unit = fl.typedOrder('n', 'c').at(-1)
+  const [lines, fromLine] = countsOf(unit === 'c' ? null : values.lines)
+  const [byteCount, fromByte] = countsOf(unit === 'n' ? null : values.bytes)
+  // mirage-rs answers -s, typed or GNU's default of 1, as null when it is
+  // infinite.
+  const interval = values.sleep_interval
+  if (interval !== null && typeof interval !== 'number') {
+    throw new Error(`tail: mirage-rs read -s as ${JSON.stringify(interval)}`)
+  }
   return {
-    counts: parseCounts(unit === 'c' ? null : nRaw, unit === 'n' ? null : cRaw),
+    counts: { lines, fromLine, byteCount, fromByte },
     quiet: headers === 'q',
     verbose: headers === 'v',
-    following,
+    following: {
+      follow,
+      byName,
+      retry,
+      interval: interval ?? Number.POSITIVE_INFINITY,
+    },
   }
 }
 
@@ -719,9 +758,11 @@ function parseFlags(bag: Record<string, FlagValue>): TailFlags | UsageError {
  * (`-n N`, or the default 10) is asked of `lastLines` first, so a mount that
  * can fetch the end of a file on its own does not send the rest; `-f` on one
  * file asks `followOp(p, n, interval)` (see `follow`). Null, or no such op, reads
- * or polls the file. Mirrors Python's `tail_generic`.
+ * or polls the file. Mirrors Python's `tail_generic`; `parsed` holds the
+ * options, read before the operands were.
  */
 export async function tailGeneric(
+  parsed: TailFlags,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
@@ -736,14 +777,8 @@ export async function tailGeneric(
   ) => Promise<AsyncIterable<Uint8Array> | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
-  const parsed = parseFlags(ctx.flags)
   const backend = stream
   stream = stdinStream(stream, ctx.stdin)
-  if (parsed instanceof UsageError)
-    return [
-      null,
-      new IOResult({ exitCode: parsed.exitCode, stderr: encodeText(parsed.message + '\n') }),
-    ]
   const { counts, quiet: qFlag, verbose: vFlag, following } = parsed
   const n = counts.lines ?? 10
   const fromEnd = counts.byteCount === null && counts.fromLine === null && counts.fromByte === null

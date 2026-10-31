@@ -15,90 +15,56 @@
 import pytest
 
 from mirage.commands.builtin.generic.truncate import (
+    Size,
     TruncateFlags,
-    parse_size,
+    parse_flags,
+    resolve_size,
     truncate_generic,
 )
-from mirage.commands.errors import UsageError
+from mirage.io.types import IOResult
 from mirage.types import FileStat, FileType, PathSpec
 
 
-def test_plain_and_operation_sizes():
-    assert parse_size("10", 0) == 10
-    assert parse_size("%4", 10) == 12
-
-
-def test_full_gnu_suffix_alphabet():
-    # truncate's letter set is not split's: lowercase g/k/m/t are valid
-    # (pinned against coreutils 9.7), and E/P parse fine even though most
-    # filesystems refuse the resulting size.
-    assert parse_size("1k", 0) == 1024
-    assert parse_size("1g", 0) == 1024**3
-    assert parse_size("1t", 0) == 1024**4
-    assert parse_size("1G", 0) == 1024**3
-    assert parse_size("1GiB", 0) == 1024**3
-    assert parse_size("1GB", 0) == 1000**3
-    assert parse_size("1mB", 0) == 1000**2
-    assert parse_size("1E", 0) == 1024**6
-
-
-def test_whitespace_skipped_around_the_mode_character():
-    # GNU skips C-locale whitespace both before and after the mode char,
-    # so ` 4` is absolute, ` +4` extends, and `< 4` caps (pinned against
-    # coreutils 9.7).
-    assert parse_size(" +4", 10) == 14
-    assert parse_size("\t<\t4", 10) == 4
-
-
-@pytest.mark.parametrize("value", ["<+4", "<\t+4"])
-def test_sign_after_mode_is_multiple_relative_modifiers(value):
-    # A sign after <, >, / or % is refused as a second relative modifier
-    # before the number is read, not reported as an invalid number.
-    with pytest.raises(UsageError) as exc:
-        parse_size(value, 10)
-    assert str(exc.value) == (
-        "truncate: multiple relative modifiers "
-        "specified\nTry 'truncate --help' for more "
-        "information."
-    )
-    assert exc.value.exit_code == 1
+def _resolved(raw: str, current: int) -> int:
+    parsed = parse_flags({"size": raw})
+    assert isinstance(parsed, TruncateFlags)
+    return resolve_size(parsed.size, current)
 
 
 @pytest.mark.parametrize(
-    ("value", "quoted"),
+    "raw,current,size",
     [
-        ("<abc", "abc"),
-        ("4\t", "4\\t"),
+        ("10", 0, 10),
+        ("%4", 10, 12),
+        ("/ 4", 10, 8),
+        ("< 4", 10, 4),
+        (">50", 10, 50),
+        (" +2", 10, 12),
+        ("-20", 10, 0),
+        ("1KiB", 0, 1024),
+        ("9007199254740993", 0, 9007199254740993),
     ],
 )
-def test_junk_is_invalid_number(value, quoted):
-    # The digits must follow the sign immediately: no second sign, no gap,
-    # and no trailing whitespace. GNU quotes the remainder past the skipped
-    # whitespace and mode character, sign included, and escapes it.
-    with pytest.raises(UsageError) as exc:
-        parse_size(value, 0)
-    assert str(exc.value) == f"truncate: Invalid number: '{quoted}'"
-    assert exc.value.exit_code == 1
+def test_a_size_resolves_against_the_current_one(raw, current, size):
+    assert _resolved(raw, current) == size
 
 
-def test_off_t_bound_is_asymmetric():
-    # off_t is signed: 2**63 is one too large upward but fine downward.
-    assert parse_size("8191P", 0) == 8191 * 1024**5
-    assert parse_size("-8E", 10) == 0
-    assert parse_size("-9223372036854775808", 10) == 0
-    with pytest.raises(UsageError) as exc:
-        parse_size("8E", 0)
-    assert str(exc.value) == (
-        "truncate: Invalid number: '8E': Value too large for defined data type"
-    )
-    with pytest.raises(UsageError):
-        parse_size("9223372036854775808", 0)
-
-
-def test_division_by_zero():
-    with pytest.raises(UsageError) as exc:
-        parse_size("/0", 10)
-    assert str(exc.value) == "truncate: division by zero"
+@pytest.mark.parametrize(
+    "flags,stderr",
+    [
+        ({"size": "<abc"}, b"truncate: Invalid number: 'abc'\n"),
+        ({"size": "/0"}, b"truncate: division by zero\n"),
+        (
+            {},
+            b"truncate: you must specify either '--size' or '--reference'\n"
+            b"Try 'truncate --help' for more information.\n",
+        ),
+    ],
+)
+def test_a_refused_size_is_the_result(flags, stderr):
+    parsed = parse_flags(flags)
+    assert isinstance(parsed, IOResult)
+    assert (parsed.exit_code, parsed.stderr) == (1, stderr)
 
 
 def _operand(path: str, raw: str) -> PathSpec:
@@ -130,7 +96,7 @@ async def test_a_slashed_operand_is_the_opens_eisdir():
             _operand("/nodir/x", "/nodir/x"),
             _operand("/missing", "/missing"),
         ],
-        flags=TruncateFlags(size="4", no_create=False),
+        flags=TruncateFlags(size=Size("absolute", 4), no_create=False),
         stat=stat,
         truncate_fn=truncate_fn,
     )
@@ -143,7 +109,7 @@ async def test_a_slashed_operand_is_the_opens_eisdir():
     )
     _, io = await truncate_generic(
         [_operand("/missing", "/missing")],
-        flags=TruncateFlags(size="4", no_create=True),
+        flags=TruncateFlags(size=Size("absolute", 4), no_create=True),
         stat=stat,
         truncate_fn=truncate_fn,
     )
@@ -164,7 +130,7 @@ async def test_no_create_reaches_the_mutation_after_a_successful_stat():
 
     _, result = await truncate_generic(
         [PathSpec.from_str_path("/file")],
-        flags=TruncateFlags("2", True),
+        flags=TruncateFlags(Size("absolute", 2), True),
         stat=stat,
         truncate_fn=mutate,
     )

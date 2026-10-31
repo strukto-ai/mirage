@@ -1,18 +1,13 @@
 import asyncio
 import functools
 import inspect
+import math
 from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from mirage.commands.builtin.tail_counts import (
-    TailCounts,
-    number_flag_error,
-    parse_counts,
-    parse_seconds,
-)
 from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.operands import (
     operands_io,
@@ -28,13 +23,9 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stream,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import UsageError
-from mirage.commands.quote import quote_text
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.commands.spec.usage import word_refusal_error
-from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
 from mirage.errors.fs import enoent, fs_strerror
 from mirage.io.cooperative import CHUNK_SIZE, chunks
@@ -43,11 +34,14 @@ from mirage.io.stream import async_chain, close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
 from mirage.observe.context import revision_for
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.scan import refused, scan
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
     FileType,
+    JsonValue,
     PathSpec,
     PolymorphicReadFn,
     ReadStreamFn,
@@ -56,8 +50,27 @@ from mirage.types import (
 from mirage.utils.quote import shell_quote
 
 DEFAULT_SLEEP_INTERVAL = 1.0
-# The --follow words, in the order GNU lists them back.
-FOLLOW_ARGS = ("descriptor", "name")
+
+
+@dataclass(frozen=True, slots=True)
+class TailCounts:
+    """``-n``/``-c`` split by the end they count from.
+
+    A leading ``+`` counts forward from the start, 1-indexed, so ``+0``
+    and ``+1`` both mean the whole input; any other spelling counts back
+    from the end.
+
+    Args:
+        lines (int | None): lines kept from the end.
+        from_line (int | None): the line printing starts at.
+        byte_count (int | None): bytes kept from the end.
+        from_byte (int | None): the byte printing starts at.
+    """
+
+    lines: int | None = None
+    from_line: int | None = None
+    byte_count: int | None = None
+    from_byte: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,21 +111,14 @@ APPEARED = "has appeared;  following new file"
 ACCESSIBLE = "has become accessible"
 
 
-def _follow_flags(fl: FlagView) -> tuple[bool, bool, bool]:
+def _follow_flags(fl: FlagView, how: str | None) -> tuple[bool, bool, bool]:
     """``-f``, ``--follow[=HOW]`` and ``-F`` as (follow, by name, retry).
 
     Args:
         fl (FlagView): the tail flag view.
+        how (str | None): the ``--follow`` word mirage-rs read, if typed.
     """
     raw = fl.raw("follow")
-    how: str | None = None
-    if isinstance(raw, str):
-        match = match_word(raw, FOLLOW_ARGS)
-        if not isinstance(match, WordMatch):
-            raise word_refusal_error(
-                "tail", "--follow", raw, FOLLOW_ARGS, None, match.kind
-            )
-        how = match.word
     # -F is --follow=name --retry. The mode is whichever of -f/--follow
     # and -F came last, GNU's own order (`-F --follow=descriptor` follows
     # the descriptor), while -F's --retry half stays on either way.
@@ -128,50 +134,63 @@ def _follow_flags(fl: FlagView) -> tuple[bool, bool, bool]:
     return True, by_name, fl.as_bool("retry") or "F" in typed
 
 
-def _interval_flag(fl: FlagView) -> float:
-    """``-s``/``--sleep-interval`` as seconds, GNU's refusal otherwise.
+def _counts_of(value: JsonValue) -> tuple[int | None, int | None]:
+    """A count mirage-rs read as (from the end, from the start).
 
     Args:
-        fl (FlagView): the tail flag view.
+        value (JsonValue): ``{"count", "from_start"}``, or None.
     """
-    raw = fl.as_str("sleep_interval")
-    if raw is None:
-        return DEFAULT_SLEEP_INTERVAL
-    seconds = parse_seconds(raw)
-    # GNU's two-part test: the whole word must read as a number, then the
-    # number must be at least 0. NaN is not, so it is refused, while `inf`
-    # passes both and is ACCEPTED (measured, coreutils 9.4).
-    if seconds is None or not 0 <= seconds:
-        raise ValueError(
-            f"tail: invalid number of seconds: '{quote_text(raw)}'\n"
-        )
-    return seconds
+    if value is None:
+        return None, None
+    assert isinstance(value, dict)
+    count = value["count"]
+    assert isinstance(count, int)
+    return (None, count) if value["from_start"] else (count, None)
 
 
-def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags:
+def parse_flags(flags: Mapping[str, FlagValue]) -> TailFlags | IOResult:
+    """tail's options, the values read by mirage-rs before any operand is
+    resolved.
+
+    Args:
+        flags (Mapping[str, FlagValue]): the parsed flags.
+
+    Returns:
+        TailFlags | IOResult: the flags, or tail's refusal of a value.
+    """
     fl = FlagView(flags, spec=SPECS["tail"])
-    n_raw = fl.as_str("n")
-    c_raw = fl.as_str("c")
-    error = number_flag_error("tail", n_raw, c_raw)
-    if error is not None:
-        raise ValueError(error)
-    follow, by_name, retry = _follow_flags(fl)
+    raw = fl.raw("follow")
+    typed = fl.texts("n", "c", "sleep_interval")
+    if isinstance(raw, str):
+        typed.append(("follow", raw))
+    try:
+        values = scan("tail", typed)
+    except StreamRefusal as refusal:
+        return refused(refusal)
+    how = values.get("follow")
+    follow, by_name, retry = _follow_flags(
+        fl, how if isinstance(how, str) else None
+    )
     # The last of -q and -v decides, as in GNU tail, and so does the last
-    # of -n and -c once both have parsed.
+    # of -n and -c.
     order = fl.typed_order("q", "v")
     headers = order[-1] if order else None
     units = fl.typed_order("n", "c")
     unit = units[-1] if units else None
+    lines, from_line = _counts_of(None if unit == "c" else values["lines"])
+    byte_count, from_byte = _counts_of(
+        None if unit == "n" else values["bytes"]
+    )
+    interval = values["sleep_interval"]
+    assert interval is None or isinstance(interval, (int, float))
     return TailFlags(
-        counts=parse_counts(
-            None if unit == "c" else n_raw, None if unit == "n" else c_raw
-        ),
+        counts=TailCounts(lines, from_line, byte_count, from_byte),
         quiet=headers == "q",
         verbose=headers == "v",
         follow=follow,
         follow_name=by_name,
         retry=retry,
-        interval=_interval_flag(fl),
+        interval=math.inf if interval is None else float(interval),
     )
 
 
@@ -909,6 +928,7 @@ async def _unfollowable(
 
 
 async def tail_generic(
+    parsed: TailFlags,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
@@ -933,6 +953,7 @@ async def tail_generic(
     (see ``_follow``).
 
     Args:
+        parsed (TailFlags): the options, read before the operands were.
         paths (list[PathSpec]): Glob-resolved operands, empty for stdin.
         texts (list[str]): Non-path words, unused by tail.
         ctx (Context): Flags and stdin from the dispatcher.
@@ -953,14 +974,6 @@ async def tail_generic(
     """
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, ctx.stdin)
-    try:
-        parsed = parse_flags(ctx.flags)
-    except UsageError as exc:
-        return None, IOResult(
-            exit_code=exc.exit_code, stderr=encode_text(f"{exc}\n")
-        )
-    except ValueError as exc:
-        return None, IOResult(exit_code=1, stderr=encode_text(str(exc)))
     counts = parsed.counts
     n = counts.lines if counts.lines is not None else 10
     from_end = (

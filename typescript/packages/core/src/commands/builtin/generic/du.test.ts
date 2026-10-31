@@ -19,9 +19,11 @@ import {
   type DuFlags,
   du,
   duGeneric,
+  parseFlags,
   rollup,
   toVirtual,
 } from './du.ts'
+import { IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
@@ -173,5 +175,44 @@ describe('du descendant mounts', () => {
     const [size, entries] = backend(TREE)
     const out = await du([spec('/base', '')], flags(), size, entries)
     expect(DEC.decode(out.stdout)).toBe('1000\t/base/inner\n1010\t/base\n')
+  })
+})
+
+// mirage-rs reads --max-depth as strtoimax at base 0 and checks it against -s
+// and -a before any operand, each refusal du's usage error, exit 1. Mirrors
+// test_du.py.
+describe('du parseFlags', () => {
+  const read = (flags: Record<string, string | boolean>) =>
+    parseFlags({ stdin: null, flags, cwd: PathSpec.fromStrPath('/') } as Context)
+  const hint = "\nTry 'du --help' for more information.\n"
+
+  it.each([
+    [{ max_depth: '0x10' }, 16],
+    [{ max_depth: '010' }, 8],
+    [{ max_depth: '-1' }, -1],
+  ])('reads %j as depth %s', (flags, depth) => {
+    const parsed = read(flags)
+    if (parsed instanceof IOResult) throw new Error('du refused a depth')
+    expect(parsed.maxDepth).toBe(depth)
+  })
+
+  it('warns that -s is --max-depth=0', () => {
+    const parsed = read({ s: true, max_depth: '0' })
+    if (parsed instanceof IOResult) throw new Error('du refused -s -d 0')
+    expect(parsed.warning).toBe('du: warning: summarizing is the same as using --max-depth=0')
+  })
+
+  it.each([
+    [{ max_depth: '09' }, "du: invalid maximum depth '09'"],
+    [{ max_depth: ' 1' }, "du: invalid maximum depth ' 1'"],
+    [{ s: true, a: true }, 'du: cannot both summarize and show all entries'],
+    [{ s: true, max_depth: '2' }, 'du: warning: summarizing conflicts with --max-depth=2'],
+  ])('refuses %j', (flags, line) => {
+    const parsed = read(flags)
+    if (!(parsed instanceof IOResult)) throw new Error('du read a refused line')
+    expect([parsed.exitCode, new TextDecoder().decode(parsed.stderr as Uint8Array)]).toEqual([
+      1,
+      line + hint,
+    ])
   })
 })

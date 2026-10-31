@@ -1,5 +1,5 @@
 {
- "baseline": 2652,
+ "baseline": 2650,
  "modules": {
   "commands/builtin/rg_glob": {
    "typescript_only": {

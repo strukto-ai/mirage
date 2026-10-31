@@ -26,8 +26,9 @@ import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
 import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
-import { cInt, strtoul } from '../utils/strtol.ts'
 import { WalkBudget } from '../utils/tree.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { refused, scan } from '../../../rs/scan.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
 
@@ -38,7 +39,7 @@ const LAST = '`-- '
 const VERTICAL = '|   '
 const INDENT = '    '
 
-interface TreeFlags {
+export interface TreeFlags {
   readonly maxDepth: number | null
   readonly showHidden: boolean
   readonly ignorePattern: string | null
@@ -47,23 +48,24 @@ interface TreeFlags {
   readonly oneFileSystem: boolean
 }
 
-// `-L` as tree 2.2.1 reads it: C `strtoul` at base 0, as an int. Mirrors
-// Python's `_level`.
-function level(text: string): bigint {
-  return cInt(strtoul(text)[0])
-}
-
-// tree's one refusal for a level under 1, whatever was typed. Mirrors
-// Python's `_level_refusal`.
-function levelRefusal(): string {
-  return 'tree: Invalid level, must be greater than 0.'
-}
-
-function parseFlags(bag: Record<string, FlagValue>): TreeFlags {
+/**
+ * tree's options, -L read by mirage-rs before any operand is resolved: the
+ * flags, or tree's refusal of a level. Mirrors Python's `parse_flags`.
+ */
+export function parseFlags(bag: Record<string, FlagValue>): TreeFlags | IOResult {
   const fl = new FlagView(bag, specOf('tree'))
-  const depth = fl.asNumber('L', level, levelRefusal, { low: 1n })
+  let level
+  try {
+    level = scan('tree', fl.texts('L')).L
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    return refused(err)
+  }
+  if (level !== null && typeof level !== 'number') {
+    throw new Error(`tree: mirage-rs read -L as ${JSON.stringify(level)}`)
+  }
   return {
-    maxDepth: depth === undefined ? null : Number(depth),
+    maxDepth: level,
     showHidden: fl.asBool('a'),
     ignorePattern: fl.asStr('args_I') ?? null,
     dirsOnly: fl.asBool('d'),
@@ -279,16 +281,17 @@ function notCrossed(): Promise<string[]> {
 /**
  * Run tree over resolved operands. `unbounded` is the walk to take when no
  * `-L` bounds it (one the mount answers whole), else `readdir` and `stat`.
- * Mirrors Python's `tree_generic`.
+ * Mirrors Python's `tree_generic`; `parsed` holds the options, read before
+ * the operands were.
  */
 export async function treeGeneric(
+  parsed: TreeFlags,
   paths: PathSpec[],
   ctx: Context,
   readdir: (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
   unbounded?: [(p: PathSpec) => Promise<string[]>, (p: PathSpec) => Promise<FileStat>],
 ): Promise<CommandFnResult> {
-  const parsed = parseFlags(ctx.flags)
   if (unbounded !== undefined && parsed.maxDepth === null) [readdir, stat] = unbounded
   const targets =
     paths.length > 0
