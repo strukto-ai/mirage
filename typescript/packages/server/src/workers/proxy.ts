@@ -30,8 +30,22 @@ import { COUNTED_HEADER } from '../rate_limit.ts'
 import { AUTH_PROBE, UNAVAILABLE } from './constants.ts'
 import { answered, discard, headersFor, passable, pathParts, sendAnswer, sendJson } from './http.ts'
 import { idOf, peek } from './peek.ts'
-import type { Answer, WorkerProxyOptions } from './types.ts'
+import type { WorkerPool } from './pool.ts'
+import type { Answer } from './types.ts'
 import type { Worker } from './worker.ts'
+
+export interface WorkerProxyOptions {
+  pool: WorkerPool
+  /** The most workspaces the workers hold together; null for no cap. */
+  maxWorkspaces: number | null
+  /** The proxies whose `X-Forwarded-For` names the client. */
+  proxies: readonly string[]
+  /** The Hosts it answers, as the workers do. */
+  allowedHosts: readonly string[]
+  idleGraceSeconds: number
+  /** Stops the daemon: after idling, or on a shutdown a worker let through. */
+  exit: () => void
+}
 
 /**
  * The daemon's server when it runs workers: it sends each request to the

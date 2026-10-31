@@ -1193,13 +1193,15 @@
    }
   },
   "server/workers/proxy": {
+   "typescript_only": {
+    "WorkerProxyOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments."
+   },
    "python_only": {
     "_FALSE": "FastAPI reads several spellings of a false flag; the TypeScript router takes only true and false."
    }
   },
   "server/workers/types": {
    "typescript_only": {
-    "WorkerProxyOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
     "WorkerPoolOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments.",
     "WorkerOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments."
    }
