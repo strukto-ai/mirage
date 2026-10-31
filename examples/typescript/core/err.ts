@@ -129,9 +129,13 @@ async function main(): Promise<void> {
   console.log(' Execution History')
   console.log('═'.repeat(60))
 
-  for (const entry of (await ws.history()).slice(-6)) {
+  const events = await ws.history()
+  const exits = new Map(
+    events.filter((e) => e.type === 'result').map((e) => [e.parent, e.exit_code]),
+  )
+  for (const entry of events.filter((e) => e.type === 'command').slice(-6)) {
     console.log(`\n  $ ${String(entry.command)}`)
-    console.log(`    exit=${String(entry.exit_code)}`)
+    console.log(`    exit=${String(exits.get(entry.id) ?? 'running')}`)
   }
 
   await ws.close()

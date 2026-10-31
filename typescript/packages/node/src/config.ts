@@ -361,6 +361,11 @@ function validateStoreBlock(value: unknown): void {
           `the s3 store as the '${S3_HOSTED_GROUP}' group override`,
       )
     }
+    if (group === 'observer' && block.type === 'redis') {
+      throw new Error(
+        'config `store.observer` cannot be redis: history only grows; keep it on ram or disk',
+      )
+    }
     if (group === 'jobs' && block.type === 'disk') {
       throw new Error(
         "config `store.jobs` cannot be disk: a job's console is a stream other " +
@@ -1093,6 +1098,7 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
     return new RedisWorkspaceStateStore({
       ...(block.url !== undefined ? { url: block.url } : {}),
       ...(block.keyPrefix !== undefined ? { keyPrefix: block.keyPrefix } : {}),
+      ...(block.root !== undefined ? { root: block.root } : {}),
       ...overrides,
     })
   }

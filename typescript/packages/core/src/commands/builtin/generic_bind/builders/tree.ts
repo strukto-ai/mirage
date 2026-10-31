@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parseFlags, treeGeneric } from '../../generic/tree.ts'
+import { facts, parseFlags, treeGeneric } from '../../generic/tree.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { treeWalk } from '../../utils/tree.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
@@ -52,5 +52,6 @@ const tree: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'tree',
+  facts: facts,
   fn: tree,
 }

@@ -1,5 +1,5 @@
 import string
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import FALLBACK_TMPDIR
@@ -13,7 +13,7 @@ from mirage.commands.spec.usage import extra_operand_error
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import eexist, fs_strerror
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.types import LineFacts, PathSpec
 from mirage.utils.ids import IdSource, SystemIdSource, random_below
 
 _ALPHABET = string.ascii_letters + string.digits
@@ -220,7 +220,17 @@ async def mktemp(
     return (name + "\n").encode(), IOResult()
 
 
-__all__ = ["mktemp"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A mktemp line creates its file unless ``-u``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(writes=not fl.as_bool("dry_run"))
+
+
+__all__ = ["facts", "mktemp"]
 
 
 @dataclass(frozen=True, slots=True)

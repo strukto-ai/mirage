@@ -13,8 +13,8 @@ virtual CLIs and a router that picks where each command runs.
 - **Scriptable.** A scriptable policy engine, written in code or as scripts, hides files per
   agent profile, refuses commands, asks for approval, caps output and routes
   commands to runtimes.
-- **Durable.** Each part can live in your own storage: sessions in RAM, and the
-  observer's history of every command and each shell job's output in Redis.
+- **Durable.** Each part can live in your own storage: sessions in RAM, each
+  shell job's output in Redis, and the history of every command on disk.
 
 ## Architecture
 

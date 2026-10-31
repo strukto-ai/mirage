@@ -23,7 +23,7 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { LineFacts, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { SED_MISSING_SCRIPT } from '../constants.ts'
 import { byteView, encodeText, utf8Locale } from '../../../shell/bytes.ts'
@@ -95,19 +95,20 @@ function parseFlags(bag: Record<string, FlagValue>): SedFlags {
 }
 
 /**
- * Whether a sed line may change files: under `-i`, with a script file (its
- * text is read only when sed runs), or when its script names a `w` file,
- * which GNU opens even when it then refuses the script. `bag` holds the
- * flags as the line's parse reads them; the first of `texts` is the script
- * when no `-e` or `-f` gave one. Mirrors Python's sed_writes.
+ * A sed line may change files under `-i`, with a script file (its text is
+ * read only when sed runs), or when its script names a `w` file, which GNU
+ * opens even when it then refuses the script. The first of `operands` is
+ * the script when no `-e` or `-f` gave one. Mirrors Python's `facts`.
  */
-export function sedWrites(bag: Record<string, FlagValue>, texts: readonly string[]): boolean {
-  const fl = new FlagView(bag, specOf('sed'))
-  if (fl.asBool('i') || fl.raw('f') !== undefined) return true
+export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
+  if (fl.asBool('i') || fl.raw('f') !== undefined) return new LineFacts()
   const expressions = fl.asList('e')
-  const scripts = expressions.length > 0 ? expressions : texts.slice(0, 1)
-  if (scripts.length === 0) return false
-  return scriptWrites(scripts, fl.asBool('E') || fl.asBool('r'))
+  const scripts =
+    expressions.length > 0
+      ? expressions
+      : operands.slice(0, 1).map((w) => (typeof w === 'string' ? w : w.rawPath))
+  if (scripts.length === 0) return new LineFacts({ writes: false })
+  return new LineFacts({ writes: scriptWrites(scripts, fl.asBool('E') || fl.asBool('r')) })
 }
 
 const writeChecks = new Map<string, boolean>()

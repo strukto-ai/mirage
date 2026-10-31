@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { uniqFlags, uniqGeneric } from '../../generic/uniq.ts'
+import { facts, uniqFlags, uniqGeneric } from '../../generic/uniq.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
@@ -39,6 +39,7 @@ const uniq: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'uniq',
+  facts: facts,
   write: true,
   read: true,
   streams: true,

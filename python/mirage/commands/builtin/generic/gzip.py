@@ -1,5 +1,11 @@
 import zlib
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 from functools import partial
 
@@ -32,7 +38,7 @@ from mirage.errors.fs import fs_strerror
 from mirage.io.spool import ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, drain
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec, PolymorphicReadFn, StatFn
+from mirage.types import LineFacts, PathSpec, PolymorphicReadFn, StatFn
 from mirage.utils.compress import gzip_compress_stream
 from mirage.utils.path import gnu_basename
 
@@ -192,7 +198,17 @@ async def gzip(
     return body, io
 
 
-__all__ = ["gzip", "extract_level"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A gzip line replaces its file operands unless ``-c``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(writes=len(operands) > 0 and not fl.as_bool("c"))
+
+
+__all__ = ["facts", "gzip", "extract_level"]
 
 
 @dataclass(frozen=True, slots=True)

@@ -382,7 +382,9 @@ class WorkerPool:
         for i in range(count):
             socket = str(Path(self._directory) / f"{i}.sock")
             worker: Worker = (
-                ProcessWorker(i, socket, host, {**env, ENV_WORKER_TOKEN: self.token})
+                ProcessWorker(
+                    i, socket, host, {**env, ENV_WORKER_TOKEN: self.token}
+                )
                 if worker_type == WorkerType.PROCESS
                 else ThreadWorker(i, socket, host, self.token)
             )
@@ -1179,7 +1181,9 @@ def build_worker_proxy(
     checked = HostHeaderMiddleware(cast(Any, proxy), list(allowed_hosts))
     if not proxies:
         return checked
-    return ProxyHeadersMiddleware(checked, trusted_hosts=list(proxies))
+    return ProxyHeadersMiddleware(
+        cast(Any, checked), trusted_hosts=list(proxies)
+    )
 
 
 def _path_parts(path: str) -> list[str]:
@@ -1223,8 +1227,8 @@ def _headers_for(scope: Scope) -> list[tuple[str, str]]:
 
 def _target(scope: Scope) -> str:
     """A request's path and query, as the client sent them."""
-    path = scope.get("raw_path") or scope["path"].encode()
-    query = scope.get("query_string", b"")
+    path: bytes = scope.get("raw_path") or scope["path"].encode()
+    query: bytes = scope.get("query_string", b"")
     return path.decode("latin-1") + ("?" + query.decode() if query else "")
 
 

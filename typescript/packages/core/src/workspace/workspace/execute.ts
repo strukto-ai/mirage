@@ -161,14 +161,19 @@ interface NestedRefusal {
 async function shown(io: IOResult, sink: JobConsole | undefined): Promise<IOResult> {
   if (!(sink instanceof Terminal)) return io
   let out: Uint8Array
-  if (sink.reader !== null) out = sink.stdoutPrefix
-  else {
+  let err: Uint8Array = new Uint8Array()
+  if (sink.reader !== null) {
+    out = sink.stdoutPrefix
+    err = sink.stderrPrefix
+  } else {
     const [stdout, stderr] = sink.drain()
     sink.putBack(stdout, stderr)
     out = stdout
+    err = stderr
   }
   return new IOResult({
     stdout: concat([out, await io.materializeStdout()]),
+    stderr: concat([err, await io.materializeStderr()]),
     exitCode: io.exitCode,
   })
 }
@@ -186,10 +191,9 @@ async function answerLine(
   result: ExecuteResult,
 ): Promise<ExecuteResult> {
   recordStatus(session, result.exitCode)
-  if (options.record !== false) {
+  if (options.record !== false && command.replaceAll('\n', '') !== '') {
     await joinOrAbort(
-      env.observer.logExecution(
-        command,
+      env.observer.logResult(
         await shown(
           new IOResult({
             exitCode: result.exitCode,
@@ -201,6 +205,7 @@ async function answerLine(
         [],
         session.sessionId,
         options.cwd ?? session.cwd,
+        options.executionScope?.id,
       ),
       options.signal,
     )
@@ -480,7 +485,20 @@ async function runPreparedLine(
         const parser = new ParseScope()
         const previousAliasExpansion = effectiveSession.aliasExpansion
         effectiveSession.aliasExpansion = null
+        const recorded = options.record !== false && command.replaceAll('\n', '') !== ''
         try {
+          // The line is recorded as it starts; how it ended follows it.
+          if (recorded) {
+            await joinOrAbort(
+              env.observer.logCommand(
+                command,
+                targetSession.sessionId,
+                effectiveSession.cwd,
+                options.executionScope?.id,
+              ),
+              lineSignal,
+            )
+          }
           const aliases = expandingAliases(effectiveSession)
           const root =
             argv === undefined
@@ -810,7 +828,7 @@ async function runPreparedLine(
             options.sink !== undefined ? { ...lineDeps, sink: options.sink } : lineDeps,
             handed,
           )
-          return await runWithEvaluation(
+          const answered = await runWithEvaluation(
             context,
             () =>
               runParsedLine(
@@ -832,6 +850,26 @@ async function runPreparedLine(
               ),
             env.sessions,
           )
+          // A path that answered before recording how the line ended (a
+          // refused or failed preflight) ends it here, as Python's finally
+          // ends every line; one already ended is left as it is.
+          if (recorded) {
+            await joinOrAbort(
+              env.observer.logResult(
+                new IOResult({
+                  stdout: answered.stdout,
+                  stderr: answered.stderr,
+                  exitCode: answered.exitCode,
+                }),
+                [],
+                targetSession.sessionId,
+                effectiveSession.cwd,
+                options.executionScope?.id,
+              ),
+              lineSignal,
+            )
+          }
+          return answered
         } finally {
           effectiveSession.aliasExpansion = previousAliasExpansion
           parser.release()
@@ -1024,8 +1062,7 @@ async function runParsedLine(
         recordStatus(targetSession, refused.exitCode)
         if (isLine) {
           await joinOrAbort(
-            env.observer.logExecution(
-              command,
+            env.observer.logResult(
               await shown(
                 new IOResult({
                   exitCode: refused.exitCode,
@@ -1037,6 +1074,7 @@ async function runParsedLine(
               [],
               targetSession.sessionId,
               effectiveSession.cwd,
+              options.executionScope?.id,
             ),
             killed,
           )
@@ -1095,12 +1133,12 @@ async function runParsedLine(
       // a fast one records before history is read.
       const logLine = async (io: IOResult): Promise<void> => {
         await joinOrAbort(
-          env.observer.logExecution(
-            command,
+          env.observer.logResult(
             await shown(io, options.sink),
             lineRecords,
             targetSession.sessionId,
             effectiveSession.cwd,
+            options.executionScope?.id,
           ),
           killed,
         )
@@ -1363,15 +1401,16 @@ async function runParsedLine(
   // whitespace-only or comment-only line is kept.
   if (isLine && command.replaceAll('\n', '') !== '') {
     io.stdout = stdoutBytes
+    io.stderr = stderrBytes
     // Joined, not raced: a fast store still records the line before the
     // caller reads history, and a stalled one releases the caller.
     await joinOrAbort(
-      env.observer.logExecution(
-        command,
+      env.observer.logResult(
         await shown(io, options.sink),
         opRecords,
         targetSession.sessionId,
         effectiveSession.cwd,
+        options.executionScope?.id,
       ),
       killed,
     )

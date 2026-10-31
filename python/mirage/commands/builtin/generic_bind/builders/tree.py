@@ -14,7 +14,11 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.tree import parse_flags, tree_generic
+from mirage.commands.builtin.generic.tree import (
+    facts,
+    parse_flags,
+    tree_generic,
+)
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.tree import tree_walk
@@ -53,4 +57,4 @@ async def tree(
     )
 
 
-BUILDER = GenericCommand("tree", tree)
+BUILDER = GenericCommand("tree", tree, facts=facts)

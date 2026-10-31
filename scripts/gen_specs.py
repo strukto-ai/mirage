@@ -27,14 +27,17 @@ from typing import Any
 from pydantic import BaseModel
 
 import mirage.commands.builtin
+from mirage.commands.builtin.generic_bind.factory import declared_facts
 from mirage.commands.cli.specs import BUILTIN_CLI_SPECS, cli_spec_for
 from mirage.commands.config import Command
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.commands.spec.synopsis import SHELL_SYNOPSES, SYNOPSES
 from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.types import LineFacts
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.registry import REGISTRY, resolve_class
+from mirage.workspace.lookup import line_facts
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,8 @@ OUT = (
     / "general"
 )
 VFS_COMMANDS = OUT.parent / "vfs_commands"
+FACT_LINES = ROOT / "scripts" / "parity" / "fact_lines.json"
+FACT_CWD = "/home"
 
 # The functions a backend may define, as BaseVFS declares them. Which ones
 # a class overrides decides what its mount and its commands can do.
@@ -433,6 +438,36 @@ def _configs() -> dict[str, dict[str, Any] | None]:
     return out
 
 
+def _facts_payload(facts: LineFacts) -> dict[str, Any]:
+    return {
+        "follows": facts.follows.value,
+        "walks": facts.walks,
+        "reads_subtree": facts.reads_subtree,
+        "writes": facts.writes,
+        "subtree": facts.subtree,
+        "move_target": facts.move_target,
+    }
+
+
+def _facts() -> dict[str, Any]:
+    """What each command declares a line of it does, and what each line
+    of the shared fixture does, so the parity gate sees a host that
+    reads a command's options differently."""
+    declared = {}
+    for name in sorted(SPECS):
+        facts = declared_facts(name)
+        declared[name] = (
+            _facts_payload(facts)
+            if isinstance(facts, LineFacts)
+            else "per_line"
+        )
+    lines = {
+        " ".join(words): _facts_payload(line_facts(words[0], words, FACT_CWD))
+        for words in json.loads(FACT_LINES.read_text())
+    }
+    return {"declared": declared, "lines": lines}
+
+
 def _emit_vfs_names(registry: dict[str, list[Command]]) -> None:
     """Dump the two VFS-name sets the parity gate compares.
 
@@ -467,6 +502,7 @@ def _emit_vfs_names(registry: dict[str, list[Command]]) -> None:
             "programs": dict(sorted(SYNOPSES.items())),
             "shell": dict(sorted(SHELL_SYNOPSES.items())),
         },
+        "facts": _facts(),
     }
     path = OUT.parent / "vfs.json"
     path.write_text(

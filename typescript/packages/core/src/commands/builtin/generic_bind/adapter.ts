@@ -13,7 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Accessor } from '../../../accessor/base.ts'
+import type { LineFacts, PathSpec } from '../../../types.ts'
 import type { AggregateFn, CommandFn } from '../../config.ts'
+import type { FlagView } from '../../spec/flag_view.ts'
+
+// What a command's options make of one line: a pure, total function of its
+// parsed flags and its operands in order, a path operand as the PathSpec it
+// was classified as. A value the command refuses answers the side that keeps
+// a rule in force.
+export type FactsFn = (fl: FlagView, operands: readonly (string | PathSpec)[]) => LineFacts
 
 /**
  * A generic builder: its name, how its runs register, and its handler, an
@@ -39,4 +47,9 @@ export interface GenericCommand<A extends Accessor = Accessor> {
    * `fold`), so a cross-mount run hands that output on live.
    */
   streams?: boolean
+  /**
+   * What a line of it does: one answer no option changes, or the function
+   * that reads it off the line. Absent is `new LineFacts()`.
+   */
+  facts?: LineFacts | FactsFn
 }

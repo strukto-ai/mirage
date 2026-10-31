@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { transferLinksOf } from '../../generic/crossmount/utils.ts'
-import { mvGeneric, parseFlags } from '../../generic/mv.ts'
+import { facts, mvGeneric, parseFlags } from '../../generic/mv.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, refuseReveal } from '../files.ts'
@@ -46,6 +46,7 @@ const mv: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'mv',
+  facts: facts,
   write: true,
   fn: mv,
 }

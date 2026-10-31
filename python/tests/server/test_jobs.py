@@ -75,7 +75,7 @@ async def test_admitted_record_identity_reaches_workspace_history_and_process():
         assert identities == [job.id]
         events = await ws.observer.events()
         assert events and all(
-            event.get("execution_id") == job.id for event in events
+            event.get("id", event.get("parent")) == job.id for event in events
         )
     finally:
         await table.close()

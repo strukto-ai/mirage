@@ -46,6 +46,7 @@ class Terminal(JobConsole):
         self.ended = 0
         self.attaching: asyncio.Event | None = None
         self._prefix = bytearray()
+        self._err_prefix = bytearray()
         self._draining: asyncio.Task[None] | None = None
 
     @property
@@ -53,9 +54,14 @@ class Terminal(JobConsole):
         """A bounded prefix of stdout handed to the current line's reader."""
         return bytes(self._prefix)
 
+    @property
+    def stderr_prefix(self) -> bytes:
+        """A bounded prefix of stderr handed to the current line's reader."""
+        return bytes(self._err_prefix)
+
     def _remember(self, channel: Channel, data: bytes) -> None:
-        if channel == Channel.STDOUT:
-            self._prefix.extend(data[: max(0, CHUNK_SIZE - len(self._prefix))])
+        kept = self._prefix if channel == Channel.STDOUT else self._err_prefix
+        kept.extend(data[: max(0, CHUNK_SIZE - len(kept))])
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         """Take what the line wrote.
@@ -109,6 +115,7 @@ class Terminal(JobConsole):
                 None to collect it.
         """
         self._prefix.clear()
+        self._err_prefix.clear()
         if reader is None:
             self.reader = None
             return
@@ -193,6 +200,7 @@ class Terminal(JobConsole):
         its attach."""
         self.reader = None
         self._prefix.clear()
+        self._err_prefix.clear()
         self.ended += 1
         if self.attaching is not None:
             self.attaching.set()

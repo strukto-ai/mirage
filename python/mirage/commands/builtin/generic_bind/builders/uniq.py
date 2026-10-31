@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.uniq import uniq_flags
+from mirage.commands.builtin.generic.uniq import facts, uniq_flags
 from mirage.commands.builtin.generic.uniq import uniq_generic as generic_uniq
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
@@ -52,4 +52,6 @@ async def uniq(
     )
 
 
-BUILDER = GenericCommand("uniq", uniq, write=True, read=True, streams=True)
+BUILDER = GenericCommand(
+    "uniq", uniq, write=True, read=True, streams=True, facts=facts
+)

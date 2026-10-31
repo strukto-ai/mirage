@@ -172,7 +172,10 @@ async def test_aborted_execution_records_failure():
             await ws.shell("wc -l", stdin=source(), cancel=cancel)
         events = await ws.observer.command_events()
         assert len(events) == 2
-        assert events[-1]["exit_code"] == 130
+        results = [
+            e for e in await ws.observer.events() if e["type"] == "result"
+        ]
+        assert results[-1]["exit_code"] == 130
         assert session.last_exit_code == 1
     finally:
         await ws.close()
@@ -204,8 +207,10 @@ async def test_cancel_during_cache_fill_aborts():
         session = ws.get_session(ws.default_session_id)
         with pytest.raises(MirageAbortError):
             await ws.shell("echo hi", cancel=cancel)
-        events = await ws.observer.command_events()
-        assert events[-1]["exit_code"] == 130
+        results = [
+            e for e in await ws.observer.events() if e["type"] == "result"
+        ]
+        assert results[-1]["exit_code"] == 130
         assert session.last_exit_code == 1
     finally:
         await ws.close()
@@ -233,7 +238,9 @@ async def test_cancel_reaches_a_whole_line_runtime():
     try:
         with pytest.raises(MirageAbortError):
             await ws.shell("hangcmd now", cancel=cancel)
-        events = await ws.observer.command_events()
-        assert events[-1]["exit_code"] == 130
+        results = [
+            e for e in await ws.observer.events() if e["type"] == "result"
+        ]
+        assert results[-1]["exit_code"] == 130
     finally:
         await ws.close()

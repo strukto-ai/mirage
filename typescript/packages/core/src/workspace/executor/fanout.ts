@@ -34,7 +34,7 @@ import type { MountEntry } from '../mount/mount.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../mount/registry.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Files, readerOf } from '../files.ts'
-import { walksMounts } from '../lookup/index.ts'
+import { lineFacts } from '../lookup/index.ts'
 
 const TRAVERSAL_CMDS: ReadonlySet<string> = new Set(['find', 'du'])
 
@@ -86,17 +86,21 @@ function ownPart(
   }
 }
 
+// Whether a walk over these operands fans out over the mounts nested in
+// them: `walks` is read off the line's words, so the facts the admission
+// gate kept for the line answer.
 export function shouldFanOut(
   cmdName: string,
   paths: readonly PathSpec[],
-  flagKwargs: Record<string, FlagValue>,
+  words: readonly (string | PathSpec)[],
+  cwd: string,
   registry: MountRegistry,
 ): boolean {
   // Use the raw mount table: hidden descendants still shadow backend keys.
   // A refused operand names nothing; every valid operand may own a subtree.
   if (!paths.some((p) => p.walkError === null && registry.descendantMounts(p.virtual).length > 0))
     return false
-  return COMPOSED.has(cmdName) && walksMounts(cmdName, flagKwargs)
+  return COMPOSED.has(cmdName) && lineFacts(cmdName, words, cwd).walks
 }
 
 /**
@@ -241,10 +245,12 @@ export function runWithFanout(
   follow?: FollowOperands,
   // find's expression, parsed once for the line.
   find?: FindExpr,
+  // The line's words, name first, whose facts say whether it walks.
+  words: readonly (string | PathSpec)[] = [],
 ): RunSingle {
   return async (cmdName, paths, texts, flagKwargs, opts) => {
     const stdin = opts?.stdin ?? null
-    if (!shouldFanOut(cmdName, paths, flagKwargs, registry)) {
+    if (!shouldFanOut(cmdName, paths, words, cwd, registry)) {
       const run =
         TRAVERSAL_CMDS.has(cmdName) && dispatch !== undefined
           ? ownPart(runSingle, registry, dispatch, cwd, vfs, follow, find)

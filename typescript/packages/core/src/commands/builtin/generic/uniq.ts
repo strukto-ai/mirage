@@ -17,7 +17,7 @@ import { stdinStat, stdinStream, streamOutput } from '../utils/stream.ts'
 import { splitReadable } from '../utils/operands.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
-import type { FileStat, PathSpec } from '../../../types.ts'
+import { LineFacts, type FileStat, type PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { wordRefusalError } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
@@ -209,4 +209,17 @@ export async function uniqGeneric(
     return [new Uint8Array(), new IOResult()]
   }
   return [output, new IOResult()]
+}
+
+function namesOutput(operands: readonly (string | PathSpec)[]): boolean {
+  return operands.length > 1 || operands.some((w) => typeof w !== 'string' && w.pattern !== null)
+}
+
+/**
+ * A uniq line writes its second operand, which a pattern the backend
+ * expands may name too; a quoted name is no pattern. Mirrors Python's
+ * `facts`.
+ */
+export function facts(fl: FlagView, operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: namesOutput(operands) })
 }

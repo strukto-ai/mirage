@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from mirage.commands.builtin.generic.archive.extract import extract_dest
@@ -29,7 +29,14 @@ from mirage.rs.scan import refused
 from mirage.rs.stream import open_stream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
-from mirage.types import JsonValue, PathSpec, ReadStreamFn, StatFn
+from mirage.types import (
+    Follow,
+    JsonValue,
+    LineFacts,
+    PathSpec,
+    ReadStreamFn,
+    StatFn,
+)
 from mirage.view.types import LinkView, MountView
 
 
@@ -232,4 +239,22 @@ async def tar_generic(
         links=links_of(ctx),
         mounts=mount_view(ctx.vfs),
         relay=relay,
+    )
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A tar line hands a link operand to its planner as given, which
+    reads ``-h`` itself, reads below what it archives under ``-c``, and
+    writes to create or extract, not to list or extract to stdout.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    create = fl.as_bool("create")
+    return LineFacts(
+        follows=Follow.NONE,
+        reads_subtree=create,
+        writes=create
+        or (fl.as_bool("extract") and not fl.as_bool("to_stdout")),
     )

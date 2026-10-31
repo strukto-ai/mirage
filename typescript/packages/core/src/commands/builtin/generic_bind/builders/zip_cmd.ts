@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat, PathSpec } from '../../../../types.ts'
-import { zipGeneric } from '../../generic/zip_cmd.ts'
+import { facts, zipGeneric } from '../../generic/zip_cmd.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -32,6 +32,7 @@ const zipCmd: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'zip',
+  facts: facts,
   write: true,
   fn: zipCmd,
 }

@@ -14,6 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.generic.sort import facts
 from mirage.commands.builtin.generic.sort import sort_generic as generic_sort
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
@@ -42,4 +43,4 @@ async def sort(
     )
 
 
-BUILDER = GenericCommand("sort", sort, write=True, read=True)
+BUILDER = GenericCommand("sort", sort, write=True, read=True, facts=facts)

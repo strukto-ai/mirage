@@ -8,8 +8,10 @@ The history store records every command a session runs at the top level. The
 `history` builtin and `/.bash_history` are two views of that one record, and a
 [policy](/home/policy/policies) reads it as `/.bash_history`.
 From outside, `ws.history()`, [`GET /v1/workspaces/{id}/history`](/home/access/http#read-a-workspaces-history)
-and `mirage workspace history` read every session's record, with each line's
-mount calls when asked.
+and `mirage workspace history` read every session's record: each line as a
+`command` entry when it starts and a `result` entry (exit code, stdout,
+stderr) when it ends, and with `vfs`, each call it made to a mount between
+them.
 
 History is kept per session. A workspace built again shows a session's
 history once it has that session again: keep the
@@ -23,9 +25,11 @@ the rest of the state stays where it is.
 | --- | --- | --- |
 | `ram` | In the process's memory, until it exits | |
 | `disk` | In files under `root` | `root`, default `~/.mirage/state` |
-| `redis` | On Redis, under `key_prefix` and the workspace id | `url`, `key_prefix`, default `mirage:` |
 
-The group key is `store.observer`.
+The group key is `store.observer`. History is never kept on Redis: a Redis
+store keeps it on the machine's disk, under the store's `root`, unless
+`observer` says otherwise. To see it across machines, send it to
+[OpenTelemetry](#send-it-to-opentelemetry).
 
 ## On disk
 
@@ -69,37 +73,36 @@ The group key is `store.observer`.
 Here the rest of the state is on Redis and only the history stays on the
 machine's disk.
 
-## On Redis
+## Send it to OpenTelemetry
+
+Every line that ends is also a trace span: `command`, from its start to its
+end, and under it a `vfs.<call>` span for each call it made to a mount. Nothing
+is sent until the process sets up an OpenTelemetry SDK, whose exporter picks
+the backend: OTLP to Datadog, Honeycomb, Grafana, Langfuse and others.
+
+| Span | Attributes |
+| --- | --- |
+| `command` | `mirage.workspace.id`, `mirage.session.id`, `mirage.command`, `mirage.exit_code` |
+| `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes` |
 
 <Tabs>
-  <Tab title="YAML" icon="file-code">
-    ```yaml
-    workspace_id: agent
-    store:
-      observer:
-        type: redis
-        url: redis://history.internal:6379/0
-    ```
-  </Tab>
   <Tab title="Python" icon="/images/python-logo.svg">
-    ```python
-    from mirage import Workspace
-    from mirage.workspace.store import RAMWorkspaceStateStore, RedisWorkspaceStateStore
-
-    store = RAMWorkspaceStateStore(
-        observer=RedisWorkspaceStateStore(url="redis://history.internal:6379/0"),
-    )
-    ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
+    ```bash
+    OTEL_TRACES_EXPORTER=otlp OTEL_EXPORTER_OTLP_ENDPOINT=https://otlp.example.com \
+      opentelemetry-instrument python agent.py
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { RAMWorkspaceStateStore, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+    import { trace } from '@opentelemetry/api'
+    import { BasicTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trace-base'
+    import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 
-    const store = new RAMWorkspaceStateStore({
-      observer: new RedisWorkspaceStateStore({ url: 'redis://history.internal:6379/0' }),
-    })
-    const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
+    trace.setGlobalTracerProvider(
+      new BasicTracerProvider({
+        spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url: 'https://otlp.example.com/v1/traces' }))],
+      }),
+    )
     ```
   </Tab>
 </Tabs>

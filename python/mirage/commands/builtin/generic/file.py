@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import FILE_HEADER_BYTES, MIME_SYMLINK
@@ -25,6 +25,8 @@ from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
     FileType,
+    Follow,
+    LineFacts,
     PathSpec,
     PolymorphicReadFn,
     ReadStreamFn,
@@ -176,7 +178,24 @@ async def file_cmd(
     return format_records(lines), IOResult()
 
 
-__all__ = ["file_cmd"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A file line describes a link itself unless the last of ``-L`` and
+    ``-h`` is ``-L`` (file 5.46).
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(
+        follows=(
+            Follow.LAST
+            if fl.typed_order("L", "h")[-1:] == ["L"]
+            else Follow.NONE
+        )
+    )
+
+
+__all__ = ["facts", "file_cmd"]
 
 
 @dataclass(frozen=True, slots=True)

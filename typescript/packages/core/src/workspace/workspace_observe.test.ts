@@ -67,7 +67,8 @@ describe('Workspace observer wiring', () => {
     const lastLine = lines[lines.length - 1]
     if (lastLine === undefined) throw new Error('no log lines')
     const entry = JSON.parse(lastLine) as Record<string, unknown>
-    expect(entry.type).toBe('command')
+    expect(entry.type).toBe('result')
+    expect((JSON.parse(lines[0] ?? '{}') as Record<string, unknown>).type).toBe('command')
     await ws.close()
   })
 
@@ -110,19 +111,21 @@ describe('Workspace observer wiring', () => {
     const ws = buildWorkspace()
     await ws.shell('echo hello > /data/test.txt')
     await ws.shell('cat /data/missing.txt')
-    const commands = await ws.history()
-    expect(commands).toHaveLength(2)
-    expect(commands.every((e) => 'exit_code' in e)).toBe(true)
-    expect(commands.every((e) => 'cwd' in e)).toBe(true)
-    expect(commands.map((e) => e.exit_code)).toEqual([0, 1])
+    const entries = await ws.history()
+    expect(entries.map((e) => e.type)).toEqual(['command', 'result', 'command', 'result'])
+    expect(entries.every((e) => 'cwd' in e)).toBe(true)
+    expect(entries.filter((e) => e.type === 'result').map((e) => e.exit_code)).toEqual([0, 1])
+    expect(entries.filter((e) => e.type === 'result').map((e) => e.parent)).toEqual(
+      entries.filter((e) => e.type === 'command').map((e) => e.id),
+    )
     await ws.close()
   })
 
   it('records what the line showed', async () => {
     const ws = buildWorkspace()
     await ws.shell('echo hi; echo err >&2')
-    const commands = await ws.history()
-    expect(commands.map((e) => e.stdout)).toEqual(['hi\n'])
+    const results = (await ws.history()).filter((e) => e.type === 'result')
+    expect(results.map((e) => [e.stdout, e.stderr])).toEqual([['hi\n', 'err\n']])
     await ws.close()
   })
 
@@ -144,9 +147,11 @@ describe('Workspace observer wiring', () => {
           : await ws.shell('cat; echo warning >&2', { stdin: source() })
         expect(result.stdout).toEqual(payload)
         expect(result.stderrText).toBe('warning\n')
-        expect((await ws.history()).map((entry) => entry.stdout)).toEqual([
-          text.slice(0, STDOUT_TRUNCATE),
-        ])
+        expect(
+          (await ws.history())
+            .filter((entry) => entry.type === 'result')
+            .map((entry) => [entry.stdout, entry.stderr]),
+        ).toEqual([[text.slice(0, STDOUT_TRUNCATE), 'warning\n']])
       } finally {
         await ws.close()
       }
@@ -227,22 +232,29 @@ describe('Workspace.history', () => {
       clock.advance(10)
       ws.createSession('s2')
       await ws.shell('cat /data/a.txt', { sessionId: 's2' })
-      expect((await ws.history()).map((e) => e.command)).toEqual([
-        'echo hi > /data/a.txt',
-        'cat /data/a.txt',
-      ])
-      expect((await ws.history({ vfs: true })).map((e) => [e.type, e.vfs ?? e.command])).toEqual([
-        ['vfs', 'write'],
-        ['command', 'echo hi > /data/a.txt'],
-        ['vfs', 'read'],
+      const cat = [
         ['command', 'cat /data/a.txt'],
+        ['result', 0],
+      ]
+      expect((await ws.history()).map(shown)).toEqual([
+        ['command', 'echo hi > /data/a.txt'],
+        ['result', 0],
+        ...cat,
       ])
-      for (const options of [{ sessionId: 's2' }, { since: 1_010_000 }, { last: 1 }]) {
-        expect((await ws.history(options)).map((e) => e.command)).toEqual(['cat /data/a.txt'])
+      expect((await ws.history({ vfs: true })).map(shown)).toEqual([
+        ['command', 'echo hi > /data/a.txt'],
+        ['vfs', 'write'],
+        ['result', 0],
+        ['command', 'cat /data/a.txt'],
+        ['vfs', 'read'],
+        ['result', 0],
+      ])
+      for (const options of [{ sessionId: 's2' }, { since: 1_010_000 }, { last: 2 }]) {
+        expect((await ws.history(options)).map(shown)).toEqual(cat)
       }
-      expect((await ws.history({ last: 2, vfs: true })).map((e) => e.type)).toEqual([
-        'vfs',
-        'command',
+      expect((await ws.history({ last: 2, vfs: true })).map(shown)).toEqual([
+        ['vfs', 'read'],
+        ['result', 0],
       ])
       expect(await ws.history({ last: 0 })).toEqual([])
     } finally {
@@ -262,9 +274,14 @@ describe('Workspace.history', () => {
       }
       expect((await ws.history({ sessionId: 's1', last: 5 })).map((e) => e.command)).toEqual([
         'echo one',
+        undefined,
       ])
     } finally {
       await ws.close()
     }
   })
 })
+
+function shown(entry: Record<string, unknown>): unknown[] {
+  return [entry.type, entry.command ?? entry.vfs ?? entry.exit_code]
+}

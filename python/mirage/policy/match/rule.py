@@ -16,14 +16,8 @@
 from collections.abc import Collection, Sequence
 from typing import Any
 
-from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
-from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import WordKind
-from mirage.policy.constants import (
-    METADATA_OPS,
-    SUBTREE_COMMANDS,
-    SUBTREE_OPS,
-)
+from mirage.policy.constants import METADATA_OPS, SUBTREE_OPS
 from mirage.policy.match.allow import line_tokens
 from mirage.policy.types import (
     AdmissionRules,
@@ -50,20 +44,6 @@ def operand_paths(ctx: CommandContext) -> list[PathSpec]:
     ]
 
 
-def target_directory(ctx: CommandContext) -> str | None:
-    """The target directory an ``mv`` line names by option (``-t``,
-    ``--target-directory``), as its grammar reads the line, so a
-    ``-S.txt`` suffix is no target; None when it names none.
-
-    Args:
-        ctx (CommandContext): the classified command.
-    """
-    spec = SPECS["mv"]
-    parsed = parse_command(spec, list(ctx.argv), ctx.cwd, "mv")
-    flags = FlagView(parse_to_kwargs(parsed), spec=spec)
-    return flags.as_str("target_directory")
-
-
 def _path_fact(path: PathSpec) -> dict[str, list[int]]:
     return {
         "virtual_path": units(path.virtual),
@@ -73,15 +53,15 @@ def _path_fact(path: PathSpec) -> dict[str, list[int]]:
 
 def command_facts(ctx: CommandContext) -> dict[str, Any]:
     """What a line's rules are read against, in the stream's wire shape:
-    its tokens and paths, and the host's word on its command, a subtree
-    command (``SUBTREE_COMMANDS``) or a move whose last operand is the
-    destination.
+    its tokens and paths, and the host's word on its command: whether it
+    moves or removes whole subtrees (``CommandContext.subtree``) and
+    whether it is a move whose last operand is the destination.
 
     Args:
         ctx (CommandContext): the classified command.
     """
     moves = ctx.command == "mv"
-    target = target_directory(ctx) if moves and ctx.paths else None
+    target = ctx.move_target if moves and ctx.paths else None
     return {
         "tokens": [units(v) for v in line_tokens(ctx)],
         "tool": ctx.tool,
@@ -89,7 +69,7 @@ def command_facts(ctx: CommandContext) -> dict[str, Any]:
         "paths": [_path_fact(path) for path in ctx.paths],
         "operands": [_path_fact(path) for path in operand_paths(ctx)],
         "walks": ctx.walks,
-        "subtree": ctx.command in SUBTREE_COMMANDS,
+        "subtree": ctx.subtree,
         "moves": moves,
         "move_target": None if target is None else units(target),
     }

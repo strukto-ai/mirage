@@ -14,7 +14,7 @@
 
 import { missingOperandError } from '../../../spec/usage.ts'
 import type { LinkView } from '../../../../view/types.ts'
-import { FileType, PathSpec } from '../../../../types.ts'
+import { FileType, Follow, LineFacts, PathSpec } from '../../../../types.ts'
 import { fsStrerror, isFsError } from '../../../../errors/fs.ts'
 import { respelled } from '../../../../utils/key_prefix.ts'
 import { CycleError, resolvePath } from '../../../../utils/path.ts'
@@ -153,6 +153,7 @@ const rmdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'rmdir',
+  facts: new LineFacts({ follows: Follow.NONE, subtree: true }),
   write: true,
   fn: rmdir,
 }

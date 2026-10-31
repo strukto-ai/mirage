@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parseFlags, xxdGeneric } from '../../generic/xxd.ts'
+import { facts, parseFlags, xxdGeneric } from '../../generic/xxd.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
@@ -35,6 +35,7 @@ const xxd: CommandFn = async (_accessor, paths, _texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'xxd',
+  facts: facts,
   write: true,
   read: true,
   fn: xxd,

@@ -82,10 +82,9 @@ it('links a pipeline CLI and operation history to the admitted execution', async
   expect(seen[0]).not.toBeNull()
   expect(seen[0]).not.toBe('exec-request')
   const events = await ws.observer.events()
-  expect(events.at(-1)?.execution_id).toBe('exec-request')
-  const ops = events.filter((event) => event.type === 'vfs')
-  expect(ops.length).toBeGreaterThan(0)
-  expect(ops.every((event) => typeof event.execution_id === 'string')).toBe(true)
+  expect([events[0]?.type, events[0]?.id]).toEqual(['command', 'exec-request'])
+  expect(events.slice(1).some((event) => event.type === 'vfs')).toBe(true)
+  expect(events.slice(1).every((event) => event.parent === 'exec-request')).toBe(true)
 })
 
 function makeWs(): Workspace {

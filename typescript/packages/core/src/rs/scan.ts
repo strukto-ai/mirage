@@ -16,10 +16,14 @@ import { IOResult } from '../io/types.ts'
 import { UsageError } from '../commands/errors.ts'
 import { byteView, fromByteView, textView } from '../shell/bytes.ts'
 import { StreamRefusal } from './errors.ts'
+import { PARSE_KEPT_CHARS, PARSES_KEPT } from '../commands/spec/constants.ts'
 import { openStreamSync } from './stream.ts'
 import type { JsonValue } from '../types.ts'
 
 const decoder = new TextDecoder()
+
+// What each command's scan answered, by tape; see `scan`.
+export const SCANS = new Map<string, Map<string, string | StreamRefusal>>()
 
 /**
  * A command's typed words, read by mirage-rs before any input is read. The
@@ -29,21 +33,54 @@ const decoder = new TextDecoder()
  * matches in its place. A value the command refuses never reaches an input.
  * Returns the values keyed as the command's grammar answers; throws
  * StreamRefusal for the first word the command refuses, with the command's
- * exit status. Mirrors Python's `scan`.
+ * exit status.
+ *
+ * A tape's answer is kept, per command, as a spec keeps its parses
+ * (PARSES_KEPT, PARSE_KEPT_CHARS), so the admission gate and the handler
+ * reading one line's options share one scan; each entry counts its name, its
+ * value and one more toward PARSE_KEPT_CHARS, so a run of switches is bounded
+ * too. It is kept as the text mirage-rs answered and decoded per reader, so no
+ * reader sees another's changes; a refusal is kept as a copy never thrown, as
+ * Python keeps no traceback of the refused call. Mirrors Python's `scan`.
  */
 export function scan(
   command: string,
   options: readonly (readonly [string, string])[],
 ): Record<string, JsonValue> {
-  const stream = openStreamSync('scan', {
-    command,
-    options: options.map(([name, text]) => [name, byteView(text)]),
-  })
-  try {
-    return JSON.parse(decoder.decode(stream.finish())) as Record<string, JsonValue>
-  } finally {
-    stream.close()
+  const tape = JSON.stringify(options)
+  let answers: Map<string, string | StreamRefusal> | undefined
+  let kept: string | StreamRefusal | undefined
+  const chars = options.reduce((sum, [name, text]) => sum + 1 + name.length + text.length, 0)
+  if (chars <= PARSE_KEPT_CHARS) {
+    answers = SCANS.get(command)
+    if (answers === undefined) {
+      answers = new Map()
+      SCANS.set(command, answers)
+    }
+    kept = answers.get(tape)
   }
+  if (kept === undefined) {
+    try {
+      const stream = openStreamSync('scan', {
+        command,
+        options: options.map(([name, text]) => [name, byteView(text)]),
+      })
+      try {
+        kept = decoder.decode(stream.finish())
+      } finally {
+        stream.close()
+      }
+    } catch (err) {
+      if (!(err instanceof StreamRefusal)) throw err
+      kept = new StreamRefusal(err.message, err.output, err.status)
+    }
+    if (answers !== undefined) {
+      if (answers.size >= PARSES_KEPT) answers.clear()
+      answers.set(tape, kept)
+    }
+  }
+  if (kept instanceof StreamRefusal) throw new StreamRefusal(kept.message, kept.output, kept.status)
+  return JSON.parse(kept) as Record<string, JsonValue>
 }
 
 /**

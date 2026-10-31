@@ -22,6 +22,7 @@ import redis.asyncio as aioredis
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.store.ram import RAMWorkspaceStateStore
 from mirage.workspace.store.redis import RedisWorkspaceStateStore
 
 REDIS_URL = os.environ.get("REDIS_URL")
@@ -38,7 +39,9 @@ def prefix() -> str:
 
 @pytest_asyncio.fixture
 async def store(prefix):
-    s = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    s = RedisWorkspaceStateStore(
+        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+    )
     yield s
     client = aioredis.from_url(REDIS_URL)
     keys = [key async for key in client.scan_iter(f"{prefix}*")]
@@ -66,7 +69,9 @@ async def test_meta_visible_across_providers(prefix, store):
     await store.cas_set_meta(
         "ws1", {"workspace_id": "ws1", "default_session_id": "default"}, 0
     )
-    sibling = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    sibling = RedisWorkspaceStateStore(
+        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+    )
     try:
         meta = await sibling.load_meta("ws1")
         assert meta is not None
@@ -80,7 +85,9 @@ async def test_meta_visible_across_providers(prefix, store):
 async def test_cas_set_meta_create_race_one_winner(prefix, store):
     """Two providers race the discovery-record create; exactly one
     conditional write lands and the loser sees the winner's record."""
-    sibling = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    sibling = RedisWorkspaceStateStore(
+        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+    )
     try:
         mine = {
             "workspace_id": "ws1",
@@ -137,14 +144,18 @@ async def test_workspace_discovery_and_session_sharing(prefix):
     """The kernel-tier flow: one process runs a workspace, a sibling
     with only the store config + workspace id finds its default
     session and reads its session table."""
-    store_a = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    store_a = RedisWorkspaceStateStore(
+        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+    )
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         workspace_id="agent-ws",
         store=store_a,
     )
-    store_b = RedisWorkspaceStateStore(url=REDIS_URL, key_prefix=prefix)
+    store_b = RedisWorkspaceStateStore(
+        url=REDIS_URL, key_prefix=prefix, observer=RAMWorkspaceStateStore()
+    )
     try:
         ws.create_session("narrow", mounts={"/data": "read"})
         await ws.ensure_sessions_loaded()
@@ -165,7 +176,6 @@ async def test_workspace_discovery_and_session_sharing(prefix):
 async def test_drop_deletes_every_key_of_the_workspace(prefix, store):
     await store.sessions("ws1").set("s1", {"session_id": "s1"})
     await store.namespace("ws1").set("/a", {"mode": 0o600})
-    await store.observer("ws1").append("d/s1.jsonl", b"{}\n")
     await store.cas_set_meta("ws1", {"workspace_id": "ws1"}, 0)
     await store.cas_set_meta("ws2", {"workspace_id": "ws2"}, 0)
     await store.drop("ws1")

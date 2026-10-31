@@ -28,7 +28,7 @@ import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
-import { PathSpec } from '../../../types.ts'
+import { Follow, PathSpec } from '../../../types.ts'
 import { invokedEnvNames, suppliedEnvNames } from '../../../commands/cli/walk.ts'
 import type { CLI } from '../../../commands/cli/types.ts'
 import {
@@ -44,7 +44,7 @@ import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { MountCommandAmbiguous } from '../../mount/errors.ts'
 import { makeCheckUnlink, makeStorageKey } from '../../mount/storage.ts'
-import { Consumer, JOB_BUILTINS, dereferences, lookup, runsAs } from '../../lookup/index.ts'
+import { Consumer, JOB_BUILTINS, lineFacts, lookup, runsAs } from '../../lookup/index.ts'
 import { EXEC_WRAPPERS } from '../../lookup/constants.ts'
 import { type SessionState, sessionEntry } from '../../session/session.ts'
 import { abortable, mergeSignals } from '../../../utils/abort.ts'
@@ -382,7 +382,7 @@ export async function handleCommand(
 
   const follow =
     namespace !== undefined
-      ? operandFollow(namespace.sessionLinks(session), dispatch, cmdName, parts)
+      ? operandFollow(namespace.sessionLinks(session), dispatch, cmdName, parts, session.cwd)
       : undefined
   const files = commandFiles(follow ?? null)
   const runCtx: RunOnMountCtx = {
@@ -641,7 +641,7 @@ export async function handleCommand(
           session.cwd,
           (path) => pathStat(dispatch, path),
           namespace ?? null,
-          dereferences(cmdName, parts),
+          lineFacts(cmdName, parts, session.cwd).follows !== Follow.NONE,
         )
         if (refErr !== null) {
           return [
@@ -749,6 +749,7 @@ export async function handleCommand(
       dispatch,
       follow,
       findExpr ?? undefined,
+      parts,
     )
     const [csStdout0, csIo] = await handleCrossMount(
       cmdName,
@@ -918,7 +919,7 @@ export async function handleCommand(
       : null
 
   const singleStat: StatPath = (path) => pathStat(dispatch, path)
-  if (!borrowed && shouldFanOut(cmdName, paths, flagKwargs, registry)) {
+  if (!borrowed && shouldFanOut(cmdName, paths, parts, session.cwd, registry)) {
     const [fanOut0, fanIo, fanNode] = await fanOutTraversal(
       cmdName,
       paths,

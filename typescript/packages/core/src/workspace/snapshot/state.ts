@@ -19,7 +19,7 @@ import type { FileCache } from '../../cache/file/mixin.ts'
 import { CacheEntry } from '../../cache/file/entry.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
-import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE } from '../../observe/log_entry.ts'
+import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE, EVENT_RESULT } from '../../observe/log_entry.ts'
 import type { EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
@@ -227,7 +227,11 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     return entry
   })
   const historyEvents = (await ws.observer.events()).filter(
-    (e) => e.type === EVENT_COMMAND || e.type === EVENT_CLEAR || e.type === EVENT_DELETE,
+    (e) =>
+      e.type === EVENT_COMMAND ||
+      e.type === EVENT_RESULT ||
+      e.type === EVENT_CLEAR ||
+      e.type === EVENT_DELETE,
   )
   const current = ws.registry.allMounts()
   if (current.length !== mounted.length || mounted.some((m, i) => m !== current[i] || m.retiring)) {

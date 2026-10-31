@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Policy } from '../base.ts'
-import { operandPaths, targetDirectory } from '../match/rule.ts'
+import { operandPaths } from '../match/rule.ts'
 import type { Action, CommandContext, Deny, MountRootQuery } from '../types.ts'
 import { isCreateMode } from '../../commands/builtin/generic/tar/mode.ts'
 import { expandTableLong } from '../../commands/spec/compile.ts'
@@ -256,7 +256,7 @@ export class MountRootPolicy implements Policy {
       // `mv -t /mnt f` move INTO a mount root, which is ordinary.
       // The refusal stops the whole line, as rm's does; GNU would
       // move the other sources.
-      const target = targetDirectory(ctx)
+      const target = ctx.moveTarget ?? null
       const sources = target !== null || operands.length < 2 ? operands : operands.slice(0, -1)
       const root = firstRoot(namesRoot, sources)
       if (root === null) return null

@@ -135,7 +135,8 @@ async function main(): Promise<void> {
     console.log('\n=== BASH HISTORY ===\n')
 
     console.log(`Total ops: ${opsSummary(ws)}`)
-    console.log(`Commands recorded: ${String((await ws.history()).length)}`)
+    const commands = (await ws.history()).filter((e) => e.type === 'command')
+    console.log(`Commands recorded: ${String(commands.length)}`)
 
     r = await ws.shell('tail -n 6 /.bash_history')
     for (const line of lines(r.stdoutText)) console.log(`  ${line.slice(0, 120)}`)

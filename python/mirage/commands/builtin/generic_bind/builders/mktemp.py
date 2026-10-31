@@ -14,7 +14,7 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.mktemp import mktemp_generic
+from mirage.commands.builtin.generic.mktemp import facts, mktemp_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.config import Context
@@ -49,4 +49,4 @@ async def mktemp(
     return await mktemp_generic(paths, list(texts), ctx, mkdir, write, exists)
 
 
-BUILDER = GenericCommand("mktemp", mktemp, write=True)
+BUILDER = GenericCommand("mktemp", mktemp, write=True, facts=facts)

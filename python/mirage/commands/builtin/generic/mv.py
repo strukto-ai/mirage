@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import Callable
@@ -65,6 +66,8 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.runtime.types import DispatchFn
 from mirage.types import (
     FileType,
+    Follow,
+    LineFacts,
     MoveStrategy,
     NativeMove,
     PathSpec,
@@ -874,4 +877,19 @@ async def mv_generic(
     return output.encode() if output else None, IOResult(
         stderr=stderr_of(errors),
         exit_code=1 if len(errors) > len(accepted) else 0,
+    )
+
+
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """An mv line moves each source with everything under it, never
+    through a link, into the directory ``-t`` names if it names one.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(
+        follows=Follow.NONE,
+        subtree=True,
+        move_target=fl.as_str("target_directory"),
     )

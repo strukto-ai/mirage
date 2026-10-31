@@ -27,7 +27,7 @@ from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view, encode_text, utf8_locale
-from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
+from mirage.types import JsonValue, LineFacts, PathSpec, PolymorphicReadFn
 
 
 def _failed(stderr: str, exit_code: int) -> tuple[None, IOResult]:
@@ -61,26 +61,25 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> SedFlags:
     )
 
 
-def sed_writes(flags: Mapping[str, FlagValue], texts: Sequence[str]) -> bool:
-    """Whether a sed line may change files: under ``-i``, with a script
-    file (its text is read only when sed runs), or when its script names
-    a ``w`` file, which GNU opens even when it then refuses the script.
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A sed line may change files under ``-i``, with a script file (its
+    text is read only when sed runs), or when its script names a ``w``
+    file, which GNU opens even when it then refuses the script.
 
     Args:
-        flags (Mapping[str, FlagValue]): the flags as the line's parse
-            reads them, before any path value is resolved.
-        texts (Sequence[str]): the line's text operands; the first is the
-            script when no ``-e`` or ``-f`` gave one.
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands; the
+            first is the script when no ``-e`` or ``-f`` gave one.
     """
-    fl = FlagView(flags, spec=SPECS["sed"])
     if fl.as_bool("i") or fl.raw("f") is not None:
-        return True
-    scripts = fl.as_list("e") or list(texts[:1])
+        return LineFacts()
+    scripts = fl.as_list("e") or [
+        w if isinstance(w, str) else w.raw_path for w in operands[:1]
+    ]
     if not scripts:
-        return False
+        return LineFacts(writes=False)
     extended = fl.as_bool("E") or fl.as_bool("r")
-    options = tuple(scripts)
-    return _script_writes(options, extended)
+    return LineFacts(writes=_script_writes(tuple(scripts), extended))
 
 
 _write_checks: dict[tuple[tuple[str, ...], bool], bool] = {}
@@ -285,4 +284,4 @@ async def sed_generic(
     return hosted_stream("sed", config, host, io), io
 
 
-__all__ = ["sed_generic", "sed_writes"]
+__all__ = ["facts", "sed_generic"]

@@ -31,7 +31,12 @@ from mirage.core.disk.utils import open_regular
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_MEMORY
 from mirage.io.network import NetworkSetting
-from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
+from mirage.observe.log_entry import (
+    EVENT_CLEAR,
+    EVENT_COMMAND,
+    EVENT_DELETE,
+    EVENT_RESULT,
+)
 from mirage.observe.observer import Observer
 from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.policy.policies import Policies
@@ -337,7 +342,8 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
     history_events = [
         e
         for e in await ws.observer.events()
-        if e.get("type") in (EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE)
+        if e.get("type")
+        in (EVENT_COMMAND, EVENT_RESULT, EVENT_CLEAR, EVENT_DELETE)
     ]
 
     clis_state = [

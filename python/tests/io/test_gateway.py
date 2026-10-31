@@ -89,6 +89,21 @@ async def _held(port: int, line: str, *policies: Policy, network=True) -> int:
         await ws.close()
 
 
+async def _settled(ended: list[NetworkResultContext], count: int) -> None:
+    """Waits for the gateway to hand ``count`` connection ends to
+    post_network, which it does once both sides close, after the line
+    may have returned.
+
+    Args:
+        ended (list[NetworkResultContext]): where a policy keeps them.
+        count (int): how many to wait for.
+    """
+    for _ in range(100):
+        if len(ended) >= count:
+            return
+        await asyncio.sleep(0.01)
+
+
 _ANSWER = (
     b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nok\n"
 )
@@ -134,6 +149,7 @@ async def test_post_network_sees_how_each_connection_went(port):
         "curl -sS -o /data/b http://127.0.0.1:{port}/"
     )
     assert await _held(port, line, watch) == 0
+    await _settled(watch.ended, 2)
     assert [(e.bytes_received, e.ended) for e in watch.ended] == [
         (len(_ANSWER), "closed"),
         (len(_ANSWER), "closed"),
@@ -215,6 +231,7 @@ async def test_an_empty_answer_lets_a_connection_through_and_hears_it_end(
 ):
     quiet = _Quiet()
     assert await _held(port, "curl -sS http://127.0.0.1:{port}/", quiet) == 0
+    await _settled(quiet.ended, 1)
     assert [e.ended for e in quiet.ended] == ["closed"]
 
 
@@ -223,6 +240,7 @@ async def test_a_limit_cuts_the_connection_with_a_reset(port):
     watch = _Watch(limit=Limit(max_bytes=40))
     line = "curl -sS http://127.0.0.1:{port}/"
     assert await _held(port, line, watch) != 0
+    await _settled(watch.ended, 1)
     assert [e.ended for e in watch.ended] == ["limit"]
     assert watch.ended[0].bytes_sent + watch.ended[0].bytes_received == 40
 
@@ -247,6 +265,7 @@ async def test_a_limit_ends_a_connection_past_its_seconds(silent):
     watch = _Watch(limit=Limit(timeout_seconds=0.2))
     line = "curl -sS -m 5 http://127.0.0.1:{port}/"
     assert await _held(silent, line, watch) != 0
+    await _settled(watch.ended, 1)
     assert [e.ended for e in watch.ended] == ["limit"]
 
 
@@ -255,10 +274,7 @@ async def test_a_cancelled_command_still_ends_its_connection(silent):
     watch = _Watch()
     line = "timeout 0.3 curl -sS http://127.0.0.1:{port}/"
     assert await _held(silent, line, watch) == 124
-    for _ in range(50):
-        if watch.ended:
-            break
-        await asyncio.sleep(0.02)
+    await _settled(watch.ended, 1)
     assert len(watch.ended) == 1
     assert watch.open == 0
 
@@ -291,6 +307,7 @@ async def test_a_mount_connection_names_its_mount_and_command(port):
     assert [(c.mount, c.command, c.port) for c in watch.asked] == [
         ("/remote", "ls", port)
     ]
+    await _settled(watch.ended, 1)
     assert [e.ended for e in watch.ended] == ["closed"]
 
 
@@ -377,6 +394,7 @@ async def test_each_address_a_connection_falls_back_to_is_judged(
         ("two.test", "10.255.255.1"),
         ("two.test", "127.0.0.1"),
     ]
+    await _settled(watch.ended, 1)
     assert [(e.address, e.ended) for e in watch.ended] == [
         ("127.0.0.1", "closed")
     ]

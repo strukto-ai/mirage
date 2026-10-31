@@ -159,9 +159,13 @@ async def main():
     print(" Execution History")
     print(f"{'═' * 60}")
 
-    for entry in (await ws.history())[-6:]:
+    events = await ws.history()
+    exits = {
+        e["parent"]: e["exit_code"] for e in events if e["type"] == "result"
+    }
+    for entry in [e for e in events if e["type"] == "command"][-6:]:
         print(f"\n  $ {entry['command']}")
-        print(f"    exit={entry['exit_code']}")
+        print(f"    exit={exits.get(entry['id'], 'running')}")
     await ws.close()
 
 

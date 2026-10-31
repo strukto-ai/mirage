@@ -16,7 +16,7 @@ import { searchReads } from '../search.ts'
 import { treeWalk } from '../../utils/tree.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 
-import { rgGeneric } from '../../generic/rg.ts'
+import { facts, rgGeneric } from '../../generic/rg.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
@@ -52,6 +52,7 @@ const rg: CommandFn = async (_accessor, paths, texts, ctx) => {
 
 export const BUILDER: GenericCommand = {
   name: 'rg',
+  facts: facts,
   read: true,
   fn: rg,
 }

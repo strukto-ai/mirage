@@ -17,14 +17,9 @@ export {
   SHELL_NAMES,
   SLASH_KEEPS_LAST,
   UNSUPPORTED_BUILTINS,
-  changesFiles,
-  dereferences,
   endOptionsAfterProgram,
-  followsLastComponent,
-  lineFlags,
-  lsLinkMode,
-  readsSubtrees,
-  walksMounts,
+  factsOf,
+  lineFacts,
 } from './constants.ts'
 export {
   execs,

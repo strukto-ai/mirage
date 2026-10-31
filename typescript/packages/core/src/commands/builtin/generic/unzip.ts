@@ -22,7 +22,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { versionLine } from '../../spec/standard.ts'
 import { UsageError } from '../../errors.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { LineFacts, type PathSpec } from '../../../types.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
@@ -150,4 +150,12 @@ export function unzipGeneric(
   const host = new StreamHost([archive], stream, ctx, false)
   const io = new IOResult()
   return [hostedStream('unzip', config, host, io, ctx.signal), io]
+}
+
+/**
+ * An unzip line writes unless it lists, tests or pipes (`-l`, `-t`, `-v`,
+ * `-p`, `-Z`). Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({ writes: !['args_l', 't', 'v', 'p', 'Z'].some((dest) => fl.asBool(dest)) })
 }

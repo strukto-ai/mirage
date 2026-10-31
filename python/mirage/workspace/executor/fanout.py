@@ -14,6 +14,7 @@
 
 import functools
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from mirage.commands.builtin.generic.crossmount.constants import (
@@ -42,7 +43,7 @@ from mirage.types import PathSpec, Producer
 from mirage.utils.hidden import path_visible
 from mirage.view.types import FollowOperands, SessionView
 from mirage.workspace.files import Files
-from mirage.workspace.lookup import walks_mounts
+from mirage.workspace.lookup import line_facts
 from mirage.workspace.mount import (
     MountCommandUnsupported,
     MountEntry,
@@ -116,17 +117,19 @@ async def _own_part(
 def _should_fan_out(
     cmd_name: str,
     paths: list[PathSpec],
-    flag_kwargs: dict[str, FlagValue],
+    words: Sequence[str | PathSpec],
+    cwd: str,
     registry: MountRegistry,
 ) -> bool:
     """Whether `cmd` on this path should run across multiple mounts.
 
     True for a walk the fan-out composes when the path has at least one
-    descendant mount and the line walks into it (``walks_mounts``, the
-    answer the admission gate stamped on the line). False when there is
-    no descendant mount under the path (single-mount dispatch is
-    correct), and for a walk told to keep to its operand's filesystem
-    (``du -x``, ``rg --one-file-system``), since a mount is one.
+    descendant mount and the line walks into it (``LineFacts.walks``,
+    read off the line's words, so the facts the admission gate kept for
+    the line answer). False when there is no descendant mount under the
+    path (single-mount dispatch is correct), and for a walk told to keep
+    to its operand's filesystem (``du -x``, ``rg --one-file-system``),
+    since a mount is one.
     """
     # Use the raw mount table: hidden descendants still shadow backend keys.
     # Refused operands name nothing. Every other operand can own nested
@@ -136,7 +139,7 @@ def _should_fan_out(
         for p in paths
     ):
         return False
-    return cmd_name in _COMPOSED and walks_mounts(cmd_name, flag_kwargs)
+    return cmd_name in _COMPOSED and line_facts(cmd_name, words, cwd).walks
 
 
 async def _fan_out_traversal(
@@ -288,6 +291,7 @@ async def run_with_fanout(
     dispatch: DispatchFn | None = None,
     follow: FollowOperands | None = None,
     find: FindExpr | None = None,
+    words: Sequence[str | PathSpec],
 ) -> tuple[ByteSource | None, IOResult]:
     """One operand's native run, fanned out over the mounts nested in it.
 
@@ -319,8 +323,10 @@ async def run_with_fanout(
         follow (FollowOperands | None): the line's operand resolution,
             which a walk through the dispatcher's globs take.
         find (FindExpr | None): find's parsed expression.
+        words (Sequence[str | PathSpec]): the line's words, name first,
+            whose facts say whether it walks.
     """
-    if not _should_fan_out(cmd_name, paths, flag_kwargs, registry):
+    if not _should_fan_out(cmd_name, paths, words, cwd, registry):
         if cmd_name in _TRAVERSAL_CMDS and dispatch is not None:
             return await _own_part(
                 run_single,

@@ -410,7 +410,8 @@ async def test_a_multipart_load_is_read_up_to_its_request_part(monkeypatch):
         assert lost.status_code == 413
         preamble = await d.client.post(
             "/v1/workspaces/load",
-            content=b"x" * (2 * 1024 * 1024)
+            content=b"x"
+            * (2 * 1024 * 1024)
             + b'\r\n--b\r\nContent-Disposition: form-data; name="request"'
             b"\r\n\r\n{}\r\n--b--\r\n",
             headers={"content-type": "multipart/form-data; boundary=b"},

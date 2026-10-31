@@ -129,6 +129,7 @@ def test_shared_matching_corpus():
             tokens=tuple(facts["tokens"]),
             tool=facts["tool"],
             walks=facts["walks"],
+            subtree=facts["subtree"],
             words=tuple(
                 CommandWord(kind=WordKind.OPERAND, path=_path(v), text=v)
                 for v in facts["operands"]

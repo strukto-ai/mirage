@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { util } from 'zod'
-import { FlagView, SPECS, parseCommand } from '../../commands/spec/index.ts'
-import { parseToKwargs } from '../../commands/spec/parser.ts'
 import { WordKind } from '../../commands/spec/types.ts'
 import { admissionMatcher, units } from '../../rs/policy.ts'
 import type { PathSpec } from '../../types.ts'
-import { METADATA_OPS, SUBTREE_COMMANDS, SUBTREE_OPS } from '../constants.ts'
+import { METADATA_OPS, SUBTREE_OPS } from '../constants.ts'
 import { sameRule } from '../decisions.ts'
 import type { AdmissionRules, CommandContext, CommandRule, VfsContext } from '../types.ts'
 import { lineTokens } from './allow.ts'
@@ -33,27 +31,18 @@ export function operandPaths(ctx: CommandContext): PathSpec[] {
     word.kind === WordKind.OPERAND && word.path !== null ? [word.path] : [],
   )
 }
-export function targetDirectory(ctx: CommandContext): string | null {
-  const spec = SPECS.mv
-  if (spec === undefined) return null
-  return (
-    new FlagView(parseToKwargs(parseCommand(spec, [...ctx.argv], ctx.cwd, 'mv')), spec).asStr(
-      'target_directory',
-    ) ?? null
-  )
-}
 function pathFact(path: PathSpec): Record<string, util.JSONType> {
   return { virtual_path: units(path.virtual), display_path: units(path.rawPath || path.virtual) }
 }
 /**
  * What a line's rules are read against, in the stream's wire shape: its
- * tokens and paths, and the host's word on its command, a subtree command
- * (`SUBTREE_COMMANDS`) or a move whose last operand is the destination.
- * Mirrors Python's command_facts.
+ * tokens and paths, and the host's word on its command: whether it moves or
+ * removes whole subtrees (`CommandContext.subtree`) and whether it is a move
+ * whose last operand is the destination. Mirrors Python's command_facts.
  */
 export function commandFacts(ctx: CommandContext): Record<string, util.JSONType> {
   const moves = ctx.command === 'mv'
-  const target = moves && ctx.paths.length > 0 ? targetDirectory(ctx) : null
+  const target = moves && ctx.paths.length > 0 ? (ctx.moveTarget ?? null) : null
   return {
     tokens: lineTokens(ctx).map(units),
     tool: ctx.tool ?? true,
@@ -61,7 +50,7 @@ export function commandFacts(ctx: CommandContext): Record<string, util.JSONType>
     paths: ctx.paths.map(pathFact),
     operands: operandPaths(ctx).map(pathFact),
     walks: ctx.walks ?? false,
-    subtree: SUBTREE_COMMANDS.has(ctx.command),
+    subtree: ctx.subtree ?? false,
     moves,
     move_target: target === null ? null : units(target),
   }

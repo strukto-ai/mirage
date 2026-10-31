@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.find import find_walk_generic
+from mirage.commands.builtin.generic.find import facts, find_walk_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     CommandFiles,
@@ -74,4 +74,4 @@ async def find_walk(
     )
 
 
-BUILDER = GenericCommand("find", find)
+BUILDER = GenericCommand("find", find, facts=facts)

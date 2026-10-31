@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from itertools import groupby
@@ -36,6 +36,8 @@ from mirage.types import (
     CapacityState,
     FileStat,
     FileType,
+    Follow,
+    LineFacts,
     PathSpec,
     StatFn,
 )
@@ -745,7 +747,19 @@ async def stat(
     return format_records(lines), io
 
 
-__all__ = ["stat"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A stat line reports a link itself unless ``-L``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(
+        follows=Follow.LAST if fl.as_bool("dereference") else Follow.NONE
+    )
+
+
+__all__ = ["facts", "stat"]
 
 
 @dataclass(frozen=True, slots=True)

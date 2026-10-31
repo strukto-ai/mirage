@@ -106,13 +106,18 @@ def test_history_survives_snapshot_round_trip(tmp_path):
     src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
     asyncio.run(src.shell("echo one"))
     asyncio.run(src.shell("echo two"))
-    assert len(asyncio.run(src.history())) == 2
+    assert len(asyncio.run(src.history())) == 4
     snap = tmp_path / "history.tar"
     asyncio.run(src.snapshot(snap))
 
     dst = _load(snap)
     entries = asyncio.run(dst.history())
-    assert [e["command"] for e in entries] == ["echo one", "echo two"]
+    assert [e.get("command", e.get("stdout")) for e in entries] == [
+        "echo one",
+        "one\n",
+        "echo two",
+        "two\n",
+    ]
 
 
 def test_from_state_rebuilds_in_process_without_tar():

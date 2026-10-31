@@ -138,7 +138,12 @@ function withHost(
 ): Promise<number> {
   return new Promise((resolve, reject) => {
     const { port } = new URL(url)
-    const req = request({ port, method, path, headers: { host, 'content-type': 'application/json' } })
+    const req = request({
+      port,
+      method,
+      path,
+      headers: { host, 'content-type': 'application/json' },
+    })
     req.once('response', (res) => {
       res.resume()
       resolve(res.statusCode ?? 0)
@@ -330,7 +335,9 @@ describe('WorkerProxy', () => {
     expect(lost.status).toBe(413)
     const preamble = Buffer.concat([
       Buffer.alloc(2 * 1024 * 1024, 'x'),
-      Buffer.from('\r\n--b\r\nContent-Disposition: form-data; name="request"\r\n\r\n{}\r\n--b--\r\n'),
+      Buffer.from(
+        '\r\n--b\r\nContent-Disposition: form-data; name="request"\r\n\r\n{}\r\n--b--\r\n',
+      ),
     ])
     const before = await fetch(`${d.url}/v1/workspaces/load`, {
       method: 'POST',

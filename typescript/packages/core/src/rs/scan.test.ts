@@ -15,7 +15,8 @@
 import { expect, it } from 'vitest'
 import { StreamRefusal } from './errors.ts'
 import { UsageError } from '../commands/errors.ts'
-import { refused, scan, scanned } from './scan.ts'
+import { PARSE_KEPT_CHARS } from '../commands/spec/constants.ts'
+import { refused, scan, scanned, SCANS } from './scan.ts'
 
 it('reads each value typed', () => {
   const values = scan('cmp', [
@@ -53,4 +54,37 @@ it('throws a refusal as the usage error it is', () => {
   if (!(caught instanceof UsageError)) throw new Error('scanned took the value')
   expect([caught.message, caught.exitCode]).toEqual(['grep: é: invalid context length argument', 2])
   expect(scanned('grep', [['max_count', '-1']]).max_count).toBeNull()
+})
+
+it("keeps a reader's change to a kept scan its own", () => {
+  const first = scan('cmp', [['ignore_initial', '3K:4']])
+  first.skip = []
+  expect(scan('cmp', [['ignore_initial', '3K:4']])).toEqual({ limit: null, skip: [3072, 4] })
+})
+
+it('refuses every reader of a kept refusal', () => {
+  for (let round = 0; round < 2; round++) {
+    let caught: unknown
+    try {
+      scan('cmp', [['bytes', '2é']])
+    } catch (err) {
+      caught = err
+    }
+    if (!(caught instanceof StreamRefusal)) throw new Error('scan took the value')
+    const result = refused(caught)
+    expect([result.exitCode, result.stderr]).toEqual([
+      2,
+      new TextEncoder().encode(
+        "cmp: invalid --bytes value '2é'\ncmp: Try 'cmp --help' for more information.\n",
+      ),
+    ])
+  }
+})
+
+it('keeps no long run of switches', () => {
+  SCANS.clear()
+  const switches = Array.from({ length: PARSE_KEPT_CHARS }, () => ['recursive', ''] as const)
+  scan('grep', switches)
+  scan('grep', switches.slice(0, 1))
+  expect([...(SCANS.get('grep')?.keys() ?? [])]).toEqual([JSON.stringify([['recursive', '']])])
 })

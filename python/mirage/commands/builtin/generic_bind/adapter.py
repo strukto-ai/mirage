@@ -12,9 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import TypeAlias
 
 from mirage.commands.config import AggregateFn, CommandFn
+from mirage.commands.spec.flag_view import FlagView
+from mirage.types import LineFacts, PathSpec
+
+# What a command's options make of one line: a pure, total function of
+# its parsed flags and its operands in order, a path operand as the
+# PathSpec it was classified as. A value the command refuses answers the
+# side that keeps a rule in force.
+FactsFn: TypeAlias = Callable[[FlagView, Sequence[str | PathSpec]], LineFacts]
 
 
 # A generic builder's handler: an ordinary command handler, which reads
@@ -37,6 +47,9 @@ class GenericCommand:
         streams (bool): it only reads its operands while its output
             drains (comm, fold), so a cross-mount run hands that output
             on live.
+        facts (LineFacts | FactsFn): what a line of it does: one answer
+            no option changes, or the function that reads it off the
+            line.
     """
 
     name: str
@@ -46,3 +59,4 @@ class GenericCommand:
     read: bool = False
     pass_through: bool = False
     streams: bool = False
+    facts: LineFacts | FactsFn = LineFacts()

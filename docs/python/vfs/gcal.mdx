@@ -1,0 +1,249 @@
+---
+title: Google Calendar
+description: Mount Google Calendar calendars and events as JSON files from Python.
+icon: calendar
+---
+The Google Calendar VFS exposes every calendar the account can see as a
+directory of date buckets, with one `.gcal.json` file per event.
+
+For Google OAuth setup, see [Google Workspace Setup](/home/setup/google).
+For the TypeScript SDK, see [Google Calendar (TypeScript)](/typescript/setup/gcal).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.vfs.gcal import GCalConfig, GCalVFS
+
+config = GCalConfig(
+    client_id=os.environ["GOOGLE_CLIENT_ID"],
+    client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+    refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+)
+vfs = GCalVFS(config)
+ws = Workspace({"/gcal": vfs}, mode=MountMode.READ)
+```
+
+{/* generated: config-table gcal omit=folder_id start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>start_time</code> | Start of the mount's time scope, inclusive: an RFC 3339 timestamp with an explicit timezone and at most millisecond precision. Unset leaves the start open. |
+| <code style={{ whiteSpace: 'nowrap' }}>end_time</code> | End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
+| <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />secret | OAuth access token, or a callable that returns one. Takes precedence over `client_id` and `refresh_token`. |
+| <code style={{ whiteSpace: 'nowrap' }}>client_id</code> | Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself. |
+| <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
+| <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>api_base</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
+| <code style={{ whiteSpace: 'nowrap' }}>time_zone</code> | IANA time zone the mount buckets every calendar's days in. Unset uses the primary calendar's zone. |
+| <code style={{ whiteSpace: 'nowrap' }}>bucket_days</code><br />default `1` | Days each date directory under a calendar holds: `1` names it by its day, `7` and `30` by its first and last day (`<first>--<last>`). |
+| <code style={{ whiteSpace: 'nowrap' }}>min_access_role</code> | List only calendars where the account has at least this access role: `freeBusyReader`, `reader`, `writer` or `owner`. Unset lists every calendar. |
+| <code style={{ whiteSpace: 'nowrap' }}>today</code> | Day (`YYYY-MM-DD`) the default listing's 90-day future horizon is measured from, for tests and snapshots. Unset uses the current date in the mount's time zone. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table gcal end */}
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with Google Calendar mounted at `/<path>`.
+
+{/* generated: vfs-md gcal start */}
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `gcal`, write |
+
+    #### `/<path>` layout
+
+    ```text
+    Google Calendar is mounted as one directory per calendar, one
+    directory per date bucket, and one JSON file per event.
+
+        /<mount>/primary/calendar.json
+        /<mount>/primary/2026-08-11/<eventId>__0900-1030_Team_Standup.gcal.json
+        /<mount>/Engineering__team@group.calendar.google.com/2026-08-11/...
+
+    Reading the tree:
+
+    - `ls <mount>/` lists the calendars. The primary one is always spelled
+      `primary`; every other directory ends in `__<calendarId>`.
+    - `ls <mount>/primary/` lists buckets with events from all available history
+      through today +90 days unless end_time is configured. start_time/end_time
+      restrict this mount, including direct paths, date globs and event reads.
+      A date glob such as `ls <mount>/primary/2027-03-*` selects its own
+      listing range within that scope, beyond the default future horizon.
+    - A bucket is one local day, named by its date. A well-formed date inside
+      the configured scope is a directory even when it holds no events. Dates
+      outside the scope are absent.
+    - A file name is `<eventId>__<HHMM-HHMM>_<Title>.gcal.json`. The times are
+      clamped to that day, so an event running through it reads `0000-2400`.
+      A multi-day event appears under every day it covers.
+    - `cat` an event for the unmodified Calendar API payload, including
+      attendees, description, location and the original start/end with offsets.
+    - `calendar.json` carries the calendar's accessRole and, in
+      `bucketTimeZone`, the zone the buckets are cut in. That zone is
+      mount-wide, so every calendar's `2026-08-11/` covers the same hours.
+    - On a calendar shared as free/busy only, Google returns no titles at all,
+      so events render as `busy`.
+
+    Acting on it:
+
+    - On a `write` path, `rm` an event file to delete that event for every
+      attendee.
+    - Everything else goes through the `gws calendar` CLI, which takes the ids
+      the tree renders.
+    - A written event must carry an explicit UTC offset or timeZone; an
+      ambiguous local time is not interpreted for you.
+
+      Time scope: start_time=unbounded (inclusive), end_time=unbounded (exclusive). Explicit paths and globs cannot escape this scope.
+    ```
+
+    #### Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `rm` and `unlink`. `grep -r` and `rg` with `-w` ask `gcal` which files may match. |
+
+    #### Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `mv`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `gcal` answers only for `*/*/*.gcal.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `gcal`, write |
+
+    ## `/<path>` layout
+
+    ```text
+    Google Calendar is mounted as one directory per calendar, one
+    directory per date bucket, and one JSON file per event.
+
+        /<mount>/primary/calendar.json
+        /<mount>/primary/2026-08-11/<eventId>__0900-1030_Team_Standup.gcal.json
+        /<mount>/Engineering__team@group.calendar.google.com/2026-08-11/...
+
+    Reading the tree:
+
+    - `ls <mount>/` lists the calendars. The primary one is always spelled
+      `primary`; every other directory ends in `__<calendarId>`.
+    - `ls <mount>/primary/` lists buckets with events from all available history
+      through today +90 days unless end_time is configured. start_time/end_time
+      restrict this mount, including direct paths, date globs and event reads.
+      A date glob such as `ls <mount>/primary/2027-03-*` selects its own
+      listing range within that scope, beyond the default future horizon.
+    - A bucket is one local day, named by its date. A well-formed date inside
+      the configured scope is a directory even when it holds no events. Dates
+      outside the scope are absent.
+    - A file name is `<eventId>__<HHMM-HHMM>_<Title>.gcal.json`. The times are
+      clamped to that day, so an event running through it reads `0000-2400`.
+      A multi-day event appears under every day it covers.
+    - `cat` an event for the unmodified Calendar API payload, including
+      attendees, description, location and the original start/end with offsets.
+    - `calendar.json` carries the calendar's accessRole and, in
+      `bucketTimeZone`, the zone the buckets are cut in. That zone is
+      mount-wide, so every calendar's `2026-08-11/` covers the same hours.
+    - On a calendar shared as free/busy only, Google returns no titles at all,
+      so events render as `busy`.
+
+    Acting on it:
+
+    - On a `write` path, `rm` an event file to delete that event for every
+      attendee.
+    - Everything else goes through the `gws calendar` CLI, which takes the ids
+      the tree renders.
+    - A written event must carry an explicit UTC offset or timeZone; an
+      ambiguous local time is not interpreted for you.
+
+      Time scope: start_time=unbounded (inclusive), end_time=unbounded (exclusive). Explicit paths and globs cannot escape this scope.
+    ```
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `rm` and `unlink`. `grep -r` and `rg` with `-w` ask `gcal` which files may match. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `mv`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `gcal` answers only for `*/*/*.gcal.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
+{/* generated: vfs-md gcal end */}
+
+## Write Support
+
+The only write is `rm` on an event file, on a mount in `MountMode.WRITE`. It
+deletes the event on its calendar, for every attendee. The account needs the
+`owner` or `writer` role on that calendar; otherwise `rm` fails with
+permission denied. Creating, editing and moving events go through the
+[`gws calendar`](/home/setup/cli/gws) CLI, which takes the calendar and event
+ids the tree shows.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from mirage import MountMode, Workspace
+from mirage.vfs.gcal import GCalConfig, GCalVFS
+
+
+async def main() -> None:
+    config = GCalConfig(
+        client_id=os.environ["GOOGLE_CLIENT_ID"],
+        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+        refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+        bucket_days=7,
+    )
+    ws = Workspace({"/gcal": GCalVFS(config)}, mode=MountMode.READ)
+
+    # Calendars the account can see
+    res = await ws.shell("ls /gcal")
+    print(await res.stdout_str())
+
+    # Weeks that open in November 2026
+    res = await ws.shell("ls /gcal/primary/2026-11-*")
+    print(await res.stdout_str())
+
+    # Events that mention a word
+    res = await ws.shell("grep -lw standup /gcal/primary/*/*.gcal.json")
+    print(await res.stdout_str())
+
+    await ws.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```

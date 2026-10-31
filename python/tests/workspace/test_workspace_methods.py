@@ -132,15 +132,23 @@ def test_history_round_trip(tmp_path):
     asyncio.run(src.shell("echo a > /m/a.txt"))
     asyncio.run(src.shell("echo b > /m/b.txt"))
     asyncio.run(src.shell("cat /m/a.txt"))
-    expected_commands = [e["command"] for e in asyncio.run(src.history())]
-    assert len(expected_commands) == 3
+    expected_commands = asyncio.run(src.history())
+    assert len(expected_commands) == 6
 
     snap = tmp_path / "ws.tar"
     asyncio.run(src.snapshot(snap))
     dst = _load(snap)
 
-    got_commands = [e["command"] for e in asyncio.run(dst.history())]
-    assert got_commands == expected_commands
+    got_commands = asyncio.run(dst.history())
+    assert [_without_session(e) for e in got_commands] == [
+        _without_session(e) for e in expected_commands
+    ]
+
+
+def _without_session(entry: dict) -> dict:
+    return {
+        k: v for k, v in entry.items() if k not in ("session", "timestamp")
+    }
 
 
 # ── finished jobs survive, pending dropped ────────────────────────

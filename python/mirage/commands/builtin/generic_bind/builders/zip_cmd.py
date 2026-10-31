@@ -14,7 +14,11 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.zip_cmd import parse_flags, zip_cmd
+from mirage.commands.builtin.generic.zip_cmd import (
+    facts,
+    parse_flags,
+    zip_cmd,
+)
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.archive_io import walk_of
 from mirage.commands.builtin.generic_bind.files import command_files
@@ -51,4 +55,4 @@ async def zip_builder(
     )
 
 
-BUILDER = GenericCommand("zip", zip_builder, write=True)
+BUILDER = GenericCommand("zip", zip_builder, write=True, facts=facts)

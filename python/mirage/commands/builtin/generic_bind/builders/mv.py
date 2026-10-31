@@ -15,8 +15,8 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.crossmount.utils import transfer_links_of
+from mirage.commands.builtin.generic.mv import facts, parse_flags
 from mirage.commands.builtin.generic.mv import mv_generic as generic_mv
-from mirage.commands.builtin.generic.mv import parse_flags
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
@@ -72,4 +72,4 @@ async def mv(
     )
 
 
-BUILDER = GenericCommand("mv", mv, write=True)
+BUILDER = GenericCommand("mv", mv, write=True, facts=facts)

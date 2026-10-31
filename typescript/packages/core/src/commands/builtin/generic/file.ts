@@ -20,6 +20,8 @@ import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import {
   DEVICE_NUMBERS_KEY,
   FileType,
+  Follow,
+  LineFacts,
   type FileStat,
   type PathSpec,
   type ReadStreamFn,
@@ -147,4 +149,14 @@ export async function fileGeneric(
   }
   const out: ByteSource = formatRecords(lines)
   return [out, new IOResult()]
+}
+
+/**
+ * A file line describes a link itself unless the last of `-L` and `-h` is
+ * `-L` (file 5.46). Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  return new LineFacts({
+    follows: fl.typedOrder('L', 'h').at(-1) === 'L' ? Follow.LAST : Follow.NONE,
+  })
 }

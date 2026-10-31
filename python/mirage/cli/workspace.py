@@ -192,16 +192,31 @@ def _format_history(items: list[dict[str, Any]]) -> str:
                 "%Y-%m-%d %H:%M:%S"
             ),
             item["session"],
+            item["type"],
             str(item.get("exit_code", "")),
-            (
-                item["command"]
-                if item["type"] == "command"
-                else f"{item['vfs']} {item['path']}"
-            ).replace("\n", "\\n"),
+            _history_entry(item),
         ]
         for item in items
     ]
-    return format_table(["TIME", "SESSION", "EXIT", "ENTRY"], rows)
+    return format_table(["TIME", "SESSION", "TYPE", "EXIT", "ENTRY"], rows)
+
+
+def _history_entry(item: dict[str, Any]) -> str:
+    """A history entry's text on one row: the line, the vfs call, or the
+    start of what the line wrote, its newlines escaped.
+
+    Args:
+        item (dict[str, Any]): the entry.
+    """
+    text: str
+    if item["type"] == "command":
+        text = item["command"]
+    elif item["type"] == "vfs":
+        text = f"{item['vfs']} {item['path']}"
+    else:
+        text = item.get("stdout", "") + item.get("stderr", "")
+    text = text.replace("\n", "\\n")
+    return text if len(text) <= 60 else text[:57] + "..."
 
 
 def _format_asks(items: list[dict[str, Any]]) -> str:

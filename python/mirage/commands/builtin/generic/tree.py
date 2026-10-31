@@ -1,6 +1,6 @@
 import logging
 import posixpath
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 
@@ -21,6 +21,7 @@ from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
     FileType,
+    LineFacts,
     PathSpec,
     ReaddirFn,
 )
@@ -418,7 +419,18 @@ async def tree(
     )
 
 
-__all__ = ["tree"]
+def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
+    """A tree line reads below every path it names and walks into the
+    mounts below unless ``-x``.
+
+    Args:
+        fl (FlagView): spec-validated view over the raw flag kwargs.
+        operands (Sequence[str | PathSpec]): the line's operands.
+    """
+    return LineFacts(walks=not fl.as_bool("x"), reads_subtree=True)
+
+
+__all__ = ["facts", "tree"]
 
 
 @dataclass(frozen=True, slots=True)
