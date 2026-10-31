@@ -406,12 +406,25 @@ async def test_a_redis_store_keeps_history_on_disk_under_its_root(tmp_path):
         }
     )
     store = cfg.to_workspace_kwargs()["store"]
-    history = store.observer("ws1")
-    await history.append("/d/s.jsonl", b"{}\n")
-    assert (
-        tmp_path / "workspaces" / "ws1" / "history" / "d" / "s.jsonl"
-    ).read_bytes() == b"{}\n"
+    await store.observer("ws1").append("/d/s.jsonl", b"{}\n")
+    other = load_config(
+        {
+            "store": {
+                "type": "redis",
+                "root": str(tmp_path),
+                "key_prefix": "b:",
+            },
+            "mounts": {"/": {"vfs": "ram"}},
+        }
+    ).to_workspace_kwargs()["store"]
+    await other.observer("ws1").append("/d/s.jsonl", b"[]\n")
+    written = sorted(
+        p.read_bytes()
+        for p in tmp_path.glob("redis/*/workspaces/ws1/history/d/s.jsonl")
+    )
+    assert written == [b"[]\n", b"{}\n"]
     await store.close()
+    await other.close()
 
 
 @pytest.mark.asyncio

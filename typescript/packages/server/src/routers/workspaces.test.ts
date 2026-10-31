@@ -158,7 +158,7 @@ describe('workspaces router', () => {
         await app.inject({ method: 'GET', url: `/v1/workspaces/h/history${qs}` })
       const all = await read('')
       expect(all.statusCode).toBe(200)
-      type Entry = {
+      interface Entry {
         type: string
         command?: string
         vfs?: string

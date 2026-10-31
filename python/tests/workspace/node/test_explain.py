@@ -315,6 +315,11 @@ async def test_a_denied_command_stops_the_whole_line(ws):
         b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
     )
     assert "/data/a.txt" in await ws.vfs.readdir("/data")
+    recorded = await ws.history(session_id="s")
+    assert [(e["type"], e.get("exit_code")) for e in recorded] == [
+        ("command", None),
+        ("result", 1),
+    ]
 
 
 @pytest.mark.asyncio

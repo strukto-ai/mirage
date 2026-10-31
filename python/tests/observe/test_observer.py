@@ -466,6 +466,28 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
         },
     )
     assert (call.start_time, call.end_time) == (
+        (start - 7) * 1_000_000,
         (start + 5) * 1_000_000,
-        (start + 17) * 1_000_000,
     )
+
+
+def test_bash_history_lists_lines_in_the_order_they_ended():
+    clock = ManualClock(start=NEW_YEAR)
+    obs = Observer(store=RAMObserverStore(), clock=clock)
+    asyncio.run(obs.log_command("sleep 9", "s1", line="slow"))
+    clock.advance(1)
+    asyncio.run(obs.log_command("echo quick", "s2", line="quick"))
+    clock.advance(1)
+    asyncio.run(obs.log_result(IOResult(), [], "s2", line="quick"))
+    clock.advance(1)
+    asyncio.run(obs.log_result(IOResult(), [], "s1", line="slow"))
+    asyncio.run(obs.log_result(IOResult(), [], "s1", line="slow"))
+    assert [e["command"] for e in asyncio.run(obs.command_events())] == [
+        "echo quick",
+        "sleep 9",
+    ]
+    results = [e for e in asyncio.run(obs.events()) if e["type"] == "result"]
+    assert [(e["parent"], e["duration_ms"]) for e in results] == [
+        ("quick", 1000),
+        ("slow", 3000),
+    ]

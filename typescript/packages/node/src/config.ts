@@ -1098,9 +1098,7 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
     return new RedisWorkspaceStateStore({
       ...(block.url !== undefined ? { url: block.url } : {}),
       ...(block.keyPrefix !== undefined ? { keyPrefix: block.keyPrefix } : {}),
-      observer: new DiskWorkspaceStateStore({
-        ...(block.root !== undefined ? { root: block.root } : {}),
-      }),
+      ...(block.root !== undefined ? { root: block.root } : {}),
       ...overrides,
     })
   }

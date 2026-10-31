@@ -130,7 +130,8 @@ it.each(['mapfile values', 'read -N 131072 value'])(
       await expect.poll(() => closed).toBe(true)
       const events = await ws.observer.commandEvents()
       expect(events).toHaveLength(1)
-      expect(events[0]?.exit_code).toBe(130)
+      const results = (await ws.observer.events()).filter((e) => e.type === 'result')
+      expect(results[0]?.exit_code).toBe(130)
     } finally {
       clearTimeout(timer)
       await ws.close()
@@ -171,7 +172,8 @@ it.each(['timeout', 'read failure'])('records %s while finalizing a shell reader
     expect(result.exitCode).toBe(code)
     const events = await ws.observer.commandEvents()
     expect(events).toHaveLength(1)
-    expect(events[0]?.exit_code).toBe(code)
+    const results = (await ws.observer.events()).filter((e) => e.type === 'result')
+    expect(results[0]?.exit_code).toBe(code)
   } finally {
     await ws.close()
   }
@@ -193,8 +195,8 @@ it('preserves a caller-supplied abort reason and records cancellation', async ()
     await expect(
       ws.shell('mapfile values', { stdin: source(), signal: controller.signal }),
     ).rejects.toMatchObject({ name: 'AbortError', cause: reason })
-    const events = await ws.observer.commandEvents()
-    expect(events[0]?.exit_code).toBe(130)
+    const results = (await ws.observer.events()).filter((e) => e.type === 'result')
+    expect(results[0]?.exit_code).toBe(130)
   } finally {
     clearTimeout(timer)
     await ws.close()

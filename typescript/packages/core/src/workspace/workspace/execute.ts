@@ -485,9 +485,10 @@ async function runPreparedLine(
         const parser = new ParseScope()
         const previousAliasExpansion = effectiveSession.aliasExpansion
         effectiveSession.aliasExpansion = null
+        const recorded = options.record !== false && command.replaceAll('\n', '') !== ''
         try {
           // The line is recorded as it starts; how it ended follows it.
-          if (options.record !== false && command.replaceAll('\n', '') !== '') {
+          if (recorded) {
             await joinOrAbort(
               env.observer.logCommand(
                 command,
@@ -827,7 +828,7 @@ async function runPreparedLine(
             options.sink !== undefined ? { ...lineDeps, sink: options.sink } : lineDeps,
             handed,
           )
-          return await runWithEvaluation(
+          const answered = await runWithEvaluation(
             context,
             () =>
               runParsedLine(
@@ -849,6 +850,26 @@ async function runPreparedLine(
               ),
             env.sessions,
           )
+          // A path that answered before recording how the line ended (a
+          // refused or failed preflight) ends it here, as Python's finally
+          // ends every line; one already ended is left as it is.
+          if (recorded) {
+            await joinOrAbort(
+              env.observer.logResult(
+                new IOResult({
+                  stdout: answered.stdout,
+                  stderr: answered.stderr,
+                  exitCode: answered.exitCode,
+                }),
+                [],
+                targetSession.sessionId,
+                effectiveSession.cwd,
+                options.executionScope?.id,
+              ),
+              lineSignal,
+            )
+          }
+          return answered
         } finally {
           effectiveSession.aliasExpansion = previousAliasExpansion
           parser.release()

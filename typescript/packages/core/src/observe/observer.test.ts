@@ -474,9 +474,28 @@ describe('a damaged history file', () => {
     expect([call?.name, call?.options.attributes, call?.options.startTime, call?.end]).toEqual([
       'vfs.read',
       { 'mirage.vfs.path': '/d/a', 'mirage.vfs.source': 's3', 'mirage.vfs.bytes': 6 },
+      start - 7,
       start + 5,
-      start + 17,
     ])
     expect(call?.parent).toBeDefined()
+  })
+
+  it('lists lines in the order they ended, each ended once', async () => {
+    const clock = new ManualClock(NEW_YEAR)
+    const o = new Observer(new RAMObserverStore(), clock)
+    await o.logCommand('sleep 9', 's1', undefined, 'slow')
+    clock.advance(1)
+    await o.logCommand('echo quick', 's2', undefined, 'quick')
+    clock.advance(1)
+    await o.logResult(new IOResult(), [], 's2', undefined, 'quick')
+    clock.advance(1)
+    await o.logResult(new IOResult(), [], 's1', undefined, 'slow')
+    await o.logResult(new IOResult(), [], 's1', undefined, 'slow')
+    expect((await o.commandEvents()).map((e) => e.command)).toEqual(['echo quick', 'sleep 9'])
+    const results = (await o.events()).filter((e) => e.type === 'result')
+    expect(results.map((e) => [e.parent, e.duration_ms])).toEqual([
+      ['quick', 1000],
+      ['slow', 3000],
+    ])
   })
 })

@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 import json
+import os
 from typing import Any, Awaitable, cast
 
 import redis.asyncio as aioredis
@@ -26,7 +28,24 @@ from mirage.workspace.mount.namespace.redis import (
 )
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
-from mirage.workspace.store.disk import DiskWorkspaceStateStore
+from mirage.workspace.store.disk import (
+    DEFAULT_STATE_ROOT,
+    DiskWorkspaceStateStore,
+)
+
+
+def _history_root(root: str, url: str, key_prefix: str) -> str:
+    """Where a Redis store keeps its history on disk: a folder of its
+    own under ``root``, named by a hash of its url and key prefix, so no
+    two stores share one and the url's credentials never reach a path.
+
+    Args:
+        root (str): the state root.
+        url (str): the store's Redis url.
+        key_prefix (str): the store's key prefix.
+    """
+    digest = hashlib.sha256(f"{url}\n{key_prefix}".encode()).hexdigest()
+    return os.path.join(root, "redis", digest[:16])
 
 
 class RedisWorkspaceStateStore(WorkspaceStateStore):
@@ -43,8 +62,8 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     pointed at the same url and prefix, so a workspace rebuilt from its
     config alone gets identical overlays, sessions, and grants, and sees
     the jobs every other one runs. History only grows, so it stays out
-    of Redis: on this machine's disk, under ``~/.mirage/state``, unless
-    ``observer`` names another store.
+    of Redis: on this machine's disk, in a folder of this store's own
+    under ``root``, unless ``observer`` names another store.
     """
 
     def __init__(
@@ -52,6 +71,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         url: str = "redis://localhost:6379/0",
         key_prefix: str = "mirage:",
         *,
+        root: str = DEFAULT_STATE_ROOT,
         namespace: WorkspaceStateStore | None = None,
         observer: WorkspaceStateStore | None = None,
         workspace: WorkspaceStateStore | None = None,
@@ -61,7 +81,9 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
             namespace=namespace,
             observer=observer
             if observer is not None
-            else DiskWorkspaceStateStore(),
+            else DiskWorkspaceStateStore(
+                root=_history_root(root, url, key_prefix)
+            ),
             workspace=workspace,
             jobs=jobs,
         )

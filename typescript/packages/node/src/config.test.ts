@@ -36,7 +36,7 @@ import { RedisJobStore } from './shell/job_table/redis.ts'
 import { RedisFileCacheStore } from './cache/file/redis.ts'
 import { Workspace } from './workspace.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -582,10 +582,26 @@ describe('configToWorkspaceArgs', () => {
       })
       const store = (await configToWorkspaceArgs(cfg)).options.store
       await store?.observer('ws1').append('/d/s.jsonl', new TextEncoder().encode('{}\n'))
-      expect(readFileSync(join(root, 'workspaces', 'ws1', 'history', 'd', 's.jsonl'), 'utf8')).toBe(
-        '{}\n',
-      )
+      const other = (
+        await configToWorkspaceArgs(
+          loadWorkspaceConfig({
+            mounts: { '/': { vfs: 'ram' } },
+            store: { type: 'redis', root, key_prefix: 'b:' },
+          }),
+        )
+      ).options.store
+      await other?.observer('ws1').append('/d/s.jsonl', new TextEncoder().encode('[]\n'))
+      const written = readdirSync(join(root, 'redis'))
+        .map((dir) =>
+          readFileSync(
+            join(root, 'redis', dir, 'workspaces', 'ws1', 'history', 'd', 's.jsonl'),
+            'utf8',
+          ),
+        )
+        .sort()
+      expect(written).toEqual(['[]\n', '{}\n'])
       await store?.close()
+      await other?.close()
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

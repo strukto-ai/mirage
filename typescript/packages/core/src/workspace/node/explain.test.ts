@@ -340,6 +340,11 @@ describe('explain', () => {
     expect(ran.exitCode).toBe(1)
     expect(DEC.decode(ran.stderr)).toBe("rm: cannot remove '/data/prod/x.txt': Permission denied\n")
     expect(await w.vfs.readdir('/data')).toContain('/data/a.txt')
+    const recorded = await w.history({ sessionId: 's' })
+    expect(recorded.map((e) => [e.type, e.exit_code])).toEqual([
+      ['command', undefined],
+      ['result', 1],
+    ])
   })
 
   it('leaves a line alone when the allow list leaves a word out', async () => {

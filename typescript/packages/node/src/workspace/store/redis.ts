@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { createHash } from 'node:crypto'
+import path from 'node:path'
 import type { ObserverStore } from '@struktoai/mirage-core/observe/store'
 import type { NamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
 import { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
@@ -23,11 +25,24 @@ import { RedisConnection } from '../../optional_peer.ts'
 import { CAS_SCRIPT, RedisNamespaceStore } from '../mount/namespace/redis.ts'
 import type { JobStore } from '@struktoai/mirage-core/shell/job_table/store'
 import { RedisJobStore } from '../../shell/job_table/redis.ts'
-import { DiskWorkspaceStateStore } from './disk.ts'
+import { DEFAULT_STATE_ROOT, DiskWorkspaceStateStore } from './disk.ts'
 
 export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOverrides {
   url?: string
   keyPrefix?: string
+  /** The state root its history goes under, `~/.mirage/state` by default. */
+  root?: string
+}
+
+/**
+ * Where a Redis store keeps its history on disk: a folder of its own under
+ * `root`, named by a hash of its url and key prefix, so no two stores share
+ * one and the url's credentials never reach a path. Mirrors Python's
+ * `_history_root`.
+ */
+function historyRoot(root: string, url: string, keyPrefix: string): string {
+  const digest = createHash('sha256').update(`${url}\n${keyPrefix}`).digest('hex')
+  return path.join(root, 'redis', digest.slice(0, 16))
 }
 
 /**
@@ -44,8 +59,8 @@ export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOver
  * pointed at the same url and prefix, so a workspace rebuilt from its
  * config alone gets identical overlays, sessions, and grants, and sees
  * the jobs every other one runs. History only grows, so it stays out of
- * Redis: on this machine's disk, under `~/.mirage/state`, unless
- * `observer` names another store.
+ * Redis: on this machine's disk, in a folder of this store's own under
+ * `root`, unless `observer` names another store.
  * Mirrors the Python RedisWorkspaceStateStore.
  */
 export class RedisWorkspaceStateStore extends WorkspaceStateStore {
@@ -58,10 +73,19 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   private readonly jobPlanes = new Map<string, RedisJobStore>()
 
   constructor(options: RedisWorkspaceStateStoreOptions = {}) {
-    const { url, keyPrefix, ...overrides } = options
-    super({ ...overrides, observer: overrides.observer ?? new DiskWorkspaceStateStore() })
-    this.url = url ?? 'redis://localhost:6379/0'
-    this.prefix = keyPrefix ?? 'mirage:'
+    const { url, keyPrefix, root, ...overrides } = options
+    const at = url ?? 'redis://localhost:6379/0'
+    const prefix = keyPrefix ?? 'mirage:'
+    super({
+      ...overrides,
+      observer:
+        overrides.observer ??
+        new DiskWorkspaceStateStore({
+          root: historyRoot(root ?? DEFAULT_STATE_ROOT, at, prefix),
+        }),
+    })
+    this.url = at
+    this.prefix = prefix
     this.metaKey = `${this.prefix}workspaces`
     this.redis = new RedisConnection(this.url, 'RedisWorkspaceStateStore')
   }

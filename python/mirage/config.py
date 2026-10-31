@@ -964,10 +964,9 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
         return _redis_state_store()(
             url=block.url,
             key_prefix=block.key_prefix,
+            root=block.root,
             namespace=namespace,
-            observer=observer
-            if observer is not None
-            else DiskWorkspaceStateStore(root=block.root),
+            observer=observer,
             workspace=workspace,
             jobs=jobs,
         )

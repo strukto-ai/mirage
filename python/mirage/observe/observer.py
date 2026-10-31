@@ -105,14 +105,14 @@ def _trace_line(
             call = tracer.start_span(
                 f"vfs.{rec.op}",
                 context=parent,
-                start_time=rec.timestamp * _NS_PER_MS,
+                start_time=(rec.timestamp - rec.duration_ms) * _NS_PER_MS,
                 attributes={
                     "mirage.vfs.path": rec.path,
                     "mirage.vfs.source": rec.source,
                     "mirage.vfs.bytes": rec.bytes,
                 },
             )
-            call.end(end_time=(rec.timestamp + rec.duration_ms) * _NS_PER_MS)
+            call.end(end_time=rec.timestamp * _NS_PER_MS)
     line.end(end_time=span[1] * _NS_PER_MS)
 
 
@@ -200,7 +200,7 @@ class Observer:
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._workspace_id = workspace_id
         self._newest: dict[str, int | None] = {}
-        self._started: dict[str, tuple[int, str]] = {}
+        self._started: dict[str, tuple[int, float, str]] = {}
 
     def _now_ms(self) -> int:
         """The clock's wall time in epoch milliseconds, an entry's stamp."""
@@ -280,9 +280,10 @@ class Observer:
             id=line,
             command=command,
         )
+        began = self._clock.monotonic()
         await self._log(entry)
         if line is not None:
-            self._started[line] = (entry.timestamp, command)
+            self._started[line] = (entry.timestamp, began, command)
 
     async def log_result(
         self,
@@ -293,7 +294,8 @@ class Observer:
         line: str | None = None,
     ) -> None:
         """Record how a typed line ended: its vfs calls, then its result,
-        each naming the line as its parent.
+        each naming the line as its parent. A line ends once: a second
+        call for a line already ended records nothing.
 
         Args:
             io (IOResult): Final result of the line.
@@ -306,6 +308,9 @@ class Observer:
         # store.append so one typed line costs one roundtrip and lands
         # atomically in the store. A store whose append never suspends
         # still lets the loop run between a long line's records.
+        started = self._started.pop(line, None) if line is not None else None
+        if line is not None and started is None:
+            return
         budget = YieldBudget()
         for rec in op_records:
             await budget.run()
@@ -313,13 +318,17 @@ class Observer:
         stdout = await io.materialize_stdout()
         stderr = await io.materialize_stderr()
         now = self._now_ms()
-        started = self._started.pop(line, None) if line is not None else None
-        if started is not None:
+        took = (
+            None
+            if started is None
+            else round((self._clock.monotonic() - started[1]) * 1000)
+        )
+        if started is not None and took is not None:
             _trace_line(
                 self._workspace_id,
                 session,
-                started[1],
-                (started[0], now),
+                started[2],
+                (started[0], started[0] + took),
                 io.exit_code,
                 op_records,
             )
@@ -333,7 +342,7 @@ class Observer:
                 exit_code=io.exit_code,
                 stdout=stdout.decode(errors="replace")[:STDOUT_TRUNCATE],
                 stderr=stderr.decode(errors="replace")[:STDOUT_TRUNCATE],
-                duration_ms=None if started is None else now - started[0],
+                duration_ms=took,
             )
         )
 
@@ -417,23 +426,25 @@ class Observer:
         return out
 
     async def command_events(self) -> list[dict[str, Any]]:
-        """The command events of every session's ended lines, in
-        timestamp order: a line enters its history once its result is
-        in, and an entry added without running (``history -s``) at once.
+        """The command events of every session's ended lines, in the
+        order they ended: a line enters its history once its result is
+        in, and an entry added without running (``history -s``) at once,
+        so the listing only ever grows at its end.
 
         Returns:
             list[dict]: Events with type == EVENT_COMMAND.
         """
-        events = await self.events()
-        ended = {
-            e.get("parent") for e in events if e.get("type") == EVENT_RESULT
-        }
-        return [
-            e
-            for e in events
-            if e.get("type") == EVENT_COMMAND
-            and (e.get("id") is None or e.get("id") in ended)
-        ]
+        ended: list[dict[str, Any]] = []
+        running: dict[str, dict[str, Any]] = {}
+        for e in await self.events():
+            kind = e.get("type")
+            if kind == EVENT_COMMAND and e.get("id") is None:
+                ended.append(e)
+            elif kind == EVENT_COMMAND:
+                running[e["id"]] = e
+            elif kind == EVENT_RESULT and e.get("parent") in running:
+                ended.append(running.pop(e["parent"]))
+        return ended
 
     async def session_command_events(
         self, session: str

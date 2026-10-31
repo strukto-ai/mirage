@@ -88,7 +88,7 @@ function traceLine(
       const call = tracer().startSpan(
         `vfs.${rec.op}`,
         {
-          startTime: rec.timestamp,
+          startTime: rec.timestamp - rec.durationMs,
           attributes: {
             'mirage.vfs.path': rec.path,
             'mirage.vfs.source': rec.source,
@@ -97,7 +97,7 @@ function traceLine(
         },
         parent,
       )
-      call.end(rec.timestamp + rec.durationMs)
+      call.end(rec.timestamp)
     }
   }
   line.end(span[1])
@@ -185,7 +185,7 @@ export class Observer {
   private readonly _store: ObserverStore
   private readonly clock: Clock
   private readonly newest = new Map<string, number | null>()
-  private readonly started = new Map<string, [number, string]>()
+  private readonly started = new Map<string, [number, number, string]>()
 
   constructor(
     store?: ObserverStore,
@@ -247,13 +247,15 @@ export class Observer {
     const init: LogEntryInit = { type: EVENT_COMMAND, session, timestamp: this.nowMs(), command }
     if (cwd !== undefined) init.cwd = cwd
     if (line !== undefined) init.id = line
+    const began = this.clock.monotonic()
     await this.log(new LogEntry(init))
-    if (line !== undefined) this.started.set(line, [init.timestamp, command])
+    if (line !== undefined) this.started.set(line, [init.timestamp, began, command])
   }
 
   /**
    * Record how a typed line ended: its vfs calls, then its result, each
-   * naming the line as its parent.
+   * naming the line as its parent. A line ends once: a second call for a
+   * line already ended records nothing.
    */
   async logResult(
     io: IOResult,
@@ -266,6 +268,11 @@ export class Observer {
     // store.append so one typed line costs one roundtrip and lands
     // atomically in the store. A store whose append never suspends still
     // lets the loop run between a long line's records.
+    const started = line === undefined ? undefined : this.started.get(line)
+    if (line !== undefined) {
+      if (started === undefined) return
+      this.started.delete(line)
+    }
     const budget = new YieldBudget()
     for (const rec of opRecords) {
       const pending = budget.run()
@@ -276,10 +283,17 @@ export class Observer {
     const stdout = decoder.decode(await io.materializeStdout()).slice(0, STDOUT_TRUNCATE)
     const stderr = decoder.decode(await io.materializeStderr()).slice(0, STDOUT_TRUNCATE)
     const now = this.nowMs()
-    const started = line === undefined ? undefined : this.started.get(line)
-    if (line !== undefined) this.started.delete(line)
-    if (started !== undefined) {
-      traceLine(this.workspaceId, session, started[1], [started[0], now], io.exitCode, opRecords)
+    const took =
+      started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
+    if (started !== undefined && took !== undefined) {
+      traceLine(
+        this.workspaceId,
+        session,
+        started[2],
+        [started[0], started[0] + took],
+        io.exitCode,
+        opRecords,
+      )
     }
     const init: LogEntryInit = {
       type: EVENT_RESULT,
@@ -291,7 +305,7 @@ export class Observer {
     }
     if (cwd !== undefined) init.cwd = cwd
     if (line !== undefined) init.parent = line
-    if (started !== undefined) init.durationMs = now - started[0]
+    if (took !== undefined) init.durationMs = took
     await this.log(new LogEntry(init))
   }
 
@@ -334,14 +348,26 @@ export class Observer {
   }
 
   /**
-   * The command events of every session's ended lines, in timestamp
-   * order: a line enters its history once its result is in, and an entry
-   * added without running (`history -s`) at once.
+   * The command events of every session's ended lines, in the order they
+   * ended: a line enters its history once its result is in, and an entry
+   * added without running (`history -s`) at once, so the listing only ever
+   * grows at its end.
    */
   async commandEvents(): Promise<EventDict[]> {
-    const events = await this.events()
-    const ended = new Set(events.filter((e) => e.type === EVENT_RESULT).map((e) => e.parent))
-    return events.filter((e) => e.type === EVENT_COMMAND && (e.id === undefined || ended.has(e.id)))
+    const ended: EventDict[] = []
+    const running = new Map<unknown, EventDict>()
+    for (const e of await this.events()) {
+      if (e.type === EVENT_COMMAND && e.id === undefined) {
+        ended.push(e)
+      } else if (e.type === EVENT_COMMAND) {
+        running.set(e.id, e)
+      } else if (e.type === EVENT_RESULT) {
+        const started = running.get(e.parent)
+        if (started !== undefined) ended.push(started)
+        running.delete(e.parent)
+      }
+    }
+    return ended
   }
 
   /**
