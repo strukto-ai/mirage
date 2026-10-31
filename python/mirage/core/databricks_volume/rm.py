@@ -22,31 +22,92 @@ from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import stat
 from mirage.core.databricks_volume.unlink import unlink
-from mirage.errors.fs import enoent
+from mirage.errors.fs import enoent, enotempty
 from mirage.types import FileType, PathSpec
+
+
+async def holds_child(
+    accessor: DatabricksVolumeAccessor, remote_dir: str
+) -> bool:
+    """Whether a directory lists any entry; a missing one holds none.
+
+    Args:
+        accessor (DatabricksVolumeAccessor): the volume's client.
+        remote_dir (str): the directory's backend path.
+    """
+    try:
+        return bool(await list_directory_contents(accessor, remote_dir))
+    except Exception as exc:
+        if is_not_found(exc):
+            return False
+        raise
 
 
 async def _remove_tree_recurse(
     accessor: DatabricksVolumeAccessor,
     remote_dir: str,
     removed: list[str],
-) -> None:
+    copied: set[str] | None,
+) -> bool:
+    left = False
     for entry in await list_directory_contents(accessor, remote_dir):
         if entry.is_directory:
-            await _remove_tree_recurse(accessor, entry.path, removed)
-        else:
+            left = (
+                await _remove_tree_recurse(
+                    accessor, entry.path, removed, copied
+                )
+                or left
+            )
+        elif copied is None or entry.path in copied:
             await delete_file(accessor, entry.path)
             removed.append(entry.path)
-    await delete_directory(accessor, remote_dir)
+        else:
+            left = True
+    if left:
+        return True
+    try:
+        await delete_directory(accessor, remote_dir)
+    except Exception as exc:
+        # The Files API deletes only an empty directory, so a file written
+        # after the listing refuses it.
+        if is_not_found(exc) or not await holds_child(accessor, remote_dir):
+            raise
+        return True
     removed.append(remote_dir)
+    return False
 
 
-async def _remove_tree(
+async def remove_tree(
     accessor: DatabricksVolumeAccessor,
-    remote_root: str,
+    path: PathSpec,
+    copied: set[str] | None = None,
 ) -> list[str]:
+    """Remove a directory tree, or only the files a move copied out of it.
+
+    The walk lists each directory once, so a file written under it since,
+    or one the move never copied, stays and keeps its directories: the
+    tree is ENOTEMPTY.
+
+    Args:
+        accessor (DatabricksVolumeAccessor): the volume's client.
+        path (PathSpec): the tree's root.
+        copied (set[str] | None): the backend paths of the files a move
+            copied, the only ones deleted; None deletes every file listed.
+
+    Returns:
+        list[str]: the backend paths removed.
+    """
     removed: list[str] = []
-    await _remove_tree_recurse(accessor, remote_root, removed)
+    try:
+        left = await _remove_tree_recurse(
+            accessor, backend_path(accessor.config, path), removed, copied
+        )
+    except Exception as exc:
+        if is_not_found(exc):
+            raise enoent(path) from exc
+        raise
+    if left:
+        raise enotempty(path)
     return removed
 
 
@@ -58,11 +119,5 @@ async def rm_recursive(
     if file_stat.type != FileType.DIRECTORY:
         await unlink(accessor, path)
         return [path.mount_path]
-    remote_root = backend_path(accessor.config, path)
-    try:
-        removed = await _remove_tree(accessor, remote_root)
-    except Exception as exc:
-        if is_not_found(exc):
-            raise enoent(path) from exc
-        raise
+    removed = await remove_tree(accessor, path)
     return [virtual_path(accessor.config, backend, "") for backend in removed]

@@ -19,6 +19,7 @@ import { deleteDirectory, listDirectoryContents } from './client.ts'
 import { ensurePathSpec } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
+import { holdsChild } from './rm.ts'
 import { stat } from './stat.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 
@@ -43,6 +44,9 @@ export async function rmdir(accessor: DatabricksVolumeAccessor, path: PathSpec):
     await deleteDirectory(accessor, remotePath)
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(p.virtual)
+    // The Files API deletes only an empty directory, so a child written
+    // after the listing refuses it.
+    if (await holdsChild(accessor, remotePath)) throw enotempty(p.virtual)
     throw exc
   }
 }

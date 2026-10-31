@@ -47,6 +47,29 @@ describe('object_store rename', () => {
     expect(store.contents()).toEqual({ 'moved/f.txt': 'x', 'moved/sub/g.txt': 'y' })
   })
 
+  it.each([
+    ['file', 'dir/late.txt', 'ENOTEMPTY'],
+    ['marker', 'dir/', 'no-throw'],
+  ])('refuses a source child that arrived during the walk: %s', async (_name, late, code) => {
+    // The walk moved what it listed; a key written under the source after it
+    // stayed, so the source is not empty. A directory made again there is a
+    // later mkdir.
+    const store = new FakeStore({ 'dir/f.txt': 'x' })
+    const driver = makeDriver(store)
+    const racingMove = async (conn: FakeStore, srcPfx: string, dstPfx: string) => {
+      const moved = await driver.movePrefix?.(conn, srcPfx, dstPfx)
+      conn.objects.set(late, new Uint8Array())
+      return moved === true
+    }
+    const racing = { ...driver, movePrefix: racingMove }
+    const rename = makeRename(racing, makeExists(makeStat(racing)))
+    const done = rename(accessor, spec('/dir'), spec('/moved'))
+    if (code === 'ENOTEMPTY') {
+      await expect(done).rejects.toMatchObject({ code, virtualPath: '/mnt/dir' })
+    } else await done
+    expect(store.contents()).toEqual({ 'moved/f.txt': 'x', [late]: '' })
+  })
+
   it('a missing source is ENOENT', async () => {
     const store = new FakeStore()
     await expect(codeOf(renameFor(store)(accessor, spec('/never'), spec('/dst')))).resolves.toBe(

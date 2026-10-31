@@ -56,6 +56,31 @@ describe('core/ssh/rm.rmR', () => {
     expect(await exists(accessor, spec('/d/sub/deep/c.txt'))).toBe(false)
   })
 
+  it('refuses a directory a file was written into during the walk', async () => {
+    // SFTP 3 refuses a non-empty rmdir with its one generic code; a listing
+    // decides it was a child written after the walk's: ENOTEMPTY on the root.
+    const files = new Map([['/d/sub/a.txt', { data: new Uint8Array() }]])
+    const accessor = makeFakeAccessor({
+      files,
+      dirs: new Map([
+        ['/', {}],
+        ['/d', {}],
+        ['/d/sub', {}],
+      ]),
+    })
+    const sftp = await accessor.sftp()
+    const inner = sftp.unlink.bind(sftp)
+    sftp.unlink = ((path: string, cb: Parameters<typeof sftp.unlink>[1]) => {
+      files.set('/d/sub/late', { data: new Uint8Array() })
+      inner(path, cb)
+    }) as typeof sftp.unlink
+    await expect(rmR(accessor, spec('/d'))).rejects.toMatchObject({
+      code: 'ENOTEMPTY',
+      virtualPath: '/d',
+    })
+    expect(await exists(accessor, spec('/d/sub/late'))).toBe(true)
+  })
+
   it('throws ENOENT on missing path', async () => {
     const accessor = makeFakeAccessor({
       files: new Map(),

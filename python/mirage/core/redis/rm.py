@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.redis import RedisAccessor
+from mirage.core.redis.dest import keep_left
+from mirage.errors.fs import enotempty
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
@@ -32,3 +34,6 @@ async def rm_r(accessor: RedisAccessor, path_spec: PathSpec) -> None:
             await store.remove_dir(key)
             await store.del_modified(key)
             await store.del_attrs(key)
+    # The listings ran once, so a key written under the path since stayed.
+    if await keep_left(store, p):
+        raise enotempty(path_spec)

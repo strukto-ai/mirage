@@ -153,7 +153,7 @@ and glob resolution. Writes: `write`, `create`, `mkdir`,
 `rmdir`, `unlink`, recursive `rm`, `cp`, and `mv`.
 
 `mv` and `cp` download and upload the file. These operations are not atomic
-because the Files API has no server-side rename.
+because the Files API has no server-side rename. A directory `mv` removes only the files it copied: a file written into the source meanwhile stays there, and `mv` fails with `Directory not empty`.
 
 ## Shell Commands
 

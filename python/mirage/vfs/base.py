@@ -563,6 +563,10 @@ class BaseVFS:
     async def rmdir(self, path: PathSpec) -> None:
         """Remove an empty directory.
 
+        A store that checks emptiness, then deletes, looks again after:
+        a child written in between keeps the directory, which stays as
+        it was, and the call raises ENOTEMPTY.
+
         Args:
             path (PathSpec): the directory.
         """
@@ -572,6 +576,11 @@ class BaseVFS:
     async def rm_r(self, path: PathSpec) -> Any:
         """Remove a subtree in one call instead of entry by entry.
 
+        A store that lists, then deletes, looks again after: a child
+        written under the root since its listing stays, inside its
+        directories, and the call raises ENOTEMPTY on the root, never
+        success over a key it left.
+
         Args:
             path (PathSpec): the subtree's root.
         """
@@ -580,6 +589,10 @@ class BaseVFS:
     @vfs_call(effect=Effect.RENAME, subtree=True)
     async def rename(self, src: PathSpec, dst: PathSpec) -> FileStat | None:
         """Move a name within this VFS.
+
+        A store that moves a directory by listing it moves only what it
+        listed: a child written under ``src`` since stays there, inside
+        its directories, and the call raises ENOTEMPTY on ``src``.
 
         Args:
             src (PathSpec): the current name.

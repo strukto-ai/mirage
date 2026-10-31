@@ -19,6 +19,7 @@ from mirage.core.databricks_volume.client import (
 )
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path
+from mirage.core.databricks_volume.rm import holds_child
 from mirage.core.databricks_volume.stat import stat
 from mirage.errors.fs import enoent, enotdir, enotempty
 from mirage.types import FileType, PathSpec
@@ -45,4 +46,8 @@ async def rmdir(
     except Exception as exc:
         if is_not_found(exc):
             raise enoent(path) from exc
+        # The Files API deletes only an empty directory, so a child written
+        # after the listing refuses it.
+        if await holds_child(accessor, remote_path):
+            raise enotempty(path) from exc
         raise

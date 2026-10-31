@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -812,6 +813,18 @@ async def mv_generic(
             try:
                 await strategy.rename(src, target)
             except Exception as exc:
+                # A walk that moved what it listed found the source holding
+                # a child written since: as in GNU's move across devices,
+                # the source is what could not be removed.
+                if (
+                    isinstance(exc, OSError)
+                    and exc.errno == errno.ENOTEMPTY
+                    and exc.filename == src.virtual
+                ):
+                    errors.append(
+                        f"mv: cannot remove '{src.raw_path}': {strerror_of(exc)}"
+                    )
+                    continue
                 if not isinstance(exc, (MoveError, *FS_ERRORS)):
                     raise
                 if isinstance(exc, MoveError):

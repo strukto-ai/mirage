@@ -15,7 +15,7 @@
 import { makeResolveGlob } from '@struktoai/mirage-core/utils/glob_walk'
 import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 import { RedisStore } from '../../vfs/redis/store.ts'
 import { copy } from '@struktoai/mirage-core/core/redis/copy'
@@ -273,6 +273,38 @@ describe.skipIf(skip)('core/redis ops', () => {
     await write(acc, spec('/d1/x'), ENC.encode('x'))
     await rename(acc, spec('/d1'), spec('/d2'))
     expect(DEC.decode(await read(acc, spec('/d2/x')))).toBe('x')
+  })
+
+  it.each([
+    ['rmR', '/dir/late'],
+    ['rmR', '/dir/sub/late'],
+    ['rename', '/dir/sub/late'],
+    ['rmdir', '/dir/late'],
+  ] as const)('%s keeps a child written during it inside its directories: %s', async (op, late) => {
+    // The op lists before it acts, so a key written under /dir meanwhile
+    // stays; the directories above it are recorded again and the op is
+    // ENOTEMPTY, never success over an orphan. Mirrors test_file_ops.py.
+    await mkdir(acc, spec('/dir'))
+    if (op !== 'rmdir') {
+      await write(acc, spec('/dir/child'), ENC.encode('child'))
+      await mkdir(acc, spec('/dir/sub'))
+    }
+    const hook = op === 'rmdir' ? 'removeDir' : 'delFile'
+    const inner = store[hook].bind(store)
+    vi.spyOn(store, hook).mockImplementationOnce(async (key: string) => {
+      await store.setFile(late, ENC.encode('late'))
+      await inner(key)
+    })
+    const done =
+      op === 'rename'
+        ? rename(acc, spec('/dir'), spec('/moved'))
+        : (op === 'rmR' ? rmR : rmdir)(acc, spec('/dir'))
+    await expect(done).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect(DEC.decode((await store.getFile(late)) ?? new Uint8Array())).toBe('late')
+    for (const up of late.includes('/sub/') ? ['/dir', '/dir/sub'] : ['/dir']) {
+      expect(await store.hasDir(up)).toBe(true)
+    }
+    if (op === 'rename') expect(DEC.decode(await read(acc, spec('/moved/child')))).toBe('child')
   })
 
   it('copy duplicates contents', async () => {

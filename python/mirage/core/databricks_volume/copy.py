@@ -27,17 +27,27 @@ from mirage.errors.fs import eisdir
 from mirage.types import FileType, PathSpec
 
 
-async def _copy_tree(
+async def copy_tree(
     accessor: DatabricksVolumeAccessor,
     remote_src: str,
     remote_dst: str,
+    copied: set[str] | None = None,
 ) -> None:
+    """Copy a directory tree file by file.
+
+    Args:
+        accessor (DatabricksVolumeAccessor): the volume's client.
+        remote_src (str): the source directory's backend path.
+        remote_dst (str): the destination directory's backend path.
+        copied (set[str] | None): filled with the backend path of each
+            source file copied, for a move to delete exactly those.
+    """
     await create_directory(accessor, remote_dst)
     for entry in await list_directory_contents(accessor, remote_src):
         name = entry.path.rstrip("/").rsplit("/", 1)[-1]
         child_dst = remote_dst.rstrip("/") + "/" + name
         if entry.is_directory:
-            await _copy_tree(accessor, entry.path, child_dst)
+            await copy_tree(accessor, entry.path, child_dst, copied)
         else:
             await upload(
                 accessor,
@@ -45,6 +55,8 @@ async def _copy_tree(
                 await download(accessor, entry.path),
                 overwrite=True,
             )
+            if copied is not None:
+                copied.add(entry.path)
 
 
 async def copy(
@@ -74,7 +86,7 @@ async def copy(
                 f"cannot copy a directory, '{src.virtual}', "
                 f"into itself, '{dst.virtual}'"
             )
-        await _copy_tree(accessor, remote_src, remote_dst)
+        await copy_tree(accessor, remote_src, remote_dst)
         return
     if same_path:
         # Copying a file onto itself would re-upload it; skip.

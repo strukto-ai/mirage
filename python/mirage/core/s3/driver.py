@@ -926,13 +926,17 @@ async def _move_prefix_if(
                         )
                     continue
                 moved.append((key, token))
-        # A batch at a time, so a later batch's failure keeps what one lost.
-        for start in range(0, len(moved), DELETE_BATCH):
-            batch_lost, batch_failed = await _delete_batch(
-                conn, moved[start : start + DELETE_BATCH]
-            )
-            lost += batch_lost
-            failed += batch_failed
+        # As any failed copy, a lost one keeps the whole source: deleting
+        # the rest would split the directory across both ends.
+        if not lost:
+            # A batch at a time, so a later batch's failure keeps what one
+            # lost.
+            for start in range(0, len(moved), DELETE_BATCH):
+                batch_lost, batch_failed = await _delete_batch(
+                    conn, moved[start : start + DELETE_BATCH]
+                )
+                lost += batch_lost
+                failed += batch_failed
     except Exception as exc:
         _raise_lost_before(lost, exc, untouched)
     _raise_kept(lost, failed, untouched)

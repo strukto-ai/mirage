@@ -17,8 +17,8 @@ from typing import cast
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.utils import join_root
-from mirage.errors.fs import enoent
+from mirage.core.ssh.utils import holds_entries, join_root
+from mirage.errors.fs import enoent, enotempty
 from mirage.types import PathSpec
 from mirage.vfs.ssh.config import SSHConfig
 
@@ -28,13 +28,13 @@ async def rm_r(accessor: SSHAccessor, path_spec: PathSpec) -> None:
     config = accessor.config
     sftp = await accessor.sftp()
     try:
-        await _rm_r_inner(sftp, config, path)
+        await _rm_r_inner(sftp, config, path, path_spec)
     except asyncssh.SFTPNoSuchFile:
         raise enoent(path)
 
 
 async def _rm_r_inner(
-    sftp: asyncssh.SFTPClient, config: SSHConfig, path: str
+    sftp: asyncssh.SFTPClient, config: SSHConfig, path: str, root: PathSpec
 ) -> None:
     remote = join_root(config.root, path)
     # lstat, not stat: rm never follows symlinks (a link to a directory
@@ -47,7 +47,16 @@ async def _rm_r_inner(
             if entry.filename in (".", ".."):
                 continue
             child = f"{path.rstrip('/')}/{cast(str, entry.filename)}"
-            await _rm_r_inner(sftp, config, child)
-        await sftp.rmdir(remote)
+            await _rm_r_inner(sftp, config, child, root)
+        try:
+            await sftp.rmdir(remote)
+        except asyncssh.SFTPDirNotEmpty as exc:
+            raise enotempty(root) from exc
+        except asyncssh.SFTPFailure as exc:
+            # A file written after the listing keeps the directory; SFTP 3
+            # says so with its one generic code, so a listing decides.
+            if await holds_entries(sftp, remote):
+                raise enotempty(root) from exc
+            raise
     else:
         await sftp.remove(remote)

@@ -575,20 +575,33 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /**
    * Remove an empty directory. The index is the mount's, which a refused
-   * rmdir's hidden-remnant walk lists through.
+   * rmdir's hidden-remnant walk lists through. A store that checks
+   * emptiness, then deletes, looks again after: a child written in between
+   * keeps the directory, which stays as it was, and the call rejects with
+   * ENOTEMPTY.
    */
   @vfsCall({ effect: Effect.REMOVE, target: Target.DIR })
   rmdir(path: PathSpec, _handed?: Handed): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rmdir', path))
   }
 
-  /** Remove a subtree in one call instead of entry by entry. */
+  /**
+   * Remove a subtree in one call instead of entry by entry. A store that
+   * lists, then deletes, looks again after: a child written under the root
+   * since its listing stays, inside its directories, and the call rejects
+   * with ENOTEMPTY on the root, never success over a key it left.
+   */
   @vfsCall({ effect: Effect.REMOVE, target: Target.DIR, subtree: true })
   rmR(path: PathSpec, _handed?: Handed): Promise<void> {
     return Promise.reject(enotsup(this.name, 'rmR', path))
   }
 
-  /** Move a name within this VFS. */
+  /**
+   * Move a name within this VFS. A store that moves a directory by listing
+   * it moves only what it listed: a child written under `src` since stays
+   * there, inside its directories, and the call rejects with ENOTEMPTY on
+   * `src`.
+   */
   @vfsCall({ effect: Effect.RENAME, subtree: true })
   rename(src: PathSpec, _dst: PathSpec, _handed?: Handed): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'rename', src))

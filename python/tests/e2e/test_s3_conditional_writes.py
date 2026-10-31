@@ -581,7 +581,7 @@ async def test_a_stale_write_is_refused_and_leaves_the_object(
             f"rm: cannot remove '/s3/d/b': {STALE}\n",
         ),
         ("cat /s3/d/a", "after", "d/a", "rm -r /s3/d", "d/b", None),
-        ("cat /s3/d/a", "after", "d/a", "mv /s3/d /s3/e", "d/b", None),
+        ("cat /s3/d/a", "after", "d/a", "mv /s3/d /s3/e", "e/a", None),
         (None, "delete_objects", "d/b", "mv /s3/d /s3/e", "d/a", None),
         (None, COPY, "d/a", "mv /s3/d /s3/e", "e/a", None),
     ],
@@ -602,6 +602,53 @@ async def test_a_directory_op_keeps_and_names_a_changed_file(
         assert err == stderr
     assert fake.buckets["b"][changed] == b"theirs\n"
     assert fake.buckets["b"].get(gone) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "write", [WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL]
+)
+@pytest.mark.parametrize(
+    "line, when, directory, prefix, left",
+    [
+        (
+            "rm -r /s3/d",
+            "delete_objects",
+            "d/",
+            "rm: cannot remove '/s3/d'",
+            ["d/late"],
+        ),
+        (
+            "mv /s3/d /s3/e",
+            "delete_objects",
+            "d/",
+            "mv: cannot remove '/s3/d'",
+            ["d/late"],
+        ),
+        (
+            "rmdir /s3/m",
+            "delete_object",
+            "m/",
+            "rmdir: failed to remove '/s3/m'",
+            ["m/", "m/late"],
+        ),
+    ],
+)
+async def test_a_child_written_during_a_directory_op_is_left_and_reported(
+    fake, workspaces, write, line, when, directory, prefix, left
+):
+    # The walk lists once; a key written under the directory after it
+    # stays, and the op is ENOTEMPTY rather than a success.
+    fake.buckets["b"]["m/"] = b""
+    ws = workspaces(write)
+    fake.before(
+        when, lambda: fake.buckets["b"].update({f"{directory}late": b"new\n"})
+    )
+    code, out, err = await _run(ws, line)
+    assert (code, out, err) == (1, "", f"{prefix}: Directory not empty\n")
+    assert sorted(k for k in fake.buckets["b"] if k.startswith(directory)) == (
+        left
+    )
 
 
 @pytest.mark.asyncio
@@ -1312,19 +1359,22 @@ async def test_a_conditional_rm_r_deletes_page_by_page(fake, workspaces):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("lost", [False, True], ids=["failed", "lost"])
 async def test_a_conditional_dir_mv_copies_everything_before_deleting(
-    fake, workspaces
+    fake, workspaces, lost
 ):
-    # As GNU mv across devices: a copy failing on a later page leaves the source.
+    # As GNU mv across devices: a copy failing on a later page leaves the
+    # source, and so does one whose source changed since it was listed.
     for name in ("c", "d", "e"):
         fake.buckets["b"][f"d/{name}"] = name.encode()
-    before = {k: v for k, v in fake.buckets["b"].items() if k.startswith("d/")}
+    before = sorted(k for k in fake.buckets["b"] if k.startswith("d/"))
     fake.page_size = 2
-    for hook in (lambda: None, lambda: None, lambda: None, _network_down):
+    last = (lambda: _theirs(fake, "d/d")) if lost else _network_down
+    for hook in (lambda: None, lambda: None, lambda: None, last):
         fake.before(COPY, hook)
     ws = workspaces()
     assert (await _run(ws, "mv /s3/d /s3/e"))[0] == 1
-    after = {k: v for k, v in fake.buckets["b"].items() if k.startswith("d/")}
+    after = sorted(k for k in fake.buckets["b"] if k.startswith("d/"))
     assert after == before
     assert _sent(fake, "delete_objects") == []
 
@@ -1335,9 +1385,8 @@ async def test_a_conditional_dir_mv_copies_everything_before_deleting(
     [
         ("delete_objects", "delete_objects", "rm -r /s3/d"),
         (COPY, COPY, "mv /s3/d /s3/e"),
-        (COPY, "delete_objects", "mv /s3/d /s3/e"),
     ],
-    ids=["rm -r", "dir mv", "dir mv, failed removal"],
+    ids=["rm -r", "dir mv"],
 )
 async def test_a_later_error_keeps_the_versions_an_earlier_page_lost(
     fake, workspaces, changed_on, failed_on, line

@@ -42,6 +42,25 @@ describe('object_store remove', () => {
     // and each one was cached under its own key.
   })
 
+  it.each([
+    ['file', 'a/b/late.txt', 'ENOTEMPTY'],
+    ['nested', 'a/b/d/late.txt', 'ENOTEMPTY'],
+    ['marker', 'a/b/', 'no-throw'],
+  ])('removePrefix refuses a child that arrived during the walk: %s', async (_name, late, code) => {
+    // The walk lists once, so a key written after it stays, and the removal
+    // is ENOTEMPTY as GNU rm's last rmdir is; a directory made again is a
+    // later mkdir, not a child the walk missed.
+    const store = new FakeStore({ 'a/b/': '', 'a/b/c.txt': 'hi' })
+    const driver = makeDriver(store)
+    const racingDelete = async (conn: FakeStore, pfx: string): Promise<void> => {
+      await driver.deletePrefix(conn, pfx)
+      conn.objects.set(late, new Uint8Array())
+    }
+    const remove = makeRemovePrefix({ ...driver, deletePrefix: racingDelete })
+    await expect(codeOf(remove(accessor, spec('/a/b')))).resolves.toBe(code)
+    expect(store.contents()).toEqual({ [late]: '' })
+  })
+
   // rmdir is not removePrefix. On a keyed store an empty directory is its
   // marker object, so a prefix delete removes an empty directory correctly
   // and a non-empty one recursively -- which is `rm -r`. The two slots
@@ -93,13 +112,14 @@ describe('object_store remove', () => {
     expect(store.contents()).toEqual({})
   })
 
-  it('rmdir leaves a child that arrived after the probe', async () => {
+  it('rmdir refuses a child that arrived after the probe', async () => {
     // The delete is the marker, not the prefix. A concurrent writer can
     // create a child between the emptiness listing and the delete, and a
     // prefix delete would take that child down with it -- the subtree loss
     // this function exists to stop, in a smaller window. So rmdir deletes
-    // only the one key that spells "empty directory", which nothing
-    // arriving after the probe can widen.
+    // only the one key that spells "empty directory", then looks again:
+    // the child still holds the directory, so rmdir(2) is ENOTEMPTY and the
+    // marker goes back.
     const store = new FakeStore({ 'a/b/': '' })
     const driver = makeDriver(store)
     async function* racingChildren(conn: FakeStore, pfx: string) {
@@ -107,8 +127,8 @@ describe('object_store remove', () => {
       conn.objects.set('a/b/late.txt', new TextEncoder().encode('new'))
     }
     const rmdir = makeRmdir({ ...driver, listChildren: racingChildren })
-    await rmdir(accessor, spec('/a/b'))
-    expect(store.contents()).toEqual({ 'a/b/late.txt': 'new' })
+    await expect(codeOf(rmdir(accessor, spec('/a/b')))).resolves.toBe('ENOTEMPTY')
+    expect(store.contents()).toEqual({ 'a/b/': '', 'a/b/late.txt': 'new' })
     expect(store.deletes).toEqual(['a/b/'])
   })
 })

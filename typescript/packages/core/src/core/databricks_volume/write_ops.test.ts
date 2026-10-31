@@ -216,6 +216,26 @@ describe('rmdir', () => {
     expect(err.code).toBe('ENOTEMPTY')
   })
 
+  it('refuses a child written after the listing', async () => {
+    // The Files API deletes only an empty directory, so a child written
+    // between the listing and the delete refuses it.
+    const listed: { path: string }[] = []
+    const { fetch } = routedFetch((call) => {
+      if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()
+      if (call.method === 'HEAD') return new Response(null, { status: 200 })
+      if (call.method === 'DELETE') {
+        listed.push({ path: `${TEST_ROOT}/empty/late.txt` })
+        return jsonResponse({ error_code: 'BAD_REQUEST', message: 'not empty' }, 400)
+      }
+      return jsonResponse({ contents: listed })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const err = (await rmdir(makeAccessor(), spec('/volume/empty')).catch(
+      (e: unknown) => e,
+    )) as Error & { code?: string }
+    expect(err.code).toBe('ENOTEMPTY')
+  })
+
   it('deletes empty directories', async () => {
     const { fetch, calls } = routedFetch((call) => {
       if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()
@@ -255,6 +275,28 @@ describe('rmRecursive', () => {
     expect(removed).toEqual(['/dir/a.txt', '/dir/sub/b.txt', '/dir/sub', '/dir'])
     expect(deletes).toHaveLength(4)
     expect(deletes.at(-1)).toContain('/fs/directories/')
+  })
+
+  it('keeps a file written during the walk and refuses the removal', async () => {
+    // The Files API deletes only an empty directory: a file written after
+    // the listing refuses it, and the removal is ENOTEMPTY.
+    const listed = [{ path: `${TEST_ROOT}/dir/a.txt` }]
+    const { fetch } = routedFetch((call) => {
+      if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()
+      if (call.method === 'HEAD') return new Response(null, { status: 200 })
+      if (call.method === 'DELETE' && call.url.includes('/fs/files/')) {
+        listed.splice(0, 1, { path: `${TEST_ROOT}/dir/late.txt` })
+        return new Response(null, { status: 200 })
+      }
+      if (call.method === 'DELETE') {
+        return jsonResponse({ error_code: 'BAD_REQUEST', message: 'not empty' }, 400)
+      }
+      return jsonResponse({ contents: listed })
+    })
+    vi.stubGlobal('fetch', fetch)
+    await expect(rmRecursive(makeAccessor(), spec('/volume/dir'))).rejects.toMatchObject({
+      code: 'ENOTEMPTY',
+    })
   })
 
   it('unlinks plain files', async () => {

@@ -60,3 +60,23 @@ async def open_for_write(
         if await sftp.isdir(remote):
             raise eisdir(path) from exc
         raise
+
+
+async def holds_entries(sftp: asyncssh.SFTPClient, remote: str) -> bool:
+    """Whether the remote directory still lists children.
+
+    SFTP 3 answers a not-empty rmdir with its one generic code
+    (``SFTPFailure``); this probe decides between "not empty" and every
+    other refusal that code covers. A probe that fails is a negative
+    probe, never an error to surface; the caller re-raises what the
+    server said.
+
+    Args:
+        sftp (asyncssh.SFTPClient): open SFTP session.
+        remote (str): absolute remote path of the directory.
+    """
+    try:
+        names = await sftp.listdir(remote)
+    except (OSError, asyncssh.Error):
+        return False
+    return any(name not in (".", "..") for name in names)

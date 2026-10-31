@@ -165,6 +165,36 @@ describe('rename', () => {
     expect(err.code).toBe('ENOENT')
   })
 
+  it('keeps a file written after the copy and refuses the move', async () => {
+    // Only what the copy carried is deleted: a file written under the
+    // source since stays there, and the move is ENOTEMPTY rather than a loss.
+    const listed = [{ path: `${TEST_ROOT}/dir/a.txt` }]
+    const deletes: string[] = []
+    const { fetch } = routedFetch((call) => {
+      if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()
+      if (call.method === 'HEAD') return new Response(null, { status: 200 })
+      if (call.method === 'PUT' && call.url.includes('/fs/files/')) {
+        listed.push({ path: `${TEST_ROOT}/dir/late.txt` })
+        return new Response(null, { status: 200 })
+      }
+      if (call.method === 'DELETE') {
+        deletes.push(call.url)
+        return new Response(null, { status: 200 })
+      }
+      if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
+        return jsonResponse({ contents: listed })
+      }
+      if (call.method === 'GET') return new Response('data', { status: 200 })
+      return new Response(null, { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetch)
+    await expect(
+      rename(makeAccessor(), spec('/volume/dir'), spec('/volume/dir2')),
+    ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect(deletes).toHaveLength(1)
+    expect(deletes[0]).toContain('dir/a.txt')
+  })
+
   it('refuses moving a directory into its own subtree and never deletes', async () => {
     const { fetch, calls } = routedFetch((call) => {
       if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()

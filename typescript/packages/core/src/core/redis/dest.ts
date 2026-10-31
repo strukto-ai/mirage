@@ -16,8 +16,10 @@ import type { PathSpec } from '../../types.ts'
 import { eexist, einval, eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { type FsError } from '../../errors/types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
+import { nowIso } from '../../utils/dates.ts'
 import { ancestors } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import type { RedisStoreLike } from '../../vfs/redis/store.ts'
 
 // Reject a destination whose parent chain is not all directories. Mirrors how
@@ -145,4 +147,30 @@ export async function checkMkdirTarget(
     const named = mountedPath(spec, component)
     throw component === key ? eexist(named) : enotdir(named)
   }
+}
+
+/**
+ * Keep what a directory op left under `p` inside its directories, and say
+ * whether it left any. The op lists before it acts, so a key written under
+ * `p` meanwhile stays while the op removes the directories above it, and a
+ * key under no recorded directory is the orphan `checkDestParents` refuses.
+ * Each directory from `p` down to such a key is recorded again, as
+ * `mkdir -p` records it. Mirrors Python's `keep_left`.
+ */
+export async function keepLeft(store: RedisStoreLike, p: string): Promise<boolean> {
+  const prefix = `${rstripSlash(p)}/`
+  const keys = [...(await store.listFiles(prefix)), ...(await store.listDirs())]
+  const left = keys.filter((k) => k.startsWith(prefix))
+  if (left.length === 0) return false
+  const held = new Set([p])
+  for (const key of left) {
+    for (const up of ancestors(key)) if (up.startsWith(prefix)) held.add(up)
+  }
+  const now = nowIso()
+  for (const key of [...held].sort(compareCodePoints)) {
+    if (await store.hasDir(key)) continue
+    await store.addDir(key)
+    if (!(await store.getModified(key))) await store.setModified(key, now)
+  }
+  return true
 }

@@ -24,6 +24,7 @@ from mirage.core.object_store.driver import (
     C,
     ObjectStoreDriver,
     PathFn,
+    holds_child,
     keep_walk,
     refused,
 )
@@ -123,7 +124,13 @@ def make_remove_prefix(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                     kp.key_path(path_spec, kpfx, key),
                     version=sent if isinstance(sent, str) else None,
                 ) from exc
+            # The walk lists once, so a key written under the prefix
+            # after its page was read stays; as GNU rm's last rmdir
+            # meets an entry created after its read, that is ENOTEMPTY.
+            left = await holds_child(driver, conn, pfx)
         lift_lost(path_spec, upto, subtree=True)
+        if left:
+            raise enotempty(path_spec)
 
     return remove_prefix
 
@@ -183,6 +190,13 @@ def make_rmdir(driver: ObjectStoreDriver[A, C]) -> PathFn[A]:
                     # through as the no-op the prefix delete already was.
                     await driver.delete_file(conn, pfx)
                     deleted = True
+                    # A child written between the listing and the delete
+                    # still holds the directory, so rmdir(2) is ENOTEMPTY
+                    # and the marker goes back: a refused rmdir changes
+                    # nothing.
+                    has_child = await holds_child(driver, conn, pfx)
+                    if has_child and driver.markers_supported:
+                        await driver.put(conn, pfx, b"")
             finally:
                 # Gated on the delete having run, not on "did not raise":
                 # the keyless root above deletes nothing and raises

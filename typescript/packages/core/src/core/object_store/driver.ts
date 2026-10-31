@@ -268,7 +268,8 @@ export interface ObjectStoreDriver<A extends Accessor, C> {
    * `movePrefix` moving each key only if it is still the version the mount
    * saw (`known`), else the one listed, onto a destination key the mount
    * holds a version for (`dstKnown`) only if it is still that version; the
-   * keys that changed stay where they were and are thrown in a ConditionLostError.
+   * keys that changed stay where they were and are thrown in a ConditionLostError,
+   * and one changed before its copy keeps every source key where it was.
    */
   movePrefixIf?: (
     conn: C,
@@ -348,4 +349,22 @@ export async function keepLost(
 export function requireHook<F>(hook: F | undefined): F {
   if (hook === undefined) throw new Error('conditional op on a driver without its hook')
   return hook
+}
+
+/**
+ * Whether a prefix holds a child, as `readdir` would list one. The prefix's
+ * own marker is no child: it proves only that the directory exists, and one
+ * made again after a removal is a later `mkdir`, not a key the removal
+ * missed. The listing stops at the first child. Mirrors Python's
+ * `holds_child`.
+ */
+export async function holdsChild<A extends Accessor, C>(
+  driver: ObjectStoreDriver<A, C>,
+  conn: C,
+  pfx: string,
+): Promise<boolean> {
+  for await (const child of driver.listChildren(conn, pfx)) {
+    if (child.kind !== 'marker') return true
+  }
+  return false
 }

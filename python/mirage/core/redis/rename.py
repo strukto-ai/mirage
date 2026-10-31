@@ -16,8 +16,10 @@ from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.dest import (
     check_dest_parents,
     check_rename,
+    keep_left,
     lookup_error,
 )
+from mirage.errors.fs import enotempty
 from mirage.types import PathSpec
 from mirage.utils.dates import now_iso
 from mirage.utils.path import norm
@@ -112,5 +114,8 @@ async def rename(
         await store.remove_dir(s)
         await store.del_modified(s)
         await store.del_attrs(s)
+        # A key written under the source while the subtree moved stayed.
+        if await keep_left(store, s):
+            raise enotempty(src_spec)
     else:
         raise await lookup_error(store, src_spec, s)

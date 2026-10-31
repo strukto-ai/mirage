@@ -334,7 +334,8 @@ class ObjectStoreDriver(Generic[A, C]):
             the one listed, onto a destination key the mount holds a
             version for (``dst_known``) only if it is still that version;
             the keys that changed stay where they were and are raised in a
-            ConditionLostError.
+            ConditionLostError, and one changed before its copy keeps every
+            source key where it was.
         delete_prefix_if (Callable | None): ``delete_prefix`` deleting
             each key only if it is still the version the mount saw, else
             the one listed.
@@ -392,3 +393,24 @@ class ObjectStoreDriver(Generic[A, C]):
     delete_prefix_if: (
         Callable[[C, str, KnownVersions], Awaitable[None]] | None
     ) = None
+
+
+async def holds_child(
+    driver: ObjectStoreDriver[A, C], conn: C, pfx: str
+) -> bool:
+    """Whether a prefix holds a child, as ``readdir`` would list one.
+
+    The prefix's own marker is no child: it proves only that the
+    directory exists, and one made again after a removal is a later
+    ``mkdir``, not a key the removal missed. The listing stops at the
+    first child.
+
+    Args:
+        driver (ObjectStoreDriver): the store's native surface.
+        conn (C): the open connection.
+        pfx (str): the directory's key prefix, trailing slash included.
+    """
+    async for child in driver.list_children(conn, pfx):
+        if child.kind != "marker":
+            return True
+    return False

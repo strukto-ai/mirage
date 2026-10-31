@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '../../types.ts'
 import { enotempty } from '../../errors/fs.ts'
-import { lookupError } from './dest.ts'
+import { keepLeft, lookupError } from './dest.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { norm } from '../../utils/path.ts'
@@ -40,4 +40,7 @@ export async function rmdir(accessor: RedisAccessor, path: PathSpec): Promise<vo
   const candidates = [...files, ...dirs]
   if (candidates.some((k) => k !== p && k.startsWith(prefix))) throw enotempty(path)
   await store.removeDir(p)
+  // A child written after the listing keeps the directory: ENOTEMPTY, and
+  // its entry goes back.
+  if (await keepLeft(store, p)) throw enotempty(path)
 }

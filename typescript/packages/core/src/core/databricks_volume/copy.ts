@@ -24,19 +24,26 @@ import { stat } from './stat.ts'
 import { write } from './write.ts'
 import { eisdir } from '../../errors/fs.ts'
 
-async function copyTree(
+/**
+ * Copy a directory tree file by file, adding the backend path of each
+ * source file copied to `copied`, for a move to delete exactly those.
+ * Mirrors Python's `copy_tree`.
+ */
+export async function copyTree(
   accessor: DatabricksVolumeAccessor,
   remoteSrc: string,
   remoteDst: string,
+  copied: Set<string> | null = null,
 ): Promise<void> {
   await createDirectory(accessor, remoteDst)
   for (const entry of await listDirectoryContents(accessor, remoteSrc)) {
     const name = rstripSlash(entry.path).split('/').pop() ?? ''
     const childDst = `${rstripSlash(remoteDst)}/${name}`
     if (entry.isDirectory) {
-      await copyTree(accessor, entry.path, childDst)
+      await copyTree(accessor, entry.path, childDst, copied)
     } else {
       await upload(accessor, childDst, await download(accessor, entry.path), true)
+      copied?.add(entry.path)
     }
   }
 }

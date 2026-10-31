@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 from dataclasses import replace
 
 import pytest
@@ -47,6 +48,37 @@ def test_rename_falls_back_to_the_prefix_walk(accessor):
     store = FakeStore({"dir/f.txt": b"x", "dir/sub/g.txt": b"y"})
     asyncio.run(_rename_for(store)(accessor, spec("/dir"), spec("/moved")))
     assert store.objects == {"moved/f.txt": b"x", "moved/sub/g.txt": b"y"}
+
+
+@pytest.mark.parametrize(
+    "late, refused",
+    [("dir/late.txt", True), ("dir/", False)],
+    ids=["file", "marker"],
+)
+def test_rename_refuses_a_source_child_that_arrived_during_the_walk(
+    accessor, late, refused
+):
+    # The walk moved what it listed; a key written under the source after
+    # it stayed, so the source is not empty. A directory made again there
+    # is a later mkdir.
+    store = FakeStore({"dir/f.txt": b"x"})
+    driver = make_driver(store)
+
+    async def racing_move(conn, src_pfx, dst_pfx):
+        moved = await driver.move_prefix(conn, src_pfx, dst_pfx)
+        conn.objects[late] = b""
+        return moved
+
+    racing = replace(driver, move_prefix=racing_move)
+    rename = make_rename(racing, make_exists(make_stat(racing)))
+    if refused:
+        with pytest.raises(OSError) as exc:
+            asyncio.run(rename(accessor, spec("/dir"), spec("/moved")))
+        assert exc.value.errno == errno.ENOTEMPTY
+        assert exc.value.filename == "/mnt/dir"
+    else:
+        asyncio.run(rename(accessor, spec("/dir"), spec("/moved")))
+    assert store.objects == {"moved/f.txt": b"x", late: b""}
 
 
 def test_rename_missing_source_is_enoent(accessor):

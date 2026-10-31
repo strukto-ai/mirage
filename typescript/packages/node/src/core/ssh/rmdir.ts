@@ -16,27 +16,7 @@ import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent, enotempty } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import { isFailure, isNoSuchFile, joinRoot } from './utils.ts'
-
-// The probe behind the version-3 arm below: whether the directory
-// still lists children. A probe that fails is a negative probe, never
-// an error to surface; the caller re-raises what the server said.
-async function holdsEntries(accessor: SSHAccessor, remote: string): Promise<boolean> {
-  const sftp = await accessor.sftp()
-  try {
-    return await new Promise<boolean>((resolveFn, rejectFn) => {
-      sftp.readdir(remote, (err, entries) => {
-        if (err !== undefined) {
-          rejectFn(err)
-          return
-        }
-        resolveFn(entries.some((e) => e.filename !== '.' && e.filename !== '..'))
-      })
-    })
-  } catch {
-    return false
-  }
-}
+import { holdsEntries, isFailure, isNoSuchFile, joinRoot } from './utils.ts'
 
 // SFTP 3 has one generic code for a not-empty refusal (SSH_FX_FAILURE),
 // which is what ssh2 always speaks, so one listing probe decides
@@ -60,7 +40,7 @@ export async function rmdir(accessor: SSHAccessor, p: PathSpec): Promise<void> {
       })
     })
   } catch (err) {
-    if (isFailure(err) && (await holdsEntries(accessor, remote))) {
+    if (isFailure(err) && (await holdsEntries(sftp, remote))) {
       throw enotempty(p)
     }
     throw err

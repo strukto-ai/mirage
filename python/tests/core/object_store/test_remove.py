@@ -47,6 +47,34 @@ def test_remove_prefix_deletes_the_subtree(accessor):
     # and each one was cached under its own key.
 
 
+@pytest.mark.parametrize(
+    "late, refused",
+    [("a/b/late.txt", True), ("a/b/d/late.txt", True), ("a/b/", False)],
+    ids=["file", "nested", "marker"],
+)
+def test_remove_prefix_refuses_a_child_that_arrived_during_the_walk(
+    accessor, late, refused
+):
+    # The walk lists once, so a key written after it stays, and the
+    # removal is ENOTEMPTY as GNU rm's last rmdir is; a directory made
+    # again is a later mkdir, not a child the walk missed.
+    store = FakeStore({"a/b/": b"", "a/b/c.txt": b"hi"})
+    driver = make_driver(store)
+
+    async def racing_delete(conn, pfx):
+        await driver.delete_prefix(conn, pfx)
+        conn.objects[late] = b""
+
+    remove = make_remove_prefix(replace(driver, delete_prefix=racing_delete))
+    if refused:
+        with pytest.raises(OSError) as exc:
+            asyncio.run(remove(accessor, spec("/a/b")))
+        assert exc.value.errno == errno.ENOTEMPTY
+    else:
+        asyncio.run(remove(accessor, spec("/a/b")))
+    assert store.objects == {late: b""}
+
+
 def test_rmdir_refuses_a_nonempty_prefix_and_keeps_every_key(accessor):
     """rmdir is not make_remove_prefix.
 
@@ -111,14 +139,15 @@ def test_rmdir_on_an_empty_mount_root_is_a_no_op(accessor):
     assert store.objects == {}
 
 
-def test_rmdir_leaves_a_child_that_arrived_after_the_probe(accessor):
-    """The delete is the marker, not the prefix.
+def test_rmdir_refuses_a_child_that_arrived_after_the_probe(accessor):
+    """The delete is the marker, not the prefix, and a late child refuses it.
 
     A concurrent writer can create a child between the emptiness listing
     and the delete, and a prefix delete would take that child down with
     it -- the subtree loss this function exists to stop, in a smaller
     window. So rmdir deletes only the one key that spells "empty
-    directory", which nothing arriving after the probe can widen.
+    directory", then looks again: the child still holds the directory,
+    so rmdir(2) is ENOTEMPTY and the marker goes back.
     """
     store = FakeStore({"a/b/": b""})
     driver = make_driver(store)
@@ -129,8 +158,10 @@ def test_rmdir_leaves_a_child_that_arrived_after_the_probe(accessor):
         conn.objects["a/b/late.txt"] = b"new"
 
     rmdir = make_rmdir(replace(driver, list_children=racing_children))
-    asyncio.run(rmdir(accessor, spec("/a/b")))
-    assert store.objects == {"a/b/late.txt": b"new"}
+    with pytest.raises(OSError) as refused:
+        asyncio.run(rmdir(accessor, spec("/a/b")))
+    assert refused.value.errno == errno.ENOTEMPTY
+    assert store.objects == {"a/b/": b"", "a/b/late.txt": b"new"}
     assert store.deletes == ["a/b/"]
 
 
