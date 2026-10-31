@@ -125,6 +125,15 @@ async def main() -> None:
             result = await ws.shell(line)
             assert await result.stdout_str() == "42\n"
             print(f"$ {line}\n42")
+
+            clash = Path(out) / "name_cli.py"
+            clash.write_text(
+                fill(mcp_to_mirage.TEMPLATE, "name", SERVER, tools)
+            )
+            ws.register_cli("name", load_cli(clash, "NAME"), {})
+            result = await ws.shell("name add-numbers '{'")
+            stderr = await result.stderr_str()
+            assert stderr.startswith("name add-numbers: invalid JSON"), stderr
         finally:
             await ws.close()
 
