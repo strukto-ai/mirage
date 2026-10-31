@@ -20,7 +20,7 @@ import {
   EVENT_CLEAR,
   EVENT_COMMAND,
   EVENT_DELETE,
-  EVENT_OP,
+  EVENT_VFS,
   LogEntry,
   type LogEntryInit,
   STDOUT_TRUNCATE,
@@ -37,7 +37,7 @@ import { currentExecutionId } from '../context/session_context.ts'
  */
 export const logger: { debug?: (message: string) => void } = {}
 
-const KNOWN_EVENTS = new Set<string>([EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_OP])
+const KNOWN_EVENTS = new Set<string>([EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_VFS])
 
 export type EventDict = Record<string, unknown>
 

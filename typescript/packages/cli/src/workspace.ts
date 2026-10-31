@@ -178,6 +178,29 @@ interface AskRecord {
   note: string
 }
 
+interface HistoryEntry {
+  type: string
+  session: string
+  timestamp: number
+  command?: string
+  exit_code?: number
+  vfs?: string
+  path?: string
+}
+
+function formatHistory(items: HistoryEntry[]): string {
+  if (items.length === 0) return 'No history.'
+  return formatTable(
+    ['TIME', 'SESSION', 'EXIT', 'ENTRY'],
+    items.map((e) => [
+      new Date(e.timestamp).toISOString().slice(0, 19).replace('T', ' '),
+      e.session,
+      e.exit_code === undefined ? '' : String(e.exit_code),
+      e.type === 'command' ? (e.command ?? '') : `${e.vfs ?? ''} ${e.path ?? ''}`,
+    ]),
+  )
+}
+
 function formatAsks(items: AskRecord[]): string {
   if (items.length === 0) return 'No asks.'
   return formatTable(
@@ -381,6 +404,33 @@ export function registerWorkspaceCommands(program: Command): void {
       emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
     })
 
+  ws.command('history')
+    .description('Show what the workspace ran, oldest first.')
+    .argument('<id>')
+    .option('--session <sessionId>', "Only this session's entries")
+    .option('--since <ms>', 'Only entries at or after this epoch ms')
+    .option('--last <count>', 'Only the newest this many entries')
+    .option('--vfs', 'Include each call a line made to a mount')
+    .action(
+      async (
+        id: string,
+        opts: { session?: string; since?: string; last?: string; vfs?: boolean },
+      ) => {
+        const params = new URLSearchParams()
+        if (opts.session !== undefined) params.set('session_id', opts.session)
+        if (opts.since !== undefined) params.set('since', opts.since)
+        if (opts.last !== undefined) params.set('last', opts.last)
+        if (opts.vfs === true) params.set('vfs', 'true')
+        const c = makeClient()
+        await c.ensureRunning({ allowSpawn: false })
+        const qs = params.toString()
+        const r = await c.request(
+          'GET',
+          `/v1/workspaces/${encodeURIComponent(id)}/history${qs === '' ? '' : `?${qs}`}`,
+        )
+        emit((await handleResponse(r)) as HistoryEntry[], formatHistory)
+      },
+    )
   ws.command('list-asks')
     .description('List pending asks (every decision with --all).')
     .argument('<id>')

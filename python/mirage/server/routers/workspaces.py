@@ -449,6 +449,38 @@ async def get_workspace(
     return await make_detail(entry, verbose=verbose)
 
 
+@router.get("/{workspace_id}/history")
+async def workspace_history(
+    workspace_id: str,
+    request: Request,
+    session_id: str | None = Query(None),
+    since: int | None = Query(None, ge=0),
+    last: int | None = Query(None, ge=0),
+    vfs: bool = Query(False),
+) -> list[dict[str, Any]]:
+    """The workspace's recorded history, oldest first: a ``command``
+    entry for every line its sessions ran, and with ``vfs`` a ``vfs``
+    entry for every call a line made to a mount. Read on the workspace's
+    own loop.
+
+    Args:
+        workspace_id (str): the workspace.
+        request (Request): the request, for the registry.
+        session_id (str | None): only this session's entries.
+        since (int | None): only entries at or after this epoch
+            millisecond.
+        last (int | None): only the newest this many entries.
+        vfs (bool): include the ``vfs`` entries.
+    """
+    entry = require_entry(request, workspace_id)
+    if request.app.state.registry.removing(workspace_id):
+        raise HTTPException(status_code=404, detail="workspace not found")
+    history = entry.runner.ws.history(
+        session_id=session_id, since=since, last=last, vfs=vfs
+    )
+    return await entry.runner.call(history)
+
+
 @router.delete("/{workspace_id}", response_model=DeleteWorkspaceResponse)
 async def delete_workspace(
     workspace_id: str, request: Request

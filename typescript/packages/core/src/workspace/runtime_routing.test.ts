@@ -627,7 +627,7 @@ describe('whole-line runtimes', () => {
       const logged = await ws.observer.events()
       const line = logged.findIndex((e) => e.command === 'anything')
       const before = logged[line - 1]
-      expect([before?.type, before?.op, before?.path]).toEqual(['op', 'read', '/f.txt'])
+      expect([before?.type, before?.vfs, before?.path]).toEqual(['vfs', 'read', '/f.txt'])
     } finally {
       await ws.close()
     }
@@ -793,7 +793,7 @@ describe('whole-line runtimes', () => {
       const line = logged.findIndex((e) => e.command === 'anything')
       expect(line).toBeGreaterThan(0)
       const before = logged[line - 1]
-      expect([before?.type, before?.op, before?.path]).toEqual(['op', 'read', '/f.txt'])
+      expect([before?.type, before?.vfs, before?.path]).toEqual(['vfs', 'read', '/f.txt'])
     } finally {
       await ws.close()
     }

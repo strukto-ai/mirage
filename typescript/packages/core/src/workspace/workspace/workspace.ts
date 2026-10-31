@@ -35,6 +35,7 @@ import {
   type RedisIndexConfig,
 } from '../../cache/index/config.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { EVENT_COMMAND, EVENT_VFS } from '../../observe/log_entry.ts'
 import { type EventDict, Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import type { OpKwargs } from '../../view/types.ts'
@@ -733,11 +734,25 @@ export class Workspace {
   }
 
   /**
-   * Command events recorded by the hidden recorder, across all sessions
-   * in timestamp order.
+   * What the hidden recorder holds, oldest first: a `command` entry for
+   * every line run, and with `vfs` a `vfs` entry for every call a line
+   * made to a mount. `sessionId` keeps one session's entries, `since`
+   * those at or after an epoch millisecond, `last` the newest that many.
+   * Mirrors Python's `Workspace.history`.
    */
-  history(): Promise<EventDict[]> {
-    return this.observer.commandEvents()
+  async history(
+    options: { sessionId?: string; since?: number; last?: number; vfs?: boolean } = {},
+  ): Promise<EventDict[]> {
+    const { sessionId, since, last, vfs = false } = options
+    const kinds = new Set<unknown>(vfs ? [EVENT_COMMAND, EVENT_VFS] : [EVENT_COMMAND])
+    const picked = (await this.observer.events()).filter(
+      (e) =>
+        kinds.has(e.type) &&
+        (sessionId === undefined || e.session === sessionId) &&
+        (since === undefined || (typeof e.timestamp === 'number' ? e.timestamp : 0) >= since),
+    )
+    if (last === undefined) return picked
+    return picked.slice(Math.max(0, picked.length - last))
   }
 
   /** The session an op runs under: the bound one, else the default. */

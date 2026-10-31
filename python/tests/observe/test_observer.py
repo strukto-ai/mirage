@@ -40,9 +40,9 @@ def test_log_op_writes_jsonl():
     asyncio.run(obs.log_op(rec, session="sess-1"))
     data = store.files["/2021-01-01/sess-1.jsonl"]
     parsed = json.loads(data.decode().strip())
-    assert parsed["type"] == "op"
+    assert parsed["type"] == "vfs"
     assert parsed["session"] == "sess-1"
-    assert parsed["op"] == "read"
+    assert parsed["vfs"] == "read"
 
 
 def test_log_execution_writes_jsonl():

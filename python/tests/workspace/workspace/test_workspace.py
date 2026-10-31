@@ -467,7 +467,7 @@ async def test_a_manual_clock_workspace_keeps_one_time_domain_in_history():
         await ws.shell("history -c")
         await asyncio.sleep(0)
         events = await ws.observer.events()
-        assert {e["type"] for e in events} >= {"op", "command", "clear"}
+        assert {e["type"] for e in events} >= {"vfs", "command", "clear"}
         assert {e["timestamp"] for e in events} == {
             1_000_000_000,
             1_000_005_000,

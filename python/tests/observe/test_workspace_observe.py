@@ -21,6 +21,7 @@ from mirage import MountMode, Workspace
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.observe.log_entry import STDOUT_TRUNCATE
 from mirage.observe.store import RAMObserverStore
+from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 
 
@@ -66,7 +67,7 @@ def test_logs_contain_op_records():
     data = obs_store.files[session_files[0]]
     lines = data.decode().strip().split("\n")
     types = {json.loads(line)["type"] for line in lines}
-    assert "op" in types
+    assert "vfs" in types
     assert "command" in types
 
 
@@ -141,10 +142,10 @@ def test_execute_records_op_source():
     asyncio.run(ws.shell("echo hello > /data/test.txt"))
     asyncio.run(ws.shell("cat /data/test.txt"))
     events = asyncio.run(ws.observer.events())
-    ops = [e for e in events if e["type"] == "op"]
+    ops = [e for e in events if e["type"] == "vfs"]
     assert ops
     assert all("source" in e for e in ops)
-    assert "/data/test.txt" in {e["path"] for e in ops if e["op"] == "read"}
+    assert "/data/test.txt" in {e["path"] for e in ops if e["vfs"] == "read"}
 
 
 def test_execute_records_op_path_per_mount():
@@ -158,7 +159,7 @@ def test_execute_records_op_path_per_mount():
     ):
         asyncio.run(ws.shell(line))
     events = asyncio.run(ws.observer.events())
-    ops = [(e["op"], e["path"]) for e in events if e["type"] == "op"]
+    ops = [(e["vfs"], e["path"]) for e in events if e["type"] == "vfs"]
     assert ops == [
         ("write", "/s3/report.json"),
         ("write", "/db/report.json"),
@@ -176,4 +177,41 @@ def test_execute_records_every_event_type():
     asyncio.run(ws.shell("history -d 1"))
     asyncio.run(ws.shell("history -c"))
     events = asyncio.run(ws.observer.events())
-    assert {"clear", "command", "delete", "op"} <= {e["type"] for e in events}
+    assert {"clear", "command", "delete", "vfs"} <= {e["type"] for e in events}
+
+
+@pytest.mark.asyncio
+async def test_history_filters_by_session_time_count_and_vfs():
+    clock = ManualClock(start=1000.0)
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
+    try:
+        await ws.shell("echo hi > /data/a.txt")
+        clock.advance(10)
+        ws.create_session("s2")
+        await ws.shell("cat /data/a.txt", session_id="s2")
+        assert [e["command"] for e in await ws.history()] == [
+            "echo hi > /data/a.txt",
+            "cat /data/a.txt",
+        ]
+        assert [
+            (e["type"], e.get("vfs") or e["command"])
+            for e in await ws.history(vfs=True)
+        ] == [
+            ("vfs", "write"),
+            ("command", "echo hi > /data/a.txt"),
+            ("vfs", "read"),
+            ("command", "cat /data/a.txt"),
+        ]
+        later = [["cat /data/a.txt"]] * 3
+        assert [
+            [e["command"] for e in await ws.history(session_id="s2")],
+            [e["command"] for e in await ws.history(since=1_010_000)],
+            [e["command"] for e in await ws.history(last=1)],
+        ] == later
+        assert [e["type"] for e in await ws.history(last=2, vfs=True)] == [
+            "vfs",
+            "command",
+        ]
+        assert await ws.history(last=0) == []
+    finally:
+        await ws.close()

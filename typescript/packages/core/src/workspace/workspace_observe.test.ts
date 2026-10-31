@@ -18,6 +18,7 @@ import { STDOUT_TRUNCATE } from '../observe/log_entry.ts'
 import { RAMObserverStore } from '../observe/store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
+import { ManualClock } from '../utils/clock.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const DEC = new TextDecoder()
@@ -85,7 +86,7 @@ describe('Workspace observer wiring', () => {
         .filter((l) => l !== '')
         .map((l) => (JSON.parse(l) as Record<string, unknown>).type),
     )
-    expect(types.has('op')).toBe(true)
+    expect(types.has('vfs')).toBe(true)
     expect(types.has('command')).toBe(true)
     await ws.close()
   })
@@ -162,10 +163,10 @@ describe('Workspace observer wiring', () => {
     await ws.shell('echo hello > /data/test.txt')
     await ws.shell('cat /data/test.txt')
     const events = await ws.observer.events()
-    const ops = events.filter((e) => e.type === 'op')
+    const ops = events.filter((e) => e.type === 'vfs')
     expect(ops.length).toBeGreaterThan(0)
     expect(ops.every((e) => 'source' in e)).toBe(true)
-    expect(ops.filter((e) => e.op === 'read').length).toBeGreaterThan(0)
+    expect(ops.filter((e) => e.vfs === 'read').length).toBeGreaterThan(0)
     expect(new Set(ops.map((e) => e.path))).toEqual(new Set(['/data/test.txt']))
     await ws.close()
   })
@@ -189,8 +190,8 @@ describe('Workspace observer wiring', () => {
       await ws.shell(line)
     }
     const ops = (await ws.observer.events())
-      .filter((e) => e.type === 'op')
-      .map((e) => [e.op, e.path])
+      .filter((e) => e.type === 'vfs')
+      .map((e) => [e.vfs, e.path])
     expect(ops).toEqual([
       ['write', '/s3/report.json'],
       ['write', '/db/report.json'],
@@ -210,9 +211,42 @@ describe('Workspace observer wiring', () => {
     await ws.shell('history -c')
     const events = await ws.observer.events()
     const types = new Set(events.map((e) => e.type))
-    for (const kind of ['clear', 'command', 'delete', 'op']) {
+    for (const kind of ['clear', 'command', 'delete', 'vfs']) {
       expect(types.has(kind)).toBe(true)
     }
     await ws.close()
+  })
+})
+
+describe('Workspace.history', () => {
+  it('filters by session, time, count and vfs', async () => {
+    const clock = new ManualClock(1000)
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
+    try {
+      await ws.shell('echo hi > /data/a.txt')
+      clock.advance(10)
+      ws.createSession('s2')
+      await ws.shell('cat /data/a.txt', { sessionId: 's2' })
+      expect((await ws.history()).map((e) => e.command)).toEqual([
+        'echo hi > /data/a.txt',
+        'cat /data/a.txt',
+      ])
+      expect((await ws.history({ vfs: true })).map((e) => [e.type, e.vfs ?? e.command])).toEqual([
+        ['vfs', 'write'],
+        ['command', 'echo hi > /data/a.txt'],
+        ['vfs', 'read'],
+        ['command', 'cat /data/a.txt'],
+      ])
+      for (const options of [{ sessionId: 's2' }, { since: 1_010_000 }, { last: 1 }]) {
+        expect((await ws.history(options)).map((e) => e.command)).toEqual(['cat /data/a.txt'])
+      }
+      expect((await ws.history({ last: 2, vfs: true })).map((e) => e.type)).toEqual([
+        'vfs',
+        'command',
+      ])
+      expect(await ws.history({ last: 0 })).toEqual([])
+    } finally {
+      await ws.close()
+    }
   })
 })

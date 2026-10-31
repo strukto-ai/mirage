@@ -24,7 +24,7 @@ from mirage.observe.log_entry import (
     EVENT_CLEAR,
     EVENT_COMMAND,
     EVENT_DELETE,
-    EVENT_OP,
+    EVENT_VFS,
     STDOUT_TRUNCATE,
     LogEntry,
 )
@@ -341,7 +341,7 @@ class Observer:
             events (list[dict]): LogEntry dicts from StateKey.HISTORY.
         """
         await self._store.clear()
-        known = (EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_OP)
+        known = (EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_VFS)
         newest = _newest_stamp([e for e in events if e.get("type") in known])
         written = (
             self._now_ms() if newest is None else max(self._now_ms(), newest)

@@ -60,9 +60,9 @@ describe('Observer', () => {
       string,
       unknown
     >
-    expect(parsed.type).toBe('op')
+    expect(parsed.type).toBe('vfs')
     expect(parsed.session).toBe('sess-1')
-    expect(parsed.op).toBe('read')
+    expect(parsed.vfs).toBe('read')
   })
 
   it('logExecution writes a command JSONL line', async () => {
