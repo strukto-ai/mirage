@@ -47,7 +47,6 @@ For SDK guides, see [Google Calendar (Python)](/python/vfs/gcal) and [Google Cal
         clientId: process.env.GOOGLE_CLIENT_ID!,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
         refreshToken: process.env.GOOGLE_REFRESH_TOKEN!,
-        bucketDays: 1,
       }),
     }, { mode: MountMode.READ })
     const result = await ws.shell('ls /gcal/primary')
