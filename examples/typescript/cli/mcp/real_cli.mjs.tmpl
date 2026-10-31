@@ -57,8 +57,13 @@ function transport(log) {
   const [command, ...args] = SERVER.command
   const env = Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined))
   const stdio = new StdioClientTransport({ command, args, env, cwd: SERVER.cwd ?? undefined, stderr: 'pipe' })
-  stdio.stderr?.on('data', (chunk) => log.push(String(chunk)))
+  stdio.stderr?.on('data', (chunk) => keepTail(log, String(chunk)))
   return stdio
+}
+
+// Keep the last 20 lines of a server's stderr, all a failure prints.
+function keepTail(log, chunk) {
+  log.splice(0, log.length, ...`${log.join('')}${chunk}`.split(/(?<=\n)/).slice(-20))
 }
 
 async function call(tool, args, log) {

@@ -55,8 +55,13 @@ function transport(config: ServerConfig, log: string[]): Transport {
     cwd: config.cwd ?? undefined,
     stderr: 'pipe',
   })
-  stdio.stderr?.on('data', (chunk: Buffer) => log.push(String(chunk)))
+  stdio.stderr?.on('data', (chunk: Buffer) => keepTail(log, String(chunk)))
   return stdio
+}
+
+// Keep the last 20 lines of a server's stderr, all a failure prints.
+function keepTail(log: string[], chunk: string): void {
+  log.splice(0, log.length, ...`${log.join('')}${chunk}`.split(/(?<=\n)/).slice(-20))
 }
 
 function causes(error: unknown): string[] {
