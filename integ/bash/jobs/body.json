@@ -273,7 +273,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(n=0; while [ $n -lt 2 ]; do echo w$n & n=$((n+1)); done; wait) 2>/dev/null",
+      "command": "(n=0; while [ $n -lt 2 ]; do echo w$n & n=$((n+1)); done; wait) 2>/dev/null | sort",
       "expect": {
         "exit": 0,
         "stdout": "w0\nw1\n",
@@ -308,7 +308,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(for ((k=0;k<2;k++)); do echo k$k & done; wait) 2>/dev/null",
+      "command": "(for ((k=0;k<2;k++)); do echo k$k & done; wait) 2>/dev/null | sort",
       "expect": {
         "exit": 0,
         "stdout": "k0\nk1\n",
