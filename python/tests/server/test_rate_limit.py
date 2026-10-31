@@ -132,7 +132,8 @@ async def test_a_function_key_counts_what_it_answers():
     async with _client(rate_limits=limits) as client:
         assert (await client.get("/v1/workspaces")).status_code == 200
         assert (await client.get("/v1/workspaces")).status_code == 429
-        assert (await client.get("/v1/ready")).status_code == 200
+        assert (await client.get("/v1/workspaces/a")).status_code == 404
+        assert (await client.get("/v1/workspaces/a")).status_code == 429
 
 
 @pytest.mark.asyncio

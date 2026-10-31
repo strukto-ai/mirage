@@ -57,7 +57,8 @@ class DaemonRpcServer(MirageRpcServer):
     """The RPC server as the daemon serves it.
 
     ``shell`` is a daemon job, as ``POST /shell`` and MCP's ``shell``
-    are, so it drains at shutdown and a cancelled request cancels it. Every other call runs on the workspace's own loop.
+    are, so it drains at shutdown and a cancelled request cancels it.
+    Every other call runs on the workspace's own loop.
 
     Args:
         entry (WorkspaceEntry): the workspace.

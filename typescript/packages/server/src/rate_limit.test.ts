@@ -125,9 +125,10 @@ describe('registerRateLimits', () => {
       await statuses({ rateLimits: [byPath] }, [
         { url: '/v1/workspaces' },
         { url: '/v1/workspaces' },
-        { url: '/v1/ready' },
+        { url: '/v1/workspaces/a' },
+        { url: '/v1/workspaces/a' },
       ]),
-    ).toEqual([200, 429, 200])
+    ).toEqual([200, 429, 404, 429])
   })
 
   it('counts the client a trusted proxy names', async () => {

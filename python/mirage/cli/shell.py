@@ -94,9 +94,7 @@ def shell_cmd(
                 code = runner.run(
                     stream_shell(
                         client,
-                        path
-                        + "?"
-                        + urlencode({**query, "stream": "true"}),
+                        path + "?" + urlencode({**query, "stream": "true"}),
                         payload,
                         piped,
                         json_output=json_output,

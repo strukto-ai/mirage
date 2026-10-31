@@ -288,7 +288,7 @@ export class WorkerProxy {
     const probe = this.open(worker, 'GET', AUTH_PROBE, headers)
     probe.end()
     const answer = await answered(probe)
-    return answer.status < 300 ? null : answer
+    return answer.status === 404 ? null : answer
   }
 
   /**

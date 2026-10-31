@@ -575,24 +575,21 @@ it.each(['', 'x'.repeat(128 * 1024 + 1)])(
   },
 )
 
-it.each(['explain'])(
-  'refuses streaming with %s before submitting work',
-  async (other) => {
-    const app = buildApp()
-    try {
-      await createWs(app, 'bad-stream')
-      const result = await app.inject({
-        method: 'POST',
-        url: `/v1/workspaces/bad-stream/shell?stream=true&${other}=true`,
-        payload: { command: 'echo no' },
-      })
-      expect(result.statusCode).toBe(400)
-      expect(app.jobs.list()).toEqual([])
-    } finally {
-      await app.close()
-    }
-  },
-)
+it.each(['explain'])('refuses streaming with %s before submitting work', async (other) => {
+  const app = buildApp()
+  try {
+    await createWs(app, 'bad-stream')
+    const result = await app.inject({
+      method: 'POST',
+      url: `/v1/workspaces/bad-stream/shell?stream=true&${other}=true`,
+      payload: { command: 'echo no' },
+    })
+    expect(result.statusCode).toBe(400)
+    expect(app.jobs.list()).toEqual([])
+  } finally {
+    await app.close()
+  }
+})
 
 it('streams a prefix before completion and joins cancellation after disconnect', async () => {
   const app = buildApp()

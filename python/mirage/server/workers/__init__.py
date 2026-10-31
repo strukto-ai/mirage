@@ -12,10 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.server.workers.config import resolve_worker_type, resolve_workers
-from mirage.server.workers.pool import WorkerPool
-from mirage.server.workers.proxy import WorkerProxy, build_worker_proxy
-from mirage.server.workers.types import WorkerType
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.server.workers.config import (
+        resolve_worker_type,
+        resolve_workers,
+    )
+    from mirage.server.workers.pool import WorkerPool
+    from mirage.server.workers.proxy import WorkerProxy, build_worker_proxy
+    from mirage.server.workers.types import WorkerType
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.server.workers.config": ("resolve_worker_type", "resolve_workers"),
+    "mirage.server.workers.pool": ("WorkerPool",),
+    "mirage.server.workers.proxy": ("WorkerProxy", "build_worker_proxy"),
+    "mirage.server.workers.types": ("WorkerType",),
+}
 
 __all__ = [
     "WorkerPool",
@@ -25,3 +40,5 @@ __all__ = [
     "resolve_worker_type",
     "resolve_workers",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

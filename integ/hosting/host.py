@@ -34,6 +34,12 @@ async def main() -> None:
     async def entered(key: str) -> dict[str, bool]:
         return {"entered": key in gates}
 
+    # The lines a workspace's sessions have queued, which have not started.
+    @app.get("/__integ/pending/{wid}")
+    async def pending(wid: str) -> dict[str, list[str]]:
+        jobs = app.state.jobs.list(wid)
+        return {"pending": [j.command for j in jobs if j.status == "pending"]}
+
     @app.post("/__integ/release/{key}")
     async def release(key: str) -> dict[str, bool]:
         gates.setdefault(key, asyncio.Event()).set()
