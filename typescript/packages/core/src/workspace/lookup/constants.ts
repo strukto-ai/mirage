@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { linkMode } from '../../commands/builtin/generic/ls.ts'
 import { declaredFacts } from '../../commands/builtin/generic_bind/factory.ts'
 import { FlagView, SPECS, WordKind, parseCommand } from '../../commands/spec/index.ts'
 import { parseToKwargs } from '../../commands/spec/parser.ts'
@@ -21,7 +20,7 @@ import { compileSpec } from '../../commands/spec/compile.ts'
 import { PARSES_KEPT } from '../../commands/spec/constants.ts'
 import { BUILTIN_GROUP } from '../../shell/constants.ts'
 import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
-import { Follow, LineFacts, type LsLinkMode, type PathSpec } from '../../types.ts'
+import { Follow, LineFacts, type PathSpec } from '../../types.ts'
 
 // Bash builtins the parser accepts but the executor cannot honor; they
 // still lookup to the shell layer so the error names a capability gap.
@@ -174,25 +173,6 @@ const SELF_RESOLVING: ReadonlySet<string> = new Set([
   'setfattr',
 ])
 
-const LS_FOLLOWS: Readonly<Record<LsLinkMode, Follow>> = {
-  all: Follow.LAST,
-  directory: Follow.DIRECTORY,
-  none: Follow.NONE,
-}
-
-/**
- * An ls line resolves the command-line links `linkMode` says, and walks, and
- * reads, below its operands under `-R`. Mirrors Python's `_ls_facts`.
- */
-function lsFacts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
-  const recursive = fl.asBool('recursive')
-  return new LineFacts({
-    follows: LS_FOLLOWS[linkMode(fl)],
-    walks: recursive,
-    readsSubtree: recursive,
-  })
-}
-
 /**
  * What a line of a builtin does, read off its parsed flags by the command's
  * own facts; a wrapper does what the program it runs does. Mirrors Python's
@@ -204,7 +184,7 @@ export function factsOf(
   operands: readonly (string | PathSpec)[],
 ): LineFacts {
   const runs = EXEC_WRAPPERS.get(name)?.[0] ?? name
-  const declared = runs === 'ls' ? lsFacts : declaredFacts(runs)
+  const declared = declaredFacts(runs)
   const facts =
     declared instanceof LineFacts ? declared : declared(new FlagView(bag, SPECS[runs]), operands)
   if (SELF_RESOLVING.has(name)) return facts.with({ follows: Follow.NONE })

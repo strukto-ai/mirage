@@ -20,6 +20,8 @@ import {
   LINK_TARGET_KEY,
   FileStat,
   FileType,
+  Follow,
+  LineFacts,
   PathSpec,
   type LsIndicator,
   type LsLinkMode,
@@ -830,6 +832,12 @@ export interface LsFlags {
 }
 
 // The three spellings of a command-line link policy; the last one wins.
+const FOLLOWS: Readonly<Record<LsLinkMode, Follow>> = {
+  all: Follow.LAST,
+  directory: Follow.DIRECTORY,
+  none: Follow.NONE,
+}
+
 const DEREF_DESTS = [
   'dereference',
   'dereference_command_line',
@@ -986,6 +994,19 @@ export function linkMode(fl: FlagView, indicator?: LsIndicator): LsLinkMode {
     if (!(err instanceof UsageError)) throw err
   }
   return fl.asBool('directory') || long || classify ? 'none' : 'directory'
+}
+
+/**
+ * An ls line resolves the command-line links `linkMode` says, and walks, and
+ * reads, below its operands under `-R`. Mirrors Python's `facts`.
+ */
+export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
+  const recursive = fl.asBool('recursive')
+  return new LineFacts({
+    follows: FOLLOWS[linkMode(fl)],
+    walks: recursive,
+    readsSubtree: recursive,
+  })
 }
 
 // Parse the ls flag bag once into a frozen struct. GNU's rules that are
