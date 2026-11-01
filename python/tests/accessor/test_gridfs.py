@@ -15,6 +15,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from bson.codec_options import DatetimeConversion
 
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.vfs.gridfs.config import GridFSConfig
@@ -37,4 +38,5 @@ async def test_client_connects_to_the_configured_uri():
         "mongodb://localhost:27017",
         connectTimeoutMS=30000,
         socketTimeoutMS=30000,
+        datetime_conversion=DatetimeConversion.DATETIME,
     )

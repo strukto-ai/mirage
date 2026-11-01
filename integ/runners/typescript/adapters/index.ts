@@ -125,7 +125,7 @@ import { ManualClock } from '@struktoai/mirage-core/utils/clock'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { ChromaClient } from 'chromadb'
-import { Double, MongoClient } from 'mongodb'
+import { Binary, DBRef, Decimal128, Double, Long, MongoClient } from 'mongodb'
 import pg from 'pg'
 import {
   installFakeNavigator,
@@ -1542,6 +1542,50 @@ const MONGODB_AUTHORS: ReadonlyArray<Record<string, unknown>> = [
   { _id: 3, name: 'cara', books: 1 },
 ]
 
+const MONGODB_BSON_DB = 'mirage_integ_bson'
+
+const MONGODB_UUID = Buffer.from('00112233445566778899aabbccddeeff', 'hex')
+
+const MONGODB_BSON_TYPES: ReadonlyArray<Record<string, unknown>> = [
+  {
+    _id: 1,
+    type: 'decimal',
+    a: Decimal128.fromString('1.10'),
+    b: Decimal128.fromString('-0'),
+    c: Decimal128.fromString('NaN'),
+    d: Decimal128.fromString('-Infinity'),
+    e: Decimal128.fromString('1E+400'),
+  },
+  { _id: 2, type: 'uuid', v: new Binary(MONGODB_UUID, 4) },
+  { _id: 3, type: 'uuid_legacy', v: new Binary(MONGODB_UUID, 3) },
+  {
+    _id: 4,
+    type: 'dbref',
+    a: new DBRef('authors', 1),
+    b: new DBRef('authors', 2, 'mirage_integ'),
+  },
+  {
+    _id: 5,
+    type: 'date',
+    a: new Date(0),
+    b: new Date(1577836800123),
+    c: new Date(-1),
+    d: new Date(253402300799999),
+    e: new Date(253402300800000),
+    f: new Date(-62135596800001),
+  },
+  {
+    _id: 6,
+    type: 'int64',
+    a: Long.fromNumber(5),
+    b: Long.fromString('9007199254740992'),
+    c: Long.fromString('9007199254740993'),
+    d: Long.fromString('-9007199254740993'),
+    e: Long.MAX_VALUE,
+    f: Long.MIN_VALUE,
+  },
+]
+
 async function seedMongodb(uri: string): Promise<void> {
   const client = new MongoClient(uri)
   await client.connect()
@@ -1558,6 +1602,9 @@ async function seedMongodb(uri: string): Promise<void> {
       viewOn: 'books',
       pipeline: [{ $match: { year: { $gte: 2022 } } }],
     })
+    const bson = client.db(MONGODB_BSON_DB)
+    await bson.dropDatabase()
+    await bson.collection('types').insertMany(MONGODB_BSON_TYPES.map((d) => ({ ...d })))
   } finally {
     await client.close()
   }

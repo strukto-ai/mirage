@@ -1210,6 +1210,18 @@
    "python_only": {
     "_NS_PER_MS": "OpenTelemetry's Python API takes a span's times in nanoseconds; its JavaScript API takes the recorder's milliseconds as they are."
    }
+  },
+  "core/mongodb/stream": {
+   "typescript_only": {
+    "ISO_DATE_END": "Python's json_util writes a $date as ISO-8601 for 1970 through 9999 only, the Extended JSON bound; bson's relaxed EJSON runs five hours into year 10000, so TypeScript applies the bound itself before EJSON.",
+    "relaxedEjson": "Python's json_util writes a $date as ISO-8601 for 1970 through 9999 only, the Extended JSON bound; bson's relaxed EJSON runs five hours into year 10000, so TypeScript applies the bound itself before EJSON.",
+    "isLong": "pymongo decodes every Int64 as an exact int and json_util writes its digits; the JS driver keeps one past 2^53 as a Long, which bson's relaxed EJSON would round to a double, so TypeScript renders it itself."
+   }
+  },
+  "core/mongodb/sampler": {
+   "typescript_only": {
+    "isDBRefLike": "Python tells a DBRef apart with isinstance; the JS driver's DBRef is told apart by its _bsontype, as the sampler's other is*Like checks are."
+   }
   }
  }
 }

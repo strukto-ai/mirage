@@ -17,7 +17,16 @@ import math
 from collections.abc import Iterable
 from typing import Any, TypeVar
 
-from bson import Binary, Decimal128, Int64, ObjectId, Regex, Timestamp
+from bson import (
+    Binary,
+    DatetimeMS,
+    DBRef,
+    Decimal128,
+    Int64,
+    ObjectId,
+    Regex,
+    Timestamp,
+)
 from pymongo.asynchronous.collection import AsyncCollection
 
 from mirage.core.mongodb.types import PRIMARY_KEY, BsonTypeTag
@@ -34,7 +43,9 @@ def _scalar_tag(v: _T) -> str:
     if isinstance(v, bool):
         return BsonTypeTag.BOOL
     if isinstance(v, Int64):
-        return BsonTypeTag.LONG
+        # The JS driver returns an Int64 up to 2^53 as a JS number, typed
+        # int there; only a wider one stays a Long. Mirror it here.
+        return BsonTypeTag.LONG if abs(v) > 2**53 else BsonTypeTag.INT
     if isinstance(v, int):
         return BsonTypeTag.INT
     if isinstance(v, float):
@@ -54,7 +65,7 @@ def _scalar_tag(v: _T) -> str:
         return BsonTypeTag.OBJECT_ID
     if isinstance(v, Decimal128):
         return BsonTypeTag.DECIMAL
-    if isinstance(v, dt.datetime):
+    if isinstance(v, (dt.datetime, DatetimeMS)):
         return BsonTypeTag.DATE
     if isinstance(v, Timestamp):
         return BsonTypeTag.TIMESTAMP
@@ -62,9 +73,11 @@ def _scalar_tag(v: _T) -> str:
         return BsonTypeTag.BINARY
     if isinstance(v, Regex):
         return BsonTypeTag.REGEX
+    if isinstance(v, DBRef):
+        return BsonTypeTag.OBJECT
     if v is None:
         return BsonTypeTag.NULL
-    return type(v).__name__
+    return BsonTypeTag.UNKNOWN
 
 
 def _array_tag(items: Iterable[Any]) -> str:

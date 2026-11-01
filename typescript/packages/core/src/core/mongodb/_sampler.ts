@@ -67,6 +67,11 @@ function isRegexLike(v: unknown): boolean {
   return (v as { _bsontype?: string })._bsontype === 'BSONRegExp'
 }
 
+function isDBRefLike(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null) return false
+  return (v as { _bsontype?: string })._bsontype === 'DBRef'
+}
+
 function scalarTag(v: unknown): string {
   if (typeof v === 'boolean') return BsonTypeTag.BOOL
   if (isLongLike(v)) return BsonTypeTag.LONG
@@ -78,6 +83,7 @@ function scalarTag(v: unknown): string {
   if (isTimestampLike(v)) return BsonTypeTag.TIMESTAMP
   if (isBinaryLike(v)) return BsonTypeTag.BINARY
   if (isRegexLike(v)) return BsonTypeTag.REGEX
+  if (isDBRefLike(v)) return BsonTypeTag.OBJECT
   if (v === null) return BsonTypeTag.NULL
   return BsonTypeTag.UNKNOWN
 }

@@ -15,6 +15,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from bson.codec_options import DatetimeConversion
 
 from mirage.accessor.mongodb import MongoDBAccessor
 from mirage.vfs.mongodb.config import MongoDBConfig
@@ -39,6 +40,7 @@ async def test_client_constructs_async_mongo_client(accessor):
         "mongodb://localhost:27017",
         connectTimeoutMS=30000,
         socketTimeoutMS=30000,
+        datetime_conversion=DatetimeConversion.DATETIME_AUTO,
     )
 
 

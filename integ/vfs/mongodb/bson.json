@@ -1,0 +1,30 @@
+{
+  "cases": [
+    {
+      "id": "mdb_bson_documents",
+      "seq": 622100,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongo-bson/mirage_integ_bson/collections/types/documents.jsonl",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"_id\": 1, \"type\": \"decimal\", \"a\": {\"$numberDecimal\": \"1.10\"}, \"b\": {\"$numberDecimal\": \"-0\"}, \"c\": {\"$numberDecimal\": \"NaN\"}, \"d\": {\"$numberDecimal\": \"-Infinity\"}, \"e\": {\"$numberDecimal\": \"1E+400\"}}\n{\"_id\": 2, \"type\": \"uuid\", \"v\": {\"$binary\": {\"base64\": \"ABEiM0RVZneImaq7zN3u/w==\", \"subType\": \"04\"}}}\n{\"_id\": 3, \"type\": \"uuid_legacy\", \"v\": {\"$binary\": {\"base64\": \"ABEiM0RVZneImaq7zN3u/w==\", \"subType\": \"03\"}}}\n{\"_id\": 4, \"type\": \"dbref\", \"a\": {\"$ref\": \"authors\", \"$id\": 1}, \"b\": {\"$ref\": \"authors\", \"$id\": 2, \"$db\": \"mirage_integ\"}}\n{\"_id\": 5, \"type\": \"date\", \"a\": {\"$date\": \"1970-01-01T00:00:00Z\"}, \"b\": {\"$date\": \"2020-01-01T00:00:00.123Z\"}, \"c\": {\"$date\": {\"$numberLong\": \"-1\"}}, \"d\": {\"$date\": \"9999-12-31T23:59:59.999Z\"}, \"e\": {\"$date\": {\"$numberLong\": \"253402300800000\"}}, \"f\": {\"$date\": {\"$numberLong\": \"-62135596800001\"}}}\n{\"_id\": 6, \"type\": \"int64\", \"a\": 5, \"b\": 9007199254740992, \"c\": 9007199254740993, \"d\": -9007199254740993, \"e\": 9223372036854775807, \"f\": -9223372036854775808}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mdb_bson_schema_fields",
+      "seq": 622101,
+      "targets": [
+        "mongodb"
+      ],
+      "command": "cat /mongo-bson/mirage_integ_bson/collections/types/schema.json | jq -c '.fields[] | [.path, .types]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"a\",{\"decimal\":0.16666666666666666,\"object\":0.16666666666666666,\"date\":0.16666666666666666,\"int\":0.16666666666666666}]\n[\"b\",{\"decimal\":0.16666666666666666,\"object\":0.16666666666666666,\"date\":0.16666666666666666,\"int\":0.16666666666666666}]\n[\"c\",{\"decimal\":0.16666666666666666,\"date\":0.16666666666666666,\"long\":0.16666666666666666}]\n[\"d\",{\"decimal\":0.16666666666666666,\"date\":0.16666666666666666,\"long\":0.16666666666666666}]\n[\"e\",{\"decimal\":0.16666666666666666,\"date\":0.16666666666666666,\"long\":0.16666666666666666}]\n[\"f\",{\"date\":0.16666666666666666,\"long\":0.16666666666666666}]\n[\"type\",{\"string\":1}]\n[\"v\",{\"binary\":0.3333333333333333}]\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

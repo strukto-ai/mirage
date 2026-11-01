@@ -1639,6 +1639,17 @@
               "excluded"
             ]
           }
+        },
+        {
+          "path": "/mongo-bson",
+          "vfs": "mongodb",
+          "backend": "mongodb",
+          "mode": "read",
+          "config": {
+            "databases": [
+              "mirage_integ_bson"
+            ]
+          }
         }
       ]
     },

@@ -18,7 +18,8 @@ import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
-import { follow, lastLines, lineCount, readStream } from './stream.ts'
+import { Long } from 'bson'
+import { follow, lastLines, lineCount, readStream, stringifyDoc } from './stream.ts'
 
 function docs(database: string, kind = 'collections', name = 'users'): PathSpec {
   const virtual = `/mongo/${database}/${kind}/${name}/documents.jsonl`
@@ -254,5 +255,27 @@ describe('mongodb read stand-ins', () => {
     expect(await lastLines(accessor, schema, 2)).toBeNull()
     expect(await lineCount(accessor, schema)).toBeNull()
     expect(await follow(accessor, docs('app', 'views', 'recent'), 5)).toBeNull()
+  })
+})
+
+describe('mongodb document rendering', () => {
+  it('writes an Int64 past 2^53 with its exact digits', () => {
+    expect(stringifyDoc({ a: Long.fromString('9007199254740993'), b: Long.MIN_VALUE })).toBe(
+      '{"a": 9007199254740993, "b": -9223372036854775808}',
+    )
+  })
+
+  it('writes a $date as ISO-8601 for years 1970 through 9999 only', () => {
+    expect(
+      stringifyDoc({
+        a: new Date(0),
+        b: new Date(253402300799999),
+        c: new Date(253402300800000),
+        d: new Date(-1),
+      }),
+    ).toBe(
+      '{"a": {"$date": "1970-01-01T00:00:00Z"}, "b": {"$date": "9999-12-31T23:59:59.999Z"}, ' +
+        '"c": {"$date": {"$numberLong": "253402300800000"}}, "d": {"$date": {"$numberLong": "-1"}}}',
+    )
   })
 })
