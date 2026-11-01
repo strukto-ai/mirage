@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { encodedPath } from '../msgraph/client.ts'
-import { graphApi, type MsGraphConfigResolved } from '../msgraph/config.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { encodedPath } from '../msgraph/client.ts'
+import type { resolveMsGraphConfig } from '../msgraph/config.ts'
+import { graphApi } from '../msgraph/config.ts'
 
 /**
  * A drive item's Graph URL.
@@ -30,7 +31,7 @@ import { stripSlash } from '../../utils/slash.ts'
  *   action: optional trailing Graph action, e.g. `/content`.
  */
 export function itemUrl(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   driveId: string,
   path: string,
   action = '',

@@ -12,19 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { ShellExecSpec, ShellExecutor, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import type { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { command, type Command } from '@struktoai/mirage-core/commands/config'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { IOResult } from '@struktoai/mirage-core/io/types'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { LocalRuntime, Workspace, parseSessionProfile } from '@struktoai/mirage-node'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { LocalRuntime, SessionProfile, Workspace } from '@struktoai/mirage-node'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MirageService } from './service.ts'
-import { MirageShellExecutor } from './shell.ts'
 import type { MirageShellConfig } from './shell.ts'
-import type { ShellExecSpec, ShellExecutor, ShellRunResult } from '@deepseek-ai/dsh-shell'
+import { MirageShellExecutor } from './shell.ts'
 
 const DEC = new TextDecoder()
 
@@ -368,7 +368,7 @@ describe('sandbox policy', () => {
       { '/data': [new RAMVFS(), MountMode.WRITE] },
       {
         profiles: {
-          scoped: parseSessionProfile(
+          scoped: SessionProfile(
             {
               commands: {
                 allow: ['cat', 'ls', 'echo'],

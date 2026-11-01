@@ -12,18 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compileSpec } from '../../../spec/compile.ts'
-import type { CommandSpec } from '../../../spec/types.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AirtableConfigSchema } from '../../../../core/airtable/config.ts'
 import {
-  FEATURES,
   FakeAirtable,
+  FEATURES,
   OPS,
   ROADMAP,
   TOKEN,
 } from '../../../../../tests/core/airtable/_test_util.ts'
+import { AirtableConfig } from '../../../../core/airtable/config.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
+import { compileSpec } from '../../../spec/compile.ts'
+import type { CommandSpec } from '../../../spec/types.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { AIRTABLE } from './index.ts'
@@ -84,7 +84,7 @@ describe('airtable tree', () => {
 
   it('is registered under its name', () => {
     expect(cliSpecFor('airtable')).toBe(AIRTABLE)
-    expect(AIRTABLE.configModel).toBe(AirtableConfigSchema)
+    expect(AIRTABLE.configModel).toBe(AirtableConfig)
     expect(AIRTABLE.spec.usageStyle).toBe(UsageStyle.ARGPARSE)
     expect(
       Object.fromEntries(

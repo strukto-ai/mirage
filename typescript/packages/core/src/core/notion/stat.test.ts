@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
-import { NotionVFSBase } from '../../vfs/notion/notion.ts'
+import { ContentType, FileStat, FileType, PathSpec } from '../../types.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { NotionVFS } from '../../vfs/notion/notion.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { NotionAPIError, type NotionTransport } from './client.ts'
@@ -56,7 +56,7 @@ function spec(virtual: string, prefix = ''): PathSpec {
 // `path`'s stat through a mount at the root, which lists each folder above it
 // to hand the backend the rows there.
 function mountedStat(transport: NotionTransport, path: string): Promise<FileStat> {
-  const vfs = new NotionVFSBase({ accessor: makeAccessor(transport) })
+  const vfs = new NotionVFS({ accessor: makeAccessor(transport) })
   return new Workspace({ '/': vfs }).dispatch('stat', path) as Promise<FileStat>
 }
 

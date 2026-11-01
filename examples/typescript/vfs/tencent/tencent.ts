@@ -19,8 +19,8 @@ import {
   MountMode,
   TencentVFS,
   Workspace,
-  resolvedTencentEndpoint,
-  type TencentConfig,
+
+  TencentConfig,
   type FileStat,
 } from '@struktoai/mirage-node'
 
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const config = configFromEnv()
   const ws = new Workspace({ '/cos/': new TencentVFS(config) }, { mode: MountMode.READ })
   try {
-    console.log(`=== Tencent COS at ${resolvedTencentEndpoint(config)} ===`)
+    console.log(`=== Tencent COS at ${TencentConfig.resolvedEndpoint(config)} ===`)
 
     let r = await ws.shell('ls /cos/')
     console.log('ls /cos/:\n' + r.stdoutText)

@@ -12,28 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  FileChangeKind,
-  FileEvent,
-  OverflowPolicy,
-  PathSpec,
-  type FileEventInit,
-} from '../../types.ts'
+import { FileChangeKind, FileEvent, OverflowPolicy, PathSpec } from '../../types.ts'
 import { DEFAULT_MAX_PENDING } from '../constants.ts'
 import { QueueClosed, QueueOverflowError } from '../errors.ts'
 import type { EventQueue } from './base.ts'
 
-interface Signal {
-  promise: Promise<void>
-  wake: () => void
-}
-
-export interface RAMEventQueueOptions {
-  maxPending?: number
-  onOverflow?: OverflowPolicy
-}
-
-function signal(): Signal {
+export function signal() {
   let wake = (): void => undefined
   const promise = new Promise<void>((resolve) => {
     wake = resolve
@@ -41,7 +25,7 @@ function signal(): Signal {
   return { promise, wake }
 }
 
-function replacement(init: FileEventInit): FileEvent {
+function replacement(init: NonNullable<ConstructorParameters<typeof FileEvent>[0]>): FileEvent {
   return new FileEvent(init)
 }
 
@@ -55,7 +39,13 @@ export class RAMEventQueue implements EventQueue {
   private closed = false
   private ready = signal()
 
-  constructor(roots: PathSpec | readonly PathSpec[], options: RAMEventQueueOptions = {}) {
+  constructor(
+    roots: PathSpec | readonly PathSpec[],
+    options: {
+      maxPending?: number
+      onOverflow?: OverflowPolicy
+    } = {},
+  ) {
     this.roots = roots instanceof PathSpec ? [roots] : [...roots]
     this.label = this.roots.map((root) => root.virtual).join(', ')
     this.maxPending = options.maxPending ?? DEFAULT_MAX_PENDING

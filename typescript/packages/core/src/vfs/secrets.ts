@@ -14,6 +14,8 @@
 
 import { z, type ZodObject, type ZodRawShape } from 'zod'
 import { type FieldNormalizer, normalizedKey, normalizeFields } from '../utils/normalize.ts'
+import { isRecord } from '../utils/records.ts'
+import { REDACTED_SECRET } from './constants.ts'
 
 // Re-exported so a config schema in the browser or node package is built
 // with the zod core resolves, not with a second copy of its own. The
@@ -22,54 +24,14 @@ import { type FieldNormalizer, normalizedKey, normalizeFields } from '../utils/n
 // it still type-checks, but it takes minutes per config file.
 export { z }
 
-export const REDACTED_SECRET = '<REDACTED>' as const
-
 const SECRET_META_KEY = 'mirageSecret'
 
-type SchemaType = z.core.SomeType
-type ShapeRecord = Record<string, SchemaType>
-interface SchemaDef {
-  innerType?: SchemaType
-}
-
-// A config's shape, read off the schema that already validates it rather
-// than declared a second time by hand. `z.infer` alone is not a drop-in:
-// it renders an optional field as `k?: T | undefined`, which under
-// `exactOptionalPropertyTypes` is wider than the `k?: T` these configs
-// were written with and stops a subclass's state from matching its base's.
-// The mapping is homomorphic, so `?` survives and only the explicit
-// `undefined` goes.
-export type ConfigOf<S extends z.ZodType> = {
-  [K in keyof z.infer<S>]: Exclude<z.infer<S>[K], undefined>
-}
-
-// The redacted twin of a config, naming only the secret fields. The
-// `secretStr`/`secretSchema` marker is runtime metadata on a plain
-// `z.ZodString`, so no type can read it back off the schema and the secret
-// list has to be written down once; what this removes is the other half of
-// the twin, which used to re-list every ordinary field by hand and drifted
-// the moment one was added. The mapping goes through `Pick` so it is
-// homomorphic and an optional secret stays optional: a bare `[P in K]` is
-// not, and made every optional secret required.
-//
-// A nullable secret keeps null in the redacted twin, because an absent
-// credential is not a masked one: `redactValueWithSchema` returns null
-// before it ever asks whether the field is secret, mirroring Python's
-// `if value is None: continue` in `_walk_config_dump`. Masking it would
-// plant a `<REDACTED>` marker that makes `Workspace.load` demand a fresh
-// config for a snapshot that never held a credential.
-export type RedactedConfig<T, K extends keyof T> = Omit<T, K> & {
-  [P in keyof Pick<T, K>]: null extends T[P]
-    ? typeof REDACTED_SECRET | null
-    : typeof REDACTED_SECRET
-}
-
-export function secretStr(): z.ZodString {
+export function secretStr(): SecretSchema<z.ZodString> {
   return secretSchema(z.string())
 }
 
-export function secretSchema<T extends z.ZodType>(schema: T): T {
-  return schema.meta({ [SECRET_META_KEY]: true })
+export function secretSchema<T extends z.ZodType>(schema: T): SecretSchema<T> {
+  return schema.meta({ [SECRET_META_KEY]: true }) as SecretSchema<T>
 }
 
 /**
@@ -194,11 +156,11 @@ function refusesExtraKeys(schema: ZodObject<ZodRawShape>): boolean {
   return catchall === undefined || catchall instanceof z.ZodNever
 }
 
-export function redactConfigWithSchema<T extends ZodRawShape>(
-  schema: ZodObject<T>,
+export function redactConfigWithSchema<S extends ZodObject>(
+  schema: S,
   config: unknown,
-): Record<string, unknown> {
-  return redactValueWithSchema(schema, schema.parse(config)) as Record<string, unknown>
+): RedactedSchema<S> {
+  return redactValueWithSchema(schema, schema.parse(config)) as RedactedSchema<S>
 }
 
 export function hasRedactedSecret(value: unknown): boolean {
@@ -251,7 +213,7 @@ function redactObjectWithSchema(
   value: Record<string, unknown>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = { ...value }
-  const shape = schema.shape as ShapeRecord
+  const shape = schema.shape as Record<string, SchemaType>
   for (const [key, childSchema] of Object.entries(shape)) {
     if (!(key in out)) continue
     out[key] = redactValueWithSchema(childSchema, out[key])
@@ -295,6 +257,71 @@ function schemaDef(schema: SchemaType): SchemaDef {
   return candidate.def ?? candidate._zod?.def ?? {}
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+declare const SECRET_SCHEMA: unique symbol
+
+/** A schema whose value is secret; this marker changes no input type. */
+export type SecretSchema<S extends z.ZodType> = S & { readonly [SECRET_SCHEMA]: true }
+
+type Unwrapped<S extends z.ZodType> =
+  S extends SecretSchema<z.ZodType>
+    ? S
+    : S extends
+          | z.ZodOptional<infer I>
+          | z.ZodNullable<infer I>
+          | z.ZodDefault<infer I>
+          | z.ZodPrefault<infer I>
+          | z.ZodNonOptional<infer I>
+          | z.ZodReadonly<infer I>
+      ? I extends z.ZodType
+        ? Unwrapped<I>
+        : S
+      : S
+
+type SecretValue<S extends z.ZodType> =
+  Unwrapped<S> extends SecretSchema<z.ZodType>
+    ? true
+    : Unwrapped<S> extends z.ZodRecord<z.core.$ZodRecordKey, infer V>
+      ? V extends z.ZodType
+        ? SecretValue<V>
+        : false
+      : false
+
+type RedactedValue<S extends z.ZodType, T> =
+  SecretValue<S> extends true
+    ? typeof REDACTED_SECRET | Extract<T, null | undefined>
+    : Unwrapped<S> extends z.ZodObject<infer Shape>
+      ? RedactedFields<T, Shape>
+      : Unwrapped<S> extends z.ZodArray<infer Item>
+        ? Item extends z.ZodType
+          ? T extends (infer V)[]
+            ? RedactedValue<Item, V>[]
+            : T extends readonly (infer V)[]
+              ? readonly RedactedValue<Item, V>[]
+              : T
+          : T
+        : T
+
+type RedactedFields<T, Shape extends z.ZodRawShape> = {
+  [K in keyof T]: Exclude<
+    K extends keyof Shape
+      ? Shape[K] extends z.ZodType
+        ? RedactedValue<Shape[K], T[K]>
+        : T[K]
+      : T[K],
+    undefined
+  >
+}
+
+/** Snapshot fields inferred from the same schema that redacts them at runtime. */
+export type RedactedSchema<S extends z.ZodObject, C = ConfigOf<S>> = RedactedFields<C, S['shape']>
+
+/** Schema output with absent optional fields, matching exactOptionalPropertyTypes. */
+export type ConfigOf<S extends z.ZodType> = {
+  [K in keyof z.infer<S>]: Exclude<z.infer<S>[K], undefined>
+}
+
+export type SchemaType = z.core.SomeType
+
+export interface SchemaDef {
+  innerType?: SchemaType
 }

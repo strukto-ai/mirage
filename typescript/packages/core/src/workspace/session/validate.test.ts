@@ -11,17 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../commands/spec/types.ts'
-import { CLIHandler } from '../../commands/cli/types.ts'
-
 import { describe, expect, it } from 'vitest'
-
-import { CLI } from '../../commands/cli/types.ts'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 import type { AdmissionRules, CommandRule } from '../../policy/types.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { checkCliVerbs, checkRules } from './validate.ts'
 
@@ -198,13 +195,13 @@ describe('createSession reads the verbs of an installed CLI', () => {
     )
     expect(() =>
       ws.createSession('bad', {
-        permissions: parseSessionProfile({
+        permissions: SessionProfile({
           commands: { deny: [{ reason: 'no', commands: ['prog walk'] }] },
         }),
       }),
     ).toThrow(/no verb for/)
     ws.createSession('good', {
-      permissions: parseSessionProfile({
+      permissions: SessionProfile({
         commands: { deny: [{ reason: 'no', commands: ['prog run'] }] },
       }),
     })

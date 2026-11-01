@@ -15,11 +15,10 @@
 
 from collections.abc import Iterable, Mapping, Sequence
 
+from mirage.rs.document import from_units, units
 from mirage.rs.policy import (
     admission_matcher,
-    from_units,
     link_trace_wire,
-    units,
     visibility_matcher,
 )
 from mirage.types import HiddenPaths, Visibility

@@ -16,7 +16,7 @@ import { isFsError } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { GraphError, graphList } from './client.ts'
-import type { MsGraphConfigResolved } from './config.ts'
+import type { resolveMsGraphConfig } from './config.ts'
 import { type DriveLoc, iterTree } from './drive.ts'
 
 /**
@@ -31,7 +31,7 @@ import { type DriveLoc, iterTree } from './drive.ts'
  * (`foo.bar`), or a recent write. Mirrors Python's `files_containing`.
  */
 export async function filesContaining(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   scopes: readonly (readonly [PathSpec, DriveLoc])[],
   text: string,
 ): Promise<PathSpec[] | null> {

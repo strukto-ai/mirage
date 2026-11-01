@@ -1,6 +1,6 @@
 export {}
 const started = performance.now()
-const { Workspace, RAMVFS, MountMode, parseSessionProfile } = await import('@struktoai/mirage-node')
+const { Workspace, RAMVFS, MountMode, SessionProfile } = await import('@struktoai/mirage-node')
 const { run } = await import('./benchmark-suite.ts')
 const importMs = performance.now() - started
 const samples = await run(
@@ -10,7 +10,7 @@ const samples = await run(
       {
         mode: MountMode.WRITE,
         policies: [policy],
-        profiles: { bench: parseSessionProfile({ commands: { deny: ['blocked'] } }) },
+        profiles: { bench: SessionProfile({ commands: { deny: ['blocked'] } }) },
       },
     ),
 )

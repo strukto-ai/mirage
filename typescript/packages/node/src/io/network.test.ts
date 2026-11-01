@@ -12,22 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createServer, type Server } from 'node:http'
-import { type LookupFunction, connect as netConnect, Socket } from 'node:net'
-import type { AddressInfo } from 'node:net'
+import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
+import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
+import { IOResult } from '@struktoai/mirage-core/io/types'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type {
   Deny,
   NetworkContext,
   NetworkResultContext,
 } from '@struktoai/mirage-core/policy/types'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
-import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
-import { IOResult } from '@struktoai/mirage-core/io/types'
 import { type FileStat, Limit, MountMode, type PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { type LookupFunction, connect as netConnect, Socket } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { rulePool } from './network.ts'
@@ -565,9 +565,9 @@ describe('a workspace network rule', () => {
       {
         network: { denied_domains: ['10.0.0.0/8'] },
         profiles: {
-          agent: parseSessionProfile({ network: held }),
-          review: parseSessionProfile({ network: false }),
-          wide: parseSessionProfile({ network: true }),
+          agent: SessionProfile({ network: held }),
+          review: SessionProfile({ network: false }),
+          wide: SessionProfile({ network: true }),
         },
       },
     )
@@ -645,7 +645,7 @@ describe('a workspace network rule', () => {
       {
         network: { routes: { 'svc.test:5003': '127.0.0.1:1' } },
         profiles: {
-          agent: parseSessionProfile({
+          agent: SessionProfile({
             network: { routes: { 'svc.test:5003': `127.0.0.1:${String(port)}` } },
           }),
         },
@@ -663,10 +663,10 @@ describe('a workspace network rule', () => {
   })
 
   it('refuses a profile network that is not a setting', () => {
-    expect(() => parseSessionProfile({ network: { allow: ['a.com'] } })).toThrow(
+    expect(() => SessionProfile({ network: { allow: ['a.com'] } })).toThrow(
       /network is true, false or/,
     )
-    expect(() => parseSessionProfile({ network: { denied_domains: ['10.0.0.0/33'] } })).toThrow(
+    expect(() => SessionProfile({ network: { denied_domains: ['10.0.0.0/33'] } })).toThrow(
       /is not an address, a range/,
     )
   })

@@ -13,23 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { RAMAccessor } from '../accessor/ram.ts'
 import { GENERAL_COMMANDS } from '../commands/builtin/general/index.ts'
 import { strategyFor } from '../commands/builtin/generic/crossmount/detect.ts'
 import { Strategy } from '../commands/builtin/generic/crossmount/types.ts'
-import { GENERIC_COMMANDS, generic } from '../commands/builtin/generic_bind/factory.ts'
+import { generic, GENERIC_COMMANDS } from '../commands/builtin/generic_bind/factory.ts'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
+import type { Command } from '../commands/config.ts'
 import { type CommandFn, type CommandFnResult, type Context, command } from '../commands/config.ts'
 import { FlagView } from '../commands/spec/flag_view.ts'
 import { Argument, CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
-import { BaseVFS, type VFSOptions } from '../vfs/base.ts'
+import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
+import { type VFSOptions } from '../vfs/types.ts'
 import { Dispatcher } from './dispatcher/dispatcher.ts'
 import { Files } from './files.ts'
-import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -55,7 +57,7 @@ class Toy extends BaseVFS<RAMAccessor> {
     }
   }
 
-  constructor(options: Pick<VFSOptions<RAMAccessor>, 'commands'> = {}) {
+  constructor(options: Pick<VFSOptions<Command | CLI, RAMAccessor>, 'commands'> = {}) {
     const ram = new RAMVFS()
     super({ name: 'toy', accessor: ram.accessor, ...options })
     this.ram = ram

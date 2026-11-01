@@ -14,7 +14,6 @@
 import type { LineFacts } from '../../types.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { type WordChoices, matchWord, valueClasses } from './word_choice.ts'
 import { BUILTIN_SPECS, isBuiltinGrammar } from './builtins.ts'
 import {
   type CompiledSpec,
@@ -28,12 +27,11 @@ import {
 } from './compile.ts'
 import {
   ARG_PLACEHOLDER,
-  WORD_CHOICE_OPTIONS,
   DASH_LETTER,
   DIGIT_OPTIONS,
   EQUALS_SHORT_VALUES,
-  FLOAT_VALUE,
   flagKwargName,
+  FLOAT_VALUE,
   IN_ORDER_OPERANDS,
   INT_VALUE,
   LETTER_OPTIONS,
@@ -48,22 +46,24 @@ import {
   PARSE_KEPT_CHARS,
   PARSES_KEPT,
   REFUSED,
+  SOLE_ARGUMENT_LONG_OPTIONS,
   SPELLED,
   SPELLED_WORDS,
-  SOLE_ARGUMENT_LONG_OPTIONS,
   STDIN_SCRIPT_COMMANDS,
   STDOUT_DASH_OPTIONS,
   WHOLE_WORD_LONG_OPTIONS,
+  WORD_CHOICE_OPTIONS,
 } from './constants.ts'
 import { flagOccurrences } from './flag_view.ts'
 import { expandOldStyle } from './oldstyle.ts'
 import {
-  type CommandSpec,
   type Argument,
-  type ValueType,
+  type CommandSpec,
   type ParsedFlagValue,
+  type ValueType,
   WordKind,
 } from './types.ts'
+import { type WordChoices, matchWord, valueClasses } from './word_choice.ts'
 
 /**
  * The builtin `Argument` objects whose choices are word choices.
@@ -117,54 +117,6 @@ function wordChoiceDests(spec: CommandSpec): ReadonlySet<string> {
     if (WORD_CHOICE_ARGUMENTS.some((table) => table === o)) dests.add(argumentDest(o))
   }
   return dests
-}
-
-export interface ParsedArgsInit {
-  flags: Record<string, ParsedFlagValue>
-  args: [string, ValueType][]
-  rawPathFlags?: Record<string, ParsedFlagValue>
-  pathFlagValues?: string[]
-  rawOperands?: [string, ValueType][]
-  textFlagValues?: string[]
-  warnings?: string[]
-  wordKinds?: (ValueType | null)[]
-  wordBases?: (string | null)[]
-  wordRoles?: (WordKind | null)[]
-  invalidOptions?: string[]
-  ambiguousOptions?: [string, readonly string[]][]
-  optionErrorKinds?: string[]
-  needsValueOptions?: string[]
-  /**
-   * Values a word choice refused, in declaration order, each tagged with the
-   * wording GNU picks for it: `ls --color=a` is a prefix of `always` and
-   * `auto`, two values, and reads `ambiguous argument 'a'`, while
-   * `ls --color=zzz` matches nothing and reads `invalid argument 'zzz'`.
-   * Both print the same candidate block; optionErrorKinds is what orders
-   * them against each other and against every other refusal on the line.
-   * Only the WORD_CHOICE_OPTIONS tables can fill the ambiguous
-   * one, because only a prefix can be ambiguous.
-   */
-  invalidValueOptions?: [string, string, WordChoices][]
-  ambiguousValueOptions?: [string, string, WordChoices][]
-  invalidIntOptions?: [string, string][]
-  invalidFloatOptions?: [string, string][]
-  missingRequiredOptions?: string[]
-  /**
-   * Display names of required operand slots the line left empty, in
-   * declaration order. Reported rather than thrown, like every other entry
-   * here, so the dialect that words it is the caller's choice.
-   */
-  missingRequiredOperands?: string[]
-  /**
-   * Dests the line actually carried, in scan order, excluding the ones a
-   * declared default filled in afterwards. A usage line that echoes what was
-   * supplied (clap's) needs exactly this distinction: a defaulted option is
-   * invisible there, a typed one is not.
-   */
-  typedDests?: string[]
-  oldOptionNeedsValue?: string | null
-  /** Whether `spec` is the builtin's own grammar (isBuiltinGrammar). */
-  builtin?: boolean
 }
 
 export class ParsedArgs {
@@ -231,7 +183,35 @@ export class ParsedArgs {
   // serialization reads.
   declare readonly facts: Map<string, LineFacts>
 
-  constructor(init: ParsedArgsInit) {
+  constructor(
+    init: Pick<ParsedArgs, 'flags' | 'args'> &
+      Partial<
+        Pick<
+          ParsedArgs,
+          | 'rawPathFlags'
+          | 'pathFlagValues'
+          | 'rawOperands'
+          | 'textFlagValues'
+          | 'warnings'
+          | 'wordKinds'
+          | 'wordBases'
+          | 'wordRoles'
+          | 'invalidOptions'
+          | 'ambiguousOptions'
+          | 'optionErrorKinds'
+          | 'needsValueOptions'
+          | 'invalidValueOptions'
+          | 'ambiguousValueOptions'
+          | 'invalidIntOptions'
+          | 'invalidFloatOptions'
+          | 'missingRequiredOptions'
+          | 'missingRequiredOperands'
+          | 'typedDests'
+          | 'oldOptionNeedsValue'
+          | 'builtin'
+        >
+      >,
+  ) {
     this.flags = init.flags
     this.args = init.args
     this.rawPathFlags = init.rawPathFlags ?? {}

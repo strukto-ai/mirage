@@ -12,36 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ByteSource } from '../../io/types.ts'
-import { BaseVFS } from '../base.ts'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
-
 import { fetchRepoInfo as fetchGitHubRepoInfo } from '../../core/github/client.ts'
-
-import {
-  buildTreeMap as githubBuildTreeMap,
-  fetchTree as fetchGitHubTree,
-} from '../../core/github/tree.ts'
-
+import { GitHubConfig } from '../../core/github/config.ts'
 import { COMMIT_SHA, WALK_LIMIT } from '../../core/github/constants.ts'
-import { ListingVersion, VFSName } from '../../types.ts'
-
-import {
-  GitHubConfigSchema,
-  type GitHubConfig,
-  type GitHubConfigRedacted,
-} from '../../core/github/config.ts'
-import type { DirListing, PathSpec, FileStat } from '../../types.ts'
-import type { Handed } from '../types.ts'
-import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { readMany as githubReadMany, readStream as githubStream } from '../../core/github/read.ts'
-import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
+import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
+import {
+  fetchTree as fetchGitHubTree,
+  buildTreeMap as githubBuildTreeMap,
+} from '../../core/github/tree.ts'
+import { type ByteSource } from '../../io/types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
+import { ListingVersion, VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { Handed } from '../types.ts'
 
 export interface GitHubVFSState {
   type: string
-  config: GitHubConfigRedacted
+  config: RedactedSchema<typeof GitHubConfig>
   defaultBranch: string
   truncated: boolean
 }
@@ -169,8 +161,7 @@ export class GitHubVFS extends BaseVFS {
 
   override getState(): Promise<GitHubVFSState> {
     return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(GitHubConfigSchema, this.config) as GitHubConfigRedacted,
+      ...this.configState(GitHubConfig, this.config),
       defaultBranch: this.accessor.defaultBranch,
       truncated: this.accessor.truncated,
     })

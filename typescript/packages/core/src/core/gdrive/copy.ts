@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import type { DriveApi } from './api.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import type { DriveNode } from './resolve.ts'
@@ -48,7 +48,7 @@ async function copyChildren(drive: DriveApi, src: DriveNode, dstFolderId: string
  * copy made, null when it merged into a folder already there. Mirrors
  * Python's `copy`.
  */
-async function copyImpl(
+export const copy = eaccesOnDenied(async function (
   accessor: GDriveAccessor,
   src: PathSpec,
   dst: PathSpec,
@@ -87,6 +87,4 @@ async function copyImpl(
   )
   const copied: unknown = item
   return typeof copied === 'object' && copied !== null ? statFromItem(item) : null
-}
-
-export const copy = eaccesOnDenied(copyImpl)
+})

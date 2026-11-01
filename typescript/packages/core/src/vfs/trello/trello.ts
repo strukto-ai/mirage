@@ -12,24 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 import { TrelloAccessor } from '../../accessor/trello.ts'
-
 import { HttpTrelloTransport } from '../../core/trello/client.ts'
-import { type DirListing, VFSName } from '../../types.ts'
-
-import {
-  TrelloConfigSchema,
-  type TrelloConfig,
-  type TrelloConfigRedacted,
-} from '../../core/trello/config.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
+import { TrelloConfig } from '../../core/trello/config.ts'
 import { read as trelloRead } from '../../core/trello/read.ts'
-import { stat as trelloStat } from '../../core/trello/stat.ts'
+import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
 import { filesContaining as trelloFilesContaining } from '../../core/trello/search.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { stat as trelloStat } from '../../core/trello/stat.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { VFSName, type DirListing } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
 
 export const VFS_MD = `{prefix}
   workspaces/
@@ -54,11 +48,6 @@ export const VFS_MD = `{prefix}
   To act on boards and cards (list boards, members, lists, labels,
   cards and comments; create, update, move, assign, label and comment
   on cards), use the trello CLI if installed: trello --help`
-
-export interface TrelloVFSState {
-  type: string
-  config: TrelloConfigRedacted
-}
 
 export class TrelloVFS extends BaseVFS {
   override readonly handed = {
@@ -133,10 +122,7 @@ export class TrelloVFS extends BaseVFS {
     return trelloStat(this.accessor, path, handed?.entry)
   }
 
-  override getState(): Promise<TrelloVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(TrelloConfigSchema, this.config) as TrelloConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof TrelloConfig>>> {
+    return Promise.resolve(this.configState(TrelloConfig, this.config))
   }
 }

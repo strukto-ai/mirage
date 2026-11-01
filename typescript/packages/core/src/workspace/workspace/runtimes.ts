@@ -18,13 +18,6 @@ import { bindCommands, buildRuntime, DEFAULT_ENTRIES } from '../../runtime/table
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
-export interface RuntimesInit {
-  registry: MountRegistry
-  /** The `runtimes` option: instances and name shorthands, or undefined for the default world. */
-  entries: RuntimeEntry[] | undefined
-  binding: WorkspaceBinding
-}
-
 /**
  * The workspace's ordered runtime world; the first capturer binds each
  * command. Mirrors the Python `Runtimes` in `workspace/runtimes.py`.
@@ -44,7 +37,12 @@ export class Runtimes {
   private readonly binding: WorkspaceBinding
   private readonly retiring = new Map<Runtime, Promise<void>>()
 
-  constructor(init: RuntimesInit) {
+  constructor(init: {
+    registry: MountRegistry
+    /** The `runtimes` option: instances and name shorthands, or undefined for the default world. */
+    entries: RuntimeEntry[] | undefined
+    binding: WorkspaceBinding
+  }) {
     this.registry = init.registry
     this.binding = init.binding
     const entries: Runtime[] = (init.entries ?? DEFAULT_ENTRIES).map((entry) =>

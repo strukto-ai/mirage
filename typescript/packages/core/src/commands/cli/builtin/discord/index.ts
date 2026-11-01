@@ -11,14 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import { discordAccessor } from '../../../../accessor/discord.ts'
-import { CommandSpec } from '../../../spec/types.ts'
-import { CLI } from '../../types.ts'
-import { CLIHandler } from '../../types.ts'
-
-import { DiscordConfigSchema } from '../../../../core/discord/config.ts'
-
-import { Argument } from '../../../spec/types.ts'
+import { DiscordConfig } from '../../../../core/discord/config.ts'
+import { Argument, CommandSpec } from '../../../spec/types.ts'
+import { CLI, CLIHandler } from '../../types.ts'
 import { deleteVerb } from './delete.ts'
 import { edit } from './edit.ts'
 import { members } from './members.ts'
@@ -147,6 +144,6 @@ export const DISCORD = new CLI({
     members: new CLIHandler({ fn: members }),
     'server-info': new CLIHandler({ fn: serverInfo }),
   },
-  configModel: DiscordConfigSchema,
+  configModel: DiscordConfig,
   accessor: discordAccessor,
 })

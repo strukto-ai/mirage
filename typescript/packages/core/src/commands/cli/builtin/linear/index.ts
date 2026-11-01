@@ -11,13 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../../spec/types.ts'
-import { CLI } from '../../types.ts'
-import { CLIHandler } from '../../types.ts'
 
-import { LinearConfigSchema } from '../../../../core/linear/config.ts'
-
-import { Argument } from '../../../spec/types.ts'
+import { LinearConfig } from '../../../../core/linear/config.ts'
+import { Argument, CommandSpec } from '../../../spec/types.ts'
+import { CLI, CLIHandler } from '../../types.ts'
 import { add as commentAdd } from './comment/add.ts'
 import { update as commentUpdate } from './comment/update.ts'
 import { addLabel } from './issue/add_label.ts'
@@ -268,6 +265,6 @@ export const LINEAR = new CLI({
     'document get': new CLIHandler({ fn: reads.documentGet }),
     search: new CLIHandler({ fn: reads.search }),
   },
-  configModel: LinearConfigSchema,
+  configModel: LinearConfig,
   accessor: linearAccessor,
 })

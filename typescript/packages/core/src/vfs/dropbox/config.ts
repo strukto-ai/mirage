@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { secretSchema, secretStr, z } from '../secrets.ts'
-import type { ConfigOf, RedactedConfig } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
+import { secretSchema, secretStr, z } from '../secrets.ts'
 
 export interface DropboxConfig {
   timeout?: number
@@ -26,7 +25,7 @@ export interface DropboxConfig {
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
 }
 
-export const DropboxConfigSchema = z.object({
+export const DropboxConfig = z.object({
   ...timeoutShape,
   clientId: z.string().describe('Dropbox app key.'),
   clientSecret: secretStr()
@@ -56,8 +55,3 @@ export const DropboxConfigSchema = z.object({
       "Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend.",
     ),
 })
-
-export type DropboxConfigRedacted = RedactedConfig<
-  ConfigOf<typeof DropboxConfigSchema>,
-  'clientSecret' | 'refreshToken' | 'refreshFn'
->

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 import { ContentType } from '../../types.ts'
+import type { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
 import { Codec, PATH_SAFE } from '../hierarchy/codec.ts'
 import { makeDetectScope, type DetectFn, type Scope } from '../hierarchy/scope.ts'
@@ -31,7 +31,7 @@ const CARD = new Codec({ suffix: '.md' })
  * `PATH_SAFE`, so a value holding `/` keeps its own directory and the WHERE
  * clause holds the exact value.
  */
-export function scopesFor(config: LanceDBConfigResolved): Scope[] {
+export function scopesFor(config: ReturnType<typeof resolveLanceDBConfig>): Scope[] {
   const leaves: Leaf[] = [['row_card', CARD, ContentType.TEXT]]
   if (config.blobColumn !== null) leaves.push(blobLeaf(config.blobExt))
   return rowScopes(

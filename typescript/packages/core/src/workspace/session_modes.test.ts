@@ -13,17 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { runWithSession } from '../context/session_context.ts'
-import { RAMNamespaceStore } from './mount/namespace/ram.ts'
-import { RAMVFS } from '../vfs/ram/ram.ts'
-import { FileType, MountMode, type FileStat } from '../types.ts'
 import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
-import { parseSessionProfile } from '../policy/profile.ts'
-import { Workspace } from './workspace/workspace.ts'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { command, type CommandFn } from '../commands/config.ts'
 import { Argument, CommandSpec } from '../commands/spec/types.ts'
+import { runWithSession } from '../context/session_context.ts'
 import { IOResult } from '../io/types.ts'
+import { SessionProfile } from '../policy/profile.ts'
+import { FileType, MountMode, type FileStat } from '../types.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { RAMNamespaceStore } from './mount/namespace/ram.ts'
+import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 
@@ -216,7 +216,7 @@ describe('per-session mount grants', () => {
   it('a user-defined root mount is governed like any other', async () => {
     const { ws } = makeGrantsWorkspace({ rootMount: true })
     ws.createSession('no_root', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         mounts: { '/a': MountMode.WRITE },
         paths: { hide: ['/root.txt'] },
       }),

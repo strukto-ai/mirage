@@ -12,17 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { S3VFS } from './s3/s3.ts'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import type { ConfigOf, RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import {
   FIELD_NORMALIZERS,
   redactConfigWithSchema,
   secretStr,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
+import type { S3Config } from './s3/config.ts'
 import { S3_FAMILY_NORMALIZER } from './s3/config.ts'
-import type { S3Config, S3ConfigRedacted } from './s3/config.ts'
+import { S3VFS } from './s3/s3.ts'
 
 /**
  * Shared shape for the S3-compatible providers.
@@ -128,13 +129,6 @@ export const FIXED_ALIAS_SCHEMA = aliasSchema({
     .describe('URL of the self-hosted S3 gateway, such as `http://localhost:9000`.'),
 })
 
-// The resolved shape, with the region and endpoint each provider's rule
-// fills in, is what redaction and snapshot state see.
-export type S3AliasConfigRedacted = RedactedConfig<
-  ConfigOf<typeof REGION_ALIAS_SCHEMA> & { endpoint: string },
-  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
->
-
 export interface Alias<C extends S3AliasConfig, R> {
   resolvedEndpoint: (config: C) => string
   toS3Config: (config: C) => S3Config
@@ -161,16 +155,18 @@ const optional = (config: S3AliasConfig): Partial<S3Config> => ({
  * treats as virtual-hosted style. The redacted config carries the same
  * resolved values the S3Config does.
  */
-export function makeS3Alias<C extends S3AliasConfig, R>(options: {
-  schema: z.ZodObject<z.ZodRawShape>
-  endpointFor: (config: C) => string
+export function makeS3Alias<S extends z.ZodObject>(options: {
+  schema: S
+  endpointFor: (config: ConfigOf<S> & S3AliasConfig) => string
   regionDefault?: string
   forcePathStyle?: boolean
-}): Alias<C, R> {
+}): S & Alias<ConfigOf<S> & S3AliasConfig, RedactedSchema<S>> {
   const { schema, endpointFor, regionDefault, forcePathStyle } = options
-  const resolvedEndpoint = (config: C): string =>
+  const resolvedEndpoint = (config: ConfigOf<S> & S3AliasConfig): string =>
     config.endpoint !== undefined && config.endpoint !== '' ? config.endpoint : endpointFor(config)
-  const resolved = (config: C): Pick<S3Config, 'endpoint' | 'region' | 'forcePathStyle'> => {
+  const resolved = (
+    config: ConfigOf<S> & S3AliasConfig,
+  ): Pick<S3Config, 'endpoint' | 'region' | 'forcePathStyle'> => {
     const region = config.region ?? regionDefault
     const pathStyle = config.forcePathStyle ?? forcePathStyle
     return {
@@ -179,7 +175,7 @@ export function makeS3Alias<C extends S3AliasConfig, R>(options: {
       ...(pathStyle !== undefined ? { forcePathStyle: pathStyle } : {}),
     }
   }
-  return {
+  const alias: Alias<ConfigOf<S> & S3AliasConfig, RedactedSchema<S>> = {
     resolvedEndpoint,
     toS3Config: (config) => ({
       bucket: config.bucket,
@@ -188,18 +184,9 @@ export function makeS3Alias<C extends S3AliasConfig, R>(options: {
       ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
       ...optional(config),
     }),
-    redact: (config) =>
-      redactConfigWithSchema(schema, { ...config, ...resolved(config) }) as unknown as R,
+    redact: (config) => redactConfigWithSchema(schema, { ...config, ...resolved(config) }),
   }
-}
-
-/**
- * The snapshot state of an S3-compatible alias: its own name and its own
- * redacted config, not the `s3` name and S3 config it delegates to.
- */
-export interface S3AliasVFSState<TRedacted> {
-  type: string
-  config: TRedacted
+  return Object.assign(schema.clone(), alias)
 }
 
 /**
@@ -213,7 +200,7 @@ export interface S3AliasVFSState<TRedacted> {
  */
 export abstract class S3AliasVFS<
   TConfig extends S3AliasConfig,
-  TRedacted extends S3ConfigRedacted,
+  TRedacted extends RedactedSchema<typeof S3Config>,
 > extends S3VFS {
   override readonly name: string
   readonly aliasConfig: TConfig
@@ -226,7 +213,7 @@ export abstract class S3AliasVFS<
     this.alias = alias
   }
 
-  override getState(): Promise<S3AliasVFSState<TRedacted>> {
+  override getState(): Promise<ConfigState<TRedacted>> {
     return Promise.resolve({
       type: this.name,
       config: this.alias.redact(this.aliasConfig),

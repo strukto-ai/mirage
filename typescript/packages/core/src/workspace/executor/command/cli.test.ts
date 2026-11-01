@@ -11,38 +11,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../../commands/spec/types.ts'
-import { CLIHandler } from '../../../commands/cli/types.ts'
-
-import { varsFromEnv } from '../../../workspace/session/session.ts'
 import { describe, expect, it, vi } from 'vitest'
-
-import { CLI, type CLIVerbFn } from '../../../commands/cli/types.ts'
-import { command, type Context } from '../../../commands/config.ts'
-import { StreamRefusal } from '../../../rs/errors.ts'
-import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
-import { FlagView } from '../../../commands/spec/flag_view.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
-import { MountMode, PathSpec } from '../../../types.ts'
+import { NOOPAccessor } from '../../../accessor/base.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { parseSessionProfile } from '../../../policy/profile.ts'
-import { Workspace } from '../../workspace/workspace.ts'
-import { CLIRegistry } from '../../cli/registry.ts'
-import { MountEntry } from '../../mount/mount.ts'
-import type { CLIInstall } from '../../cli/types.ts'
-import { Activity } from '../../../utils/activity.ts'
-import { ScriptSource } from '../../../runtime/types.ts'
+import { CLI, CLIHandler, type CLIVerbFn } from '../../../commands/cli/types.ts'
+import { command, type Context } from '../../../commands/config.ts'
+import { FlagView } from '../../../commands/spec/flag_view.ts'
+import { Argument, CommandSpec, UsageStyle } from '../../../commands/spec/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { Runtime } from '../../../runtime/base.ts'
 import { LanguageRuntime } from '../../../runtime/language.ts'
 import { PythonRuntime } from '../../../runtime/python/base.ts'
-import { Runtime } from '../../../runtime/base.ts'
-import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
-import type { Program, RunResult, Language } from '../../../runtime/types.ts'
+import type { Language, Program, RunResult } from '../../../runtime/types.ts'
+import { ScriptSource } from '../../../runtime/types.ts'
+import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
+import { Activity } from '../../../utils/activity.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { varsFromEnv } from '../../../workspace/session/session.ts'
+import { CLIRegistry } from '../../cli/registry.ts'
+import type { CLIInstall } from '../../cli/types.ts'
+import { MountEntry } from '../../mount/mount.ts'
 import { SessionState } from '../../session/session.ts'
 import type { ExecutionNode } from '../../types.ts'
+import { Workspace } from '../../workspace/workspace.ts'
 import { handleCli, reachesService } from './cli.ts'
-import { NOOPAccessor } from '../../../accessor/base.ts'
 
 // Mirrors python/tests/workspace/executor/command/test_cli.py.
 
@@ -1313,7 +1309,7 @@ describe('a command tree a mount serves', () => {
       ws.setMountMode('/n/', MountMode.READ)
       ws.createSession('hidden', { profile: { paths: { hide: ['/n/x'] } } })
       ws.createSession('ruled', {
-        profile: parseSessionProfile({
+        profile: SessionProfile({
           commands: { deny: [{ reason: 'no tagging', commands: ['notes add'] }] },
         }),
       })

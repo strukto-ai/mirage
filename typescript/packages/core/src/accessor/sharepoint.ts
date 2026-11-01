@@ -13,16 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { Accessor } from './base.ts'
 import {
   MSGRAPH_CONFIG_SHAPE,
   optionalText,
   resolveMsGraphConfig,
   type MsGraphConfig,
-  type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
-import { type ConfigOf, type RedactedConfig } from '../vfs/secrets.ts'
 import { stripSlash } from '../utils/slash.ts'
+import { Accessor } from './base.ts'
 
 export interface SharePointConfig extends MsGraphConfig {
   siteFilter?: string
@@ -31,7 +29,7 @@ export interface SharePointConfig extends MsGraphConfig {
   keyPrefix?: string
 }
 
-export const SharePointConfigSchema = z.object({
+export const SharePointConfig = z.object({
   ...MSGRAPH_CONFIG_SHAPE,
   siteFilter: z.string().optional().meta({
     description:
@@ -58,18 +56,6 @@ export const SharePointConfigSchema = z.object({
     ),
 })
 
-export type SharePointConfigRedacted = RedactedConfig<
-  ConfigOf<typeof SharePointConfigSchema>,
-  'accessToken'
->
-
-export interface SharePointConfigResolved extends MsGraphConfigResolved {
-  siteFilter: string | null
-  site: string | null
-  drive: string | null
-  keyPrefix: string
-}
-
 function normalizePrefix(value: string | undefined): string {
   const normalized = stripSlash(value ?? '')
   if (normalized.split('/').includes('..'))
@@ -77,7 +63,7 @@ function normalizePrefix(value: string | undefined): string {
   return normalized
 }
 
-function resolveSharePointConfig(config: SharePointConfig): SharePointConfigResolved {
+export function resolveSharePointConfig(config: SharePointConfig) {
   return {
     ...resolveMsGraphConfig(config),
     siteFilter: optionalText(config.siteFilter),
@@ -88,7 +74,7 @@ function resolveSharePointConfig(config: SharePointConfig): SharePointConfigReso
 }
 
 export class SharePointAccessor extends Accessor {
-  readonly config: SharePointConfigResolved
+  readonly config: ReturnType<typeof resolveSharePointConfig>
   // Name -> id lookups for the two namespace levels above a drive item, so
   // resolving a path does not call /sites and /drives on every op. They live
   // on the accessor, not the module: one accessor is one mount is one

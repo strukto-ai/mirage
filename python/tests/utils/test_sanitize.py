@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 import pytest
 
 from mirage.utils.sanitize import (
@@ -23,6 +24,7 @@ from mirage.utils.sanitize import (
     path_safe_name,
     sanitize_label,
     sanitize_name,
+    truncate_bytes,
 )
 
 
@@ -202,3 +204,17 @@ def test_sanitize_name_is_never_dot_led_or_empty(raw, name):
 )
 def test_sanitize_label_is_never_dot_led_or_empty(raw, label):
     assert sanitize_label(raw, fallback="No_Subject", max_len=80) == label
+
+
+@pytest.mark.parametrize("budget", [-1, 0, 1, 2, 3, 4, 255, 2**40])
+def test_truncate_bytes_preserves_unicode_and_bom(budget):
+    text = "\ufeffé𐐀"
+    expected = text.encode()[: max(0, budget)].decode("utf-8", errors="ignore")
+    assert truncate_bytes(text, budget) == expected
+
+
+def test_sanitize_crosses_stream_buffer_boundary():
+    text = "é" * 100_000 + "/.tail"
+    assert path_safe_name(text) == "é" * 100_000 + "∕.tail"
+    assert sanitize_name(text) == "é" * 100
+    assert sanitize_label("abc", fallback="X", max_len=100, max_bytes=-1) == ""

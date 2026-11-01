@@ -13,17 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
-import type { PathSpec } from '../../types.ts'
-import { lookupError } from './dest.ts'
+import type { PathSpec, SetAttrFields } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
-
-export interface SetAttrsFields {
-  mode?: number
-  uid?: number | string
-  gid?: number | string
-  atime?: string
-  mtime?: string
-}
+import { lookupError } from './dest.ts'
 
 // Write metadata fields on an existing entry (the write side of stat).
 // Only present fields are written. Stored, not enforced: mount mode does
@@ -32,7 +24,7 @@ export interface SetAttrsFields {
 export function setAttrs(
   accessor: RAMAccessor,
   path: PathSpec,
-  fields: SetAttrsFields,
+  fields: SetAttrFields,
 ): Promise<Record<string, number | string>> {
   const store = accessor.store
   const p = norm(path.mountPath)

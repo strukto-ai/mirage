@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from mirage.context import reset_admission, set_admission
 from mirage.rs.errors import RegexError
 from mirage.rs.regex import posix_regex
@@ -23,6 +24,7 @@ from mirage.workspace.executor.builtins.condition.constants import (
     FILE_PAIR_BINARY,
     INT_COMPARATORS,
 )
+from mirage.workspace.executor.builtins.condition.errors import CondError
 from mirage.workspace.executor.builtins.condition.operators import (
     apply_file_pair,
     apply_unary,
@@ -31,7 +33,6 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondAnd,
     CondBinary,
     CondContext,
-    CondError,
     CondLazy,
     CondNode,
     CondNot,

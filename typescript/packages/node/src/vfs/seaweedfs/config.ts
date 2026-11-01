@@ -12,26 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  makeS3Alias,
-  FIXED_ALIAS_SCHEMA,
-  type S3AliasConfig,
-  type S3AliasConfigRedacted,
-} from '../s3_alias.ts'
+import { FIXED_ALIAS_SCHEMA, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface SeaweedFSConfig extends S3AliasConfig {
   endpoint: string
 }
 
-export type SeaweedFSConfigRedacted = S3AliasConfigRedacted
-
-export const SeaweedFSConfigSchema = FIXED_ALIAS_SCHEMA
-
-export const ALIAS = makeS3Alias<SeaweedFSConfig, SeaweedFSConfigRedacted>({
-  schema: SeaweedFSConfigSchema,
+export const SeaweedFSConfig = makeS3Alias({
+  schema: FIXED_ALIAS_SCHEMA,
   endpointFor: (config) => config.endpoint,
   regionDefault: 'us-east-1',
   forcePathStyle: true,
 })
-
-export const seaweedfsToS3Config = ALIAS.toS3Config

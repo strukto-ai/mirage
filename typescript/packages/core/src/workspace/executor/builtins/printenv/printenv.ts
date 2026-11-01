@@ -12,15 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { compareCodePoints } from '../../../../utils/sort.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import type { BuiltinCall } from '../types.ts'
 
-export function handlePrintenv(name: string | null, session: SessionState): Result {
+export function handlePrintenv(name: string | null, session: SessionState): RedirectResult {
   // The process view, not the shell view: GNU printenv is a separate
   // binary, so the only names it can possibly see are the exported ones.
   // A plain `X=hello` is invisible to it and exits 1.
@@ -44,7 +45,7 @@ export function handlePrintenv(name: string | null, session: SessionState): Resu
 }
 
 /** The `printenv` arm. */
-export function printenvBuiltin(call: BuiltinCall): Promise<Result> {
+export function printenvBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const args = call.argv.args
   return Promise.resolve(
     handlePrintenv(args.length > 0 ? (args[0] ?? null) : null, call.context.session),

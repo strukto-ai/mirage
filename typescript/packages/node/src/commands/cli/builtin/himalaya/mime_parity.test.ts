@@ -15,8 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-
-import type { FetchedMessage } from '../../../../core/email/client.ts'
+import type { fetchMessage } from '../../../../core/email/client.ts'
 import { build, type Attachment, type Compose, type Source } from './builder.ts'
 
 // The fixture is generated from the python builder
@@ -70,7 +69,7 @@ function toCompose(fixture: FixtureCompose): Compose {
 function toSource(fixture: FixtureCompose): Source | null {
   if (fixture.source === undefined) return null
   return {
-    message: fixture.source as unknown as FetchedMessage,
+    message: fixture.source as unknown as Awaited<ReturnType<typeof fetchMessage>>,
     mode: fixture.mode ?? 'reply',
     postingStyle: fixture.postingStyle ?? 'top',
     quoteHeadline: fixture.quoteHeadline ?? '',

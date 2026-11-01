@@ -12,14 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FastifyInstance } from 'fastify'
-import { PolicyError } from '@struktoai/mirage-core/policy/errors'
 import { isFsError } from '@struktoai/mirage-core/errors/fs'
+import { PolicyError } from '@struktoai/mirage-core/policy/errors'
+import type { FastifyInstance } from 'fastify'
 import type { WorkspaceRegistry } from '../registry.ts'
 
-export interface DocumentsRoutesDeps {
-  registry: WorkspaceRegistry
-}
 interface DocumentParams {
   wsId: string
   sessionId?: string
@@ -32,7 +29,12 @@ interface DocumentPath {
   path: string
 }
 
-export function registerDocumentsRoutes(app: FastifyInstance, deps: DocumentsRoutesDeps): void {
+export function registerDocumentsRoutes(
+  app: FastifyInstance,
+  deps: {
+    registry: WorkspaceRegistry
+  },
+): void {
   for (const kind of ['vfs', 'skill'] as const) {
     for (const base of ['/v1/workspaces/:wsId', '/v1/workspaces/:wsId/sessions/:sessionId']) {
       for (const method of ['GET', 'PUT'] as const) {

@@ -1,4 +1,4 @@
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Workspace, RAMVFS, MountMode } from '@struktoai/mirage-browser'
 import { run } from './benchmark-suite.ts'
 
@@ -10,7 +10,7 @@ export async function benchmark() {
         {
           mode: MountMode.WRITE,
           policies: [policy],
-          profiles: { bench: parseSessionProfile({ commands: { deny: ['blocked'] } }) },
+          profiles: { bench: SessionProfile({ commands: { deny: ['blocked'] } }) },
         },
       ),
   )

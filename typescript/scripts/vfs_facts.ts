@@ -12,12 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ListingVersion } from '@struktoai/mirage-core'
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
-
 import ts from 'typescript'
-
-import { ListingVersion } from '@struktoai/mirage-core'
 
 // Capability values and the functions a class defines are read from the
 // source rather than from a live object on purpose. Python can introspect
@@ -651,7 +649,7 @@ export interface ConfigShape {
 
 const CONFIG_PARSER = 'parseConfigWithSchema'
 const FIELD_REGISTRY = 'FIELD_NORMALIZERS'
-const CONFIG_RE = /^normalize\w*Config$|ConfigSchema$/
+const CONFIG_RE = /Config$/
 
 export interface Bound {
   expr: ts.Expression
@@ -695,7 +693,7 @@ function registryConfigs(
         const name = prop.name.getText(source).replace(/^['"]|['"]$/g, '')
         let found: { file: string; name: string } | null = null
         const scan = (child: ts.Node): void => {
-          // `const { XConfigSchema } = await import('...')`
+          // `const { XConfig } = await import('...')`
           if (
             ts.isVariableDeclaration(child) &&
             ts.isObjectBindingPattern(child.name) &&
@@ -849,6 +847,15 @@ function shapeOf(
     if (ts.isPropertyAccessExpression(callee)) {
       const method = callee.name.text
       if (
+        method === 'assign' &&
+        ts.isIdentifier(callee.expression) &&
+        callee.expression.text === 'Object'
+      ) {
+        const target = expr.arguments[0]
+        if (target === undefined) throw new Error(`${label}: Object.assign() needs a target`)
+        return shapeOf(target, source, env, packagesRoot, label)
+      }
+      if (
         method === 'object' &&
         ts.isIdentifier(callee.expression) &&
         callee.expression.text === 'z'
@@ -878,13 +885,7 @@ function shapeOf(
       // arguments.
       const fn = resolveFunction(callee.text, source, packagesRoot)
       if (fn === undefined) throw new Error(`${label}: cannot resolve schema helper ${callee.text}`)
-      const inner: Env = new Map(env)
-      fn.decl.parameters.forEach((param, i) => {
-        const arg = expr.arguments[i]
-        if (arg !== undefined && ts.isIdentifier(param.name)) {
-          inner.set(param.name.text, { expr: arg, source })
-        }
-      })
+      const inner = helperEnv(fn, expr.arguments, source, env, packagesRoot)
       const returned = returnExpression(fn.decl)
       if (returned === undefined) throw new Error(`${label}: helper ${callee.text} has no return`)
       return shapeOf(returned, fn.source, inner, packagesRoot, label)
@@ -1046,6 +1047,47 @@ function resolveFunction(
   return decl === undefined ? undefined : { decl, source: imported }
 }
 
+function helperEnv(
+  fn: {
+    decl: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression
+    source: ts.SourceFile
+  },
+  args: readonly ts.Expression[],
+  source: ts.SourceFile,
+  env: Env,
+  packagesRoot: string,
+): Env {
+  const inner: Env = new Map(env)
+  fn.decl.parameters.forEach((param, i) => {
+    const arg = args[i]
+    if (arg !== undefined && ts.isIdentifier(param.name))
+      inner.set(param.name.text, { expr: arg, source })
+  })
+  if (fn.decl.body === undefined || !ts.isBlock(fn.decl.body)) return inner
+  for (const statement of fn.decl.body.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    for (const decl of statement.declarationList.declarations) {
+      if (decl.initializer === undefined) continue
+      if (ts.isIdentifier(decl.name)) {
+        inner.set(decl.name.text, { expr: decl.initializer, source: fn.source })
+      } else if (ts.isObjectBindingPattern(decl.name)) {
+        const bound = declaration(decl.initializer, fn.source, inner, packagesRoot)
+        if (bound === undefined || !ts.isObjectLiteralExpression(bound.expr)) continue
+        for (const element of decl.name.elements) {
+          if (!ts.isIdentifier(element.name) || element.dotDotDotToken !== undefined) continue
+          const name = (element.propertyName ?? element.name).getText(fn.source)
+          const property = bound.expr.properties.find(
+            (prop) => propertyKey(prop, bound.source) === name,
+          )
+          if (property !== undefined && ts.isPropertyAssignment(property))
+            inner.set(element.name.text, { expr: property.initializer, source: bound.source })
+        }
+      }
+    }
+  }
+  return inner
+}
+
 function returnExpression(
   fn: ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression,
 ): ts.Expression | undefined {
@@ -1141,6 +1183,15 @@ function registeredNormalizer(
   const callee = expr.expression
   if (ts.isPropertyAccessExpression(callee)) {
     const method = callee.name.text
+    if (
+      method === 'assign' &&
+      ts.isIdentifier(callee.expression) &&
+      callee.expression.text === 'Object'
+    ) {
+      const target = expr.arguments[0]
+      if (target === undefined) throw new Error(`${label}: Object.assign() needs a target`)
+      return registeredNormalizer(target, source, env, packagesRoot, label)
+    }
     const [registry, normalizer] = expr.arguments
     if (
       method === 'register' &&
@@ -1157,13 +1208,7 @@ function registeredNormalizer(
     const fn = resolveFunction(callee.text, source, packagesRoot)
     const returned = fn === undefined ? undefined : returnExpression(fn.decl)
     if (fn === undefined || returned === undefined) return undefined
-    const inner: Env = new Map(env)
-    fn.decl.parameters.forEach((param, i) => {
-      const arg = expr.arguments[i]
-      if (arg !== undefined && ts.isIdentifier(param.name)) {
-        inner.set(param.name.text, { expr: arg, source })
-      }
-    })
+    const inner = helperEnv(fn, expr.arguments, source, env, packagesRoot)
     return registeredNormalizer(returned, fn.source, inner, packagesRoot, label)
   }
   return undefined

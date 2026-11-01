@@ -13,39 +13,30 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { aliasSchema, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface R2Config extends S3AliasConfig {
   accountId?: string
 }
 
-export const R2ConfigSchema = aliasSchema({
-  region: z.string().optional().meta({
-    description: 'Region requests are signed for; R2 addresses a bucket by account, not by region.',
-    default: 'auto',
+export const R2Config = makeS3Alias({
+  schema: aliasSchema({
+    region: z.string().optional().meta({
+      description:
+        'Region requests are signed for; R2 addresses a bucket by account, not by region.',
+      default: 'auto',
+    }),
+    endpoint: z
+      .string()
+      .optional()
+      .describe('Endpoint URL that replaces the one the provider derives.'),
+    accountId: z
+      .string()
+      .optional()
+      .describe(
+        'Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set; one of the two is required.',
+      ),
   }),
-  endpoint: z
-    .string()
-    .optional()
-    .describe('Endpoint URL that replaces the one the provider derives.'),
-  accountId: z
-    .string()
-    .optional()
-    .describe(
-      'Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set; one of the two is required.',
-    ),
-})
-
-// Only the redacted twin derives; the redactor fills in the region and
-// endpoint the provider's rule resolves.
-export type R2ConfigRedacted = RedactedConfig<
-  ConfigOf<typeof R2ConfigSchema>,
-  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
->
-
-export const ALIAS = makeS3Alias<R2Config, R2ConfigRedacted>({
-  schema: R2ConfigSchema,
   endpointFor: (config) => {
     if (config.accountId !== undefined && config.accountId !== '') {
       return `https://${config.accountId}.r2.cloudflarestorage.com`
@@ -54,5 +45,3 @@ export const ALIAS = makeS3Alias<R2Config, R2ConfigRedacted>({
   },
   regionDefault: 'auto',
 })
-
-export const r2ToS3Config = ALIAS.toS3Config

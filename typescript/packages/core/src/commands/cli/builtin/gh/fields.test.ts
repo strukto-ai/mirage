@@ -13,19 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { JsonObject } from '../../../../types.ts'
 import {
-  SHARED_FIELDS,
   exportedNode,
   readRest,
   selection,
+  SHARED_FIELDS,
   type Fetch,
   type Field,
-  type Node,
 } from './fields.ts'
 
 const TABLE: ReadonlyMap<string, Field> = new Map(SHARED_FIELDS)
 
-function comments(bodies: string[], next: string | null): Node {
+function comments(bodies: string[], next: string | null): JsonObject {
   return {
     comments: {
       nodes: bodies.map((body) => ({ body })),

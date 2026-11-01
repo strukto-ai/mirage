@@ -12,24 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { KeyLock } from '../lock.ts'
+import { FileStat, FileType } from '../../types.ts'
 import type { Clock } from '../../utils/clock.ts'
 import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { FileStat, FileType } from '../../types.ts'
+import { globEscape } from '../file/utils.ts'
+import { KeyLock } from '../lock.ts'
 import {
   FileStatWireSchema,
-  IndexDirectorySchema,
+  IndexDirectory,
   LookupStatus,
   type Evicted,
-  type IndexDirectory,
   type ListResult,
   type LookupResult,
   type SetDirOptions,
 } from './config.ts'
-import { ListingMemo } from './listing_memo.ts'
-import { IndexCacheStore } from './store.ts'
 import {
   CHILDREN_PREFIX,
   DEFAULT_KEY_PREFIX,
@@ -39,7 +37,8 @@ import {
   REGISTRY_PAGE,
   TOMBSTONE_PREFIX,
 } from './constants.ts'
-import { globEscape } from '../file/utils.ts'
+import { ListingMemo } from './listing_memo.ts'
+import { IndexCacheStore } from './store.ts'
 
 const INVALIDATE_MISSING = `
 local changed, unknown = false, false
@@ -605,21 +604,6 @@ export interface RedisClientLike {
   quit: () => Promise<unknown>
 }
 
-export interface RedisIndexCacheOptions {
-  ttl?: number
-  clock?: Clock
-  /**
-   * Where generation and lease tokens are drawn; the system source by default.
-   * The tokens only fence clients of one server apart, so a seeded source,
-   * which mints the same tokens on every run, needs a server that is itself
-   * part of the replayed run.
-   */
-  ids?: IdSource
-  url?: string
-  client?: RedisClientLike
-  keyPrefix?: string
-}
-
 // Directory records retain stale listings like RAM; Redis maxmemory eviction
 // can still turn any cached fact into a miss. A missing path registry is rebuilt
 // in client-side scan batches; prefix invalidation also yields between batches.
@@ -642,7 +626,22 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   private closed = false
   private readonly ids: IdSource
 
-  constructor(options: RedisIndexCacheOptions = {}) {
+  constructor(
+    options: {
+      ttl?: number
+      clock?: Clock
+      /**
+       * Where generation and lease tokens are drawn; the system source by default.
+       * The tokens only fence clients of one server apart, so a seeded source,
+       * which mints the same tokens on every run, needs a server that is itself
+       * part of the replayed run.
+       */
+      ids?: IdSource
+      url?: string
+      client?: RedisClientLike
+      keyPrefix?: string
+    } = {},
+  ) {
     super(options.clock)
     this.ids = options.ids ?? new SystemIdSource()
     this.ttl = options.ttl ?? 600
@@ -1027,7 +1026,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       `${this.generationKey}:${vfsPath}`,
     ])
     if (raw == null) return [{ status: LookupStatus.NOT_FOUND }, null]
-    const listing = IndexDirectorySchema.parse(JSON.parse(raw))
+    const listing = IndexDirectory.parse(JSON.parse(raw))
     if (
       current == null ||
       directory == null ||

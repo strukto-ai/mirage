@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { secretSchema } from '../../vfs/secrets.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { secretSchema } from '../../vfs/secrets.ts'
 import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 
 export type AccessTokenProvider = () => string | Promise<string>
@@ -68,20 +68,12 @@ export interface MsGraphConfig {
   maxRetries?: number
 }
 
-export interface MsGraphConfigResolved {
-  accessToken: string | AccessTokenProvider
-  tenantHost: string | null
-  graphBaseUrl: string | null
-  timeout: number
-  maxRetries: number
-}
-
 export function optionalText(value: string | undefined): string | null {
   const normalized = value?.trim()
   return normalized === undefined || normalized === '' ? null : normalized
 }
 
-export function resolveMsGraphConfig(config: MsGraphConfig): MsGraphConfigResolved {
+export function resolveMsGraphConfig(config: MsGraphConfig) {
   const timeout = config.timeout ?? DEFAULT_TIMEOUT
   const maxRetries = config.maxRetries ?? 5
   if (!Number.isFinite(timeout) || timeout <= 0) throw new Error('timeout must be positive')
@@ -102,7 +94,7 @@ export function resolveMsGraphConfig(config: MsGraphConfig): MsGraphConfigResolv
 // address different deployments, and so a test server is reached by
 // configuring a mount instead of rebinding a global in every module that
 // spells a URL.
-export function graphApi(config: MsGraphConfigResolved): string {
+export function graphApi(config: ReturnType<typeof resolveMsGraphConfig>): string {
   if (config.graphBaseUrl !== null) return rstripSlash(config.graphBaseUrl)
   return DEFAULT_GRAPH_API
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { parseSessionProfile } from '../../../policy/profile.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { SessionState } from '../../../workspace/session/session.ts'
 import { sessionView } from '../../../workspace/session/state.ts'
 import type { WorkspaceOptions } from '../../../workspace/workspace/types.ts'
@@ -51,7 +51,7 @@ function makeWs(options: Partial<WorkspaceOptions> = {}): Workspace {
 
 describe('identity in a workspace', () => {
   it('ls, stat, find and whoami render the profile', async () => {
-    const ws = makeWs({ profiles: { admin: parseSessionProfile({}) }, profile: 'admin' })
+    const ws = makeWs({ profiles: { admin: SessionProfile({}) }, profile: 'admin' })
     expect((await run(ws, 'ls -l /data/f.txt'))[1]).toBe(
       '-rw-r--r-- 1 admin admin 5 - /data/f.txt\n',
     )
@@ -72,7 +72,7 @@ describe('identity in a workspace', () => {
 
   it('a named session reports its own profile', async () => {
     const ws = makeWs({
-      profiles: { default: parseSessionProfile({}), reviewer: parseSessionProfile({}) },
+      profiles: { default: SessionProfile({}), reviewer: SessionProfile({}) },
     })
     expect((await run(ws, 'stat -c "%G" /data/f.txt'))[1]).toBe('default\n')
     ws.createSession('r1', { profile: 'reviewer' })

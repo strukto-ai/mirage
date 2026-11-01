@@ -14,18 +14,18 @@
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { DirListing, FileStat, FileType } from '../../types.ts'
-import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
 import { globPrefix, globStemPrefix } from '../../utils/glob_walk.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import type { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PATH_SAFE } from '../hierarchy/codec.ts'
 import type { Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { filtersOf, tableOf } from '../vector/scope.ts'
 import { tableExists } from './query.ts'
-import type { LanceRow, ValueTest } from './types.ts'
 import { cellText, renderCard } from './render.ts'
+import type { LanceRow, ValueTest } from './types.ts'
 
-function rowFiles(rows: LanceRow[], config: LanceDBConfigResolved): FileStat[] {
+function rowFiles(rows: LanceRow[], config: ReturnType<typeof resolveLanceDBConfig>): FileStat[] {
   // The widened select carries every rendered column, so each card's exact
   // size is free here; blob values are deliberately not fetched at listing
   // time, so blob entries stay size-unknown and stat renders them itself.
@@ -57,7 +57,10 @@ function renderedPrefixTest(prefix: string): ValueTest {
  * A leaf is named `<rowId>` plus whichever suffix the renderer gave it, and
  * only the id half is a prefix the query can test.
  */
-function rowPrefix(pattern: string | null, config: LanceDBConfigResolved): string {
+function rowPrefix(
+  pattern: string | null,
+  config: ReturnType<typeof resolveLanceDBConfig>,
+): string {
   const suffixes = ['.md']
   if (config.blobColumn !== null && config.blobColumn !== '') suffixes.push(`.${config.blobExt}`)
   return globStemPrefix(pattern, suffixes)

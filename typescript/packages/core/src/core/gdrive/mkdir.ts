@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { eexist } from '../../errors/fs.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { eexist } from '../../errors/fs.ts'
 import { statFromItem } from './readdir.ts'
 import { eaccesOnDenied, parentFolder } from './resolve.ts'
 
@@ -24,7 +24,7 @@ import { eaccesOnDenied, parentFolder } from './resolve.ts'
  * reaches here one level at a time, each handed the level above as its
  * parent. Mirrors Python's `mkdir`.
  */
-async function mkdirImpl(
+export const mkdir = eaccesOnDenied(async function (
   accessor: GDriveAccessor,
   path: PathSpec,
   parents = false,
@@ -38,6 +38,4 @@ async function mkdirImpl(
   const [parentId] = await parentFolder(accessor, path, handed.parent)
   const basename = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
   return statFromItem(await accessor.drive.createFolder(basename, parentId))
-}
-
-export const mkdir = eaccesOnDenied(mkdirImpl)
+})

@@ -12,28 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { EvaluationContext } from '../../../evaluation.ts'
-
+import { specOf } from '../../../../commands/spec/index.ts'
+import { helpPage, versionLine } from '../../../../commands/spec/standard.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { runAsShell } from '../../../../context/session_context.ts'
-import { materialize, IOResult } from '../../../../io/types.ts'
+import { yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
+import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
+import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
-import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
-
+import { EvaluationContext } from '../../../evaluation.ts'
 import { ExecutionNode } from '../../../types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
+import { clearTraps, finishShell } from '../../traps.ts'
+import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import { BASH_LONG_OPTIONS, BASH_START_FLAGS, BASH_UNSUPPORTED_LONG_OPTIONS } from './constants.ts'
 import { readScriptFile, scriptError } from './script.ts'
 import type { BashArgs } from './types.ts'
-import { helpPage, versionLine } from '../../../../commands/spec/standard.ts'
-import { specOf } from '../../../../commands/spec/index.ts'
-import { yieldBytes } from '../../../../io/stream.ts'
-import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { clearTraps, finishShell } from '../../traps.ts'
-import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 function bashArgs(partial: Partial<BashArgs>): BashArgs {
   return {
@@ -147,7 +146,7 @@ export async function handleBash(
   jobTable?: JobTable,
   // The caller's frames, whose nesting the nested shell counts on from.
   callStack: CallStack | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   let session = context.session
   const parsed = parseBashArgs(args)
   if (parsed.help || parsed.version) {
@@ -235,7 +234,7 @@ export async function handleBash(
 }
 
 /** The `bash` / `sh` arm; the head word names the nested shell. */
-export async function bashBuiltin(call: BuiltinCall): Promise<Result> {
+export async function bashBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleBash(
     call.dispatch,
     call.executeFn,

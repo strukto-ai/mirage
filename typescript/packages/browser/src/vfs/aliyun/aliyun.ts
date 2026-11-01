@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type AliyunConfig, type AliyunConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { AliyunConfig } from './config.ts'
 
-export type AliyunVFSState = S3AliasVFSState<AliyunConfigRedacted>
-
-export class AliyunVFS extends S3AliasVFS<AliyunConfig, AliyunConfigRedacted> {
+export class AliyunVFS extends S3AliasVFS<AliyunConfig, RedactedSchema<typeof AliyunConfig>> {
   constructor(config: AliyunConfig) {
-    super(VFSName.ALIYUN, config, ALIAS)
+    super(VFSName.ALIYUN, config, AliyunConfig)
   }
 }

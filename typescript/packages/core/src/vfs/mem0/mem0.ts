@@ -1,24 +1,19 @@
-import { BaseVFS } from '../base.ts'
-import { type ByteSource } from '../../io/types.ts'
-import type { Handed } from '../types.ts'
 import { Mem0Accessor } from '../../accessor/mem0.ts'
-import { Mem0ConfigSchema, type Mem0Config, type Mem0ConfigRedacted } from './config.ts'
-
-import { type DirListing, VFSName } from '../../types.ts'
-import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import { readdir } from '../../core/mem0/readdir.ts'
 import { readStream } from '../../core/mem0/read.ts'
-import { stat } from '../../core/mem0/stat.ts'
+import { readdir } from '../../core/mem0/readdir.ts'
 import { searchMany } from '../../core/mem0/search.ts'
+import { stat } from '../../core/mem0/stat.ts'
+import { type ByteSource } from '../../io/types.ts'
+import type { FileStat, PathSpec, SearchQuery } from '../../types.ts'
+import { VFSName, type DirListing } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
 import { redactConfigWithSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { Mem0Config } from './config.ts'
 
 export const VFS_MD = `{prefix}
   <memory-id>.json`
-
-export interface Mem0VFSState {
-  type: string
-  config: Mem0ConfigRedacted
-}
 
 export class Mem0VFS extends BaseVFS {
   override readonly handed = {
@@ -64,11 +59,11 @@ export class Mem0VFS extends BaseVFS {
     return searchMany(this.accessor, paths, query)
   }
 
-  override getState(): Mem0VFSState {
-    const config: Mem0ConfigRedacted = redactConfigWithSchema(
-      Mem0ConfigSchema,
+  override getState(): ConfigState<RedactedSchema<typeof Mem0Config>> {
+    const config: RedactedSchema<typeof Mem0Config> = redactConfigWithSchema(
+      Mem0Config,
       this.config,
-    ) as Mem0ConfigRedacted
+    ) as RedactedSchema<typeof Mem0Config>
     return { type: this.name, config }
   }
 }

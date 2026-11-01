@@ -15,7 +15,8 @@
 
 from mirage.policy.match.pattern import pattern_matches
 from mirage.policy.types import AdmissionRules, CommandContext
-from mirage.rs.policy import admission_matcher, units
+from mirage.rs.document import units
+from mirage.rs.policy import admission_matcher
 
 
 def head_allowed(name: str, rules: AdmissionRules | None) -> bool:

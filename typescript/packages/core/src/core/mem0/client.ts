@@ -13,15 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Mem0Accessor } from '../../accessor/mem0.ts'
-
-function records(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value)
-    ? value.filter(
-        (item): item is Record<string, unknown> =>
-          item !== null && typeof item === 'object' && !Array.isArray(item),
-      )
-    : []
-}
+import { records } from '../../utils/records.ts'
 
 /** Fetch all memories for the configured scope, following pagination. */
 export async function getAllMemories(

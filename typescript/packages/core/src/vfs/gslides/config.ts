@@ -12,8 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { GoogleConfigSchema as GSlidesConfigSchema } from '../../core/google/config.ts'
-export type {
-  GoogleAppConfig as GSlidesConfig,
-  GoogleAppConfigRedacted as GSlidesConfigRedacted,
-} from '../../core/google/config.ts'
+export { GoogleConfig as GSlidesConfig } from '../../core/google/config.ts'

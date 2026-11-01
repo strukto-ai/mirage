@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi, type Mock } from 'vitest'
-import type { BridgeDispatchFn } from '../../types.ts'
-import { ContentType, FileStat, FileType } from '../../../types.ts'
-import { MontyFs } from './index.ts'
-import type { GuestStat } from './stat.ts'
-import { PrefixResolver } from '../../resolver.ts'
-import { MAX_URANDOM_BYTES, SCAN_LINK_DEPTH, SCAN_MAX_ENTRIES } from './constants.ts'
 import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
+import { ContentType, FileStat, FileType } from '../../../types.ts'
+import { PrefixResolver } from '../../resolver.ts'
+import type { BridgeDispatchFn } from '../../types.ts'
+import { MAX_URANDOM_BYTES, SCAN_LINK_DEPTH, SCAN_MAX_ENTRIES } from './constants.ts'
+import { MontyFs } from './index.ts'
+import type { statFields } from './stat.ts'
 
 const NOT_HANDLED = Symbol('NOT_HANDLED')
 
@@ -268,7 +268,7 @@ describe('MontyFs stat', () => {
     const wrapped = (await access.handle('Path.stat', ['/ram/x'])) as FakeClassInstance
     expect(wrapped).toBeInstanceOf(FakeClassInstance)
     expect(wrapped.options?.name).toBe('stat_result')
-    const st = wrapped.instance as GuestStat
+    const st = wrapped.instance as ReturnType<typeof statFields>
     expect(st.st_size).toBe(1)
     expect(st.st_mode & 0o170000).toBe(0o100000)
     expect(st.st_nlink).toBe(1)
@@ -277,7 +277,7 @@ describe('MontyFs stat', () => {
   it('reports a mounted directory the way monty does, 4096 bytes and two links', async () => {
     const access = accessOn(listing(['/ram/d'], ['/ram/d']))
     const wrapped = (await access.handle('Path.stat', ['/ram/d'])) as FakeClassInstance
-    const st = wrapped.instance as GuestStat
+    const st = wrapped.instance as ReturnType<typeof statFields>
     expect(st.st_size).toBe(4096)
     expect(st.st_mode & 0o170000).toBe(0o40000)
     expect(st.st_nlink).toBe(2)
@@ -298,7 +298,7 @@ describe('MontyFs stat', () => {
     const access = accessOn(listing(['/parent/child']), {}, ['/parent/child'])
     expect(await access.handle('Path.is_dir', ['/parent'])).toBe(true)
     const wrapped = (await access.handle('Path.stat', ['/parent'])) as FakeClassInstance
-    const st = wrapped.instance as GuestStat
+    const st = wrapped.instance as ReturnType<typeof statFields>
     expect(st.st_mode & 0o170000).toBe(0o40000)
     expect(st.st_nlink).toBe(2)
   })

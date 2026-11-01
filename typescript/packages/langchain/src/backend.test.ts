@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Limit, MountMode } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { describe, expect, it } from 'vitest'
 import { LangchainWorkspace } from './backend.ts'
 
 const DEC = new TextDecoder()
@@ -430,7 +430,7 @@ async function guardedWs(): Promise<Workspace> {
     { '/': new RAMVFS(), '/vault': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      profiles: { guarded: parseSessionProfile({ paths: { hide: ['/vault'] } }) },
+      profiles: { guarded: SessionProfile({ paths: { hide: ['/vault'] } }) },
     },
   )
   await ws.shell('echo key > /vault/key.txt')

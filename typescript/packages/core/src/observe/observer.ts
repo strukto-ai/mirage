@@ -15,8 +15,11 @@
 import { context, trace, type Attributes, type Tracer } from '@opentelemetry/api'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
-import { utcDateFolder } from '../utils/dates.ts'
+import type { JsonObject } from '../types.ts'
 import { SystemClock, type Clock } from '../utils/clock.ts'
+import { utcDateFolder } from '../utils/dates.ts'
+import { sha256Hex } from '../utils/hash.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 import {
   EVENT_CLEAR,
   EVENT_COMMAND,
@@ -24,13 +27,11 @@ import {
   EVENT_RESULT,
   EVENT_VFS,
   LogEntry,
-  type LogEntryInit,
   STDOUT_TRUNCATE,
+  type LogEntryInit,
 } from './log_entry.ts'
 import type { OpRecord } from './record.ts'
-import { type ObserverStore, RAMObserverStore } from './store.ts'
-import { sha256Hex } from '../utils/hash.ts'
-import { compareCodePoints } from '../utils/sort.ts'
+import { RAMObserverStore, type ObserverStore } from './store.ts'
 
 /**
  * Opt in by assigning a debug sink, as Python's module logger is off until
@@ -46,8 +47,6 @@ const KNOWN_EVENTS = new Set<string>([
   EVENT_RESULT,
   EVENT_VFS,
 ])
-
-export type EventDict = Record<string, unknown>
 
 const NAME_LIMIT = 200
 
@@ -123,8 +122,8 @@ async function sessionFile(session: string): Promise<string> {
   return `${quoted}.jsonl`
 }
 
-function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
-  const out: EventDict[] = []
+function parseFiles(files: Map<string, Uint8Array>): JsonObject[] {
+  const out: JsonObject[] = []
   const decoder = new TextDecoder('utf-8', { fatal: false })
   for (const key of [...files.keys()].sort(compareCodePoints)) {
     if (!key.endsWith('.jsonl')) continue
@@ -132,7 +131,7 @@ function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
     for (const line of text.split('\n')) {
       if (!line) continue
       try {
-        out.push(JSON.parse(line) as EventDict)
+        out.push(JSON.parse(line) as JsonObject)
       } catch (err) {
         // A crash mid-append tears a line and the entry appended onto it.
         if (!(err instanceof SyntaxError)) throw err
@@ -143,12 +142,12 @@ function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
   return out
 }
 
-function eventTimestamp(e: EventDict): number {
+function eventTimestamp(e: JsonObject): number {
   return typeof e.timestamp === 'number' ? e.timestamp : 0
 }
 
 /** The latest timestamp among `events`, null when none carries one. */
-function newestStamp(events: readonly EventDict[]): number | null {
+function newestStamp(events: readonly JsonObject[]): number | null {
   return events.reduce<number | null>(
     (newest, e) =>
       typeof e.timestamp === 'number' ? later(newest, Math.floor(e.timestamp)) : newest,
@@ -337,7 +336,7 @@ export class Observer {
    * line order, so events that share a millisecond (one line's ops plus
    * its command entry) keep append order.
    */
-  async events(session?: string): Promise<EventDict[]> {
+  async events(session?: string): Promise<JsonObject[]> {
     const out = parseFiles(
       await (session === undefined
         ? this._store.readAll()
@@ -353,9 +352,9 @@ export class Observer {
    * added without running (`history -s`) at once, so the listing only ever
    * grows at its end.
    */
-  async commandEvents(): Promise<EventDict[]> {
-    const ended: EventDict[] = []
-    const running = new Map<unknown, EventDict>()
+  async commandEvents(): Promise<JsonObject[]> {
+    const ended: JsonObject[] = []
+    const running = new Map<unknown, JsonObject>()
     for (const e of await this.events()) {
       if (e.type === EVENT_COMMAND && e.id === undefined) {
         ended.push(e)
@@ -377,10 +376,10 @@ export class Observer {
    * tombstone empties it, and delete events apply at the position they
    * were issued (history -d renumbers subsequent entries, GNU behavior).
    */
-  async sessionCommandEvents(session: string): Promise<EventDict[]> {
+  async sessionCommandEvents(session: string): Promise<JsonObject[]> {
     const entries = parseFiles(await this._store.readMatching(`/${await sessionFile(session)}`))
-    let visible: EventDict[] = []
-    const running = new Map<unknown, EventDict>()
+    let visible: JsonObject[] = []
+    const running = new Map<unknown, JsonObject>()
     for (const e of entries) {
       if (e.type === EVENT_COMMAND && e.id === undefined) {
         visible.push(e)
@@ -409,7 +408,7 @@ export class Observer {
    * different history shape) without a recognized `type` are skipped:
    * the views filter by `type` so they are unusable here anyway.
    */
-  async loadEvents(events: EventDict[]): Promise<void> {
+  async loadEvents(events: JsonObject[]): Promise<void> {
     await this._store.clear()
     const written = Math.max(
       this.nowMs(),

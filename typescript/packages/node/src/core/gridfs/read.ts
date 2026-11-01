@@ -12,20 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '@struktoai/mirage-core/utils/bytes'
-import type { ObjectId } from 'mongodb'
-import { record, revisionFor, startOp } from '@struktoai/mirage-core/observe/context'
-import { VFSName } from '@struktoai/mirage-core/types'
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
-import type { GridFSAccessor } from '../../accessor/gridfs.ts'
+import { record, revisionFor, startOp } from '@struktoai/mirage-core/observe/context'
+import type { PathSpec, ReadRange } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
+import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import type { ObjectId } from 'mongodb'
+import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { bucket, fileById, gridfsKey, latestFile, loadGridFSModule } from './client.ts'
-
-export interface GridFSReadOptions {
-  offset?: number
-  size?: number
-}
 
 export async function resolveFileId(
   accessor: GridFSAccessor,
@@ -51,10 +46,7 @@ export async function resolveFileId(
 // comes back short, so the window is clamped to the file here. Python needs
 // no equivalent: its driver reads through a file object that seeks and stops
 // at EOF like any file.
-function clampWindow(
-  length: number,
-  options: GridFSReadOptions,
-): { start: number; end: number } | null {
+function clampWindow(length: number, options: ReadRange): { start: number; end: number } | null {
   const start = Math.min(options.offset ?? 0, length)
   const end = options.size === undefined ? length : Math.min(start + options.size, length)
   return start >= end ? null : { start, end }
@@ -64,7 +56,7 @@ async function downloadBytes(
   accessor: GridFSAccessor,
   path: PathSpec,
   fileId: ObjectId,
-  options: GridFSReadOptions = {},
+  options: ReadRange = {},
 ): Promise<Uint8Array> {
   const b = await bucket(accessor)
   const windowed = (options.offset ?? 0) !== 0 || options.size !== undefined
@@ -100,7 +92,7 @@ export function isNoFileError(err: unknown): boolean {
 export async function read(
   accessor: GridFSAccessor,
   path: PathSpec,
-  options: GridFSReadOptions = {},
+  options: ReadRange = {},
 ): Promise<Uint8Array> {
   const virtual = path.virtual
   const raw = rawPathOf(path)

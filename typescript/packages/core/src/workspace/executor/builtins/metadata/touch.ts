@@ -12,13 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_UMASK } from '../../../../context/session_context.ts'
-import { matchWord } from '../../../../commands/spec/word_choice.ts'
-import { invalidArgumentError, usageHint } from '../../../../commands/spec/usage.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import { IOResult } from '../../../../io/types.ts'
-import type { FileStat, SetAttrFields } from '../../../../types.ts'
-import { PathSpec } from '../../../../types.ts'
+import { invalidArgumentError, usageHint } from '../../../../commands/spec/usage.ts'
+import { matchWord } from '../../../../commands/spec/word_choice.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { DEFAULT_UMASK } from '../../../../context/session_context.ts'
 import {
   fsStrerror,
   isAborting,
@@ -29,14 +27,16 @@ import {
   strerrorOf,
   walkRefusal,
 } from '../../../../errors/fs.ts'
-import { CycleError } from '../../../../utils/path.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
+import type { FileStat, SetAttrFields } from '../../../../types.ts'
+import { PathSpec } from '../../../../types.ts'
+import { CycleError } from '../../../../utils/path.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, fail, finish, parseLine } from '../shared.ts'
-import { nowIso, permissionError, parseTouchStamp, setattrLink, setattrVia } from './metadata.ts'
-import type { Result } from '../types.ts'
-import { decodeText } from '../../../../shell/bytes.ts'
+import { nowIso, parseTouchStamp, permissionError, setattrLink, setattrVia } from './metadata.ts'
 
 // GNU touch's --time words, aliases of one value together. Mirrors
 // Python's TIME_GROUPS.
@@ -54,7 +54,7 @@ export async function handleTouch(
   dispatch: DispatchFn,
   session: SessionState,
   args: readonly (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('touch', args, session.cwd)
   if (refused !== null) return refused
   let time = fl.asStr('time')

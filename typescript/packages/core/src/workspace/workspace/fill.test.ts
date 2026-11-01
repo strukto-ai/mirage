@@ -11,38 +11,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CLIHandler } from '../../commands/cli/types.ts'
-import type { Context } from '../../commands/config.ts'
-import { CommandSpec } from '../../commands/spec/types.ts'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-
-import { Argument, type FlagValue } from '../../commands/spec/types.ts'
-import { CLI, type CLIVerbFn } from '../../commands/cli/types.ts'
-import { IOResult } from '../../io/types.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { Runtime } from '../../runtime/base.ts'
-import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
-import type { RouteDecision } from '../../runtime/types.ts'
-import { WorkspaceRuntime } from '../../runtime/workspace.ts'
-import { ScriptSource, type RunResult } from '../../runtime/types.ts'
-import { registerSecrets } from '../../secrets/registry.ts'
-import { networkBound, type NetworkRule } from '../../io/network.ts'
-import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
-import type { ResolvedSecret } from '../../secrets/types.ts'
-import { VarAttr } from '../../shell/variable.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
-import { Limit, MountMode, type PathSpec } from '../../types.ts'
-import type { Action, CommandContext, Policy } from '../../policy/index.ts'
-import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
-import { parse } from '../../shell/parse/parse.ts'
-import type { RouteContext } from '../../policy/types.ts'
-import type { AskHandler } from '../../policy/decisions.ts'
-import { Outcome, Scope, type Decision, type SessionContext } from '../../policy/types.ts'
 import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { CLI, CLIHandler, type CLIVerbFn } from '../../commands/cli/types.ts'
+import type { Context } from '../../commands/config.ts'
+import { Argument, CommandSpec, type FlagValue } from '../../commands/spec/types.ts'
+import { networkBound, type NetworkRule } from '../../io/network.ts'
+import { IOResult } from '../../io/types.ts'
+import type { AskHandler } from '../../policy/decisions.ts'
+import type { Action, CommandContext, Policy } from '../../policy/index.ts'
+import { SessionProfile } from '../../policy/profile.ts'
+import type { RouteContext } from '../../policy/types.ts'
+import { Outcome, Scope, type Decision, type SessionContext } from '../../policy/types.ts'
+import { Runtime } from '../../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
+import type { RouteDecision } from '../../runtime/types.ts'
+import { ScriptSource, type RunResult } from '../../runtime/types.ts'
+import { WorkspaceRuntime } from '../../runtime/workspace.ts'
+import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
+import { registerSecrets } from '../../secrets/registry.ts'
+import type { ResolvedSecret } from '../../secrets/types.ts'
+import { parse } from '../../shell/parse/parse.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
+import { VarAttr } from '../../shell/variable.ts'
+import { Limit, MountMode, type PathSpec } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { toStateDict } from '../snapshot/state.ts'
 import { guestBound } from './fill.ts'
 import { Workspace } from './workspace.ts'
-import { toStateDict } from '../snapshot/state.ts'
 
 const FakeConfig = z.strictObject({})
 type FakeConfig = z.infer<typeof FakeConfig>
@@ -91,7 +88,7 @@ class DenyLine implements Policy {
 // rules judge a line before it runs, so they keep a refused line's
 // secrets unfetched.
 function ruled(verb: 'deny' | 'ask', name: string, reason: string): SessionProfile {
-  return parseSessionProfile({ commands: { [verb]: [{ reason, commands: [name] }] } })
+  return SessionProfile({ commands: { [verb]: [{ reason, commands: [name] }] } })
 }
 
 function makeWs(
@@ -130,7 +127,7 @@ function envCliSpec(): CLI {
   })
 }
 
-class NiceBox extends Runtime implements LineExecutor {
+class NiceBox extends Runtime implements LineExecutorMixin {
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'nicebox'
 
@@ -428,7 +425,7 @@ describe('fillEnv through execute', () => {
 
   it('an unknown source fails at construction', () => {
     expect(() => makeWs({ T: { from: 'nope-never', ref: 'r' } })).toThrow(/unknown secrets source/)
-    const profile = parseSessionProfile({ env: { T: { from: 'nope-never', ref: 'r' } } })
+    const profile = SessionProfile({ env: { T: { from: 'nope-never', ref: 'r' } } })
     expect(() => makeWs(undefined, profile)).toThrow(/unknown secrets source/)
   })
 
@@ -440,7 +437,7 @@ describe('fillEnv through execute', () => {
     const { fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-profile', FakeConfig, fetch)
     const pointer = { from: 'fake-profile', ref: 'r' }
-    const ws = makeWs(undefined, parseSessionProfile({ env: { TOKEN: pointer } }))
+    const ws = makeWs(undefined, SessionProfile({ env: { TOKEN: pointer } }))
     try {
       ws.createSession('agent')
       for (const sessionId of [ws.defaultSessionId, 'agent']) {
@@ -1701,7 +1698,7 @@ describe('fillEnv through execute', () => {
         CLI_ROOT: { from: 'fake-cli-refused', ref: 'root' },
         CLI_ALPHA: { from: 'fake-cli-refused', ref: 'alpha' },
       },
-      parseSessionProfile({ paths: { hide: ['/secret'] }, commands: { allow: ['*'] } }),
+      SessionProfile({ paths: { hide: ['/secret'] }, commands: { allow: ['*'] } }),
     )
     try {
       const base = envCliSpec()
@@ -1725,7 +1722,7 @@ describe('fillEnv through execute', () => {
     registerSecrets('fake-cli-glob', FakeConfig, fetch)
     const ws = makeWs(
       { CLI_ROOT: { from: 'fake-cli-glob', ref: 'root' } },
-      parseSessionProfile({ commands: { allow: ['probe /open.txt'] } }),
+      SessionProfile({ commands: { allow: ['probe /open.txt'] } }),
     )
     try {
       await ws.vfs.write('/open.txt', new Uint8Array())
@@ -1749,7 +1746,7 @@ describe('fillEnv through execute', () => {
         mode: MountMode.EXEC,
         runtimes: [new NiceBox(), 'workspace'],
         env: { TOKEN: { from: 'fake-nice-box', ref: 'r' } },
-        profiles: { p: parseSessionProfile({ commands: { allow: ['nice'] } }) },
+        profiles: { p: SessionProfile({ commands: { allow: ['nice'] } }) },
         profile: 'p',
       },
     )

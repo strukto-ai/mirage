@@ -16,7 +16,7 @@ import { CreateBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client
 import type { FileStat } from '@struktoai/mirage-node'
 import {
   MountMode,
-  parseSessionProfile,
+  SessionProfile,
   RAMVFS,
   RedisVFS,
   S3VFS,
@@ -601,7 +601,7 @@ async function main(): Promise<void> {
 
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
-    profiles: { 'integ-agent': parseSessionProfile({}) },
+    profiles: { 'integ-agent': SessionProfile({}) },
     profile: 'integ-agent',
   })
   try {

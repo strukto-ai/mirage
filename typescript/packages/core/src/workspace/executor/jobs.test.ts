@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { IOResult } from '../../io/types.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell/job_table/index.ts'
 import { MountMode } from '../../types.ts'
-import { stdoutStr, stderrStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../workspace/workspace.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
 import { ExecutionNode } from '../types.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait, ownerTags } from './jobs.ts'
 
 /** A runner that finishes immediately with no output. */
@@ -768,7 +768,7 @@ it('ps lists the session leader with its owner', async () => {
     { '/m': [new RAMVFS(), MountMode.WRITE] },
     {
       mode: MountMode.WRITE,
-      profiles: { admin: parseSessionProfile({}) },
+      profiles: { admin: SessionProfile({}) },
       profile: 'admin',
     },
   )
@@ -789,8 +789,8 @@ it("ps does not name another session's group", async () => {
     {
       mode: MountMode.WRITE,
       profiles: {
-        admin: parseSessionProfile({ processes: 'workspace' }),
-        reader: parseSessionProfile({}),
+        admin: SessionProfile({ processes: 'workspace' }),
+        reader: SessionProfile({}),
       },
       profile: 'admin',
     },

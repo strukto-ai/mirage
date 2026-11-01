@@ -1,4 +1,66 @@
+import type { Accessor } from '../../accessor/base.ts'
+import { mutationLock } from '../../cache/file/io.ts'
+import type { FileCacheMixin } from '../../cache/file/mixin.ts'
+import type { Evicted, IndexConfig } from '../../cache/index/config.ts'
+import { buildIndex } from '../../cache/index/factory.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { CacheManager } from '../../cache/manager.ts'
+import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
+import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
+import { walk } from '../../commands/cli/walk.ts'
+import { parseCommand } from '../../commands/spec/parser.ts'
+import {
+  effectivePathMode,
+  sessionVisibility,
+  strongestModeUnder,
+} from '../../context/session_context.ts'
+import { noMount } from '../../errors/fs.ts'
+import { IOConfig } from '../../io/config.ts'
+import type { MemoryBudget } from '../../io/memory.ts'
+import {
+  mergeRoutes,
+  networkLayer,
+  networkRoutes,
+  NetworkRule,
+  type NetworkSetting,
+} from '../../io/network.ts'
+import type { Observer } from '../../observe/observer.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
+import type { ProcessView } from '../../process/view.ts'
 import type { DiffComputer } from '../../rs/diff_types.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
+import {
+  DEFAULT_READ_SPEC,
+  Limit,
+  MountMode,
+  PathSpec,
+  type ReadSpec,
+  VFSName,
+  WritePolicy,
+} from '../../types.ts'
+import { type Clock, SystemClock } from '../../utils/clock.ts'
+import { pathVisible } from '../../utils/hidden.ts'
+import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { normDir, ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
+import { BinViewVFS } from '../../vfs/bin/bin.ts'
+import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
+import { DocumentVFS } from '../../vfs/document/document.ts'
+import { HistoryViewVFS } from '../../vfs/history/history.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import type { SessionAccess } from '../../view/types.ts'
+import { CLIRegistry } from '../cli/registry.ts'
+import { lineFacts } from '../lookup/constants.ts'
+import type { SessionState } from '../session/session.ts'
+import type { MountRow } from '../types.ts'
+import { backendCommands } from './backends.ts'
+import { MountCommandAmbiguous, SharedStorageError } from './errors.ts'
+import { MountEntry, type MountInit } from './mount.ts'
+
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,69 +74,6 @@ import type { DiffComputer } from '../../rs/diff_types.ts'
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import type { SessionAccess } from '../../view/types.ts'
-import { IOConfig } from '../../io/config.ts'
-import type { MemoryBudget } from '../../io/memory.ts'
-import {
-  mergeRoutes,
-  NetworkRule,
-  networkLayer,
-  networkRoutes,
-  type NetworkSetting,
-} from '../../io/network.ts'
-import { backendCommands } from './backends.ts'
-import type { Observer } from '../../observe/observer.ts'
-import type { ProcessView } from '../../process/view.ts'
-import type { SessionState } from '../session/session.ts'
-import { noMount } from '../../errors/fs.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
-import type { Accessor } from '../../accessor/base.ts'
-import type { Runtime } from '../../runtime/base.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
-import { mutationLock } from '../../cache/file/io.ts'
-import type { FileCache } from '../../cache/file/mixin.ts'
-import type { Evicted } from '../../cache/index/config.ts'
-import { CacheManager } from '../../cache/manager.ts'
-import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
-import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
-import type { MountRow } from '../types.ts'
-import { BinViewVFS } from '../../vfs/bin/bin.ts'
-import { DocumentVFS } from '../../vfs/document/document.ts'
-import { HistoryViewVFS } from '../../vfs/history/history.ts'
-import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
-import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
-import {
-  Limit,
-  type ReadSpec,
-  DEFAULT_READ_SPEC,
-  MountMode,
-  PathSpec,
-  VFSName,
-  WritePolicy,
-} from '../../types.ts'
-import { CLIRegistry } from '../cli/registry.ts'
-import { lineFacts } from '../lookup/constants.ts'
-import {
-  effectivePathMode,
-  sessionVisibility,
-  strongestModeUnder,
-} from '../../context/session_context.ts'
-import { walk } from '../../commands/cli/walk.ts'
-import { parseCommand } from '../../commands/spec/parser.ts'
-import { pathVisible } from '../../utils/hidden.ts'
-import { MountEntry, type MountInit } from './mount.ts'
-import { MountCommandAmbiguous, SharedStorageError } from './errors.ts'
-import type { IndexConfig } from '../../cache/index/config.ts'
-import { buildIndex } from '../../cache/index/factory.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { normDir, ownerPrefix, rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
-import { type Clock, SystemClock } from '../../utils/clock.ts'
-import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
 
 // What the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
@@ -107,12 +106,6 @@ export class MountCommandUnsupported extends Error {
 }
 
 /** What a placement adds to a driver: the store config and the reference it came from. */
-export interface MountPlacementInit {
-  index?: IndexConfig
-  vfsRef?: string | null
-  /** The mount's write policy; undefined takes the workspace default. */
-  write?: WritePolicy
-}
 
 /** The placements of the mounts a registry is constructed with, keyed by raw prefix. */
 export interface RegistryPlacements {
@@ -144,7 +137,7 @@ export class MountRegistry {
   private rootRef: MountEntry | null = null
   private defaultRead: ReadSpec = DEFAULT_READ_SPEC
   private defaultWrite: WritePolicy = WritePolicy.UNCONDITIONAL
-  private cacheStore: FileCache | null = null
+  private cacheStore: FileCacheMixin | null = null
   private reconciler: ReadReconciler | null = null
   private dispatchFn: DispatchFn | null = null
   private dispatchAsFn: ((owner: SessionAccess) => DispatchFn) | null = null
@@ -324,7 +317,7 @@ export class MountRegistry {
    * added later get their manager in `mount()`. The cache is a hidden
    * store, never a mount.
    */
-  attachFileCache(cache: FileCache | null): void {
+  attachFileCache(cache: FileCacheMixin | null): void {
     this.cacheStore = cache
     for (const m of this.mountList) this.attachManager(m)
   }
@@ -535,7 +528,12 @@ export class MountRegistry {
     vfs: BaseVFS,
     mode: MountMode = MountMode.READ,
     read?: ReadSpec,
-    placement: MountPlacementInit = {},
+    placement: {
+      index?: IndexConfig
+      vfsRef?: string | null
+      /** The mount's write policy; undefined takes the workspace default. */
+      write?: WritePolicy
+    } = {},
   ): MountEntry {
     this.checkVfsAvailable(vfs)
     const norm = normDir(prefix)
@@ -713,7 +711,7 @@ export class MountRegistry {
     return this.rootRef
   }
 
-  get fileCache(): FileCache | null {
+  get fileCache(): FileCacheMixin | null {
     return this.cacheStore
   }
 

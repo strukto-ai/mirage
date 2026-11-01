@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { WriteKind } from '../../cache/types.ts'
 import { MountMode, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
-import { S3VFSBase } from '../../vfs/s3/s3.ts'
-import type { WriteKind } from '../../cache/types.ts'
+import { S3VFS } from '../../vfs/s3/s3.ts'
 import { WritePolicyError } from './errors.ts'
 
 /**
@@ -85,7 +85,7 @@ export function checkWriteCapability(
       `mount '${prefix}': write: conditional needs a writable mount; this one is read`,
     )
   }
-  if (vfs instanceof S3VFSBase && vfs.presigned) {
+  if (vfs instanceof S3VFS && vfs.presigned) {
     throw new WritePolicyError(
       `mount '${prefix}': write: conditional cannot be sent through a presigned-URL client, ` +
         'which carries no condition',

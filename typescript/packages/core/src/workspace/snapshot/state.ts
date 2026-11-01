@@ -11,32 +11,87 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../commands/spec/types.ts'
 
-import { indexConfigDump, restoreIndexConfig } from './config.ts'
-import { tokenOrNull } from '../../cache/file/utils.ts'
-import type { FileCache } from '../../cache/file/mixin.ts'
-import { CacheEntry } from '../../cache/file/entry.ts'
-import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import { BaseVFS } from '../../vfs/base.ts'
-import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE, EVENT_RESULT } from '../../observe/log_entry.ts'
-import type { EventDict, Observer } from '../../observe/observer.ts'
-import type { OpRecord } from '../../observe/record.ts'
-import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
-import type { VFSStateBase } from '../../vfs/base.ts'
 import { z } from 'zod'
-
-import { narrow, narrowingOf, stricterModes } from '../session/resolve.ts'
-import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
-import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
+import { CacheEntry } from '../../cache/file/entry.ts'
+import type { FileCacheMixin } from '../../cache/file/mixin.ts'
+import { RAMFileCacheStore } from '../../cache/file/ram.ts'
+import { tokenOrNull } from '../../cache/file/utils.ts'
+import { CLI } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { IOConfig } from '../../io/config.ts'
 import { MAX_MEMORY } from '../../io/memory.ts'
 import type { NetworkSetting } from '../../io/network.ts'
-import { IOConfig } from '../../io/config.ts'
+import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE, EVENT_RESULT } from '../../observe/log_entry.ts'
+import type { Observer } from '../../observe/observer.ts'
+import type { OpRecord } from '../../observe/record.ts'
+import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
+import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
+import { ScriptSource } from '../../runtime/types.ts'
+import {
+  Channel,
+  type ConsoleChunk,
+  exitOutcome,
+  JobConsole,
+  killedOutcome,
+  RAMConsoleStore,
+} from '../../shell/console/index.ts'
+import { BIN_PREFIX } from '../../shell/constants.ts'
+import { Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
+import type { ShellVar } from '../../shell/variable.ts'
+import type { JsonObject } from '../../types.ts'
+import {
+  DEFAULT_READ_SPEC,
+  MountMode,
+  type ReadSpec,
+  VFSName,
+  type WritePolicy,
+} from '../../types.ts'
+import { normDir } from '../../utils/slash.ts'
+import { VERSION } from '../../version.ts'
+import { BaseVFS } from '../../vfs/base.ts'
+import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
+import { RAMVFS, type RAMVFSState } from '../../vfs/ram/ram.ts'
+import {
+  hasRedactedSecret,
+  redactConfigWithSchema,
+  vfsStateRequiresOverride,
+} from '../../vfs/secrets.ts'
+import type { VFSStateBase } from '../../vfs/types.ts'
+import type { CLIInstall } from '../cli/types.ts'
+import type { Documents } from '../documentation/documents.ts'
+import { WritePolicyError } from '../mount/errors.ts'
+import {
+  metaFromFields,
+  metaToFields,
+  type Namespace,
+  type NodeMeta,
+} from '../mount/namespace/namespace.ts'
+import { resolveReadSpec } from '../mount/read_policy.ts'
+import type { MountRegistry } from '../mount/registry.ts'
+import { Mount } from '../mount/spec.ts'
+import { coerceWritePolicy } from '../mount/write_policy.ts'
+import type { SessionManager } from '../session/manager.ts'
+import { narrow, narrowingOf, stricterModes } from '../session/resolve.ts'
+import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
 import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
-import type { CLIInstall } from '../cli/types.ts'
-import { CLI } from '../../commands/cli/types.ts'
-import { ScriptSource } from '../../runtime/types.ts'
+import type { MountArgs } from './config.ts'
+import { indexConfigDump, restoreIndexConfig } from './config.ts'
+import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
+import { readRegular } from './fs.ts'
+import type {
+  CacheEntrySnapshot,
+  CLISnapshot,
+  FingerprintEntrySnapshot,
+  JobSnapshot,
+  MountSnapshot,
+  NodeMetaSnapshot,
+  SessionSnapshot,
+  VFSState,
+  WorkspaceStateDict,
+} from './types.ts'
+import { FORMAT_VERSION } from './utils.ts'
 
 /**
  * Per-name overrides for restoring installed CLIs: a plain mapping is a
@@ -48,61 +103,6 @@ export type CLIOverrides = Record<
   string,
   Record<string, unknown> | [CLI, Record<string, unknown> | null]
 >
-import { BIN_PREFIX } from '../../shell/constants.ts'
-import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
-import {
-  hasRedactedSecret,
-  redactConfigWithSchema,
-  vfsStateRequiresOverride,
-} from '../../vfs/secrets.ts'
-import { Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
-import type { ShellVar } from '../../shell/variable.ts'
-import {
-  Channel,
-  type ConsoleChunk,
-  JobConsole,
-  RAMConsoleStore,
-  exitOutcome,
-  killedOutcome,
-} from '../../shell/console/index.ts'
-import {
-  type ReadSpec,
-  type WritePolicy,
-  DEFAULT_READ_SPEC,
-  MountMode,
-  VFSName,
-} from '../../types.ts'
-import { readRegular } from './fs.ts'
-import { resolveReadSpec } from '../mount/read_policy.ts'
-import { coerceWritePolicy } from '../mount/write_policy.ts'
-import { Mount } from '../mount/spec.ts'
-import { VERSION } from '../../version.ts'
-import type { Documents } from '../documentation/documents.ts'
-import {
-  metaFromFields,
-  metaToFields,
-  type Namespace,
-  type NodeMeta,
-} from '../mount/namespace/namespace.ts'
-import { WritePolicyError } from '../mount/errors.ts'
-import type { MountRegistry } from '../mount/registry.ts'
-import type { SessionManager } from '../session/manager.ts'
-import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
-import type { MountArgs } from './config.ts'
-import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
-import type {
-  CacheEntrySnapshot,
-  CLISnapshot,
-  FingerprintEntrySnapshot,
-  JobSnapshot,
-  MountSnapshot,
-  NodeMetaSnapshot,
-  VFSState,
-  SessionSnapshot,
-  WorkspaceStateDict,
-} from './types.ts'
-import { FORMAT_VERSION } from './utils.ts'
-import { normDir } from '../../utils/slash.ts'
 
 /** What a snapshot reads from a workspace and restores into it (`Workspace`). */
 export interface WorkspaceLike {
@@ -111,7 +111,7 @@ export interface WorkspaceLike {
   readonly sessionManager: SessionManager
   readonly jobTable: JobTable
   readonly writeDefault: WritePolicy
-  readonly cache: FileCache & BaseVFS
+  readonly cache: FileCacheMixin & BaseVFS
   readonly namespace: Namespace
   readonly observer: Observer
   readonly documents: Documents
@@ -522,7 +522,6 @@ export function buildMountArgs(
 }
 
 /** Builds the VFS a saved mount names, or null when it cannot. */
-export type SavedResourceBuilder = (entry: MountSnapshot) => Promise<BaseVFS | null>
 
 /**
  * The VFS an override places at a saved mount, with its label. A `Mount`
@@ -605,7 +604,7 @@ export function savedVfsBuild(
 export async function withRebuiltMounts(
   state: WorkspaceStateDict,
   overrides: Record<string, BaseVFS | Mount>,
-  build: SavedResourceBuilder,
+  build: (entry: MountSnapshot) => Promise<BaseVFS | null>,
 ): Promise<Record<string, BaseVFS | Mount>> {
   checkFormatVersion(state)
   const merged: Record<string, BaseVFS | Mount> = { ...overrides }
@@ -836,7 +835,7 @@ async function restoreHistory(ws: WorkspaceLike, state: WorkspaceStateDict): Pro
   // still rewinds the recorder, same as the cache clear. Foreign-format
   // entries (e.g. a Python snapshot's different history shape) are skipped
   // inside loadEvents.
-  await ws.observer.loadEvents((state.history as EventDict[] | undefined) ?? [])
+  await ws.observer.loadEvents((state.history as JsonObject[] | undefined) ?? [])
 }
 
 /** Rebuild a finished job's console from its serialized output. */

@@ -1,39 +1,30 @@
-import { BaseVFS } from '../base.ts'
-import {
-  OneDriveAccessor,
-  OneDriveConfigSchema,
-  type OneDriveConfig,
-  type OneDriveConfigRedacted,
-} from '../../accessor/onedrive.ts'
-import { VFSName } from '../../types.ts'
-import type { DeltaHook } from '../../events/base.ts'
-import { buildDeltaHook } from '../../core/onedrive/events.ts'
-import type { CapacityResult, DirListing, PathSpec, FileStat } from '../../types.ts'
+import { OneDriveAccessor, OneDriveConfig } from '../../accessor/onedrive.ts'
+import { filesContaining } from '../../core/msgraph/search.ts'
 import { capacity as onedriveCapacity } from '../../core/onedrive/capacity.ts'
-import type { Handed } from '../types.ts'
-import { readdir } from '../../core/onedrive/readdir.ts'
+import { driveLoc } from '../../core/onedrive/client.ts'
+import { copy } from '../../core/onedrive/copy.ts'
+import { create } from '../../core/onedrive/create.ts'
+import { buildDeltaHook } from '../../core/onedrive/events.ts'
+import { exists } from '../../core/onedrive/exists.ts'
+import { mkdir } from '../../core/onedrive/mkdir.ts'
 import { read } from '../../core/onedrive/read.ts'
+import { readdir } from '../../core/onedrive/readdir.ts'
+import { rename } from '../../core/onedrive/rename.ts'
+import { rmR } from '../../core/onedrive/rm.ts'
+import { rmdir } from '../../core/onedrive/rmdir.ts'
 import { stat, tree } from '../../core/onedrive/stat.ts'
 import { readStream } from '../../core/onedrive/stream.ts'
-import { exists } from '../../core/onedrive/exists.ts'
-import type { ByteSource } from '../../io/types.ts'
-import { write } from '../../core/onedrive/write.ts'
-import { create } from '../../core/onedrive/create.ts'
-import { mkdir } from '../../core/onedrive/mkdir.ts'
-import { unlink } from '../../core/onedrive/unlink.ts'
-import { rmdir } from '../../core/onedrive/rmdir.ts'
-import { rmR } from '../../core/onedrive/rm.ts'
-import { rename } from '../../core/onedrive/rename.ts'
-import { copy } from '../../core/onedrive/copy.ts'
 import { truncate } from '../../core/onedrive/truncate.ts'
-import { filesContaining } from '../../core/msgraph/search.ts'
-import { driveLoc } from '../../core/onedrive/client.ts'
+import { unlink } from '../../core/onedrive/unlink.ts'
+import { write } from '../../core/onedrive/write.ts'
+import type { DeltaHook } from '../../events/base.ts'
+import type { ByteSource } from '../../io/types.ts'
+import type { CapacityResult, DirListing, FileStat, PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
 import { redactConfigWithSchema } from '../secrets.ts'
-
-export interface OneDriveVFSState {
-  type: string
-  config: OneDriveConfigRedacted
-}
+import type { ConfigState, Handed } from '../types.ts'
 
 export class OneDriveVFS extends BaseVFS {
   override readonly name: string = VFSName.ONEDRIVE
@@ -153,11 +144,11 @@ export class OneDriveVFS extends BaseVFS {
     return buildDeltaHook(this.accessor)
   }
 
-  override getState(): OneDriveVFSState {
-    const config: OneDriveConfigRedacted = redactConfigWithSchema(
-      OneDriveConfigSchema,
+  override getState(): ConfigState<RedactedSchema<typeof OneDriveConfig>> {
+    const config: RedactedSchema<typeof OneDriveConfig> = redactConfigWithSchema(
+      OneDriveConfig,
       this.config,
-    ) as OneDriveConfigRedacted
+    ) as RedactedSchema<typeof OneDriveConfig>
     return { type: this.name, config }
   }
 }

@@ -12,17 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const MinIOConfigSchema = browserAliasSchema({})
+export const MinIOConfig = makeBrowserS3Alias({ schema: browserAliasSchema({}) })
 
-export type MinIOConfig = ConfigOf<typeof MinIOConfigSchema>
-
-export type MinIOConfigRedacted = RedactedConfig<MinIOConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<MinIOConfig, MinIOConfigRedacted>({
-  schema: MinIOConfigSchema,
-})
-
-export const minioToS3Config = ALIAS.toS3Config
+export type MinIOConfig = ConfigOf<typeof MinIOConfig>

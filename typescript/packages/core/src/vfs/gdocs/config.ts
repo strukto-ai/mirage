@@ -12,8 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { GoogleConfigSchema as GDocsConfigSchema } from '../../core/google/config.ts'
-export type {
-  GoogleAppConfig as GDocsConfig,
-  GoogleAppConfigRedacted as GDocsConfigRedacted,
-} from '../../core/google/config.ts'
+export { GoogleConfig as GDocsConfig } from '../../core/google/config.ts'

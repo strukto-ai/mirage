@@ -12,13 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Outcome, Scope, type Decision } from '@struktoai/mirage-core/policy/index'
 import type { FastifyInstance } from 'fastify'
 import type { WorkspaceRegistry } from '../registry.ts'
-import { Outcome, Scope, type Decision } from '@struktoai/mirage-core/policy/index'
-
-export interface AsksRoutesDeps {
-  registry: WorkspaceRegistry
-}
 
 interface WsIdParams {
   wsId: string
@@ -68,7 +64,12 @@ function toResponse(record: Decision): AskResponse {
   }
 }
 
-export function registerAsksRoutes(app: FastifyInstance, deps: AsksRoutesDeps): void {
+export function registerAsksRoutes(
+  app: FastifyInstance,
+  deps: {
+    registry: WorkspaceRegistry
+  },
+): void {
   app.get<{ Params: WsIdParams; Querystring: ListAsksQuery }>(
     '/v1/workspaces/:wsId/asks',
     async (req, reply) => {

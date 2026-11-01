@@ -12,25 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  makeS3Alias,
-  REGION_ALIAS_SCHEMA,
-  type S3AliasConfig,
-  type S3AliasConfigRedacted,
-} from '../s3_alias.ts'
+import { makeS3Alias, REGION_ALIAS_SCHEMA, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface AliyunConfig extends S3AliasConfig {
   region: string
 }
 
-export type AliyunConfigRedacted = S3AliasConfigRedacted
-
-export const AliyunConfigSchema = REGION_ALIAS_SCHEMA
-
-export const ALIAS = makeS3Alias<AliyunConfig, AliyunConfigRedacted>({
-  schema: AliyunConfigSchema,
+export const AliyunConfig = makeS3Alias({
+  schema: REGION_ALIAS_SCHEMA,
   endpointFor: (config) => `https://s3.oss-${config.region}.aliyuncs.com`,
 })
-
-export const resolvedAliyunEndpoint = ALIAS.resolvedEndpoint
-export const aliyunToS3Config = ALIAS.toS3Config

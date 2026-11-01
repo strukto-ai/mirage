@@ -12,24 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-
+import type { DirListing, FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { VFSName } from '@struktoai/mirage-core/types'
-
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState, Handed } from '@struktoai/mirage-core/vfs/types'
 import { EmailAccessor } from '../../accessor/email.ts'
-
-import {
-  EmailConfigSchema,
-  type EmailConfig,
-  type EmailConfigRedacted,
-} from '../../core/email/config.ts'
-import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { readdir as emailReaddir } from '../../core/email/readdir.ts'
+import { EmailConfig } from '../../core/email/config.ts'
 import { read as emailRead, readMany as emailReadMany } from '../../core/email/read.ts'
-import { stat as emailStat } from '../../core/email/stat.ts'
+import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { filesContaining as emailFilesContaining } from '../../core/email/search.ts'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { stat as emailStat } from '../../core/email/stat.ts'
 
 export const VFS_MD = `{prefix}
   <folder>/
@@ -43,11 +36,6 @@ export const VFS_MD = `{prefix}
 
   To act on mail (list/search/read/compose/reply/forward), use the
   himalaya CLI if installed: himalaya --help`
-
-export interface EmailVFSState {
-  type: string
-  config: EmailConfigRedacted
-}
 
 export class EmailVFS extends BaseVFS {
   override readonly name: string = VFSName.EMAIL
@@ -118,10 +106,7 @@ export class EmailVFS extends BaseVFS {
     return emailFilesContaining(this.accessor, text, [path], opts.wholeWord)
   }
 
-  override getState(): Promise<EmailVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(EmailConfigSchema, this.config) as EmailConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof EmailConfig>>> {
+    return Promise.resolve(this.configState(EmailConfig, this.config))
   }
 }

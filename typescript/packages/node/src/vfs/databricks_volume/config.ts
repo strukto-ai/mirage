@@ -12,9 +12,5 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { DatabricksVolumeConfigSchema } from '@struktoai/mirage-core/vfs/databricks_volume/config'
-export type {
-  DatabricksVolumeConfig,
-  TokenProvider,
-  DatabricksVolumeConfigRedacted,
-} from '@struktoai/mirage-core/vfs/databricks_volume/config'
+export { DatabricksVolumeConfig } from '@struktoai/mirage-core/vfs/databricks_volume/config'
+export type { TokenProvider } from '@struktoai/mirage-core/vfs/databricks_volume/config'

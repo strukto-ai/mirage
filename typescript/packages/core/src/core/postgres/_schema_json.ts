@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
-import type { ColumnInfo, ForeignKey, IndexInfo, Relationship } from './client.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import type { ColumnInfo } from './client.ts'
 import {
   estimatedRowCount,
   fetchAllRelationships,
@@ -27,7 +28,6 @@ import {
   listViews,
   tableSizeBytes,
 } from './client.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 interface DatabaseTable {
   schema: string
@@ -42,32 +42,12 @@ interface DatabaseView {
   kind: 'view' | 'materialized'
 }
 
-export interface DatabaseJson {
-  database: string
-  schemas: string[]
-  tables: DatabaseTable[]
-  views: DatabaseView[]
-  relationships: Relationship[]
-}
-
 interface EntityColumn extends ColumnInfo {
   primary_key?: boolean
   references?: { schema: string; table: string; column: string }
 }
 
-export interface EntitySchemaJson {
-  schema: string
-  name: string
-  kind: string
-  columns: EntityColumn[]
-  primary_key: string[]
-  foreign_keys: ForeignKey[]
-  indexes: IndexInfo[]
-  row_count_estimate: number
-  size_bytes_estimate: number
-}
-
-export async function buildDatabaseJson(accessor: PostgresAccessor): Promise<DatabaseJson> {
+export async function buildDatabaseJson(accessor: PostgresAccessor) {
   const schemas = await listSchemas(accessor, accessor.config.schemas)
   const tables: DatabaseTable[] = []
   const views: DatabaseView[] = []
@@ -102,7 +82,7 @@ export async function buildEntitySchemaJson(
   schema: string,
   name: string,
   kind: string,
-): Promise<EntitySchemaJson> {
+) {
   const cols = await fetchColumns(accessor, schema, name)
   const pk = await fetchPrimaryKey(accessor, schema, name)
   const fks = await fetchForeignKeys(accessor, schema, name)

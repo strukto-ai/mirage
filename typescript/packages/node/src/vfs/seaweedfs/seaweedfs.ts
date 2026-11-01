@@ -13,13 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type SeaweedFSConfig, type SeaweedFSConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { SeaweedFSConfig } from './config.ts'
 
-export type SeaweedFSVFSState = S3AliasVFSState<SeaweedFSConfigRedacted>
-
-export class SeaweedFSVFS extends S3AliasVFS<SeaweedFSConfig, SeaweedFSConfigRedacted> {
+export class SeaweedFSVFS extends S3AliasVFS<
+  SeaweedFSConfig,
+  RedactedSchema<typeof SeaweedFSConfig>
+> {
   constructor(config: SeaweedFSConfig) {
-    super(VFSName.SEAWEEDFS, config, ALIAS)
+    super(VFSName.SEAWEEDFS, config, SeaweedFSConfig)
   }
 }

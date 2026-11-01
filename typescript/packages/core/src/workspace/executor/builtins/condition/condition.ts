@@ -12,26 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { linkView } from '../../../../commands/builtin/utils/links.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isProgramInvocation, runWithAdmission } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
+import { ShellBuiltin as SB } from '../../../../shell/types.ts'
 import type { PathSpec } from '../../../../types.ts'
+import { wordText } from '../../../../types.ts'
+import type { SessionView } from '../../../../view/types.ts'
+import { Files } from '../../../files.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
+import { sessionView } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
+import type { BuiltinCall } from '../types.ts'
+import { CondError, CondRefused } from './errors.ts'
 import { evalFlat } from './flat.ts'
 import { evalCond } from './tree.ts'
-import { CondError, CondRefused } from './types.ts'
 import type { AdmitTest, CondContext, CondNode } from './types.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { ShellBuiltin as SB } from '../../../../shell/types.ts'
-import { wordText } from '../../../../types.ts'
-import { sessionView } from '../../../session/state.ts'
-import type { SessionView } from '../../../../view/types.ts'
-import { linkView } from '../../../../commands/builtin/utils/links.ts'
-import { Files } from '../../../files.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * Evaluate test/[ (flat argv) or [[ (condition tree). `name` is the
@@ -53,7 +54,7 @@ export async function handleTest(
   view?: SessionView,
   admit?: AdmitTest,
   signal?: AbortSignal,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const links = linkView(
     new Files(
       dispatch,
@@ -134,7 +135,7 @@ async function flatStatus(
 }
 
 /** The `test` / `[` / `[[` arm; `[` must close with `]`. */
-export async function testBuiltin(call: BuiltinCall): Promise<Result> {
+export async function testBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const name = call.argv.name
   let testArgs = [...call.argv.operands]
   const testName = name === SB.BRACKET ? '[' : 'test'

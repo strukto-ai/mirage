@@ -13,32 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { aliasSchema, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
 export type WasabiConfig = S3AliasConfig
 
-export const WasabiConfigSchema = aliasSchema({
-  region: z.string().optional().meta({
-    description:
-      'Wasabi region. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set, and signs every request.',
-    default: 'us-east-1',
+export const WasabiConfig = makeS3Alias({
+  schema: aliasSchema({
+    region: z.string().optional().meta({
+      description:
+        'Wasabi region. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set, and signs every request.',
+      default: 'us-east-1',
+    }),
+    endpoint: z
+      .string()
+      .optional()
+      .describe('Endpoint URL that replaces the one the provider derives.'),
   }),
-  endpoint: z
-    .string()
-    .optional()
-    .describe('Endpoint URL that replaces the one the provider derives.'),
-})
-
-// Only the redacted twin derives; the redactor fills in the region and
-// endpoint the provider's rule resolves.
-export type WasabiConfigRedacted = RedactedConfig<
-  ConfigOf<typeof WasabiConfigSchema>,
-  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
->
-
-export const ALIAS = makeS3Alias<WasabiConfig, WasabiConfigRedacted>({
-  schema: WasabiConfigSchema,
   endpointFor: (config) => {
     const region = config.region ?? 'us-east-1'
     return region === 'us-east-1'
@@ -47,6 +37,3 @@ export const ALIAS = makeS3Alias<WasabiConfig, WasabiConfigRedacted>({
   },
   regionDefault: 'us-east-1',
 })
-
-export const resolvedWasabiEndpoint = ALIAS.resolvedEndpoint
-export const wasabiToS3Config = ALIAS.toS3Config

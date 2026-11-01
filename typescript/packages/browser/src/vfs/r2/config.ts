@@ -12,29 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const R2ConfigSchema = browserAliasSchema({
-  region: z.string().optional().meta({
-    description: 'Region of the bucket; R2 addresses a bucket by account, not by region.',
-    default: 'auto',
+export const R2Config = makeBrowserS3Alias({
+  schema: browserAliasSchema({
+    region: z.string().optional().meta({
+      description: 'Region of the bucket; R2 addresses a bucket by account, not by region.',
+      default: 'auto',
+    }),
+    accountId: z
+      .string()
+      .optional()
+      .describe(
+        'Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set.',
+      ),
   }),
-  accountId: z
-    .string()
-    .optional()
-    .describe(
-      'Cloudflare account ID. It builds the endpoint `https://<accountId>.r2.cloudflarestorage.com` unless `endpoint` is set.',
-    ),
-})
-
-export type R2Config = ConfigOf<typeof R2ConfigSchema>
-
-export type R2ConfigRedacted = RedactedConfig<R2Config, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<R2Config, R2ConfigRedacted>({
-  schema: R2ConfigSchema,
   endpointFor: derivedEndpoint(
     'accountId',
     (accountId) => `https://${accountId}.r2.cloudflarestorage.com`,
@@ -42,5 +36,4 @@ export const ALIAS = makeBrowserS3Alias<R2Config, R2ConfigRedacted>({
   regionDefault: 'auto',
 })
 
-export const resolvedR2Endpoint = ALIAS.resolvedEndpoint
-export const r2ToS3Config = ALIAS.toS3Config
+export type R2Config = ConfigOf<typeof R2Config>

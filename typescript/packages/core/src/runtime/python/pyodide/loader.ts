@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ErrnoCodes, FSHost, FSType } from './fs/types.ts'
-import { PyodideUnavailableError } from './errors.ts'
-import { sealNetwork, type NetworkHost } from './network.ts'
 import { resolveHome } from '../../config.ts'
+import { PyodideUnavailableError } from './errors.ts'
+import type { ErrnoCodes, FSHost, FSType } from './fs/types.ts'
+import { sealNetwork, type NetworkHost } from './network.ts'
 
 const noopIo = (): void => undefined
 
@@ -83,18 +83,17 @@ async function resolveNodeIndexURL(): Promise<string | null> {
 }
 
 /** Distribution knobs a deployment can point at its own prebuilt assets. */
-export interface PyodideLoadOptions {
-  home?: string
-  // Where wheels are fetched from, which is NOT indexURL: the npm
-  // pyodide package ships pyodide-lock.json and no wheels at all, so a
-  // deployment wanting packages offline points this at its own build.
-  packageBaseUrl?: string
-  lockFileURL?: string
-  packages?: readonly string[]
-}
 
 export async function loadPyodideRuntime(
-  options: PyodideLoadOptions = {},
+  options: {
+    home?: string
+    // Where wheels are fetched from, which is NOT indexURL: the npm
+    // pyodide package ships pyodide-lock.json and no wheels at all, so a
+    // deployment wanting packages offline points this at its own build.
+    packageBaseUrl?: string
+    lockFileURL?: string
+    packages?: readonly string[]
+  } = {},
 ): Promise<PyodideInterface> {
   const home =
     resolveHome(options, PYODIDE_HOME_ENV) ??

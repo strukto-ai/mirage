@@ -31,7 +31,7 @@ export const VFS_MD = `{prefix}
  * Jaeger's functions over its accessor, which a host package builds
  * over its own transport.
  */
-export class JaegerVFSBase extends BaseVFS<JaegerAccessor> {
+export class JaegerVFS extends BaseVFS<JaegerAccessor> {
   override readonly handed = {
     stat: ['entry'],
   } as const

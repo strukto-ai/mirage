@@ -12,20 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { refused } from '../metrics.ts'
-import { Buffer } from 'node:buffer'
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { ExecutionStatus, type ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { WorkspaceRegistry } from '../registry.ts'
-import type { ExecutionTable } from '../jobs.ts'
-import { ExecutionStatus, type ExecutionRecord } from '@struktoai/mirage-core/execution/types'
+import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { Buffer } from 'node:buffer'
 import { explanationToDict, ioResultToDict } from '../io_serde.ts'
+import type { ExecutionTable } from '../jobs.ts'
+import { refused } from '../metrics.ts'
 import { MAX_REQUEST_PART, MultipartError, partEvents, type PartEvent } from '../multipart.ts'
+import type { WorkspaceRegistry } from '../registry.ts'
 import { UploadStdin } from '../stdin.ts'
 import { shellResponse } from '../stream.ts'
-import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
-import { HttpError, failure, queryFlag, requireEntry, sessionOf } from './vfs.ts'
+import { failure, HttpError, queryFlag, requireEntry, sessionOf } from './vfs.ts'
 
 export interface ShellRoutesDeps {
   registry: WorkspaceRegistry
@@ -36,7 +36,7 @@ interface ShellParams {
   wsId: string
 }
 
-const ShellRequestSchema = z
+const ShellRequest = z
   .object({
     command: z.string(),
     cwd: z.string().optional(),
@@ -45,7 +45,7 @@ const ShellRequestSchema = z
   })
   .strict()
 
-type ShellRequest = z.infer<typeof ShellRequestSchema>
+type ShellRequest = z.infer<typeof ShellRequest>
 
 interface ShellUpload {
   body: ShellRequest
@@ -56,7 +56,7 @@ interface ShellUpload {
 }
 
 function parseRequestPart(chunks: Uint8Array[]): ShellRequest {
-  return ShellRequestSchema.parse(JSON.parse(Buffer.concat(chunks).toString()))
+  return ShellRequest.parse(JSON.parse(Buffer.concat(chunks).toString()))
 }
 
 /**
@@ -90,7 +90,7 @@ async function readShellBody(req: FastifyRequest, capacity: number): Promise<She
   const contentType = req.headers['content-type'] ?? ''
   if (!contentType.startsWith('multipart/')) {
     return {
-      body: ShellRequestSchema.parse(req.body),
+      body: ShellRequest.parse(req.body),
       stdin: undefined,
       failed: Promise.resolve(undefined),
       finish: () => Promise.resolve(),
@@ -217,7 +217,7 @@ async function explained(
   let said: ShellExplanation
   try {
     const entry = requireEntry(deps.registry, req.params.wsId, req.account)
-    const parsed = ShellRequestSchema.safeParse(req.body)
+    const parsed = ShellRequest.safeParse(req.body)
     if (
       req.headers['content-type']?.startsWith('multipart/') === true ||
       (parsed.success && (parsed.data.cwd !== undefined || parsed.data.runtime !== undefined))

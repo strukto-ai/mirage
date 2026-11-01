@@ -19,7 +19,7 @@ import {
   type Context,
   LanguageRuntime,
   LINE_EXECUTOR,
-  type LineExecutor,
+  type LineExecutorMixin,
   type PathSpec,
   type Program,
   type RunResult,
@@ -28,7 +28,7 @@ import {
 
 const ENC = new TextEncoder()
 
-export class EchoBox extends Runtime<undefined> implements LineExecutor<undefined> {
+export class EchoBox extends Runtime<undefined> implements LineExecutorMixin<undefined> {
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'echobox'
 

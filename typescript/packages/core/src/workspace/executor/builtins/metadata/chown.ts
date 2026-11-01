@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import type { PathSpec } from '../../../../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { fail, parseLine } from '../shared.ts'
 import { changeOwner, parseOwner } from './metadata.ts'
-import type { Result } from '../types.ts'
 
 // chown OWNER[:GROUP] FILE...: set ownership via setattr. Ownership is
 // stored, not enforced (mirage has no user model); names are kept
@@ -29,7 +29,7 @@ export async function handleChown(
   dispatch: DispatchFn,
   session: SessionState,
   args: readonly (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('chown', args, session.cwd)
   if (refused !== null) return refused
   const ownerText = parsed.texts[0]

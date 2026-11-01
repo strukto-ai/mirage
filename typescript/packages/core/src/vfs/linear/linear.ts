@@ -12,20 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 import { LinearAccessor } from '../../accessor/linear.ts'
-
-import { filesContaining as linearFilesContaining } from '../../core/linear/search.ts'
 import { HttpLinearTransport } from '../../core/linear/client.ts'
-import { LinearConfigSchema } from '../../core/linear/config.ts'
-import type { LinearConfig, LinearConfigRedacted } from '../../core/linear/config.ts'
-import { type DirListing, VFSName } from '../../types.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import { readdir as linearReaddir } from '../../core/linear/readdir.ts'
+import { LinearConfig } from '../../core/linear/config.ts'
 import { read as linearRead } from '../../core/linear/read.ts'
+import { readdir as linearReaddir } from '../../core/linear/readdir.ts'
+import { filesContaining as linearFilesContaining } from '../../core/linear/search.ts'
 import { stat as linearStat } from '../../core/linear/stat.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { type DirListing, VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
 
 export const VFS_MD = `{prefix}
   teams/
@@ -139,11 +137,6 @@ export const VFS_MD = `{prefix}
   comments, projects, cycles, labels, users, documents, search), use
   the linear CLI if installed: linear --help`
 
-export interface LinearVFSState {
-  type: string
-  config: LinearConfigRedacted
-}
-
 export class LinearVFS extends BaseVFS {
   override readonly handed = {
     readdir: ['entry'],
@@ -205,10 +198,7 @@ export class LinearVFS extends BaseVFS {
     return linearStat(this.accessor, path, handed?.entry)
   }
 
-  override getState(): Promise<LinearVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(LinearConfigSchema, this.config) as LinearConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof LinearConfig>>> {
+    return Promise.resolve(this.configState(LinearConfig, this.config))
   }
 }

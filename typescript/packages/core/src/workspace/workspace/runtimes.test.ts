@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Context } from '../../commands/config.ts'
 import { Runtime } from '../../runtime/base.ts'
-import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
@@ -64,7 +64,7 @@ class Engine extends PythonRuntime {
   }
 }
 
-class Gate extends Runtime implements LineExecutor {
+class Gate extends Runtime implements LineExecutorMixin {
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'gate'
   entered = latch()

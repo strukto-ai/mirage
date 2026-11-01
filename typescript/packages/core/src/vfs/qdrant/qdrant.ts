@@ -12,20 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
-
-import { type DirListing, VFSName } from '../../types.ts'
-import {
-  type QdrantConfigRedacted,
-  redactQdrantConfig,
-  resolveQdrantConfig,
-  type QdrantConfig,
-  type QdrantConfigResolved,
-} from './config.ts'
-import type { PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import { readdir, read, stat, SEARCH } from '../../core/qdrant/tree.ts'
 import { filesContaining } from '../../core/qdrant/search.ts'
+import { read, readdir, SEARCH, stat } from '../../core/qdrant/tree.ts'
+import type { FileStat, PathSpec, SearchQuery } from '../../types.ts'
+import { VFSName, type DirListing } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { ConfigState } from '../types.ts'
+import { redactQdrantConfig, resolveQdrantConfig, type QdrantConfig } from './config.ts'
 
 export const VFS_MD = `This mount is a Qdrant vector database exposed as a filesystem.
 
@@ -41,12 +35,6 @@ export interface QdrantVFSOptions {
   config: QdrantConfig
 }
 
-export interface QdrantVFSState {
-  type: string
-  config: QdrantConfigRedacted
-  needs_override: true
-}
-
 export class QdrantVFS extends BaseVFS {
   override readonly name: string = VFSName.QDRANT
   // readdir seeds exact rendered sizes from the scroll payloads and stat
@@ -54,7 +42,7 @@ export class QdrantVFS extends BaseVFS {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly supportsSnapshot: boolean = false
   override vfsMd: string = VFS_MD
-  readonly config: QdrantConfigResolved
+  readonly config: ReturnType<typeof resolveQdrantConfig>
   override readonly accessor: QdrantAccessor
 
   constructor(options: QdrantVFSOptions | QdrantConfig) {
@@ -64,7 +52,9 @@ export class QdrantVFS extends BaseVFS {
     this.accessor = new QdrantAccessor(this.config)
   }
 
-  override getState(): QdrantVFSState {
+  override getState(): ConfigState<ReturnType<typeof redactQdrantConfig>> & {
+    needs_override: true
+  } {
     return {
       type: this.name,
       config: redactQdrantConfig(this.config),

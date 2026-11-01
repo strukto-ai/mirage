@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { admissionMatcher, fromUnits } from '../../rs/policy.ts'
+import { fromUnits } from '../../rs/document.ts'
+import { admissionMatcher } from '../../rs/policy.ts'
 import {
   Outcome,
   type AdmissionRules,
@@ -21,14 +22,6 @@ import {
   type Ruling,
 } from '../types.ts'
 import { commandFacts } from './rule.ts'
-
-interface RulingReply {
-  readonly outcome: Outcome
-  readonly rule: number | null
-  readonly matched_path: number[] | null
-  readonly allow_list: boolean
-  readonly asks: readonly number[]
-}
 
 /**
  * Where in the document a rule was written, as a host reads it: the
@@ -81,7 +74,13 @@ export function sourceOf(rule: CommandRule): string {
 export function decide(ctx: CommandContext, rules: AdmissionRules | null): Ruling {
   if (rules === null)
     return { outcome: Outcome.ALLOW, rule: null, matchedPath: null, source: '', asks: [] }
-  const answer = admissionMatcher(rules).ask('decide', { facts: commandFacts(ctx) }) as RulingReply
+  const answer = admissionMatcher(rules).ask('decide', { facts: commandFacts(ctx) }) as {
+    readonly outcome: Outcome
+    readonly rule: number | null
+    readonly matched_path: number[] | null
+    readonly allow_list: boolean
+    readonly asks: readonly number[]
+  }
   const listed = [...rules.deny, ...rules.ask]
   const ruleAt = (id: number): CommandRule => {
     const rule = listed[id]

@@ -15,13 +15,14 @@
 import type { FastifyInstance } from 'fastify'
 import type { WorkspaceRegistry } from '../registry.ts'
 
-export interface HealthDeps {
-  registry: WorkspaceRegistry
-  startedAt: number
-  exit: () => void
-}
-
-export function registerHealthRoutes(app: FastifyInstance, deps: HealthDeps): void {
+export function registerHealthRoutes(
+  app: FastifyInstance,
+  deps: {
+    registry: WorkspaceRegistry
+    startedAt: number
+    exit: () => void
+  },
+): void {
   app.get('/v1/health', () => ({
     status: 'ok',
     workspaces: deps.registry.size(),

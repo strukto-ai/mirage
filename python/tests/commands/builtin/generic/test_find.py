@@ -15,7 +15,7 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.core.generic.find import walk_find
-from mirage.core.generic.find_eval import FindArgs, Name, Not, Or
+from mirage.core.generic.types import FindArgs, Name, Not, Or
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.types import IOResult, materialize
 from mirage.types import (

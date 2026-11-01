@@ -12,26 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { toHex } from '../../../../utils/hex.ts'
-import { dispatchedReadTree } from '../../../../commands/builtin/generic_bind/files.ts'
 import { readdirOp } from '../../../../commands/builtin/generic/crossmount/utils.ts'
-import { WalkBudget, treeWalk, type WalkCall } from '../../../../commands/builtin/utils/tree.ts'
+import { dispatchedReadTree } from '../../../../commands/builtin/generic_bind/files.ts'
+import { treeWalk, WalkBudget, type WalkCall } from '../../../../commands/builtin/utils/tree.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { callerSignal } from '../../../../context/session_context.ts'
 import { classify } from '../../../../errors/index.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../../types.ts'
 import { encodeBase64 } from '../../../../utils/base64.ts'
-import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import { toHex } from '../../../../utils/hex.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 import type { NamespaceLinks } from '../../../../view/types.ts'
+import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { result } from '../shared.ts'
-import type { Result } from '../types.ts'
-import { GETFATTR_USAGE, attrError, attrOperands, attrUsageRefusal } from './xattr.ts'
-import { rstripSlash } from '../../../../utils/slash.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
-import { callerSignal } from '../../../../context/session_context.ts'
+import { attrError, attrOperands, attrUsageRefusal, GETFATTR_USAGE } from './xattr.ts'
 
 const ENCODINGS = new Set(['text', 'hex', 'base64'])
 const DEFAULT_MATCH = '^user\\.'
@@ -199,7 +199,7 @@ export async function handleGetfattr(
   dispatch: DispatchFn,
   session: SessionState,
   args: (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const spec = specOf('getfattr')
   const parsed = parseCommand(
     spec,

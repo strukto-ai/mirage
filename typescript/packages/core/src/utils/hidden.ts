@@ -12,14 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fromUnits, units } from '../rs/document.ts'
+import { admissionMatcher, linkTraceWire, visibilityMatcher } from '../rs/policy.ts'
 import type { HiddenPaths, Visibility } from '../types.ts'
-import {
-  admissionMatcher,
-  fromUnits,
-  linkTraceWire,
-  units,
-  visibilityMatcher,
-} from '../rs/policy.ts'
 import { traceSymlinks } from './path.ts'
 
 /** Whether a document entry is a pattern (any of `*`, `?`, `[`). */

@@ -12,15 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  SecretRefSchema,
-  SecretSourceSchema,
-  type SecretEntries,
-  type SecretRef,
-} from './config.ts'
+import { isPlainObject } from '../utils/records.ts'
+import { SecretRef, SecretSource, type SecretEntries } from './config.ts'
 import { SecretsError } from './errors.ts'
-import { errorSummary, fieldSummary } from './summary.ts'
 import { fetchSecret, sourceFor } from './registry.ts'
+import { errorSummary, fieldSummary } from './summary.ts'
 import type { ResolvedSecret, ResolvedSource } from './types.ts'
 
 /**
@@ -100,11 +96,6 @@ function selectField(
  * the VFS then calls. Python needs no such check -- its walk asks
  * `isinstance(value, Mapping)`, which an instance already fails.
  */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  const proto: unknown = Object.getPrototypeOf(value)
-  return proto === Object.prototype || proto === null
-}
 
 /**
  * Whether a raw config value is a `{from, ref, key}` pointer.
@@ -116,7 +107,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 export function isConfigPointer(value: unknown): boolean {
   if (!isPlainObject(value)) return false
   if (!Object.hasOwn(value, 'from')) return false
-  return SecretRefSchema.safeParse(value).success
+  return SecretRef.safeParse(value).success
 }
 
 /**
@@ -171,7 +162,7 @@ async function resolveValue(
   sources?: Readonly<Record<string, ResolvedSource>>,
 ): Promise<unknown> {
   if (isConfigPointer(value)) {
-    return configValue(label, SecretRefSchema.parse(value), fetched, sources)
+    return configValue(label, SecretRef.parse(value), fetched, sources)
   }
   if (Array.isArray(value)) {
     const out: unknown[] = []
@@ -246,7 +237,7 @@ export async function resolveSources(
   // pair for the workspace's life.
   const fetched = new Map<string, ResolvedSecret>()
   for (const [name, raw] of Object.entries(declared)) {
-    const block = SecretSourceSchema.parse(raw)
+    const block = SecretSource.parse(raw)
     const { configModel, fetch } = sourceFor(block.source)
     // fromEntries, not keyed assignment: the block's schema now keeps
     // a `__proto__` config key, and this is where it would be lost on

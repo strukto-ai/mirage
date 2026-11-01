@@ -12,24 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { TiDBFilesystemVFSBase } from '@struktoai/mirage-core/vfs/tidb_filesystem/tidb_filesystem'
 import { TiDBFilesystemAccessor } from '@struktoai/mirage-core/accessor/tidb_filesystem'
-
 import { VFSName } from '@struktoai/mirage-core/types'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { TiDBFilesystemVFS as CoreTiDBFilesystemVFS } from '@struktoai/mirage-core/vfs/tidb_filesystem/tidb_filesystem'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
+import { TiDBFilesystemConfig } from './config.ts'
 
-import {
-  TiDBFilesystemConfigSchema,
-  type TiDBFilesystemConfig,
-  type TiDBFilesystemConfigRedacted,
-} from './config.ts'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-
-export interface TiDBFilesystemVFSState {
-  type: string
-  config: TiDBFilesystemConfigRedacted
-}
-
-export class TiDBFilesystemVFS extends TiDBFilesystemVFSBase {
+export class TiDBFilesystemVFS extends CoreTiDBFilesystemVFS {
   override readonly name: string = VFSName.TIDB_FILESYSTEM
   override readonly cachesReads: boolean = true
   // A listing row and a HEAD both carry the byte count a download returns,
@@ -49,13 +39,7 @@ export class TiDBFilesystemVFS extends TiDBFilesystemVFSBase {
     return Promise.resolve(new TiDBFilesystemVFS(config, accessor))
   }
 
-  override getState(): Promise<TiDBFilesystemVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(
-        TiDBFilesystemConfigSchema,
-        this.config,
-      ) as TiDBFilesystemConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof TiDBFilesystemConfig>>> {
+    return Promise.resolve(this.configState(TiDBFilesystemConfig, this.config))
   }
 }

@@ -14,14 +14,15 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  ESCAPE_LEAD,
-  NAME_MAX_BYTES,
-  SAFE_SLASH,
   byteLength,
+  ESCAPE_LEAD,
   isBlank,
+  NAME_MAX_BYTES,
   pathSafeName,
+  SAFE_SLASH,
   sanitizeLabel,
   sanitizeName,
+  truncateBytes,
 } from './sanitize.ts'
 
 describe('sanitizeName', () => {
@@ -235,4 +236,20 @@ describe('isBlank', () => {
     }
     expect(sanitizeName('a\u0085b')).toBe('a\u0085b')
   })
+})
+
+it.each([-1, 0, 1, 2, 3, 4, 255, 2 ** 40])(
+  'keeps UTF-8 and the BOM at byte budget %s',
+  (budget) => {
+    const expected = ['', '', '', '', '\ufeff', '\ufeff', '\ufeffé𐐀', '\ufeffé𐐀']
+    const index = [-1, 0, 1, 2, 3, 4, 255, 2 ** 40].indexOf(budget)
+    expect(truncateBytes('\ufeffé𐐀', budget)).toBe(expected[index])
+  },
+)
+
+it('crosses the stream buffer boundary', () => {
+  const text = 'é'.repeat(100_000) + '/.tail'
+  expect(pathSafeName(text)).toBe('é'.repeat(100_000) + '∕.tail')
+  expect(sanitizeName(text)).toBe('é'.repeat(100))
+  expect(sanitizeLabel('abc', { fallback: 'X', maxLen: 100, maxBytes: -1 })).toBe('')
 })

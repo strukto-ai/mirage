@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type WasabiConfig, type WasabiConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { WasabiConfig } from './config.ts'
 
-export type WasabiVFSState = S3AliasVFSState<WasabiConfigRedacted>
-
-export class WasabiVFS extends S3AliasVFS<WasabiConfig, WasabiConfigRedacted> {
+export class WasabiVFS extends S3AliasVFS<WasabiConfig, RedactedSchema<typeof WasabiConfig>> {
   constructor(config: WasabiConfig) {
-    super(VFSName.WASABI, config, ALIAS)
+    super(VFSName.WASABI, config, WasabiConfig)
   }
 }

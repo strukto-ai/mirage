@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
-import { parseConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
+import { parseConfigWithSchema, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 
-export const GridFSConfigSchema = z.object({
+export const GridFSConfig = z.object({
   ...timeoutShape,
   uri: secretStr().describe('MongoDB connection URI.'),
   database: z.string().describe('Database that holds the GridFS bucket.'),
@@ -45,9 +45,7 @@ export const GridFSConfigSchema = z.object({
     ),
 })
 
-export type GridFSConfig = ConfigOf<typeof GridFSConfigSchema>
-
-export type GridFSConfigRedacted = RedactedConfig<GridFSConfig, 'uri'>
+export type GridFSConfig = ConfigOf<typeof GridFSConfig>
 
 /**
  * Translate Python-style snake_case keys (as used in YAML configs and the
@@ -55,7 +53,7 @@ export type GridFSConfigRedacted = RedactedConfig<GridFSConfig, 'uri'>
  * normalize the key prefix the way the accessor expects.
  */
 export function normalizeGridFSConfig(input: Record<string, unknown>): GridFSConfig {
-  const norm = parseConfigWithSchema(GridFSConfigSchema, input)
+  const norm = parseConfigWithSchema(GridFSConfig, input)
   const prefix = normalizeKeyPrefix(norm.keyPrefix)
   if (prefix !== undefined) {
     norm.keyPrefix = prefix

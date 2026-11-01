@@ -11,14 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../../spec/types.ts'
-import { CLI } from '../../types.ts'
-import { CLIHandler } from '../../types.ts'
 
 import { AirtableAccessor } from '../../../../accessor/airtable.ts'
-import { type AirtableConfig, AirtableConfigSchema } from '../../../../core/airtable/config.ts'
-import { Argument } from '../../../spec/types.ts'
-
+import { AirtableConfig } from '../../../../core/airtable/config.ts'
+import { Argument, CommandSpec } from '../../../spec/types.ts'
+import { CLI, CLIHandler } from '../../types.ts'
 import * as reads from './reads.ts'
 import * as writes from './writes.ts'
 
@@ -161,6 +158,6 @@ export const AIRTABLE = new CLI({
     'comment list': new CLIHandler({ fn: reads.commentList }),
     'comment add': new CLIHandler({ fn: writes.commentAdd, write: true }),
   },
-  configModel: AirtableConfigSchema,
+  configModel: AirtableConfig,
   accessor: (config) => new AirtableAccessor(config as AirtableConfig),
 })

@@ -15,12 +15,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 import { ScriptSource } from '../../runtime/types.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
-import { Workspace } from '../workspace/workspace.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
+import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
 
@@ -148,7 +148,7 @@ it('omits unrestricted backend guidance with subtree mode overrides', async () =
   const ws = workspace()
   await ws.setSessionProfile(
     ws.defaultSessionId,
-    parseSessionProfile({ paths: { show: { '/data/public': 'r' } } }),
+    SessionProfile({ paths: { show: { '/data/public': 'r' } } }),
   )
   const markdown = await ws.vfsMd()
   expect(markdown).not.toContain('In-memory')

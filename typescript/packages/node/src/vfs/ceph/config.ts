@@ -12,26 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  makeS3Alias,
-  FIXED_ALIAS_SCHEMA,
-  type S3AliasConfig,
-  type S3AliasConfigRedacted,
-} from '../s3_alias.ts'
+import { FIXED_ALIAS_SCHEMA, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface CephConfig extends S3AliasConfig {
   endpoint: string
 }
 
-export type CephConfigRedacted = S3AliasConfigRedacted
-
-export const CephConfigSchema = FIXED_ALIAS_SCHEMA
-
-export const ALIAS = makeS3Alias<CephConfig, CephConfigRedacted>({
-  schema: CephConfigSchema,
+export const CephConfig = makeS3Alias({
+  schema: FIXED_ALIAS_SCHEMA,
   endpointFor: (config) => config.endpoint,
   regionDefault: 'us-east-1',
   forcePathStyle: true,
 })
-
-export const cephToS3Config = ALIAS.toS3Config

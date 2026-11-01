@@ -11,33 +11,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { type Context, command } from '../../../commands/config.ts'
-import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
-import { shellJoin } from '../../../shell/join.ts'
 import { describe, expect, it, vi } from 'vitest'
+import { command, type Context } from '../../../commands/config.ts'
+import { Argument, CommandSpec } from '../../../commands/spec/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import type { Policy } from '../../../policy/base.ts'
-import type { ExecuteResultContext } from '../../../policy/types.ts'
-import { PermissionsPolicy } from '../../../policy/builtin/permissions.ts'
-import type { CommandRule } from '../../../policy/types.ts'
 import { DEFAULT_COMMAND_LIMITS } from '../../../policy/builtin/output_cap.ts'
-import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
+import { PermissionsPolicy } from '../../../policy/builtin/permissions.ts'
+import type { CommandRule, ExecuteResultContext } from '../../../policy/types.ts'
 import { Runtime } from '../../../runtime/base.ts'
-import type { OutputFn, Program, RunResult } from '../../../runtime/types.ts'
-import { PythonRuntime } from '../../../runtime/python/base.ts'
+import type { RuntimeOptions } from '../../../runtime/config.ts'
+import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
-  type LineExecutor,
-  type ProcessExecutor,
+  type LineExecutorMixin,
+  type ProcessExecutorMixin,
 } from '../../../runtime/mixin.ts'
-import type { RuntimeOptions } from '../../../runtime/config.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { PythonRuntime } from '../../../runtime/python/base.ts'
+import type { OutputFn, Program, RunResult } from '../../../runtime/types.ts'
+import { shellJoin } from '../../../shell/join.ts'
 import { Limit, MountMode, type PathSpec } from '../../../types.ts'
-import * as globs from '../../expand/globs.ts'
-import { Consumer, SHELL_NAMES, lookup, lookupAll } from '../../lookup/index.ts'
-import { SessionState } from '../../session/session.ts'
 import { abortable, sleep } from '../../../utils/abort.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import * as globs from '../../expand/globs.ts'
+import { Consumer, lookup, lookupAll, SHELL_NAMES } from '../../lookup/index.ts'
+import { SessionState } from '../../session/session.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -46,7 +45,7 @@ const DEC = new TextDecoder()
 /** What one process run received: its argv beside the run's context. */
 type Request = Context & { argv: readonly string[] }
 
-class ProcessProbe extends Runtime implements ProcessExecutor {
+class ProcessProbe extends Runtime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
   name = 'probe'
   requests: Request[] = []
@@ -306,7 +305,7 @@ describe('external program at the line deadline', () => {
   })
 })
 
-class ShellProbe extends Runtime implements LineExecutor {
+class ShellProbe extends Runtime implements LineExecutorMixin {
   readonly [LINE_EXECUTOR] = true as const
   name = 'shell-probe'
   lines: string[] = []

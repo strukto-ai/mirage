@@ -15,17 +15,18 @@
 import type { FastifyInstance } from 'fastify'
 import { PROTECTED_RESOURCE_PATH, type AuthConfig } from '../auth/config.ts'
 
-export interface OAuthDeps {
-  auth: AuthConfig
-}
-
 /**
  * Say where to log in, for `mirage login`: RFC 9728's protected resource
  * metadata names the issuer, and `client_id` the OAuth client the CLI
  * signs in as. A server that publishes no login answers 404, so the CLI
  * knows it needs none.
  */
-export function registerOAuthRoutes(app: FastifyInstance, deps: OAuthDeps): void {
+export function registerOAuthRoutes(
+  app: FastifyInstance,
+  deps: {
+    auth: AuthConfig
+  },
+): void {
   app.get(PROTECTED_RESOURCE_PATH, async (req, reply) => {
     const jwt = deps.auth.jwt
     if (jwt?.loginClientId === undefined || jwt.issuer === undefined) {

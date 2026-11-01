@@ -1,17 +1,14 @@
-import { BaseVFS } from '../base.ts'
-import { type ByteSource } from '../../io/types.ts'
-import type { Handed } from '../types.ts'
 import { WandbAccessor } from '../../accessor/wandb.ts'
-
-import { WandbConfigSchema } from '../../core/wandb/config.ts'
-import type { WandbConfig, WandbConfigRedacted } from '../../core/wandb/config.ts'
-
-import { type DirListing, VFSName } from '../../types.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import { readdir } from '../../core/wandb/readdir.ts'
+import { WandbConfig } from '../../core/wandb/config.ts'
 import { readStream } from '../../core/wandb/read.ts'
+import { readdir } from '../../core/wandb/readdir.ts'
 import { stat } from '../../core/wandb/stat.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { type ByteSource } from '../../io/types.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { type DirListing, VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
 
 export const VFS_MD = `Read-only W&B experiments: /<entity>/<project>/<run-id>/ contains
 run.json (identity, creator, sweep/group/job, tags, timestamps, notes, system metrics,
@@ -25,11 +22,6 @@ files/wandb-metadata.json, when present, describes the machine/runtime environme
 run.json user contains the creator's id, name, username and email, when available.
 Missing run metadata is null. run.json read_only is W&B's permission, not mount mode.
 `
-
-export interface WandbVFSState {
-  type: string
-  config: WandbConfigRedacted
-}
 
 export class WandbVFS extends BaseVFS {
   override readonly handed = {
@@ -61,10 +53,7 @@ export class WandbVFS extends BaseVFS {
     return stat(this.accessor, path, handed?.entry)
   }
 
-  override getState(): Promise<WandbVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(WandbConfigSchema, this.config) as WandbConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof WandbConfig>>> {
+    return Promise.resolve(this.configState(WandbConfig, this.config))
   }
 }

@@ -16,5 +16,4 @@ export {
   buildEmailConfig,
   type EmailConfig,
   type EmailConfigInput,
-  type EmailConfigRedacted,
 } from '../../core/email/config.ts'

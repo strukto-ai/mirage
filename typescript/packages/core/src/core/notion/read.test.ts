@@ -12,20 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { readFileSync } from 'node:fs'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { NotionAPIError, type NotionTransport } from './client.ts'
 import { NotionAccessor } from '../../accessor/notion.ts'
-import { firstLines, readStream, read as rawOperation } from './read.ts'
-import { normalizeRow } from './normalize.ts'
-import { jsonlBytes } from '../render/json.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { materialize } from '../../io/types.ts'
-import { NotionVFSBase } from '../../vfs/notion/notion.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
+import type { JsonObject } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { NotionVFS } from '../../vfs/notion/notion.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { jsonlBytes } from '../render/json.ts'
+import { NotionAPIError, type NotionTransport } from './client.ts'
+import { normalizeRow } from './normalize.ts'
+import { firstLines, read as rawOperation, readStream } from './read.ts'
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []
@@ -373,15 +374,13 @@ async function indexFor(path: PathSpec, cache: IndexCacheStore) {
   ])
   return cache
 }
-
-type Json = Record<string, unknown>
 interface StreamFixture {
-  responses: Json[]
+  responses: JsonObject[]
   prefixes: { n: number; requests: number; rows: number }[]
 }
 interface PaginationCase {
   name: string
-  responses: Json[]
+  responses: JsonObject[]
   cursors: (string | null)[]
   error?: { message: string }
 }
@@ -393,12 +392,12 @@ const PAGINATION = JSON.parse(
 ) as PaginationCase[]
 const VIRTUAL = '/notion/databases/DB__db/DS__ds/rows.jsonl'
 const ROWS = STREAM.responses.flatMap((reply) =>
-  (reply.results as Json[]).filter((row) => row.object === 'page'),
+  (reply.results as JsonObject[]).filter((row) => row.object === 'page'),
 )
 const EXPECTED = jsonlBytes(ROWS.map(normalizeRow))
 const QUERY = 'API-post-data-source-query'
 
-function streamTransport(responses: Json[] = STREAM.responses): FakeTransport {
+function streamTransport(responses: JsonObject[] = STREAM.responses): FakeTransport {
   const transport = new FakeTransport()
   for (const response of responses) {
     const error = response.raise as { message: string; status: number; code: string } | undefined
@@ -408,7 +407,12 @@ function streamTransport(responses: Json[] = STREAM.responses): FakeTransport {
         ? {
             ...response,
             ...(Array.isArray(response.results)
-              ? { results: (response.results as Json[]).map((row) => ({ object: 'page', ...row })) }
+              ? {
+                  results: (response.results as JsonObject[]).map((row) => ({
+                    object: 'page',
+                    ...row,
+                  })),
+                }
               : {}),
           }
         : new NotionAPIError(error.message, error.status, error.code),
@@ -417,7 +421,7 @@ function streamTransport(responses: Json[] = STREAM.responses): FakeTransport {
   return transport
 }
 
-class StreamingVFS extends NotionVFSBase {
+class StreamingVFS extends NotionVFS {
   override readonly name = 'notion'
   override readonly cachesReads = true
   override readonly accessor: NotionAccessor

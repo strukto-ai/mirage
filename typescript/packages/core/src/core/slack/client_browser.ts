@@ -12,17 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { HttpSlackTransport } from './client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-
-export interface BrowserSlackTransportOptions {
-  proxyUrl: string
-  getHeaders?: () => Promise<Record<string, string>> | Record<string, string>
-  timeout?: number
-}
+import { HttpSlackTransport } from './client.ts'
 
 export class BrowserSlackTransport extends HttpSlackTransport {
-  constructor(private readonly opts: BrowserSlackTransportOptions) {
+  constructor(
+    private readonly opts: {
+      proxyUrl: string
+      getHeaders?: () => Promise<Record<string, string>> | Record<string, string>
+      timeout?: number
+    },
+  ) {
     super(opts.timeout)
     // Reject query strings and fragments — they would silently corrupt the
     // resolved URL when the endpoint is appended.

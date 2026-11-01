@@ -1,19 +1,4 @@
 from mirage.core.generic.find_eval import (
-    Action,
-    And,
-    Effects,
-    Empty,
-    FindArgs,
-    FindEntry,
-    Mtime,
-    Name,
-    Not,
-    Or,
-    Path,
-    PendingPrune,
-    Prune,
-    TrueNode,
-    Type,
     args_to_tree,
     bind_tree,
     build_tree,
@@ -29,6 +14,23 @@ from mirage.core.generic.find_eval import (
     tree_has_prune,
     unrespell_raw,
     without_prune,
+)
+from mirage.core.generic.types import (
+    Action,
+    And,
+    Effects,
+    Empty,
+    FindArgs,
+    FindEntry,
+    Mtime,
+    Name,
+    Not,
+    Or,
+    Path,
+    PendingPrune,
+    Prune,
+    TrueNode,
+    Type,
 )
 from mirage.types import FindType
 from mirage.utils.stat_view import DIR_SIZE

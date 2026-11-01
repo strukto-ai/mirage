@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { secretStr, z } from '../secrets.ts'
-import type { ConfigOf, RedactedConfig } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
+import type { ConfigOf } from '../secrets.ts'
+import { secretStr, z } from '../secrets.ts'
 
-export const LangfuseConfigSchema = z.object({
+export const LangfuseConfig = z.object({
   ...timeoutShape,
   publicKey: z.string().describe('Langfuse project public key.'),
   secretKey: secretStr().describe('Langfuse project secret key.'),
@@ -37,6 +37,4 @@ export const LangfuseConfigSchema = z.object({
     ),
 })
 
-export type LangfuseConfig = ConfigOf<typeof LangfuseConfigSchema>
-
-export type LangfuseConfigRedacted = RedactedConfig<LangfuseConfig, 'secretKey'>
+export type LangfuseConfig = ConfigOf<typeof LangfuseConfig>

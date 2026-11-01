@@ -14,7 +14,7 @@
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import { filesContaining } from '../../core/lancedb/search.ts'
-import { SEARCH, read, readdir, stat } from '../../core/lancedb/tree.ts'
+import { read, readdir, SEARCH, stat } from '../../core/lancedb/tree.ts'
 import type { DirListing, FileStat, PathSpec, SearchQuery } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 
@@ -28,7 +28,7 @@ ls/cd/cat/tree/find/wc/grep/rg as usual.`
  * LanceDB's functions over its accessor, which a host package builds
  * over its own transport.
  */
-export class LanceDBVFSBase extends BaseVFS<LanceDBAccessor> {
+export class LanceDBVFS extends BaseVFS<LanceDBAccessor> {
   override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
     return readdir(this.accessor, path)
   }

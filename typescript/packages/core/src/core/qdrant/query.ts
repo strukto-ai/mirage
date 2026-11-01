@@ -17,7 +17,6 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { valueText } from '../render/json.ts'
 import { groupName, rowStem } from './naming.ts'
 import { fieldValue } from './payload.ts'
-
 import type { PointTest, QdrantPoint, QdrantRow } from './types.ts'
 
 export const SCROLL_BATCH = 256
@@ -110,11 +109,6 @@ export function candidateIds(rowId: string): (string | number)[] {
   return []
 }
 
-interface ScrollPage {
-  points: QdrantPoint[]
-  next_page_offset?: string | number | null
-}
-
 async function scrollRaw(
   accessor: QdrantAccessor,
   collection: string,
@@ -138,7 +132,10 @@ async function scrollRaw(
       offset,
       with_payload: true,
       with_vector: false,
-    })) as ScrollPage
+    })) as {
+      points: QdrantPoint[]
+      next_page_offset?: string | number | null
+    }
     for (const item of keep === undefined ? res.points : res.points.filter(keep)) points.push(item)
     const next = res.next_page_offset
     if (next === null || next === undefined) break

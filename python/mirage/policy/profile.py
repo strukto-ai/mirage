@@ -44,6 +44,7 @@ from mirage.policy.types import (
     ScriptMethod,
 )
 from mirage.process.config import ProcessPermissions
+from mirage.rs.document import validate_document
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar, SecretRef
 from mirage.types import (
@@ -55,12 +56,9 @@ from mirage.types import (
     parse_mount_mode,
     weaker_mode,
 )
-from mirage.utils.hidden import is_glob
 from mirage.utils.path import norm
 
 _DOC = ConfigDict(extra="forbid", frozen=True)
-
-_RULE_FIELDS = frozenset({"reason", "commands", "paths"})
 
 
 def _list(value: Any, where: str, expected: str = "a list") -> tuple[Any, ...]:
@@ -97,13 +95,7 @@ def _string_list(
         names (str | None): what a non-blank entry names (``a
             command``, ``a path``); None accepts blank entries.
     """
-    entries = _list(value, where, "a list of strings")
-    for i, entry in enumerate(entries):
-        if not isinstance(entry, str):
-            raise ValueError(f"{where}[{i}] must be a string")
-        if names is not None and not entry.split():
-            raise ValueError(f"{where}[{i}] must name {names}")
-    return entries
+    return tuple(validate_document("strings", value, where, names=names))
 
 
 def _absolute_paths(entries: tuple[str, ...], where: str) -> None:
@@ -124,13 +116,7 @@ def _absolute_paths(entries: tuple[str, ...], where: str) -> None:
         entries (tuple[str, ...]): the entries as written.
         where (str): the field's name, for the message.
     """
-    for i, entry in enumerate(entries):
-        if entry.startswith("/") or (is_glob(entry) and "/" not in entry):
-            continue
-        raise ValueError(
-            f"{where}[{i}] must be an absolute path or a name "
-            f"pattern: {entry!r} is relative"
-        )
+    validate_document("absolute", entries, where)
 
 
 def _under_mount(entries: tuple[str, ...], root: str, where: str) -> None:
@@ -151,51 +137,7 @@ def _under_mount(entries: tuple[str, ...], root: str, where: str) -> None:
         root (str): the mount prefix, leading slash, no trailing one.
         where (str): the field's name, for the message.
     """
-    if root == "/":
-        return
-    for i, entry in enumerate(entries):
-        if not entry.startswith("/"):
-            continue
-        if entry == root or entry.startswith(root + "/"):
-            continue
-        raise ValueError(
-            f"{where}[{i}] is outside the mount it is written "
-            f"under: {entry!r} is not below {root!r}"
-        )
-
-
-def _scoped_rules(
-    commands: Mapping[Any, Any], reason: str, where: str
-) -> list[CommandRule]:
-    """The rules of a ``commands`` mapping: each command on its own paths.
-
-    One rule per entry, so the document never states a command beside
-    a path it was not meant for: ``{rm: [/repo/*], mv: [/shared/*]}``
-    scopes ``rm`` to the repo and ``mv`` to the share, nothing else.
-
-    Args:
-        commands (Mapping[Any, Any]): the mapping as written, command
-            pattern to its path entries.
-        reason (str): the rule's reason, shared by every entry.
-        where (str): ``deny rule`` or ``ask rule``, for the messages.
-    """
-    if not commands:
-        raise ValueError(f"{where} commands must name at least one command")
-    rules = []
-    for pattern, paths in commands.items():
-        if not isinstance(pattern, str) or not pattern.split():
-            raise ValueError(f"{where} commands keys must name a command")
-        entries = _string_list(
-            paths, f"{where} commands[{pattern}]", names="a path"
-        )
-        if not entries:
-            raise ValueError(
-                f"{where} commands[{pattern}] must list at least one path"
-            )
-        rules.append(
-            CommandRule(reason=reason, commands=(pattern,), paths=entries)
-        )
-    return rules
+    validate_document("under", entries, where, root=root)
 
 
 def _rule(entry: Any, where: str, default_reason: str) -> list[CommandRule]:
@@ -218,48 +160,15 @@ def _rule(entry: Any, where: str, default_reason: str) -> list[CommandRule]:
             none.
     """
     if isinstance(entry, CommandRule):
-        # Already compiled: the resolver rebuilds blocks from rules, and
-        # a typed caller may construct the document from them.
         return [entry]
-    if isinstance(entry, str):
-        return [
-            CommandRule(
-                reason=default_reason,
-                commands=_string_list(
-                    (entry,), f"{where} commands", names="a command"
-                ),
-            )
-        ]
-    if not isinstance(entry, Mapping):
-        raise ValueError(f"{where} must be a command pattern or a mapping")
-    unknown = sorted(set(entry) - _RULE_FIELDS)
-    if unknown:
-        raise ValueError(f"{where} has unknown field(s): {', '.join(unknown)}")
-    reason = entry.get("reason", default_reason)
-    if not isinstance(reason, str):
-        raise ValueError(f"{where} reason must be a string")
-    commands, paths = entry.get("commands"), entry.get("paths")
-    if isinstance(commands, Mapping):
-        if paths is not None:
-            raise ValueError(
-                f"{where} maps each command to its paths, "
-                "so it takes no paths of its own"
-            )
-        return _scoped_rules(commands, reason, where)
-    if commands is not None and paths is not None:
-        raise ValueError(
-            f"{where} lists commands beside paths; map each "
-            "command to its paths instead"
-        )
-    if commands is None and paths is None:
-        raise ValueError(f"{where} names no command and no path")
     return [
         CommandRule(
-            reason=reason,
-            commands=_string_list(
-                commands, f"{where} commands", names="a command"
-            ),
-            paths=_string_list(paths, f"{where} paths", names="a path"),
+            reason=row["reason"],
+            commands=tuple(row.get("commands", ())),
+            paths=tuple(row.get("paths", ())),
+        )
+        for row in validate_document(
+            "rule", entry, where, reason=default_reason
         )
     ]
 

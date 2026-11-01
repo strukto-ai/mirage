@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compactJsonBytes } from '@struktoai/mirage-core/core/render/json'
-import type { FetchedMessage } from './client.ts'
+import type { fetchMessage } from './client.ts'
 
 const encoder = new TextEncoder()
 
@@ -25,17 +25,19 @@ const encoder = new TextEncoder()
  * field of the message. The gmail backend keeps its internalDate out of
  * the rendered JSON the same way.
  */
-function messageDocument(message: FetchedMessage): Partial<FetchedMessage> {
-  const body: Partial<FetchedMessage> = { ...message }
+function messageDocument(
+  message: Awaited<ReturnType<typeof fetchMessage>>,
+): Partial<Awaited<ReturnType<typeof fetchMessage>>> {
+  const body: Partial<Awaited<ReturnType<typeof fetchMessage>>> = { ...message }
   delete body.internalDate
   return body
 }
 
-export function messageJsonText(message: FetchedMessage): string {
+export function messageJsonText(message: Awaited<ReturnType<typeof fetchMessage>>): string {
   return JSON.stringify(messageDocument(message))
 }
 
-export function messageJsonBytes(message: FetchedMessage): Uint8Array {
+export function messageJsonBytes(message: Awaited<ReturnType<typeof fetchMessage>>): Uint8Array {
   // Single renderer for .email.json: the listing fetches the full message
   // source and parses it exactly like read() does, so sizing a listed
   // header dict here yields the byte length read() will return. Every
@@ -44,7 +46,10 @@ export function messageJsonBytes(message: FetchedMessage): Uint8Array {
   return encoder.encode(messageJsonText(message))
 }
 
-export type Envelope = Omit<FetchedMessage, 'internalDate' | 'body_text' | 'body_html' | 'snippet'>
+export type Envelope = Omit<
+  Awaited<ReturnType<typeof fetchMessage>>,
+  'internalDate' | 'body_text' | 'body_html' | 'snippet'
+>
 
 /**
  * Projects a fetched message onto its envelope.
@@ -57,7 +62,7 @@ export type Envelope = Omit<FetchedMessage, 'internalDate' | 'body_text' | 'body
  * bodies. Those are `message read`'s and the mounted .email.json's,
  * which render through `messageDocument`.
  */
-function envelopeDocument(message: FetchedMessage): Envelope {
+function envelopeDocument(message: Awaited<ReturnType<typeof fetchMessage>>): Envelope {
   const body = messageDocument(message)
   delete body.body_text
   delete body.body_html
@@ -65,6 +70,8 @@ function envelopeDocument(message: FetchedMessage): Envelope {
   return body as Envelope
 }
 
-export function envelopesJsonBytes(messages: readonly FetchedMessage[]): Uint8Array {
+export function envelopesJsonBytes(
+  messages: readonly Awaited<ReturnType<typeof fetchMessage>>[],
+): Uint8Array {
   return compactJsonBytes(messages.map((m) => envelopeDocument(m)))
 }

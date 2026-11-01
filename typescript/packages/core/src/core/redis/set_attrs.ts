@@ -12,18 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../types.ts'
-import { lookupError } from './dest.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
+import type { PathSpec, SetAttrFields } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
-
-export interface SetAttrsFields {
-  mode?: number
-  uid?: number | string
-  gid?: number | string
-  atime?: string
-  mtime?: string
-}
+import { lookupError } from './dest.ts'
 
 // Write metadata fields on an existing entry (the write side of stat).
 // Fields live in a per-path attrs hash; values are stored as strings
@@ -33,7 +25,7 @@ export interface SetAttrsFields {
 export async function setAttrs(
   accessor: RedisAccessor,
   path: PathSpec,
-  fields: SetAttrsFields,
+  fields: SetAttrFields,
 ): Promise<Record<string, number | string>> {
   const store = accessor.store
   const p = norm(path.mountPath)

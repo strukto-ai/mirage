@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { boundedDecimal } from '../../../../commands/builtin/utils/strtol.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { builtinError, builtinUsage, result } from '../shared.ts'
 import { SIGNALS } from '../timeout/constants.ts'
-import type { BuiltinCall, Result } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
 import { PSEUDO_SIGNALS, RUN_EVENTS, SIGNAL_MAX } from './constants.ts'
 import { TrapEvent } from './types.ts'
-import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 
 /**
  * What a signal spec names: EXIT, ERR or RETURN, another signal bash knows
@@ -57,7 +58,7 @@ export function listing(action: string, event: TrapEvent): string {
  * no signals, so any other event bash knows is refused rather than accepted
  * and never run.
  */
-export function handleTrap(args: readonly string[], session: SessionState): Result {
+export function handleTrap(args: readonly string[], session: SessionState): RedirectResult {
   const words = [...args]
   let printing = false
   for (let word = words[0]; word?.startsWith('-') === true && word !== '-'; word = words[0]) {
@@ -114,6 +115,6 @@ export function handleTrap(args: readonly string[], session: SessionState): Resu
 }
 
 /** The `trap` arm. */
-export function trapBuiltin(call: BuiltinCall): Promise<Result> {
+export function trapBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleTrap(call.argv.args, call.context.session))
 }

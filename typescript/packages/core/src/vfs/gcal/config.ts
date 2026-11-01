@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { timeRangeShape, orderedTimes, timeRangeOrderError } from '../../core/time_config.ts'
-import { GoogleConfigSchema } from '../../core/google/config.ts'
-import { type ConfigOf, type RedactedConfig } from '../secrets.ts'
+import { GoogleConfig } from '../../core/google/config.ts'
+import { orderedTimes, timeRangeOrderError, timeRangeShape } from '../../core/time_config.ts'
+import type { ConfigOf } from '../secrets.ts'
 
 // Calendar-only knobs live here, not on the shared Google base, so a drive
 // or docs mount cannot be handed a time zone that means nothing to it.
@@ -23,7 +23,7 @@ import { type ConfigOf, type RedactedConfig } from '../secrets.ts'
 // credential check rides along, and unlike `.extend` it cannot throw at
 // import time should a key here ever shadow one of the base's. Mirrors
 // python's `GCalConfig(GoogleConfig)`.
-export const GCalConfigSchema = GoogleConfigSchema.safeExtend({
+export const GCalConfig = GoogleConfig.safeExtend({
   ...timeRangeShape,
   // One zone for the whole mount, not one per calendar: the Calendar UI
   // draws its whole grid in the primary zone, and per-calendar bucketing
@@ -55,9 +55,4 @@ export const GCalConfigSchema = GoogleConfigSchema.safeExtend({
     ),
 }).refine(orderedTimes, timeRangeOrderError)
 
-export type GCalConfig = ConfigOf<typeof GCalConfigSchema>
-
-export type GCalConfigRedacted = RedactedConfig<
-  GCalConfig,
-  'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
->
+export type GCalConfig = ConfigOf<typeof GCalConfig>

@@ -18,11 +18,6 @@ import type { WorkspaceRegistry } from '../registry.ts'
 import { serveCodexSocket } from '../ssh/codex.ts'
 import type { SSHEndpoint } from '../ssh/types.ts'
 
-export interface SshRoutesDeps {
-  registry: WorkspaceRegistry
-  ssh: SSHEndpoint
-}
-
 interface SshParams {
   id: string
 }
@@ -38,7 +33,13 @@ interface SshParams {
  * one JSON-RPC message per WebSocket message: `mirage codex-exec` relays
  * `codex exec-server forward` there with the CLI's token.
  */
-export function registerSshRoutes(app: FastifyInstance, deps: SshRoutesDeps): void {
+export function registerSshRoutes(
+  app: FastifyInstance,
+  deps: {
+    registry: WorkspaceRegistry
+    ssh: SSHEndpoint
+  },
+): void {
   // An upgrade answered over HTTP was refused, maybe by a hook that ran
   // before the WebSocket plugin took charge of its socket (the host check,
   // auth); the socket is no longer the server's, so it is ended here.

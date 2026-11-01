@@ -12,21 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fromUnits, units, visibilityMatcher } from '../rs/policy.ts'
-import { mergeSignals } from '../utils/abort.ts'
-import type { SessionAccess } from '../view/types.ts'
-import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
-import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
-import type { Redirect } from '../shell/types.ts'
-import type { JobConsole } from '../shell/console/index.ts'
-import type { ExecutionNode } from '../workspace/types.ts'
-import type { EvaluationContext } from '../workspace/evaluation.ts'
-import type { SessionState } from '../workspace/session/session.ts'
-import type { ProcessHandle } from '../process/handle.ts'
-import { rstripSlash } from '../utils/slash.ts'
-import { leadsHidden, pathVisible } from '../utils/hidden.ts'
 import { eacces, enoent, enotsup, erofs } from '../errors/fs.ts'
-import { norm, parent } from '../utils/path.ts'
+import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
+import type { OpRecord } from '../observe/record.ts'
 import type {
   CommandContext,
   DecisionOwner,
@@ -35,9 +23,22 @@ import type {
   HandOff,
   VfsExplanation,
 } from '../policy/types.ts'
-import type { OpRecord } from '../observe/record.ts'
+import type { ProcessHandle } from '../process/handle.ts'
+import { fromUnits, units } from '../rs/document.ts'
+import { visibilityMatcher } from '../rs/policy.ts'
+import type { JobConsole } from '../shell/console/index.ts'
+import type { Redirect } from '../shell/types.ts'
 import type { Limit, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MountMode, weakerMode } from '../types.ts'
+import { mergeSignals } from '../utils/abort.ts'
+import { asyncContextIsolatesTasks, createAsyncContext } from '../utils/async_context.ts'
+import { leadsHidden, pathVisible } from '../utils/hidden.ts'
+import { norm, parent } from '../utils/path.ts'
+import { rstripSlash } from '../utils/slash.ts'
+import type { SessionAccess } from '../view/types.ts'
+import type { EvaluationContext } from '../workspace/evaluation.ts'
+import type { SessionState } from '../workspace/session/session.ts'
+import type { ExecutionNode } from '../workspace/types.ts'
 
 /** Whoever binds sessions: one per workspace, compared by identity. */
 export abstract class SessionOwner {

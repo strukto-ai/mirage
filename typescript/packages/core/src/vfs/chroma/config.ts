@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, normalizeNonEmpty } from '../secrets.ts'
+import type { ConfigOf, RedactedSchema } from '../secrets.ts'
+import { normalizeNonEmpty } from '../secrets.ts'
 
-export const ChromaConfigSchema = z.object({
+export const ChromaConfig = z.object({
   host: z
     .string()
     .optional()
@@ -41,18 +42,9 @@ export const ChromaConfigSchema = z.object({
   }),
 })
 
-export type ChromaConfig = ConfigOf<typeof ChromaConfigSchema>
+export type ChromaConfig = ConfigOf<typeof ChromaConfig>
 
-export interface ChromaConfigResolved {
-  host: string
-  port: number
-  ssl: boolean
-  collectionName: string
-  slugField: string
-  chunkIndexField: string
-}
-
-export function resolveChromaConfig(config: ChromaConfig): ChromaConfigResolved {
+export function resolveChromaConfig(config: ChromaConfig) {
   return {
     host: config.host ?? 'localhost',
     port: config.port ?? 8000,
@@ -63,10 +55,8 @@ export function resolveChromaConfig(config: ChromaConfig): ChromaConfigResolved 
   }
 }
 
-// No credential in this config, so the snapshot carries it whole and
-// `Workspace.load` needs no override for the mount.
-export type ChromaConfigRedacted = ChromaConfigResolved
-
-export function redactChromaConfig(config: ChromaConfigResolved): ChromaConfigRedacted {
+export function redactChromaConfig(
+  config: ReturnType<typeof resolveChromaConfig>,
+): RedactedSchema<typeof ChromaConfig, ReturnType<typeof resolveChromaConfig>> {
   return { ...config }
 }

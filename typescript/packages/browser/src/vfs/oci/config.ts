@@ -12,25 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const OCIConfigSchema = browserAliasSchema({
-  namespace: z
-    .string()
-    .optional()
-    .describe(
-      'Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint` is set.',
-    ),
-})
-
-export type OCIConfig = ConfigOf<typeof OCIConfigSchema>
-
-export type OCIConfigRedacted = RedactedConfig<OCIConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<OCIConfig, OCIConfigRedacted>({
-  schema: OCIConfigSchema,
+export const OCIConfig = makeBrowserS3Alias({
+  schema: browserAliasSchema({
+    namespace: z
+      .string()
+      .optional()
+      .describe(
+        'Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint` is set.',
+      ),
+  }),
   endpointFor: (config) =>
     config.namespace !== undefined &&
     config.namespace !== '' &&
@@ -40,5 +34,4 @@ export const ALIAS = makeBrowserS3Alias<OCIConfig, OCIConfigRedacted>({
       : undefined,
 })
 
-export const resolvedOciEndpoint = ALIAS.resolvedEndpoint
-export const ociToS3Config = ALIAS.toS3Config
+export type OCIConfig = ConfigOf<typeof OCIConfig>

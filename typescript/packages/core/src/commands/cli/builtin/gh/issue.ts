@@ -13,9 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccount } from '../../../../accessor/github.ts'
-import { FlagView } from '../../../spec/flag_view.ts'
-import type { CommandFnResult, Context } from '../../../config.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { GitHubTransport } from '../../../../core/github/client.ts'
 import {
   commentIssue,
@@ -28,6 +25,9 @@ import {
   listIssues,
 } from '../../../../core/github/issue.ts'
 import type { RepoRef } from '../../../../core/github/repo.ts'
+import type { JsonObject, PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
 import {
   bodyValue,
   camel,
@@ -42,14 +42,13 @@ import {
   typedOut,
 } from './accessor.ts'
 import {
-  SHARED_FIELDS,
   exportedNode,
   plain,
   readRest,
   references,
   selection,
+  SHARED_FIELDS,
   type Field,
-  type Node,
 } from './fields.ts'
 
 /**
@@ -88,7 +87,7 @@ async function viewedIssue(
   ref: RepoRef,
   number: number,
   fields: readonly string[],
-): Promise<Node> {
+): Promise<JsonObject> {
   const names = [...fields, 'id', ...(fields.includes('projectItems') ? ['number'] : [])]
   const node = await issueFields(transport, ref, number, {
     issue: selection(ISSUE_FIELD_TABLE, names, true),

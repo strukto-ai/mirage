@@ -12,24 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it, vi } from 'vitest'
-import * as abort from '../utils/abort.ts'
-import { Command } from '../commands/config.ts'
+import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
-import { CommandSpec, Argument } from '../commands/spec/types.ts'
+import { Command } from '../commands/config.ts'
+import { Argument, CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
+import { Runtime } from '../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from '../runtime/mixin.ts'
+import type { RunResult } from '../runtime/types.ts'
+import { Channel, type ConsoleChunk, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
+import { dispatched } from '../test-utils.ts'
+import { MountMode, VFSName } from '../types.ts'
+import * as abort from '../utils/abort.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { RAMNamespaceStore } from './mount/namespace/ram.ts'
 import type { RecordFields } from './record/types.ts'
-import { RAMVFS } from '../vfs/ram/ram.ts'
-import { Runtime } from '../runtime/base.ts'
-import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
-import type { RunResult } from '../runtime/types.ts'
-import { MountMode, VFSName } from '../types.ts'
-import { Channel, type ConsoleChunk, JobConsole, RAMConsoleStore } from '../shell/console/index.ts'
-import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteResult } from './workspace/workspace.ts'
 import { Workspace } from './workspace/workspace.ts'
-import { dispatched } from '../test-utils.ts'
 
 const DEC = new TextDecoder()
 
@@ -685,7 +685,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('releases the caller when the history store stalls after a whole-line runtime', async () => {
-    class Answers extends Runtime implements LineExecutor {
+    class Answers extends Runtime implements LineExecutorMixin {
       readonly name = 'answers'
       readonly [LINE_EXECUTOR] = true as const
       constructor() {
@@ -792,7 +792,7 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('aborts a whole-line runtime that never answers', async () => {
-    class Hanging extends Runtime implements LineExecutor {
+    class Hanging extends Runtime implements LineExecutorMixin {
       readonly name = 'hanging'
       readonly [LINE_EXECUTOR] = true as const
       constructor() {

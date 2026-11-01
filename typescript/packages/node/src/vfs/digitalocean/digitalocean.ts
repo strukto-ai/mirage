@@ -13,13 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type DigitalOceanConfig, type DigitalOceanConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { DigitalOceanConfig } from './config.ts'
 
-export type DigitalOceanVFSState = S3AliasVFSState<DigitalOceanConfigRedacted>
-
-export class DigitalOceanVFS extends S3AliasVFS<DigitalOceanConfig, DigitalOceanConfigRedacted> {
+export class DigitalOceanVFS extends S3AliasVFS<
+  DigitalOceanConfig,
+  RedactedSchema<typeof DigitalOceanConfig>
+> {
   constructor(config: DigitalOceanConfig) {
-    super(VFSName.DIGITALOCEAN, config, ALIAS)
+    super(VFSName.DIGITALOCEAN, config, DigitalOceanConfig)
   }
 }

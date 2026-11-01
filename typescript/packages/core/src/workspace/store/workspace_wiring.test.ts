@@ -14,9 +14,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RAMObserverStore } from '../../observe/store.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 import { MountMode } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { RAMWorkspaceStateStore } from './ram.ts'
 
@@ -106,7 +106,7 @@ describe('Workspace on a WorkspaceStateStore', () => {
     await wsA.shell('mkdir -p /data/vault && echo top > /data/vault/secret')
     await wsA.setSessionProfile(
       wsA.defaultSessionId,
-      parseSessionProfile({ paths: { hide: ['/data/vault'] } }),
+      SessionProfile({ paths: { hide: ['/data/vault'] } }),
     )
     await wsA.flushSessions()
 

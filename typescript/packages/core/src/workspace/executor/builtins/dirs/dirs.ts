@@ -18,12 +18,6 @@ import { CD_OPTIONS } from './constants.ts'
 
 export type DirArgs = (string | PathSpec)[]
 
-export interface ModeOptions {
-  operands: DirArgs
-  bad: string | null
-  physical: boolean
-}
-
 // Split leading -L/-P option flags (clusters like -LP, and a `--`
 // terminator) from the operands. Shared by `cd` (which also takes -e -@)
 // and `pwd`, so the last-wins rule -- `pwd -L -P` is physical, `pwd -P
@@ -35,7 +29,7 @@ export function splitModeOptions(
   // The mode to assume when the line names neither, which is what
   // `set -P` changes for the whole session.
   fallback = false,
-): ModeOptions {
+) {
   const operands: DirArgs = []
   let parsing = true
   let physical = fallback

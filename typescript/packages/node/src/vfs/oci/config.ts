@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { aliasSchema, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface OCIConfig extends S3AliasConfig {
@@ -21,36 +20,25 @@ export interface OCIConfig extends S3AliasConfig {
   region: string
 }
 
-export const OCIConfigSchema = aliasSchema({
-  forcePathStyle: z.boolean().optional().meta({ default: true }),
-  region: z
-    .string()
-    .describe(
-      'Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.',
-    ),
-  endpoint: z
-    .string()
-    .optional()
-    .describe('Endpoint URL that replaces the one the provider derives.'),
-  namespace: z
-    .string()
-    .describe(
-      'Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint` is set.',
-    ),
-})
-
-// Only the redacted twin derives; the redactor fills in the region and
-// endpoint the provider's rule resolves.
-export type OCIConfigRedacted = RedactedConfig<
-  ConfigOf<typeof OCIConfigSchema>,
-  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
->
-
-export const ALIAS = makeS3Alias<OCIConfig, OCIConfigRedacted>({
-  schema: OCIConfigSchema,
+export const OCIConfig = makeS3Alias({
+  schema: aliasSchema({
+    forcePathStyle: z.boolean().optional().meta({ default: true }),
+    region: z
+      .string()
+      .describe(
+        'Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.',
+      ),
+    endpoint: z
+      .string()
+      .optional()
+      .describe('Endpoint URL that replaces the one the provider derives.'),
+    namespace: z
+      .string()
+      .describe(
+        'Object Storage namespace of the tenancy. With `region` it builds the endpoint `https://<namespace>.compat.objectstorage.<region>.oci.customer-oci.com` unless `endpoint` is set.',
+      ),
+  }),
   endpointFor: (config) =>
     `https://${config.namespace}.compat.objectstorage.${config.region}.oci.customer-oci.com`,
   forcePathStyle: true,
 })
-
-export const ociToS3Config = ALIAS.toS3Config

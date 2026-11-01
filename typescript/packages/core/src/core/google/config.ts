@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, type RedactedConfig, secretSchema, secretStr } from '../../vfs/secrets.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
+import { secretSchema, secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
 // A pre-minted token read on every request. This is how a caller that
@@ -27,9 +28,6 @@ export type GoogleAccessTokenProvider = () => string | Promise<string>
 // token refresh to this callback instead of calling Google's token endpoint
 // directly. Useful when the client_secret must stay on a backend (e.g. a
 // Vercel function proxy).
-export type GoogleRefreshFn = (
-  refreshToken: string,
-) => Promise<{ accessToken: string; expiresIn: number }>
 
 export const GOOGLE_CREDENTIAL_ERROR =
   'GoogleConfig needs either accessToken (a token or a provider callable) or both clientId and refreshToken'
@@ -46,7 +44,7 @@ function hasGoogleCredential(config: {
   return config.clientId !== undefined && config.refreshToken !== undefined
 }
 
-export const GoogleConfigSchema = z
+export const GoogleConfig = z
   .object({
     ...timeoutShape,
     // Two ways to authenticate, the same two MsGraphConfig offers: a token
@@ -83,7 +81,11 @@ export const GoogleConfigSchema = z
     // Declared here rather than on a CLI-only extension: parse strips what
     // the schema does not name, and marking it secret is what keeps a
     // callback out of snapshot state.
-    refreshFn: secretSchema(z.custom<GoogleRefreshFn>((value) => typeof value === 'function'))
+    refreshFn: secretSchema(
+      z.custom<(refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>>(
+        (value) => typeof value === 'function',
+      ),
+    )
       .optional()
       .describe(
         "Function that exchanges the refresh token for `{ accessToken, expiresIn }` instead of Google's token endpoint, so the client secret can stay on a backend. Still needs `clientId` and `refreshToken`.",
@@ -106,11 +108,6 @@ export const GoogleConfigSchema = z
 // Derived, not declared twice: the schema validates every install and
 // carries the secret markers redaction reads, so a hand-written twin only
 // adds a shape that can drift from it.
-export type GoogleConfig = ConfigOf<typeof GoogleConfigSchema>
+export type GoogleConfig = ConfigOf<typeof GoogleConfig>
 
-export type GoogleAppConfig = ConfigOf<typeof GoogleConfigSchema>
-
-export type GoogleAppConfigRedacted = RedactedConfig<
-  GoogleAppConfig,
-  'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
->
+export type GoogleAppConfig = ConfigOf<typeof GoogleConfig>

@@ -12,18 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 import {
-  timeRangeShape,
   orderedTimes,
   timeRangeOrderError,
+  timeRangeShape,
 } from '@struktoai/mirage-core/core/time_config'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { secretSchema, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 type HeaderProvider = () => Promise<Record<string, string>> | Record<string, string>
 
-export const DiscordConfigSchema = z
+export const DiscordConfig = z
   .object({
     ...timeoutShape,
     ...timeRangeShape,
@@ -40,6 +40,4 @@ export const DiscordConfigSchema = z
   })
   .refine(orderedTimes, timeRangeOrderError)
 
-export type DiscordConfig = ConfigOf<typeof DiscordConfigSchema>
-
-export type DiscordConfigRedacted = RedactedConfig<DiscordConfig, 'getHeaders'>
+export type DiscordConfig = ConfigOf<typeof DiscordConfig>

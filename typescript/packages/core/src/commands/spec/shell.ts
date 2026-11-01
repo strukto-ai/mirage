@@ -14,7 +14,7 @@
 import { specOf } from './builtins.ts'
 import { compileSpec, expandLong, optionSpellings } from './compile.ts'
 import { HELP_OPTION, VERSION_OPTION } from './constants.ts'
-import { CommandSpec, Argument } from './types.ts'
+import { Argument, CommandSpec } from './types.ts'
 
 const DECLARE_OPTIONS = [
   new Argument('-a', { action: 'store_true', help: 'make each NAME an indexed array' }),
@@ -777,10 +777,6 @@ export interface ShellParse {
   unexpectedValue: string | null
 }
 
-type ShellRefusal = Partial<
-  Pick<ShellParse, 'invalid' | 'candidates' | 'needsValue' | 'unexpectedValue'>
->
-
 /**
  * Scan leading options the way getopt does for a shell builtin.
  *
@@ -828,7 +824,12 @@ export function parseShellOptions(spec: CommandSpec, argv: readonly string[]): S
     flags[key] = value
     given.push([key, value])
   }
-  const done = (operands: readonly string[], refusal: ShellRefusal = {}): ShellParse => ({
+  const done = (
+    operands: readonly string[],
+    refusal: Partial<
+      Pick<ShellParse, 'invalid' | 'candidates' | 'needsValue' | 'unexpectedValue'>
+    > = {},
+  ): ShellParse => ({
     flags,
     given,
     operands: [...operands],

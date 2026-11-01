@@ -12,19 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import {
   SET_OPTION_DEFAULTS,
   SET_OPTION_NAMES,
   SHOPT_DEFAULTS,
 } from '../../../../shell/constants.ts'
 import type { SessionState } from '../../../session/session.ts'
+import { ExecutionNode } from '../../../types.ts'
 import { type AliasMark, aliasMark, noteExpanding } from '../alias/index.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
-import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage, fail } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import type { BuiltinCall } from '../types.ts'
 
 function row(name: string, on: boolean, reusable: boolean, setO: boolean): string {
   if (reusable) {
@@ -48,7 +49,7 @@ export function handleShopt(
   args: string[],
   session: SessionState,
   mark: AliasMark | null = null,
-): Result {
+): RedirectResult {
   const scan = scanOptions(args, 'pqosu')
   if (scan.bad !== null)
     return fail('shopt', `bash: shopt: ${scan.bad}: invalid option\n${builtinUsage('shopt')}`, 2)
@@ -104,7 +105,7 @@ export function handleShopt(
 }
 
 /** The `shopt` arm; the row marks the read it runs in. */
-export function shoptBuiltin(call: BuiltinCall): Promise<Result> {
+export function shoptBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const session = call.context.session
   return Promise.resolve(handleShopt([...call.argv.args], session, aliasMark(session, call.row)))
 }

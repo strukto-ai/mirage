@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { ContentType, FileType, PathSpec, type FileStat } from '../../types.ts'
-import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { SlackVFS } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SlackApiError, type SlackResponse, type SlackTransport } from './client.ts'
 import { stat } from './stat.ts'
@@ -80,7 +80,7 @@ function world(messages: unknown[] = MESSAGES, sealed: string | null = null) {
 // `path`'s stat through a mount at /mnt/slack, which lists each folder
 // above it to hand the backend the rows there.
 function statAt(t: SlackTransport, path: string): Promise<FileStat> {
-  const vfs = new SlackVFSBase({ accessor: new SlackAccessor(t) })
+  const vfs = new SlackVFS({ accessor: new SlackAccessor(t) })
   return new Workspace({ '/mnt/slack/': vfs }).dispatch('stat', path) as Promise<FileStat>
 }
 

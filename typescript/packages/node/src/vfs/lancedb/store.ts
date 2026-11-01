@@ -14,11 +14,11 @@
 
 import type { Connection, Query, Table } from '@lancedb/lancedb'
 import { eqClause, predicate } from '@struktoai/mirage-core/core/lancedb/query'
-import type { LanceDriver, LanceRow, ValueTest } from '@struktoai/mirage-core/core/lancedb/types'
 import { cellText } from '@struktoai/mirage-core/core/lancedb/render'
-import type { LanceDBConfigResolved } from '@struktoai/mirage-core/vfs/lancedb/config'
+import type { LanceDriver, LanceRow, ValueTest } from '@struktoai/mirage-core/core/lancedb/types'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import type { resolveLanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
 
 // Arrow's names for a column a card spells as text, and for one it spells as
 // digits, signs or a fixed word; any other type (a list, a struct, bytes, a
@@ -63,11 +63,11 @@ async function keptTexts(
 }
 
 export class LanceDBStore implements LanceDriver {
-  private readonly config: LanceDBConfigResolved
+  private readonly config: ReturnType<typeof resolveLanceDBConfig>
   private db: Connection | null = null
   private readonly tables = new Map<string, Table>()
 
-  constructor(config: LanceDBConfigResolved) {
+  constructor(config: ReturnType<typeof resolveLanceDBConfig>) {
     this.config = config
   }
 

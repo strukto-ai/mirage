@@ -12,7 +12,7 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.core.generic.find import walk_find
-from mirage.core.generic.find_eval import FindArgs
+from mirage.core.generic.types import FindArgs
 from mirage.types import FileStat, FileType, PathSpec
 
 

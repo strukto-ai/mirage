@@ -12,19 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { runAsProgram } from '../../../../context/session_context.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import { ownRecord, type SessionState, varsFromEnv } from '../../../session/session.ts'
 import type { ShellVar } from '../../../../shell/variable.ts'
+import { ownRecord, type SessionState, varsFromEnv } from '../../../session/session.ts'
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { ENV_HELP_HINT } from './constants.ts'
 import { fail, ok } from '../shared.ts'
-import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import { ENV_HELP_HINT } from './constants.ts'
 
-function envError(message: string): Result {
+function envError(message: string): RedirectResult {
   return fail('env', `${message}\n${ENV_HELP_HINT}`, 125)
 }
 
@@ -154,7 +155,7 @@ export async function handleEnv(
   args: string[],
   session: SessionState,
   stdin: ByteSource | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const child = envChild(args, session)
   if (typeof child === 'string') return envError(child)
   const [command, base, ignoreEnv, nullSep] = child
@@ -192,6 +193,6 @@ export async function handleEnv(
 }
 
 /** The `env` arm. */
-export async function envBuiltin(call: BuiltinCall): Promise<Result> {
+export async function envBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleEnv(call.executeFn, [...call.argv.args], call.context.session, call.stdin)
 }

@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LanceRow } from './types.ts'
-import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
+import type { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { valueText } from '../render/json.ts'
+import type { LanceRow } from './types.ts'
 
 const ENC = new TextEncoder()
 const SKIP_KEYS = new Set(['_distance', '_rowid', '_score'])
@@ -40,7 +40,10 @@ export function cellText(value: unknown): string {
   return isJson(value) ? valueText(value) : String(value)
 }
 
-export function renderCard(row: LanceRow, config: LanceDBConfigResolved): Uint8Array {
+export function renderCard(
+  row: LanceRow,
+  config: ReturnType<typeof resolveLanceDBConfig>,
+): Uint8Array {
   const lines: string[] = []
   const title = config.titleColumn !== null ? row[config.titleColumn] : undefined
   if (title !== undefined && title !== null) {

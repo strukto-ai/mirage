@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { WandbClient } from './client.ts'
-import { WandbConfigSchema } from './config.ts'
-import { WandbAPIError } from './errors.ts'
 import { parseConfigWithSchema } from '../../vfs/secrets.ts'
+import { WandbClient } from './client.ts'
+import { WandbConfig } from './config.ts'
+import { WandbAPIError } from './errors.ts'
+
 function connection(cursor: string | null, more: boolean) {
   return {
     models: {
@@ -12,9 +13,7 @@ function connection(cursor: string | null, more: boolean) {
   }
 }
 function client(options: Record<string, unknown> = {}) {
-  return new WandbClient(
-    parseConfigWithSchema(WandbConfigSchema, { entities: ['lab'], ...options }),
-  )
+  return new WandbClient(parseConfigWithSchema(WandbConfig, { entities: ['lab'], ...options }))
 }
 describe('W&B client', () => {
   it.each([

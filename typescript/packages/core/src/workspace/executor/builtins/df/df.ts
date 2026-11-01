@@ -13,9 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { humanScaled, humanSize } from '../../../../commands/builtin/utils/formatting.ts'
-import { CapacityState, type CapacityResult, PathSpec } from '../../../../types.ts'
 import { dispatchStat, nearestAncestor } from '../../../../commands/builtin/utils/paths.ts'
-
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import {
   enoent,
   enotdir,
@@ -24,18 +23,18 @@ import {
   walkRefusal,
 } from '../../../../errors/fs.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import { CapacityState, PathSpec, type CapacityResult } from '../../../../types.ts'
 import { pathVisible } from '../../../../utils/hidden.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { MountEntry } from '../../../mount/mount.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { fail, ok, result, splitValueFlags } from '../shared.ts'
 import { scopePath } from '../scope.ts'
+import { fail, ok, result, splitValueFlags } from '../shared.ts'
 import { BLOCK_SUFFIX, SI_UNITS } from './constants.ts'
-import { compareCodePoints } from '../../../../utils/sort.ts'
-import type { Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 // Parse a -B/--block-size argument into [bytes, header-label]; a plain byte
 // count or a 1024-based suffix (K/M/G/T), labelled after the raw argument.
@@ -257,7 +256,7 @@ export async function handleDf(
   session: SessionState,
   dispatch: DispatchFn,
   args: (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const { flags, values, operands, bad } = splitValueFlags(args, 'hHkiaTP', 'B')
   if (bad !== null) return fail('df', `df: invalid option -- '${bad}'\n`, 2)
 

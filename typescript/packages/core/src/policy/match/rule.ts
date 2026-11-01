@@ -14,7 +14,8 @@
 
 import type { util } from 'zod'
 import { WordKind } from '../../commands/spec/types.ts'
-import { admissionMatcher, units } from '../../rs/policy.ts'
+import { units } from '../../rs/document.ts'
+import { admissionMatcher } from '../../rs/policy.ts'
 import type { PathSpec } from '../../types.ts'
 import { METADATA_OPS, SUBTREE_OPS } from '../constants.ts'
 import { sameRule } from '../decisions.ts'

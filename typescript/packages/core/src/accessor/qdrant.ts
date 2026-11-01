@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { QdrantClient } from '@qdrant/js-client-rest'
+import type { QdrantRow } from '../core/qdrant/types.ts'
+import { loadOptionalPeer } from '../utils/optional_peer.ts'
+import type { resolveQdrantConfig } from '../vfs/qdrant/config.ts'
 import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
-import { loadOptionalPeer } from '../utils/optional_peer.ts'
-import type { QdrantRow } from '../core/qdrant/types.ts'
-import type { QdrantConfigResolved } from '../vfs/qdrant/config.ts'
 
 type QdrantClientCtor = new (opts: {
   url?: string
@@ -29,12 +29,12 @@ type QdrantClientCtor = new (opts: {
 }) => QdrantClient
 
 export class QdrantAccessor extends Accessor {
-  readonly config: QdrantConfigResolved
+  readonly config: ReturnType<typeof resolveQdrantConfig>
   readonly indexesEnsured = new Set<string>()
   readonly searches = new ResponseCache<string, QdrantRow[]>()
   private opened: QdrantClient | null = null
 
-  constructor(config: QdrantConfigResolved) {
+  constructor(config: ReturnType<typeof resolveQdrantConfig>) {
     super()
     this.config = config
   }

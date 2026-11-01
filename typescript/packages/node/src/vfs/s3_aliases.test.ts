@@ -12,75 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3VFS } from './s3/s3.ts'
-import type { S3Config } from './s3/config.ts'
-import {
-  aliyunToS3Config,
-  AliyunConfigSchema,
-  resolvedAliyunEndpoint,
-  type AliyunConfig,
-} from './aliyun/config.ts'
-import { AliyunVFS } from './aliyun/aliyun.ts'
-import {
-  backblazeToS3Config,
-  BackblazeConfigSchema,
-  resolvedBackblazeEndpoint,
-  type BackblazeConfig,
-} from './backblaze/config.ts'
-import { BackblazeVFS } from './backblaze/backblaze.ts'
-import { cephToS3Config, CephConfigSchema, type CephConfig } from './ceph/config.ts'
-import { CephVFS } from './ceph/ceph.ts'
-import {
-  digitalOceanToS3Config,
-  DigitalOceanConfigSchema,
-  resolvedDigitalOceanEndpoint,
-  type DigitalOceanConfig,
-} from './digitalocean/config.ts'
-import { DigitalOceanVFS } from './digitalocean/digitalocean.ts'
-import { gcsToS3Config, type GCSConfig } from './gcs/config.ts'
-import { OCIConfigSchema, ociToS3Config, type OCIConfig } from './oci/config.ts'
-import { r2ToS3Config, type R2Config } from './r2/config.ts'
-import { SupabaseConfigSchema, supabaseToS3Config, type SupabaseConfig } from './supabase/config.ts'
-import { minioToS3Config, MinIOConfigSchema, type MinIOConfig } from './minio/config.ts'
-import { MinIOVFS } from './minio/minio.ts'
-import {
-  SeaweedFSConfigSchema,
-  seaweedfsToS3Config,
-  type SeaweedFSConfig,
-} from './seaweedfs/config.ts'
-import { SeaweedFSVFS } from './seaweedfs/seaweedfs.ts'
-import {
-  QingStorConfigSchema,
-  qingStorToS3Config,
-  resolvedQingStorEndpoint,
-  type QingStorConfig,
-} from './qingstor/config.ts'
-import { QingStorVFS } from './qingstor/qingstor.ts'
-import {
-  ScalewayConfigSchema,
-  resolvedScalewayEndpoint,
-  scalewayToS3Config,
-  type ScalewayConfig,
-} from './scaleway/config.ts'
-import { ScalewayVFS } from './scaleway/scaleway.ts'
-import {
-  TencentConfigSchema,
-  resolvedTencentEndpoint,
-  tencentToS3Config,
-  type TencentConfig,
-} from './tencent/config.ts'
-import { TencentVFS } from './tencent/tencent.ts'
-import {
-  WasabiConfigSchema,
-  resolvedWasabiEndpoint,
-  wasabiToS3Config,
-  type WasabiConfig,
-} from './wasabi/config.ts'
-import { WasabiVFS } from './wasabi/wasabi.ts'
 import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { describe, expect, it } from 'vitest'
+import { AliyunVFS } from './aliyun/aliyun.ts'
+import { AliyunConfig } from './aliyun/config.ts'
+import { BackblazeVFS } from './backblaze/backblaze.ts'
+import { BackblazeConfig } from './backblaze/config.ts'
+import { CephVFS } from './ceph/ceph.ts'
+import { CephConfig } from './ceph/config.ts'
+import { DigitalOceanConfig } from './digitalocean/config.ts'
+import { DigitalOceanVFS } from './digitalocean/digitalocean.ts'
+import { GCSConfig } from './gcs/config.ts'
+import { MinIOConfig } from './minio/config.ts'
+import { MinIOVFS } from './minio/minio.ts'
+import { OCIConfig } from './oci/config.ts'
+import { QingStorConfig } from './qingstor/config.ts'
+import { QingStorVFS } from './qingstor/qingstor.ts'
+import { R2Config } from './r2/config.ts'
+import type { S3Config } from './s3/config.ts'
+import { S3VFS } from './s3/s3.ts'
+import { ScalewayConfig } from './scaleway/config.ts'
+import { ScalewayVFS } from './scaleway/scaleway.ts'
+import { SeaweedFSConfig } from './seaweedfs/config.ts'
+import { SeaweedFSVFS } from './seaweedfs/seaweedfs.ts'
+import { SupabaseConfig } from './supabase/config.ts'
+import { TencentConfig } from './tencent/config.ts'
+import { TencentVFS } from './tencent/tencent.ts'
+import { WasabiConfig } from './wasabi/config.ts'
+import { WasabiVFS } from './wasabi/wasabi.ts'
 
 const CREDS = { bucket: 'b', accessKeyId: 'AKIA-LEAK', secretAccessKey: 'SECRET-LEAK' }
 
@@ -91,9 +52,9 @@ const REGION_CASES = [
     region: 'cn-hangzhou',
     expectedEndpoint: 'https://s3.oss-cn-hangzhou.aliyuncs.com',
     make: (region: string): AliyunConfig => ({ ...CREDS, region }),
-    resolved: resolvedAliyunEndpoint,
-    toS3: aliyunToS3Config,
-    schema: AliyunConfigSchema,
+    resolved: AliyunConfig.resolvedEndpoint,
+    toS3: AliyunConfig.toS3Config,
+    schema: AliyunConfig,
     build: (config: AliyunConfig) => new AliyunVFS(config),
   },
   {
@@ -102,9 +63,9 @@ const REGION_CASES = [
     region: 'us-west-004',
     expectedEndpoint: 'https://s3.us-west-004.backblazeb2.com',
     make: (region: string): BackblazeConfig => ({ ...CREDS, region }),
-    resolved: resolvedBackblazeEndpoint,
-    toS3: backblazeToS3Config,
-    schema: BackblazeConfigSchema,
+    resolved: BackblazeConfig.resolvedEndpoint,
+    toS3: BackblazeConfig.toS3Config,
+    schema: BackblazeConfig,
     build: (config: BackblazeConfig) => new BackblazeVFS(config),
   },
   {
@@ -113,9 +74,9 @@ const REGION_CASES = [
     region: 'nyc3',
     expectedEndpoint: 'https://nyc3.digitaloceanspaces.com',
     make: (region: string): DigitalOceanConfig => ({ ...CREDS, region }),
-    resolved: resolvedDigitalOceanEndpoint,
-    toS3: digitalOceanToS3Config,
-    schema: DigitalOceanConfigSchema,
+    resolved: DigitalOceanConfig.resolvedEndpoint,
+    toS3: DigitalOceanConfig.toS3Config,
+    schema: DigitalOceanConfig,
     build: (config: DigitalOceanConfig) => new DigitalOceanVFS(config),
   },
   {
@@ -124,9 +85,9 @@ const REGION_CASES = [
     region: 'ap-guangzhou',
     expectedEndpoint: 'https://cos.ap-guangzhou.myqcloud.com',
     make: (region: string): TencentConfig => ({ ...CREDS, region }),
-    resolved: resolvedTencentEndpoint,
-    toS3: tencentToS3Config,
-    schema: TencentConfigSchema,
+    resolved: TencentConfig.resolvedEndpoint,
+    toS3: TencentConfig.toS3Config,
+    schema: TencentConfig,
     build: (config: TencentConfig) => new TencentVFS(config),
   },
   {
@@ -135,9 +96,9 @@ const REGION_CASES = [
     region: 'fr-par',
     expectedEndpoint: 'https://s3.fr-par.scw.cloud',
     make: (region: string): ScalewayConfig => ({ ...CREDS, region }),
-    resolved: resolvedScalewayEndpoint,
-    toS3: scalewayToS3Config,
-    schema: ScalewayConfigSchema,
+    resolved: ScalewayConfig.resolvedEndpoint,
+    toS3: ScalewayConfig.toS3Config,
+    schema: ScalewayConfig,
     build: (config: ScalewayConfig) => new ScalewayVFS(config),
   },
   {
@@ -146,9 +107,9 @@ const REGION_CASES = [
     region: 'pek3a',
     expectedEndpoint: 'https://s3.pek3a.qingstor.com',
     make: (region: string): QingStorConfig => ({ ...CREDS, region }),
-    resolved: resolvedQingStorEndpoint,
-    toS3: qingStorToS3Config,
-    schema: QingStorConfigSchema,
+    resolved: QingStorConfig.resolvedEndpoint,
+    toS3: QingStorConfig.toS3Config,
+    schema: QingStorConfig,
     build: (config: QingStorConfig) => new QingStorVFS(config),
   },
 ] as const
@@ -226,24 +187,24 @@ describe('region-derived S3 aliases', () => {
 describe('wasabi endpoint defaults', () => {
   it('default region endpoint', () => {
     const config: WasabiConfig = { ...CREDS }
-    expect(resolvedWasabiEndpoint(config)).toBe('https://s3.wasabisys.com')
-    expect(wasabiToS3Config(config).region).toBe('us-east-1')
+    expect(WasabiConfig.resolvedEndpoint(config)).toBe('https://s3.wasabisys.com')
+    expect(WasabiConfig.toS3Config(config).region).toBe('us-east-1')
   })
 
   it('regional endpoint', () => {
-    expect(resolvedWasabiEndpoint({ ...CREDS, region: 'us-west-1' })).toBe(
+    expect(WasabiConfig.resolvedEndpoint({ ...CREDS, region: 'us-west-1' })).toBe(
       'https://s3.us-west-1.wasabisys.com',
     )
   })
 
   it('custom endpoint override', () => {
-    expect(resolvedWasabiEndpoint({ ...CREDS, endpoint: 'https://custom.example.com' })).toBe(
-      'https://custom.example.com',
-    )
+    expect(
+      WasabiConfig.resolvedEndpoint({ ...CREDS, endpoint: 'https://custom.example.com' }),
+    ).toBe('https://custom.example.com')
   })
 
   it('normalize renames snake_case keys', () => {
-    const norm = parseConfigWithSchema(WasabiConfigSchema, {
+    const norm = parseConfigWithSchema(WasabiConfig, {
       bucket: 'b',
       access_key_id: 'k',
       secret_access_key: 's',
@@ -273,24 +234,24 @@ const ENDPOINT_CASES = [
   {
     name: 'minio',
     kind: VFSName.MINIO,
-    toS3: minioToS3Config as (config: never) => S3Config,
-    schema: MinIOConfigSchema,
+    toS3: MinIOConfig.toS3Config as (config: never) => S3Config,
+    schema: MinIOConfig,
     make: (): MinIOConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new MinIOVFS(config),
   },
   {
     name: 'ceph',
     kind: VFSName.CEPH,
-    toS3: cephToS3Config as (config: never) => S3Config,
-    schema: CephConfigSchema,
+    toS3: CephConfig.toS3Config as (config: never) => S3Config,
+    schema: CephConfig,
     make: (): CephConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new CephVFS(config),
   },
   {
     name: 'seaweedfs',
     kind: VFSName.SEAWEEDFS,
-    toS3: seaweedfsToS3Config as (config: never) => S3Config,
-    schema: SeaweedFSConfigSchema,
+    toS3: SeaweedFSConfig.toS3Config as (config: never) => S3Config,
+    schema: SeaweedFSConfig,
     make: (): SeaweedFSConfig => ({ ...CREDS, endpoint: 'http://localhost:9000' }),
     build: (config: never) => new SeaweedFSVFS(config),
   },
@@ -347,72 +308,72 @@ const PREFIX_CASES = [
   {
     name: 'aliyun',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as AliyunConfig,
-    toS3: aliyunToS3Config as (config: never) => S3Config,
+    toS3: AliyunConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'backblaze',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as BackblazeConfig,
-    toS3: backblazeToS3Config as (config: never) => S3Config,
+    toS3: BackblazeConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'ceph',
     config: { ...CREDS, endpoint: 'http://localhost:9000' } as CephConfig,
-    toS3: cephToS3Config as (config: never) => S3Config,
+    toS3: CephConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'digitalocean',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as DigitalOceanConfig,
-    toS3: digitalOceanToS3Config as (config: never) => S3Config,
+    toS3: DigitalOceanConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'gcs',
     config: { ...CREDS, forcePathStyle: true } as GCSConfig,
-    toS3: gcsToS3Config as (config: never) => S3Config,
+    toS3: GCSConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'minio',
     config: { ...CREDS, endpoint: 'http://localhost:9000' } as MinIOConfig,
-    toS3: minioToS3Config as (config: never) => S3Config,
+    toS3: MinIOConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'oci',
     config: { ...CREDS, namespace: 'ns', region: 'us-east-1' } as OCIConfig,
-    toS3: ociToS3Config as (config: never) => S3Config,
+    toS3: OCIConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'qingstor',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as QingStorConfig,
-    toS3: qingStorToS3Config as (config: never) => S3Config,
+    toS3: QingStorConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'r2',
     config: { ...CREDS, accountId: 'account', forcePathStyle: true } as R2Config,
-    toS3: r2ToS3Config as (config: never) => S3Config,
+    toS3: R2Config.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'scaleway',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as ScalewayConfig,
-    toS3: scalewayToS3Config as (config: never) => S3Config,
+    toS3: ScalewayConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'seaweedfs',
     config: { ...CREDS, endpoint: 'http://localhost:9000' } as SeaweedFSConfig,
-    toS3: seaweedfsToS3Config as (config: never) => S3Config,
+    toS3: SeaweedFSConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'supabase',
     config: { ...CREDS, projectRef: 'project', region: 'us-east-1' } as SupabaseConfig,
-    toS3: supabaseToS3Config as (config: never) => S3Config,
+    toS3: SupabaseConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'tencent',
     config: { ...CREDS, region: 'us-east-1', forcePathStyle: true } as TencentConfig,
-    toS3: tencentToS3Config as (config: never) => S3Config,
+    toS3: TencentConfig.toS3Config as (config: never) => S3Config,
   },
   {
     name: 'wasabi',
     config: { ...CREDS, forcePathStyle: true } as WasabiConfig,
-    toS3: wasabiToS3Config as (config: never) => S3Config,
+    toS3: WasabiConfig.toS3Config as (config: never) => S3Config,
   },
 ] as const
 
@@ -443,44 +404,44 @@ describe('S3 alias subfolder mounts', () => {
 // silently ignored here.
 describe('oci and supabase path style', () => {
   it('oci: defaults on, honors path_style: false', () => {
-    const on = parseConfigWithSchema(OCIConfigSchema, {
+    const on = parseConfigWithSchema(OCIConfig, {
       bucket: 'b',
       namespace: 'ns',
       region: 'us-ashburn-1',
     })
-    expect(ociToS3Config(on).forcePathStyle).toBe(true)
-    const off = parseConfigWithSchema(OCIConfigSchema, {
+    expect(OCIConfig.toS3Config(on).forcePathStyle).toBe(true)
+    const off = parseConfigWithSchema(OCIConfig, {
       bucket: 'b',
       namespace: 'ns',
       region: 'us-ashburn-1',
       path_style: false,
     })
     expect(off.forcePathStyle).toBe(false)
-    expect(ociToS3Config(off).forcePathStyle).toBe(false)
+    expect(OCIConfig.toS3Config(off).forcePathStyle).toBe(false)
   })
 
   it('supabase: defaults on, honors path_style: false', () => {
-    const on = parseConfigWithSchema(SupabaseConfigSchema, {
+    const on = parseConfigWithSchema(SupabaseConfig, {
       bucket: 'b',
       project_ref: 'p',
       region: 'us-east-1',
     })
-    expect(supabaseToS3Config(on).forcePathStyle).toBe(true)
-    const off = parseConfigWithSchema(SupabaseConfigSchema, {
+    expect(SupabaseConfig.toS3Config(on).forcePathStyle).toBe(true)
+    const off = parseConfigWithSchema(SupabaseConfig, {
       bucket: 'b',
       project_ref: 'p',
       region: 'us-east-1',
       path_style: false,
     })
-    expect(supabaseToS3Config(off).forcePathStyle).toBe(false)
+    expect(SupabaseConfig.toS3Config(off).forcePathStyle).toBe(false)
   })
 
   it('refuses a wrong-typed field for every alias', () => {
     expect(() =>
-      parseConfigWithSchema(OCIConfigSchema, { bucket: 'b', namespace: 'ns', region: 1 }),
+      parseConfigWithSchema(OCIConfig, { bucket: 'b', namespace: 'ns', region: 1 }),
     ).toThrow(/region/)
     expect(() =>
-      parseConfigWithSchema(AliyunConfigSchema, {
+      parseConfigWithSchema(AliyunConfig, {
         bucket: 'b',
         region: 'cn-hangzhou',
         timeout: 'abc',

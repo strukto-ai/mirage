@@ -15,21 +15,6 @@
 import type { Measured } from '../../cache/types.ts'
 
 /** What a refusal carries besides its keys. Mirrors Python's keyword arguments. */
-export interface LostOptions {
-  /** A move's copy landed before its source delete lost; recovered records compensation. */
-  readonly landed?: boolean
-  /** The object no longer exists. */
-  readonly gone?: boolean
-  /** The version each lost key was measured on, where the op knew it; ABSENT, for one found gone, keeps what the session last saw. */
-  readonly versions?: ReadonlyMap<string, Measured>
-  /** A later failure that stopped a walk after these keys were lost; the caller keeps their versions and throws it. */
-  readonly error?: unknown
-  /** Whether the copied destination was reverted; null for other operations. */
-  readonly recovered?: boolean | null
-  /** A secondary cleanup failure, without replacing the source failure. */
-  readonly recoveryError?: unknown
-  readonly recoveryReason?: string | null
-}
 
 /**
  * A conditional request the store refused: the object changed since the
@@ -47,7 +32,21 @@ export class ConditionLostError extends Error {
   /** @param keys the raw keys whose condition did not hold, in order met */
   constructor(
     readonly keys: readonly string[],
-    options: LostOptions = {},
+    options: {
+      /** A move's copy landed before its source delete lost; recovered records compensation. */
+      readonly landed?: boolean
+      /** The object no longer exists. */
+      readonly gone?: boolean
+      /** The version each lost key was measured on, where the op knew it; ABSENT, for one found gone, keeps what the session last saw. */
+      readonly versions?: ReadonlyMap<string, Measured>
+      /** A later failure that stopped a walk after these keys were lost; the caller keeps their versions and throws it. */
+      readonly error?: unknown
+      /** Whether the copied destination was reverted; null for other operations. */
+      readonly recovered?: boolean | null
+      /** A secondary cleanup failure, without replacing the source failure. */
+      readonly recoveryError?: unknown
+      readonly recoveryReason?: string | null
+    } = {},
   ) {
     super(`condition lost on '${keys[0] ?? ''}'`)
     this.name = 'ConditionLostError'

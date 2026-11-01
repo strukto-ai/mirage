@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '../types.ts'
-import { underPath } from '../utils/key_prefix.ts'
 import type { Clock } from '../utils/clock.ts'
+import { underPath } from '../utils/key_prefix.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
 // by direction: the file cache stores bytes from either `IOResult.reads`
@@ -136,33 +136,6 @@ export class RecordIndex {
   }
 }
 
-export interface OpRecordInit {
-  executionId?: string | null
-  op: string
-  path: string
-  source: string
-  bytes: number
-  timestamp: number
-  durationMs: number
-  /**
-   * On a read, on an object store's write, create and truncate, and on a
-   * Box, Dropbox or Google Drive write, the content-derived identifier the
-   * backend returned (ETag, md5, Box sha1).
-   * Captured as the op completes, so it describes the bytes that op
-   * moved. Null for metadata ops and backends that return no token.
-   */
-  fingerprint?: string | null
-  /**
-   * Stable revision handle the backend returned (S3 VersionId, Drive
-   * revisionId, Git SHA). Strictly stronger than fingerprint — populated
-   * only by backends that can guarantee revision durability. Used by
-   * replay to pin reads to the exact recorded version.
-   */
-  revision?: string | null
-  /** In-process ownership for snapshot capture; not a persisted backend revision. */
-  mountId?: string | null
-}
-
 export class OpRecord {
   /** In-process transfer lifecycle; excluded from serialized observations. */
   complete = true
@@ -177,7 +150,10 @@ export class OpRecord {
   revision: string | null
   readonly mountId: string | null
 
-  constructor(init: OpRecordInit) {
+  constructor(
+    init: Pick<OpRecord, 'op' | 'path' | 'source' | 'bytes' | 'timestamp' | 'durationMs'> &
+      Partial<Pick<OpRecord, 'executionId' | 'fingerprint' | 'revision' | 'mountId'>>,
+  ) {
     this.executionId = init.executionId ?? null
     this.op = init.op
     this.path = init.path

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { asyncContextIsolatesTasks } from '@struktoai/mirage-core/utils/async_context'
 import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
@@ -337,7 +337,7 @@ const CHECKS: [string, Check][] = [
     async (ws) => {
       const loose = ws.createSession('loose')
       const tight = ws.createSession('tight', {
-        profile: parseSessionProfile({
+        profile: SessionProfile({
           mounts: { '/data': 'r' },
           paths: { hide: ['/data/private'] },
         }),
@@ -621,10 +621,10 @@ const CHECKS: [string, Check][] = [
       await ws.vfs.write('/data/ok.txt', 'ok\n')
       await shell(ws, 'ln -s /data/secret.txt /data/lnk')
       const veil = ws.createSession('veil', {
-        profile: parseSessionProfile({ paths: { hide: ['/data/secret.txt'] } }),
+        profile: SessionProfile({ paths: { hide: ['/data/secret.txt'] } }),
       })
       const seal = ws.createSession('seal', {
-        profile: parseSessionProfile({
+        profile: SessionProfile({
           commands: { deny: [{ reason: 'sealed', paths: ['/data/secret.txt'] }] },
         }),
       })

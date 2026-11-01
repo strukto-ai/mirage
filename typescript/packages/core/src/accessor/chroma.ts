@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ChromaClient, Collection } from 'chromadb'
-import { Accessor } from './base.ts'
 import { loadOptionalPeer } from '../utils/optional_peer.ts'
-import type { ChromaConfigResolved } from '../vfs/chroma/config.ts'
+import type { resolveChromaConfig } from '../vfs/chroma/config.ts'
+import { Accessor } from './base.ts'
 
 export class ChromaAccessor extends Accessor {
-  readonly config: ChromaConfigResolved
+  readonly config: ReturnType<typeof resolveChromaConfig>
   private client: ChromaClient | null = null
   private collection: Collection | null = null
 
-  constructor(config: ChromaConfigResolved) {
+  constructor(config: ReturnType<typeof resolveChromaConfig>) {
     super()
     this.config = config
   }

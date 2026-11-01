@@ -1,22 +1,11 @@
 import { z } from 'zod'
-import { rstripSlash } from '../../utils/slash.ts'
-import { type ConfigOf, type RedactedConfig, secretStr } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import type { ConfigOf } from '../secrets.ts'
+import { secretStr } from '../secrets.ts'
 
-export interface Mem0ConfigResolved {
-  timeout: number
-  apiKey: string
-  host: string
-  userId: string | null
-  agentId: string | null
-  runId: string | null
-  defaultPageSize: number
-  defaultSearchLimit: number
-  scopeFilter: Record<string, string>
-}
-
-export const Mem0ConfigSchema = z.object({
+export const Mem0Config = z.object({
   ...timeoutShape,
   apiKey: secretStr().describe('Mem0 Platform API key.'),
   host: z
@@ -45,9 +34,7 @@ export const Mem0ConfigSchema = z.object({
   }),
 })
 
-export type Mem0Config = ConfigOf<typeof Mem0ConfigSchema>
-
-export type Mem0ConfigRedacted = RedactedConfig<Mem0Config, 'apiKey'>
+export type Mem0Config = ConfigOf<typeof Mem0Config>
 
 function positive(value: number | undefined, fallback: number, name: string): number {
   const resolved = value ?? fallback
@@ -55,7 +42,7 @@ function positive(value: number | undefined, fallback: number, name: string): nu
   return resolved
 }
 
-export function resolveMem0Config(config: Mem0Config): Mem0ConfigResolved {
+export function resolveMem0Config(config: Mem0Config) {
   const scopes = [
     ['user_id', config.userId] as const,
     ['agent_id', config.agentId] as const,

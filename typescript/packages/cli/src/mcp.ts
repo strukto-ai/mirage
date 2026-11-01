@@ -14,17 +14,11 @@
 
 import { resolveWorkspaceConfig } from '@struktoai/mirage-server/workspace_config'
 import type { Command } from 'commander'
-import { makeClient, DaemonClient } from './client.ts'
+import { DaemonClient, makeClient } from './client.ts'
 import { LoginError } from './credentials.ts'
 import { fail, handleResponse } from './output.ts'
 
 export const MCP_ENV_NAMES = ['MIRAGE_MCP_CONFIG', 'MIRAGE_CONFIG']
-
-interface McpCommandOptions {
-  workspace?: string
-  session?: string
-  allCalls?: boolean
-}
 
 /**
  * Whether a daemon workspace holds a session. A daemon refusal throws
@@ -60,7 +54,14 @@ async function hasSession(
  * `mirage shell`. `--all-calls` also serves each VFS call as a
  * `vfs_<call>` tool, and `explain` on `shell` and on each of them.
  */
-async function runMcp(config: string | undefined, options: McpCommandOptions): Promise<void> {
+async function runMcp(
+  config: string | undefined,
+  options: {
+    workspace?: string
+    session?: string
+    allCalls?: boolean
+  },
+): Promise<void> {
   if (options.workspace !== undefined && config !== undefined) {
     fail('pass a config or --workspace, not both', 2)
   }

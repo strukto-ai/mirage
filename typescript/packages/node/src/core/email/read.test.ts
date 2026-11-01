@@ -13,22 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { expect, it, vi } from 'vitest'
+import type { EmailAccessor } from '../../accessor/email.ts'
 import type * as ClientModule from './client.ts'
+import type { fetchMessage } from './client.ts'
+import * as client from './client.ts'
+import { readMany } from './read.ts'
+import { messageJsonBytes } from './render.ts'
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
   return { ...actual, fetchHeaders: vi.fn() }
 })
 
-import type { EmailAccessor } from '../../accessor/email.ts'
-import * as client from './client.ts'
-import type { FetchedMessage } from './client.ts'
-import { readMany } from './read.ts'
-import { messageJsonBytes } from './render.ts'
-
 const DAY = '/INBOX/2024-01-15'
 
-function message(uid: string): FetchedMessage {
+function message(uid: string): Awaited<ReturnType<typeof fetchMessage>> {
   return {
     from: { name: 'Alice', email: 'alice@example.com' },
     reply_to: [],

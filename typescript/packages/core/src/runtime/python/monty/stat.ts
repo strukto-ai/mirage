@@ -27,18 +27,6 @@ const FILE_LINKS = 1
  * The fields of the guest's `os.stat_result`, spelled the way CPython
  * spells them because the guest reads them by those names.
  */
-export interface GuestStat {
-  st_mode: number
-  st_ino: number
-  st_dev: number
-  st_nlink: number
-  st_uid: number
-  st_gid: number
-  st_size: number
-  st_atime: number
-  st_mtime: number
-  st_ctime: number
-}
 
 /**
  * The row's type bits, the one rule every answer derived from a mode
@@ -83,7 +71,7 @@ export function isDirRow(st: VFSStat): boolean {
  * Args:
  *   st: the mount's row for the path.
  */
-export function statFields(st: VFSStat): GuestStat {
+export function statFields(st: VFSStat) {
   const type = fileType(st)
   // Seconds, as CPython reports them; an unknown stamp is 0 rather
   // than the host clock.

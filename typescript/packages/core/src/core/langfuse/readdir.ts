@@ -14,6 +14,7 @@
 
 import type { LangfuseAccessor } from '../../accessor/langfuse.ts'
 import { DirListing, FileStat, FileType } from '../../types.ts'
+import { stringOf as pickString } from '../../utils/records.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonlBytes } from '../render/json.ts'
@@ -25,15 +26,10 @@ import {
   fetchSessions,
   fetchTraces,
 } from './client.ts'
-import { TOP_LEVEL_DIRS, detectScope } from './scope.ts'
+import { detectScope, TOP_LEVEL_DIRS } from './scope.ts'
 
 // Mirrors LangfuseConfig.default_trace_limit in python.
 const DEFAULT_TRACE_LIMIT = 100
-
-function pickString(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
 
 function promptVersions(record: Record<string, unknown>): string[] {
   const value = record.versions

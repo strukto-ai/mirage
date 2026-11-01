@@ -12,32 +12,31 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { CacheConfig, RedisCacheConfig } from '../../cache/file/config.ts'
+import type { IndexConfig, RedisIndexConfig } from '../../cache/index/config.ts'
+import type { CLI } from '../../commands/cli/types.ts'
 import type { IOConfig } from '../../io/config.ts'
 import type { NetworkSetting } from '../../io/network.ts'
-import type { Runtime } from '../../runtime/base.ts'
-import type { EvaluationContext } from '../evaluation.ts'
-import type { ExecutionScope } from '../execution.ts'
-import type { HandOff } from '../../policy/types.ts'
-import type { CallStack } from '../../shell/call_stack.ts'
-import type { CacheConfig, RedisCacheConfig } from '../../cache/file/config.ts'
-import type { CLI } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
-import type { JobConsole, Terminal } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
-import type { IndexConfig, RedisIndexConfig } from '../../cache/index/config.ts'
-import type { Mount } from '../mount/spec.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
-import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
-import type { Clock } from '../../utils/clock.ts'
-import type { IdSource } from '../../utils/ids.ts'
-import type { Limit, DriftPolicy, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
+import type { SessionProfile } from '../../policy/profile.ts'
+import type { HandOff } from '../../policy/types.ts'
+import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { RouteRule } from '../../runtime/routing/index.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
-import type { RuntimeEntry } from '../../runtime/base.ts'
+import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
+import type { CallStack } from '../../shell/call_stack.ts'
+import type { JobConsole, Terminal } from '../../shell/console/index.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
+import type { DriftPolicy, Limit, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
+import type { Clock } from '../../utils/clock.ts'
+import type { IdSource } from '../../utils/ids.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
+import type { EvaluationContext } from '../evaluation.ts'
+import type { ExecutionScope } from '../execution.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import type { SessionProfile } from '../../policy/profile.ts'
+import type { Mount } from '../mount/spec.ts'
 import type { SessionState } from '../session/session.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 
@@ -152,7 +151,7 @@ export interface WorkspaceOptions {
    * The profiles (`profiles:` in YAML). A profile is the whole permission
    * document a session runs under, so there is no workspace-wide block
    * and no mount-owned block above it. Each is a parsed profile, not the
-   * document as written: run the document through `parseSessionProfile`
+   * document as written: run the document through `SessionProfile`
    * first (the config loader already does). Python validates here
    * instead, because pydantic can tell a built model from a document and
    * a plain interface cannot; parsing twice is not a no-op, since a

@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
-import type { PathSpec, FileStat } from '../../../../types.ts'
-import type { FlagValue } from '../../../spec/types.ts'
-import type { AggregateFn } from '../../../config.ts'
 import type { FindExpr } from '../../../../rs/find.ts'
+import type { FileStat, PathSpec } from '../../../../types.ts'
+import type { AggregateFn } from '../../../config.ts'
+import type { FlagValue } from '../../../spec/types.ts'
 
 // How a cross-mount command combines per-mount work.
 //
@@ -89,20 +89,18 @@ export type { DispatchFn } from '../../../../runtime/types.ts'
 
 export type CrossResult = [ByteSource | null, IOResult]
 
-interface RunSingleOpts {
-  signal?: AbortSignal
-  stdin?: ByteSource | null
-  resolveHint?: PathSpec | null
-  // find's expression, parsed once for the line.
-  find?: FindExpr
-}
-
 export type RunSingle = (
   cmdName: string,
   paths: PathSpec[],
   texts: string[],
   flagKwargs: Record<string, FlagValue>,
-  opts?: RunSingleOpts,
+  opts?: {
+    signal?: AbortSignal
+    stdin?: ByteSource | null
+    resolveHint?: PathSpec | null
+    // find's expression, parsed once for the line.
+    find?: FindExpr
+  },
 ) => Promise<CrossResult>
 
 export interface OperandRun {

@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
-import { Workspace } from '../../workspace.ts'
-import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { DatabricksVolumeConfigSchema } from './config.ts'
-import { DatabricksVolumeVFS } from './databricks_volume.ts'
-import { buildVfs } from '../registry.ts'
 import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
+import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
+import { describe, expect, it, vi } from 'vitest'
+import { Workspace } from '../../workspace.ts'
+import { buildVfs } from '../registry.ts'
+import { DatabricksVolumeConfig } from './config.ts'
+import { DatabricksVolumeVFS } from './databricks_volume.ts'
 
 const BASE_CONFIG = {
   catalog: 'main',
@@ -32,7 +32,7 @@ const BASE_CONFIG = {
 
 describe('config normalization', () => {
   it('accepts snake_case YAML keys and applies defaults', () => {
-    const config = parseConfigWithSchema(DatabricksVolumeConfigSchema, {
+    const config = parseConfigWithSchema(DatabricksVolumeConfig, {
       ...BASE_CONFIG,
       root_path: '/root/',
     })
@@ -45,14 +45,12 @@ describe('config normalization', () => {
     'https://example.com\\extra',
     'https://example.com\n',
   ])('rejects malformed origin %j', (host) => {
-    expect(() =>
-      parseConfigWithSchema(DatabricksVolumeConfigSchema, { ...BASE_CONFIG, host }),
-    ).toThrow()
+    expect(() => parseConfigWithSchema(DatabricksVolumeConfig, { ...BASE_CONFIG, host })).toThrow()
   })
 
   it('normalizes the workspace origin', () => {
     expect(
-      parseConfigWithSchema(DatabricksVolumeConfigSchema, {
+      parseConfigWithSchema(DatabricksVolumeConfig, {
         ...BASE_CONFIG,
         host: 'HTTPS://EXAMPLE.COM:443/',
       }).host,
@@ -61,13 +59,13 @@ describe('config normalization', () => {
 
   it('rejects invalid volume parts', () => {
     expect(() =>
-      parseConfigWithSchema(DatabricksVolumeConfigSchema, { ...BASE_CONFIG, catalog: 'a/b' }),
+      parseConfigWithSchema(DatabricksVolumeConfig, { ...BASE_CONFIG, catalog: 'a/b' }),
     ).toThrow()
   })
 
   it('redacts the token', () => {
-    const config = parseConfigWithSchema(DatabricksVolumeConfigSchema, BASE_CONFIG)
-    const redacted = redactConfigWithSchema(DatabricksVolumeConfigSchema, config)
+    const config = parseConfigWithSchema(DatabricksVolumeConfig, BASE_CONFIG)
+    const redacted = redactConfigWithSchema(DatabricksVolumeConfig, config)
     expect(redacted.token).toBe('<REDACTED>')
     expect(redacted.catalog).toBe('main')
   })
@@ -76,7 +74,7 @@ describe('config normalization', () => {
 describe('DatabricksVolumeVFS', () => {
   it('creates with explicit credentials and exposes commands and writes', async () => {
     const vfs = await DatabricksVolumeVFS.create(
-      parseConfigWithSchema(DatabricksVolumeConfigSchema, BASE_CONFIG),
+      parseConfigWithSchema(DatabricksVolumeConfig, BASE_CONFIG),
     )
     expect(vfs.name).toBe(VFSName.DATABRICKS_VOLUME)
     expect(vfs.cachesReads).toBe(true)
@@ -95,7 +93,7 @@ describe('DatabricksVolumeVFS', () => {
 const location = async (root: string, token: string): Promise<string | null> =>
   (
     await DatabricksVolumeVFS.create(
-      parseConfigWithSchema(DatabricksVolumeConfigSchema, {
+      parseConfigWithSchema(DatabricksVolumeConfig, {
         ...BASE_CONFIG,
         root_path: root,
         token,
@@ -115,7 +113,7 @@ describe('DatabricksVolumeVFS rotating credential state', () => {
   it('requires an override after redacting a callback and restores with a fresh provider', async () => {
     const token = vi.fn().mockReturnValue('secret-token')
     const vfs = await DatabricksVolumeVFS.create(
-      parseConfigWithSchema(DatabricksVolumeConfigSchema, { ...BASE_CONFIG, token }),
+      parseConfigWithSchema(DatabricksVolumeConfig, { ...BASE_CONFIG, token }),
     )
     const workspace = new Workspace({ '/volume': vfs })
     try {
@@ -124,7 +122,7 @@ describe('DatabricksVolumeVFS rotating credential state', () => {
       expect(token).not.toHaveBeenCalled()
       await expect(Workspace.fromState(state)).rejects.toThrow('needs_override')
       const replacement = await DatabricksVolumeVFS.create(
-        parseConfigWithSchema(DatabricksVolumeConfigSchema, {
+        parseConfigWithSchema(DatabricksVolumeConfig, {
           ...BASE_CONFIG,
           token: () => Promise.resolve('fresh-token'),
         }),

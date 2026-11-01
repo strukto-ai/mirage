@@ -12,27 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type EvaluationContext, childContext } from '../../../evaluation.ts'
-
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { runAsProgram } from '../../../../context/session_context.ts'
-import { resolvePath } from '../../../../utils/path.ts'
-import { BinViewVFS } from '../../../../vfs/bin/bin.ts'
-import type { MountRegistry } from '../../../mount/registry.ts'
-import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import { handleCommandBuiltin } from '../command/command.ts'
-import type { ByteSource } from '../../../../io/types.ts'
-import type { JobConsole } from '../../../../shell/console/index.ts'
-import type { CallStack } from '../../../../shell/call_stack.ts'
-import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
-import { ExecutionNode } from '../../../types.ts'
+import type { ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
+import type { CallStack } from '../../../../shell/call_stack.ts'
+import type { JobConsole } from '../../../../shell/console/index.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
+import type { JobTable } from '../../../../shell/job_table/index.ts'
+import { resolvePath } from '../../../../utils/path.ts'
+import { stripSlash } from '../../../../utils/slash.ts'
+import { BinViewVFS } from '../../../../vfs/bin/bin.ts'
+import { type EvaluationContext, childContext } from '../../../evaluation.ts'
+import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import type { MountRegistry } from '../../../mount/registry.ts'
+import { ExecutionNode } from '../../../types.ts'
+import { handleCommandBuiltin } from '../command/command.ts'
+import type { ExecuteStringFn } from '../types.ts'
 import { handleBash } from './bash.ts'
 import { isBinary, readScriptBytes, scriptError } from './script.ts'
-import { decodeText } from '../../../../shell/bytes.ts'
-import type { ExecuteStringFn, Result } from '../types.ts'
-import { stripSlash } from '../../../../utils/slash.ts'
-import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
 
 /** The interpreter words a script's first line names, env resolved. */
 /**
@@ -117,7 +117,7 @@ export async function handleExecPath(
   jobTable?: JobTable,
   // The caller's frames, whose nesting a shell script counts on from.
   callStack: CallStack | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   let session = context.session
   let data: Uint8Array
   try {

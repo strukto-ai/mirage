@@ -12,21 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { LanceDBVFSBase } from '@struktoai/mirage-core/vfs/lancedb/lancedb'
 import { LanceDBAccessor } from '@struktoai/mirage-core/accessor/lancedb'
-
+import { VFSName } from '@struktoai/mirage-core/types'
+import type { LanceDBConfig } from '@struktoai/mirage-core/vfs/lancedb/config'
 import {
   redactLanceDBConfig,
   resolveLanceDBConfig,
 } from '@struktoai/mirage-core/vfs/lancedb/config'
-import type {
-  LanceDBConfig,
-  LanceDBConfigRedacted,
-  LanceDBConfigResolved,
-} from '@struktoai/mirage-core/vfs/lancedb/config'
-import { VFS_MD } from '@struktoai/mirage-core/vfs/lancedb/lancedb'
-import { VFSName } from '@struktoai/mirage-core/types'
-
+import { LanceDBVFS as CoreLanceDBVFS, VFS_MD } from '@struktoai/mirage-core/vfs/lancedb/lancedb'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 import { LanceDBStore } from './store.ts'
 
 const REMOTE_SCHEMES = ['s3://', 'gs://', 'az://', 'hf://', 'db://']
@@ -35,13 +29,7 @@ export interface LanceDBVFSOptions {
   config: LanceDBConfig
 }
 
-export interface LanceDBVFSState {
-  type: string
-  config: LanceDBConfigRedacted
-  needs_override: true
-}
-
-export class LanceDBVFS extends LanceDBVFSBase {
+export class LanceDBVFS extends CoreLanceDBVFS {
   override readonly name: string = VFSName.LANCEDB
   override readonly cachesReads: boolean
   // readdir seeds exact card sizes from the widened select and stat falls
@@ -49,7 +37,7 @@ export class LanceDBVFS extends LanceDBVFSBase {
   override readonly sizesAlwaysKnown: boolean = true
   override readonly indexTtl: number = 0
   override vfsMd: string = VFS_MD
-  readonly config: LanceDBConfigResolved
+  readonly config: ReturnType<typeof resolveLanceDBConfig>
   readonly store: LanceDBStore
   override readonly accessor: LanceDBAccessor
   // Only cards are searched: a blob file is the blob column's bytes.
@@ -66,7 +54,9 @@ export class LanceDBVFS extends LanceDBVFSBase {
     this.searchable = [[...Array<string>(depth).fill('*'), '*.md'].join('/')]
   }
 
-  override getState(): LanceDBVFSState {
+  override getState(): ConfigState<ReturnType<typeof redactLanceDBConfig>> & {
+    needs_override: true
+  } {
     return {
       type: this.name,
       config: redactLanceDBConfig(this.config),

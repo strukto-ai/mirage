@@ -1,8 +1,9 @@
 import { z } from 'zod'
-import { secretStr, type ConfigOf, type RedactedConfig } from '../../vfs/secrets.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
+import { secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-export const WandbConfigSchema = z
+export const WandbConfig = z
   .object({
     ...timeoutShape,
     entities: z
@@ -43,5 +44,4 @@ export const WandbConfigSchema = z
       ),
   })
   .strict()
-export type WandbConfig = ConfigOf<typeof WandbConfigSchema>
-export type WandbConfigRedacted = RedactedConfig<WandbConfig, 'apiKey'>
+export type WandbConfig = ConfigOf<typeof WandbConfig>

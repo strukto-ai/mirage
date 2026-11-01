@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { HfRepoConfig, HfRepoConfigRedacted } from '../hf_buckets/config.ts'
+import type { HfRepoConfig } from '../hf_buckets/config.ts'
 
 export type HfDatasetsConfig = HfRepoConfig
-export type HfDatasetsConfigRedacted = HfRepoConfigRedacted

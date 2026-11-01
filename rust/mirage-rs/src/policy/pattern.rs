@@ -1,6 +1,6 @@
 use super::{Text, Whitespace};
 
-fn whitespace(unit: u32, dialect: Whitespace) -> bool {
+pub(crate) fn whitespace(unit: u32, dialect: Whitespace) -> bool {
     matches!(unit, 0x9..=0xd | 0x20 | 0xa0 | 0x1680 | 0x2000..=0x200a | 0x2028 | 0x2029 | 0x202f | 0x205f | 0x3000)
         || match dialect {
             Whitespace::Python => matches!(unit, 0x1c..=0x1f | 0x85),

@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git from 'isomorphic-git'
-
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
+import { systemNow } from '../../../../utils/clock.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { isBare } from './discover.ts'
@@ -25,7 +26,6 @@ import { configLines, configValues } from './fs.ts'
 import { resolvedRefs } from './history.ts'
 import { globalSources } from './inspect.ts'
 import { writeFile } from './io.ts'
-
 import { append, entry, IDENTITY, ZERO } from './reflog.ts'
 import {
   BRANCH_PREFIX,
@@ -43,7 +43,6 @@ import {
 import { objectType, openRepo, repoArgs, storePack, type Repo } from './repo.ts'
 import { refsNamed } from './revparse.ts'
 import { opened } from './session.ts'
-import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
   displayUrl,
   extraHeaders,
@@ -53,7 +52,6 @@ import {
 } from './transport.ts'
 import type { ReadOnlyRefusal, Refspec } from './types.ts'
 import { checkSwitches } from './util.ts'
-import { systemNow } from '../../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 const FETCH_HEAD = 'FETCH_HEAD'
@@ -78,52 +76,28 @@ const NO_REMOTE =
   'remote name from which new revisions should be fetched.'
 
 /** One remote ref a fetch takes, and where it lands. */
-export interface Wanted {
-  /** The remote ref name, `HEAD` for a bare URL. */
-  readonly remote: string
-  /** The object id the remote holds there. */
-  readonly oid: string
-  /** The local ref to update, null when it only goes to FETCH_HEAD. */
-  readonly local: string | null
-  /** Whether a non-fast-forward is allowed. */
-  readonly force: boolean
-  /** Whether FETCH_HEAD marks it for merging. */
-  readonly merge: boolean
-  /** Whether it is written to FETCH_HEAD at all. */
-  readonly listed: boolean
-}
 
 /** One line of git's fetch summary. */
-export interface Row {
-  /** `*` new, ` ` fast-forward, `+` forced, `-` pruned, `!` rejected, `=` unchanged. */
-  readonly code: string
-  readonly summary: string
-  readonly remote: string
-  readonly local: string
-  readonly error: string
-  /** Whether the row may widen the ref column: git widens it for a changed local ref only. */
-  readonly counted: boolean
-}
 
-function wanted(
+export function wanted(
   remote: string,
   oid: string,
   local: string | null,
   force = false,
   merge = false,
   listed = true,
-): Wanted {
+) {
   return { remote, oid, local, force, merge, listed }
 }
 
-function row(
+export function row(
   code: string,
   summary: string,
   remote: string,
   local: string,
   error = '',
   counted = false,
-): Row {
+) {
   return { code, summary, remote, local, error, counted }
 }
 
@@ -141,7 +115,11 @@ export function prettify(ref: string): string {
  * wide and the ref column at least ten, widened by each changed ref whose line
  * still fits 80 columns.
  */
-export function summaryLines(url: string, rows: readonly Row[], abbrev: number): string {
+export function summaryLines(
+  url: string,
+  rows: readonly ReturnType<typeof row>[],
+  abbrev: number,
+): string {
   if (!rows.length) return ''
   const width = 2 * abbrev + 3
   let refcol = REFCOL_MIN
@@ -205,8 +183,10 @@ async function receive(repo: Repo, transport: Transport, wants: readonly string[
  * (pinned against git 2.50.1). Returns the refs kept and the errors git prints
  * for the others.
  */
-export function ignoreFunny(wants: readonly Wanted[]): [Wanted[], string] {
-  const kept: Wanted[] = []
+export function ignoreFunny(
+  wants: readonly ReturnType<typeof wanted>[],
+): [ReturnType<typeof wanted>[], string] {
+  const kept: ReturnType<typeof wanted>[] = []
   let notes = ''
   for (const want of wants) {
     if (want.local === null || (want.local.startsWith('refs/') && validRefName(want.local)))
@@ -226,9 +206,9 @@ async function followedTags(
   repo: Repo,
   adv: Advertisement,
   taken: ReadonlySet<string>,
-): Promise<Wanted[]> {
+): Promise<ReturnType<typeof wanted>[]> {
   const local = await resolvedRefs(repo)
-  const follow: Wanted[] = []
+  const follow: ReturnType<typeof wanted>[] = []
   for (const [name, oid] of adv.refs) {
     if (!name.startsWith(TAG_PREFIX) || taken.has(name) || local.has(name) || !validRefName(name))
       continue
@@ -246,9 +226,9 @@ export async function fetchObjects(
   repo: Repo,
   transport: Transport,
   adv: Advertisement,
-  wants: readonly Wanted[],
+  wants: readonly ReturnType<typeof wanted>[],
   follow: boolean,
-): Promise<[Repo, Wanted[]]> {
+): Promise<[Repo, ReturnType<typeof wanted>[]]> {
   let current = await receive(
     repo,
     transport,
@@ -268,9 +248,9 @@ export async function fetchObjects(
 /** The summary row for one ref update, and its reflog reason (null: not written). */
 async function classify(
   repo: Repo,
-  want: Wanted,
+  want: ReturnType<typeof wanted>,
   old: string | undefined,
-): Promise<[Row, string | null]> {
+): Promise<[ReturnType<typeof row>, string | null]> {
   const local = want.local ?? ''
   const remote = prettify(want.remote)
   const shown = prettify(local)
@@ -294,12 +274,12 @@ async function classify(
 /** Move each local ref, returning the summary rows and any rejection. */
 export async function updateRefs(
   repo: Repo,
-  wants: readonly Wanted[],
+  wants: readonly ReturnType<typeof wanted>[],
   reason: string,
   logged: boolean,
-): Promise<[Row[], boolean]> {
+): Promise<[ReturnType<typeof row>[], boolean]> {
   const local = await resolvedRefs(repo)
-  const rows: Row[] = []
+  const rows: ReturnType<typeof row>[] = []
   let rejected = false
   const now = Math.floor(systemNow())
   for (const want of wants) {
@@ -330,7 +310,7 @@ export async function updateRefs(
 }
 
 /** FETCH_HEAD: every listed ref, the ones marked for merge first. */
-export function fetchHead(url: string, wants: readonly Wanted[]): string {
+export function fetchHead(url: string, wants: readonly ReturnType<typeof wanted>[]): string {
   const lines: string[] = []
   for (const merge of [true, false]) {
     for (const want of wants) {
@@ -374,9 +354,9 @@ function plan(
   configured: readonly Refspec[],
   merge: string | null,
   allTags: boolean,
-): Wanted[] {
+): ReturnType<typeof wanted>[] {
   const names = [...adv.refs.keys()].filter((name) => name !== 'HEAD')
-  const out: Wanted[] = []
+  const out: ReturnType<typeof wanted>[] = []
   const specs = typed.length ? typed : configured
   for (const spec of specs) {
     if (spec.src.includes('*')) {
@@ -455,8 +435,12 @@ export function leafArgs(argv: readonly string[], verb: string): readonly string
 }
 
 /** Delete the remote-tracking refs whose remote ref is gone. */
-async function prune(repo: Repo, adv: Advertisement, specs: readonly Refspec[]): Promise<Row[]> {
-  const rows: Row[] = []
+async function prune(
+  repo: Repo,
+  adv: Advertisement,
+  specs: readonly Refspec[],
+): Promise<ReturnType<typeof row>[]> {
+  const rows: ReturnType<typeof row>[] = []
   const refs = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
   const names = [...refs.entries()]
     .filter(([, value]) => !value.startsWith(SYMREF_PREFIX))

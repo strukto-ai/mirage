@@ -12,24 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ByteSource } from '../../io/types.ts'
-import { BaseVFS } from '../base.ts'
 import { ChromaAccessor } from '../../accessor/chroma.ts'
-
-import { VFSName } from '../../types.ts'
-import {
-  type ChromaConfigRedacted,
-  redactChromaConfig,
-  resolveChromaConfig,
-  type ChromaConfig,
-  type ChromaConfigResolved,
-} from './config.ts'
-import type { DirListing, PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import type { Handed } from '../types.ts'
-import { CHROMA_TREE } from '../../core/chroma/tree.ts'
 import { readStream } from '../../core/chroma/read.ts'
-import { stat } from '../../core/chroma/stat.ts'
 import { filesContaining, searchMany } from '../../core/chroma/search.ts'
+import { stat } from '../../core/chroma/stat.ts'
+import { CHROMA_TREE } from '../../core/chroma/tree.ts'
+import { type ByteSource } from '../../io/types.ts'
+import type { DirListing, FileStat, PathSpec, SearchQuery } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { redactChromaConfig, resolveChromaConfig, type ChromaConfig } from './config.ts'
 
 export const VFS_MD = `Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
 collection.
@@ -42,12 +35,6 @@ export interface ChromaVFSOptions {
   config: ChromaConfig
 }
 
-export interface ChromaVFSState {
-  type: string
-  config: ChromaConfigRedacted
-  needs_override: true
-}
-
 export class ChromaVFS extends BaseVFS {
   override readonly name: string = VFSName.CHROMA
   override readonly cachesReads: boolean = false
@@ -57,7 +44,7 @@ export class ChromaVFS extends BaseVFS {
   // never becomes the reported byte length.
   override readonly sizesAlwaysKnown: boolean = true
   override vfsMd: string = VFS_MD
-  readonly config: ChromaConfigResolved
+  readonly config: ReturnType<typeof resolveChromaConfig>
   override readonly accessor: ChromaAccessor
   override readonly handed = {
     readdir: ['entry'],
@@ -72,7 +59,9 @@ export class ChromaVFS extends BaseVFS {
     this.accessor = new ChromaAccessor(this.config)
   }
 
-  override getState(): ChromaVFSState {
+  override getState(): ConfigState<ReturnType<typeof redactChromaConfig>> & {
+    needs_override: true
+  } {
     return {
       type: this.name,
       config: redactChromaConfig(this.config),

@@ -1,10 +1,10 @@
 import { expect, it, vi } from 'vitest'
+import { seedChannel } from '../../../tests/vfs/discord/_test_util.ts'
 import { DiscordAccessor } from '../../accessor/discord.ts'
 import { NodeDiscordTransport } from '../../core/discord/client.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { DiscordVFSBase } from './discord.ts'
-import { seedChannel } from '../../../tests/vfs/discord/_test_util.ts'
+import { DiscordVFS } from './discord.ts'
 
 it.each([false, true])(
   'aborting cat releases a stalled attachment body (prefix=%s)',
@@ -36,7 +36,7 @@ it.each([false, true])(
       return Promise.resolve(new Response(body))
     })
     vi.stubGlobal('fetch', fakeFetch)
-    const vfs = new DiscordVFSBase({
+    const vfs = new DiscordVFS({
       name: 'discord',
       accessor: new DiscordAccessor(new NodeDiscordTransport('token')),
     })

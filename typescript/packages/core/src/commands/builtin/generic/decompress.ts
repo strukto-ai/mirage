@@ -1,14 +1,13 @@
+import { eloop, enoent, isDotWalkError, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 import { ByteSpool, spooled } from '../../../io/spool.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 import { PathSpec, type StatFn } from '../../../types.ts'
-import { gunzipStream } from '../../../utils/compress.ts'
-import { enoent, eloop, isDotWalkError, isEisdir, isEnoent, isFsError } from '../../../errors/fs.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
-import { GzipDataError } from '../../../utils/compress.ts'
+import { gunzipStream, GzipDataError } from '../../../utils/compress.ts'
 import { respelled } from '../../../utils/key_prefix.ts'
 import { stripSlash } from '../../../utils/slash.ts'
-import type { LinkResolver } from '../utils/links.ts'
 import {
   GZIP_KNOWN_SUFFIXES,
   GZIP_MAX_SUFFIX,
@@ -16,10 +15,10 @@ import {
   GZIP_SUFFIX,
   GZIP_TAR_SUFFIXES,
 } from '../constants.ts'
-import { pathExists } from '../utils/copy.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
+import { pathExists } from '../utils/copy.ts'
+import type { LinkResolver } from '../utils/links.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { encodeText } from '../../../shell/bytes.ts'
 
 function asciiLower(text: string): string {
   return text.replace(/[A-Z]/g, (c) => c.toLowerCase())
@@ -129,14 +128,6 @@ export interface GzipInput {
 }
 
 /** Takes a failure's line, exit code and whether it is a warning. */
-export type GzipReport = (line: string, code: number, warning: boolean) => void
-
-interface GzipOpenOptions {
-  suffix?: string
-  decompress?: boolean
-  follow?: boolean
-  resolver?: LinkResolver | null
-}
 
 /**
  * Open one operand the way gzip 1.13 opens it.
@@ -153,8 +144,13 @@ interface GzipOpenOptions {
 export async function openGzipInput(
   path: PathSpec,
   source: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  report: GzipReport,
-  options: GzipOpenOptions = {},
+  report: (line: string, code: number, warning: boolean) => void,
+  options: {
+    suffix?: string
+    decompress?: boolean
+    follow?: boolean
+    resolver?: LinkResolver | null
+  } = {},
 ): Promise<GzipInput | null> {
   const suffix = options.suffix ?? GZIP_SUFFIX
   const resolver = options.resolver ?? null
@@ -256,20 +252,6 @@ export function existsLine(name: string): string {
   return `gzip: ${name} already exists;\tnot overwritten\n`
 }
 
-interface DecompressOptions {
-  stdin: ByteSource | null
-  toStdout?: boolean
-  testOnly?: boolean
-  keep?: boolean
-  force?: boolean
-  quiet?: boolean
-  suffix?: string
-  write?: (path: PathSpec, data: ByteSource) => Promise<void>
-  unlink?: (path: PathSpec) => Promise<void>
-  stat?: StatFn
-  resolver?: LinkResolver | null
-}
-
 /**
  * Decode operands in order the way gzip 1.13 does, in its voice.
  *
@@ -289,7 +271,19 @@ interface DecompressOptions {
 export async function decompressInputs(
   paths: PathSpec[],
   read: (path: PathSpec) => AsyncIterable<Uint8Array>,
-  options: DecompressOptions,
+  options: {
+    stdin: ByteSource | null
+    toStdout?: boolean
+    testOnly?: boolean
+    keep?: boolean
+    force?: boolean
+    quiet?: boolean
+    suffix?: string
+    write?: (path: PathSpec, data: ByteSource) => Promise<void>
+    unlink?: (path: PathSpec) => Promise<void>
+    stat?: StatFn
+    resolver?: LinkResolver | null
+  },
 ): Promise<[ByteSource | null, IOResult]> {
   const suffix = options.suffix ?? GZIP_SUFFIX
   const refused = suffixRefusal(suffix)

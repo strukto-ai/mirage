@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from mirage.vfs.types import Effect
 
 WALK_LIMIT = 1000
@@ -30,3 +31,5 @@ WRITE_EFFECTS = frozenset(
         Effect.ATTR,
     }
 )
+
+REDACTED_SECRET = "<REDACTED>"

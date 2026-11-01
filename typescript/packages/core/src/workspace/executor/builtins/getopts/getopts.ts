@@ -12,17 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CallStack } from '../../../../shell/call_stack.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import type { CallStack } from '../../../../shell/call_stack.ts'
 import { ReadonlyVariableError } from '../../../../shell/errors.ts'
-import type { SessionState } from '../../../session/session.ts'
 import type { SessionView } from '../../../../view/types.ts'
+import type { SessionState } from '../../../session/session.ts'
+import { positionalParams, sessionView } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage, isValidName, requireView } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { positionalParams, sessionView } from '../../../session/state.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import type { BuiltinCall } from '../types.ts'
 
 async function getoptsFinish(
   session: SessionState,
@@ -34,7 +35,7 @@ async function getoptsFinish(
   newPos: number,
   exitCode: number,
   stderr: Uint8Array | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   // The name is assigned last, exactly as bash does: OPTIND/OPTARG and
   // the hidden cursor still advance, but a bad destination fails the
   // write and turns the call into a status-1 error. Writes go through
@@ -80,7 +81,7 @@ export async function handleGetopts(
   session: SessionState,
   callStack: CallStack | null = null,
   state: SessionView | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   if (args.length < 2) {
     const err = encodeText(builtinUsage('getopts'))
     return [
@@ -146,7 +147,7 @@ export async function handleGetopts(
 }
 
 /** The `getopts` arm. */
-export async function getoptsBuiltin(call: BuiltinCall): Promise<Result> {
+export async function getoptsBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleGetopts(
     [...call.argv.args],
     call.context.session,

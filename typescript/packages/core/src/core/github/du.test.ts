@@ -14,19 +14,19 @@
 
 import { afterEach, expect, it, vi } from 'vitest'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
+import { BUILDER } from '../../commands/builtin/generic_bind/builders/du.ts'
+import type { FlagValue } from '../../commands/spec/types.ts'
+import { runWithMountGate } from '../../context/session_context.ts'
+import { materialize } from '../../io/types.ts'
+import { answeringFiles } from '../../test-utils.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import type { GitHubTransport } from './client.ts'
 import { tree } from './stat.ts'
-import type { TreeEntry } from './tree_entry.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
-import { materialize } from '../../io/types.ts'
-import { runWithMountGate } from '../../context/session_context.ts'
-import { answeringFiles } from '../../test-utils.ts'
-import type { FlagValue } from '../../commands/spec/types.ts'
-import { BUILDER } from '../../commands/builtin/generic_bind/builders/du.ts'
+import type { makeTreeEntry } from './tree_entry.ts'
 
 afterEach(() => vi.restoreAllMocks())
 
-const TREE: Record<string, TreeEntry> = {
+const TREE: Record<string, ReturnType<typeof makeTreeEntry>> = {
   'Banana.md': { path: 'Banana.md', type: 'blob', sha: 's0', size: 2 },
   docs: { path: 'docs', type: 'tree', sha: 's1', size: null },
   'docs/a.md': { path: 'docs/a.md', type: 'blob', sha: 's2', size: 100 },

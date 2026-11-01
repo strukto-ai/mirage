@@ -11,12 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import { atoi } from '../../../../commands/builtin/utils/strtol.ts'
 import { compileSpec } from '../../../../commands/spec/compile.ts'
 import { SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import { versionLine } from '../../../../commands/spec/standard.ts'
 import { SHELL_SYNOPSES } from '../../../../commands/spec/synopsis.ts'
 import type { CommandSpec } from '../../../../commands/spec/types.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { runs } from '../../../../policy/match/allow.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
@@ -26,7 +28,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { visibleEnv } from '../../../session/state.ts'
 import { scanOptions } from '../getopt.ts'
 import { builtinError, builtinUsage, result } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
 import {
   DEFAULT_COLUMNS,
   DESCRIPTION,
@@ -239,7 +241,7 @@ export function matching(pattern: string): string[] {
  * Null for a word that reads `--help` as an operand, and for any word that is
  * no builtin.
  */
-export function flagHelp(name: string): Result | null {
+export function flagHelp(name: string): RedirectResult | null {
   if (SHELL_SYNOPSES[name] === undefined || !BASH_BUILTINS.has(name) || OPERAND_HELP.has(name)) {
     return null
   }
@@ -251,7 +253,7 @@ export function flagHelp(name: string): Result | null {
  * `-m` and `-m` over `-s`. A pattern that matches nothing is passed over;
  * only when none matches is there an error, and it names the last.
  */
-export function helpBuiltin(call: BuiltinCall): Promise<Result> {
+export function helpBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const session = call.context.session
   const scan = scanOptions([...call.argv.args], 'dms')
   if (scan.bad !== null) {

@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ContentType, FileStat, FileType } from '../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { ZodError } from 'zod'
 import { errorSummary } from '../../secrets/summary.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import {
   FileStatWireSchema,
   type IndexConfig,
-  IndexDirectorySchema,
+  IndexDirectory,
   IndexType,
   normalizeIndexConfig,
 } from './config.ts'
@@ -53,7 +53,7 @@ describe('row JSON', () => {
 describe('IndexDirectory JSON', () => {
   it('reads the listing Python writes', () => {
     expect(
-      IndexDirectorySchema.parse(
+      IndexDirectory.parse(
         JSON.parse(
           '{"entries":["/a/b"],"folders":[0],"expires_at":4102444800.5,"generation":"g:d"}',
         ),
@@ -70,7 +70,7 @@ describe('IndexDirectory JSON', () => {
   })
 
   it('refuses a listing missing its generation', () => {
-    expect(() => IndexDirectorySchema.parse({ entries: [], expires_at: 1 })).toThrow()
+    expect(() => IndexDirectory.parse({ entries: [], expires_at: 1 })).toThrow()
   })
 })
 

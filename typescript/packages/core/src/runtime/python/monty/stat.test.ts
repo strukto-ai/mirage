@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { statFields, statResult, type GuestStat } from './stat.ts'
+import { statFields, statResult } from './stat.ts'
 
 // The numbers below are pydantic_monty's own StatResult constructors,
 // read off the python engine: file_stat(size=5, mode=0o100644,
@@ -89,7 +89,9 @@ describe('statResult', () => {
     }
     const wrapped = statResult(bits, { size: 4, isDir: false, mtimeMs: 0, mode: 0o644 })
     expect(wrapped).toBeInstanceOf(FakeClassInstance)
-    expect((wrapped as FakeClassInstance).instance as GuestStat).toMatchObject({ st_size: 4 })
+    expect((wrapped as FakeClassInstance).instance as ReturnType<typeof statFields>).toMatchObject({
+      st_size: 4,
+    })
     // The name the guest sees in `type(st)` and in the repr; without
     // the wrapper the answer converts structurally and arrives as a
     // dict, where `st.st_size` raises AttributeError.

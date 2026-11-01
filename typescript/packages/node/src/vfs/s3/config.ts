@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { S3ConfigSchema as S3CoreConfigSchema } from '@struktoai/mirage-core/vfs/s3/config'
-import type { S3Config as S3CoreConfig } from '@struktoai/mirage-core/vfs/s3/config'
-import { FIELD_NORMALIZERS, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import type { FieldNormalizer } from '@struktoai/mirage-core/utils/normalize'
+import type { S3Config as S3CoreConfig } from '@struktoai/mirage-core/vfs/s3/config'
+import { S3Config as S3CoreConfigSchema } from '@struktoai/mirage-core/vfs/s3/config'
+import { FIELD_NORMALIZERS, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 
 export interface S3Config extends S3CoreConfig {
   profile?: string
@@ -37,7 +36,7 @@ const S3_FAMILY_RENAME: Record<string, string> = {
 
 export const S3_FAMILY_NORMALIZER: FieldNormalizer = { rename: S3_FAMILY_RENAME }
 
-export const S3ConfigSchema = S3CoreConfigSchema.extend({
+export const S3Config = S3CoreConfigSchema.extend({
   profile: z
     .string()
     .optional()
@@ -57,13 +56,3 @@ export const S3ConfigSchema = S3CoreConfigSchema.extend({
       ...S3_FAMILY_RENAME,
     },
   })
-
-export type S3ConfigRedacted = RedactedConfig<
-  ConfigOf<typeof S3ConfigSchema>,
-  | 'accessKeyId'
-  | 'secretAccessKey'
-  | 'sessionToken'
-  | 'presignedUrlProvider'
-  | 'httpAgentProvider'
-  | 'proxy'
->

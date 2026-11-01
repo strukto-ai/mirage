@@ -15,29 +15,28 @@
 // Mirror of the narrow_paths tests in python/tests/core/github/test_search.py.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
+import { PathSpec } from '../../types.ts'
 import type * as ClientModule from './client.ts'
+import * as client from './client.ts'
+import { SCOPE_WARN } from './constants.ts'
+import { filesContaining, narrowPaths, search as restSearch } from './search.ts'
+import type { makeTreeEntry } from './tree_entry.ts'
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
   return { ...actual, searchCode: vi.fn() }
 })
 
-import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
-import { PathSpec } from '../../types.ts'
-import * as client from './client.ts'
-import { SCOPE_WARN } from './constants.ts'
-import { filesContaining, narrowPaths, search as restSearch } from './search.ts'
-import type { TreeEntry } from './tree_entry.ts'
-
 const search = vi.mocked(client.searchCode)
 // GitHub's documented code-search limit; files at or over it are not indexed.
 const SEARCH_LIMIT = 384 * 1024
 
-function blob(path: string, size: number | null): TreeEntry {
+function blob(path: string, size: number | null): ReturnType<typeof makeTreeEntry> {
   return { path, type: 'blob', sha: path, size }
 }
 
-function makeAccessor(tree: Record<string, TreeEntry>): GitHubAccessor {
+function makeAccessor(tree: Record<string, ReturnType<typeof makeTreeEntry>>): GitHubAccessor {
   const transport: client.GitHubTransport = {
     get(): Promise<unknown> {
       throw new Error('search is mocked')

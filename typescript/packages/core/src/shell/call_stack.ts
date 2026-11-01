@@ -16,15 +16,6 @@ import { encodeText } from './bytes.ts'
 import { NESTING_MAX } from './constants.ts'
 import { DiscardSignal } from './errors.ts'
 
-export interface CallFrameInit {
-  positional?: string[]
-  locals?: Record<string, string>
-  functionName?: string
-  loopLevel?: number
-  sourced?: boolean
-  closed?: boolean
-}
-
 export class CallFrame {
   positional: string[]
   locals: Record<string, string>
@@ -34,7 +25,11 @@ export class CallFrame {
   // A sourced file whose RETURN action runs: it has returned.
   closed: boolean
 
-  constructor(init: CallFrameInit = {}) {
+  constructor(
+    init: Partial<
+      Pick<CallFrame, 'positional' | 'locals' | 'functionName' | 'loopLevel' | 'sourced' | 'closed'>
+    > = {},
+  ) {
     this.positional = init.positional ?? []
     this.locals = init.locals ?? {}
     this.functionName = init.functionName ?? ''

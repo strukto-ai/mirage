@@ -1,8 +1,8 @@
-import { Accessor } from './base.ts'
-import { resolveMem0Config, type Mem0Config, type Mem0ConfigResolved } from '../vfs/mem0/config.ts'
-import { md5Hex } from '../utils/hash.ts'
 import { stallTimeout } from '../core/api/client.ts'
 import { ApiError } from '../core/api/errors.ts'
+import { md5Hex } from '../utils/hash.ts'
+import { resolveMem0Config, type Mem0Config } from '../vfs/mem0/config.ts'
+import { Accessor } from './base.ts'
 
 const ENCODER = new TextEncoder()
 
@@ -15,7 +15,7 @@ export class Mem0Error extends ApiError {
 }
 
 export class Mem0Accessor extends Accessor {
-  readonly config: Mem0ConfigResolved
+  readonly config: ReturnType<typeof resolveMem0Config>
 
   constructor(config: Mem0Config) {
     super()

@@ -1,4 +1,175 @@
+import type { FileCacheMixin } from '../../cache/file/mixin.ts'
+import {
+  type IndexConfig,
+  normalizeIndexConfig,
+  type RedisIndexConfig,
+} from '../../cache/index/config.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
+import { KeyLock } from '../../cache/lock.ts'
+import { cliSpecFor } from '../../commands/cli/specs.ts'
+import type { CLI } from '../../commands/cli/types.ts'
+import {
+  type Caller,
+  currentCaller,
+  getAdmission,
+  getCurrentSessionFor,
+  getCurrentSessionUnlessForeign,
+  runAsProgram,
+  runExplaining,
+  runWithCaller,
+  runWithExecution,
+  runWithRefusalSink,
+  runWithSession,
+  sessionAccess,
+  sessionCaller,
+  sessionVisibility,
+} from '../../context/session_context.ts'
+import { eacces, enoent } from '../../errors/fs.ts'
+import type { EventRuntime } from '../../events/base.ts'
+import { newExecutionId } from '../../execution/context.ts'
+import { IOConfig } from '../../io/config.ts'
+import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
+import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '../../io/network.ts'
+import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
+import { Observer } from '../../observe/observer.ts'
+import type { OpRecord } from '../../observe/record.ts'
+import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
+import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
+import { RoutePolicy } from '../../policy/builtin/route.ts'
+import { Decisions } from '../../policy/decisions.ts'
+import { PolicyError } from '../../policy/errors.ts'
+import type { Policies } from '../../policy/index.ts'
+import {
+  parseProfileMounts,
+  parseProfilePolicy,
+  type SessionProfile,
+} from '../../policy/profile.ts'
+import { ScriptPolicy } from '../../policy/script.ts'
+import { DryRun, Outcome, policyCaller, type ShellExplanation } from '../../policy/types.ts'
+import { ChildProcess } from '../../process/child.ts'
+import { ProcessInput, ProcessOutput } from '../../process/stdio.ts'
+import { ProcessTable } from '../../process/table.ts'
+import type { SpawnRequest } from '../../process/types.ts'
+import type { ProcessView } from '../../process/view.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
+import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
+import {
+  captureBinding,
+  restrictedMountsFor,
+  type RuntimeContext,
+  WorkspaceBinding,
+} from '../../runtime/binding.ts'
+import { PrefixResolver } from '../../runtime/resolver.ts'
+import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
+import { wholeLineRuntime } from '../../runtime/table.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
+import { SecretSource } from '../../secrets/config.ts'
+import { SecretsError } from '../../secrets/errors.ts'
+import { sourceFor } from '../../secrets/registry.ts'
+import { resolveSources } from '../../secrets/sources.ts'
+import type { ResolvedSource } from '../../secrets/types.ts'
+import { Terminal } from '../../shell/console/terminal.ts'
+import { BIN_PREFIX } from '../../shell/constants.ts'
+import { JobTable } from '../../shell/job_table/index.ts'
+import { shellJoin } from '../../shell/join.ts'
+import { literalTree } from '../../shell/literal.ts'
+import { ParseScope } from '../../shell/parse/scope.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
+import { makeVar, VarAttr } from '../../shell/variable.ts'
+import type { FileEvent, JsonObject, JsonValue, Visibility } from '../../types.ts'
+import {
+  DEFAULT_READ_SPEC,
+  DriftPolicy,
+  MountMode,
+  parseMountMode,
+  PathSpec,
+  type ReadSpec,
+  WritePolicy,
+} from '../../types.ts'
+import { abortable } from '../../utils/abort.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import {
+  type Clock,
+  parseSystemTime,
+  ShiftedClock,
+  SystemClock,
+  systemNow,
+} from '../../utils/clock.ts'
+import { pathVisible } from '../../utils/hidden.ts'
+import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
+import { parseLimit } from '../../utils/size.ts'
+import { normDir, rstripSlash } from '../../utils/slash.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
+import { BinViewVFS } from '../../vfs/bin/bin.ts'
+import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
+import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
+import type { OpKwargs } from '../../view/types.ts'
+import { newStatusWriter, runWithLineAbort } from '../abort.ts'
+import type { CLIInstall } from '../cli/types.ts'
+import { Dispatcher } from '../dispatcher/index.ts'
+import { Documents } from '../documentation/documents.ts'
+import { ExecutionScope } from '../execution.ts'
+import { expandingAliases } from '../executor/builtins/alias/alias.ts'
+import { recordStatus } from '../executor/statement.ts'
+import { classifyBarePath } from '../expand/classify/path.ts'
+import { resolveGlobs } from '../expand/globs.ts'
+import { Files, withCaller, WorkspaceFiles } from '../files.ts'
+import { lookup, program, programNote, programs } from '../lookup/lookup.ts'
+import { Consumer } from '../lookup/types.ts'
+import { WritePolicyError } from '../mount/errors.ts'
+import type { MountEntry } from '../mount/mount.ts'
+import { Namespace } from '../mount/namespace/namespace.ts'
+import { checkReadCapability } from '../mount/read_policy.ts'
+import { MountRegistry } from '../mount/registry.ts'
+import { Mount } from '../mount/spec.ts'
+import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
+import { explainedLine, explainLine, holds, lineJudgments } from '../node/explain.ts'
+import { DEFAULT_PROFILE } from '../session/constants.ts'
+import { SessionManager } from '../session/manager.ts'
+import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
+import { type SessionState, varsFromEntries, varsFromEnv } from '../session/session.ts'
+import { envSnapshot, sessionView } from '../session/state.ts'
+import { checkCliVerbs } from '../session/validate.ts'
+import { ShellExecution } from '../shell_execution.ts'
+import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
+import { indexConfigDump } from '../snapshot/config.ts'
+import { DriftQueue, installFingerprints } from '../snapshot/drift.ts'
+import { makeStagingDir, removeDir } from '../snapshot/fs.ts'
+import {
+  applyStateDict,
+  buildMountArgs,
+  type CLIOverrides,
+  toStateDict,
+  withRebuiltMounts,
+} from '../snapshot/state.ts'
+import type { MountSnapshot, WorkspaceStateDict } from '../snapshot/types.ts'
+import { QUIESCE_SECONDS } from '../snapshot/utils.ts'
+import type { WorkspaceStateStore } from '../store/base.ts'
+import { FileVersionTracker } from '../tools/file_version.ts'
+import { MirageToolOperations } from '../tools/tool_operations.ts'
+import { resolveControlStores } from './build.ts'
+import { buildFileCache } from './cache.ts'
+import { EventManager } from './events.ts'
+import { type ExecuteEnv, executeLine } from './execute.ts'
+import { Explainer } from './explainer.ts'
+import { placementRefused } from './failure.ts'
+import { fillEnv } from './fill.ts'
+import { closeWorkspace } from './lifecycle.ts'
+import { WorkspaceMeta } from './meta.ts'
+import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
+import { Router } from './routing.ts'
+import { Runtimes } from './runtimes.ts'
+import type {
+  ExecuteOptions,
+  ExecuteResult,
+  MountSpec,
+  SessionExecuteOptions,
+  WorkspaceOptions,
+} from './types.ts'
+import { forkForCall } from './utils.ts'
+
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,178 +183,6 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import { IOConfig } from '../../io/config.ts'
-import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
-import { networkRule, runWithNetwork, sameNetwork, type NetworkSetting } from '../../io/network.ts'
-import { parseLimit } from '../../utils/size.ts'
-import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
-import { ShellExecution } from '../shell_execution.ts'
-import { ExecutionScope } from '../execution.ts'
-import { newExecutionId } from '../../execution/context.ts'
-
-import { ParseScope } from '../../shell/parse/scope.ts'
-
-import { indexConfigDump } from '../snapshot/config.ts'
-import { ListingCheckStore } from '../../cache/index/ram.ts'
-import { KeyLock } from '../../cache/lock.ts'
-import { checkCliVerbs } from '../session/validate.ts'
-import type { FileCache } from '../../cache/file/mixin.ts'
-import {
-  normalizeIndexConfig,
-  type IndexConfig,
-  type RedisIndexConfig,
-} from '../../cache/index/config.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
-import { type EventDict, Observer } from '../../observe/observer.ts'
-import type { OpRecord } from '../../observe/record.ts'
-import type { OpKwargs } from '../../view/types.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
-import type { S3Config } from '../../vfs/s3/config.ts'
-import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
-import { BIN_PREFIX } from '../../shell/constants.ts'
-import { Consumer } from '../lookup/types.ts'
-import { BinViewVFS } from '../../vfs/bin/bin.ts'
-import { lookup, program, programNote, programs } from '../lookup/lookup.ts'
-import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
-import { cliSpecFor } from '../../commands/cli/specs.ts'
-import type { CLI } from '../../commands/cli/types.ts'
-import type { CLIInstall } from '../cli/types.ts'
-import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
-import { RoutePolicy } from '../../policy/builtin/route.ts'
-import { PolicyError } from '../../policy/errors.ts'
-import { Decisions } from '../../policy/decisions.ts'
-import { Terminal } from '../../shell/console/terminal.ts'
-import { JobTable } from '../../shell/job_table/index.ts'
-import { buildFileCache } from './cache.ts'
-import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
-import { readSnapshot, snapshot as writeSnapshot } from '../snapshot/api.ts'
-import { makeStagingDir, removeDir } from '../snapshot/fs.ts'
-import {
-  applyStateDict,
-  buildMountArgs,
-  type CLIOverrides,
-  toStateDict,
-  withRebuiltMounts,
-} from '../snapshot/state.ts'
-import { classifyBarePath } from '../expand/classify/path.ts'
-import { resolveGlobs } from '../expand/globs.ts'
-import { QUIESCE_SECONDS } from '../snapshot/utils.ts'
-import type { WorkspaceStateDict, MountSnapshot } from '../snapshot/types.ts'
-import type { FileEvent, JsonValue, Visibility } from '../../types.ts'
-import {
-  type ReadSpec,
-  DEFAULT_READ_SPEC,
-  DriftPolicy,
-  MountMode,
-  PathSpec,
-  WritePolicy,
-  parseMountMode,
-} from '../../types.ts'
-import type { Policies } from '../../policy/index.ts'
-import { DryRun, Outcome, policyCaller, type ShellExplanation } from '../../policy/types.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
-import { Files, WorkspaceFiles, withCaller } from '../files.ts'
-import type { MountEntry } from '../mount/mount.ts'
-import { checkReadCapability } from '../mount/read_policy.ts'
-import { WritePolicyError } from '../mount/errors.ts'
-import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
-import { MountRegistry } from '../mount/registry.ts'
-import { PrefixResolver } from '../../runtime/resolver.ts'
-import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
-import { wholeLineRuntime } from '../../runtime/table.ts'
-import { ChildProcess } from '../../process/child.ts'
-import { ProcessInput, ProcessOutput } from '../../process/stdio.ts'
-import type { SpawnRequest } from '../../process/types.ts'
-import type { ProcessView } from '../../process/view.ts'
-import { literalTree } from '../../shell/literal.ts'
-import { shellJoin } from '../../shell/join.ts'
-import { ProcessTable } from '../../process/table.ts'
-import {
-  WorkspaceBinding,
-  captureBinding,
-  restrictedMountsFor,
-  type RuntimeContext,
-} from '../../runtime/binding.ts'
-import {
-  type Caller,
-  currentCaller,
-  getAdmission,
-  getCurrentSessionUnlessForeign,
-  runExplaining,
-  runWithCaller,
-  runWithRefusalSink,
-  runWithSession,
-  runAsProgram,
-  runWithExecution,
-  sessionCaller,
-  sessionVisibility,
-} from '../../context/session_context.ts'
-import { pathVisible } from '../../utils/hidden.ts'
-import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { makeVar, VarAttr } from '../../shell/variable.ts'
-import { eacces, enoent } from '../../errors/fs.ts'
-import { sessionView, envSnapshot } from '../session/state.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
-import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
-import { Dispatcher } from '../dispatcher/index.ts'
-import { Namespace } from '../mount/namespace/namespace.ts'
-import { explainLine, explainedLine, holds, lineJudgments } from '../node/explain.ts'
-import { Documents } from '../documentation/documents.ts'
-import { getCurrentSessionFor, sessionAccess } from '../../context/session_context.ts'
-import { abortable } from '../../utils/abort.ts'
-import { SecretSourceSchema, type SecretSource } from '../../secrets/config.ts'
-import { SecretsError } from '../../secrets/errors.ts'
-import { sourceFor } from '../../secrets/registry.ts'
-import { resolveSources } from '../../secrets/sources.ts'
-import type { ResolvedSource } from '../../secrets/types.ts'
-import { DEFAULT_PROFILE } from '../session/constants.ts'
-import { SessionManager } from '../session/manager.ts'
-import type { WorkspaceStateStore } from '../store/base.ts'
-import { varsFromEnv, varsFromEntries, type SessionState } from '../session/session.ts'
-import {
-  parseProfileMounts,
-  parseProfilePolicy,
-  type SessionProfile,
-} from '../../policy/profile.ts'
-import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
-import { ScriptPolicy } from '../../policy/script.ts'
-import {
-  type Clock,
-  parseSystemTime,
-  ShiftedClock,
-  SystemClock,
-  systemNow,
-} from '../../utils/clock.ts'
-import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
-import { normDir, rstripSlash } from '../../utils/slash.ts'
-import type { EventRuntime } from '../../events/base.ts'
-import { resolveControlStores } from './build.ts'
-import { executeLine, type ExecuteEnv } from './execute.ts'
-import { forkForCall } from './utils.ts'
-import { recordStatus } from '../executor/statement.ts'
-import { newStatusWriter, runWithLineAbort } from '../abort.ts'
-import { fillEnv } from './fill.ts'
-import { closeWorkspace } from './lifecycle.ts'
-import { WorkspaceMeta } from './meta.ts'
-import { normalizeMounts, prepareAddedMount, unmountPrefix } from './mounts.ts'
-import { Router } from './routing.ts'
-import { Runtimes } from './runtimes.ts'
-import { Explainer } from './explainer.ts'
-import { FileVersionTracker } from '../tools/file_version.ts'
-import { MirageToolOperations } from '../tools/tool_operations.ts'
-import type {
-  ExecuteOptions,
-  ExecuteResult,
-  MountSpec,
-  SessionExecuteOptions,
-  WorkspaceOptions,
-} from './types.ts'
-import { Mount } from '../mount/spec.ts'
-import { EventManager } from './events.ts'
-import { placementRefused } from './failure.ts'
-import { expandingAliases } from '../executor/builtins/alias/alias.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
@@ -211,7 +210,7 @@ export class Workspace {
   readonly writeDefault: WritePolicy
   readonly processes: ProcessTable
   readonly jobTable: JobTable
-  readonly cache: FileCache & BaseVFS
+  readonly cache: FileCacheMixin & BaseVFS
   /** The clock this workspace reads time and waits on; a rebuild that shares its mounts runs on it too. */
   readonly clock: Clock
   private readonly ids: IdSource
@@ -372,7 +371,7 @@ export class Workspace {
     this.declaredSecretSources = Object.fromEntries(
       Object.entries(options.secrets ?? {}).map(([name, block]) => [
         name,
-        SecretSourceSchema.parse(block),
+        SecretSource.parse(block),
       ]),
     )
     for (const block of Object.values(this.declaredSecretSources)) sourceFor(block.source)
@@ -764,7 +763,7 @@ export class Workspace {
    */
   async history(
     options: { sessionId?: string; since?: number; last?: number; vfs?: boolean } = {},
-  ): Promise<EventDict[]> {
+  ): Promise<JsonObject[]> {
     const { sessionId, since, last, vfs = false } = options
     const kinds = new Set<unknown>([EVENT_COMMAND, EVENT_RESULT, ...(vfs ? [EVENT_VFS] : [])])
     const picked = (await this.observer.events(sessionId)).filter(
@@ -1592,11 +1591,11 @@ export class Workspace {
    * the owning mounts, fingerprint-only entries queued on the drift
    * queue (drained on the first dispatch/execute).
    */
-  protected installDriftState(
+  protected installFingerprints(
     state: WorkspaceStateDict,
     policy: DriftPolicy = DriftPolicy.STRICT,
   ): Promise<void> {
-    return installDriftState(this.registry, this.cache, this.drift, state, policy)
+    return installFingerprints(this.registry, this.cache, this.drift, state, policy)
   }
 
   /**
@@ -2229,7 +2228,7 @@ export class Workspace {
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
     try {
-      await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
+      await ws.installFingerprints(state, options.driftPolicy ?? DriftPolicy.STRICT)
     } catch (err) {
       await ws.close().catch((closeError: unknown) => {
         console.debug('restore not closed:', closeError)

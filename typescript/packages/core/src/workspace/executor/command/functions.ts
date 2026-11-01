@@ -12,37 +12,34 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { EvaluationContext } from '../../evaluation.ts'
-import { parseFunction } from '../../../shell/helpers.ts'
-import type { ParseScope } from '../../../shell/parse/scope.ts'
-
-import type { ShellVar } from '../../../shell/variable.ts'
-import { encodeText } from '../../../shell/bytes.ts'
-import { NESTING_MAX } from '../../../shell/constants.ts'
+import type { RedirectResult } from '../../../context/session_context.ts'
+import { runAsShell } from '../../../context/session_context.ts'
+import { share } from '../../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
+import type { Decisions } from '../../../policy/decisions.ts'
+import type { HandOff } from '../../../policy/types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 import { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
+import { NESTING_MAX } from '../../../shell/constants.ts'
+import { DiscardSignal, ExitSignal, ReturnSignal } from '../../../shell/errors.ts'
+import { parseFunction } from '../../../shell/helpers.ts'
+import type { JobTable } from '../../../shell/job_table/index.ts'
+import type { ParseScope } from '../../../shell/parse/scope.ts'
+import type { ShellVar } from '../../../shell/variable.ts'
 import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
-
+import type { EvaluationContext } from '../../evaluation.ts'
+import type { SessionState } from '../../session/session.ts'
 import { restoreLocals } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
-import { share } from '../../../io/async_line_iterator.ts'
-import type { ExecuteNodeFn } from './types.ts'
-import type { JobTable } from '../../../shell/job_table/index.ts'
-
-import type { HandOff } from '../../../policy/types.ts'
-import type { Decisions } from '../../../policy/decisions.ts'
-import { DiscardSignal, ExitSignal, ReturnSignal } from '../../../shell/errors.ts'
-import { executeBody, returning } from '../control.ts'
-import { liftFunctionTraps, restoreFunctionTraps } from '../traps.ts'
-import type { ExecuteStringFn } from '../builtins/types.ts'
-import { runAsShell } from '../../../context/session_context.ts'
 import { bodyAliases } from '../builtins/alias/alias.ts'
 import { isCountWord } from '../builtins/shared.ts'
-import type { SessionState } from '../../session/session.ts'
-import type { Result } from './types.ts'
+import type { ExecuteStringFn } from '../builtins/types.ts'
+import { executeBody, returning } from '../control.ts'
+import { liftFunctionTraps, restoreFunctionTraps } from '../traps.ts'
+import type { ExecuteNodeFn } from './types.ts'
 
 /**
  * How many functions may run nested: `FUNCNEST` when it is a number from 1
@@ -73,7 +70,7 @@ export async function runShellFunction(
   sink?: JobConsole,
   // Runs a trap action as a line of the shell; null where nothing can.
   executeFn: ExecuteStringFn | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const cs = callStack ?? new CallStack(session.shellNesting)
   // bash refuses the call before it enters the function, and abandons the
@@ -150,7 +147,7 @@ export async function runShellFunction(
   try {
     // The body is shell code: the builtins it runs are the shell's,
     // whatever `xargs` or `env` marked the line that called it.
-    return await runAsShell(async (): Promise<Result> => {
+    return await runAsShell(async (): Promise<RedirectResult> => {
       let stdout: ByteSource | null
       let io: IOResult
       let lastExec: ExecutionNode

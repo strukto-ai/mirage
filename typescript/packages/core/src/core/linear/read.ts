@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonlBytesByCreatedAt, jsonBytes } from '../render/json.ts'
 import type { LinearAccessor } from '../../accessor/linear.ts'
-import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
+import { stringOf as pickString } from '../../utils/records.ts'
 import { makeRead } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
+import { jsonBytes, jsonlBytesByCreatedAt } from '../render/json.ts'
 import {
   getIssue,
   listIssueComments,
@@ -37,15 +38,9 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
-  type NormalizedProjectIssue,
 } from './normalize.ts'
 import { filteredTeams } from './readdir.ts'
 import { detectScope } from './scope.ts'
-
-function pickString(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
 
 async function readTeamJson(
   accessor: LinearAccessor,
@@ -99,7 +94,7 @@ async function readProject(
   const teamIssues = await listTeamIssues(accessor.transport, teamId, undefined, [projectId])
   for (const project of projects) {
     if (project.id !== projectId) continue
-    const projectIssues: NormalizedProjectIssue[] = []
+    const projectIssues: ReturnType<typeof buildProjectIssue>[] = []
     for (const issue of teamIssues) {
       const projField = issue.project
       const projObj =

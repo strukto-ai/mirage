@@ -11,14 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import { slackAccessor } from '../../../../accessor/slack.ts'
-import { CommandSpec } from '../../../spec/types.ts'
-import { CLI } from '../../types.ts'
-import { CLIHandler } from '../../types.ts'
-
-import { SlackConfigSchema } from '../../../../core/slack/config.ts'
-
-import { Argument } from '../../../spec/types.ts'
+import { SlackConfig } from '../../../../core/slack/config.ts'
+import { Argument, CommandSpec } from '../../../spec/types.ts'
+import { CLI, CLIHandler } from '../../types.ts'
 import { emojiList } from './emoji_list.ts'
 import { listMembers } from './list_members.ts'
 import { listPins } from './list_pins.ts'
@@ -150,6 +147,6 @@ export const SLACK = new CLI({
     'emoji-list': new CLIHandler({ fn: emojiList }),
     search: new CLIHandler({ fn: search }),
   },
-  configModel: SlackConfigSchema,
+  configModel: SlackConfig,
   accessor: slackAccessor,
 })

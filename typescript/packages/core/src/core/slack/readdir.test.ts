@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { DirListing } from '../../types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { SlackVFS } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
@@ -72,7 +72,7 @@ const DAY = new FileStat({
 })
 
 function mounted(t: SlackTransport): Workspace {
-  return new Workspace({ '/mnt/slack/': new SlackVFSBase({ accessor: new SlackAccessor(t) }) })
+  return new Workspace({ '/mnt/slack/': new SlackVFS({ accessor: new SlackAccessor(t) }) })
 }
 
 describe('dateRange', () => {

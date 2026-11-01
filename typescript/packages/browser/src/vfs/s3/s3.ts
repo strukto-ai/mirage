@@ -12,22 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { S3VFSBase } from '@struktoai/mirage-core/vfs/s3/s3'
 import { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
-
-import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
-import { s3StorageLocation } from '@struktoai/mirage-core/vfs/s3/storage_id'
 import { VFSName } from '@struktoai/mirage-core/types'
+import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
+import { S3VFS as CoreS3VFS } from '@struktoai/mirage-core/vfs/s3/s3'
+import { s3StorageLocation } from '@struktoai/mirage-core/vfs/s3/storage_id'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
+import { S3Config } from './config.ts'
 
-import { S3ConfigSchema, type S3Config, type S3ConfigRedacted } from './config.ts'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-
-export interface S3VFSState {
-  type: string
-  config: S3ConfigRedacted
-}
-
-export class S3VFS extends S3VFSBase {
+export class S3VFS extends CoreS3VFS {
   override readonly supportsSnapshot: boolean = true
   override readonly name: string = VFSName.S3
   override readonly cachesReads: boolean = true
@@ -64,10 +58,7 @@ export class S3VFS extends S3VFSBase {
     return s3StorageLocation(this.config)
   }
 
-  override getState(): Promise<S3VFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(S3ConfigSchema, this.config) as S3ConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof S3Config>>> {
+    return Promise.resolve(this.configState(S3Config, this.config))
   }
 }

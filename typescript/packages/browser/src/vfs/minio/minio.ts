@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type MinIOConfig, type MinIOConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { MinIOConfig } from './config.ts'
 
-export type MinIOVFSState = S3AliasVFSState<MinIOConfigRedacted>
-
-export class MinIOVFS extends S3AliasVFS<MinIOConfig, MinIOConfigRedacted> {
+export class MinIOVFS extends S3AliasVFS<MinIOConfig, RedactedSchema<typeof MinIOConfig>> {
   constructor(config: MinIOConfig) {
-    super(VFSName.MINIO, config, ALIAS)
+    super(VFSName.MINIO, config, MinIOConfig)
   }
 }

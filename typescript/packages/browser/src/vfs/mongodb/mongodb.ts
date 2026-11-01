@@ -12,23 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MongoDBVFSBase } from '@struktoai/mirage-core/vfs/mongodb/mongodb'
 import { MongoDBAccessor } from '@struktoai/mirage-core/accessor/mongodb'
-
 import type { MongoDriver } from '@struktoai/mirage-core/core/mongodb/_driver'
-
+import { VFSName } from '@struktoai/mirage-core/types'
+import type { MongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
 import {
   redactMongoDBConfig,
   resolveMongoDBConfig,
 } from '@struktoai/mirage-core/vfs/mongodb/config'
-import type {
-  MongoDBConfig,
-  MongoDBConfigRedacted,
-  MongoDBConfigResolved,
-} from '@struktoai/mirage-core/vfs/mongodb/config'
-import { VFS_MD } from '@struktoai/mirage-core/vfs/mongodb/mongodb'
-import { VFSName } from '@struktoai/mirage-core/types'
-
+import { MongoDBVFS as CoreMongoDBVFS, VFS_MD } from '@struktoai/mirage-core/vfs/mongodb/mongodb'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 import { HttpMongoDriver } from './http_driver.ts'
 
 export interface MongoDBVFSOptions {
@@ -38,18 +31,12 @@ export interface MongoDBVFSOptions {
   endpoint?: string
 }
 
-export interface MongoDBVFSState {
-  type: string
-  config: MongoDBConfigRedacted
-  needs_override: true
-}
-
-export class MongoDBVFS extends MongoDBVFSBase {
+export class MongoDBVFS extends CoreMongoDBVFS {
   override readonly name: string = VFSName.MONGODB
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
   override vfsMd: string
-  readonly config: MongoDBConfigResolved
+  readonly config: ReturnType<typeof resolveMongoDBConfig>
   readonly driver: MongoDriver
   override readonly accessor: MongoDBAccessor
 
@@ -67,7 +54,9 @@ export class MongoDBVFS extends MongoDBVFSBase {
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }
 
-  override getState(): MongoDBVFSState {
+  override getState(): ConfigState<ReturnType<typeof redactMongoDBConfig>> & {
+    needs_override: true
+  } {
     return {
       type: this.name,
       config: redactMongoDBConfig(this.config),

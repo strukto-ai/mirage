@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { storedFunctionText } from '../../../../shell/printer.ts'
-import type { ParseScope } from '../../../../shell/parse/scope.ts'
-import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import {
   arraySet,
@@ -22,8 +20,10 @@ import {
   buildIndexedLiteral,
   type ShellArray,
 } from '../../../../shell/array.ts'
-import { varHidden } from '../../../../utils/hidden.ts'
-import { type SessionState, sessionEntry, setSessionEntry } from '../../../session/session.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
+import { storedFunctionText } from '../../../../shell/printer.ts'
 import {
   attrLetters,
   type ShellValue,
@@ -31,6 +31,12 @@ import {
   VarAttr,
   VarKind,
 } from '../../../../shell/variable.ts'
+import { traceAssignment } from '../../../../shell/xtrace.ts'
+import { concat } from '../../../../utils/bytes.ts'
+import { varHidden } from '../../../../utils/hidden.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
+import type { SessionView } from '../../../../view/types.ts'
+import { sessionEntry, type SessionState, setSessionEntry } from '../../../session/session.ts'
 import {
   appended,
   conversionScalar,
@@ -41,7 +47,7 @@ import {
   shadowLocal,
   subscriptIndex,
 } from '../../../session/state.ts'
-import type { SessionView } from '../../../../view/types.ts'
+import { bodyAliasValues } from '../alias/alias.ts'
 import {
   builtinUsage,
   fail,
@@ -52,7 +58,6 @@ import {
   requireView,
   result,
 } from '../shared.ts'
-import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
   ANSI_C_ESCAPES,
   BARE_KEY_RE,
@@ -63,12 +68,7 @@ import {
   SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
 } from './constants.ts'
-import type { Result } from '../types.ts'
 import type { AttrMarks, DeclarationOperand } from './types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
-import { traceAssignment } from '../../../../shell/xtrace.ts'
-import { concat } from '../../../../utils/bytes.ts'
-import { bodyAliasValues } from '../alias/alias.ts'
 
 /**
  * Put a declaration's value-shaping marks on a name before its value
@@ -340,7 +340,7 @@ export async function storeStagedArrays(
   shaping: AttrMarks = [],
   globalScope = false,
   inherit = false,
-): Promise<Result | null> {
+): Promise<RedirectResult | null> {
   const scoped = !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd)
   const locals = scoped ? session.localVars : null
   for (const [position, operand] of operands.entries()) {
@@ -541,7 +541,7 @@ export function declarationResult(
   errors: readonly string[],
   warnings: readonly string[] = [],
   failed: boolean = errors.length > 0,
-): Result {
+): RedirectResult {
   const lines = [...warnings, ...errors.filter((line) => line !== '')]
   return result(cmd, {
     exitCode: failed ? 1 : 0,
@@ -607,7 +607,7 @@ export function handleDeclarePrint(
   names: string[],
   session: SessionState,
   flags: ReadonlySet<string> = new Set(),
-): Result {
+): RedirectResult {
   const targets =
     names.length > 0
       ? names
@@ -693,7 +693,7 @@ export function handleDeclareFunctions(
   names: readonly string[],
   plus: ReadonlySet<string>,
   parser?: ParseScope,
-): Result {
+): RedirectResult {
   const printing = flags.has('p')
   const wanted = ['r', 'x'].filter((c) => flags.has(c))
   let present = names.filter((name) => name in session.functions)
@@ -750,7 +750,7 @@ export async function markNames(
   state: SessionView | null,
   attr: VarAttr,
   parser?: ParseScope,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const exporting = attr === VarAttr.Export
   const cmd = exporting ? 'export' : 'readonly'
   const { flags, names, bad } = splitDeclFlags(
@@ -798,7 +798,7 @@ export async function markFunctions(
   state: SessionView | null = null,
   parser?: ParseScope,
   kind: VarKind | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const errors: string[] = []
   const warnings: string[] = []
   if (operands.some((operand) => typeof operand !== 'string')) {
@@ -851,7 +851,7 @@ export async function markVariables(
   attr: VarAttr,
   on: boolean,
   kind: VarKind | null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const errors: string[] = []
   const warnings: string[] = []
   const stored = new Map<number, string>()

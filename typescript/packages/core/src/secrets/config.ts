@@ -35,7 +35,7 @@ export const BOOTSTRAP_SOURCES: readonly string[] = ['dotenv', 'env']
  * languages; Python exposes it as `provider` in code only because
  * `from` is a keyword there.
  */
-export const EnvVarSchema = z
+export const EnvVar = z
   .strictObject({
     value: z.string().optional(),
     readonly: z.boolean().default(false),
@@ -69,10 +69,10 @@ export const EnvVarSchema = z
     }
   })
 
-export type EnvVar = z.infer<typeof EnvVarSchema>
+export type EnvVar = z.infer<typeof EnvVar>
 
 /** The env block as an embedder or the config loader writes it. */
-export type EnvEntries = Record<string, string | z.input<typeof EnvVarSchema>>
+export type EnvEntries = Record<string, string | z.input<typeof EnvVar>>
 
 /**
  * A source-config value read from a bootstrap source.
@@ -82,13 +82,13 @@ export type EnvEntries = Record<string, string | z.input<typeof EnvVarSchema>>
  * bootstrap source may back one: those take no config of their own,
  * which is what stops the table from needing a dependency graph.
  */
-export const SecretRefSchema = z.strictObject({
+export const SecretRef = z.strictObject({
   from: z.string(),
   ref: z.string().default(''),
   key: z.string(),
 })
 
-export type SecretRef = z.infer<typeof SecretRefSchema>
+export type SecretRef = z.infer<typeof SecretRef>
 
 /**
  * One declared source instance: which source, and its config.
@@ -106,7 +106,7 @@ export type SecretRef = z.infer<typeof SecretRefSchema>
  * `SecretRef` and every other value passes through to the source's
  * model.
  */
-export const SecretSourceSchema = z.strictObject({
+export const SecretSource = z.strictObject({
   source: z.string(),
   // A custom check rather than `z.record`, which builds its output by
   // keyed assignment and so DROPS a `__proto__` key outright -- the
@@ -130,7 +130,7 @@ export const SecretSourceSchema = z.strictObject({
         // Reported, never thrown: a throw from inside a transform
         // escapes safeParse, and the config loader's own wrapper (which
         // names the instance) would never see the failure.
-        const parsed = SecretRefSchema.safeParse(item)
+        const parsed = SecretRef.safeParse(item)
         if (!parsed.success) {
           for (const issue of parsed.error.issues) {
             ctx.addIssue({ code: 'custom', message: issue.message, path: [name, ...issue.path] })
@@ -163,7 +163,7 @@ export const SecretSourceSchema = z.strictObject({
     }),
 })
 
-export type SecretSource = z.infer<typeof SecretSourceSchema>
+export type SecretSource = z.infer<typeof SecretSource>
 
 /** The `secrets:` block as an embedder or the config loader writes it. */
-export type SecretEntries = Record<string, z.input<typeof SecretSourceSchema>>
+export type SecretEntries = Record<string, z.input<typeof SecretSource>>

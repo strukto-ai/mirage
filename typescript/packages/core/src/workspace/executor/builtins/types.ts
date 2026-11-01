@@ -12,21 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ParseScope } from '../../../shell/parse/scope.ts'
-import type { EvaluationContext } from '../../evaluation.ts'
+import type { RedirectResult } from '../../../context/session_context.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
-import type { ExecuteFn } from '../../expand/types.ts'
+import type { ParseScope } from '../../../shell/parse/scope.ts'
+import type { EvaluationContext } from '../../evaluation.ts'
 import type { Argv } from '../../expand/argv.ts'
-import type { MountRegistry } from '../../mount/registry.ts'
+import type { ExecuteFn } from '../../expand/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
+import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
-import type { ExecutionNode } from '../../types.ts'
-
-export type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 /**
  * Runs a text line in a session, as `eval`, `source`, `bash -c`,
@@ -77,4 +75,4 @@ export interface BuiltinCall {
   jobTable?: JobTable
 }
 
-export type BuiltinFn = (call: BuiltinCall) => Promise<Result>
+export type BuiltinFn = (call: BuiltinCall) => Promise<RedirectResult>

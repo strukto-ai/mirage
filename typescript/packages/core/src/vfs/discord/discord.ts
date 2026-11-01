@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ByteSource } from '../../io/types.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import {
   follow as discordFollow,
@@ -22,6 +21,7 @@ import {
 } from '../../core/discord/read.ts'
 import { readdir as discordReaddir } from '../../core/discord/readdir.ts'
 import { stat as discordStat } from '../../core/discord/stat.ts'
+import { type ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
@@ -58,7 +58,7 @@ export const VFS_MD = `{prefix}
  * Discord's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
-export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
+export class DiscordVFS extends BaseVFS<DiscordAccessor> {
   override readonly readsRanges: boolean = true
   override readonly handed = {
     readdir: ['entry'],

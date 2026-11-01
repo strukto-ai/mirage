@@ -1,0 +1,258 @@
+{
+  "cases": [
+    {
+      "id": "mapping_order_is_rule_order",
+      "op": "rules",
+      "where": "commands.deny",
+      "value": [
+        {
+          "commands": {
+            "z": [
+              "/z"
+            ],
+            "a": [
+              "/a"
+            ]
+          }
+        }
+      ],
+      "options": {
+        "reason": "blocked"
+      },
+      "expect": [
+        {
+          "reason": "blocked",
+          "commands": [
+            "z"
+          ],
+          "paths": [
+            "/z"
+          ]
+        },
+        {
+          "reason": "blocked",
+          "commands": [
+            "a"
+          ],
+          "paths": [
+            "/a"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "grouped_hides_and_mode_aliases",
+      "op": "paths",
+      "where": "paths",
+      "value": {
+        "hide": [
+          "/private",
+          {
+            "patterns": [
+              "*.pem"
+            ],
+            "reason": "keys"
+          }
+        ],
+        "show": {
+          "/private/public": "r"
+        }
+      },
+      "expect": {
+        "hide": [
+          "/private",
+          "*.pem"
+        ],
+        "show": [
+          {
+            "path": "/private/public",
+            "mode": "read"
+          }
+        ],
+        "reasons": [
+          {
+            "patterns": [
+              "*.pem"
+            ],
+            "reason": "keys"
+          }
+        ]
+      }
+    },
+    {
+      "id": "lone_surrogate_path_round_trip",
+      "op": "paths",
+      "where": "paths",
+      "value": {
+        "hide": [
+          "/data/\udc80"
+        ]
+      },
+      "expect": {
+        "hide": [
+          "/data/\udc80"
+        ]
+      }
+    },
+    {
+      "id": "null_is_not_a_reason",
+      "op": "rule",
+      "where": "commands.deny[0]",
+      "value": {
+        "commands": [
+          "rm"
+        ],
+        "reason": null
+      },
+      "error": ".reason must be a string"
+    },
+    {
+      "id": "blank_command_is_refused",
+      "op": "rules",
+      "where": "deny",
+      "value": [
+        " "
+      ],
+      "error": "must name a command"
+    },
+    {
+      "id": "ambiguous_command_path_lists_are_refused",
+      "op": "rule",
+      "where": "deny",
+      "value": {
+        "commands": [
+          "rm"
+        ],
+        "paths": [
+          "/x"
+        ]
+      },
+      "error": "map each command to its paths"
+    },
+    {
+      "id": "mount_boundary_is_a_component",
+      "op": "under",
+      "where": "mount.paths",
+      "options": {
+        "root": "/data"
+      },
+      "value": [
+        "/database/x"
+      ],
+      "error": "outside the mount"
+    },
+    {
+      "id": "relative_hide_is_refused",
+      "op": "paths",
+      "where": "paths",
+      "value": {
+        "hide": [
+          "secret/file"
+        ]
+      },
+      "error": "must be an absolute path"
+    },
+    {
+      "id": "store_plane_defaults",
+      "op": "config",
+      "where": "store",
+      "options": {
+        "names": "store"
+      },
+      "value": {
+        "namespace": {},
+        "workspace": {
+          "type": "s3",
+          "bucket": "state",
+          "default_content_type": "application/octet-stream"
+        }
+      },
+      "expect": null
+    },
+    {
+      "id": "observer_cannot_use_redis",
+      "op": "config",
+      "where": "store",
+      "options": {
+        "names": "store"
+      },
+      "value": {
+        "observer": {
+          "type": "redis"
+        }
+      },
+      "error": "history only grows"
+    },
+    {
+      "id": "jobs_cannot_use_disk",
+      "op": "config",
+      "where": "store",
+      "options": {
+        "names": "store"
+      },
+      "value": {
+        "jobs": {
+          "type": "disk"
+        }
+      },
+      "error": "cannot be disk"
+    },
+    {
+      "id": "s3_only_hosts_workspace",
+      "op": "config",
+      "where": "store",
+      "options": {
+        "names": "store"
+      },
+      "value": {
+        "namespace": {
+          "type": "s3"
+        }
+      },
+      "error": "cannot be s3"
+    },
+    {
+      "id": "index_requires_discriminator",
+      "op": "config",
+      "where": "index",
+      "options": {
+        "names": "index"
+      },
+      "value": {
+        "ttl": 30
+      },
+      "error": "needs a `type`"
+    },
+    {
+      "id": "unknown_workspace_keys_are_refused",
+      "op": "config",
+      "where": "config",
+      "value": {
+        "mount": {}
+      },
+      "error": "unknown config key `mount`"
+    },
+    {
+      "id": "cache_keys_are_backend_specific",
+      "op": "config",
+      "where": "cache",
+      "options": {
+        "names": "cache"
+      },
+      "value": {
+        "type": "ram",
+        "url": "redis://x"
+      },
+      "error": "unknown cache (ram) key `url`"
+    },
+    {
+      "id": "prototype_spelling_is_still_an_unknown_key",
+      "op": "config",
+      "where": "config",
+      "value": {
+        "__proto__": {}
+      },
+      "error": "unknown config key `__proto__`"
+    }
+  ]
+}

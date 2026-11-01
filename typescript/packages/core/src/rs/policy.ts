@@ -16,6 +16,7 @@ import type { util } from 'zod'
 import type { AdmissionRules, CommandRule } from '../policy/types.ts'
 import type { MountMode, ProcessScope, Visibility } from '../types.ts'
 import type { LinkStep } from '../utils/path.ts'
+import { fromUnits, units } from './document.ts'
 import { MovableStream } from './stream.ts'
 
 export type Wire = Record<string, util.JSONType>
@@ -45,19 +46,6 @@ export class PolicyMatcher {
     stream.feed(encoder.encode(JSON.stringify({ op, ...args })))
     return JSON.parse(decoder.decode(stream.finish()))
   }
-}
-
-/** Text as the code points the stream reads, lone surrogates kept. Mirrors Python's units. */
-export function units(value: string): number[] {
-  return Array.from(value, (ch) => ch.codePointAt(0) ?? 0)
-}
-
-/** Code points from the stream back as text. Mirrors Python's from_units. */
-export function fromUnits(value: readonly number[]): string {
-  let out = ''
-  for (let at = 0; at < value.length; at += 4096)
-    out += String.fromCodePoint(...value.slice(at, at + 4096))
-  return out
 }
 
 /** One rule in the stream's wire shape. Mirrors Python's rule_wire. */

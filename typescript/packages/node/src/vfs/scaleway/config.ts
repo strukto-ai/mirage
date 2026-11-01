@@ -12,25 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  makeS3Alias,
-  REGION_ALIAS_SCHEMA,
-  type S3AliasConfig,
-  type S3AliasConfigRedacted,
-} from '../s3_alias.ts'
+import { makeS3Alias, REGION_ALIAS_SCHEMA, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface ScalewayConfig extends S3AliasConfig {
   region: string
 }
 
-export type ScalewayConfigRedacted = S3AliasConfigRedacted
-
-export const ScalewayConfigSchema = REGION_ALIAS_SCHEMA
-
-export const ALIAS = makeS3Alias<ScalewayConfig, ScalewayConfigRedacted>({
-  schema: ScalewayConfigSchema,
+export const ScalewayConfig = makeS3Alias({
+  schema: REGION_ALIAS_SCHEMA,
   endpointFor: (config) => `https://s3.${config.region}.scw.cloud`,
 })
-
-export const resolvedScalewayEndpoint = ALIAS.resolvedEndpoint
-export const scalewayToS3Config = ALIAS.toS3Config

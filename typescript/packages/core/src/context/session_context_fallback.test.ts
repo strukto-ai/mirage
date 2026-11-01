@@ -11,43 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import type { ByteSource } from '../io/types.ts'
-import { expandPattern, resolveGlobWith } from '../utils/glob_walk.ts'
-import { newStatusWriter, runWithLineAbort } from '../workspace/abort.ts'
-import { CommandSpec } from '../commands/spec/types.ts'
-import { CLIHandler } from '../commands/cli/types.ts'
-
-import { EvaluationContext } from '../workspace/evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  sessionCaller,
-  getAdmission,
-  getCurrentSessionFor,
-  getCurrentSession,
-  isProgramInvocation,
-  sessionVisibility,
-  redirectPathsFor,
-  redirectTargetJudged,
-  runAsProgram,
-  runWithAdmission,
-  runWithRedirectPaths,
-  runWithSession,
-  sessionUmask,
-  getCurrentEvaluation,
-  runWithEvaluation,
-  currentCaller,
-  runWithCaller,
-  callerSignal,
-  inLanding,
-  runLanding,
-} from './session_context.ts'
-import { CLI } from '../commands/cli/types.ts'
-import { IOResult, materialize } from '../io/types.ts'
-import { handleXargs as streamXargs } from '../workspace/executor/builtins/xargs/xargs.ts'
-import { seedVar, sessionView } from '../workspace/session/state.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../types.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
 import { searchScope } from '../core/slug_tree/search.ts'
 import { SlugTree } from '../core/slug_tree/tree.ts'
+import type { ByteSource } from '../io/types.ts'
+import { IOResult, materialize } from '../io/types.ts'
+import type { Policy } from '../policy/base.ts'
+import { SessionProfile } from '../policy/profile.ts'
 import {
   type Action,
   type CommandRule,
@@ -56,18 +28,44 @@ import {
   Outcome,
   Scope,
 } from '../policy/types.ts'
-import type { Policy } from '../policy/base.ts'
+import type { DispatchFn } from '../runtime/types.ts'
+import { readers } from '../test-utils.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../types.ts'
+import type * as asyncContextModule from '../utils/async_context.ts'
+import { expandPattern, resolveGlobWith } from '../utils/glob_walk.ts'
+import { pathVisible } from '../utils/hidden.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import type { Handed } from '../vfs/types.ts'
+import { newStatusWriter, runWithLineAbort } from '../workspace/abort.ts'
+import { EvaluationContext } from '../workspace/evaluation.ts'
+import { handleXargs as streamXargs } from '../workspace/executor/builtins/xargs/xargs.ts'
+import { Files, readerOf } from '../workspace/files.ts'
 import type { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
-import { parseSessionProfile } from '../policy/profile.ts'
-import { RAMVFS } from '../vfs/ram/ram.ts'
+import { seedVar, sessionView } from '../workspace/session/state.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
-import type * as asyncContextModule from '../utils/async_context.ts'
-import { pathVisible } from '../utils/hidden.ts'
-import { Files, readerOf } from '../workspace/files.ts'
-import { readers } from '../test-utils.ts'
-import type { DispatchFn } from '../runtime/types.ts'
-import type { Handed } from '../vfs/types.ts'
+import {
+  callerSignal,
+  currentCaller,
+  getAdmission,
+  getCurrentEvaluation,
+  getCurrentSession,
+  getCurrentSessionFor,
+  inLanding,
+  isProgramInvocation,
+  redirectPathsFor,
+  redirectTargetJudged,
+  runAsProgram,
+  runLanding,
+  runWithAdmission,
+  runWithCaller,
+  runWithEvaluation,
+  runWithRedirectPaths,
+  runWithSession,
+  sessionCaller,
+  sessionUmask,
+  sessionVisibility,
+} from './session_context.ts'
 
 const DEC = new TextDecoder()
 
@@ -427,12 +425,12 @@ describe('a named facade session on the fallback storage', () => {
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
-        profiles: { agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }) },
+        profiles: { agent: SessionProfile({ paths: { hide: ['/data/vault'] } }) },
         profile: 'agent',
       },
     )
     try {
-      const host = ws.createSession('host', { profile: parseSessionProfile({}) })
+      const host = ws.createSession('host', { profile: SessionProfile({}) })
       const wide = new Session(ws, host.sessionId).vfs
       await wide.mkdir('/data/vault')
       await wide.write('/data/vault/secret', 'top\n')
@@ -865,7 +863,7 @@ it('keeps each browser session’s permissions, umask and glob settings across s
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const loose = ws.createSession('loose')
   const tight = ws.createSession('tight', {
-    profile: parseSessionProfile({ mounts: { '/data': 'r' }, paths: { hide: ['/data/private'] } }),
+    profile: SessionProfile({ mounts: { '/data': 'r' }, paths: { hide: ['/data/private'] } }),
   })
   loose.umask = 0o022
   loose.shopts.dotglob = true
@@ -923,7 +921,7 @@ it('keeps each browser session’s permissions, umask and glob settings across s
 it('keeps unbound file calls restrictive when a wider browser session shadows their owner', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const narrow = ws.createSession('narrow', {
-    profile: parseSessionProfile({ mounts: { '/data': 'r' }, paths: { hide: ['/data/secret'] } }),
+    profile: SessionProfile({ mounts: { '/data': 'r' }, paths: { hide: ['/data/secret'] } }),
   })
   const wide = ws.createSession('wide')
   const [resume, releaseNarrow] = gate()
@@ -960,7 +958,7 @@ it('walks a nested mount under the command’s own gate while another session’
     { mode: MountMode.WRITE },
   )
   const sealed = ws.createSession('sealed', {
-    profile: parseSessionProfile({
+    profile: SessionProfile({
       commands: { deny: [{ reason: 'sealed', commands: { pause: ['/data/sub/box'] } }] },
     }),
   })
@@ -1012,7 +1010,7 @@ it('walks dotted operands with the command’s own probe while another session r
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const wide = ws.createSession('wide')
   const hider = ws.createSession('hider', {
-    profile: parseSessionProfile({ paths: { hide: ['/data/h'] } }),
+    profile: SessionProfile({ paths: { hide: ['/data/h'] } }),
   })
   const [held, release] = gate()
   const [started, start] = gate()
@@ -1047,7 +1045,7 @@ it('walks dotted operands with the command’s own probe while another session r
 it('links under the command’s own hides while another session’s hides are live', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const hider = ws.createSession('hider', {
-    profile: parseSessionProfile({ paths: { hide: ['/data/x'] } }),
+    profile: SessionProfile({ paths: { hide: ['/data/x'] } }),
   })
   const wide = ws.createSession('wide')
   const [held, release] = gate()
@@ -1122,7 +1120,7 @@ describe('a line beside another session’s paused line on the fallback storage'
       Promise.resolve({ ...asked, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, onAsk: allowOnce })
     const asker = ws.createSession('asker', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         commands: { ask: [{ reason: 'review', paths: ['/data/review/*'] }] },
       }),
     })
@@ -1155,7 +1153,7 @@ describe('a line beside another session’s paused line on the fallback storage'
   it('reports the session’s own mount mode', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const narrow = ws.createSession('narrow', {
-      profile: parseSessionProfile({ mounts: { '/data': 'r' } }),
+      profile: SessionProfile({ mounts: { '/data': 'r' } }),
     })
     const wide = ws.createSession('wide')
     const holds = registerPauses(ws)
@@ -1206,7 +1204,7 @@ describe('a line beside another session’s paused line on the fallback storage'
 it('judges a named facade’s op by its own rules when a wider session binds meanwhile', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   ws.createSession('sealed', {
-    profile: parseSessionProfile({
+    profile: SessionProfile({
       commands: { deny: [{ reason: 'sealed', paths: ['/data/secret'] }] },
     }),
   })
@@ -1253,7 +1251,7 @@ it('judges a named facade’s op by its own rules when a wider session binds mea
 it('expands an ambient glob under every live session’s hides', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const hider = ws.createSession('hider', {
-    profile: parseSessionProfile({ paths: { hide: ['/data/secret'] } }),
+    profile: SessionProfile({ paths: { hide: ['/data/secret'] } }),
   })
   const wide = ws.createSession('wide')
   const [held, release] = gate()
@@ -1297,7 +1295,7 @@ it('expands an ambient glob under every live session’s hides', async () => {
 it('checks a link target under the caller’s own view while a peer hides the link', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const peer = ws.createSession('peer', {
-    profile: parseSessionProfile({ paths: { hide: ['/data/link'] } }),
+    profile: SessionProfile({ paths: { hide: ['/data/link'] } }),
   })
   const [held, release] = gate()
   const [entered, enter] = gate()

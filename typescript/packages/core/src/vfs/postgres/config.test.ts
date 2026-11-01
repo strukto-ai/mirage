@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { PostgresConfigSchema, resolvePostgresConfig } from './config.ts'
 import { parseConfigWithSchema } from '../secrets.ts'
+import { PostgresConfig, resolvePostgresConfig } from './config.ts'
 
 describe('PostgresConfig', () => {
   it('applies Python-parity defaults', () => {
@@ -43,7 +43,7 @@ describe('PostgresConfig', () => {
 
 describe('PostgresConfigSchema parsing', () => {
   it('translates snake_case YAML keys to camelCase', () => {
-    const out = parseConfigWithSchema(PostgresConfigSchema, {
+    const out = parseConfigWithSchema(PostgresConfig, {
       dsn: 'postgres://h/d',
       max_read_rows: 50,
       max_read_bytes: 2048,
@@ -58,7 +58,7 @@ describe('PostgresConfigSchema parsing', () => {
   })
 
   it('preserves already-camelCase keys', () => {
-    const out = parseConfigWithSchema(PostgresConfigSchema, {
+    const out = parseConfigWithSchema(PostgresConfig, {
       dsn: 'postgres://h/d',
       maxReadRows: 50,
     })
@@ -66,7 +66,7 @@ describe('PostgresConfigSchema parsing', () => {
   })
 
   it('preserves the schemas array', () => {
-    const out = parseConfigWithSchema(PostgresConfigSchema, {
+    const out = parseConfigWithSchema(PostgresConfig, {
       dsn: 'postgres://h/d',
       schemas: ['public', 'analytics'],
     })

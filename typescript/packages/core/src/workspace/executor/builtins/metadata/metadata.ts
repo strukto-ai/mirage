@@ -12,21 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PolicyDenied } from '../../../../policy/index.ts'
-import type { FileStat, SetAttrFields } from '../../../../types.ts'
-import { FileType, PathSpec } from '../../../../types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
-import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
-import type { SessionState } from '../../../session/session.ts'
+import { readdirOp } from '../../../../commands/builtin/generic/crossmount/utils.ts'
+import { dispatchedReadTree } from '../../../../commands/builtin/generic_bind/files.ts'
 import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import { dispatchedReadTree } from '../../../../commands/builtin/generic_bind/files.ts'
-import { readdirOp } from '../../../../commands/builtin/generic/crossmount/utils.ts'
 import { beforeFullWalk, treeWalk } from '../../../../commands/builtin/utils/tree.ts'
-import type { NamespaceReader } from '../../../dispatcher/reader.ts'
 import { UsageError } from '../../../../commands/errors.ts'
 import type { FlagView } from '../../../../commands/spec/flag_view.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { callerSignal } from '../../../../context/session_context.ts'
 import {
   fsStrerror,
   isEacces,
@@ -35,16 +29,22 @@ import {
   isRefusal,
   walkRefusal,
 } from '../../../../errors/fs.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
 import { fsErrorLine } from '../../../../errors/render.ts'
-import { CycleError, ancestors } from '../../../../utils/path.ts'
+import { PolicyDenied } from '../../../../policy/index.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import type { FileStat, SetAttrFields } from '../../../../types.ts'
+import { FileType, PathSpec } from '../../../../types.ts'
+import { systemDate } from '../../../../utils/clock.ts'
+import { ancestors, CycleError } from '../../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
+import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
+import type { NamespaceReader } from '../../../dispatcher/reader.ts'
+import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, result } from '../shared.ts'
-import type { Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
-import { posixPhrase } from '../../../../errors/posix.ts'
-import { callerSignal } from '../../../../context/session_context.ts'
-import { systemDate } from '../../../../utils/clock.ts'
 
 export function parseOwner(text: string): [number | string | null, number | string | null] {
   const sep = text.indexOf(':')
@@ -350,7 +350,7 @@ export function walkedName(typed: string, root: PathSpec, path: PathSpec): strin
 // Whether chown or chgrp changes a link's referent, or GNU's refusal. The
 // last of -h and --dereference wins; -R implies -h, and refuses an explicit
 // --dereference, which needs the -H or -L walk mirage does not offer.
-export function followsLinks(cmd: string, fl: FlagView): [boolean, Result | null] {
+export function followsLinks(cmd: string, fl: FlagView): [boolean, RedirectResult | null] {
   const last = fl.typedOrder('no_dereference', 'dereference').at(-1)
   if (!fl.asBool('recursive')) return [last !== 'no_dereference', null]
   if (last === 'dereference') {
@@ -401,7 +401,7 @@ export async function changeOwner(
   operands: readonly PathSpec[],
   uid: number | string | null,
   gid: number | string | null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const [follow, refused] = followsLinks(cmd, fl)
   if (refused !== null) return refused
   const report = verbosity(fl)

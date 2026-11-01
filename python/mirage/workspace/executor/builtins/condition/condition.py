@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from mirage.commands.builtin.utils.links import link_view
 from mirage.context import program_invocation, reset_admission, set_admission
 from mirage.io import IOResult
@@ -22,14 +23,16 @@ from mirage.shell.errors import ExitSignal
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.types import PathSpec, word_text
 from mirage.view.types import SessionView
+from mirage.workspace.executor.builtins.condition.errors import (
+    CondError,
+    CondRefused,
+)
 from mirage.workspace.executor.builtins.condition.flat import eval_flat
 from mirage.workspace.executor.builtins.condition.tree import eval_cond
 from mirage.workspace.executor.builtins.condition.types import (
     AdmitTest,
     CondContext,
-    CondError,
     CondNode,
-    CondRefused,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.files import Files

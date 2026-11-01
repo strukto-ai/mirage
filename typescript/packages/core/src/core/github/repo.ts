@@ -15,10 +15,10 @@
 // Repository arguments are read as go-gh v2.13.0 reads them (MIT; see
 // licenses/third_party/go-gh.txt).
 
-import { GitHubApiError, type GitHubTransport } from './client.ts'
-import { GRAPHQL_PATH } from './constants.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { GitHubApiError, type GitHubTransport } from './client.ts'
+import { GRAPHQL_PATH } from './constants.ts'
 import { githubPages } from './paginate.ts'
 
 export interface RepoRef {
@@ -117,11 +117,6 @@ export function viewRepo(transport: GitHubTransport, ref: RepoRef): Promise<unkn
   return transport.get(`/repos/${ref.owner}/${ref.repo}`)
 }
 
-interface GraphQLErrorRow {
-  message?: string
-  path?: (string | number)[]
-}
-
 /**
  * Run one GraphQL query and return its data, refusing the way gh does.
  *
@@ -136,7 +131,10 @@ export async function graphqlData(
 ): Promise<Record<string, unknown>> {
   const response = (await transport.request('POST', GRAPHQL_PATH, { query, variables })) as {
     data?: Record<string, unknown> | null
-    errors?: GraphQLErrorRow[]
+    errors?: {
+      message?: string
+      path?: (string | number)[]
+    }[]
   }
   if (response.errors !== undefined && response.errors.length > 0) {
     const messages = response.errors.map((error) => {

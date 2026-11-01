@@ -13,19 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-
-import {
-  resolveQdrantConfig,
-  type QdrantConfig,
-  type QdrantConfigResolved,
-} from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { INVALID, makeDetectScope, type DetectFn } from '../hierarchy/scope.ts'
 import { filtersOf } from '../vector/scope.ts'
 import { scopesFor } from './scope.ts'
 
-function cfg(over: Partial<QdrantConfig> = {}): QdrantConfigResolved {
+function cfg(over: Partial<QdrantConfig> = {}): ReturnType<typeof resolveQdrantConfig> {
   return resolveQdrantConfig({
     groupBy: ['label', 'kind'],
     idField: 'id',
@@ -39,7 +34,7 @@ function cfg(over: Partial<QdrantConfig> = {}): QdrantConfigResolved {
 
 const config = cfg()
 
-function detect(c: QdrantConfigResolved): DetectFn {
+function detect(c: ReturnType<typeof resolveQdrantConfig>): DetectFn {
   return makeDetectScope(scopesFor(c))
 }
 

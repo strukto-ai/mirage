@@ -16,7 +16,7 @@ import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { recordQueries } from '../../utils/record_search.ts'
-import type { LanceDBConfigResolved } from '../../vfs/lancedb/config.ts'
+import type { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PATH_SAFE } from '../hierarchy/codec.ts'
 import { filtersOf, tableOf } from '../vector/scope.ts'
 import type { Row } from '../vector/types.ts'
@@ -40,7 +40,7 @@ export const CARD_WORDS: ReadonlySet<string> = new Set([
  * A row's card path below its table: its group values as the listing names
  * them, then `<id>.md`. Mirrors Python's `card_path`.
  */
-export function cardPath(config: LanceDBConfigResolved, row: Row): string[] {
+export function cardPath(config: ReturnType<typeof resolveLanceDBConfig>, row: Row): string[] {
   const segments: string[] = []
   for (const column of config.groupBy) {
     const value = row[column]

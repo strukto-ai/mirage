@@ -12,23 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
-import type { Stats } from 'ssh2'
+import { eacces, enoent } from '@struktoai/mirage-core/errors/fs'
 import { FileStat, FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { epochToIso } from '@struktoai/mirage-core/utils/dates'
-import { eacces, enoent } from '@struktoai/mirage-core/errors/fs'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { S_IFDIR, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
+import type { Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
-import {
-  S_IFDIR,
-  S_IFREG,
-  isDirectoryAttrs,
-  isNoSuchFile,
-  isPermissionDenied,
-  joinRoot,
-} from './utils.ts'
+import { isDirectoryAttrs, isNoSuchFile, isPermissionDenied, joinRoot } from './utils.ts'
 
 export const FIND = 'env LC_ALL=C find -L'
 export const TREE_FORMAT = '%y %m %s %T@ %A@ %U %G %P\\0'

@@ -34,7 +34,7 @@ export const SESSION_SCOPED: unique symbol = Symbol.for('mirage.policy.sessionSc
  * session-write gate) asks `Policies.wantsFor` instead, which consults
  * this brand so one profile's entry point does not charge every session.
  */
-export interface SessionScoped {
+export interface SessionScopedMixin {
   readonly [SESSION_SCOPED]: true
 
   /** Whether this policy's `method` will speak for one session. */
@@ -42,6 +42,6 @@ export interface SessionScoped {
 }
 
 /** Whether this policy speaks per session. */
-export function isSessionScoped(policy: Policy): policy is Policy & SessionScoped {
-  return (policy as Partial<SessionScoped>)[SESSION_SCOPED] === true
+export function isSessionScoped(policy: Policy): policy is Policy & SessionScopedMixin {
+  return (policy as Partial<SessionScopedMixin>)[SESSION_SCOPED] === true
 }

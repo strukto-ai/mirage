@@ -14,29 +14,28 @@
 
 import { z } from 'zod'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import type { ByteWindow } from '../../utils/ranges.ts'
 import { ByteSpool } from '../../io/spool.ts'
+import type { ByteWindow } from '../../utils/ranges.ts'
 import { apiRequest, apiStream, NO_RETRY } from '../api/client.ts'
-import { DatabricksVolumeApiError, DatabricksVolumeCredentialError } from './errors.ts'
-import type { DirectoryEntry, FileMetadata } from './types.ts'
+import { DatabricksVolumeCredentialError, errorOf } from './errors.ts'
+import type { DirectoryEntry as DirectoryRow, FileMetadata } from './types.ts'
 
 type Endpoint = 'files' | 'directories'
 
 /** The Files API takes a file in one PUT of at most 5 GiB. */
 export const MAX_UPLOAD_SIZE = 5 * 1024 ** 3
 
-const ENTRY = z.object({
+const DirectoryEntry = z.object({
   path: z.string(),
   is_directory: z.boolean().default(false),
   file_size: z.number().int().nonnegative().nullish(),
   last_modified: z.number().int().nullish(),
 })
-const PAGE = z.object({
-  contents: z.array(ENTRY).default([]),
+const DirectoryPage = z.object({
+  contents: z.array(DirectoryEntry).default([]),
   next_page_token: z.string().nullish(),
 })
 const RESPONSE = z.object({ headers: z.record(z.string(), z.string()) })
-const ERROR = z.object({ error_code: z.string().nullish(), message: z.string().nullish() })
 
 function url(accessor: DatabricksVolumeAccessor, endpoint: Endpoint, path: string): string {
   const encoded = path
@@ -59,23 +58,6 @@ async function headers(accessor: DatabricksVolumeAccessor): Promise<Record<strin
     throw new Error('databricks_volume: token must be a nonblank string without CR or LF')
   }
   return { Authorization: `Bearer ${token}` }
-}
-
-function errorOf(response: Response, text: string): Error {
-  let payload: unknown = null
-  try {
-    payload = JSON.parse(text)
-  } catch {
-    payload = null
-  }
-  const parsed = ERROR.safeParse(payload)
-  const code = parsed.success ? (parsed.data.error_code ?? null) : null
-  const message = parsed.success ? (parsed.data.message ?? text) : text
-  return new DatabricksVolumeApiError(
-    `databricks_volume: HTTP ${String(response.status)} ${message}`,
-    response.status,
-    code,
-  )
 }
 
 async function request(
@@ -127,11 +109,11 @@ export async function listDirectoryContents(
   accessor: DatabricksVolumeAccessor,
   path: string,
   limit?: number,
-): Promise<DirectoryEntry[]> {
-  const entries: DirectoryEntry[] = []
+): Promise<DirectoryRow[]> {
+  const entries: DirectoryRow[] = []
   let token: string | null | undefined
   do {
-    const page = PAGE.parse(
+    const page = DirectoryPage.parse(
       await request(accessor, 'GET', 'directories', path, {
         params: token === undefined || token === null ? {} : { page_token: token },
       }),

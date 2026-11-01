@@ -12,24 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const WasabiConfigSchema = browserAliasSchema({
-  region: z.string().optional().meta({
-    description:
-      'Region of the bucket. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set.',
-    default: 'us-east-1',
+export const WasabiConfig = makeBrowserS3Alias({
+  schema: browserAliasSchema({
+    region: z.string().optional().meta({
+      description:
+        'Region of the bucket. It builds the endpoint `https://s3.<region>.wasabisys.com` (`https://s3.wasabisys.com` for `us-east-1`) unless `endpoint` is set.',
+      default: 'us-east-1',
+    }),
   }),
-})
-
-export type WasabiConfig = ConfigOf<typeof WasabiConfigSchema>
-
-export type WasabiConfigRedacted = RedactedConfig<WasabiConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<WasabiConfig, WasabiConfigRedacted, string>({
-  schema: WasabiConfigSchema,
   endpointFor: (config) => {
     const region = config.region ?? 'us-east-1'
     return region === 'us-east-1'
@@ -38,5 +32,4 @@ export const ALIAS = makeBrowserS3Alias<WasabiConfig, WasabiConfigRedacted, stri
   },
 })
 
-export const resolvedWasabiEndpoint = ALIAS.resolvedEndpoint
-export const wasabiToS3Config = ALIAS.toS3Config
+export type WasabiConfig = ConfigOf<typeof WasabiConfig>

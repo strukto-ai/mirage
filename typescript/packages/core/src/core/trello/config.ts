@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr, z } from '../../vfs/secrets.ts'
-import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-export const TrelloConfigSchema = z.object({
+export const TrelloConfig = z.object({
   ...timeoutShape,
   apiKey: secretStr().describe('Trello API key.'),
   apiToken: secretStr().describe('Trello API token.'),
@@ -39,6 +39,4 @@ export const TrelloConfigSchema = z.object({
   }),
 })
 
-export type TrelloConfig = ConfigOf<typeof TrelloConfigSchema>
-
-export type TrelloConfigRedacted = RedactedConfig<TrelloConfig, 'apiKey' | 'apiToken'>
+export type TrelloConfig = ConfigOf<typeof TrelloConfig>

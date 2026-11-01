@@ -12,10 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_operations'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import type { ExecuteResult, Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type {
   BashOperations,
   EditOperations,
@@ -25,10 +21,14 @@ import type {
   ReadOperations,
   WriteOperations,
 } from '@earendil-works/pi-coding-agent'
-import picomatch from 'picomatch'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { decode, refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import type { ExecuteResult, Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import picomatch from 'picomatch'
 
 /**
  * Options for `mirageOperations`: `staleWriteProtection` (default `true`)
@@ -57,17 +57,15 @@ export interface MirageOperationsBundle {
   ls: LsOperations
 }
 
-interface WalkOptions {
-  ignoreMatchers: ((path: string) => boolean)[]
-  limit: number
-}
-
 async function walkDirectory(
   vfs: Files,
   dir: string,
   cwdPrefix: string,
   matcher: (relativePath: string) => boolean,
-  opts: WalkOptions,
+  opts: {
+    ignoreMatchers: ((path: string) => boolean)[]
+    limit: number
+  },
   results: string[],
 ): Promise<void> {
   if (results.length >= opts.limit) return

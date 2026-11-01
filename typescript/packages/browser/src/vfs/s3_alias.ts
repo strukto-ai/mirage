@@ -12,16 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { S3VFS } from './s3/s3.ts'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
+import type { ConfigOf, RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import {
   FIELD_NORMALIZERS,
   redactConfigWithSchema,
   secretSchema,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
+import type { S3BrowserPresignedUrlProvider } from './s3/config.ts'
 import { S3_BROWSER_RENAME } from './s3/config.ts'
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
-import type { S3BrowserPresignedUrlProvider, S3Config, S3ConfigRedacted } from './s3/config.ts'
+import { S3VFS } from './s3/s3.ts'
 
 /**
  * Shared shape for the browser's S3-compatible providers.
@@ -132,21 +135,20 @@ export interface BrowserAlias<C, R, E extends string | undefined> {
  * only by supabase, whose gateway does not serve virtual-hosted style.
  */
 export function makeBrowserS3Alias<
-  C extends S3BrowserAliasConfig,
-  R,
+  S extends z.ZodObject,
   E extends string | undefined = string | undefined,
 >(options: {
-  schema: z.ZodObject<z.ZodRawShape>
-  endpointFor?: (config: C) => E
+  schema: S
+  endpointFor?: (config: ConfigOf<S> & S3BrowserAliasConfig) => E
   regionDefault?: string
   forcePathStyle?: boolean
-}): BrowserAlias<C, R, E> {
+}): S & BrowserAlias<ConfigOf<S> & S3BrowserAliasConfig, RedactedSchema<S>, E> {
   const { schema, endpointFor, regionDefault, forcePathStyle } = options
-  const resolvedEndpoint = (config: C): string | E => {
+  const resolvedEndpoint = (config: ConfigOf<S> & S3BrowserAliasConfig): string | E => {
     if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
     return endpointFor === undefined ? (undefined as E) : endpointFor(config)
   }
-  return {
+  const alias: BrowserAlias<ConfigOf<S> & S3BrowserAliasConfig, RedactedSchema<S>, E> = {
     resolvedEndpoint,
     toS3Config: (config) => {
       const endpoint = resolvedEndpoint(config)
@@ -164,17 +166,9 @@ export function makeBrowserS3Alias<
         ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
       }
     },
-    redact: (config) => redactConfigWithSchema(schema, config) as unknown as R,
+    redact: (config) => redactConfigWithSchema(schema, config),
   }
-}
-
-/**
- * The snapshot state of an S3-compatible alias: its own name and its own
- * redacted config, not the `s3` name and S3 config it delegates to.
- */
-export interface S3AliasVFSState<TRedacted> {
-  type: string
-  config: TRedacted
+  return Object.assign(schema.clone(), alias)
 }
 
 /**
@@ -186,7 +180,10 @@ export interface S3AliasVFSState<TRedacted> {
  * and hands the varying pieces to `super`. Mirrors python `S3AliasVFS` in
  * `mirage/vfs/s3_alias.py`.
  */
-export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> extends S3VFS {
+export abstract class S3AliasVFS<
+  TConfig,
+  TRedacted extends RedactedSchema<typeof S3Config>,
+> extends S3VFS {
   override readonly name: string
   readonly aliasConfig: TConfig
   private readonly redactAlias: (config: TConfig) => TRedacted
@@ -202,7 +199,7 @@ export abstract class S3AliasVFS<TConfig, TRedacted extends S3ConfigRedacted> ex
     this.redactAlias = alias.redact
   }
 
-  override getState(): Promise<S3AliasVFSState<TRedacted>> {
+  override getState(): Promise<ConfigState<TRedacted>> {
     return Promise.resolve({
       type: this.name,
       config: this.redactAlias(this.aliasConfig),

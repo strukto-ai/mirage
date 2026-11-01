@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CommandTimeoutError } from '../../../../errors/types.ts'
+import { SessionProfile } from '../../../../policy/profile.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { CommandTimeoutError } from '../../../../errors/types.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
-import { parseSessionProfile } from '../../../../policy/profile.ts'
 import { parseGroup, parseOwner, parseTouchStamp, walkOwned } from './metadata.ts'
 
 describe('parseOwner', () => {
@@ -584,7 +584,7 @@ async function sealedWs(mounted = false): Promise<Workspace> {
     { mode: MountMode.WRITE },
   )
   ws.createSession('g', {
-    profile: parseSessionProfile({
+    profile: SessionProfile({
       commands: {
         deny: [
           {

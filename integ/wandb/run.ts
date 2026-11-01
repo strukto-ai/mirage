@@ -1,19 +1,19 @@
-import { checkSchema } from './schema.ts'
-import { API_KEY } from '../server/wandb/store.ts'
-import { ops } from '../../typescript/packages/core/src/test-utils.ts'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { Workspace } from '../../typescript/packages/core/src/workspace/workspace/workspace.ts'
-import { WandbVFS } from '../../typescript/packages/core/src/vfs/wandb/wandb.ts'
-import { WandbConfigSchema } from '../../typescript/packages/core/src/core/wandb/config.ts'
-import { parseConfigWithSchema } from '../../typescript/packages/core/src/vfs/secrets.ts'
-import { MountMode, PathSpec } from '../../typescript/packages/core/src/types.ts'
+import { WandbConfig } from '../../typescript/packages/core/src/core/wandb/config.ts'
 import { readStream } from '../../typescript/packages/core/src/core/wandb/read.ts'
-import { selftest } from '../server/wandb/selftest.ts'
+import { ops } from '../../typescript/packages/core/src/test-utils.ts'
+import { MountMode, PathSpec } from '../../typescript/packages/core/src/types.ts'
+import { parseConfigWithSchema } from '../../typescript/packages/core/src/vfs/secrets.ts'
+import { WandbVFS } from '../../typescript/packages/core/src/vfs/wandb/wandb.ts'
+import { Workspace } from '../../typescript/packages/core/src/workspace/workspace/workspace.ts'
 import { startWandb } from '../server/wandb/fake.ts'
+import { selftest } from '../server/wandb/selftest.ts'
+import { API_KEY } from '../server/wandb/store.ts'
 import { checkRequests, requestChecks, type RequestResult } from './requests.ts'
+import { checkSchema } from './schema.ts'
 
 interface Result {
   name: string
@@ -62,7 +62,7 @@ checkSchema()
 await selftest()
 const server = await startWandb()
 const vfs = new WandbVFS(
-  parseConfigWithSchema(WandbConfigSchema, {
+  parseConfigWithSchema(WandbConfig, {
     entities: ['lab', 'other'],
     api_key: API_KEY,
     base_url: server.base,
@@ -107,7 +107,7 @@ try {
   assert.equal((await ops(vfs).stat(p(summary))).size, null)
   for (const page_size of [1, 5]) {
     const narrow = new WandbVFS(
-      parseConfigWithSchema(WandbConfigSchema, {
+      parseConfigWithSchema(WandbConfig, {
         entities: ['lab'],
         api_key: API_KEY,
         base_url: server.base,
@@ -136,7 +136,7 @@ try {
   )
   assert(!JSON.stringify(await vfs.getState()).includes(API_KEY))
   const unauth = new WandbVFS(
-    parseConfigWithSchema(WandbConfigSchema, {
+    parseConfigWithSchema(WandbConfig, {
       entities: ['lab'],
       api_key: 'invalid',
       base_url: server.base,

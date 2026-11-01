@@ -12,23 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createRequire } from 'node:module'
-import { constants as osConstants } from 'node:os'
-import { posix } from 'node:path'
-import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
 import { eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 import { registerPipeServer } from '@struktoai/mirage-core/runtime/sandbox/mounts'
 import type { PipeWriter } from '@struktoai/mirage-core/runtime/types'
+import { S_IFDIR, S_IFLNK, S_IFMT } from '@struktoai/mirage-core/utils/stat_view'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
+import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
+import { createRequire } from 'node:module'
+import { constants as osConstants } from 'node:os'
+import { posix } from 'node:path'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
 import { OPEN, OWNER, PIPE_PACKET_SIZE, SSH2_SFTP_MODULE, STATUS } from './constants.ts'
-import { SFTPStatusError, classifyErrno } from './errors.ts'
+import { classifyErrno, SFTPStatusError } from './errors.ts'
 
-const S_IFMT = 0o170000
-const S_IFDIR = 0o040000
-const S_IFLNK = 0o120000
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const NO_ATTRS = {} as Attributes
 
@@ -38,13 +36,13 @@ interface OpenFile {
   fd: number
 }
 
-interface OpenDir {
-  kind: 'dir'
-  path: string
-  done: boolean
-}
-
-type OpenHandle = OpenFile | OpenDir
+type OpenHandle =
+  | OpenFile
+  | {
+      kind: 'dir'
+      path: string
+      done: boolean
+    }
 
 function isDir(mode: number): boolean {
   return (mode & S_IFMT) === S_IFDIR

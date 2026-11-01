@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { BinAccessor } from '../../accessor/bin.ts'
-import { VFSName } from '../../types.ts'
-import { BaseVFS, type VFSStateBase } from '../base.ts'
-import type { FileStat, PathSpec, SetAttrFields } from '../../types.ts'
-import { readdir as binReaddir } from '../../core/bin/readdir.ts'
 import { read as binRead } from '../../core/bin/read.ts'
+import { readdir as binReaddir } from '../../core/bin/readdir.ts'
 import { refuse } from '../../core/bin/refuse.ts'
 import { stat as binStat } from '../../core/bin/stat.ts'
+import type { FileStat, PathSpec, SetAttrFields } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import { type VFSStateBase } from '../types.ts'
 
 /**
  * Read-only view VFS backing the /usr/bin mount. Lists one executable

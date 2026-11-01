@@ -26,6 +26,7 @@ from mirage.commands.spec.constants import OPERAND
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.core.generic import find_eval
+from mirage.core.generic import types as find_types
 from mirage.core.generic.find import modified_ts, walk_find
 from mirage.core.generic.find_eval import printf_kind
 from mirage.errors.constants import MISS_ERRORS
@@ -59,7 +60,7 @@ def parse_find_args(
     path: str | None = None,
     mindepth: str | None = None,
     empty: bool = False,
-) -> find_eval.FindArgs:
+) -> find_types.FindArgs:
     """The walk's arguments, from the line's expression or from flags.
 
     Args:
@@ -79,7 +80,7 @@ def parse_find_args(
     """
     if find is not None or texts:
         expr = find if find is not None else parse_find_expression(texts)
-        return find_eval.FindArgs(
+        return find_types.FindArgs(
             min_size=expr.min_size,
             max_size=expr.max_size,
             mtime_min=expr.mtime_min,
@@ -104,7 +105,7 @@ def parse_find_args(
         for word in (flag, value)
     ]
     limits = parse_find_expression(words) if words else FindExpr()
-    return find_eval.FindArgs(
+    return find_types.FindArgs(
         name=name,
         iname=iname,
         path_pattern=path,
@@ -218,7 +219,7 @@ async def _missing_start_detail(
 
 async def resolve_start(
     search: PathSpec,
-    args: find_eval.FindArgs,
+    args: find_types.FindArgs,
     stat_path: StatPath | None,
     *,
     is_link: bool = False,
@@ -312,8 +313,8 @@ async def resolve_start(
 def start_point_results(
     search_path: PathSpec,
     start: FileStat,
-    args: find_eval.FindArgs,
-    tree: find_eval.PredNode,
+    args: find_types.FindArgs,
+    tree: find_types.PredNode,
 ) -> list[str]:
     """Results for a start point that is not a directory.
 
@@ -366,8 +367,8 @@ def start_point_results(
 
 def root_dir_results(
     search_path: PathSpec,
-    args: find_eval.FindArgs,
-    tree: find_eval.PredNode,
+    args: find_types.FindArgs,
+    tree: find_types.PredNode,
     *,
     is_empty: bool | None,
 ) -> list[str]:
@@ -405,7 +406,7 @@ def root_dir_results(
 
 async def early_root(
     search: PathSpec,
-    args: find_eval.FindArgs,
+    args: find_types.FindArgs,
     start: StartPoint,
 ) -> list[str]:
     """Emit an independently known start point before asking for descendants.

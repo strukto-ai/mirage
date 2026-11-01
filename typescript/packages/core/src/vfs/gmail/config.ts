@@ -12,14 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GoogleConfigSchema } from '../../core/google/config.ts'
-import { type ConfigOf, type RedactedConfig } from '../secrets.ts'
+import { GoogleConfig } from '../../core/google/config.ts'
+import type { ConfigOf } from '../secrets.ts'
 
-export const GmailConfigSchema = GoogleConfigSchema
+export const GmailConfig = GoogleConfig
 
-export type GmailConfig = ConfigOf<typeof GmailConfigSchema>
-
-export type GmailConfigRedacted = RedactedConfig<
-  GmailConfig,
-  'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
->
+export type GmailConfig = ConfigOf<typeof GmailConfig>

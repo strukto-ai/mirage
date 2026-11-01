@@ -12,8 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { GoogleConfigSchema as GSheetsConfigSchema } from '../../core/google/config.ts'
-export type {
-  GoogleAppConfig as GSheetsConfig,
-  GoogleAppConfigRedacted as GSheetsConfigRedacted,
-} from '../../core/google/config.ts'
+export { GoogleConfig as GSheetsConfig } from '../../core/google/config.ts'

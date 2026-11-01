@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, secretStr } from '../../vfs/secrets.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
+import { secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-export const SlackConfigSchema = z.object({
+export const SlackConfig = z.object({
   ...timeoutShape,
   token: secretStr().describe(
     'Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`).',
@@ -32,4 +33,4 @@ export const SlackConfigSchema = z.object({
   }),
 })
 
-export type SlackConfig = ConfigOf<typeof SlackConfigSchema>
+export type SlackConfig = ConfigOf<typeof SlackConfig>

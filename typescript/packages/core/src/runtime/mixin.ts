@@ -36,7 +36,7 @@ export const LINE_EXECUTOR: unique symbol = Symbol.for('mirage.lineExecutor')
  * does not either: a line resolved to workspace runs on the workspace
  * executor inline, so there is no delegate to call.
  */
-export interface LineExecutor<E = unknown> {
+export interface LineExecutorMixin<E = unknown> {
   readonly [LINE_EXECUTOR]: true
 
   /**
@@ -63,8 +63,10 @@ export interface LineExecutor<E = unknown> {
 }
 
 /** Whether this runtime carries the whole-line capability. */
-export function isLineExecutor<T extends RuntimeIdentity>(runtime: T): runtime is T & LineExecutor {
-  return (runtime as Partial<LineExecutor>)[LINE_EXECUTOR] === true
+export function isLineExecutor<T extends RuntimeIdentity>(
+  runtime: T,
+): runtime is T & LineExecutorMixin {
+  return (runtime as Partial<LineExecutorMixin>)[LINE_EXECUTOR] === true
 }
 
 /**
@@ -74,7 +76,7 @@ export function isLineExecutor<T extends RuntimeIdentity>(runtime: T): runtime i
  */
 export const PROCESS_EXECUTOR: unique symbol = Symbol.for('mirage.processExecutor')
 
-export interface ProcessExecutor<E = unknown> {
+export interface ProcessExecutorMixin<E = unknown> {
   readonly [PROCESS_EXECUTOR]: true
   /**
    * Run the program `texts` names, with `ctx`'s working directory,
@@ -101,6 +103,6 @@ export interface ProcessExecutor<E = unknown> {
 
 export function isProcessExecutor<T extends RuntimeIdentity>(
   runtime: T,
-): runtime is T & ProcessExecutor {
-  return (runtime as Partial<ProcessExecutor>)[PROCESS_EXECUTOR] === true
+): runtime is T & ProcessExecutorMixin {
+  return (runtime as Partial<ProcessExecutorMixin>)[PROCESS_EXECUTOR] === true
 }

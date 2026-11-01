@@ -78,7 +78,7 @@ function formatSlackErrorMessage(
 
 // Slack reports failures as ok:false payloads, usually with a 200; a
 // non-2xx that still carries one keeps Slack's own wording.
-function slackHttpError(endpoint: string, response: Response, text: string): SlackApiError {
+function errorOf(endpoint: string, response: Response, text: string): SlackApiError {
   let data: unknown = null
   try {
     data = JSON.parse(text)
@@ -136,7 +136,7 @@ export abstract class HttpSlackTransport implements SlackTransport {
     const base = this.baseUrl().replace(/\/$/, '')
     const auth = await this.authHeaders(endpoint)
     const raw = await apiRequest(body === undefined ? 'GET' : 'POST', `${base}/${endpoint}`, {
-      errorOf: (response, text) => slackHttpError(endpoint, response, text),
+      errorOf: (response, text) => errorOf(endpoint, response, text),
       headers: { 'Content-Type': 'application/json; charset=utf-8', ...auth },
       ...(params === undefined ? {} : { params }),
       ...(body === undefined ? {} : { json: body }),

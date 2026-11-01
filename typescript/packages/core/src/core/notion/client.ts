@@ -19,9 +19,10 @@ import type {
   OAuthTokens,
 } from '@modelcontextprotocol/client'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
-import { API_VERSION, DEFAULT_API_BASE_URL } from './constants.ts'
 import { apiRequest, type RetryPolicy } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
+import type { NotionConfig } from './config.ts'
+import { API_VERSION, DEFAULT_API_BASE_URL } from './constants.ts'
 
 const RATE_LIMIT_RETRY: RetryPolicy = {
   statuses: new Set([429, 529]),
@@ -212,7 +213,7 @@ export class NotionAPIError extends ApiError {
   }
 }
 
-function notionError(response: Response, body: string): NotionAPIError {
+function errorOf(response: Response, body: string): NotionAPIError {
   let data: Record<string, unknown> = {}
   try {
     const parsed: unknown = JSON.parse(body)
@@ -228,19 +229,6 @@ function notionError(response: Response, body: string): NotionAPIError {
       : `Notion API error: HTTP ${String(response.status)}`
   const code = typeof data.code === 'string' ? data.code : null
   return new NotionAPIError(message, response.status, code)
-}
-
-export interface HttpNotionTransportOptions {
-  apiKey: string
-  baseUrl?: string
-  /**
-   * Absent means the generation the client is written against. A CLI verb
-   * overrides it per line from --notion-version, so the override travels with
-   * the transport the call sites already hold rather than as a second argument
-   * every one of them would have to thread.
-   */
-  apiVersion?: string
-  timeout?: number
 }
 
 export interface RestCall {
@@ -319,7 +307,7 @@ export class HttpNotionTransport implements NotionTransport {
   private readonly apiVersion: string
   private readonly timeout: number | undefined
 
-  constructor(opts: HttpNotionTransportOptions) {
+  constructor(opts: NotionConfig) {
     this.apiKey = opts.apiKey
     this.baseUrl = opts.baseUrl ?? DEFAULT_API_BASE_URL
     this.apiVersion = opts.apiVersion ?? API_VERSION
@@ -350,7 +338,7 @@ export class HttpNotionTransport implements NotionTransport {
       },
       params,
       ...(withBody ? { json: call.body ?? {} } : {}),
-      errorOf: notionError,
+      errorOf: errorOf,
       retry: RATE_LIMIT_RETRY,
     })
     return (data ?? {}) as Record<string, unknown>

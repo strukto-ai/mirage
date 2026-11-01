@@ -16,7 +16,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
 import type * as FoldersModule from './folders.ts'
 
-function message(overrides: Partial<ClientModule.FetchedMessage>): ClientModule.FetchedMessage {
+function message(
+  overrides: Partial<Awaited<ReturnType<typeof ClientModule.fetchMessage>>>,
+): Awaited<ReturnType<typeof ClientModule.fetchMessage>> {
   return {
     from: { name: 'Alice', email: 'alice@example.com' },
     reply_to: [],

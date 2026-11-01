@@ -12,25 +12,25 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VersionScope, type VersionHistory } from './versions.ts'
 import { type Caller, currentCaller, liveCallers } from '../context/session_context.ts'
 import { enotsup } from '../errors/fs.ts'
-import { captureRead } from './context.ts'
 import { activeRecords, lineVersion, lostPaths, recordIndex } from '../observe/context.ts'
 import type { OpRecord } from '../observe/record.ts'
 import { DEFAULT_READ_TTL, FileChangeKind, type FileStat, PathSpec } from '../types.ts'
+import { concat } from '../utils/bytes.ts'
 import { type Clock, SystemClock } from '../utils/clock.ts'
 import { mountKey } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import { drainBudget, type FileCache } from './file/mixin.ts'
-import { concat } from '../utils/bytes.ts'
-import type { IndexCacheStore } from './index/store.ts'
+import { captureRead } from './context.ts'
+import { latestFingerprint, mutationLock } from './file/io.ts'
+import { drainBudget, type FileCacheMixin } from './file/mixin.ts'
 import type { Evicted } from './index/config.ts'
 import { CHECKED_LIMIT, LISTING_TRUST_WINDOW, PROBED_LIMIT } from './index/constants.ts'
 import { commandStarted, soleCommandStarted, tick } from './index/scope.ts'
+import type { IndexCacheStore } from './index/store.ts'
 import { IndexView } from './index/view.ts'
-import { mutationLock, latestFingerprint } from './file/io.ts'
 import { type Measured, OwnRead } from './types.ts'
+import { type VersionHistory, VersionScope } from './versions.ts'
 
 /**
  * Post-mutation cache coherence for one mount.
@@ -45,7 +45,7 @@ import { type Measured, OwnRead } from './types.ts'
  */
 export class CacheManager {
   readonly versionScope = new VersionScope()
-  private readonly fileCache: FileCache | null
+  private readonly fileCache: FileCacheMixin | null
   private readonly index: IndexCacheStore | null
   private readonly clock: Clock
   private readonly prefix: string
@@ -71,7 +71,7 @@ export class CacheManager {
   private checkBound = CHECKED_LIMIT
 
   constructor(
-    fileCache: FileCache | null,
+    fileCache: FileCacheMixin | null,
     index: IndexCacheStore | null,
     prefix: string,
     cachesReads: boolean,
@@ -452,7 +452,7 @@ export class CacheManager {
   }
 
   /** The file cache this manager may read `key` from, if any. */
-  private readableCache(key: string): FileCache | null {
+  private readableCache(key: string): FileCacheMixin | null {
     if (!this.cachesReads || !this.ownsPath(key)) return null
     return this.fileCache
   }
@@ -639,7 +639,7 @@ export class CacheManager {
   }
 
   private async *filling(
-    cache: FileCache,
+    cache: FileCacheMixin,
     key: string,
     source: AsyncIterable<Uint8Array>,
     records: readonly OpRecord[],

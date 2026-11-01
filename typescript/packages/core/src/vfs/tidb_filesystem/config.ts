@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, type RedactedConfig, secretStr } from '../secrets.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 import { timeoutShape } from '../../core/api/config.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import type { ConfigOf } from '../secrets.ts'
+import { secretStr } from '../secrets.ts'
 
 function normalizeRootPath(value: string): string {
   const parts = value.split('/').filter((p) => p !== '' && p !== '.')
@@ -26,7 +27,7 @@ function normalizeRootPath(value: string): string {
   return '/' + parts.join('/')
 }
 
-export const TiDBFilesystemConfigSchema = z.object({
+export const TiDBFilesystemConfig = z.object({
   ...timeoutShape,
   host: z
     .string()
@@ -44,6 +45,4 @@ export const TiDBFilesystemConfigSchema = z.object({
     ),
 })
 
-export type TiDBFilesystemConfig = ConfigOf<typeof TiDBFilesystemConfigSchema>
-
-export type TiDBFilesystemConfigRedacted = RedactedConfig<TiDBFilesystemConfig, 'token'>
+export type TiDBFilesystemConfig = ConfigOf<typeof TiDBFilesystemConfig>

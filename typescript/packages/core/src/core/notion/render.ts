@@ -12,20 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-type Json = Record<string, unknown>
-
-export function asObject(value: unknown): Json {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {}
-}
-
-export function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : []
-}
-
-export function strOf(record: Json, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
+import type { JsonObject } from '../../types.ts'
+import { asArray, asObject, stringOf as strOf } from '../../utils/records.ts'
 
 function richTextToMd(richTextList: unknown[]): string {
   const parts: string[] = []
@@ -44,7 +32,7 @@ function richTextToMd(richTextList: unknown[]): string {
   return parts.join('')
 }
 
-function blockToMd(block: Json, indent: number): string {
+function blockToMd(block: JsonObject, indent: number): string {
   const btype = strOf(block, 'type')
   const content = asObject(block[btype])
   const text = richTextToMd(asArray(content.rich_text))
@@ -90,7 +78,7 @@ function blockToMd(block: Json, indent: number): string {
   return text !== '' ? `${prefix}${text}` : ''
 }
 
-function walkBlock(block: Json, indent: number, lines: string[]): void {
+function walkBlock(block: JsonObject, indent: number, lines: string[]): void {
   const line = blockToMd(block, indent)
   if (line !== '' || strOf(block, 'type') === 'paragraph') lines.push(line)
   for (const child of asArray(block.children)) {
@@ -98,7 +86,7 @@ function walkBlock(block: Json, indent: number, lines: string[]): void {
   }
 }
 
-export function blocksToMarkdown(blocks: readonly Json[]): string {
+export function blocksToMarkdown(blocks: readonly JsonObject[]): string {
   const lines: string[] = []
   for (const block of blocks) {
     walkBlock(block, 0, lines)

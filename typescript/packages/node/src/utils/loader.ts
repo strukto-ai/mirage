@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isRecord } from '@struktoai/mirage-core/utils/records'
 import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -59,10 +60,6 @@ export function splitRef(spec: string): [string, string] {
     throw new Error(`invalid ref ${JSON.stringify(spec)}, expected 'source:ExportName'`)
   }
   return [spec.slice(0, cut), spec.slice(cut + 1)]
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 function isNotFound(error: unknown): boolean {

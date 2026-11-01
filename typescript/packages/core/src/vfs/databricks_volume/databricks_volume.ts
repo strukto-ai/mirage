@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource } from '../../io/types.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { copy as dbxCopy } from '../../core/databricks_volume/copy.ts'
 import { create as dbxCreate } from '../../core/databricks_volume/create.ts'
@@ -27,16 +26,17 @@ import { stat as dbxStat } from '../../core/databricks_volume/stat.ts'
 import { readStream as dbxStream } from '../../core/databricks_volume/stream.ts'
 import { unlink as dbxUnlink } from '../../core/databricks_volume/unlink.ts'
 import { write as dbxWrite } from '../../core/databricks_volume/write.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
-import type { Handed } from '../types.ts'
-import { BaseVFS } from '../base.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { BaseVFS } from '../base.ts'
+import type { Handed } from '../types.ts'
 
 /**
  * DatabricksVolume's functions over its accessor, which a host package builds
  * over its own transport.
  */
-export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
+export class DatabricksVolumeVFS extends BaseVFS<DatabricksVolumeAccessor> {
   override readonly readsRanges: boolean = true
 
   override storageLocation(): string {

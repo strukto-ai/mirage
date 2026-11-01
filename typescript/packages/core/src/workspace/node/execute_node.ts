@@ -12,70 +12,68 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ProcessSubScope } from './process_sub.ts'
-import { diagnosticStderr } from './diagnostics.ts'
-import type { ExecuteFn } from '../expand/types.ts'
-import { type EvaluationContext, childContext } from '../evaluation.ts'
-import type { ParseScope } from '../../shell/parse/scope.ts'
-
-import { ExecutionScope } from '../execution.ts'
-import { newExecutionId } from '../../execution/context.ts'
-import { timedBy, timingReport } from './timing.ts'
-import { PathSpec } from '../../types.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
-
+import type { RedirectResult } from '../../context/session_context.ts'
 import {
   isProgramInvocation,
+  redirectPathsFor,
+  type RedirectRunner,
+  redirectRunnerFor,
+  redirectSyntaxFor,
   runAsProgram,
   runWithEvaluation,
+  runWithRedirectPaths,
 } from '../../context/session_context.ts'
-import type { ProcessHandle } from '../../process/handle.ts'
-import type { ProcessTable } from '../../process/table.ts'
+import { newExecutionId } from '../../execution/context.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
-import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
-import { CallStack } from '../../shell/call_stack.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import type { HandOff } from '../../policy/types.ts'
+import type { ProcessHandle } from '../../process/handle.ts'
+import type { ProcessTable } from '../../process/table.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import { assignmentStatus, forks, ignoringErrexit, recordStatus } from '../executor/statement.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import { CallStack } from '../../shell/call_stack.ts'
+import type { JobConsole } from '../../shell/console/index.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS, SIGPIPE_STATUS } from '../../shell/constants.ts'
+import { ArithError, ExitSignal, PipeClosed, ReadonlyVariableError } from '../../shell/errors.ts'
 import {
+  commandRedirects,
   getCaseItems,
   getCaseWord,
   getCforParts,
   getForParts,
-  getFunctionSource,
   getFunctionName,
+  getFunctionSource,
   getIfBranches,
   getListParts,
   getNegatedCommand,
-  getPipelineStages,
-  commandRedirects,
-  withOwnRedirects,
-  getRedirects,
-  readRow,
-  getText,
   getParts,
+  getPipelineStages,
+  getRedirects,
+  getText,
   getUnsetArgs,
   getWhileParts,
+  readRow,
+  withOwnRedirects,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS, SIGPIPE_STATUS } from '../../shell/constants.ts'
-import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
-import type { ExpandedWords } from './types.ts'
 import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.ts'
-import {
-  runWithRedirectPaths,
-  redirectPathsFor,
-  redirectRunnerFor,
-  redirectSyntaxFor,
-  type RedirectRunner,
-} from '../../context/session_context.ts'
-import { expandRedirect } from '../expand/redirects.ts'
-import { expandArith, expandNode } from '../expand/node.ts'
-import { expandPattern } from '../expand/pattern.ts'
-import { ExitSignal, ArithError, PipeClosed, ReadonlyVariableError } from '../../shell/errors.ts'
-import { expandAndClassify } from '../expand/parts.ts'
-import { landedArith } from '../session/elements.ts'
+import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
+import { PathSpec } from '../../types.ts'
+import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
+import { concat } from '../../utils/bytes.ts'
+import type { SessionView } from '../../view/types.ts'
+import { childContext, type EvaluationContext } from '../evaluation.ts'
+import { ExecutionScope } from '../execution.ts'
+import { aliasMark, aliasView } from '../executor/builtins/alias/index.ts'
+import { installExecRedirects } from '../executor/builtins/exec/index.ts'
+import { handleTest, handleUnset } from '../executor/builtins/index.ts'
+import { fail, isValidName, result } from '../executor/builtins/shared.ts'
+import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import {
   type BodyRun,
   type CforEval,
@@ -90,35 +88,33 @@ import {
   LoopSignal,
   trailed,
 } from '../executor/control.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
-import { handleTest, handleUnset } from '../executor/builtins/index.ts'
-import { aliasMark, aliasView } from '../executor/builtins/alias/index.ts'
-import { fail, isValidName, result } from '../executor/builtins/shared.ts'
+import { drained } from '../executor/jobs.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
+import { assignmentStatus, forks, ignoringErrexit, recordStatus } from '../executor/statement.ts'
+import { endShell } from '../executor/traps.ts'
+import { globOptions, resolveGlobs } from '../expand/globs.ts'
+import { expandArith, expandNode } from '../expand/node.ts'
+import { expandAndClassify } from '../expand/parts.ts'
+import { expandPattern } from '../expand/pattern.ts'
+import { expandRedirect } from '../expand/redirects.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-
-import { ExecutionNode } from '../types.ts'
-import { globOptions, resolveGlobs } from '../expand/globs.ts'
-import { expandDoubleBracket } from './test_expr.ts'
-import { executeProgram } from './program.ts'
-import { installExecRedirects } from '../executor/builtins/exec/index.ts'
-import { executeCommand } from './command_dispatch.ts'
-import { executeAssignment } from './assignment.ts'
-import { executeDeclaration } from './declaration.ts'
-import { PolicyDenied } from '../../policy/errors.ts'
-import type { HandOff } from '../../policy/types.ts'
-import { claimantFor, definedAt } from './occurrence.ts'
-import { type Admitted, admitTest } from './admission.ts'
-import type { SessionView } from '../../view/types.ts'
+import { landedArith } from '../session/elements.ts'
 import { positionalParams, sessionView } from '../session/state.ts'
-import type { JobConsole } from '../../shell/console/index.ts'
-import { drained } from '../executor/jobs.ts'
-import type { ExecuteNodeOpts } from '../executor/command/types.ts'
-import { endShell } from '../executor/traps.ts'
-import { concat } from '../../utils/bytes.ts'
-import { encodeText } from '../../shell/bytes.ts'
+import { ExecutionNode } from '../types.ts'
+import { type Admitted, admitTest } from './admission.ts'
+import { executeAssignment } from './assignment.ts'
+import { executeCommand } from './command_dispatch.ts'
+import { executeDeclaration } from './declaration.ts'
+import { diagnosticStderr } from './diagnostics.ts'
+import { claimantFor, definedAt } from './occurrence.ts'
+import { ProcessSubScope } from './process_sub.ts'
+import { executeProgram } from './program.ts'
+import { expandDoubleBracket } from './test_expr.ts'
+import { timedBy, timingReport } from './timing.ts'
+import type { ExpandedWords } from './types.ts'
 
 const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.PROGRAM,
@@ -134,15 +130,13 @@ const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.CASE,
   NodeKind.NEGATED,
 ])
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
 type Recurse = (
   node: TSNodeLike,
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
-) => Promise<Result>
+) => Promise<RedirectResult>
 
 /**
  * The deps for a subtree that runs on `handed`.
@@ -259,7 +253,7 @@ async function evalCforExpr(
  * recurses normally.
  */
 /** The empty command a redirect with no command name runs under. */
-function noCommand(): Promise<Result> {
+function noCommand(): Promise<RedirectResult> {
   return Promise.resolve([null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })])
 }
 
@@ -278,7 +272,7 @@ async function recurseReassociated(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
-): Promise<Result> {
+): Promise<RedirectResult> {
   if (node.id !== right.id) return recurse(node, context, stdin, callStack, opts)
   return runRedirected(
     recurse,
@@ -317,7 +311,7 @@ async function recurseLifted(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
-): Promise<Result> {
+): Promise<RedirectResult> {
   if (node !== right) return recurse(node, context, stdin, callStack, opts)
   return runPipeline(
     recurse,
@@ -357,7 +351,7 @@ async function recurseStage(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const index = stages.commands.indexOf(node)
   const hoisted = index < 0 ? [] : (stages.redirects[index] ?? [])
   if (hoisted.length === 0) {
@@ -416,7 +410,7 @@ async function runPipeline(
   signal?: AbortSignal,
   processes?: ProcessTable,
   sink?: JobConsole,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   if (stages.lead !== null) {
     const [left, op, right] = stages.lead
@@ -447,7 +441,7 @@ async function runPipeline(
     signal,
     processes,
   )
-  const piped = (): Promise<Result> =>
+  const piped = (): Promise<RedirectResult> =>
     handlePipe(
       pipeRecurse,
       stages.commands,
@@ -482,7 +476,7 @@ async function negated(
   execNode: ExecutionNode,
   context: EvaluationContext,
   inner: TSNodeLike,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   // Lazy exit codes (grep's) must be final before
   // inverting, or `! grep miss f` negates the provisional 0.
@@ -524,7 +518,7 @@ async function runRedirected(
   context: EvaluationContext,
   stdin: ByteSource | null,
   callStack: CallStack | null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   if (command !== null && command.type === NT.REDIRECTED_STATEMENT) {
     const [inner, own] = getRedirects(command)
@@ -743,7 +737,7 @@ async function recursePipeStderr(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
-): Promise<Result> {
+): Promise<RedirectResult> {
   if (!targets.includes(node) || nodeKind(node) !== NodeKind.REDIRECT) {
     return recurse(node, context, stdin, callStack, opts)
   }
@@ -838,7 +832,7 @@ export async function executeNode(
   // its EXIT action when the node ends, its evaluator bound the way
   // `executeNodeBody` binds it for the node's own lines.
   endsShell = false,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   if (endsShell) {
     const { signal, executionScope } = deps
@@ -951,7 +945,7 @@ async function executeNodeBody(
   callStack: CallStack | null,
   executionScope: ExecutionScope,
   ownDiagnostics = true,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const inner = deps.executeFn
   const signal = deps.signal
@@ -975,7 +969,7 @@ async function executeNodeBody(
     i: ByteSource | null,
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
-  ): Promise<Result> =>
+  ): Promise<RedirectResult> =>
     executeNode(
       withOpts(captureDeps, opts),
       n,
@@ -994,7 +988,7 @@ async function executeNodeBody(
           i: ByteSource | null,
           cs: CallStack | null,
           opts?: ExecuteNodeOpts,
-        ): Promise<Result> =>
+        ): Promise<RedirectResult> =>
           executeNode(
             withOpts(deps, opts),
             n,
@@ -1182,7 +1176,7 @@ async function executeNodeBody(
     mergedIo = await mergedIo.merge(opened)
     mergedIo.exitCode =
       opened.exitCode !== 0 ? opened.exitCode : assignmentStatus(context.frame, subSeq)
-    const ran: Result = [
+    const ran: RedirectResult = [
       null,
       mergedIo,
       new ExecutionNode({ command: getText(node), exitCode: mergedIo.exitCode }),
@@ -1324,7 +1318,7 @@ async function executeNodeBody(
       inp: ByteSource | null,
       cs: CallStack | null,
       opts?: ExecuteNodeOpts,
-    ): Promise<Result> =>
+    ): Promise<RedirectResult> =>
       executeNode(
         withOpts(subDeps, opts),
         n,
@@ -1336,7 +1330,7 @@ async function executeNodeBody(
       )
     const child = childContext(context)
     const asProgram = isProgramInvocation(session)
-    let result: Result | undefined
+    let result: RedirectResult | undefined
     let process: ProcessHandle
     try {
       process = subTable.processes.start({

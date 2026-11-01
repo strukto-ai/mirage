@@ -12,22 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource, IOResult } from '../../../../io/types.ts'
-import type { JobConsole } from '../../../../shell/console/index.ts'
-import { ended, returning } from '../../control.ts'
-import type { PathSpec } from '../../../../types.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
+import type { ByteSource, IOResult } from '../../../../io/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
+import type { JobConsole } from '../../../../shell/console/index.ts'
 import { ExitSignal, ReturnSignal } from '../../../../shell/errors.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { wordText } from '../../../../types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { positionalParams, setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
+import { ended, returning } from '../../control.ts'
 import { scopePath } from '../scope.ts'
-import { readScriptText, scriptError } from './script.ts'
-import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { wordText } from '../../../../types.ts'
 import { builtinUsage } from '../shared.ts'
+import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
+import { readScriptText, scriptError } from './script.ts'
 
 /**
  * Read a script file and execute it in the calling shell, `name` (`source`
@@ -48,7 +49,7 @@ export async function handleSource(
   callStack: CallStack | null = null,
   sink?: JobConsole,
   name = 'source',
-): Promise<Result> {
+): Promise<RedirectResult> {
   const raw = scopePath(path)
   if (wordText(path) === '') {
     return scriptError('bash', ': No such file or directory', 1, 'source ')
@@ -99,7 +100,7 @@ export async function handleSource(
  * The `source` / `.` arm. Positional parameters keep the words as typed,
  * so a path operand contributes its spelling, not its resolved mount path.
  */
-export async function sourceBuiltin(call: BuiltinCall): Promise<Result> {
+export async function sourceBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const operands = [...call.argv.operands]
   const target = operands[0]
   const name = call.argv.name

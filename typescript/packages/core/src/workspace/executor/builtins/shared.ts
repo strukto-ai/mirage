@@ -15,30 +15,23 @@
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { SHELL_SYNOPSES } from '../../../commands/spec/synopsis.ts'
+import type { RedirectResult } from '../../../context/session_context.ts'
+import { GlobLimitError } from '../../../errors/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import type { SessionView } from '../../../view/types.ts'
 import type { PolicyDenied } from '../../../policy/errors.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
+import { TooManyMatches } from '../../../shell/errors.ts'
 import { PathSpec, wordText } from '../../../types.ts'
 import { resolvePath } from '../../../utils/path.ts'
-import type { Namespace } from '../../mount/namespace/namespace.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
+import type { SessionView } from '../../../view/types.ts'
 import { expandGlob } from '../../expand/globs.ts'
+import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { ExecutionNode } from '../../types.ts'
 import { optionError, parseFlags } from '../command/flags.ts'
 import type { ParsedCommand } from '../command/types.ts'
 import { COUNT_WORD_RE, IDENTIFIER_RE } from './constants.ts'
-import type { Result } from './types.ts'
 import { scopePath } from './scope.ts'
-import { decodeText, encodeText } from '../../../shell/bytes.ts'
-import { TooManyMatches } from '../../../shell/errors.ts'
-import { GlobLimitError } from '../../../errors/types.ts'
-
-interface ResultInit {
-  out?: Uint8Array | null
-  exitCode?: number
-  stderr?: string
-  io?: IOResult
-}
 
 /**
  * Build the (stream, IOResult, ExecutionNode) triple builtins return.
@@ -48,7 +41,15 @@ interface ResultInit {
  *   error text encoded onto both; `io` a prebuilt IOResult to reuse (e.g.
  *   carrying writes), whose exitCode/stderr are overwritten.
  */
-export function result(cmd: string, init: ResultInit = {}): Result {
+export function result(
+  cmd: string,
+  init: {
+    out?: Uint8Array | null
+    exitCode?: number
+    stderr?: string
+    io?: IOResult
+  } = {},
+): RedirectResult {
   const exitCode = init.exitCode ?? 0
   const err =
     init.stderr !== undefined && init.stderr !== '' ? encodeText(init.stderr) : new Uint8Array()
@@ -58,11 +59,11 @@ export function result(cmd: string, init: ResultInit = {}): Result {
   return [init.out ?? null, io, new ExecutionNode({ command: cmd, exitCode, stderr: err })]
 }
 
-export function ok(cmd: string, out?: Uint8Array | null): Result {
+export function ok(cmd: string, out?: Uint8Array | null): RedirectResult {
   return result(cmd, { out: out ?? null })
 }
 
-export function fail(cmd: string, message: string, exitCode = 1): Result {
+export function fail(cmd: string, message: string, exitCode = 1): RedirectResult {
   return result(cmd, { exitCode, stderr: message })
 }
 
@@ -74,7 +75,7 @@ export function fail(cmd: string, message: string, exitCode = 1): Result {
  * @param errors - per-operand error messages collected so far.
  * @param io - prebuilt IOResult to reuse (e.g. carrying writes).
  */
-export function finish(cmd: string, errors: string[], io?: IOResult): Result {
+export function finish(cmd: string, errors: string[], io?: IOResult): RedirectResult {
   const carried = io !== undefined ? { io } : {}
   if (errors.length > 0) {
     return result(cmd, { exitCode: 1, stderr: errors.join(''), ...carried })
@@ -97,7 +98,7 @@ export function parseLine(
   cmd: string,
   args: readonly (string | PathSpec)[],
   cwd: string,
-): [ParsedCommand, FlagView, Result | null] {
+): [ParsedCommand, FlagView, RedirectResult | null] {
   const spec = specOf(cmd)
   const parsed = parseFlags(args, spec, cmd, cwd)
   const refused = optionError(cmd, parsed)
@@ -243,7 +244,7 @@ export function requireView(state: SessionView | null): SessionView {
 }
 
 /** Render a policy denial in the builtin's own voice. */
-export function refusal(cmd: string, err: PolicyDenied): Result {
+export function refusal(cmd: string, err: PolicyDenied): RedirectResult {
   const encoded = encodeText(`${err.message}\n`)
   return [
     null,
@@ -264,7 +265,7 @@ export function readonlyLine(cmd: string, name: string): string {
 }
 
 /** Render the readonly refusal (`readonlyLine`) as the result. */
-export function readonlyRefusal(cmd: string, name: string): Result {
+export function readonlyRefusal(cmd: string, name: string): RedirectResult {
   const encoded = encodeText(`${readonlyLine(cmd, name)}\n`)
   return [
     null,

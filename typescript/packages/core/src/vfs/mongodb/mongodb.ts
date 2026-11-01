@@ -46,7 +46,7 @@ export const VFS_MD = `{prefix}
  * MongoDB's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
-export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
+export class MongoDBVFS extends BaseVFS<MongoDBAccessor> {
   override readonly handed = {
     stat: ['entry'],
   } as const

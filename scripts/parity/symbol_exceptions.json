@@ -1,5 +1,5 @@
 {
- "baseline": 2497,
+ "baseline": 1997,
  "modules": {
   "server/app": {
    "python_only": {
@@ -97,15 +97,7 @@
   },
   "vfs/tidb_filesystem/config": {
    "typescript_only": {
-    "TiDBFilesystemConfigRedacted": "The type of the redacted plain-object config that getState returns; Python's state is a dict built by config_state.",
-    "TiDBFilesystemConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the registry parses it with this schema through parseConfigWithSchema.",
     "normalizeRootPath": "Python normalizes root_path in a field validator on the pydantic model; the zod schema takes the same normalization as a transform function."
-   }
-  },
-  "vfs/tidb_filesystem/tidb_filesystem": {
-   "typescript_only": {
-    "TiDBFilesystemVFSBase": "TypeScript core holds the VFS functions over the accessor and the node package builds the concrete VFS with its config and state; Python has one class.",
-    "TiDBFilesystemVFSState": "The typed shape getState returns in TypeScript; Python returns a dict."
    }
   },
   "vfs/ram/store": {
@@ -411,7 +403,6 @@
     "tool_route": "FastAPI adds one endpoint per tool through tool_route; Fastify registers the same routes inside registerToolsRoutes."
    },
    "typescript_only": {
-    "ToolsRoutesDeps": "Fastify routes are registered by a function taking its dependencies (registerToolsRoutes, ToolsRoutesDeps), as every TypeScript router is; Python's FastAPI router is a module object.",
     "registerToolsRoutes": "Fastify routes are registered by a function taking its dependencies (registerToolsRoutes, ToolsRoutesDeps), as every TypeScript router is; Python's FastAPI router is a module object."
    }
   },
@@ -578,7 +569,6 @@
    },
    "typescript_only": {
     "SshParams": "Fastify types a route's path parameters with an interface; FastAPI reads them from the handler's arguments.",
-    "SshRoutesDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
     "registerSshRoutes": "Fastify registers routes through a function; FastAPI's route is the module function ssh_tunnel."
    }
   },
@@ -628,21 +618,16 @@
     "protected_resource": "FastAPI routes are module functions; Fastify registers the same handler inline in registerOAuthRoutes."
    },
    "typescript_only": {
-    "OAuthDeps": "Fastify routes take their dependencies as an object; FastAPI routes read them off app.state.",
     "registerOAuthRoutes": "Fastify registers routes through a function; FastAPI's route is the module function protected_resource."
    }
   },
   "cache/file/config": {
    "typescript_only": {
-    "CacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
-    "RedisCacheConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
     "normalizeCacheConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built."
    }
   },
   "cache/index/config": {
    "typescript_only": {
-    "IndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
-    "RedisIndexConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
     "normalizeIndexConfig": "Python checks the config when the model is built; a TypeScript config is a plain object, so the Workspace checks it here, through parseConfigWithSchema, when it is built.",
     "FileStatWireSchema": "pydantic validates a stat row Python reads back; TypeScript parses one with this schema."
    }
@@ -689,7 +674,6 @@
    "typescript_only": {
     "DocumentParams": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "DocumentQuery": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "DocumentsRoutesDeps": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "registerDocumentsRoutes": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
    }
   },
@@ -745,7 +729,6 @@
    "typescript_only": {
     "CallQuery": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "HttpError": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
-    "VfsRoutesDeps": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "queryFlag": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "registerVfsRoutes": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access."
    }
@@ -858,7 +841,6 @@
     "ReadBytesFn": "The reader Python's materialized_read (commands/builtin/utils/operands) hands a generic body; TypeScript has no polymorphic reader to normalize, so nothing names the type there."
    },
    "typescript_only": {
-    "DirListingInit": "A TypeScript DirListing takes its fields as one object; the Python dataclass takes them as keywords.",
     "LIMIT_FIELDS": "Limit.layered walks every field in order; Python reads them off the pydantic model's model_fields, a TypeScript class has no field list to walk."
    }
   },
@@ -874,11 +856,6 @@
   "core/object_store/driver": {
    "typescript_only": {
     "requireHook": "Python narrows a conditional op's *_if hook with assert; TypeScript's lint bans the non-null assertion, so the narrowing is this helper."
-   }
-  },
-  "core/object_store/errors": {
-   "typescript_only": {
-    "LostOptions": "Python takes a refusal's landed, gone, versions and error as keyword arguments; TypeScript names them in one options object, so swapped booleans cannot type-check."
    }
   },
   "vfs/types": {
@@ -922,17 +899,6 @@
   "core/email/client": {
    "python_only": {
     "_text_lines": "Reads the text lines of an IMAPResponse from mirage's own Python IMAP client (accessor/imap); node's imapflow hands back parsed messages, so its client has no lines to read."
-   }
-  },
-  "commands/cli/types": {
-   "typescript_only": {
-    "CLIHandlerInit": "TypeScript describes constructor keyword objects with an interface; Python declares those fields on the CLIHandler dataclass.",
-    "CLIInit": "TypeScript describes constructor keyword objects with an interface; Python declares those fields on the CLI dataclass."
-   }
-  },
-  "commands/spec/types": {
-   "typescript_only": {
-    "ArgumentInit": "TypeScript describes the Argument constructor options with an interface; Python spells them as constructor keyword parameters."
    }
   },
   "commands/spec/parser": {

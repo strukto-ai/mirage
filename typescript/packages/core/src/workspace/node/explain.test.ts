@@ -14,10 +14,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-
+import type { Context } from '../../commands/config.ts'
 import { runExplaining, runWithRefusalSink } from '../../context/session_context.ts'
-import { Outcome, Scope } from '../../policy/index.ts'
-import { DryRun } from '../../policy/types.ts'
 import type {
   Action,
   AskHandler,
@@ -26,19 +24,20 @@ import type {
   Policy,
   ShellNode,
 } from '../../policy/index.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Outcome, Scope } from '../../policy/index.ts'
+import { SessionProfile } from '../../policy/profile.ts'
+import { DryRun } from '../../policy/types.ts'
 import { Runtime } from '../../runtime/base.ts'
-import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
 import type { RunResult } from '../../runtime/types.ts'
-import type { Context } from '../../commands/config.ts'
+import { registerSecrets } from '../../secrets/registry.ts'
 import type { ConsoleStore } from '../../shell/console/index.ts'
 import { RAMJobStore } from '../../shell/job_table/index.ts'
-import { registerSecrets } from '../../secrets/registry.ts'
+import { parse } from '../../shell/parse/parse.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Session, Workspace } from '../workspace/workspace.ts'
 import { explainLine, type Judgment } from './explain.ts'
-import { parse } from '../../shell/parse/parse.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -63,7 +62,7 @@ const ALLOW = [
   'shopt',
 ]
 
-const PROFILE = parseSessionProfile({
+const PROFILE = SessionProfile({
   commands: {
     allow: ALLOW,
     deny: [{ reason: 'production data is protected', commands: { rm: ['/data/prod/*'] } }],
@@ -80,11 +79,11 @@ const PROFILE = parseSessionProfile({
 // The same world under a rule that speaks on the command name alone, so
 // a spelling whose operands only the runtime can read is still asked
 // about.
-const ASK_CAT = parseSessionProfile({
+const ASK_CAT = SessionProfile({
   commands: { allow: ALLOW, ask: [{ reason: 'reads need sign-off', commands: ['cat'] }] },
 })
 
-const DENY_CAT = parseSessionProfile({
+const DENY_CAT = SessionProfile({
   commands: { allow: ALLOW, deny: [{ reason: 'reads are refused', commands: ['cat'] }] },
 })
 
@@ -168,7 +167,7 @@ async function aliased(asked: string[]): Promise<Workspace> {
   return w
 }
 
-class LineBox extends Runtime implements LineExecutor {
+class LineBox extends Runtime implements LineExecutorMixin {
   override readonly reach = 'workspace' as const
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'sandbox'
@@ -247,7 +246,7 @@ describe('explain', () => {
     async (line) => {
       // A builtin that runs a word hands it to the gate, which refuses it
       // there, and the dry run says what the run says.
-      const profile = parseSessionProfile({ commands: { allow: ['timeout', 'eval'] } })
+      const profile = SessionProfile({ commands: { allow: ['timeout', 'eval'] } })
       const w = new Workspace(
         { '/data': new RAMVFS() },
         { mode: MountMode.WRITE, profiles: { r: profile } },
@@ -491,7 +490,7 @@ describe('explain', () => {
   })
 })
 
-const SEALED = parseSessionProfile({
+const SEALED = SessionProfile({
   commands: {
     allow: ['ls', 'cat', 'rm', 'mkdir', 'echo'],
     deny: [{ reason: 'sealed until review', paths: ['/data/prod/*'] }],
@@ -819,7 +818,7 @@ describe('prejudge', () => {
     const line = 'X=echo; "$X" hi'
     for (const [whole, profile, code] of [
       [false, PROFILE, 0],
-      [true, parseSessionProfile({}), 0],
+      [true, SessionProfile({}), 0],
       [true, PROFILE, 126],
     ] as const) {
       const w = new Workspace(
@@ -849,7 +848,7 @@ describe('prejudge', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        profiles: { r: parseSessionProfile({ commands: { allow: ['bash', 'source', 'rm'] } }) },
+        profiles: { r: SessionProfile({ commands: { allow: ['bash', 'source', 'rm'] } }) },
         runtimes: [new LineBox(), 'workspace'],
       },
     )
@@ -883,7 +882,7 @@ describe('prejudge', () => {
       {
         mode: MountMode.EXEC,
         profiles: {
-          r: parseSessionProfile({
+          r: SessionProfile({
             commands: {
               allow: ['cat', 'cd', 'grep'],
               deny: [
@@ -927,7 +926,7 @@ describe('prejudge', () => {
       {
         mode: MountMode.EXEC,
         profiles: {
-          r: parseSessionProfile({
+          r: SessionProfile({
             commands: {
               allow: ['cat', 'cd', 'false', 'grep', 'true'],
               deny: [
@@ -1019,7 +1018,7 @@ describe('prejudge', () => {
       {
         mode: MountMode.EXEC,
         profiles: {
-          r: parseSessionProfile({
+          r: SessionProfile({
             commands: {
               allow: ['grep'],
               ask: [{ reason: 'nod', commands: { grep: ['/data'] } }],
@@ -1069,7 +1068,7 @@ describe('prejudge', () => {
     // that remove only an allowed file, and `.` read as a mount root. A
     // path a word names outright stays read though it is the lost cwd;
     // a grep pattern spelling that cwd names no path.
-    const sealed = parseSessionProfile({
+    const sealed = SessionProfile({
       commands: { deny: [{ reason: 'sealed', commands: { grep: ['/data/prod'] } }] },
     })
     const w = new Workspace(

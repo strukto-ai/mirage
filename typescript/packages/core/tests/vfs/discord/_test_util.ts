@@ -20,7 +20,7 @@ import type {
   DiscordTransport,
 } from '../../../src/core/discord/client.ts'
 import { FileStat, FileType } from '../../../src/types.ts'
-import { DiscordVFSBase } from '../../../src/vfs/discord/discord.ts'
+import { DiscordVFS } from '../../../src/vfs/discord/discord.ts'
 
 export interface FakeCall {
   method: DiscordMethod
@@ -54,14 +54,14 @@ export class FakeDiscordTransport implements DiscordTransport {
   }
 }
 
-class FakeDiscordVFS extends DiscordVFSBase {
+class FakeDiscordVFS extends DiscordVFS {
   override readonly name = 'discord'
   constructor(override readonly accessor: DiscordAccessor) {
     super()
   }
 }
 
-export function makeFakeVfs(transport: DiscordTransport): DiscordVFSBase {
+export function makeFakeVfs(transport: DiscordTransport): DiscordVFS {
   return new FakeDiscordVFS(new DiscordAccessor(transport))
 }
 

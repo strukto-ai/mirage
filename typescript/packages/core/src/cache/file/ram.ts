@@ -12,19 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { underPath } from '../../utils/key_prefix.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { PathSpec } from '../../types.ts'
 import { type Clock, SystemClock } from '../../utils/clock.ts'
-import { Invalidation, withFillGuard } from './invalidation.ts'
+import { underPath } from '../../utils/key_prefix.ts'
+import { parseLimit } from '../../utils/size.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { KeyLock } from '../lock.ts'
 import { CacheEntry, Holds } from './entry.ts'
-import { type FileCache, validateMaxDrainBytes } from './mixin.ts'
-import { parseLimit } from '../../utils/size.ts'
+import { Invalidation, withFillGuard } from './invalidation.ts'
+import { type FileCacheMixin, validateMaxDrainBytes } from './mixin.ts'
 import { tokenOrNull } from './utils.ts'
 
-export class RAMFileCacheStore extends RAMVFS implements FileCache {
+export class RAMFileCacheStore extends RAMVFS implements FileCacheMixin {
   private readonly entries = new Map<string, CacheEntry>()
   private readonly lock = new KeyLock()
   private readonly limit: number
@@ -116,7 +116,7 @@ export class RAMFileCacheStore extends RAMVFS implements FileCache {
     return data
   }
 
-  // The cache's own key test, part of `FileCache` and not a driver verb:
+  // The cache's own key test, part of `FileCacheMixin` and not a driver verb:
   // the key is the cache entry's, not a path the mount resolves.
   override exists(key: string | PathSpec): Promise<boolean> {
     const k = typeof key === 'string' ? key : key.mountPath

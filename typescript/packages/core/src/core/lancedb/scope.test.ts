@@ -13,19 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-
-import {
-  resolveLanceDBConfig,
-  type LanceDBConfig,
-  type LanceDBConfigResolved,
-} from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { resolveLanceDBConfig, type LanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { INVALID, makeDetectScope, type DetectFn } from '../hierarchy/scope.ts'
 import { filtersOf } from '../vector/scope.ts'
 import { scopesFor } from './scope.ts'
 
-function cfg(over: Partial<LanceDBConfig> = {}): LanceDBConfigResolved {
+function cfg(over: Partial<LanceDBConfig> = {}): ReturnType<typeof resolveLanceDBConfig> {
   return resolveLanceDBConfig({
     uri: '/tmp/db',
     groupBy: ['label', 'kind'],
@@ -39,7 +34,7 @@ function cfg(over: Partial<LanceDBConfig> = {}): LanceDBConfigResolved {
 
 const config = cfg()
 
-function detect(c: LanceDBConfigResolved): DetectFn {
+function detect(c: ReturnType<typeof resolveLanceDBConfig>): DetectFn {
   return makeDetectScope(scopesFor(c))
 }
 

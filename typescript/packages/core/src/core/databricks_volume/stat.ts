@@ -12,23 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { toIsoZ } from '../../utils/dates.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
+import { enoent } from '../../errors/fs.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
+import { toIsoZ } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { getMetadata, getDirectoryMetadata } from './client.ts'
-import type { FileMetadata } from './types.ts'
+import { getDirectoryMetadata, getMetadata } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
-import { enoent } from '../../errors/fs.ts'
+import type { FileMetadata } from './types.ts'
 
 function nameFromBackendPath(remotePath: string): string {
   const stripped = stripSlash(remotePath)
   return stripped.split('/').pop() ?? stripped
 }
 
-function modifiedFromHeader(value: string | null): string | null {
+function modifiedToIso(value: string | null): string | null {
   if (value === null || value === '') return null
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
@@ -66,7 +66,7 @@ export async function stat(accessor: DatabricksVolumeAccessor, path: PathSpec): 
   }
   const name = nameFromBackendPath(remotePath)
   const size = metadata.contentLength
-  const modified = modifiedFromHeader(metadata.lastModified)
+  const modified = modifiedToIso(metadata.lastModified)
   return new FileStat({
     name,
     size,

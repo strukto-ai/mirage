@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, type RedactedConfig, secretSchema } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
+import type { ConfigOf } from '../secrets.ts'
+import { secretSchema } from '../secrets.ts'
 
 function validVolumePart(value: string): boolean {
   return value !== '' && !value.includes('/')
@@ -61,7 +62,7 @@ function validToken(value: string): boolean {
   return value.trim() !== '' && !/[\r\n]/.test(value)
 }
 
-export const DatabricksVolumeConfigSchema = z.object({
+export const DatabricksVolumeConfig = z.object({
   ...timeoutShape,
   catalog: z
     .string()
@@ -98,6 +99,4 @@ export const DatabricksVolumeConfigSchema = z.object({
   ),
 })
 
-export type DatabricksVolumeConfig = ConfigOf<typeof DatabricksVolumeConfigSchema>
-
-export type DatabricksVolumeConfigRedacted = RedactedConfig<DatabricksVolumeConfig, 'token'>
+export type DatabricksVolumeConfig = ConfigOf<typeof DatabricksVolumeConfig>

@@ -16,15 +16,11 @@ import { z } from 'zod'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import {
-  type ConfigOf,
-  normalizeNonEmpty,
-  REDACTED_SECRET,
-  type RedactedConfig,
-  secretStr,
-} from '../secrets.ts'
+import { REDACTED_SECRET } from '../constants.ts'
+import type { ConfigOf, RedactedSchema } from '../secrets.ts'
+import { normalizeNonEmpty, secretStr } from '../secrets.ts'
 
-export const DifyConfigSchema = z.object({
+export const DifyConfig = z.object({
   apiKey: secretStr().describe('Dify Knowledge API key, sent as `Authorization: Bearer`.'),
   baseUrl: z.string().describe('Dify API root, such as `https://api.dify.ai/v1`.'),
   datasetId: z.string().describe('ID of the Knowledge dataset the mount shows.'),
@@ -49,18 +45,7 @@ export const DifyConfigSchema = z.object({
   ...timeoutShape,
 })
 
-export type DifyConfig = ConfigOf<typeof DifyConfigSchema>
-
-export interface DifyConfigResolved {
-  apiKey: string
-  baseUrl: string
-  datasetId: string
-  slugMetadataName: string
-  maxConcurrency: number
-  timeout: number
-  retryAttempts: number
-  retryMaxDelay: number
-}
+export type DifyConfig = ConfigOf<typeof DifyConfig>
 
 function normalizePositive(value: number | undefined, fallback: number, field: string): number {
   const resolved = value ?? fallback
@@ -70,7 +55,7 @@ function normalizePositive(value: number | undefined, fallback: number, field: s
   return resolved
 }
 
-export function resolveDifyConfig(config: DifyConfig): DifyConfigResolved {
+export function resolveDifyConfig(config: DifyConfig) {
   return {
     apiKey: config.apiKey,
     baseUrl: rstripSlash(config.baseUrl),
@@ -83,12 +68,8 @@ export function resolveDifyConfig(config: DifyConfig): DifyConfigResolved {
   }
 }
 
-// `apiKey` is the credential. Masking it is what makes
-// `vfsStateRequiresOverride` demand a fresh one at load instead of
-// quietly rebuilding the mount as an empty RAMVFS. Python masks the
-// same field, a SecretStr on the model.
-export type DifyConfigRedacted = RedactedConfig<DifyConfigResolved, 'apiKey'>
-
-export function redactDifyConfig(config: DifyConfigResolved): DifyConfigRedacted {
+export function redactDifyConfig(
+  config: ReturnType<typeof resolveDifyConfig>,
+): RedactedSchema<typeof DifyConfig, ReturnType<typeof resolveDifyConfig>> {
   return { ...config, apiKey: REDACTED_SECRET }
 }

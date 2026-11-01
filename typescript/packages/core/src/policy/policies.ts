@@ -12,12 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FlagView, SPECS, parseCommand } from '../commands/spec/index.ts'
+import { FlagView, parseCommand, SPECS } from '../commands/spec/index.ts'
 import { parseToKwargs } from '../commands/spec/parser.ts'
 import { operandExitCode } from '../commands/spec/usage.ts'
-import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
-  type Caller,
   callerSignal,
   currentCaller,
   explaining,
@@ -25,26 +23,34 @@ import {
   noteRefusal,
   runExplaining,
   runLanding,
+  type Caller,
 } from '../context/session_context.ts'
 import { eacces, erofs } from '../errors/fs.ts'
-import { commandRecords } from '../observe/context.ts'
+import { posixPhrase } from '../errors/posix.ts'
 import { fsErrorLine } from '../errors/render.ts'
+import { commandRecords } from '../observe/context.ts'
+import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 import { FileType, Limit, type PathSpec, type Refusal } from '../types.ts'
+import { abortable, hasAborted, makeAbortError } from '../utils/abort.ts'
+import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import { rstripSlash } from '../utils/slash.ts'
+import type { VfsCall } from '../vfs/types.ts'
+import type { SessionState } from '../workspace/session/session.ts'
 import type { Policy } from './base.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
+import { composeSettled, Composition, type CompositionResult } from './composition.ts'
+import { Decisions, opQuestion } from './decisions.ts'
 import { Explained, PolicyDenied } from './errors.ts'
-import { Composition, composeSettled, type CompositionResult } from './composition.ts'
 import { sourceOf } from './match/decide.ts'
 import { operandPaths } from './match/rule.ts'
 import { isSessionScoped } from './mixin.ts'
-import { Decisions, opQuestion } from './decisions.ts'
+import type { RouteContext } from './types.ts'
 import {
   DryRun,
   Outcome,
-  VALIDITY,
   policyCaller,
+  VALIDITY,
   type Ask,
   type Claimant,
   type CommandContext,
@@ -53,21 +59,15 @@ import {
   type ExecuteResultContext,
   type NetworkContext,
   type NetworkResultContext,
-  type VfsContext,
-  type VfsResultContext,
   type Pending,
   type Route,
   type SessionContext,
   type SessionResultContext,
-  type WorkspaceContext,
+  type VfsContext,
   type VfsExplanation,
+  type VfsResultContext,
+  type WorkspaceContext,
 } from './types.ts'
-import { abortable, hasAborted, makeAbortError } from '../utils/abort.ts'
-import type { VfsCall } from '../vfs/types.ts'
-import type { RouteContext } from './types.ts'
-import type { SessionState } from '../workspace/session/session.ts'
-import { posixPhrase } from '../errors/posix.ts'
-import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
 
 type Method = keyof typeof VALIDITY
 
@@ -729,7 +729,7 @@ export class Policies {
   /**
    * True when some policy will speak at `method` for this session. The
    * per-session refinement of `wants`: a policy that defines the method
-   * counts, unless it speaks per session (`SessionScoped`) and says this
+   * counts, unless it speaks per session (`SessionScopedMixin`) and says this
    * is not one of its. For a seam that pays ahead for a method rather than
    * gating on it: the secret fill drops its masks under a session-write
    * gate, and a profile's policy at that entry point is one profile's, not

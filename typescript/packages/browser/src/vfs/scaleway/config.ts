@@ -12,19 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const ScalewayConfigSchema = browserAliasSchema({})
-
-export type ScalewayConfig = ConfigOf<typeof ScalewayConfigSchema>
-
-export type ScalewayConfigRedacted = RedactedConfig<ScalewayConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<ScalewayConfig, ScalewayConfigRedacted>({
-  schema: ScalewayConfigSchema,
+export const ScalewayConfig = makeBrowserS3Alias({
+  schema: browserAliasSchema({}),
   endpointFor: derivedEndpoint('region', (region) => `https://s3.${region}.scw.cloud`),
 })
 
-export const resolvedScalewayEndpoint = ALIAS.resolvedEndpoint
-export const scalewayToS3Config = ALIAS.toS3Config
+export type ScalewayConfig = ConfigOf<typeof ScalewayConfig>

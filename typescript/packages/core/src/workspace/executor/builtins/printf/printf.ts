@@ -13,21 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { usageHint } from '../../../../commands/spec/usage.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
-import { concat } from '../../../../utils/bytes.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { SessionView } from '../../../../view/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { decodeText, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
 import { ArithError } from '../../../../shell/errors.ts'
+import { concat } from '../../../../utils/bytes.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { ExecutionNode } from '../../../types.ts'
-import { printfOutput, runPrintf } from './format.ts'
-import type { BuiltinCall, Result } from '../types.ts'
 import { envSnapshot, sessionView } from '../../../session/state.ts'
+import { ExecutionNode } from '../../../types.ts'
 import { TARGET_RE } from '../constants.ts'
 import { builtinUsage, fail, result } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
+import { printfOutput, runPrintf } from './format.ts'
 
 /**
  * Print formatted output, honoring GNU printf's format-reuse rules.
@@ -59,7 +60,7 @@ export async function handlePrintf(
   session: SessionState,
   view?: SessionView,
   signal?: AbortSignal,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const program = isProgramInvocation(session)
   let target: string | null = null
   let parsed: RegExpExecArray | null = null
@@ -156,7 +157,7 @@ function printed(
   posix: boolean,
   utf8: boolean,
   signal?: AbortSignal,
-): Result {
+): RedirectResult {
   const io = new IOResult()
   const node = new ExecutionNode({ command: 'printf' })
   async function* output(): AsyncGenerator<Uint8Array> {
@@ -171,7 +172,7 @@ function printed(
 }
 
 /** The `printf` arm. */
-export async function printfBuiltin(call: BuiltinCall): Promise<Result> {
+export async function printfBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handlePrintf(
     [...call.argv.args],
     call.context.session,

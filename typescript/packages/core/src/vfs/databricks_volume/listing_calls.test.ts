@@ -23,7 +23,7 @@ import {
 } from '../../../tests/core/databricks_volume/_test_util.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { DatabricksVolumeVFSBase } from './databricks_volume.ts'
+import { DatabricksVolumeVFS } from './databricks_volume.ts'
 
 const MS = 1_700_000_000_000
 const FROZEN_NOW_S = 1_700_000_000
@@ -90,7 +90,7 @@ function agedRoute(call: FetchCall): Response {
 // Runs one line over a fresh mount, the way the agent's shell does.
 async function run(line: string): Promise<string[]> {
   const ws = new Workspace(
-    { '/volume': new DatabricksVolumeVFSBase({ accessor: makeAccessor() }) },
+    { '/volume': new DatabricksVolumeVFS({ accessor: makeAccessor() }) },
     { mode: MountMode.READ },
   )
   try {

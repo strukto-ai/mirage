@@ -13,22 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-
 import { DEFAULT_ASK_REASON } from '../../policy/constants.ts'
+import { covers } from '../../policy/decisions.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { opRuling } from '../../policy/match/rule.ts'
-import { covers } from '../../policy/decisions.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 import { Outcome, Scope, type CommandRule, type VfsContext } from '../../policy/types.ts'
-import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
 import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
-import { pathVisible } from '../../utils/hidden.ts'
-import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
-import { applyProfile, compileProfile, narrow, resolveProfile, withInline } from './resolve.ts'
-import { SessionState } from './session.ts'
 import { VarAttr } from '../../shell/variable.ts'
-import { CALLS } from '../../workspace/dispatcher/constants.ts'
+import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import type { VfsCall } from '../../vfs/types.ts'
+import { CALLS } from '../../workspace/dispatcher/constants.ts'
+import { applyProfile, compileProfile, narrow, resolveProfile, withInline } from './resolve.ts'
 import { ruleFromDict } from './serialize.ts'
+import { SessionState } from './session.ts'
 
 function callOf(name: string): VfsCall {
   const call = CALLS.get(name)
@@ -51,12 +50,12 @@ function readOp(virtual: string): VfsContext {
 }
 
 const PROFILES: Record<string, SessionProfile> = {
-  default: parseSessionProfile({
+  default: SessionProfile({
     cwd: '/scratch',
     env: { PAGER: 'cat' },
     mounts: { '/repo': 'r', '/scratch': 'rwx' },
   }),
-  reviewer: parseSessionProfile({
+  reviewer: SessionProfile({
     paths: { hide: ['/repo/.env'] },
     env: { ROLE: 'reviewer' },
   }),
@@ -115,8 +114,8 @@ describe('resolveProfile', () => {
 
 describe('withInline', () => {
   it('takes the weaker mode per mount', () => {
-    const base = parseSessionProfile({ mounts: { '/a': 'rwx', '/b': 'r' } })
-    const inline = parseSessionProfile({ mounts: { '/a': 'rw', '/c': 'rwx' } })
+    const base = SessionProfile({ mounts: { '/a': 'rwx', '/b': 'r' } })
+    const inline = SessionProfile({ mounts: { '/a': 'rw', '/c': 'rwx' } })
     const out = withInline(base, inline)
     // Every prefix either side names survives; a mount only the inline
     // document names is not a grant, since a mount the profile never named
@@ -128,13 +127,13 @@ describe('withInline', () => {
 
   it('unions hides and lets inline presets win', () => {
     const out = withInline(
-      parseSessionProfile({
+      SessionProfile({
         cwd: '/scratch',
         env: { PAGER: 'cat', A: '1' },
         paths: { hide: ['/repo/.env', '*.pem'] },
         vars: { hide: ['AWS_*'] },
       }),
-      parseSessionProfile({
+      SessionProfile({
         cwd: '/repo',
         env: { A: '2' },
         paths: { hide: ['*.pem', '/repo/secrets'] },
@@ -148,7 +147,7 @@ describe('withInline', () => {
   })
 
   it('merges one mount section', () => {
-    const base = parseSessionProfile({
+    const base = SessionProfile({
       mounts: {
         '/repo': {
           mode: 'rw',
@@ -157,7 +156,7 @@ describe('withInline', () => {
         },
       },
     })
-    const inline = parseSessionProfile({
+    const inline = SessionProfile({
       mounts: {
         '/repo': { commands: { ask: ['git push'] }, paths: { hide: ['/repo/secrets'] } },
       },
@@ -177,10 +176,10 @@ describe('withInline', () => {
   })
 
   it('adds ask and deny but refuses an allow list', () => {
-    const base = parseSessionProfile({
+    const base = SessionProfile({
       commands: { allow: ['ls', 'git', 'cat'], ask: ['git push'], deny: ['rm'] },
     })
-    const inline = parseSessionProfile({
+    const inline = SessionProfile({
       commands: { deny: [{ reason: 'no', commands: ['mv'] }] },
     })
     const out = withInline(base, inline)
@@ -189,21 +188,21 @@ describe('withInline', () => {
     expect(out?.commands?.allow).toEqual(['ls', 'git', 'cat'])
     expect(out?.commands?.ask?.map((r) => r.commands)).toEqual([['git push']])
     expect(out?.commands?.deny?.map((r) => r.commands)).toEqual([['rm'], ['mv']])
-    expect(() => withInline(base, parseSessionProfile({ commands: { allow: ['wc'] } }))).toThrow(
+    expect(() => withInline(base, SessionProfile({ commands: { allow: ['wc'] } }))).toThrow(
       'not an allow list',
     )
     // And with no profile to add to: the refusal belongs to where the
     // document was written, so a workspace that happens to declare no
     // default profile must not quietly accept what one with a profile refuses.
-    expect(() => withInline(null, parseSessionProfile({ commands: { allow: ['wc'] } }))).toThrow(
+    expect(() => withInline(null, SessionProfile({ commands: { allow: ['wc'] } }))).toThrow(
       'not an allow list',
     )
   })
 
   it('leaves a stated block alone when the other is bare', () => {
-    const base = parseSessionProfile({ commands: { allow: ['ls'] } })
+    const base = SessionProfile({ commands: { allow: ['ls'] } })
     expect(withInline(base, { cwd: '/x' })?.commands).toEqual(base.commands)
-    const inline = parseSessionProfile({ commands: { deny: ['rm'] } })
+    const inline = SessionProfile({ commands: { deny: ['rm'] } })
     expect(withInline({ cwd: '/x' }, inline)?.commands).toEqual(inline.commands)
   })
 })
@@ -211,7 +210,7 @@ describe('withInline', () => {
 describe('compileProfile commands', () => {
   it("lists mount rules before the profile's own", () => {
     const rules = compileProfile(
-      parseSessionProfile({
+      SessionProfile({
         commands: { allow: ['ls', 'rm', 'git'], deny: ['shutdown'] },
         mounts: {
           '/repo': {
@@ -243,7 +242,7 @@ describe('compileProfile commands', () => {
 
   it('anchors a name pattern to its mount', () => {
     const rules = compileProfile(
-      parseSessionProfile({
+      SessionProfile({
         mounts: { '/repo': { commands: { deny: [{ reason: 'no pems', paths: ['*.pem'] }] } } },
       }),
     ).policies.commands
@@ -258,9 +257,9 @@ describe('compileProfile commands', () => {
 
   it('is null when the profile states no rules', () => {
     expect(compileProfile({}).policies.commands).toBeNull()
-    expect(compileProfile(parseSessionProfile({ commands: {} })).policies.commands).toBeNull()
+    expect(compileProfile(SessionProfile({ commands: {} })).policies.commands).toBeNull()
     expect(
-      compileProfile(parseSessionProfile({ mounts: { '/repo': 'r' } })).policies.commands,
+      compileProfile(SessionProfile({ mounts: { '/repo': 'r' } })).policies.commands,
     ).toBeNull()
   })
 })
@@ -268,7 +267,7 @@ describe('compileProfile commands', () => {
 describe('compileProfile', () => {
   it('turns the document into session fields', () => {
     const out = compileProfile(
-      parseSessionProfile({
+      SessionProfile({
         cwd: '/scratch',
         env: { ROLE: 'x' },
         mounts: { '/a': 'rw', '/b': 'r' },
@@ -289,7 +288,7 @@ describe('compileProfile', () => {
   })
 
   it('carries the name, which narrow stamps onto the session', () => {
-    const profile = parseSessionProfile({ cwd: '/scratch' })
+    const profile = SessionProfile({ cwd: '/scratch' })
     expect(compileProfile(profile, 'reviewer').profile).toBe('reviewer')
     const session = new SessionState({ sessionId: 's1' })
     narrow(session, compileProfile(profile, 'reviewer'))
@@ -304,7 +303,7 @@ describe('compileProfile', () => {
 
   it('collects the hides of every mount section, anchored to it', () => {
     const out = compileProfile(
-      parseSessionProfile({
+      SessionProfile({
         paths: { hide: ['/shared/finance'] },
         mounts: {
           '/repo': { paths: { hide: ['/repo/.env', '*.pem'] } },
@@ -322,7 +321,7 @@ describe('compileProfile', () => {
     expect(pathVisible(out.visibility, '/repo/deep/key.pem')).toBe(false)
     expect(pathVisible(out.visibility, '/scratch/key.pem')).toBe(true)
     // The profile's own hide is not a mount section's and stays global.
-    const profile = compileProfile(parseSessionProfile({ paths: { hide: ['*.pem'] } }))
+    const profile = compileProfile(SessionProfile({ paths: { hide: ['*.pem'] } }))
     expect(pathVisible(profile.visibility, '/scratch/key.pem')).toBe(false)
   })
 
@@ -345,16 +344,14 @@ describe('compileProfile', () => {
     expect(compileProfile({})).toEqual(empty)
     // A profile that names a mount without a mode narrows nothing: the
     // mount keeps whatever the workspace gave it.
-    expect(
-      compileProfile(parseSessionProfile({ mounts: { '/a': {} } })).policies.mountModes,
-    ).toBeNull()
+    expect(compileProfile(SessionProfile({ mounts: { '/a': {} } })).policies.mountModes).toBeNull()
   })
 })
 
 describe('narrow / applyProfile', () => {
   it('narrow stamps the uneditable fields, applyProfile seeds the rest', () => {
     const compiled = compileProfile(
-      parseSessionProfile({
+      SessionProfile({
         cwd: '/a',
         env: { ROLE: 'x' },
         mounts: { '/a': 'rw' },
@@ -379,9 +376,7 @@ describe('narrow / applyProfile', () => {
   })
 
   it("carries the profile's admission rules onto the session", () => {
-    const compiled = compileProfile(
-      parseSessionProfile({ commands: { allow: ['ls'], ask: ['git'] } }),
-    )
+    const compiled = compileProfile(SessionProfile({ commands: { allow: ['ls'], ask: ['git'] } }))
     expect(compiled.policies.commands).toEqual({
       allow: ['ls'],
       ask: [{ reason: DEFAULT_ASK_REASON, commands: ['git'] }],
@@ -394,7 +389,7 @@ describe('narrow / applyProfile', () => {
   })
 
   it('the process list scope is part of what a session sees', () => {
-    const seen = compileProfile(parseSessionProfile({ processes: 'workspace' }))
+    const seen = compileProfile(SessionProfile({ processes: 'workspace' }))
     expect(seen.visibility.processes).toBe('workspace')
     expect(seen.policies.processes.list).toBe('workspace')
     const session = new SessionState({ sessionId: 's' })
@@ -406,13 +401,13 @@ describe('narrow / applyProfile', () => {
 
 describe('the path axis through resolve', () => {
   it("withInline cannot add show and the profile's survives", () => {
-    const base = parseSessionProfile({
+    const base = SessionProfile({
       paths: {
         hide: [{ patterns: ['/repo'], reason: 'sealed' }],
         show: ['/repo/public'],
       },
     })
-    const inline = parseSessionProfile({
+    const inline = SessionProfile({
       paths: { hide: [{ patterns: ['/repo/extra'], reason: 'audit' }] },
     })
     const out = withInline(base, inline)
@@ -423,27 +418,27 @@ describe('the path axis through resolve', () => {
       { patterns: ['/repo'], reason: 'sealed' },
       { patterns: ['/repo/extra'], reason: 'audit' },
     ])
-    expect(() =>
-      withInline(base, parseSessionProfile({ paths: { show: ['/repo/secrets'] } })),
-    ).toThrow('not show entries')
+    expect(() => withInline(base, SessionProfile({ paths: { show: ['/repo/secrets'] } }))).toThrow(
+      'not show entries',
+    )
     // The mount-section spelling is the same statement.
     expect(() =>
       withInline(
         base,
-        parseSessionProfile({ mounts: { '/repo': { paths: { show: ['/repo/secrets'] } } } }),
+        SessionProfile({ mounts: { '/repo': { paths: { show: ['/repo/secrets'] } } } }),
       ),
     ).toThrow('not show entries')
     // And with no profile to add to, same rule as the allow list.
-    expect(() => withInline(null, parseSessionProfile({ paths: { show: ['/x'] } }))).toThrow(
+    expect(() => withInline(null, SessionProfile({ paths: { show: ['/x'] } }))).toThrow(
       'not show entries',
     )
   })
 
   it("withInline keeps a mount section's show", () => {
-    const base = parseSessionProfile({
+    const base = SessionProfile({
       mounts: { '/repo': { paths: { hide: ['/repo'], show: { '/repo/public': 'r' } } } },
     })
-    const inline = parseSessionProfile({
+    const inline = SessionProfile({
       mounts: { '/repo': { paths: { hide: ['/repo/extra'] } } },
     })
     const entry = withInline(base, inline)?.mounts?.get('/repo')
@@ -453,7 +448,7 @@ describe('the path axis through resolve', () => {
 
   it('compileProfile collects the shows of every mount section', () => {
     const out = compileProfile(
-      parseSessionProfile({
+      SessionProfile({
         paths: { hide: ['/repo'], show: ['/repo/public'] },
         mounts: { '/data': { paths: { hide: ['/data'], show: { '/data/out': 'rw' } } } },
       }),
@@ -471,7 +466,7 @@ describe('the path axis through resolve', () => {
 
   it("compileProfile anchors a mount section's reasons", () => {
     const out = compileProfile(
-      parseSessionProfile({
+      SessionProfile({
         paths: { reasons: [{ patterns: ['/shared'], reason: 'global' }] },
         mounts: {
           '/repo': { paths: { reasons: [{ patterns: ['*.pem'], reason: 'credentials' }] } },
@@ -486,7 +481,7 @@ describe('the path axis through resolve', () => {
 
   it('narrow stamps the path axis', () => {
     const compiled = compileProfile(
-      parseSessionProfile({
+      SessionProfile({
         paths: { hide: [{ patterns: ['/repo'], reason: 'sealed' }], show: ['/repo/public'] },
       }),
     )

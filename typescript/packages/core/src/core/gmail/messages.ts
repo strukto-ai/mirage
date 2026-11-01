@@ -50,20 +50,10 @@ export interface GmailMessageStub {
   threadId?: string
 }
 
-interface ListMessagesResponse {
-  messages?: GmailMessageStub[]
-  nextPageToken?: string
-}
-
 export interface GmailAttachmentInfo {
   filename: string
   attachmentId: string
   size: number
-}
-
-interface GmailAddress {
-  name: string
-  email: string
 }
 
 interface GmailProcessedAttachment {
@@ -72,20 +62,6 @@ interface GmailProcessedAttachment {
   path: string
   mime_type: string
   size: number
-}
-
-export interface GmailMessageProcessed {
-  id: string
-  thread_id: string
-  from: GmailAddress
-  to: GmailAddress[]
-  cc: GmailAddress[]
-  subject: string
-  date: string
-  body_text: string
-  snippet: string
-  labels: string[]
-  attachments: GmailProcessedAttachment[]
 }
 
 export interface ListMessagesOptions {
@@ -111,7 +87,10 @@ export async function listMessagePage(
     params.q = opts.query
   }
   const url = `${gmailBase(tokenManager)}/users/me/messages`
-  const data = (await googleGet(tokenManager, url, params)) as ListMessagesResponse
+  const data = (await googleGet(tokenManager, url, params)) as {
+    messages?: GmailMessageStub[]
+    nextPageToken?: string
+  }
   return [data.messages ?? [], data.nextPageToken ?? null]
 }
 
@@ -162,7 +141,7 @@ export function extractHeader(headers: GmailHeader[] | undefined, name: string):
   return ''
 }
 
-function parseAddress(raw: string): GmailAddress {
+export function parseAddress(raw: string) {
   if (raw.includes('<') && raw.includes('>')) {
     const lt = raw.indexOf('<')
     const gt = raw.indexOf('>')
@@ -173,7 +152,7 @@ function parseAddress(raw: string): GmailAddress {
   return { name: '', email: raw.trim() }
 }
 
-function parseAddressList(raw: string): GmailAddress[] {
+function parseAddressList(raw: string): ReturnType<typeof parseAddress>[] {
   if (raw === '') return []
   return raw.split(',').map((a) => parseAddress(a.trim()))
 }
@@ -248,15 +227,12 @@ function extractProcessedAttachments(
   return result
 }
 
-export async function getMessageProcessed(
-  tokenManager: TokenManager,
-  messageId: string,
-): Promise<GmailMessageProcessed> {
+export async function getMessageProcessed(tokenManager: TokenManager, messageId: string) {
   const raw = await getMessageRaw(tokenManager, messageId)
   return processMessage(raw)
 }
 
-function processMessage(raw: GmailMessageRaw): GmailMessageProcessed {
+export function processMessage(raw: GmailMessageRaw) {
   const headers = raw.payload?.headers ?? []
   const bodyText = decodeBody(raw.payload)
   return {

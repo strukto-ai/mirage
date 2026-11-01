@@ -14,19 +14,19 @@
 
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { MountMode, WritePolicy } from '../../types.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
-import { checkWriteCapability, coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { S3Accessor } from '../../accessor/s3.ts'
-import type { S3Config } from '../../vfs/s3/config.ts'
-import {
-  CONDITION_SUPPORT as S3_SUPPORT,
-  CUSTOM_CONDITION_SUPPORT,
-} from '../../core/s3/constants.ts'
+import type { ConditionSupport } from '../../cache/types.ts'
 import { CONDITION_SUPPORT as BOX_SUPPORT } from '../../core/box/constants.ts'
 import { CONDITION_SUPPORT as DROPBOX_SUPPORT } from '../../core/dropbox/constants.ts'
-import { S3VFSBase } from '../../vfs/s3/s3.ts'
-import type { ConditionSupport } from '../../cache/types.ts'
+import {
+  CUSTOM_CONDITION_SUPPORT,
+  CONDITION_SUPPORT as S3_SUPPORT,
+} from '../../core/s3/constants.ts'
+import { MountMode, WritePolicy } from '../../types.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
+import type { S3Config } from '../../vfs/s3/config.ts'
+import { S3VFS } from '../../vfs/s3/s3.ts'
+import { checkWriteCapability, coerceWritePolicy, writeConditions } from './write_policy.ts'
 
 const FIXTURES = new URL('../../../../../../integ/fixtures/write/', import.meta.url)
 
@@ -74,7 +74,7 @@ function stub(name: string, config?: S3Config): BaseVFS {
       : {}),
     ...(config !== undefined ? { accessor: new S3Accessor(config) } : {}),
   }
-  const proto = config !== undefined ? S3VFSBase.prototype : Object.prototype
+  const proto = config !== undefined ? S3VFS.prototype : Object.prototype
   return Object.assign(Object.create(proto) as object, fields) as unknown as BaseVFS
 }
 

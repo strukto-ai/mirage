@@ -12,46 +12,47 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { refused } from '../metrics.ts'
-import { Buffer } from 'node:buffer'
-import { createHash } from 'node:crypto'
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { runWithNetwork } from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
-import { DiskWorkspaceStateStore, DOT_IDS, Workspace } from '@struktoai/mirage-node'
-import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
-import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
-import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
-import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
-import { Claim, type WorkspaceRegistry } from '../registry.ts'
-import { z } from '@struktoai/mirage-core/vfs/secrets'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
+import type { JsonValue } from '@struktoai/mirage-core/types'
+import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
-import { buildOverrideMounts, cloneWorkspaceWithOverride } from '../clone.ts'
+import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
+import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/workspace/mount/errors'
+import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
+import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
   configToWorkspaceArgs,
+  DiskWorkspaceStateStore,
+  DOT_IDS,
   loadProfilePolicy,
   loadWorkspaceConfig,
-  type WorkspaceArgs,
+  Workspace,
   type WorkspaceConfigRaw,
 } from '@struktoai/mirage-node'
-import { makeBrief, makeDetail } from '../summary.ts'
+import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { Buffer } from 'node:buffer'
+import { createHash } from 'node:crypto'
+import { buildOverrideMounts, cloneWorkspaceWithOverride } from '../clone.ts'
+import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
+import { explanationToDict } from '../io_serde.ts'
+import { refused } from '../metrics.ts'
+import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
+import { Claim, type WorkspaceRegistry } from '../registry.ts'
 import type {
   CloneWorkspaceRequest,
   CreateWorkspaceRequest,
   LoadWorkspaceRequest,
 } from '../schemas.ts'
-import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
-import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/workspace/mount/errors'
-import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
-import { explanationToDict } from '../io_serde.ts'
+import { makeBrief, makeDetail } from '../summary.ts'
 import { queryFlag } from './vfs.ts'
-import type { JsonValue } from '@struktoai/mirage-core/types'
 
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
@@ -368,7 +369,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
         const refusal = await admit(deps, req, reply, config)
         if (refusal !== null) return refusal
         return claimed(deps, req, reply, wid, async () => {
-          let args: WorkspaceArgs
+          let args: Awaited<ReturnType<typeof configToWorkspaceArgs>>
           try {
             // Mounts that answer as they are built, and the secrets the
             // config names, go out under the network the workspace will be
@@ -644,7 +645,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       try {
         entry.runner.ws.setProfile(
           name,
-          loadProfilePolicy(parseSessionProfile(req.body, `profile \`${name}\``)),
+          loadProfilePolicy(SessionProfile(req.body, `profile \`${name}\``)),
         )
       } catch (err) {
         return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })

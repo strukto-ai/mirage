@@ -105,8 +105,13 @@ jobs:
             # stay in the whole-host filters, alongside disk and visibility cases.
             # Fill invalidation and its tests live under cache/file on both
             # hosts and remain covered by these whole-host filters.
+            # Shared Rust filename sanitization, generic predicate types, and
+            # condition errors remain covered by the whole-host filters below.
             # Live session version history under cache/versions uses these
             # filters too, with peer-session cases in unix/write/conditional.
+            # Rust document validation, rs/document, utils/records and the
+            # core Jaeger config use these whole-host filters. The shared
+            # policy/documents and fixtures/normalized_records corpora do too.
             core:
               - 'integ/**'
               - 'data/**'

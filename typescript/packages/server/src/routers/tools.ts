@@ -21,10 +21,6 @@ import type { FastifyInstance } from 'fastify'
 import type { McpEndpoint } from '../mcp/http.ts'
 import { TOOLS } from '../mcp/server.ts'
 
-export interface ToolsRoutesDeps {
-  mcp: McpEndpoint
-}
-
 const INPUTS: ReadonlyMap<string, JsonSchemaType> = new Map(
   TOOLS.map((tool) => [tool.name, tool.inputSchema]),
 )
@@ -80,7 +76,12 @@ async function callTool(
  * Serve each tool at `POST /v1/workspaces/:wsId/tools/<tool>`, with the
  * MCP route's body limit, so an input MCP takes is one these take.
  */
-export function registerToolsRoutes(app: FastifyInstance, deps: ToolsRoutesDeps): void {
+export function registerToolsRoutes(
+  app: FastifyInstance,
+  deps: {
+    mcp: McpEndpoint
+  },
+): void {
   for (const [name, input] of INPUTS) {
     app.post<{ Params: { wsId: string }; Querystring: { session_id?: string } }>(
       `/v1/workspaces/:wsId/tools/${name}`,

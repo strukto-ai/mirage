@@ -12,20 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createHash } from 'node:crypto'
+import { yieldBytes } from '@struktoai/mirage-core/io/stream'
+import { PolicyError } from '@struktoai/mirage-core/policy/errors'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import type { Action, VfsResultContext } from '@struktoai/mirage-core/policy/types'
 import {
-  type ReadSpec,
   DEFAULT_READ_TTL,
   MountMode,
   ReadPolicy,
+  type ReadSpec,
 } from '@struktoai/mirage-core/types'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { PolicyError } from '@struktoai/mirage-core/policy/errors'
-import type { Action, VfsResultContext } from '@struktoai/mirage-core/policy/types'
-import { yieldBytes } from '@struktoai/mirage-core/io/stream'
+import { createHash } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import type { S3Config } from '../vfs/s3/config.ts'
 import { installS3Mock, type S3Mock } from '../../tests/vfs/s3/mock.ts'
+import type { S3Config } from '../vfs/s3/config.ts'
 import { S3VFS } from '../vfs/s3/s3.ts'
 import { Workspace } from '../workspace.ts'
 
@@ -280,7 +280,7 @@ describe('object-store write fingerprint (mocked S3)', () => {
     const ws = makeWorkspace(BOUNDED)
     try {
       ws.createSession('agent', {
-        profile: parseSessionProfile({ paths: { hide: ['*.secret'] } }),
+        profile: SessionProfile({ paths: { hide: ['*.secret'] } }),
       })
       const io = await ws.shell('cp /s3/a /s3/b; printf new | tee /s3/a > /dev/null', {
         sessionId: 'agent',

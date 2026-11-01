@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { apiRequest } from '../api/client.ts'
 import { enoent } from '../../errors/fs.ts'
+import { apiRequest } from '../api/client.ts'
+import { ApiError } from '../api/errors.ts'
+import type { LinearConfig } from './config.ts'
 import {
   COMMENT_CREATE_MUTATION,
   COMMENT_UPDATE_MUTATION,
@@ -32,7 +34,6 @@ import {
   TEAM_PROJECTS_QUERY,
   USER_LOOKUP_QUERY,
 } from './queries.ts'
-import { ApiError } from '../api/errors.ts'
 
 export class LinearApiError extends ApiError {
   constructor(
@@ -49,12 +50,6 @@ export interface LinearTransport {
   graphql(query: string, variables?: Record<string, unknown>): Promise<Record<string, unknown>>
 }
 
-export interface HttpLinearTransportOptions {
-  apiKey: string
-  baseUrl?: string
-  timeout?: number
-}
-
 interface GraphQLResponse {
   data?: Record<string, unknown>
   errors?: { message?: string }[]
@@ -66,7 +61,7 @@ function errorMessage(errors: { message?: string }[] | undefined): string | null
   return first?.message ?? null
 }
 
-function linearError(response: Response, text: string): LinearApiError {
+function errorOf(response: Response, text: string): LinearApiError {
   let errors: { message?: string }[] = []
   try {
     errors = (JSON.parse(text) as GraphQLResponse).errors ?? []
@@ -83,7 +78,7 @@ export class HttpLinearTransport implements LinearTransport {
   private readonly baseUrl: string
   private readonly timeout: number | undefined
 
-  constructor(opts: HttpLinearTransportOptions) {
+  constructor(opts: Pick<LinearConfig, 'apiKey' | 'baseUrl' | 'timeout'>) {
     this.apiKey = opts.apiKey
     this.baseUrl = opts.baseUrl ?? 'https://api.linear.app/graphql'
     this.timeout = opts.timeout
@@ -98,7 +93,7 @@ export class HttpLinearTransport implements LinearTransport {
       timeout: this.timeout,
       headers: { Authorization: this.apiKey, 'Content-Type': 'application/json' },
       json: { query, variables },
-      errorOf: linearError,
+      errorOf: errorOf,
     })) ?? {}) as GraphQLResponse
     if (data.errors !== undefined && data.errors.length > 0) {
       const msg = errorMessage(data.errors) ?? 'Linear API error'
@@ -132,7 +127,7 @@ function navigate(root: Record<string, unknown>, path: readonly string[]): Conne
   return cursor as unknown as Connection
 }
 
-async function paginate(
+async function paginateConnection(
   transport: LinearTransport,
   query: string,
   variables: Record<string, unknown>,
@@ -152,7 +147,7 @@ async function paginate(
 }
 
 export async function listTeams(transport: LinearTransport): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_LIST_QUERY, {}, ['teams'])
+  return paginateConnection(transport, TEAM_LIST_QUERY, {}, ['teams'])
 }
 
 export async function listTeamMembers(
@@ -160,7 +155,7 @@ export async function listTeamMembers(
   teamId: string,
   limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_MEMBERS_QUERY, { teamId }, ['team', 'members'], limit)
+  return paginateConnection(transport, TEAM_MEMBERS_QUERY, { teamId }, ['team', 'members'], limit)
 }
 
 export async function listTeamIssues(
@@ -172,7 +167,7 @@ export async function listTeamIssues(
   if (projects?.length === 0) return []
   const variables: Record<string, unknown> =
     projects === undefined ? { teamId } : { teamId, filter: { project: { id: { in: projects } } } }
-  return paginate(transport, TEAM_ISSUES_QUERY, variables, ['team', 'issues'], limit)
+  return paginateConnection(transport, TEAM_ISSUES_QUERY, variables, ['team', 'issues'], limit)
 }
 
 export async function listTeamProjects(
@@ -180,7 +175,7 @@ export async function listTeamProjects(
   teamId: string,
   limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_PROJECTS_QUERY, { teamId }, ['team', 'projects'], limit)
+  return paginateConnection(transport, TEAM_PROJECTS_QUERY, { teamId }, ['team', 'projects'], limit)
 }
 
 export async function listTeamCycles(
@@ -188,14 +183,14 @@ export async function listTeamCycles(
   teamId: string,
   limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_CYCLES_QUERY, { teamId }, ['team', 'cycles'], limit)
+  return paginateConnection(transport, TEAM_CYCLES_QUERY, { teamId }, ['team', 'cycles'], limit)
 }
 
 export async function listTeamLabels(
   transport: LinearTransport,
   teamId: string,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_LABELS_QUERY, { teamId }, ['team', 'labels'])
+  return paginateConnection(transport, TEAM_LABELS_QUERY, { teamId }, ['team', 'labels'])
 }
 
 export async function listTeamDocuments(
@@ -203,7 +198,7 @@ export async function listTeamDocuments(
   teamId: string,
   limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_DOCUMENTS_QUERY, { teamId }, ['documents'], limit)
+  return paginateConnection(transport, TEAM_DOCUMENTS_QUERY, { teamId }, ['documents'], limit)
 }
 
 export async function resolveTeam(
@@ -233,7 +228,7 @@ export async function listIssueComments(
   transport: LinearTransport,
   issueId: string,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, ISSUE_COMMENTS_QUERY, { issueId }, ['issue', 'comments'])
+  return paginateConnection(transport, ISSUE_COMMENTS_QUERY, { issueId }, ['issue', 'comments'])
 }
 
 export async function resolveIssueId(

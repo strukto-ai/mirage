@@ -12,19 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonBytes } from '../render/json.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
+import type { NotionAccessor } from '../../accessor/notion.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { byteLength, NAME_MAX_BYTES } from '../../utils/sanitize.ts'
+import { NotionVFS } from '../../vfs/notion/notion.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { rowsOf } from '../hierarchy/probe.ts'
+import { jsonBytes } from '../render/json.ts'
 import type { NotionTransport } from './client.ts'
 import { normalizeDatabase } from './normalize.ts'
-import type { NotionAccessor } from '../../accessor/notion.ts'
-import { readdir as rawOperation } from './readdir.ts'
-import { rowsOf } from '../hierarchy/probe.ts'
-import { NotionVFSBase } from '../../vfs/notion/notion.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { formatSegment } from './pathing.ts'
-import { NAME_MAX_BYTES, byteLength } from '../../utils/sanitize.ts'
+import { readdir as rawOperation } from './readdir.ts'
 
 class FakeTransport implements NotionTransport {
   public readonly invocations: { name: string; args: Record<string, unknown> }[] = []
@@ -258,7 +258,7 @@ describe('notion readdir databases', () => {
     })
     transport.enqueue('API-retrieve-a-database', database())
     transport.enqueue('API-retrieve-a-database', database())
-    const vfs = new NotionVFSBase({ accessor: makeAccessor(transport) })
+    const vfs = new NotionVFS({ accessor: makeAccessor(transport) })
     const ws = new Workspace({ '/': vfs })
     const dirPath = `/databases/Tasks__${DB_ID}`
     await ws.dispatch('readdir', dirPath)

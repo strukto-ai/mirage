@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ArithError } from '../../../../shell/errors.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import { ArithError } from '../../../../shell/errors.ts'
 import { type ShellVar, VarAttr } from '../../../../shell/variable.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import { sessionEntry, type SessionState } from '../../../session/session.ts'
 import {
   appended,
@@ -28,8 +30,8 @@ import {
   visibleArrays,
   visibleAssocs,
 } from '../../../session/state.ts'
-import type { SessionView } from '../../../../view/types.ts'
 import { fail, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
 import { SUBSCRIPT_RE } from './constants.ts'
 import {
   declarationResult,
@@ -49,7 +51,6 @@ import {
   storeStagedArrays,
   visibleRecord,
 } from './declare.ts'
-import type { BuiltinCall, Result } from '../types.ts'
 import type { AttrMarks, Declaration, DeclarationOperand } from './types.ts'
 
 /**
@@ -69,7 +70,7 @@ export async function handleLocal(
   session: SessionState,
   state: SessionView | null = null,
   options: Partial<Declaration> = {},
-): Promise<Result> {
+): Promise<RedirectResult> {
   const decl: Declaration = {
     cmd: 'local',
     kind: null,
@@ -116,7 +117,7 @@ async function declareOperands(
   view: SessionView,
   decl: Declaration,
   locals: Map<string, ShellVar | null> | null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const { cmd, kind, shaping, marks, plus, nameref, inherit } = decl
   const errors: string[] = []
   const warnings: string[] = []
@@ -372,7 +373,7 @@ async function freshLocal(
 }
 
 /** The `local` arm. */
-export async function localBuiltin(call: BuiltinCall): Promise<Result> {
+export async function localBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleLocal(
     [...call.argv.args],
     call.context.session,

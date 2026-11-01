@@ -12,11 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rawPathOf } from '../../utils/key_prefix.ts'
-import { publishRead } from '../../cache/context.ts'
-import { record, revisionFor, startOp } from '../../observe/context.ts'
-import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
+import { publishRead } from '../../cache/context.ts'
+import { eacces, enoent } from '../../errors/fs.ts'
+import { record, revisionFor, startOp } from '../../observe/context.ts'
+import type { ReadRange } from '../../types.ts'
+import { VFSName, type PathSpec } from '../../types.ts'
+import { rawPathOf } from '../../utils/key_prefix.ts'
+import { rangeHeader } from '../../utils/ranges.ts'
 import {
   createS3Client,
   isDenied,
@@ -25,13 +28,6 @@ import {
   s3Key,
   streamToBuffer,
 } from './client.ts'
-import { eacces, enoent } from '../../errors/fs.ts'
-import { rangeHeader } from '../../utils/ranges.ts'
-
-export interface S3ReadOptions {
-  offset?: number
-  size?: number
-}
 
 /**
  * Extract `(fingerprint, revision)` from a GetObject / HeadObject response.
@@ -53,7 +49,7 @@ export function fpRevFromS3Response(resp: { ETag?: string | null; VersionId?: st
 export async function read(
   accessor: S3Accessor,
   path: PathSpec,
-  options: S3ReadOptions = {},
+  options: ReadRange = {},
 ): Promise<Uint8Array> {
   const virtual = path.virtual
   const rawPath = rawPathOf(path)

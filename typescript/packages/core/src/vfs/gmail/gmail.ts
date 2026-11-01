@@ -12,22 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
 import { GmailAccessor } from '../../accessor/gmail.ts'
-
-import { TokenManager } from '../../core/google/client.ts'
-import { VFSName } from '../../types.ts'
-
-import { GmailConfigSchema, type GmailConfig, type GmailConfigRedacted } from './config.ts'
-import type { DirListing, PathSpec, FileStat } from '../../types.ts'
-import type { Handed } from '../types.ts'
-import { readdir as gmailReaddir } from '../../core/gmail/readdir.ts'
 import { buildDeltaHook } from '../../core/gmail/events.ts'
-import type { DeltaHook } from '../../events/base.ts'
-import { filesContaining as gmailFilesContaining } from '../../core/gmail/search.ts'
 import { read as gmailRead } from '../../core/gmail/read.ts'
+import { readdir as gmailReaddir } from '../../core/gmail/readdir.ts'
+import { filesContaining as gmailFilesContaining } from '../../core/gmail/search.ts'
 import { stat as gmailStat } from '../../core/gmail/stat.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { TokenManager } from '../../core/google/client.ts'
+import type { DeltaHook } from '../../events/base.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { GmailConfig } from './config.ts'
 
 export const VFS_MD = `{prefix}
   <label>/
@@ -87,11 +85,6 @@ export const VFS_MD = `{prefix}
 
   To act on messages (read by id, triage, raw API calls), use the gws
   CLI if installed: gws gmail --help`
-
-export interface GmailVFSState {
-  type: string
-  config: GmailConfigRedacted
-}
 
 export class GmailVFS extends BaseVFS {
   override readonly name: string = VFSName.GMAIL
@@ -157,10 +150,7 @@ export class GmailVFS extends BaseVFS {
     return gmailFilesContaining(this.accessor, text, [path])
   }
 
-  override getState(): Promise<GmailVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(GmailConfigSchema, this.config) as GmailConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof GmailConfig>>> {
+    return Promise.resolve(this.configState(GmailConfig, this.config))
   }
 }

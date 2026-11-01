@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseSessionProfile } from '../policy/profile.ts'
 import {
   countOccurrences,
   makeWorkspace,
   stdoutBytes,
   stdoutStr,
 } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { SessionProfile } from '../policy/profile.ts'
 
 describe('workspace: env set / unset / printenv', () => {
   it('unset removes env var', async () => {
@@ -63,7 +63,7 @@ describe('workspace: env set / unset / printenv', () => {
   })
 })
 
-const ALICE = { profiles: { alice: parseSessionProfile({}) }, profile: 'alice' }
+const ALICE = { profiles: { alice: SessionProfile({}) }, profile: 'alice' }
 
 describe('workspace: whoami', () => {
   it('prints the profile name', async () => {

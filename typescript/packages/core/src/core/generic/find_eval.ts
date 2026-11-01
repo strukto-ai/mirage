@@ -12,104 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fnmatch } from '../../utils/fnmatch.ts'
+import { FileType, type FileStat } from '../../types.ts'
 import { inMtimeWindow } from '../../utils/dates.ts'
+import { fnmatch } from '../../utils/fnmatch.ts'
 import { respellOne } from '../../utils/path.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { DIR_SIZE } from '../../utils/stat_view.ts'
-import { FileType, type FileStat } from '../../types.ts'
-
-/** find's row actions: -print, -print0, -ls and -delete. */
-export type RowActionKind = 'print' | 'print0' | 'ls' | 'delete'
-
-/** The one-letter kind a -printf %y/%Y directive renders. */
-export type PrintfKind = 'f' | 'd' | 'l' | 'c' | 'p'
-export interface FindEntry {
-  key: string
-  name: string
-  // 'l' is a namespace symlink: GNU find without -L reports the link
-  // itself and never walks through it, so it is never 'f' or 'd'.
-  kind: 'f' | 'd' | 'l' | 'c' | 'p'
-  depth: number
-  isEmpty?: boolean | null
-  mtime?: number | null
-}
-
-export type ActionKind = RowActionKind | 'exec' | 'printf'
-
-// `-mtime`, `-newermt` and a resolved `-newer`: an inclusive epoch-second
-// window over the entry's modification time. The same bounds fold into the
-// expression's flat window (`FindExpr.mtimeMin`/`mtimeMax`), which is what a
-// backend pushes down and the generic post-filters with, so an entry whose
-// mtime the walk did not fetch passes here and meets the window afterwards.
-// The node's own job is its position: a `-prune` after it fires only for a
-// directory the test holds for, and one before it fires regardless, as GNU
-// orders them. A prune reached past an undecided test is recorded as
-// pending for the caller to settle once it has statted the directory.
-export interface MtimeNode {
-  op: 'mtime'
-  lo: number | null
-  hi: number | null
-}
-
-// A directory whose `-prune` decision waited on time tests the walk could
-// not decide: a prune reached past one, or every prune skipped on the
-// strength of one (`-mtime 1 -o -prune`). The entry is kept whole: whether
-// the prune stands is settled by evaluating the expression again with the
-// directory's mtime, since a failing test may send GNU down another arm
-// that prunes anyway (`( -mtime 1 -o -type d ) -prune`).
-export interface PendingPrune {
-  entry: FindEntry
-}
-
-export type PredNode =
-  | { op: 'name'; pattern: string; icase: boolean }
-  // `-path` matches the row as `find` prints it: the mount prefix plus the
-  // entry's key, respelled under the operand as typed (`find . -path
-  // ./skip` prints and matches `./skip`), so `bindTree` stamps all three
-  // onto the node before evaluation and entry keys stay mount-relative
-  // (#396). An empty `root` leaves the row as the display path.
-  | { op: 'path'; pattern: string; prefix?: string; root?: string; raw?: string }
-  | { op: 'type'; kind: string }
-  | { op: 'empty' }
-  | { op: 'not'; kid: PredNode }
-  | { op: 'and'; kids: PredNode[] }
-  | { op: 'or'; kids: PredNode[] }
-  | { op: 'true' }
-  // An action the expression reached (-print, -print0, -ls, -delete,
-  // -exec, -printf): true, like GNU's, and it marks the entry as acted on.
-  // A tree that holds one keeps the entries an action reached rather than
-  // the ones the whole expression held for, which is how `-o`
-  // short-circuits past a `-print` (`-path ./skip -prune -o -type f
-  // -print` never reaches the print for `./skip`). The executor still runs
-  // the action itself, once per kept row, so the parser admits one
-  // distinct action to a tree holding any. GNU's `-exec ... ;` alone is
-  // false when its command fails, which the executor learns only after the
-  // walk, so the parser lets it stand only where nothing follows it;
-  // `batch` marks `-exec ... {} +`, true whatever the command exits.
-  | { op: 'action'; kind: ActionKind; batch?: boolean }
-  // `-prune`: true, and a directory it reaches loses its contents. Every
-  // backend evaluates the tree entry by entry with no say over its own
-  // walk, and a flat listing meets a child before its parent, so the node
-  // keeps the ledger of pruned directory keys (mount-relative) and
-  // `dropPruned` applies it to what the walk returned; `bindTree` hands
-  // every start point a fresh ledger. A prune reached past a time test the
-  // entry could not answer lands in `pending`; until `settlePrunes`
-  // evaluates the directory again with its mtime, it counts as pruned, the
-  // most a walk without times can say.
-  | { op: 'prune'; pruned: string[]; pending: PendingPrune[] }
-  | MtimeNode
-
-// What evaluating an expression on one entry did besides answer: whether an
-// action was reached, whether a prune node recorded the entry (firm or
-// pending), and the time tests the entry carried no mtime for on the path
-// that decided the answer so far; a branch whose outcome they could not
-// have changed drops them again.
-export interface Effects {
-  acted: boolean
-  pruned: boolean
-  deferred: MtimeNode[]
-}
+import type {
+  BuildTreeOptions,
+  Effects,
+  EmitStartPathOptions,
+  FindEntry,
+  PendingPrune,
+  PredNode,
+  PrintfKind,
+} from './types.ts'
 
 function freshEffects(): Effects {
   return { acted: false, pruned: false, deferred: [] }
@@ -391,18 +308,6 @@ export function startBasename(virtual: string): string {
   return rstripSlash(virtual).split('/').pop() ?? ''
 }
 
-export interface EmitStartPathOptions {
-  kind: FindEntry['kind']
-  isEmpty?: boolean | null
-  exists: boolean
-  tree: PredNode
-  maxDepth: number | null | undefined
-  minDepth: number | null | undefined
-  size?: number | null | undefined
-  minSize?: number | null | undefined
-  maxSize?: number | null | undefined
-}
-
 // Append the search start path to results when it matches. Shared by every
 // backend find op so the start path is emitted uniformly: bare `find <dir>`,
 // `-type d` on the root, `-maxdepth 0`, `-mindepth 0`, and `-name` against the
@@ -436,16 +341,6 @@ export function emitStartPath(
     if (opts.maxSize !== null && opts.maxSize !== undefined && effective > opts.maxSize) return
   }
   results.push(startKey)
-}
-
-export interface BuildTreeOptions {
-  name?: string | null | undefined
-  iname?: string | null | undefined
-  pathPattern?: string | null | undefined
-  type?: string | null | undefined
-  nameExclude?: string | null | undefined
-  orNames?: string[] | null | undefined
-  empty?: boolean | null | undefined
 }
 
 export function buildTree(opts: BuildTreeOptions): PredNode {

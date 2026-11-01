@@ -13,15 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-
 import { eacces, fsError } from '../../../../errors/fs.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
+import { CondError } from './errors.ts'
 import { evalFlat } from './flat.ts'
-import { CondError, type CondContext } from './types.ts'
+import { type CondContext } from './types.ts'
 
 // Mirrors python/tests/workspace/executor/builtins/condition/test_flat.py.
 

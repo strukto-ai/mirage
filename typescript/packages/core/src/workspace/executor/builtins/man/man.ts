@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import { findChild, listedNode, subcommandRows } from '../../../../commands/cli/walk.ts'
 import { BUILTIN_SPECS } from '../../../../commands/spec/builtins.ts'
 import {
@@ -20,9 +21,10 @@ import {
   renderHelp,
   usageLine,
 } from '../../../../commands/spec/help.ts'
-import { SHELL_SPECS, type ShellParse, parseShellOptions } from '../../../../commands/spec/shell.ts'
+import { parseShellOptions, SHELL_SPECS, type ShellParse } from '../../../../commands/spec/shell.ts'
 import { SHELL_SYNOPSES, SYNOPSES } from '../../../../commands/spec/synopsis.ts'
 import { type CommandSpec, UsageStyle } from '../../../../commands/spec/types.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { RegexError } from '../../../../rs/errors.ts'
 import { type PosixRegex, posixRegex } from '../../../../rs/regex.ts'
 import { byteView, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
@@ -35,7 +37,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { envSnapshot } from '../../../session/state.ts'
 import { envWidth, fill, optionRows, paragraphs, summary } from '../help/help.ts'
 import { result } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
 import {
   DEFAULT_WIDTH,
   HINT,
@@ -324,7 +326,7 @@ function whatis(page: ManPage): string {
 }
 
 /** man's refusal of its own command line: the message, then the hint, status 1. */
-function usageError(message: string): Result {
+function usageError(message: string): RedirectResult {
   return result('man', { exitCode: 1, stderr: `man: ${message}\n${HINT}` })
 }
 
@@ -387,7 +389,7 @@ export async function handleMan(
   args: readonly string[],
   registry: MountRegistry,
   session: SessionState,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const spec = SHELL_SPECS.man
   const parse = parseShellOptions(spec, [...args])
   const wrong = refusal(parse)
@@ -441,7 +443,7 @@ async function summaries(
   registry: MountRegistry,
   isWhatis: boolean,
   utf8: boolean,
-): Promise<Result> {
+): Promise<RedirectResult> {
   if (words.length === 0) {
     return result('man', { exitCode: 1, stderr: `${isWhatis ? 'whatis' : 'apropos'} what?\n` })
   }
@@ -489,6 +491,6 @@ async function matches(pattern: PosixRegex, page: ManPage, utf8: boolean): Promi
 }
 
 /** The `man` arm. */
-export function manBuiltin(call: BuiltinCall): Promise<Result> {
+export function manBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleMan([...call.argv.args], call.registry, call.context.session)
 }

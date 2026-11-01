@@ -12,17 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Limit } from '../../types.ts'
 import { runOutput } from '../../commands/builtin/general/interpreter.ts'
 import { guardIO, guardOutput, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import type { Context } from '../../commands/config.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
-import type { Runtime } from '../../runtime/base.ts'
-import type { LineExecutor } from '../../runtime/mixin.ts'
-import type { OutputFn, RunResult } from '../../runtime/types.ts'
-import type { RouteContext } from '../../policy/types.ts'
+import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import {
   type Claimant,
   postExecuteGate,
@@ -30,28 +26,28 @@ import {
   renderDeny,
   resolveLimit,
 } from '../../policy/index.ts'
+import type { RouteContext } from '../../policy/types.ts'
+import type { Runtime } from '../../runtime/base.ts'
+import type { LineExecutorMixin } from '../../runtime/mixin.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
+import { TIMEOUT_STATUS } from '../../shell/constants.ts'
+import { Limit, PathSpec } from '../../types.ts'
+import { makeAbortError } from '../../utils/abort.ts'
+import { concat } from '../../utils/bytes.ts'
 import { pump } from '../executor/jobs.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
-import { commandName } from './utils.ts'
 import { ExecutionNode } from '../types.ts'
-import { makeAbortError } from '../../utils/abort.ts'
-import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
-import { concat } from '../../utils/bytes.ts'
 import { isControlFlowError } from './failure.ts'
-import { PathSpec, type Refusal } from '../../types.ts'
-import { encodeText } from '../../shell/bytes.ts'
-import { TIMEOUT_STATUS } from '../../shell/constants.ts'
+import { commandName } from './utils.ts'
 
 /**
  * What a whole line answers: the runtime's own result plus the
  * refusal record when the boundary's post_execute gate refused it.
  */
-export interface LineResult extends RunResult {
-  refusal: Refusal | null
-}
 
 /**
  * Hand the raw line to one runtime instead of walking its tree.
@@ -68,7 +64,7 @@ export interface LineResult extends RunResult {
  * before any of it escapes, and back in the result without one.
  */
 export async function runWholeLine(
-  runtime: Runtime & LineExecutor,
+  runtime: Runtime & LineExecutorMixin,
   command: string,
   stdin: ByteSource | null,
   session: SessionState,
@@ -85,7 +81,7 @@ export async function runWholeLine(
   timeout: number | null = null,
   // When the line's budget began (`performance.now()`).
   start?: number,
-): Promise<LineResult> {
+) {
   const name = commandName(command)
   const mounts = registry.allMounts()
   const guard = resolveLimit(

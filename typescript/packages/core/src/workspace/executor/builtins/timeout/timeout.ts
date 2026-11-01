@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { versionLine } from '../../../../commands/spec/standard.ts'
-import { quoteText } from '../../../../commands/quote.ts'
 import { STRTOD, strtodDouble } from '../../../../commands/builtin/utils/strtod.ts'
-import { INT_MAX, boundedDecimal } from '../../../../commands/builtin/utils/strtol.ts'
+import { boundedDecimal, INT_MAX } from '../../../../commands/builtin/utils/strtol.ts'
+import { quoteText } from '../../../../commands/quote.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
-import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
+import { parseShellOptions, SHELL_SPECS } from '../../../../commands/spec/shell.ts'
+import { versionLine } from '../../../../commands/spec/standard.ts'
 import { SYNOPSES } from '../../../../commands/spec/synopsis.ts'
 import {
   ambiguousOptionError,
@@ -26,20 +26,24 @@ import {
   unknownOptionError,
   usageHint,
 } from '../../../../commands/spec/usage.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { runAsProgram } from '../../../../context/session_context.ts'
-import { IOResult, OutputState, materialize } from '../../../../io/types.ts'
+import { ensureStream, OutputStream, yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import { OutputStream, ensureStream, yieldBytes } from '../../../../io/stream.ts'
+import { IOResult, materialize, OutputState } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
-import { shellJoin } from '../../../../shell/join.ts'
-import { SignalStop, abortable, atDeadline, joinOrAbort } from '../../../../utils/abort.ts'
+import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
 import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
+import { shellJoin } from '../../../../shell/join.ts'
+import { abortable, atDeadline, joinOrAbort, SignalStop } from '../../../../utils/abort.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
+import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import {
   CONTINUE_SIGNALS,
   SELF_KILLING_SIGNALS,
@@ -53,9 +57,6 @@ import {
   STOP_SIGNALS,
   TIMEOUT_NAMES,
 } from './constants.ts'
-import { concat } from '../../../../utils/bytes.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
-import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
 
 const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
   '': 1,
@@ -67,7 +68,7 @@ const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
 
 const TIMED_OUT: unique symbol = Symbol('timed-out')
 
-function refuse(stderr: Uint8Array, exitCode = 125): Result {
+function refuse(stderr: Uint8Array, exitCode = 125): RedirectResult {
   return [
     null,
     new IOResult({ exitCode, stderr }),
@@ -75,7 +76,7 @@ function refuse(stderr: Uint8Array, exitCode = 125): Result {
   ]
 }
 
-function usageError(message: string): Result {
+function usageError(message: string): RedirectResult {
   // GNU timeout reserves 125 for its own failures; 124 means the
   // command was killed at the deadline.
   return refuse(encodeText(`timeout: ${message}\n${usageHint('timeout')}\n`))
@@ -276,7 +277,7 @@ export async function handleTimeout(
   stdin: ByteSource | null = null,
   registry: MountRegistry | null = null,
   lineSignal?: AbortSignal,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const parse = parseShellOptions(SHELL_SPECS.timeout, args)
   let signal = 15
   let killAfter = 0
@@ -385,7 +386,7 @@ export async function handleTimeout(
  */
 async function* streamed(
   sink: PipeConsole,
-  watch: Promise<Result>,
+  watch: Promise<RedirectResult>,
   io: IOResult,
   node: ExecutionNode,
 ): AsyncGenerator<Uint8Array, void, undefined> {
@@ -404,7 +405,7 @@ async function supervise(
   seconds: number,
   lineSignal: AbortSignal | undefined,
   how: Supervision,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const { signal, killAfter, foreground } = how
   const stops = STOP_SIGNALS.has(signal) && (foreground || signal === SIGSTOP)
   const carriesOn =
@@ -434,7 +435,7 @@ async function supervise(
   // Its stderr is read after the join, since a runtime hands over what its
   // guest wrote there as the run ends. One that will not end is let go
   // after a stop's grace.
-  const stop = async (said: readonly string[], exitCode: number): Promise<Result> => {
+  const stop = async (said: readonly string[], exitCode: number): Promise<RedirectResult> => {
     sink.mute()
     try {
       await joinOrAbort(run, abort.signal, STOP_WAIT_SECONDS * 1000)
@@ -504,7 +505,7 @@ async function ended(
   said: readonly string[],
   exitCode: number,
   finished = false,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const source = held[0]?.stderr ?? null
   const head = finished
     ? await materialize(source)
@@ -524,7 +525,7 @@ async function ended(
 }
 
 /** The `timeout` arm. */
-export async function timeoutBuiltin(call: BuiltinCall): Promise<Result> {
+export async function timeoutBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleTimeout(
     call.executeFn,
     [...call.argv.args],

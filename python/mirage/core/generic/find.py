@@ -4,6 +4,7 @@ from functools import partial
 from mirage.cache.context import active_cache_manager
 from mirage.context import session_visibility
 from mirage.core.generic import find_eval
+from mirage.core.generic import types as find_types
 from mirage.core.generic.find_eval import (
     printf_kind,
 )
@@ -173,7 +174,7 @@ async def walk_find(
     *,
     readdir: Callable[[PathSpec], Awaitable[list[str]]],
     stat: Callable[[PathSpec], Awaitable[FileStat]],
-    args: find_eval.FindArgs,
+    args: find_types.FindArgs,
     follow: LinkView | None = None,
     unreadable: list[str] | None = None,
     unstatted: dict[str, Exception] | None = None,
@@ -203,7 +204,7 @@ async def walk_find(
         search_path (PathSpec): the start point.
         readdir (Callable): bound readdir, ``readdir(p)``.
         stat (Callable): bound stat, ``stat(p)``.
-        args (find_eval.FindArgs): parsed find expression.
+        args (find_types.FindArgs): parsed find expression.
         follow (LinkView | None): the namespace's links, where ``-L``
             follows them.
         unreadable (list[str] | None): collects refused directories.
@@ -258,7 +259,7 @@ async def walk_find(
                 else None
             )
             find_eval.keep(
-                find_eval.FindEntry(
+                find_types.FindEntry(
                     key=key,
                     name=spec.virtual.rstrip("/").rsplit("/", 1)[-1],
                     kind="d",
@@ -344,7 +345,7 @@ async def walk_find(
             if st is None:
                 continue
             learned[key] = modified_ts(st.modified)
-        entry = find_eval.FindEntry(
+        entry = find_types.FindEntry(
             key=key,
             name=entry_name,
             kind=kind,

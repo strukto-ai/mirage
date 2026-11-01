@@ -14,18 +14,11 @@
 
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { listFolderEntries } from '../../../../core/email/client.ts'
-import type { ParsedRfc822 } from '../../../../core/email/_parse.ts'
 import { sendRaw } from './smtp.ts'
 
 const SENT_ATTRIBUTE = '\\sent'
 const DEFAULT_SENT_FOLDER = 'Sent'
 const SEEN_FLAG = '\\Seen'
-
-export interface Delivery {
-  parsed: ParsedRfc822
-  /** A line for stderr, empty when there is nothing to report. */
-  warning: string
-}
 
 /**
  * Names the mailbox a sent copy belongs in.
@@ -91,7 +84,7 @@ export async function deliver(
   accessor: EmailAccessor,
   raw: Uint8Array,
   save: string | null = null,
-): Promise<Delivery> {
+) {
   const parsed = await sendRaw(accessor.config, raw)
   if (save === null && !accessor.config.saveCopy) return { parsed, warning: '' }
   try {

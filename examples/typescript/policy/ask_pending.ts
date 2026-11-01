@@ -19,11 +19,11 @@ import {
   RAMVFS,
   Scope,
   Workspace,
-  parseSessionProfile,
+  SessionProfile,
 } from "@struktoai/mirage-node";
 
 // Two rules that ask: one about a path, one about a whole command.
-const ROLE = parseSessionProfile(
+const ROLE = SessionProfile(
   {
     commands: {
       allow: ["ls", "cat", "rm"],

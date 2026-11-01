@@ -13,47 +13,42 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import { VFSName } from '@struktoai/mirage-core/types'
-import { SSHAccessor } from '../../accessor/ssh.ts'
-import { type SSHConfig, type SSHConfigRedacted, SSHConfigSchema } from './config.ts'
 import type {
   CapacityResult,
-  PathSpec,
   FileStat,
+  PathSpec,
   SetAttrFields,
 } from '@struktoai/mirage-core/types'
-import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { readdir as sshReaddir } from '../../core/ssh/readdir.ts'
+import { VFSName } from '@struktoai/mirage-core/types'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState, Handed } from '@struktoai/mirage-core/vfs/types'
+import { SSHAccessor } from '../../accessor/ssh.ts'
+import { append as sshAppend } from '../../core/ssh/append.ts'
+import { capacity as sshCapacity } from '../../core/ssh/capacity.ts'
+import { checksum as sshChecksum } from '../../core/ssh/checksum.ts'
+import { copy as sshCopy, dirCopy as sshDirCopy } from '../../core/ssh/copy.ts'
+import { create as sshCreate } from '../../core/ssh/create.ts'
+import { exists as sshExists } from '../../core/ssh/exists.ts'
+import { mkdir as sshMkdir } from '../../core/ssh/mkdir.ts'
+import { pwrite as sshPwrite } from '../../core/ssh/pwrite.ts'
 import { lineCount as sshLineCount, read as sshRead } from '../../core/ssh/read.ts'
+import { readdir as sshReaddir } from '../../core/ssh/readdir.ts'
+import { rename as sshRename } from '../../core/ssh/rename.ts'
+import { rmR as sshRmR } from '../../core/ssh/rm.ts'
+import { rmdir as sshRmdir } from '../../core/ssh/rmdir.ts'
+import { filesContaining as sshFilesContaining } from '../../core/ssh/search.ts'
+import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
 import { stat as sshStat, tree as sshTree } from '../../core/ssh/stat.ts'
 import { follow as sshFollow, readStream as sshStream } from '../../core/ssh/stream.ts'
-import { checksum as sshChecksum } from '../../core/ssh/checksum.ts'
-import { exists as sshExists } from '../../core/ssh/exists.ts'
-import { filesContaining as sshFilesContaining } from '../../core/ssh/search.ts'
-import { write as sshWrite } from '../../core/ssh/write.ts'
-import { append as sshAppend } from '../../core/ssh/append.ts'
-import { pwrite as sshPwrite } from '../../core/ssh/pwrite.ts'
-import { create as sshCreate } from '../../core/ssh/create.ts'
-import { mkdir as sshMkdir } from '../../core/ssh/mkdir.ts'
-import { unlink as sshUnlink } from '../../core/ssh/unlink.ts'
-import { rmdir as sshRmdir } from '../../core/ssh/rmdir.ts'
-import { rmR as sshRmR } from '../../core/ssh/rm.ts'
-import { rename as sshRename } from '../../core/ssh/rename.ts'
-import { copy as sshCopy, dirCopy as sshDirCopy } from '../../core/ssh/copy.ts'
-import { capacity as sshCapacity } from '../../core/ssh/capacity.ts'
 import { truncate as sshTruncate } from '../../core/ssh/truncate.ts'
-import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { unlink as sshUnlink } from '../../core/ssh/unlink.ts'
+import { write as sshWrite } from '../../core/ssh/write.ts'
+import { SSHConfig } from './config.ts'
 
 const mkdirOp = (accessor: SSHAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   sshMkdir(accessor, path, parents === true)
-
-export interface SSHVFSState {
-  type: string
-  config: SSHConfigRedacted
-}
 
 export class SSHVFS extends BaseVFS {
   override readonly name = VFSName.SSH
@@ -209,10 +204,7 @@ export class SSHVFS extends BaseVFS {
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
-  override async getState(): Promise<SSHVFSState> {
-    return {
-      type: this.name,
-      config: redactConfigWithSchema(SSHConfigSchema, this.config) as SSHConfigRedacted,
-    }
+  override async getState(): Promise<ConfigState<RedactedSchema<typeof SSHConfig>>> {
+    return this.configState(SSHConfig, this.config)
   }
 }

@@ -12,20 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { concat } from '../../../../utils/bytes.ts'
 import type { GitHubAccount } from '../../../../accessor/github.ts'
-import { IOResult } from '../../../../io/types.ts'
-import { FlagView } from '../../../spec/flag_view.ts'
-import type { CommandFnResult, Context } from '../../../config.ts'
-import type { PathSpec } from '../../../../types.ts'
-import { expand } from '../../../../core/github/placeholder.ts'
+import { GitHubApiError } from '../../../../core/github/client.ts'
 import { GRAPHQL_PATH } from '../../../../core/github/constants.ts'
-import { GitHubApiError, type GitHubResponse } from '../../../../core/github/client.ts'
+import { expand } from '../../../../core/github/placeholder.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
+import type { JsonValue, PathSpec } from '../../../../types.ts'
+import { concat } from '../../../../utils/bytes.ts'
+import { isRecord } from '../../../../utils/records.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
 import { ghBool, jqLines, readCliFile } from './accessor.ts'
 import { HTTP_REASONS } from './constants.ts'
 
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 const EMPTY_ARRAY = Symbol('empty-array')
 const ENC = new TextEncoder()
 
@@ -42,7 +42,7 @@ interface Failure {
   head: string
 }
 
-function typed(value: string): Json {
+function typed(value: string): JsonValue {
   if (value === 'true') return true
   if (value === 'false') return false
   if (value === 'null') return null
@@ -118,15 +118,15 @@ function put(container: unknown, parts: (string | null)[], value: unknown): void
   put(child, tail, value)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
 function setField(fields: Record<string, unknown>, key: string, value: unknown): void {
   put(fields, keyParts(key), value)
 }
 
-async function fieldValue(accessor: GitHubAccount, ctx: Context, value: string): Promise<Json> {
+async function fieldValue(
+  accessor: GitHubAccount,
+  ctx: Context,
+  value: string,
+): Promise<JsonValue> {
   const expanded = expand(value, accessor.config)
   if (expanded.startsWith('@')) {
     return new TextDecoder().decode(await readCliFile(ctx, expanded.slice(1), '--field'))
@@ -161,12 +161,12 @@ function requestHeaders(fl: FlagView): Record<string, string> {
   return result
 }
 
-async function inputBody(ctx: Context, fl: FlagView): Promise<Json | undefined> {
+async function inputBody(ctx: Context, fl: FlagView): Promise<JsonValue | undefined> {
   const raw = fl.raw('input')
   if (raw === undefined) return undefined
   const path = fl.asPaths('input')[0]?.rawPath ?? fl.asStr('input') ?? ''
   try {
-    return JSON.parse(new TextDecoder().decode(await readCliFile(ctx, raw, '--input'))) as Json
+    return JSON.parse(new TextDecoder().decode(await readCliFile(ctx, raw, '--input'))) as JsonValue
   } catch (err) {
     if (err instanceof SyntaxError) throw new Error(`invalid JSON in ${path}: ${err.message}`)
     throw err
@@ -248,7 +248,7 @@ export async function api(
   let first = true
   while (current !== undefined) {
     const headers = requestHeaders(fl)
-    let response: GitHubResponse
+    let response: Awaited<ReturnType<NonNullable<typeof transport.requestWithResponse>>>
     try {
       response =
         transport.requestWithResponse === undefined

@@ -14,8 +14,8 @@
 
 import { readAsText, SESSION } from '@struktoai/mirage-core/accessor/postgres'
 import type { PgDriver, PgQueryResult } from '@struktoai/mirage-core/core/postgres/_driver'
-import type { PostgresConfigResolved } from '@struktoai/mirage-core/vfs/postgres/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+import type { resolvePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 
 interface PgPoolLike {
   query: (
@@ -32,10 +32,10 @@ interface PgModule {
 }
 
 export class PostgresStore implements PgDriver {
-  readonly config: PostgresConfigResolved
+  readonly config: ReturnType<typeof resolvePostgresConfig>
   private poolPromise: Promise<PgPoolLike> | null = null
 
-  constructor(config: PostgresConfigResolved) {
+  constructor(config: ReturnType<typeof resolvePostgresConfig>) {
     this.config = config
   }
 

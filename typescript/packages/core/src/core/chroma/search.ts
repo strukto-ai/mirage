@@ -15,7 +15,7 @@
 import type { Where } from 'chromadb'
 import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import type { PathSpec, SearchQuery } from '../../types.ts'
-import { mountPrefixOf, mountedPath } from '../../utils/key_prefix.ts'
+import { mountedPath, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { scoreFromDistance } from '../../utils/score.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -57,14 +57,12 @@ export async function searchSegments(
   return renderRecords(response, accessor.config.slugField, mountPrefix, scopedSlugs, threshold)
 }
 
-interface ChromaQueryResponse {
-  documents?: unknown
-  metadatas?: unknown
-  distances?: unknown
-}
-
 function renderRecords(
-  response: ChromaQueryResponse,
+  response: {
+    documents?: unknown
+    metadatas?: unknown
+    distances?: unknown
+  },
   slugField: string,
   mountPrefix: string,
   scopedSlugs: ReadonlySet<string> | null = null,

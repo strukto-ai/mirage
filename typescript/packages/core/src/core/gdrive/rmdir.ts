@@ -13,10 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-
+import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 
@@ -31,7 +30,7 @@ import { eaccesOnDenied } from './resolve.ts'
  * runtimes all reach the op directly. The probe is the one `rename` already
  * makes before it overwrites a directory, bounded to a single entry.
  */
-async function rmdirImpl(
+export const rmdir = eaccesOnDenied(async function (
   accessor: GDriveAccessor,
   path: PathSpec,
   handed: Handed = {},
@@ -49,6 +48,4 @@ async function rmdirImpl(
   })
   if (children.length > 0) throw enotempty(path)
   await drive.deleteFile(entry.extra.file_id as string)
-}
-
-export const rmdir = eaccesOnDenied(rmdirImpl)
+})

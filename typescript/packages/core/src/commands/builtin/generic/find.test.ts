@@ -12,22 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, IOResult } from '../../../io/types.ts'
-
-import { stripSlash } from '../../../utils/slash.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { runWithCacheManager } from '../../../cache/context.ts'
-import { BatchedRAM } from '../../../test-utils.ts'
-import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { FindOptions } from '../../../core/generic/find.ts'
+import { modifiedTs } from '../../../core/generic/find.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { BatchedRAM } from '../../../test-utils.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
-import { parseSessionProfile } from '../../../policy/profile.ts'
+import { stripSlash } from '../../../utils/slash.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { Files } from '../../../workspace/files.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { Context } from '../../config.ts'
 import { findGeneric as streamFind } from './find.ts'
-import { modifiedTs } from '../../../core/generic/find.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
-import { Files } from '../../../workspace/files.ts'
 
 async function findGeneric(...args: Parameters<typeof streamFind>) {
   const result = await streamFind(...args)
@@ -296,7 +295,7 @@ it('streams the start point before calling a native backend', async () => {
 })
 
 describe('a link onto a directory a rule refuses to list', () => {
-  const SEALED_DOC = parseSessionProfile({
+  const SEALED_DOC = SessionProfile({
     commands: {
       deny: [{ reason: 'sealed', paths: ['/s/d/hdir', '/s/d/hdir/*', '/v/ax/hl'] }],
     },

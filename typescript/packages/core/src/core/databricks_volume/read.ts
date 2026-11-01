@@ -13,22 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
+import { enoent } from '../../errors/fs.ts'
 import { record, startOp } from '../../observe/context.ts'
+import type { ReadRange } from '../../types.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { download } from './client.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
-import { enoent } from '../../errors/fs.ts'
-
-export interface DbxReadOptions {
-  offset?: number
-  size?: number
-}
 
 export async function read(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
-  options: DbxReadOptions = {},
+  options: ReadRange = {},
 ): Promise<Uint8Array> {
   const virtual = path.virtual
   const remotePath = backendPath(accessor.config, path)

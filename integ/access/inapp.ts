@@ -21,7 +21,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buffer } from 'node:stream/consumers'
 import { classify } from '@struktoai/mirage-core/errors/classify'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { answered, checked, explanationToDict } from '@struktoai/mirage-server/io_serde'
@@ -312,11 +312,11 @@ async function steps(
             ? asked
             : asked === undefined || asked === null
               ? null
-              : parseSessionProfile(asked)
+              : SessionProfile(asked)
         await get(wid).setSessionProfile(step.session as string, profile)
         answers.push({ text: step.session })
       } else if (kind === 'set_profile') {
-        get(wid).setProfile(step.name as string, parseSessionProfile(step.profile))
+        get(wid).setProfile(step.name as string, SessionProfile(step.profile))
         answers.push({ text: step.name })
       } else if (kind === 'close_workspace') {
         await get(wid).close()

@@ -12,31 +12,41 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../expand/types.ts'
-import type { EntryGate } from '../../policy/types.ts'
-import { sessionAccess } from '../../context/session_context.ts'
-import type { EvaluationContext } from '../evaluation.ts'
-import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
-import { seedVar, setAttr } from '../session/state.ts'
-import { type ShellVar, TempEnv, VarAttr } from '../../shell/variable.ts'
+import { guardIO } from '../../commands/builtin/utils/limit.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
 import {
   type RedirectRunner,
   currentCaller,
+  isProgramInvocation,
   noteRefusal,
+  redirectPathsFor,
   redirectRunnerFor,
   redirectSyntaxFor,
   runWithCaller,
   runWithRedirectPaths,
-  isProgramInvocation,
-  redirectPathsFor,
+  sessionAccess,
 } from '../../context/session_context.ts'
-import { guardDispatch } from '../abort.ts'
-import { mergeSignals } from '../../utils/abort.ts'
-import { type ByteSource, IOResult, type OutputState, materialize } from '../../io/types.ts'
+import { type ByteSource, type OutputState, IOResult, materialize } from '../../io/types.ts'
 import { commandRecords } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
+import {
+  type Claimant,
+  type HandOff,
+  PolicyDenied,
+  postCommandGate,
+  postSessionGate,
+  preSessionGate,
+  refusalOf,
+  renderDeny,
+  resolveProducer,
+} from '../../policy/index.ts'
+import type { EntryGate } from '../../policy/types.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
+import { type JobConsole, Channel } from '../../shell/console/index.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
+import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import {
   ALIAS_WORD_TYPES,
   getCommandName,
@@ -46,45 +56,33 @@ import {
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
-import { NodeType as NT } from '../../shell/types.ts'
-import { PathSpec, wordText } from '../../types.ts'
-import { Argv, expandArgv } from '../expand/argv.ts'
-import { expandBoundaryGlobs } from '../expand/globs.ts'
-import { expandNode } from '../expand/node.ts'
-import { claimantFor, evaluatedFrom } from './occurrence.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
-import { runExternal } from '../executor/command/external.ts'
-import { argumentListTooLong } from '../executor/command/handler.ts'
-import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
-import type { ExecuteNodeOpts } from '../executor/command/types.ts'
-import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
-import { flagHelp } from '../executor/builtins/help/index.ts'
+import { WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
-import { guardIO } from '../../commands/builtin/utils/limit.ts'
-import {
-  PolicyDenied,
-  postCommandGate,
-  refusalOf,
-  renderDeny,
-  resolveProducer,
-  type Claimant,
-  type HandOff,
-} from '../../policy/index.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
+import { NodeType as NT } from '../../shell/types.ts'
+import { type ShellVar, TempEnv, VarAttr } from '../../shell/variable.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
-import { Channel, type JobConsole } from '../../shell/console/index.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
+import { PathSpec, wordText } from '../../types.ts'
+import { mergeSignals } from '../../utils/abort.ts'
+import { concat } from '../../utils/bytes.ts'
+import { globPattern } from '../../utils/glob_walk.ts'
+import { CycleError, globPrefixMatch } from '../../utils/path.ts'
+import { stripSlash } from '../../utils/slash.ts'
+import { guardDispatch } from '../abort.ts'
+import type { EvaluationContext } from '../evaluation.ts'
+import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
+import { flagHelp } from '../executor/builtins/help/index.ts'
 import {
   acceptsLine,
   handleChgrp,
   handleChmod,
   handleChown,
   handleDf,
-  handleMount,
   handleExecPath,
   handleGetfattr,
   handleLn,
+  handleMount,
   handleReadlink,
   handleSetfattr,
   handleTouch,
@@ -93,23 +91,23 @@ import {
   stripLinkOperands,
 } from '../executor/builtins/index.ts'
 import { BUILTINS } from '../executor/builtins/table.ts'
-import { globPattern } from '../../utils/glob_walk.ts'
-import { CycleError, globPrefixMatch } from '../../utils/path.ts'
-import { stripSlash } from '../../utils/slash.ts'
+import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
+import { runExternal } from '../executor/command/external.ts'
+import { argumentListTooLong } from '../executor/command/handler.ts'
+import type { ExecuteNodeOpts } from '../executor/command/types.ts'
+import { Argv, expandArgv } from '../expand/argv.ts'
+import { expandBoundaryGlobs } from '../expand/globs.ts'
+import { expandNode } from '../expand/node.ts'
+import type { ExecuteFn } from '../expand/types.ts'
+import { Consumer, lookup, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { Consumer, lookup, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { Admitted, admit, classifiedWords } from './admission.ts'
-
-import { ensureVarVisible, gateRendering, sessionView } from '../session/state.ts'
-import { postSessionGate, preSessionGate } from '../../policy/index.ts'
+import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
+import { ensureVarVisible, gateRendering, seedVar, sessionView, setAttr } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
-import { concat } from '../../utils/bytes.ts'
+import { admit, Admitted, classifiedWords } from './admission.ts'
+import { claimantFor, evaluatedFrom } from './occurrence.ts'
 import type { ExpandedWords } from './types.ts'
-import { WORD_BREAKS } from '../../shell/parse/constants.ts'
-import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 /**
  * Await an expansion of the command's own words; an `ExitSignal` it raises
@@ -161,7 +159,7 @@ export async function executeCommand(
     i: ByteSource | null,
     cs: CallStack | null,
     opts?: ExecuteNodeOpts,
-  ) => Promise<Result>,
+  ) => Promise<RedirectResult>,
   dispatch: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
@@ -185,7 +183,7 @@ export async function executeCommand(
   // Filled with the words the command expanded to, so the caller knows what
   // the head ran as.
   expanded?: ExpandedWords,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const name = getCommandName(node)
   const [assignmentNodes, nonPrefixParts] = splitEnvPrefix(getParts(node))
@@ -502,7 +500,7 @@ function rmUnseen(
 }
 
 /** A prefix assignment a session policy refused: bash's line, exit 1. */
-function writeRefused(err: PolicyDenied, command: string): Result {
+function writeRefused(err: PolicyDenied, command: string): RedirectResult {
   const stderr = encodeText(`bash: ${err.message}\n`)
   return [
     null,
@@ -517,7 +515,7 @@ async function runCommandBody(
     s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
-  ) => Promise<Result>,
+  ) => Promise<RedirectResult>,
   dispatch: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
@@ -535,7 +533,7 @@ async function runCommandBody(
   parser?: ParseScope,
   expanded?: ExpandedWords,
   assigned: ReadonlySet<string> = new Set(),
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const stdin = stdinIn
   // A background job's kill channel rides the session; fold it in so
@@ -629,7 +627,7 @@ async function runArgv(
     s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
-  ) => Promise<Result>,
+  ) => Promise<RedirectResult>,
   dispatch: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
@@ -657,7 +655,7 @@ async function runArgv(
   parser?: ParseScope,
   seedPrefix?: (name: string) => Promise<void>,
   assigned: ReadonlySet<string> = new Set(),
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const name = argv.name
 
@@ -710,7 +708,7 @@ async function runArgv(
   const guard = async (
     paths: readonly PathSpec[],
     given: ByteSource | null,
-  ): Promise<Result | null> => {
+  ): Promise<RedirectResult | null> => {
     const key = [String(given === null), ...paths.map((p) => p.virtual)].join('\0')
     if (admitted !== null && asked === key) return null
     if (name !== '') {
@@ -751,7 +749,7 @@ async function runArgv(
     given: ByteSource | null,
     output: JobConsole | undefined,
     paths: readonly PathSpec[],
-  ): Promise<Result> => {
+  ): Promise<RedirectResult> => {
     try {
       await seedPrefix?.(name)
     } catch (err) {
@@ -919,7 +917,7 @@ async function routeArgv(
     s: EvaluationContext,
     i: ByteSource | null,
     cs: CallStack | null,
-  ) => Promise<Result>,
+  ) => Promise<RedirectResult>,
   dispatchIn: DispatchFn,
   registry: MountRegistry,
   namespace: Namespace,
@@ -935,7 +933,7 @@ async function routeArgv(
   sink?: JobConsole,
   parser?: ParseScope,
   admission: EntryGate | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   // The half of `runArgv` past the gate, split out so the gate's verdict
   // can be bound around it.

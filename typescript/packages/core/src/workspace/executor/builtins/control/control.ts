@@ -12,31 +12,31 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../../../expand/types.ts'
-import { concat } from '../../../../utils/bytes.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
-import { ExitSignal } from '../../../../shell/errors.ts'
+import { ExitSignal, ReturnSignal } from '../../../../shell/errors.ts'
+import { concat } from '../../../../utils/bytes.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { ReturnSignal } from '../../../../shell/errors.ts'
-import { builtinError, isCountWord, numericOperands, statusOf } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
 import { BreakSignal, ContinueSignal } from '../../control.ts'
 import { runExitTrap } from '../../traps.ts'
+import { builtinError, isCountWord, numericOperands, statusOf } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
 
 /** `true`: succeed and print nothing. */
-export function handleTrue(): Result {
+export function handleTrue(): RedirectResult {
   return [null, new IOResult(), new ExecutionNode({ command: 'true', exitCode: 0 })]
 }
 
 /** `:`: succeed and print nothing (the null command). */
-export function handleColon(): Result {
+export function handleColon(): RedirectResult {
   return [null, new IOResult(), new ExecutionNode({ command: ':', exitCode: 0 })]
 }
 
 /** `false`: fail with 1 and print nothing. */
-export function handleFalse(): Result {
+export function handleFalse(): RedirectResult {
   return [null, new IOResult({ exitCode: 1 }), new ExecutionNode({ command: 'false', exitCode: 1 })]
 }
 
@@ -50,7 +50,7 @@ export function handleReturn(
   args: readonly string[],
   session: SessionState,
   callStack: CallStack | null = null,
-): Result {
+): RedirectResult {
   const words = numericOperands(args)
   const first = words[0]
   let status = session.lastExitCode
@@ -92,7 +92,7 @@ export async function handleExit(
   executeFn: ExecuteFn | null = null,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const words = numericOperands(args)
   const first = words[0]
   let code: number
@@ -135,7 +135,7 @@ function leaveLoops(
   args: readonly string[],
   session: SessionState,
   callStack: CallStack | null,
-): Result {
+): RedirectResult {
   const loops = callStack?.current.loopLevel ?? 0
   if (loops === 0) {
     const err = builtinError(name, "only meaningful in a `for', `while', or `until' loop")
@@ -160,27 +160,27 @@ function leaveLoops(
 }
 
 /** The `true` arm. */
-export function trueBuiltin(_call: BuiltinCall): Promise<Result> {
+export function trueBuiltin(_call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleTrue())
 }
 
 /** The `:` arm. */
-export function colonBuiltin(_call: BuiltinCall): Promise<Result> {
+export function colonBuiltin(_call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleColon())
 }
 
 /** The `false` arm. */
-export function falseBuiltin(_call: BuiltinCall): Promise<Result> {
+export function falseBuiltin(_call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleFalse())
 }
 
 /** The `return` arm. */
-export function returnBuiltin(call: BuiltinCall): Promise<Result> {
+export function returnBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleReturn([...call.argv.args], call.context.session, call.callStack))
 }
 
 /** The `exit` arm. */
-export function exitBuiltin(call: BuiltinCall): Promise<Result> {
+export function exitBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleExit(
     [...call.argv.args],
     call.context.session,
@@ -191,14 +191,14 @@ export function exitBuiltin(call: BuiltinCall): Promise<Result> {
 }
 
 /** The `break` arm: unwinds the enclosing loops by throwing. */
-export function breakBuiltin(call: BuiltinCall): Promise<Result> {
+export function breakBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(
     leaveLoops('break', [...call.argv.args], call.context.session, call.callStack),
   )
 }
 
 /** The `continue` arm: unwinds to the next iteration by throwing. */
-export function continueBuiltin(call: BuiltinCall): Promise<Result> {
+export function continueBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(
     leaveLoops('continue', [...call.argv.args], call.context.session, call.callStack),
   )

@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { unsearchedText } from '../../utils/record_search.ts'
-import { jsonBytes } from '../render/json.ts'
 import type { TrelloAccessor } from '../../accessor/trello.ts'
 import { ContentType, FileStat, FileType } from '../../types.ts'
+import { unsearchedText } from '../../utils/record_search.ts'
+import { stringOf as pickString } from '../../utils/records.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
+import { jsonBytes } from '../render/json.ts'
 import {
   getBoard,
   listBoardLabels,
@@ -46,11 +47,6 @@ import {
   workspaceDirname,
 } from './pathing.ts'
 import { detectScope } from './scope.ts'
-
-function pickString(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
 
 function extraSize(entry: FileStat): number | null {
   const value = entry.extra.json_size

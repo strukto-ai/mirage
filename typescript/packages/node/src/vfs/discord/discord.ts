@@ -12,26 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DiscordVFSBase } from '@struktoai/mirage-core/vfs/discord/discord'
 import { DiscordAccessor } from '@struktoai/mirage-core/accessor/discord'
-
 import { NodeDiscordTransport } from '@struktoai/mirage-core/core/discord/client'
-import { DiscordConfigSchema } from '@struktoai/mirage-core/vfs/discord/config'
-import type {
-  DiscordConfig,
-  DiscordConfigRedacted,
-} from '@struktoai/mirage-core/vfs/discord/config'
-
-import { VFS_MD } from '@struktoai/mirage-core/vfs/discord/discord'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { DiscordConfig } from '@struktoai/mirage-core/vfs/discord/config'
+import { DiscordVFS as CoreDiscordVFS, VFS_MD } from '@struktoai/mirage-core/vfs/discord/discord'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 
-export interface DiscordVFSState {
-  type: string
-  config: DiscordConfigRedacted
-}
-
-export class DiscordVFS extends DiscordVFSBase {
+export class DiscordVFS extends CoreDiscordVFS {
   override readonly name: string = VFSName.DISCORD
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and members/*.json
@@ -52,10 +41,7 @@ export class DiscordVFS extends DiscordVFSBase {
     this.vfsMd = VFS_MD + this.accessor.timeRange.vfsMd()
   }
 
-  override getState(): Promise<DiscordVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(DiscordConfigSchema, this.config) as DiscordConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof DiscordConfig>>> {
+    return Promise.resolve(this.configState(DiscordConfig, this.config))
   }
 }

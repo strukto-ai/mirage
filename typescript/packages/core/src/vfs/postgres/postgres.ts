@@ -51,7 +51,7 @@ export const VFS_MD = `{prefix}
  * Postgres's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
-export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
+export class PostgresVFS extends BaseVFS<PostgresAccessor> {
   override readonly handed = {
     read: ['parent'],
     stat: ['entry'],

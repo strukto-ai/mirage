@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { apiRequest } from '../api/client.ts'
+import { asArray } from '../../utils/records.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { apiRequest } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
+import type { TrelloConfig } from './config.ts'
 
 export class TrelloApiError extends ApiError {
   declare readonly status: number
@@ -37,13 +39,6 @@ export interface TrelloTransport {
   ): Promise<unknown>
 }
 
-export interface HttpTrelloTransportOptions {
-  apiKey: string
-  apiToken: string
-  baseUrl?: string
-  timeout?: number
-}
-
 export class HttpTrelloTransport implements TrelloTransport {
   protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
   private readonly apiKey: string
@@ -51,7 +46,7 @@ export class HttpTrelloTransport implements TrelloTransport {
   private readonly baseUrl: string
   private readonly timeout: number | undefined
 
-  constructor(opts: HttpTrelloTransportOptions) {
+  constructor(opts: Pick<TrelloConfig, 'apiKey' | 'apiToken' | 'baseUrl' | 'timeout'>) {
     this.apiKey = opts.apiKey
     this.apiToken = opts.apiToken
     this.baseUrl = rstripSlash(opts.baseUrl ?? 'https://api.trello.com/1')
@@ -75,10 +70,6 @@ export class HttpTrelloTransport implements TrelloTransport {
       errorOf: (response, text) => new TrelloApiError(path, response.status, text),
     })
   }
-}
-
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : []
 }
 
 function asObject(value: unknown, endpoint: string): Record<string, unknown> {

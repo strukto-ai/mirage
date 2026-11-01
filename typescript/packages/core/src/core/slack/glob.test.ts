@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { PathSpec } from '../../types.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
-import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { SlackVFS } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import type { SlackResponse, SlackTransport } from './client.ts'
@@ -105,10 +105,7 @@ describe('a glob through a mount', () => {
       }
       return { ok: true }
     })
-    const ws = new Workspace(
-      { '/slack/': new SlackVFSBase({ accessor: new SlackAccessor(t) }) },
-      {},
-    )
+    const ws = new Workspace({ '/slack/': new SlackVFS({ accessor: new SlackAccessor(t) }) }, {})
     try {
       const result = await ws.shell('echo /slack/channels/general__C001/2026-04-10/files/*.pdf')
       expect(result.stdoutText.split(/\s+/).filter((w) => w !== '')).toEqual([

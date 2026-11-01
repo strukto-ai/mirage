@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OAuthClientProvider } from '@modelcontextprotocol/client'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { secretSchema, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 
-export const NotionConfigSchema = z.object({
+export const NotionConfig = z.object({
   authProvider: secretSchema(
     z.custom<OAuthClientProvider>((value) => value !== null && typeof value === 'object'),
   ).describe(
@@ -28,6 +28,4 @@ export const NotionConfigSchema = z.object({
   }),
 })
 
-export type NotionConfig = ConfigOf<typeof NotionConfigSchema>
-
-export type NotionConfigRedacted = RedactedConfig<NotionConfig, 'authProvider'>
+export type NotionConfig = ConfigOf<typeof NotionConfig>

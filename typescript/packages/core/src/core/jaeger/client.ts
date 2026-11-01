@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JaegerConfig } from '../../vfs/jaeger/config.ts'
 import { apiRequest, buildUrl } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
 
@@ -40,11 +41,6 @@ export interface JaegerTransport {
   request(path: string, query?: Record<string, string | number | undefined>): Promise<unknown>
 }
 
-export interface HttpJaegerTransportOptions {
-  host?: string
-  timeout?: number
-}
-
 function errorMessage(body: unknown, status: number): string {
   if (body !== null && typeof body === 'object') {
     const errors = (body as Record<string, unknown>).errors
@@ -59,7 +55,7 @@ function errorMessage(body: unknown, status: number): string {
 
 // The parse comes before the status check, so a non-JSON error body reports
 // as invalid JSON rather than a bare status, matching the old transport.
-function jaegerError(response: Response, text: string): JaegerApiError {
+function errorOf(response: Response, text: string): JaegerApiError {
   let body: unknown
   try {
     body = JSON.parse(text)
@@ -75,7 +71,7 @@ export class HttpJaegerTransport implements JaegerTransport {
   private readonly host: string
   private readonly timeout: number | undefined
 
-  constructor(opts: HttpJaegerTransportOptions = {}) {
+  constructor(opts: Pick<JaegerConfig, 'host' | 'timeout'> = {}) {
     this.host = opts.host ?? 'http://localhost:16686'
     this.timeout = opts.timeout
   }
@@ -89,7 +85,7 @@ export class HttpJaegerTransport implements JaegerTransport {
       headers: { Accept: 'application/json' },
       timeout: this.timeout,
       read: 'text',
-      errorOf: jaegerError,
+      errorOf: errorOf,
     })) as string
     try {
       return JSON.parse(text) as unknown

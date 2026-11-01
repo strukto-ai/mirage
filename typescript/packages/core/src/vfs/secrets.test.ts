@@ -12,17 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import { errorSummary } from '../secrets/summary.ts'
+import { REDACTED_SECRET } from './constants.ts'
 import {
   FIELD_NORMALIZERS,
   hasRedactedSecret,
   normalizeNonEmpty,
   parseConfigWithSchema,
-  REDACTED_SECRET,
   redactConfigWithSchema,
   refuseRepeatedFields,
   refuseUnknownKeys,
+  secretSchema,
   secretStr,
   z,
 } from './secrets.ts'
@@ -156,5 +157,41 @@ describe('normalizeNonEmpty', () => {
   it('trims a value and refuses a blank one by field', () => {
     expect(normalizeNonEmpty('  docs ', 'collectionName')).toBe('docs')
     expect(() => normalizeNonEmpty('   ', 'datasetId')).toThrow('datasetId cannot be empty')
+  })
+})
+
+it('infers redaction from optional, nullable, callback, and nested secret schemas', () => {
+  const schema = z.object({
+    token: secretStr().optional(),
+    absent: secretStr().nullable(),
+    provider: secretSchema(z.custom<() => Promise<string>>()),
+    headers: z.record(z.string(), secretStr()),
+    nested: z.object({ key: secretStr(), label: z.string() }).nullable(),
+    rows: z.array(z.object({ key: secretStr().default('default-key') })),
+    public: z.string().default('visible'),
+  })
+  const state = redactConfigWithSchema(schema, {
+    absent: null,
+    provider: () => Promise.resolve('private'),
+    headers: { Authorization: 'private' },
+    nested: { key: 'private', label: 'label' },
+    rows: [{}],
+  })
+  expectTypeOf(state).toEqualTypeOf<{
+    token?: typeof REDACTED_SECRET
+    absent: typeof REDACTED_SECRET | null
+    provider: typeof REDACTED_SECRET
+    headers: typeof REDACTED_SECRET
+    nested: { key: typeof REDACTED_SECRET; label: string } | null
+    rows: { key: typeof REDACTED_SECRET }[]
+    public: string
+  }>()
+  expect(state).toEqual({
+    absent: null,
+    provider: REDACTED_SECRET,
+    headers: REDACTED_SECRET,
+    nested: { key: REDACTED_SECRET, label: 'label' },
+    rows: [{ key: REDACTED_SECRET }],
+    public: 'visible',
   })
 })

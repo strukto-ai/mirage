@@ -19,8 +19,8 @@ import {
   MountMode,
   ScalewayVFS,
   Workspace,
-  resolvedScalewayEndpoint,
-  type ScalewayConfig,
+
+  ScalewayConfig,
   type FileStat,
 } from '@struktoai/mirage-node'
 
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const config = configFromEnv()
   const ws = new Workspace({ '/scw/': new ScalewayVFS(config) }, { mode: MountMode.READ })
   try {
-    console.log(`=== Scaleway at ${resolvedScalewayEndpoint(config)} ===`)
+    console.log(`=== Scaleway at ${ScalewayConfig.resolvedEndpoint(config)} ===`)
 
     let r = await ws.shell('ls /scw/')
     console.log('ls /scw/:\n' + r.stdoutText)

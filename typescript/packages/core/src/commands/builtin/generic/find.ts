@@ -12,11 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { specOf } from '../../spec/builtins.ts'
-import { OPERAND } from '../../spec/constants.ts'
-import { FlagView } from '../../spec/flag_view.ts'
-import type { FlagValue } from '../../spec/types.ts'
-import { type FindOptions, modifiedTs } from '../../../core/generic/find.ts'
+import { modifiedTs, type FindOptions } from '../../../core/generic/find.ts'
+import {
+  bindTree,
+  dropPruned,
+  emitStartPath,
+  optionsTree,
+  printfKind,
+  settlePendingPrunes,
+  startBasename,
+  unrespellRaw,
+} from '../../../core/generic/find_eval.ts'
+import { type PredNode } from '../../../core/generic/types.ts'
 import {
   fsStrerror,
   isEnoent,
@@ -25,29 +32,22 @@ import {
   strerrorOf,
   walkRefusal,
 } from '../../../errors/fs.ts'
-import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/paths.ts'
+import { posixPhrase } from '../../../errors/posix.ts'
 import { IOResult, type PathRecord } from '../../../io/types.ts'
-import { UsageError } from '../../errors.ts'
 import { parseFindExpression, type FindExpr } from '../../../rs/find.ts'
 import { FileType, Follow, LineFacts, PathSpec, type FileStat } from '../../../types.ts'
-import type { CommandFnResult, Context } from '../../config.ts'
-import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { respellOne, respellRaw } from '../../../utils/path.ts'
-import {
-  bindTree,
-  dropPruned,
-  emitStartPath,
-  optionsTree,
-  settlePendingPrunes,
-  startBasename,
-  unrespellRaw,
-  type PredNode,
-} from '../../../core/generic/find_eval.ts'
-import { printfKind } from '../../../core/generic/find_eval.ts'
+import { rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
-import { posixPhrase } from '../../../errors/posix.ts'
-import { linksOf } from '../utils/links.ts'
 import { readerOf } from '../../../workspace/files.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
+import { UsageError } from '../../errors.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { OPERAND } from '../../spec/constants.ts'
+import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
+import { linksOf } from '../utils/links.ts'
+import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/paths.ts'
 
 const ENC = new TextEncoder()
 

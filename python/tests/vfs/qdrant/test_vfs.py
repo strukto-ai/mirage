@@ -1,8 +1,8 @@
 import pytest
 
+from mirage.vfs.constants import REDACTED_SECRET
 from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
 from mirage.vfs.registry import REGISTRY, build_vfs
-from mirage.vfs.secrets import REDACTED_SECRET
 from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 

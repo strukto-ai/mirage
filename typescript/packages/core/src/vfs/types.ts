@@ -94,3 +94,82 @@ export interface SearchOps<A extends Accessor = Accessor> {
   search: SearchOp<A>
   searchMany: SearchManyOp<A>
 }
+/** The snapshot of a backend rebuilt from its redacted configuration. */
+export interface ConfigState<C> {
+  type: string
+  config: C
+}
+
+/**
+ * The two keys the snapshot machinery reads out of a VFS's state.
+ *
+ * `type` is the registry name, and it is what rebuilds the VFS:
+ * Python's `_vfs_class_for` looks it up in the registry first and
+ * only falls back to the mount's `vfs_class` import path when it
+ * misses. `config` is what `vfsStateRequiresOverride` scans for the
+ * `<REDACTED>` marker, which is what makes load demand a fresh config
+ * instead of silently substituting an empty mount.
+ *
+ * This lived as a private interface in `workspace/snapshot/types.ts`,
+ * where `VFSState` still widens it with each backend's own keys; it
+ * moved here so the `BaseVFS` contract and the snapshot format name
+ * one shape rather than two identical ones. Python needs no such type —
+ * `get_state` is annotated `dict[str, Any]` — but a TS interface is not
+ * assignable to `Record<string, unknown>` (no implicit index signature),
+ * so the literal twin would reject every named `XVFSState`.
+ */
+export interface VFSStateBase {
+  type: string
+  config?: unknown
+  // Set by a backend whose mount cannot be rebuilt from this state alone,
+  // so `Workspace.load` asks for the live VFS back instead of
+  // rebuilding one. See `vfsStateRequiresOverride`.
+  needs_override?: boolean
+}
+
+/**
+ * The facts a subclass that does not declare them as members hands the
+ * constructor. Every field is optional, so a class that declares its facts
+ * as members calls `super()` bare. Mirrors the keyword arguments of
+ * Python's `BaseVFS.__init__`.
+ */
+export interface VFSOptions<C, A extends Accessor = Accessor> {
+  /**
+   * VFS name commands register under, and the `type` key `getState`
+   * writes into a snapshot. Also the registry key when the backend is
+   * exposed through `registerVfs`.
+   */
+  name?: string
+  /** Backend handle the functions use. */
+  accessor?: A
+  /**
+   * This VFS's part of VFS.md: its layout and file formats, `{prefix}`
+   * standing for the mount path.
+   */
+  vfsMd?: string
+  /**
+   * Extra commands, from `command({...})`, or `CLI` trees: bespoke verbs, a
+   * program's verbs as one command tree under its root's name, or
+   * replacements that win over the generic command of the same name.
+   */
+  commands?: readonly C[]
+  /** Serve repeat reads from the file cache. Read-mostly content only. */
+  cachesReads?: boolean
+  /**
+   * Whether `stat` sizes every regular file without fetching it, which is
+   * also what makes the mount legal on FSKit.
+   */
+  sizesAlwaysKnown?: boolean
+  /**
+   * Whether `stat` fills `FileStat.fingerprint` with a stable per-path
+   * version marker. Setting it without that is not drift detection.
+   */
+  supportsSnapshot?: boolean
+  /**
+   * Whether `stat` and the read record stamp the *same kind* of content
+   * token, so a `read: fresh` mount can compare them. Setting it without
+   * that makes every read verdict stale; a mount declaring `fresh` on a
+   * backend that leaves it false is refused.
+   */
+  readRevalidatable?: boolean
+}

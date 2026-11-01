@@ -12,17 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
-import {
-  DatabricksVolumeConfigSchema,
-  type DatabricksVolumeConfig,
-} from '../../vfs/databricks_volume/config.ts'
-import { backendPath, configuredRoot, normalizePosix, virtualPath, volumeRoot } from './path.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { DatabricksVolumeConfig } from '../../vfs/databricks_volume/config.ts'
 import { parseConfigWithSchema } from '../../vfs/secrets.ts'
+import { backendPath, configuredRoot, normalizePosix, virtualPath, volumeRoot } from './path.ts'
 
-const CONFIG: DatabricksVolumeConfig = parseConfigWithSchema(DatabricksVolumeConfigSchema, {
+const CONFIG: DatabricksVolumeConfig = parseConfigWithSchema(DatabricksVolumeConfig, {
   catalog: 'main',
   schema: 'default',
   volume: 'agent_files',
@@ -49,7 +46,7 @@ describe('volumeRoot / configuredRoot', () => {
   })
 
   it('defaults to the volume root without root_path', () => {
-    const config = parseConfigWithSchema(DatabricksVolumeConfigSchema, {
+    const config = parseConfigWithSchema(DatabricksVolumeConfig, {
       catalog: 'main',
       schema: 'default',
       volume: 'agent_files',
@@ -101,7 +98,7 @@ describe('backendPath', () => {
 describe('config root_path validation', () => {
   it('rejects parent segments in root_path', () => {
     expect(() =>
-      parseConfigWithSchema(DatabricksVolumeConfigSchema, {
+      parseConfigWithSchema(DatabricksVolumeConfig, {
         catalog: 'main',
         schema: 'default',
         volume: 'agent_files',

@@ -30,8 +30,9 @@ from mirage.policy.types import (
     CommandRule,
     CommandWord,
 )
+from mirage.rs.document import units
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.policy import admission_matcher, units, visibility_matcher
+from mirage.rs.policy import admission_matcher, visibility_matcher
 from mirage.rs.stream import open_stream
 from mirage.types import (
     HiddenPaths,

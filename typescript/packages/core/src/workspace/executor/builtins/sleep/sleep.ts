@@ -12,23 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { helpPage, versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
-import { specOf } from '../../../../commands/spec/index.ts'
 import { NUMERIC_SHORT } from '../../../../commands/spec/constants.ts'
+import { specOf } from '../../../../commands/spec/index.ts'
+import { helpPage, versionLine } from '../../../../commands/spec/standard.ts'
 import {
   ambiguousOptionError,
   unexpectedValueError,
   unknownOptionError,
   usageHint,
 } from '../../../../commands/spec/usage.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import { sleep } from '../../../../utils/abort.ts'
 import { ExecutionNode } from '../../../types.ts'
+import type { BuiltinCall } from '../types.ts'
 import { SLEEP_INTERVAL, SLEEP_SUFFIXES } from './constants.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 // The only two options coreutils sleep accepts; its --help page lists no
 // others. They share no prefix, so an abbreviation of either resolves and
@@ -60,7 +61,7 @@ function standardMatches(name: string): string[] {
  * of the options this arm exists to answer, under a synthesized
  * `sleep [<text>...]` in place of GNU's own `sleep NUMBER[SUFFIX]...`.
  */
-function standardResponse(option: string): Result {
+function standardResponse(option: string): RedirectResult {
   const text = option === '--help' ? helpPage('sleep', specOf('sleep')) : versionLine('sleep')
   return [
     yieldBytes(encodeText(text)),
@@ -122,7 +123,7 @@ function intervalSeconds(raw: string): number | null {
   return Number.isFinite(seconds) ? seconds : null
 }
 
-export async function handleSleep(args: string[], signal?: AbortSignal): Promise<Result> {
+export async function handleSleep(args: string[], signal?: AbortSignal): Promise<RedirectResult> {
   const [operands, badOption] = sleepOperands(args)
   if (badOption !== null) {
     // The scan stops at the first dash word, and that word decides the whole
@@ -210,6 +211,6 @@ export async function handleSleep(args: string[], signal?: AbortSignal): Promise
 }
 
 /** The `sleep` arm; the abort signal ends the wait early. */
-export async function sleepBuiltin(call: BuiltinCall): Promise<Result> {
+export async function sleepBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleSleep([...call.argv.args], call.signal)
 }

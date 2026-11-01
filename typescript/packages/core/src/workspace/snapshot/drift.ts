@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
+import type { FileCacheMixin } from '../../cache/file/mixin.ts'
 import {
   CONTENT_CHANGING_OPS,
   RETRACT_FINGERPRINT_OPS,
@@ -20,11 +20,12 @@ import {
   SUBTREE_RETRACT_OPS,
   type OpRecord,
 } from '../../observe/record.ts'
-import type { FileCache } from '../../cache/file/mixin.ts'
 import type { FileStat } from '../../types.ts'
 import { DriftPolicy } from '../../types.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { MountEntry } from '../mount/mount.ts'
+import type { FingerprintEntrySnapshot } from './types.ts'
 
 /**
  * Raised at load time when a remote VFS's live fingerprint differs
@@ -50,13 +51,6 @@ export class ContentDriftError extends Error {
     this.snapshotFingerprint = snapshotFingerprint
     this.liveFingerprint = liveFingerprint
   }
-}
-
-export interface FingerprintEntry {
-  path: string
-  mount_prefix: string
-  fingerprint?: string | null
-  revision?: string | null
 }
 
 interface RegistryLike {
@@ -134,11 +128,11 @@ export class DriftQueue {
  * Idempotent: clears queued state before installing. Called from
  * `Workspace.fromState`.
  */
-export async function installDriftState(
+export async function installFingerprints(
   registry: RegistryLike,
-  cache: Pick<FileCache, 'remove'>,
+  cache: Pick<FileCacheMixin, 'remove'>,
   drift: DriftQueue,
-  state: { fingerprints?: FingerprintEntry[]; live_only_mounts?: string[] },
+  state: { fingerprints?: FingerprintEntrySnapshot[]; live_only_mounts?: string[] },
   policy: DriftPolicy,
 ): Promise<void> {
   drift.clear()
@@ -183,7 +177,7 @@ export async function installDriftState(
  * keys stay as recorded, so the snapshot's `path` values are unchanged.
  */
 function dropPin(
-  out: Map<string, FingerprintEntry>,
+  out: Map<string, FingerprintEntrySnapshot>,
   path: string,
   subtree: boolean,
   owner: string | null,
@@ -232,8 +226,8 @@ function dropPin(
 export function captureFingerprints(
   records: readonly OpRecord[],
   registry: RegistryLike,
-): FingerprintEntry[] {
-  const out = new Map<string, FingerprintEntry>()
+): FingerprintEntrySnapshot[] {
+  const out = new Map<string, FingerprintEntrySnapshot>()
   // By timestamp, not by position: a backend record reaches this list
   // only when its line ends, while a `Files` facade record appends as it
   // happens, so the list is flush-ordered and a retraction can otherwise
@@ -263,7 +257,7 @@ export function captureFingerprints(
     const mount = registry.tryMountFor(rec.path)
     if (mount === null || (rec.mountId !== null && rec.mountId !== mount.mountId)) continue
     if (!mount.vfs.supportsSnapshot) continue
-    const entry: FingerprintEntry = { path: rec.path, mount_prefix: mount.prefix }
+    const entry: FingerprintEntrySnapshot = { path: rec.path, mount_prefix: mount.prefix }
     if (rec.fingerprint !== null) entry.fingerprint = rec.fingerprint
     if (rec.revision !== null) entry.revision = rec.revision
     out.set(rec.path, entry)

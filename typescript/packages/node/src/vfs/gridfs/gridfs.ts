@@ -12,37 +12,31 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { appendByStreamedRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { DirListing, FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
+import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
-import { VFSName } from '@struktoai/mirage-core/types'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState, Handed } from '@struktoai/mirage-core/vfs/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
-import { GridFSConfigSchema, type GridFSConfig, type GridFSConfigRedacted } from './config.ts'
-import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { appendByStreamedRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
-import { readdir as gridfsReaddir } from '../../core/gridfs/readdir.ts'
+import { copy as gridfsCopy } from '../../core/gridfs/copy.ts'
+import { create as gridfsCreate } from '../../core/gridfs/create.ts'
+import { exists as gridfsExists } from '../../core/gridfs/exists.ts'
+import { mkdir as gridfsMkdir } from '../../core/gridfs/mkdir.ts'
 import { read as gridfsRead } from '../../core/gridfs/read.ts'
+import { readdir as gridfsReaddir, tree as gridfsTree } from '../../core/gridfs/readdir.ts'
+import { rename as gridfsRename } from '../../core/gridfs/rename.ts'
+import { rmR as gridfsRmR } from '../../core/gridfs/rm.ts'
+import { rmdir as gridfsRmdir } from '../../core/gridfs/rmdir.ts'
 import { stat as gridfsStat } from '../../core/gridfs/stat.ts'
 import { readStream as gridfsStream } from '../../core/gridfs/stream.ts'
-import { exists as gridfsExists } from '../../core/gridfs/exists.ts'
-import { write as gridfsWrite, replace as gridfsReplace } from '../../core/gridfs/write.ts'
-import { create as gridfsCreate } from '../../core/gridfs/create.ts'
-import { mkdir as gridfsMkdir } from '../../core/gridfs/mkdir.ts'
-import { unlink as gridfsUnlink } from '../../core/gridfs/unlink.ts'
-import { rmdir as gridfsRmdir } from '../../core/gridfs/rmdir.ts'
-import { rmR as gridfsRmR } from '../../core/gridfs/rm.ts'
-import { rename as gridfsRename } from '../../core/gridfs/rename.ts'
-import { copy as gridfsCopy } from '../../core/gridfs/copy.ts'
 import { truncate as gridfsTruncate } from '../../core/gridfs/truncate.ts'
-import { tree as gridfsTree } from '../../core/gridfs/readdir.ts'
-import { stripSlash } from '@struktoai/mirage-core/utils/slash'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-
-export interface GridFSVFSState {
-  type: string
-  config: GridFSConfigRedacted
-}
+import { unlink as gridfsUnlink } from '../../core/gridfs/unlink.ts'
+import { replace as gridfsReplace, write as gridfsWrite } from '../../core/gridfs/write.ts'
+import { GridFSConfig } from './config.ts'
 
 export class GridFSVFS extends BaseVFS {
   override readonly name: string = VFSName.GRIDFS
@@ -161,10 +155,7 @@ export class GridFSVFS extends BaseVFS {
     return prefix === '' ? base : `${base}/${prefix}`
   }
 
-  override getState(): Promise<GridFSVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(GridFSConfigSchema, this.config) as GridFSConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof GridFSConfig>>> {
+    return Promise.resolve(this.configState(GridFSConfig, this.config))
   }
 }

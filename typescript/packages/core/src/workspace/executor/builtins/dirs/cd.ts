@@ -12,25 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { linkView } from '../../../../commands/builtin/utils/links.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import { dottedSpelling, resolvePath, CycleError, posixNormpath } from '../../../../utils/path.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { fsStrerror, isEnoent } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { PathSpec, type StatFn, FileType } from '../../../../types.ts'
-import type { SessionState } from '../../../session/session.ts'
-import { changeDir, logicalCwd, homeDir } from '../../../session/shell_dirs.ts'
-import { ExecutionNode } from '../../../types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { toScope, scopePath } from '../scope.ts'
-import { joinPath, resolveTarget, typedPath, splitModeOptions } from './dirs.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import type { Namespace } from '../../../mount/namespace/namespace.ts'
-import { linkView } from '../../../../commands/builtin/utils/links.ts'
-import { Files } from '../../../files.ts'
-import { CD_OPTIONS } from './constants.ts'
-import { classifyBarePath } from '../../../expand/classify/index.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { FileType, PathSpec, type StatFn } from '../../../../types.ts'
+import { CycleError, dottedSpelling, posixNormpath, resolvePath } from '../../../../utils/path.ts'
+import { classifyBarePath } from '../../../expand/classify/index.ts'
+import { Files } from '../../../files.ts'
+import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import type { SessionState } from '../../../session/session.ts'
+import { changeDir, homeDir, logicalCwd } from '../../../session/shell_dirs.ts'
+import { ExecutionNode } from '../../../types.ts'
+import { scopePath, toScope } from '../scope.ts'
 import { builtinUsage } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
+import { CD_OPTIONS } from './constants.ts'
+import { joinPath, resolveTarget, splitModeOptions, typedPath } from './dirs.ts'
 
 function cdpathSearchable(target: string): boolean {
   if (target.startsWith('/') || target.startsWith('./') || target.startsWith('../')) {
@@ -106,7 +107,7 @@ export async function handleCd(
   cdpathTarget: string | null = null,
   follow: ((path: string) => string) | null = null,
   physical = false,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const raw = scopePath(path)
   const named = typedPath(path)
   // -L joins a relative operand to the name the shell is *spelling*, -P
@@ -206,7 +207,7 @@ function cdSuccess(
   spelled: string,
   raw: string,
   printPath: boolean,
-): Result {
+): RedirectResult {
   changeDir(session, resolved, logical)
   const out = printPath ? encodeText(`${spelled}\n`) : null
   return [out, new IOResult(), new ExecutionNode({ command: `cd ${raw}`, exitCode: 0 })]
@@ -217,7 +218,7 @@ function cdSuccess(
  * (`set -o physical`) is the session-wide version of the per-command
  * flag, and GNU applies it to both `cd` and `pwd`.
  */
-export async function cdBuiltin(call: BuiltinCall): Promise<Result> {
+export async function cdBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const { dispatch, registry, namespace } = call
   const { session } = call.context
   const shellPhysical = session.shellOptions.physical === true

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
-import { getValidator, isView, listCollections, getIndexes } from './client.ts'
-import { sampleFieldTypes, type SampledField } from './_sampler.ts'
+import { sampleFieldTypes } from './_sampler.ts'
+import { getIndexes, getValidator, isView, listCollections } from './client.ts'
 import { EntityKind, IndexType, PRIMARY_KEY } from './types.ts'
 
 function indexType(idx: Record<string, unknown>): string {
@@ -22,24 +22,7 @@ function indexType(idx: Record<string, unknown>): string {
   return IndexType.BTREE
 }
 
-interface DatabaseJsonCollection {
-  name: string
-}
-
-interface DatabaseJsonView {
-  name: string
-}
-
-export interface DatabaseJson {
-  database: string
-  collections: DatabaseJsonCollection[]
-  views: DatabaseJsonView[]
-}
-
-export async function buildDatabaseJson(
-  accessor: MongoDBAccessor,
-  database: string,
-): Promise<DatabaseJson> {
+export async function buildDatabaseJson(accessor: MongoDBAccessor, database: string) {
   const names = await listCollections(accessor, database)
   const viewNames = new Set(await listCollections(accessor, database, EntityKind.VIEW))
   const collections = names.filter((name) => !viewNames.has(name)).map((name) => ({ name }))
@@ -53,23 +36,12 @@ interface CollectionSchemaIndex {
   type: string
 }
 
-export interface CollectionSchemaJson {
-  database: string
-  name: string
-  kind: EntityKind
-  validator: unknown
-  fields: SampledField[]
-  primary_key: string
-  indexes: CollectionSchemaIndex[]
-  sampled: number
-}
-
 export async function buildCollectionSchemaJson(
   accessor: MongoDBAccessor,
   database: string,
   collection: string,
   sampleSize = 100,
-): Promise<CollectionSchemaJson> {
+) {
   const view = await isView(accessor, database, collection)
   const validator = await getValidator(accessor, database, collection)
   const fields = await sampleFieldTypes(accessor, database, collection, sampleSize)

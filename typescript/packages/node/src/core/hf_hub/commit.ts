@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { createHash } from 'node:crypto'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { apiUrl, hubPost, hubPostNdjson, revSegment } from './client.ts'
 import { COMMIT_CHUNK, DEFAULT_COMMIT_MESSAGE, PREUPLOAD_SAMPLE_BYTES } from './constants.ts'
-import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 
 // The upload modes the Hub's preupload endpoint answers with. "regular" is a
 // git blob and rides inline in the commit; the other two are out-of-band
@@ -151,15 +151,6 @@ export function payload(
   return new TextEncoder().encode(lines.map((line) => `${JSON.stringify(line)}\n`).join(''))
 }
 
-export interface CommitOptions {
-  additions?: Addition[]
-  deletions?: string[]
-  message?: string
-  description?: string
-  createPr?: boolean
-  revision?: string
-}
-
 /**
  * Apply one commit to the repository.
  *
@@ -169,7 +160,14 @@ export interface CommitOptions {
  */
 export async function commit(
   accessor: HfHubAccessor,
-  options: CommitOptions = {},
+  options: {
+    additions?: Addition[]
+    deletions?: string[]
+    message?: string
+    description?: string
+    createPr?: boolean
+    revision?: string
+  } = {},
 ): Promise<Record<string, unknown> | undefined> {
   const info = await preupload(accessor, options.additions ?? [], options.revision)
   const adds: Addition[] = []

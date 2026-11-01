@@ -12,23 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NotionVFSBase } from '@struktoai/mirage-core/vfs/notion/notion'
 import { NotionAccessor } from '@struktoai/mirage-core/accessor/notion'
-
 import { HttpNotionTransport } from '@struktoai/mirage-core/core/notion/client'
-import { NotionConfigSchema } from '@struktoai/mirage-core/core/notion/config'
-import type { NotionConfig, NotionConfigRedacted } from '@struktoai/mirage-core/core/notion/config'
-
-import { VFS_MD } from '@struktoai/mirage-core/vfs/notion/notion'
+import { NotionConfig } from '@struktoai/mirage-core/core/notion/config'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { NotionVFS as CoreNotionVFS, VFS_MD } from '@struktoai/mirage-core/vfs/notion/notion'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 
-export interface NotionVFSState {
-  type: string
-  config: NotionConfigRedacted
-}
-
-export class NotionVFS extends NotionVFSBase {
+export class NotionVFS extends CoreNotionVFS {
   override readonly name: string = VFSName.NOTION
   override readonly cachesReads: boolean = true
   override vfsMd: string = VFS_MD
@@ -52,10 +44,7 @@ export class NotionVFS extends NotionVFSBase {
     this.accessor = new NotionAccessor(new HttpNotionTransport(transportOpts))
   }
 
-  override getState(): Promise<NotionVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(NotionConfigSchema, this.config) as NotionConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof NotionConfig>>> {
+    return Promise.resolve(this.configState(NotionConfig, this.config))
   }
 }

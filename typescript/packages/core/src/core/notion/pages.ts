@@ -12,15 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JsonObject } from '../../types.ts'
+import { asObject } from '../../utils/records.ts'
+import { cursorItems, cursorPages } from '../api/paginate.ts'
 import { NotionAPIError, type NotionTransport } from './client.ts'
 import { MAX_PAGE_SIZE } from './constants.ts'
-import { asObject } from './render.ts'
-import { cursorItems, cursorPages } from '../api/paginate.ts'
-
-type Json = Record<string, unknown>
 
 /** Refuse a list response Notion marked incomplete. */
-function completePage(page: Json): Json {
+function completePage(page: JsonObject): JsonObject {
   const status = asObject(page.request_status)
   if (status.type === 'incomplete') {
     const reason =
@@ -35,7 +34,7 @@ async function paginateTool(
   toolName: string,
   baseArgs: Record<string, unknown>,
   maxResults?: number,
-): Promise<Json[]> {
+): Promise<JsonObject[]> {
   const items = await cursorItems(
     async (cursor) =>
       completePage(
@@ -49,19 +48,22 @@ async function paginateTool(
   return items.map(asObject)
 }
 
-export async function searchDataSources(transport: NotionTransport): Promise<Json[]> {
+export async function searchDataSources(transport: NotionTransport): Promise<JsonObject[]> {
   const baseArgs = { filter: { value: 'data_source', property: 'object' }, page_size: 100 }
   return paginateTool(transport, 'API-post-search', baseArgs)
 }
 
-export async function getDatabase(transport: NotionTransport, databaseId: string): Promise<Json> {
+export async function getDatabase(
+  transport: NotionTransport,
+  databaseId: string,
+): Promise<JsonObject> {
   return transport.callTool('API-retrieve-a-database', { database_id: databaseId })
 }
 
 export async function getDataSource(
   transport: NotionTransport,
   dataSourceId: string,
-): Promise<Json> {
+): Promise<JsonObject> {
   return transport.callTool('API-retrieve-a-data-source', { data_source_id: dataSourceId })
 }
 
@@ -74,8 +76,8 @@ export async function getDataSource(
 export async function* queryDataSourcePages(
   transport: NotionTransport,
   dataSourceId: string,
-  body: Json = {},
-): AsyncGenerator<Json[], void> {
+  body: JsonObject = {},
+): AsyncGenerator<JsonObject[], void> {
   const baseArgs = { ...body, page_size: MAX_PAGE_SIZE }
   for await (const page of cursorPages((cursor) =>
     queryDataSourcePage(
@@ -88,15 +90,18 @@ export async function* queryDataSourcePages(
   }
 }
 
-export async function getPage(transport: NotionTransport, pageId: string): Promise<Json> {
+export async function getPage(transport: NotionTransport, pageId: string): Promise<JsonObject> {
   return transport.callTool('API-retrieve-a-page', { page_id: pageId })
 }
 
-export async function getSelf(transport: NotionTransport): Promise<Json> {
+export async function getSelf(transport: NotionTransport): Promise<JsonObject> {
   return transport.callTool('API-get-self', {})
 }
 
-export async function getPageMarkdown(transport: NotionTransport, pageId: string): Promise<Json> {
+export async function getPageMarkdown(
+  transport: NotionTransport,
+  pageId: string,
+): Promise<JsonObject> {
   return transport.callTool('API-retrieve-page-markdown', { page_id: pageId })
 }
 
@@ -104,7 +109,7 @@ export async function replacePageMarkdown(
   transport: NotionTransport,
   pageId: string,
   markdown: string,
-): Promise<Json> {
+): Promise<JsonObject> {
   return transport.callTool('API-patch-page-markdown', {
     page_id: pageId,
     type: 'replace_content',
@@ -119,8 +124,8 @@ export async function replacePageMarkdown(
 export async function queryDataSourcePage(
   transport: NotionTransport,
   dataSourceId: string,
-  body: Json,
-): Promise<Json> {
+  body: JsonObject,
+): Promise<JsonObject> {
   return completePage(
     await transport.callTool('API-post-data-source-query', {
       ...body,
@@ -132,7 +137,7 @@ export async function queryDataSourcePage(
 export async function listBlockChildren(
   transport: NotionTransport,
   blockId: string,
-): Promise<Json[]> {
+): Promise<JsonObject[]> {
   return paginateTool(transport, 'API-retrieve-block-children', {
     block_id: blockId,
     page_size: 100,
@@ -145,7 +150,7 @@ export async function listBlockTree(
   transport: NotionTransport,
   blockId: string,
   depth = 0,
-): Promise<Json[]> {
+): Promise<JsonObject[]> {
   const blocks = await listBlockChildren(transport, blockId)
   if (depth >= MAX_BLOCK_DEPTH) return blocks
   for (const block of blocks) {
@@ -191,8 +196,8 @@ export async function searchPages(
   query = '',
   pageSize = 100,
   maxResults?: number,
-): Promise<Json[]> {
-  const baseArgs: Json = {
+): Promise<JsonObject[]> {
+  const baseArgs: JsonObject = {
     filter: { value: 'page', property: 'object' },
     page_size: Math.min(pageSize, MAX_PAGE_SIZE),
   }
@@ -208,12 +213,12 @@ export interface CreatePageInput {
 export async function createPage(
   transport: NotionTransport,
   input: CreatePageInput,
-): Promise<Json> {
-  const parentBody: Json =
+): Promise<JsonObject> {
+  const parentBody: JsonObject =
     input.parent.type === 'workspace'
       ? { type: 'workspace', workspace: true }
       : { type: 'page_id', page_id: input.parent.page_id }
-  const body: Json = {
+  const body: JsonObject = {
     parent: parentBody,
     properties: {
       title: { title: [{ type: 'text', text: { content: input.title } }] },
@@ -222,14 +227,17 @@ export async function createPage(
   return transport.callTool('API-post-page', body)
 }
 
-export async function createPageRaw(transport: NotionTransport, body: Json): Promise<Json> {
+export async function createPageRaw(
+  transport: NotionTransport,
+  body: JsonObject,
+): Promise<JsonObject> {
   return transport.callTool('API-post-page', body)
 }
 
 export async function updatePage(
   transport: NotionTransport,
   pageId: string,
-  body: Json,
-): Promise<Json> {
+  body: JsonObject,
+): Promise<JsonObject> {
   return transport.callTool('API-patch-page', { ...body, page_id: pageId })
 }

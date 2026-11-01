@@ -16,7 +16,7 @@ import {
   MountMode,
   RAMVFS,
   Workspace,
-  parseSessionProfile,
+  SessionProfile,
 } from "@struktoai/mirage-node";
 import type {
   Files,
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
       profiles: Object.fromEntries(
         Object.entries(PROFILES).map(([name, doc]) => [
           name,
-          parseSessionProfile(doc, `profile \`${name}\``),
+          SessionProfile(doc, `profile \`${name}\``),
         ]),
       ),
     },

@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { MsGraphConfigResolved } from './config.ts'
-import { GraphError, graphGet } from './client.ts'
 import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { GraphError, graphGet } from './client.ts'
+import type { resolveMsGraphConfig } from './config.ts'
 
 interface DrivePath {
   readonly path: string
@@ -25,7 +25,7 @@ interface DrivePath {
 
 /** Validate caller-controlled drive components; configured root components are infrastructure. */
 export async function checkItem(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DrivePath,
   virtual?: string,
   params?: Record<string, string>,

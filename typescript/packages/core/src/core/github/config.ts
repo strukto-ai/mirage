@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-export const GitHubConfigSchema = z.object({
+export const GitHubConfig = z.object({
   ...timeoutShape,
   token: secretStr().describe('GitHub personal access token.'),
   owner: z.string().describe('Repository owner, a user or an organization.'),
@@ -34,11 +34,9 @@ export const GitHubConfigSchema = z.object({
   }),
 })
 
-export type GitHubConfig = ConfigOf<typeof GitHubConfigSchema>
+export type GitHubConfig = ConfigOf<typeof GitHubConfig>
 
-export type GitHubConfigRedacted = RedactedConfig<GitHubConfig, 'token'>
-
-export const GhConfigSchema = z.object({
+export const GhConfig = z.object({
   ...timeoutShape,
   token: secretStr(),
   baseUrl: z.string().optional(),
@@ -50,4 +48,4 @@ export const GhConfigSchema = z.object({
 // it validates an install's config and carries the `secretStr` marker
 // redaction reads -- so a hand-written twin only adds a shape that can
 // drift from it, which is how `branch` reached the schema and not the type.
-export type GhConfig = ConfigOf<typeof GhConfigSchema>
+export type GhConfig = ConfigOf<typeof GhConfig>

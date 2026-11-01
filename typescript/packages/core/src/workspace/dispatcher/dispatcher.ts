@@ -12,15 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithMemory } from '../../io/memory.ts'
-import { type Egress, liveEgress, runWithEgress } from '../../io/gateway.ts'
-import { closeQuietly, ensureStream } from '../../io/stream.ts'
-import type { ByteSource } from '../../io/types.ts'
-
-import type { OpKwargs, SessionAccess } from '../../view/types.ts'
-import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { keepVersions } from '../../cache/file/io.ts'
-import { drainBudget, type FileCache } from '../../cache/file/mixin.ts'
+import { drainBudget, type FileCacheMixin } from '../../cache/file/mixin.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { type KeyHold, KeyLock } from '../../cache/lock.ts'
 import type { CacheManager } from '../../cache/manager.ts'
 import {
@@ -30,60 +24,72 @@ import {
   readHitADir,
   walkSpelling,
 } from '../../commands/builtin/utils/paths.ts'
-import { getExtension } from '../../utils/filetype.ts'
-import { IOResult, type OpReport, PipeStream } from '../../io/types.ts'
+import {
+  type Caller,
+  type CallerDispatchFn,
+  callerSignal,
+  currentCaller,
+  effectivePathMode,
+  explaining,
+  getCurrentSession,
+  hiddenRefusal,
+  liveCallers,
+  runWithCaller,
+  sessionAccess,
+  sessionVisibility,
+} from '../../context/session_context.ts'
 import {
   eacces,
+  ebusy,
   eexist,
   einval,
-  enoent,
   eisdir,
+  eloop,
+  enoent,
   enotdir,
   enotempty,
   enotsup,
   erofs,
+  exdev,
   isEnoent,
   isEnotdir,
   isFsError,
   isMissError,
   isMissingOp,
-  eloop,
-  exdev,
-  walkDeclined,
+  isMissingPath,
   noMount,
   noXattr,
+  walkDeclined,
   walkRefusal,
 } from '../../errors/fs.ts'
 import { type FsError } from '../../errors/types.ts'
-import { Policies, PolicyDenied } from '../../policy/index.ts'
-import type { Decisions } from '../../policy/decisions.ts'
-import { Boundary } from '../../policy/boundary.ts'
-import { METADATA_OPS } from '../../policy/constants.ts'
-import { PolicyError } from '../../policy/errors.ts'
-import { walkBound } from '../../policy/builtin/output_cap.ts'
-import { mountKey, underPath } from '../../utils/key_prefix.ts'
-import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
-import { CycleError, endsAtDot, norm, parent, posixNormpath } from '../../utils/path.ts'
-import type { Visibility } from '../../types.ts'
-import type { DryRun, EntryGate, VfsExplanation } from '../../policy/types.ts'
+import { type Egress, liveEgress, runWithEgress } from '../../io/gateway.ts'
+import { runWithMemory } from '../../io/memory.ts'
+import { closeQuietly, ensureStream } from '../../io/stream.ts'
+import type { ByteSource } from '../../io/types.ts'
+import { IOResult, type OpReport, PipeStream } from '../../io/types.ts'
 import {
   activeRecords,
   commandRecords,
+  finishRecord,
   lostPaths,
   record,
   recordIndex,
   runWithRecording,
   startOp,
-  finishRecord,
 } from '../../observe/context.ts'
 import type { LostPaths, OpRecord } from '../../observe/record.ts'
 import { RETRACT_FINGERPRINT_OPS, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
-import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
-import { ebusy, isMissingPath } from '../../errors/fs.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
-import { declared } from '../../vfs/call.ts'
-import { WRITE_EFFECTS } from '../../vfs/constants.ts'
-import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
+import { Boundary } from '../../policy/boundary.ts'
+import { walkBound } from '../../policy/builtin/output_cap.ts'
+import { METADATA_OPS } from '../../policy/constants.ts'
+import type { Decisions } from '../../policy/decisions.ts'
+import { PolicyError } from '../../policy/errors.ts'
+import { Policies, PolicyDenied } from '../../policy/index.ts'
+import type { DryRun, EntryGate, VfsExplanation } from '../../policy/types.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import type { Visibility } from '../../types.ts'
 import {
   type CacheFacts,
   type CapacityResult,
@@ -98,17 +104,35 @@ import {
   VFSName,
   WritePolicy,
 } from '../../types.ts'
-import { sees } from './reader.ts'
-import { LentPayload, memoryAnswered, primed, served } from './stream.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
-import type { DriftQueue } from '../snapshot/drift.ts'
-import type { Namespace } from '../mount/namespace/namespace.ts'
-import type { MountEntry } from '../mount/mount.ts'
-import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
-import { Reconciler } from '../reconcile.ts'
+import { abortable } from '../../utils/abort.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { runWithSystemClock, systemNow } from '../../utils/clock.ts'
+import { getExtension } from '../../utils/filetype.ts'
+import {
+  hiddenUnder,
+  leadsHidden,
+  moveReveals,
+  pathVisible,
+  visibleLinks,
+} from '../../utils/hidden.ts'
+import { mountKey, underPath } from '../../utils/key_prefix.ts'
+import { CycleError, endsAtDot, norm, parent, posixNormpath } from '../../utils/path.ts'
 import { sliceWindow } from '../../utils/ranges.ts'
+import { type RemnantChannel, removeRemnants, visibleBelow } from '../../utils/remnants.ts'
+import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { ident } from '../../utils/stat_view.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
+import { declared } from '../../vfs/call.ts'
+import { WRITE_EFFECTS } from '../../vfs/constants.ts'
+import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
+import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
+import type { OpKwargs, SessionAccess } from '../../view/types.ts'
+import type { MountEntry } from '../mount/mount.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
+import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
+import { Reconciler } from '../reconcile.ts'
+import type { DriftQueue } from '../snapshot/drift.ts'
 import {
   CALLS,
   COPY_OPS,
@@ -119,10 +143,10 @@ import {
   ENTRY_CREATE_OPS,
   FILE_CREATE_OPS,
   HIDDEN_CREATE_OPS,
+  HIDE_FILTERED_OPS,
   LINK_ENTRY_OPS,
   MISS_OPS,
   NAMESPACE_TABLE_OPS,
-  HIDE_FILTERED_OPS,
   NATIVE_WALK_OPS,
   NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
@@ -134,32 +158,8 @@ import {
   STAMP_WRITE_OPS,
   XATTR_OPS,
 } from './constants.ts'
-import {
-  type Caller,
-  type CallerDispatchFn,
-  callerSignal,
-  currentCaller,
-  liveCallers,
-  effectivePathMode,
-  explaining,
-  getCurrentSession,
-  hiddenRefusal,
-  runWithCaller,
-  sessionVisibility,
-  sessionAccess,
-} from '../../context/session_context.ts'
-import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { abortable } from '../../utils/abort.ts'
-import {
-  hiddenUnder,
-  leadsHidden,
-  moveReveals,
-  pathVisible,
-  visibleLinks,
-} from '../../utils/hidden.ts'
-import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
-import { encodeText } from '../../shell/bytes.ts'
-import { runWithSystemClock, systemNow } from '../../utils/clock.ts'
+import { sees } from './reader.ts'
+import { LentPayload, memoryAnswered, primed, served } from './stream.ts'
 
 /**
  * Whether a completed write op was an append of no bytes. That is an open for
@@ -690,7 +690,7 @@ type AdmitWrite = <T>(write: () => Promise<T>) => Promise<T>
 
 export class Dispatcher {
   private readonly namespace: Namespace
-  private readonly cache: FileCache & BaseVFS
+  private readonly cache: FileCacheMixin & BaseVFS
   private readonly policies: Policies
   // The snapshot drift queue rides along because this is the one dispatcher:
   // a strict restore's pending fingerprint checks must run before ANY
@@ -714,7 +714,7 @@ export class Dispatcher {
 
   constructor(
     namespace: Namespace,
-    cache: FileCache & BaseVFS,
+    cache: FileCacheMixin & BaseVFS,
     policies?: Policies,
     drift?: DriftQueue,
     admitWrite?: AdmitWrite,
@@ -1960,7 +1960,7 @@ export class Dispatcher {
     // A function the VFS declares a write is judged as one, whatever its
     // name: the POSIX names are known here, a custom one only to the VFS
     // that defines it.
-    call.write = call.write || WRITE_EFFECTS.includes(mark.effect)
+    call.write = call.write || WRITE_EFFECTS.some((writeEffect) => writeEffect === mark.effect)
     const gate = call.ruleGate === null ? {} : { gate: call.ruleGate }
     // A file copy reads its source, whatever the backend does with it, so the
     // source is admitted as the read a policy judges reads by.
@@ -3228,7 +3228,7 @@ export class Dispatcher {
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
     const mark = declared(vfs.constructor, name) ?? CALLS.get(name) ?? null
-    const write = mark !== null && WRITE_EFFECTS.includes(mark.effect)
+    const write = mark !== null && WRITE_EFFECTS.some((writeEffect) => writeEffect === mark.effect)
     const boundary = new Boundary(
       this.policies,
       mountPrefix,

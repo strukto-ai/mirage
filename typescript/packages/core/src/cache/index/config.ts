@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-
 import type { FileStat } from '../../types.ts'
 import { ContentType, FileType } from '../../types.ts'
-import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, refuseRepeatedFields } from '../../vfs/secrets.ts'
 
 export const LookupStatus = Object.freeze({
   EXPIRED: 'expired',
@@ -113,7 +113,7 @@ export interface ListResult {
 }
 
 /** The directory row, the twin of the pydantic `IndexDirectory`. */
-export const IndexDirectorySchema = z.object({
+export const IndexDirectory = z.object({
   entries: z.array(z.string()),
   folders: z.array(z.number().int()),
   expires_at: z.number(),
@@ -123,23 +123,23 @@ export const IndexDirectorySchema = z.object({
   window: z.boolean().default(false),
 })
 
-export type IndexDirectory = z.output<typeof IndexDirectorySchema>
+export type IndexDirectory = z.output<typeof IndexDirectory>
 
-const IndexConfigSchema = z.object({
+const IndexConfig = z.object({
   type: z.enum(IndexType).optional(),
   ttl: z.number().optional(),
 })
 
-const RedisIndexConfigSchema = IndexConfigSchema.extend({
+const RedisIndexConfig = IndexConfig.extend({
   url: z.string().optional(),
   // Absent scopes the keys to the workspace; a prefix shares them with
   // every workspace that names it.
   keyPrefix: z.string().optional(),
 })
 
-export type IndexConfig = ConfigOf<typeof IndexConfigSchema>
+export type IndexConfig = ConfigOf<typeof IndexConfig>
 
-export type RedisIndexConfig = ConfigOf<typeof RedisIndexConfigSchema>
+export type RedisIndexConfig = ConfigOf<typeof RedisIndexConfig>
 
 /**
  * Check an index config the way python's `IndexConfig` checks one on
@@ -156,6 +156,6 @@ export function normalizeIndexConfig(config: IndexConfig): IndexConfig {
   const input = config as Record<string, unknown>
   refuseRepeatedFields(input)
   return (input.type ?? IndexType.RAM) === IndexType.RAM
-    ? parseConfigWithSchema(IndexConfigSchema, input)
-    : parseConfigWithSchema(RedisIndexConfigSchema, input)
+    ? parseConfigWithSchema(IndexConfig, input)
+    : parseConfigWithSchema(RedisIndexConfig, input)
 }

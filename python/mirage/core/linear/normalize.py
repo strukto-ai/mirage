@@ -14,95 +14,104 @@
 
 from typing import Any
 
+from mirage.utils.records import (
+    as_object,
+    pick_bool_or_none,
+    pick_number_or_none,
+    pick_string,
+    records,
+    string_of,
+)
+
 
 def normalize_team(team: dict[str, Any]) -> dict[str, Any]:
     states = []
-    for state in (team.get("states") or {}).get("nodes", []):
+    for state in records(as_object(team.get("states")).get("nodes", [])):
         states.append(
             {
-                "state_id": state.get("id"),
-                "state_name": state.get("name"),
-                "type": state.get("type"),
+                "state_id": pick_string(state, "id"),
+                "state_name": pick_string(state, "name"),
+                "type": pick_string(state, "type"),
             }
         )
     return {
-        "team_id": team.get("id"),
-        "team_key": team.get("key"),
-        "team_name": team.get("name"),
-        "name": team.get("name"),
-        "description": team.get("description"),
-        "timezone": team.get("timezone"),
-        "updated_at": team.get("updatedAt"),
+        "team_id": pick_string(team, "id"),
+        "team_key": pick_string(team, "key"),
+        "team_name": pick_string(team, "name"),
+        "name": pick_string(team, "name"),
+        "description": pick_string(team, "description"),
+        "timezone": pick_string(team, "timezone"),
+        "updated_at": pick_string(team, "updatedAt"),
         "states": states,
     }
 
 
 def normalize_user(user: dict[str, Any]) -> dict[str, Any]:
     return {
-        "user_id": user.get("id"),
-        "name": user.get("name"),
-        "display_name": user.get("displayName") or user.get("name"),
-        "email": user.get("email"),
-        "is_active": user.get("active"),
-        "is_admin": user.get("admin"),
-        "updated_at": user.get("updatedAt"),
-        "url": user.get("url"),
+        "user_id": pick_string(user, "id"),
+        "name": pick_string(user, "name"),
+        "display_name": pick_string(user, "displayName", "name"),
+        "email": pick_string(user, "email"),
+        "is_active": pick_bool_or_none(user, "active"),
+        "is_admin": pick_bool_or_none(user, "admin"),
+        "updated_at": pick_string(user, "updatedAt"),
+        "url": pick_string(user, "url"),
     }
 
 
 def normalize_issue(issue: dict[str, Any]) -> dict[str, Any]:
-    team = issue.get("team") or {}
-    state = issue.get("state") or {}
-    project = issue.get("project") or {}
-    cycle = issue.get("cycle") or {}
-    assignee = issue.get("assignee") or {}
-    creator = issue.get("creator") or {}
-    labels = (issue.get("labels") or {}).get("nodes", [])
+    team = as_object(issue.get("team"))
+    state = as_object(issue.get("state"))
+    project = as_object(issue.get("project"))
+    cycle = as_object(issue.get("cycle"))
+    assignee = as_object(issue.get("assignee"))
+    creator = as_object(issue.get("creator"))
+    labels = records(as_object(issue.get("labels")).get("nodes", []))
     return {
-        "issue_id": issue.get("id"),
-        "issue_key": issue.get("identifier"),
-        "title": issue.get("title"),
-        "description": issue.get("description") or "",
-        "team_id": team.get("id"),
-        "team_key": team.get("key"),
-        "team_name": team.get("name"),
-        "project_id": project.get("id"),
-        "project_name": project.get("name"),
-        "cycle_id": cycle.get("id"),
-        "cycle_name": cycle.get("name"),
-        "cycle_number": cycle.get("number"),
-        "state_id": state.get("id"),
-        "state_name": state.get("name"),
-        "assignee_id": assignee.get("id"),
-        "assignee_email": assignee.get("email"),
-        "assignee_name": assignee.get("name"),
-        "creator_id": creator.get("id"),
-        "creator_email": creator.get("email"),
-        "creator_name": creator.get("name"),
-        "priority": issue.get("priority"),
-        "label_ids": [label.get("id") for label in labels],
-        "label_names": [label.get("name") for label in labels],
-        "created_at": issue.get("createdAt"),
-        "updated_at": issue.get("updatedAt"),
-        "url": issue.get("url"),
+        "issue_id": pick_string(issue, "id"),
+        "issue_key": pick_string(issue, "identifier"),
+        "title": pick_string(issue, "title"),
+        "description": string_of(issue, "description"),
+        "team_id": pick_string(team, "id"),
+        "team_key": pick_string(team, "key"),
+        "team_name": pick_string(team, "name"),
+        "project_id": pick_string(project, "id"),
+        "project_name": pick_string(project, "name"),
+        "cycle_id": pick_string(cycle, "id"),
+        "cycle_name": pick_string(cycle, "name"),
+        "cycle_number": pick_number_or_none(cycle, "number"),
+        "state_id": pick_string(state, "id"),
+        "state_name": pick_string(state, "name"),
+        "assignee_id": pick_string(assignee, "id"),
+        "assignee_email": pick_string(assignee, "email"),
+        "assignee_name": pick_string(assignee, "name"),
+        "creator_id": pick_string(creator, "id"),
+        "creator_email": pick_string(creator, "email"),
+        "creator_name": pick_string(creator, "name"),
+        "priority": pick_number_or_none(issue, "priority"),
+        "label_ids": [pick_string(label, "id") for label in labels],
+        "label_names": [pick_string(label, "name") for label in labels],
+        "created_at": pick_string(issue, "createdAt"),
+        "updated_at": pick_string(issue, "updatedAt"),
+        "url": pick_string(issue, "url"),
     }
 
 
 def normalize_comment(
     comment: dict[str, Any], *, issue_id: str, issue_key: str | None
 ) -> dict[str, Any]:
-    user = comment.get("user") or {}
+    user = as_object(comment.get("user"))
     return {
-        "comment_id": comment.get("id"),
+        "comment_id": pick_string(comment, "id"),
         "issue_id": issue_id,
         "issue_key": issue_key,
-        "user_id": user.get("id"),
-        "user_email": user.get("email"),
-        "user_name": user.get("displayName") or user.get("name"),
-        "body": comment.get("body") or "",
-        "created_at": comment.get("createdAt"),
-        "updated_at": comment.get("updatedAt"),
-        "url": comment.get("url"),
+        "user_id": pick_string(user, "id"),
+        "user_email": pick_string(user, "email"),
+        "user_name": pick_string(user, "displayName", "name"),
+        "body": string_of(comment, "body"),
+        "created_at": pick_string(comment, "createdAt"),
+        "updated_at": pick_string(comment, "updatedAt"),
+        "url": pick_string(comment, "url"),
     }
 
 
@@ -114,18 +123,18 @@ def normalize_project(
     team_name: str | None,
     issues: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    lead = project.get("lead") or {}
+    lead = as_object(project.get("lead"))
     return {
-        "project_id": project.get("id"),
+        "project_id": pick_string(project, "id"),
         "team_id": team_id,
         "team_key": team_key,
         "team_name": team_name,
-        "name": project.get("name"),
-        "description": project.get("description"),
-        "state": (project.get("status") or {}).get("type"),
-        "lead_id": lead.get("id"),
-        "updated_at": project.get("updatedAt"),
-        "url": project.get("url"),
+        "name": pick_string(project, "name"),
+        "description": pick_string(project, "description"),
+        "state": pick_string(as_object(project.get("status")), "type"),
+        "lead_id": pick_string(lead, "id"),
+        "updated_at": pick_string(project, "updatedAt"),
+        "url": pick_string(project, "url"),
         "issue_count": len(issues),
         "issues": issues,
     }
@@ -136,17 +145,17 @@ def project_issue_rows(
 ) -> list[dict[str, Any]]:
     rows = []
     for issue in issues:
-        if (issue.get("project") or {}).get("id") != project_id:
+        if pick_string(as_object(issue.get("project")), "id") != project_id:
             continue
-        state = issue.get("state") or {}
+        state = as_object(issue.get("state"))
         rows.append(
             {
-                "issue_id": issue.get("id"),
-                "issue_key": issue.get("identifier"),
-                "title": issue.get("title"),
-                "state_id": state.get("id"),
-                "state_name": state.get("name"),
-                "url": issue.get("url"),
+                "issue_id": pick_string(issue, "id"),
+                "issue_key": pick_string(issue, "identifier"),
+                "title": pick_string(issue, "title"),
+                "state_id": pick_string(state, "id"),
+                "state_name": pick_string(state, "name"),
+                "url": pick_string(issue, "url"),
             }
         )
     return rows
@@ -154,43 +163,41 @@ def project_issue_rows(
 
 def normalize_label(label: dict[str, Any]) -> dict[str, Any]:
     return {
-        "label_id": label.get("id"),
-        "name": label.get("name"),
-        "color": label.get("color"),
+        "label_id": pick_string(label, "id"),
+        "name": pick_string(label, "name"),
+        "color": pick_string(label, "color"),
     }
 
 
 def normalize_document(document: dict[str, Any]) -> dict[str, Any]:
-    project = document.get("project") or {}
-    creator = document.get("creator") or {}
+    project = as_object(document.get("project"))
+    creator = as_object(document.get("creator"))
     return {
-        "document_id": document.get("id"),
-        "title": document.get("title"),
-        "content": document.get("content") or "",
-        "project_id": project.get("id"),
-        "project_name": project.get("name"),
-        "creator_id": creator.get("id"),
-        "creator_name": creator.get("name"),
-        "creator_email": creator.get("email"),
-        "created_at": document.get("createdAt"),
-        "updated_at": document.get("updatedAt"),
-        "url": document.get("url"),
+        "document_id": pick_string(document, "id"),
+        "title": pick_string(document, "title"),
+        "content": string_of(document, "content"),
+        "project_id": pick_string(project, "id"),
+        "project_name": pick_string(project, "name"),
+        "creator_id": pick_string(creator, "id"),
+        "creator_name": pick_string(creator, "name"),
+        "creator_email": pick_string(creator, "email"),
+        "created_at": pick_string(document, "createdAt"),
+        "updated_at": pick_string(document, "updatedAt"),
+        "url": pick_string(document, "url"),
     }
 
 
 def normalize_cycle(cycle: dict[str, Any], *, team_id: str) -> dict[str, Any]:
     return {
-        "cycle_id": cycle.get("id"),
+        "cycle_id": pick_string(cycle, "id"),
         "team_id": team_id,
-        "name": cycle.get("name"),
-        "number": cycle.get("number"),
-        "starts_at": cycle.get("startsAt"),
-        "ends_at": cycle.get("endsAt"),
-        "updated_at": cycle.get("updatedAt"),
-        "url": cycle.get("url"),
+        "name": pick_string(cycle, "name"),
+        "number": pick_number_or_none(cycle, "number"),
+        "starts_at": pick_string(cycle, "startsAt"),
+        "ends_at": pick_string(cycle, "endsAt"),
+        "updated_at": pick_string(cycle, "updatedAt"),
+        "url": pick_string(cycle, "url"),
     }
 
 
-# The fields of an issue's JSON Linear's issue search reads; every other
-# field is checked against the listing instead (``unsearched_text``).
 SEARCHED_FIELDS = ("title", "description")

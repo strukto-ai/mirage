@@ -3322,3 +3322,8 @@ def test_the_old_script_and_runtime_keys_are_told_where_they_went():
         )
     with pytest.raises(ValidationError, match="now a policy block"):
         SessionProfile.model_validate({"runtime": "monty"})
+
+
+def test_explicit_null_reason_is_refused():
+    with pytest.raises(ValueError, match="reason must be a string"):
+        CommandsBlock(deny=[{"commands": ["rm"], "reason": None}])

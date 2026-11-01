@@ -24,8 +24,6 @@ export interface Connection {
   pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }
 }
 
-export type Node = Record<string, unknown>
-
 /**
  * A connection `gh pr view` and `gh issue view` read to its end: its
  * selection given the clause that picks the page after `$endCursor` (or no
@@ -310,3 +308,5 @@ export async function readRest(
   }
   return node
 }
+
+export type Node = Record<string, unknown>

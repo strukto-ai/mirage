@@ -12,15 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_VISIBILITY, FileStat, FileType, PathSpec, MountMode } from '../../../../types.ts'
 import { execFileSync } from 'node:child_process'
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -29,13 +28,17 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-
+import type { CallerDispatchFn } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { SessionProfile } from '../../../../policy/profile.ts'
+import { readers } from '../../../../test-utils.ts'
+import { DEFAULT_VISIBILITY, FileStat, FileType, MountMode, PathSpec } from '../../../../types.ts'
+import { classifyPaths } from '../../../../utils/hidden.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
+import { Files } from '../../../../workspace/files.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { parseSessionProfile } from '../../../../policy/profile.ts'
 import { GIT } from './index.ts'
-import { blockingRef } from './refs.ts'
 import {
   ensureDir,
   readNames,
@@ -44,11 +47,7 @@ import {
   removeEmptyParents,
   removeTree,
 } from './io.ts'
-import type { CallerDispatchFn } from '../../../../context/session_context.ts'
-import { classifyPaths } from '../../../../utils/hidden.ts'
-import { Files } from '../../../../workspace/files.ts'
-import { readers } from '../../../../test-utils.ts'
-import { rstripSlash } from '../../../../utils/slash.ts'
+import { blockingRef } from './refs.ts'
 
 const BUILDER = fileURLToPath(
   new URL('../../../../../../../../integ/fixtures/git/build.sh', import.meta.url),
@@ -346,7 +345,7 @@ describe('git add', () => {
 async function seal(h: Harness, path: string): Promise<void> {
   await h.ws.setSessionProfile(
     h.ws.defaultSessionId,
-    parseSessionProfile({ commands: { deny: [{ reason: 'sealed', paths: [path] }] } }, 'seal'),
+    SessionProfile({ commands: { deny: [{ reason: 'sealed', paths: [path] }] } }, 'seal'),
   )
 }
 

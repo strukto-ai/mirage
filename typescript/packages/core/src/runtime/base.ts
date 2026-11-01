@@ -17,8 +17,8 @@ import { runWithCaller } from '../context/session_context.ts'
 import { liveEgress } from '../io/gateway.ts'
 import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
-import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
 import { refusedRun, type WorkspaceBinding } from './binding.ts'
+import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isLineExecutor, isProcessExecutor } from './mixin.ts'
 import type {
@@ -44,7 +44,7 @@ import type {
  * captured command names, the coerced config and the engine. What a
  * runtime can DO is declared by its tier and mixins, detected by type and
  * never by probing: LanguageRuntime interprets code in its language
- * (run), LineExecutor takes whole lines (runLine), ProcessExecutor runs
+ * (run), LineExecutorMixin takes whole lines (runLine), ProcessExecutorMixin runs
  * an argv (runProcess).
  *
  * Every runtime is constructed the same way (captures, config); each

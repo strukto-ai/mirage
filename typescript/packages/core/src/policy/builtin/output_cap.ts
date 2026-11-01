@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Limit, type LimitInit, OnExceed, type Producer } from '../../types.ts'
+import { Limit, OnExceed, type Producer } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 const DEFAULT_MAX_LINES = 2000
@@ -155,7 +155,10 @@ export function resolveProducer(
 }
 
 // Each Limit field as config spells it.
-const WIRE_FIELDS: readonly (readonly [string, keyof LimitInit])[] = [
+const WIRE_FIELDS: readonly (readonly [
+  string,
+  keyof NonNullable<ConstructorParameters<typeof Limit>[0]>,
+])[] = [
   ['max_lines', 'maxLines'],
   ['max_bytes', 'maxBytes'],
   ['timeout_seconds', 'timeoutSeconds'],
@@ -188,7 +191,7 @@ export function parseCommandLimits(raw: unknown): Record<string, Limit> {
       block.on_exceed !== OnExceed.TRUNCATE
     )
       throw new Error(`command_limits.${name}.on_exceed must be truncate or error`)
-    const init: LimitInit = {}
+    const init: NonNullable<ConstructorParameters<typeof Limit>[0]> = {}
     for (const [key, field] of WIRE_FIELDS) {
       if (key in block) Object.assign(init, { [field]: block[key] })
     }

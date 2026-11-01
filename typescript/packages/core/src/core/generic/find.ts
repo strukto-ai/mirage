@@ -13,28 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { activeCacheManager } from '../../cache/context.ts'
-import { isEacces, isEnoent } from '../../errors/fs.ts'
 import { isEntryError } from '../../errors/classify.ts'
+import { isEacces, isEnoent } from '../../errors/fs.ts'
+import { FileType, PathSpec, type FileStat } from '../../types.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { DIR_SIZE } from '../../utils/stat_view.ts'
+import { followedStat } from '../../view/namespace_view.ts'
+import type { LinkView } from '../../view/types.ts'
 import {
   bindTree,
   dropPruned,
+  keep,
   optionsTree,
+  printfKind,
+  prunedKeys,
   settlePrunes,
   treeHasAction,
   treeHasEmpty,
   treeHasPrune,
-  prunedKeys,
-  type FindEntry,
-  keep,
-  type PredNode,
 } from './find_eval.ts'
-import { FileType, PathSpec, type FileStat } from '../../types.ts'
-import type { LinkView } from '../../view/types.ts'
-import { followedStat } from '../../view/namespace_view.ts'
-import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
-import { DIR_SIZE } from '../../utils/stat_view.ts'
-import { type PrintfKind, printfKind } from './find_eval.ts'
+import { type FindEntry, type PredNode, type PrintfKind } from './types.ts'
 
 /** What a find walk filters by: the expression's predicates, parsed. */
 export interface FindOptions {

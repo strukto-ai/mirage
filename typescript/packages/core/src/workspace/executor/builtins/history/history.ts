@@ -15,6 +15,7 @@
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import type { FlagValue } from '../../../../commands/spec/types.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { renderHistoryListing } from '../../../../core/history/render.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -22,13 +23,17 @@ import { ExitSignal } from '../../../../shell/errors.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import type { BuiltinCall, Result } from '../types.ts'
 import { builtinUsage } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
 
 const OPTION_CHARS = 'cdanrwsp'
 
 /** The builtin's output, status and execution-tree node. */
-function result(stdout: Uint8Array | null, exitCode = 0, stderr: Uint8Array | null = null): Result {
+function result(
+  stdout: Uint8Array | null,
+  exitCode = 0,
+  stderr: Uint8Array | null = null,
+): RedirectResult {
   return [
     stdout,
     new IOResult({ exitCode, stderr }),
@@ -36,7 +41,7 @@ function result(stdout: Uint8Array | null, exitCode = 0, stderr: Uint8Array | nu
   ]
 }
 
-function outOfRange(value: string): Result {
+function outOfRange(value: string): RedirectResult {
   return result(null, 1, encodeText(`bash: history: ${value}: history position out of range\n`))
 }
 
@@ -50,13 +55,7 @@ function parseIntStrict(value: string): number | null {
   return Number.parseInt(trimmed, 10)
 }
 
-interface ParsedArgs {
-  flags: Record<string, FlagValue>
-  texts: string[]
-  error: string | null
-}
-
-function parseArgs(args: string[]): ParsedArgs {
+export function parseArgs(args: string[]) {
   const flags: Record<string, FlagValue> = {}
   const texts: string[] = []
   let optionsDone = false
@@ -114,7 +113,7 @@ export async function handleHistory(
   registry: MountRegistry,
   args: string[],
   session: SessionState,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const { flags, texts, error } = parseArgs(args)
   if (error !== null) return result(null, 2, encodeText(error + builtinUsage('history')))
   // bash abandons everything still to run, as `exit 1 2` does; `-p` and
@@ -172,6 +171,6 @@ export async function handleHistory(
 }
 
 /** The `history` arm. */
-export async function historyBuiltin(call: BuiltinCall): Promise<Result> {
+export async function historyBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleHistory(call.registry, [...call.argv.args], call.context.session)
 }

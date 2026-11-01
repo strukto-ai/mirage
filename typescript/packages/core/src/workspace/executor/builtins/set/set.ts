@@ -12,22 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
-import { parseOptionWord } from '../../../../shell/options.ts'
 import { SET_OPTION_DEFAULTS, SET_OPTION_NAMES } from '../../../../shell/constants.ts'
-import type { SessionState } from '../../../session/session.ts'
-import { setPositionalParams, visibleEnv } from '../../../session/state.ts'
-import { ExecutionNode } from '../../../types.ts'
+import { parseOptionWord } from '../../../../shell/options.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import type { SessionState } from '../../../session/session.ts'
+import { setPositionalParams, visibleEnv } from '../../../session/state.ts'
+import { ExecutionNode } from '../../../types.ts'
 import { SET_QUOTED_CHARS } from '../constants.ts'
-import { bashDeclareQuote } from '../declare/declare.ts'
 import { CONTROL_RE } from '../declare/constants.ts'
+import { bashDeclareQuote } from '../declare/declare.ts'
 import { builtinError, builtinUsage } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import type { BuiltinCall } from '../types.ts'
 
 /**
  * A value as bash's bare `set` prints it.
@@ -70,7 +71,7 @@ export function handleSet(
   args: string[],
   session: SessionState,
   callStack: CallStack | null = null,
-): Result {
+): RedirectResult {
   if (args.length === 0) {
     const entries = Object.entries(visibleEnv(session))
     entries.sort(([a], [b]) => compareCodePoints(a, b))
@@ -160,6 +161,6 @@ function optionListing(session: SessionState, plus: boolean): Uint8Array {
 }
 
 /** The `set` arm. */
-export function setBuiltin(call: BuiltinCall): Promise<Result> {
+export function setBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleSet([...call.argv.args], call.context.session, call.callStack))
 }

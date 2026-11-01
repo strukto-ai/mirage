@@ -11,24 +11,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { GitHubAccount } from '../../../../accessor/github.ts'
-import { CommandSpec } from '../../../spec/types.ts'
-import { CLI } from '../../types.ts'
-import { CLIHandler } from '../../types.ts'
 
-import { searchHandlers, searchSpec } from './search.ts'
-import { GhConfigSchema, type GhConfig } from '../../../../core/github/config.ts'
-import { BOOLEAN, HELP_TOPICS, REPO_EDIT_FIELDS } from './constants.ts'
-import type { RepoEditField } from './types.ts'
-import { findChild, nodeHelp } from '../../walk.ts'
+import { GitHubAccount } from '../../../../accessor/github.ts'
+import { GhConfig } from '../../../../core/github/config.ts'
 import { IOResult } from '../../../../io/types.ts'
-import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { Argument, UsageStyle } from '../../../spec/types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import { Argument, CommandSpec, UsageStyle } from '../../../spec/types.ts'
+import { CLI, CLIHandler } from '../../types.ts'
+import { findChild, nodeHelp } from '../../walk.ts'
+import {
+  runListCmd,
+  runRerunCmd,
+  runViewCmd,
+  workflowListCmd,
+  workflowRunCmd,
+  workflowViewCmd,
+} from './actions.ts'
 import { api } from './api.ts'
 import { status as authStatus, token as authToken } from './auth.ts'
-import { version } from './version.ts'
+import { BOOLEAN, HELP_TOPICS, REPO_EDIT_FIELDS } from './constants.ts'
 import {
   closeCmd as issueClose,
   commentCmd as issueComment,
@@ -50,28 +53,23 @@ import {
   viewCmd as prView,
 } from './pull.ts'
 import {
-  cloneCmd as repoClone,
-  createCmd as repoCreate,
-  deleteCmd as repoDelete,
-  editCmd as repoEdit,
-  fork,
-  listCmd as repoList,
-  rename,
-  view as repoView,
-} from './repo.ts'
-import {
   createCmd as releaseCreate,
   listCmd as releaseList,
   viewCmd as releaseView,
 } from './release.ts'
 import {
-  runListCmd,
-  runRerunCmd,
-  runViewCmd,
-  workflowListCmd,
-  workflowRunCmd,
-  workflowViewCmd,
-} from './actions.ts'
+  fork,
+  rename,
+  cloneCmd as repoClone,
+  createCmd as repoCreate,
+  deleteCmd as repoDelete,
+  editCmd as repoEdit,
+  listCmd as repoList,
+  view as repoView,
+} from './repo.ts'
+import { searchHandlers, searchSpec } from './search.ts'
+import type { RepoEditField } from './types.ts'
+import { version } from './version.ts'
 
 const REPO = new Argument(['-R', '--repo'], {
   help: 'Select another repository, as [HOST/]OWNER/REPO',
@@ -649,6 +647,6 @@ export const GH = new CLI({
     'workflow view': new CLIHandler({ fn: workflowViewCmd }),
     'workflow run': new CLIHandler({ fn: workflowRunCmd, write: true }),
   },
-  configModel: GhConfigSchema,
+  configModel: GhConfig,
   accessor: (config) => new GitHubAccount(config as GhConfig),
 })

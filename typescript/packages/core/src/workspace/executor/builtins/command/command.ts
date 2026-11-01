@@ -12,23 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ParseScope } from '../../../../shell/parse/scope.ts'
-
-import { IOResult } from '../../../../io/types.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
 import { shellJoin } from '../../../../shell/join.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
+import { sessionEntry } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
 import { classify, describe, programFile } from '../lookup/index.ts'
 import { NameKind } from '../lookup/types.ts'
-import { sessionEntry } from '../../../session/session.ts'
-import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 import { builtinUsage } from '../shared.ts'
+import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 /**
  * Run the `-v`/`-V` introspection modes.
@@ -46,7 +46,7 @@ function probe(
   session: SessionState,
   registry: MountRegistry,
   parser?: ParseScope,
-): Result {
+): RedirectResult {
   const outLines: string[] = []
   const errLines: string[] = []
   let anyFound = false
@@ -102,7 +102,7 @@ export async function handleCommandBuiltin(
   // Null runs the target as a line of its own.
   callStack: CallStack | null = null,
   parser?: ParseScope,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const scan = scanOptions(args, 'pvV')
   if (scan.bad !== null) {
     const err = encodeText(`bash: command: ${scan.bad}: invalid option\n${builtinUsage('command')}`)
@@ -146,7 +146,7 @@ export async function handleCommandBuiltin(
 }
 
 /** The `command` arm. */
-export async function commandBuiltin(call: BuiltinCall): Promise<Result> {
+export async function commandBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleCommandBuiltin(
     call.executeFn,
     [...call.argv.args],

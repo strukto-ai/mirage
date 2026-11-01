@@ -12,17 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JsonObject } from '../../types.ts'
+import {
+  asArray,
+  asObject,
+  pickString as pickStringOrNull,
+  stringOf as strOf,
+} from '../../utils/records.ts'
 import { formatSegment } from './pathing.ts'
-import { asArray, asObject, blocksToMarkdown, strOf } from './render.ts'
+import { blocksToMarkdown } from './render.ts'
 
-type Json = Record<string, unknown>
-
-function pickStringOrNull(record: Json, key: string): string | null {
-  const value = record[key]
-  return typeof value === 'string' ? value : null
-}
-
-function boolOf(record: Json, key: string): boolean {
+function boolOf(record: JsonObject, key: string): boolean {
   const value = record[key]
   return typeof value === 'boolean' ? value : false
 }
@@ -37,7 +37,7 @@ function joinTitleFragments(fragments: unknown[]): string {
   return out
 }
 
-export function extractTitle(page: Json): string {
+export function extractTitle(page: JsonObject): string {
   const properties = asObject(page.properties)
   const titleProp = asObject(properties.title)
   const titleFragments = asArray(titleProp.title)
@@ -54,11 +54,11 @@ export function extractTitle(page: Json): string {
   return 'untitled'
 }
 
-export function pageSegmentName(page: Json): string {
+export function pageSegmentName(page: JsonObject): string {
   return formatSegment({ id: strOf(page, 'id'), title: pageContentTitle(page) })
 }
 
-function pageContentTitle(page: Json): string {
+function pageContentTitle(page: JsonObject): string {
   const properties = asObject(page.properties)
   for (const value of Object.values(properties)) {
     const prop = asObject(value)
@@ -69,7 +69,7 @@ function pageContentTitle(page: Json): string {
   return ''
 }
 
-function extractDatabaseTitle(database: Json): string {
+function extractDatabaseTitle(database: JsonObject): string {
   const titleFragments = asArray(database.title)
   if (titleFragments.length > 0) {
     const joined = joinTitleFragments(titleFragments)
@@ -78,20 +78,20 @@ function extractDatabaseTitle(database: Json): string {
   return 'untitled'
 }
 
-export function databaseSegmentName(database: Json): string {
+export function databaseSegmentName(database: JsonObject): string {
   return formatSegment({ id: strOf(database, 'id'), title: extractDatabaseTitle(database) })
 }
 
 // A data source arrives either as the full object (rich-text `title`) or as a
 // stub under a database's `data_sources` (plain `name`). Both name the same
 // thing, so both must render the same directory.
-function extractDataSourceTitle(dataSource: Json): string {
+function extractDataSourceTitle(dataSource: JsonObject): string {
   const name = pickStringOrNull(dataSource, 'name')
   if (name !== null && name !== '') return name
   return extractDatabaseTitle(dataSource)
 }
 
-export function dataSourceSegmentName(dataSource: Json): string {
+export function dataSourceSegmentName(dataSource: JsonObject): string {
   return formatSegment({ id: strOf(dataSource, 'id'), title: extractDataSourceTitle(dataSource) })
 }
 
@@ -106,39 +106,7 @@ interface PageFields {
   archived: boolean
   created_by: string
   last_edited_by: string
-  properties: Json
-}
-
-export interface NormalizedPage extends PageFields {
-  markdown: string
-  blocks: Json[]
-}
-
-export interface NormalizedRow extends PageFields {
-  path: string
-}
-
-export interface NormalizedDatabase {
-  database_id: string
-  title: string
-  url: string | null
-  created_time: string | null
-  last_edited_time: string | null
-  parent: Json
-  archived: boolean
-  is_inline: boolean
-  data_sources: unknown[]
-}
-
-export interface NormalizedDataSource {
-  data_source_id: string
-  database_id: string
-  title: string
-  created_time: string | null
-  last_edited_time: string | null
-  database_parent: Json
-  archived: boolean
-  properties: Json
+  properties: JsonObject
 }
 
 // A database row's cells are its `properties`, and they are the reason the row
@@ -146,7 +114,7 @@ export interface NormalizedDataSource {
 // Kept as Notion's own property objects for the same reason `blocks` is: the
 // schema they answer to is rendered one level up, in data_source.json's
 // `properties`.
-function pageFields(page: Json): PageFields {
+function pageFields(page: JsonObject): PageFields {
   const parent = asObject(page.parent)
   const parentType = strOf(parent, 'type')
   const rawParentId = parent[parentType]
@@ -166,8 +134,8 @@ function pageFields(page: Json): PageFields {
   }
 }
 
-export function normalizePage(page: Json, blocks: readonly Json[]): NormalizedPage {
-  const contentBlocks = (blocks as Json[]).filter((block) => {
+export function normalizePage(page: JsonObject, blocks: readonly JsonObject[]) {
+  const contentBlocks = (blocks as JsonObject[]).filter((block) => {
     const type = strOf(block, 'type')
     return type !== 'child_page' && type !== 'child_database'
   })
@@ -185,12 +153,12 @@ export function normalizePage(page: Json, blocks: readonly Json[]): NormalizedPa
  * directories, so the line is where a row's directory name is found.
  * Mirrors `normalize_row` in `mirage/core/notion/normalize.py`.
  */
-export function normalizeRow(page: Json): NormalizedRow {
+export function normalizeRow(page: JsonObject) {
   const { page_id, title, ...rest } = pageFields(page)
   return { page_id, title, path: `${pageSegmentName(page)}/page.json`, ...rest }
 }
 
-export function normalizeDatabase(database: Json): NormalizedDatabase {
+export function normalizeDatabase(database: JsonObject) {
   const archived =
     database.archived !== undefined ? boolOf(database, 'archived') : boolOf(database, 'in_trash')
   return {
@@ -206,7 +174,7 @@ export function normalizeDatabase(database: Json): NormalizedDatabase {
   }
 }
 
-export function normalizeDataSource(dataSource: Json): NormalizedDataSource {
+export function normalizeDataSource(dataSource: JsonObject) {
   const archived =
     dataSource.archived !== undefined
       ? boolOf(dataSource, 'archived')

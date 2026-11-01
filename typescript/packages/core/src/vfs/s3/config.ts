@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, type RedactedConfig, secretSchema, secretStr } from '../secrets.ts'
-import * as kp from '../../utils/key_prefix.ts'
 import { timeoutShape } from '../../core/api/config.ts'
+import * as kp from '../../utils/key_prefix.ts'
+import { secretSchema, secretStr } from '../secrets.ts'
 
 export type S3BrowserOperation = 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
 
@@ -47,7 +47,7 @@ export interface S3HttpAgents {
  */
 export type S3HttpAgentProvider = () => S3HttpAgents
 
-export const S3ConfigSchema = z.object({
+export const S3Config = z.object({
   bucket: z.string().describe('Name of the bucket to mount.'),
   region: z
     .string()
@@ -125,10 +125,3 @@ export function normalizeKeyPrefix(v: string | undefined): string | undefined {
   const out = kp.normalize(v)
   return out === '' ? undefined : out
 }
-
-// Only the redacted twin derives: `S3Config` carries a `profile` the schema
-// does not, so the schema is not this config's own shape.
-export type S3ConfigRedacted = RedactedConfig<
-  ConfigOf<typeof S3ConfigSchema>,
-  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'presignedUrlProvider' | 'httpAgentProvider'
->

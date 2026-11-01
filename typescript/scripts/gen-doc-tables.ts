@@ -578,6 +578,22 @@ function selftest(): void {
     factsOfSchema(statement.expression, schema, new Map(), PACKAGES, 'selftest').rename,
     { b: 'a' },
   )
+  const decorated = ts.createSourceFile(
+    'decorated.ts',
+    `function decorate(options) {
+      const { schema } = options
+      return Object.assign(schema.clone(), { helper: () => true })
+    }
+    decorate({schema: z.object({ a: z.string() }).register(FIELD_NORMALIZERS, { rename: { b: 'a' } })})`,
+    ts.ScriptTarget.ESNext,
+    true,
+  )
+  const decoratedCall = decorated.statements[1]
+  assert.ok(decoratedCall !== undefined && ts.isExpressionStatement(decoratedCall))
+  const facts = factsOfSchema(decoratedCall.expression, decorated, new Map(), PACKAGES, 'decorated')
+  assert.deepEqual(Object.keys(facts.fields), ['a'])
+  assert.equal(facts.fields.a?.required, true)
+  assert.deepEqual(facts.rename, { b: 'a' })
   console.log('gen-doc-tables selftest: ok')
 }
 

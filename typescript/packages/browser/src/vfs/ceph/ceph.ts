@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type CephConfig, type CephConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { CephConfig } from './config.ts'
 
-export type CephVFSState = S3AliasVFSState<CephConfigRedacted>
-
-export class CephVFS extends S3AliasVFS<CephConfig, CephConfigRedacted> {
+export class CephVFS extends S3AliasVFS<CephConfig, RedactedSchema<typeof CephConfig>> {
   constructor(config: CephConfig) {
-    super(VFSName.CEPH, config, ALIAS)
+    super(VFSName.CEPH, config, CephConfig)
   }
 }

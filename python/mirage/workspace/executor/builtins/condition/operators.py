@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from functools import partial
 
 from mirage.commands.builtin.utils.paths import (
@@ -36,10 +37,8 @@ from mirage.workspace.executor.builtins.condition.constants import (
     FILE_UNARY,
     INT_COMPARATORS,
 )
-from mirage.workspace.executor.builtins.condition.types import (
-    CondContext,
-    CondError,
-)
+from mirage.workspace.executor.builtins.condition.errors import CondError
+from mirage.workspace.executor.builtins.condition.types import CondContext
 from mirage.workspace.executor.builtins.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.executor.builtins.shared import abs_path

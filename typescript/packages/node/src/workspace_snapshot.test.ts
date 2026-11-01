@@ -12,13 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
 import { Accessor } from '@struktoai/mirage-core/accessor/base'
-import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
-import { RAMVFS, type RAMVFSState } from '@struktoai/mirage-core/vfs/ram/ram'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
+import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import {
   ContentType,
   FileStat,
@@ -28,18 +24,23 @@ import {
   type PathSpec,
   WritePolicy,
 } from '@struktoai/mirage-core/types'
-import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
-import { enoent } from '@struktoai/mirage-core/errors/fs'
+import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { RAMVFS, type RAMVFSState } from '@struktoai/mirage-core/vfs/ram/ram'
+import { type VFSStateBase } from '@struktoai/mirage-core/vfs/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { MountKey } from '@struktoai/mirage-core/workspace/snapshot/keys'
 import { buildMountArgs, toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
+import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
+import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { conditionalS3, s3Vfs } from '../tests/test-utils.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'
 import { RedisVFS } from './vfs/redis/redis.ts'
 import { buildVfs, registerVfs } from './vfs/registry.ts'
-import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
-import { conditionalS3, s3Vfs } from '../tests/test-utils.ts'
 import { Workspace } from './workspace.ts'
-import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 const ENC = new TextEncoder()
 

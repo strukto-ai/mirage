@@ -19,12 +19,12 @@ import {
   unexpectedValueError,
   unknownOptionError,
 } from '../../../../commands/spec/usage.ts'
-import { classify } from '../../../../errors/index.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { strerrorOf } from '../../../../errors/fs.ts'
+import { classify } from '../../../../errors/index.ts'
+import { decodeText } from '../../../../shell/bytes.ts'
 import { PathSpec } from '../../../../types.ts'
 import { result } from '../shared.ts'
-import type { Result } from '../types.ts'
-import { decodeText } from '../../../../shell/bytes.ts'
 
 // attr 2.5.2's usage blocks, which follow getopt's one-line refusal and
 // end every usage error (exit 2) with the older backquote hint.
@@ -42,7 +42,11 @@ export const SETFATTR_USAGE =
  * 'n'`) and then attr's usage block, exit 2. Mirrors Python's
  * `attr_usage_refusal`.
  */
-export function attrUsageRefusal(cmd: string, parsed: ParsedArgs, usage: string): Result | null {
+export function attrUsageRefusal(
+  cmd: string,
+  parsed: ParsedArgs,
+  usage: string,
+): RedirectResult | null {
   let message: Uint8Array | null = null
   const ambiguous = parsed.ambiguousOptions[0]
   const invalid = parsed.invalidOptions[0]

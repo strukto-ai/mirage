@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type ScalewayConfig, type ScalewayConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { ScalewayConfig } from './config.ts'
 
-export type ScalewayVFSState = S3AliasVFSState<ScalewayConfigRedacted>
-
-export class ScalewayVFS extends S3AliasVFS<ScalewayConfig, ScalewayConfigRedacted> {
+export class ScalewayVFS extends S3AliasVFS<ScalewayConfig, RedactedSchema<typeof ScalewayConfig>> {
   constructor(config: ScalewayConfig) {
-    super(VFSName.SCALEWAY, config, ALIAS)
+    super(VFSName.SCALEWAY, config, ScalewayConfig)
   }
 }

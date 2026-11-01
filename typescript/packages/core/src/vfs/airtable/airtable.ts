@@ -13,26 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { AirtableAccessor } from '../../accessor/airtable.ts'
-import {
-  AirtableConfigSchema,
-  type AirtableConfig,
-  type AirtableConfigRedacted,
-} from '../../core/airtable/config.ts'
-import { VFSName } from '../../types.ts'
-import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
-import type { DirListing, PathSpec, FileStat } from '../../types.ts'
-import { readdir as airtableReaddir } from '../../core/airtable/readdir.ts'
+import { AirtableConfig } from '../../core/airtable/config.ts'
+import { buildDeltaHook } from '../../core/airtable/events.ts'
 import {
   firstLines as airtableFirstLines,
   readStream as airtableStream,
 } from '../../core/airtable/read.ts'
-import { stat as airtableStat } from '../../core/airtable/stat.ts'
-import { buildDeltaHook } from '../../core/airtable/events.ts'
-import type { DeltaHook } from '../../events/index.ts'
+import { readdir as airtableReaddir } from '../../core/airtable/readdir.ts'
 import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
+import { stat as airtableStat } from '../../core/airtable/stat.ts'
+import type { DeltaHook } from '../../events/index.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
 
 export const VFS_MD = `{prefix}
   bases/
@@ -60,11 +56,6 @@ export const VFS_MD = `{prefix}
   The airtable CLI, if installed, reaches what a file cannot: server-side
   filters (airtable record list --formula or --view), one record by id
   (airtable record get), and comments (airtable comment list).`
-
-export interface AirtableVFSState {
-  type: string
-  config: AirtableConfigRedacted
-}
 
 /**
  * Airtable bases as directories, tables as records.jsonl files. Records are
@@ -127,10 +118,7 @@ export class AirtableVFS extends BaseVFS {
     return buildDeltaHook(this.accessor)
   }
 
-  override getState(): AirtableVFSState {
-    return {
-      type: this.name,
-      config: redactConfigWithSchema(AirtableConfigSchema, this.config) as AirtableConfigRedacted,
-    }
+  override getState(): ConfigState<RedactedSchema<typeof AirtableConfig>> {
+    return this.configState(AirtableConfig, this.config)
   }
 }

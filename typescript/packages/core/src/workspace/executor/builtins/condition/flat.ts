@@ -14,9 +14,9 @@
 
 import { type PathSpec, wordText } from '../../../../types.ts'
 import { scopePath } from '../scope.ts'
+import { CondError } from './errors.ts'
 import { applyBinary, applyUnary } from './operators.ts'
 import { flatShape } from './shape.ts'
-import { CondError } from './types.ts'
 import type { CondContext, FlatNode } from './types.ts'
 
 /** Evaluate a flat test/[ argument list by test's own reading of it (`flatShape`). */

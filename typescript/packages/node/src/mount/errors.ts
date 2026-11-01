@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { constants as osConstants } from 'node:os'
-
+import type { FsCondition } from '@struktoai/mirage-core/errors/index'
 import { classify } from '@struktoai/mirage-core/errors/index'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
-import type { FsCondition } from '@struktoai/mirage-core/errors/index'
+import { constants as osConstants } from 'node:os'
 
 // The kernel reads host errno numbers. Only this boundary needs the
 // platform-specific mapping; FUSE callbacks negate its positive result.
@@ -49,7 +48,7 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
 // third-party client's untyped failure). "read-only" and "no mount" are not
 // here: those arrive typed and `classify` names them. Mirrors python's
 // `_MESSAGE_CODES`.
-const MESSAGE_ERRNO: [string[], number][] = [
+const MESSAGE_CODES: [string[], number][] = [
   [['not empty', 'enotempty'], osConstants.errno.ENOTEMPTY],
   [['not a directory', 'enotdir'], osConstants.errno.ENOTDIR],
   [['is a directory', 'eisdir'], osConstants.errno.EISDIR],
@@ -85,7 +84,7 @@ export function classifyErrno(err: unknown): number {
     if (passthrough !== undefined) return passthrough
   }
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase()
-  for (const [needles, errno] of MESSAGE_ERRNO) {
+  for (const [needles, errno] of MESSAGE_CODES) {
     if (needles.some((n) => msg.includes(n))) return errno
   }
   // A bug in the core would otherwise read only as "I/O error".

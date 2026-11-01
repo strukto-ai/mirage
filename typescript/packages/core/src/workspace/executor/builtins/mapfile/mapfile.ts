@@ -12,22 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
+import { parseShellOptions, SHELL_SPECS } from '../../../../commands/spec/shell.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { lineBuffer } from '../../../../io/async_line_iterator.ts'
 import { checkMemory } from '../../../../io/memory.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arraySet, type ShellArray } from '../../../../shell/array.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { concat } from '../../../../utils/bytes.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionView, visibleArrays, visibleAssocs } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage, countOperand, fail, recordDelimiter, requireView } from '../shared.ts'
-import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { concat } from '../../../../utils/bytes.ts'
-import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_QUANTUM = 5000
@@ -49,7 +50,7 @@ export async function handleMapfile(
   state: SessionView | null = null,
   cmd = 'mapfile',
   signal?: AbortSignal,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const parse = parseShellOptions(SHELL_SPECS.mapfile, args)
   if (parse.invalid !== null) {
     const token = parse.invalid.startsWith('--') ? parse.invalid : `-${parse.invalid}`
@@ -153,7 +154,7 @@ export async function handleMapfile(
 }
 
 /** The `mapfile` / `readarray` arm; the head word is what diagnostics name. */
-export async function mapfileBuiltin(call: BuiltinCall): Promise<Result> {
+export async function mapfileBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleMapfile(
     [...call.argv.args],
     call.context.session,

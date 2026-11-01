@@ -12,24 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 import { GCalAccessor } from '../../accessor/gcal.ts'
-
 import { bucketName, bucketStart } from '../../core/gcal/day.ts'
-import { TokenManager } from '../../core/google/client.ts'
-import { type DirListing, VFSName } from '../../types.ts'
-
-import { GCalConfigSchema, type GCalConfig, type GCalConfigRedacted } from './config.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
+import { buildDeltaHook } from '../../core/gcal/events.ts'
+import { read as gcalRead, readMany as gcalReadMany } from '../../core/gcal/read.ts'
 import { readdir as gcalReaddir } from '../../core/gcal/readdir.ts'
 import { filesContaining as gcalFilesContaining } from '../../core/gcal/search.ts'
-import { read as gcalRead, readMany as gcalReadMany } from '../../core/gcal/read.ts'
 import { stat as gcalStat } from '../../core/gcal/stat.ts'
 import { unlink as gcalUnlink } from '../../core/gcal/unlink.ts'
-import { buildDeltaHook } from '../../core/gcal/events.ts'
+import { TokenManager } from '../../core/google/client.ts'
 import type { DeltaHook } from '../../events/base.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { VFSName, type DirListing } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { GCalConfig } from './config.ts'
 
 export const VFS_MD = `Google Calendar is mounted as one directory per calendar, one
 directory per date bucket, and one JSON file per event.
@@ -95,11 +93,6 @@ function treeVfsMd(size: number): string {
     .replaceAll('{days}', String(size))
     .replaceAll('{bucket}', bucket)
     .replaceAll('{day}', day)
-}
-
-export interface GCalVFSState {
-  type: string
-  config: GCalConfigRedacted
 }
 
 export class GCalVFS extends BaseVFS {
@@ -177,10 +170,7 @@ export class GCalVFS extends BaseVFS {
     return gcalUnlink(this.accessor, path, handed?.entry)
   }
 
-  override getState(): Promise<GCalVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(GCalConfigSchema, this.config) as GCalConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof GCalConfig>>> {
+    return Promise.resolve(this.configState(GCalConfig, this.config))
   }
 }

@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { secretSchema, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import { secretSchema, secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 
 // Stricter than core's DropboxConfig on purpose: a server is a confidential
 // client and python requires the secret too, while the browser refreshes as a
@@ -29,7 +28,7 @@ export interface DropboxConfig {
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
 }
 
-export const DropboxConfigSchema = z.object({
+export const DropboxConfig = z.object({
   ...timeoutShape,
   clientId: z.string().describe('Dropbox app key.'),
   clientSecret: secretStr().describe('Dropbox app secret.'),
@@ -57,10 +56,3 @@ export const DropboxConfigSchema = z.object({
       "Function that takes the refresh token and returns `{ accessToken, expiresIn }` (seconds), called instead of Dropbox's token endpoint, for example so the app secret stays on a backend.",
     ),
 })
-
-// Only the redacted twin derives; the interface above stays the readable
-// statement of the callback signature.
-export type DropboxConfigRedacted = RedactedConfig<
-  ConfigOf<typeof DropboxConfigSchema>,
-  'clientSecret' | 'refreshToken' | 'refreshFn'
->

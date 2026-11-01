@@ -1,43 +1,34 @@
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { VFSName } from '@struktoai/mirage-core/types'
-import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-import {
-  NextcloudConfigSchema,
-  type NextcloudConfig,
-  type NextcloudConfigRedacted,
-} from './config.ts'
 import type {
   CapacityResult,
-  PathSpec,
   FileStat,
+  PathSpec,
   SetAttrFields,
 } from '@struktoai/mirage-core/types'
-import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { readdir } from '../../core/nextcloud/readdir.ts'
-import { read } from '../../core/nextcloud/read.ts'
-import { stat, tree } from '../../core/nextcloud/stat.ts'
-import { readStream } from '../../core/nextcloud/stream.ts'
-import { exists } from '../../core/nextcloud/exists.ts'
-import { write } from '../../core/nextcloud/write.ts'
-import { create } from '../../core/nextcloud/create.ts'
-import { mkdir } from '../../core/nextcloud/mkdir.ts'
-import { unlink } from '../../core/nextcloud/unlink.ts'
-import { rmdir } from '../../core/nextcloud/rmdir.ts'
-import { rmR } from '../../core/nextcloud/rm.ts'
-import { rename } from '../../core/nextcloud/rename.ts'
-import { copy, dirCopy } from '../../core/nextcloud/copy.ts'
-import { truncate } from '../../core/nextcloud/truncate.ts'
+import { VFSName } from '@struktoai/mirage-core/types'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState, Handed } from '@struktoai/mirage-core/vfs/types'
+import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { capacity } from '../../core/nextcloud/capacity.ts'
 import { checksum } from '../../core/nextcloud/checksum.ts'
+import { copy, dirCopy } from '../../core/nextcloud/copy.ts'
+import { create } from '../../core/nextcloud/create.ts'
+import { exists } from '../../core/nextcloud/exists.ts'
+import { mkdir } from '../../core/nextcloud/mkdir.ts'
+import { read } from '../../core/nextcloud/read.ts'
+import { readdir } from '../../core/nextcloud/readdir.ts'
+import { rename } from '../../core/nextcloud/rename.ts'
+import { rmR } from '../../core/nextcloud/rm.ts'
+import { rmdir } from '../../core/nextcloud/rmdir.ts'
 import { setAttrs } from '../../core/nextcloud/set_attrs.ts'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-
-export interface NextcloudVFSState {
-  type: string
-  config: NextcloudConfigRedacted
-}
+import { stat, tree } from '../../core/nextcloud/stat.ts'
+import { readStream } from '../../core/nextcloud/stream.ts'
+import { truncate } from '../../core/nextcloud/truncate.ts'
+import { unlink } from '../../core/nextcloud/unlink.ts'
+import { write } from '../../core/nextcloud/write.ts'
+import { NextcloudConfig } from './config.ts'
 
 export class NextcloudVFS extends BaseVFS {
   override readonly name = VFSName.NEXTCLOUD
@@ -142,10 +133,7 @@ export class NextcloudVFS extends BaseVFS {
     return `${this.name}:${rstripSlash(this.config.url)}:${this.config.username ?? ''}`
   }
 
-  override getState(): Promise<NextcloudVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(NextcloudConfigSchema, this.config) as NextcloudConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof NextcloudConfig>>> {
+    return Promise.resolve(this.configState(NextcloudConfig, this.config))
   }
 }

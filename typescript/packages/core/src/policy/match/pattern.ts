@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { admissionMatcher, fromUnits, units } from '../../rs/policy.ts'
+import { fromUnits, units } from '../../rs/document.ts'
+import { admissionMatcher } from '../../rs/policy.ts'
 
 /**
  * A command pattern's tokens. Whitespace-split; trailing wildcards are

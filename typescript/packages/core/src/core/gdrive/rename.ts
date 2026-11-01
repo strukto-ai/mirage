@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { enoent, enotempty } from '../../errors/fs.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { enoent, enotempty } from '../../errors/fs.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import { driveTargetName, eaccesOnDenied, parentFolder } from './resolve.ts'
 
@@ -24,7 +24,7 @@ import { driveTargetName, eaccesOnDenied, parentFolder } from './resolve.ts'
  * `src` and its parent and at `dst` and its parent. Mirrors Python's
  * `rename`.
  */
-async function renameImpl(
+export const rename = eaccesOnDenied(async function (
   accessor: GDriveAccessor,
   src: PathSpec,
   dst: PathSpec,
@@ -68,6 +68,4 @@ async function renameImpl(
   })
   const moved: unknown = item
   return typeof moved === 'object' && moved !== null ? statFromItem(item) : null
-}
-
-export const rename = eaccesOnDenied(renameImpl)
+})

@@ -12,27 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../expand/types.ts'
-import type { ParseScope } from '../../shell/parse/scope.ts'
-import type { EvaluationContext } from '../evaluation.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
 import { IOResult } from '../../io/types.ts'
-import { flagHelp } from '../executor/builtins/help/index.ts'
-import { builtinUsage, fail } from '../executor/builtins/shared.ts'
-import type { Result } from '../executor/builtins/types.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
 import { getDeclarationKeyword, getText } from '../../shell/helpers.ts'
+import type { ParseScope } from '../../shell/parse/scope.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { VarAttr, VarKind } from '../../shell/variable.ts'
-import { sessionEntry } from '../session/session.ts'
-import { PolicyDenied } from '../../policy/errors.ts'
+import { traceArray, traceCommand } from '../../shell/xtrace.ts'
+import { concat } from '../../utils/bytes.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import {
-  handleDeclareFunctions,
-  handleDeclarePrint,
-  handleLocal,
-  noteLocalArray,
-} from '../executor/builtins/index.ts'
+import type { EvaluationContext } from '../evaluation.ts'
 import {
   LISTED_ATTRIBUTES,
   VISIBLE_SCOPE_BUILTINS,
@@ -44,17 +37,23 @@ import {
   markNames,
   startLocal,
 } from '../executor/builtins/declare/declare.ts'
-import { traceArray, traceCommand } from '../../shell/xtrace.ts'
-import { concat } from '../../utils/bytes.ts'
+import type { DeclarationOperand } from '../executor/builtins/declare/types.ts'
+import { flagHelp } from '../executor/builtins/help/index.ts'
+import {
+  handleDeclareFunctions,
+  handleDeclarePrint,
+  handleLocal,
+  noteLocalArray,
+} from '../executor/builtins/index.ts'
+import { builtinUsage, fail } from '../executor/builtins/shared.ts'
 import { expandNode } from '../expand/node.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-
+import { sessionEntry } from '../session/session.ts'
 import { conversionScalar, ensureVarVisible, seedVar, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
-import type { DeclarationOperand } from '../executor/builtins/declare/types.ts'
-import { encodeText } from '../../shell/bytes.ts'
 
 /**
  * Fold kind-conversion refusals into a declaration's result.
@@ -64,7 +63,7 @@ import { encodeText } from '../../shell/bytes.ts'
  * still declare, so the refusals ride the handler's own result rather
  * than replacing it.
  */
-function mergeConversionErrors(result: Result, errors: readonly string[]): Result {
+function mergeConversionErrors(result: RedirectResult, errors: readonly string[]): RedirectResult {
   if (errors.length === 0) return result
   const [stream, io, node] = result
   const extra = encodeText(errors.join('\n') + '\n')
@@ -104,7 +103,7 @@ function declareOptionRefusal(
   cmd: string,
   flagChars: ReadonlySet<string>,
   plusChars: ReadonlySet<string>,
-): Result | null {
+): RedirectResult | null {
   const bad = [...flagChars, ...plusChars]
     .sort(compareCodePoints)
     .find((c) => !DECLARE_LETTERS.has(c))
@@ -168,7 +167,7 @@ export async function executeDeclaration(
   namespace: Namespace,
   callStack: CallStack | null,
   parser?: ParseScope,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const keyword = getDeclarationKeyword(node)
   // Array literals are staged, not stored: `readonly -a a=(y)` on an

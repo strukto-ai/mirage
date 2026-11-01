@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
+import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
 import { appendByStreamedRewrite } from '../../core/generic/rewrite.ts'
 import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
 import {
@@ -26,7 +26,7 @@ import { copy as s3Copy, copyFrom as s3CopyFrom } from '../../core/s3/copy.ts'
 import { create as s3Create } from '../../core/s3/create.ts'
 import { exists as s3Exists } from '../../core/s3/exists.ts'
 import { mkdir as s3Mkdir } from '../../core/s3/mkdir.ts'
-import { readdir as s3Readdir } from '../../core/s3/readdir.ts'
+import { readdir as s3Readdir, tree as s3Tree } from '../../core/s3/readdir.ts'
 import { rename as s3Rename } from '../../core/s3/rename.ts'
 import { rmR as s3RmR } from '../../core/s3/rm.ts'
 import { rmdir as s3Rmdir } from '../../core/s3/rmdir.ts'
@@ -34,19 +34,18 @@ import { stat as s3Stat } from '../../core/s3/stat.ts'
 import { readRange as s3ReadRange, readStream as s3Stream } from '../../core/s3/stream.ts'
 import { truncate as s3Truncate } from '../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
+import { replace as s3Replace, write as s3Write } from '../../core/s3/write.ts'
+import { exdev } from '../../errors/fs.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { write as s3Write, replace as s3Replace } from '../../core/s3/write.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
-import { exdev } from '../../errors/fs.ts'
-import { tree as s3Tree } from '../../core/s3/readdir.ts'
 
 /**
  * S3's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
-export class S3VFSBase extends BaseVFS<S3Accessor> {
+export class S3VFS extends BaseVFS<S3Accessor> {
   override get conditionSupport(): ConditionSupport {
     if (this.presigned) return {}
     if (this.name === 'minio') return CUSTOM_CONDITION_SUPPORT
@@ -104,7 +103,7 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
   }
 
   override copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {
-    if (!(source instanceof S3VFSBase)) return Promise.reject(exdev(dst))
+    if (!(source instanceof S3VFS)) return Promise.reject(exdev(dst))
     return s3CopyFrom(this.accessor, source.accessor, src, dst)
   }
 

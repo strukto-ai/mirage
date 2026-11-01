@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { TrelloConfig } from '../../core/trello/config.ts'
 import { ops } from '../../test-utils.ts'
 import { PathSpec, VFSName } from '../../types.ts'
-import { TrelloConfigSchema } from '../../core/trello/config.ts'
-import { TrelloVFS, VFS_MD } from './trello.ts'
 import { redactConfigWithSchema } from '../secrets.ts'
+import { TrelloVFS, VFS_MD } from './trello.ts'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -131,12 +131,12 @@ describe('TrelloVFS', () => {
 
 describe('TrelloConfigSchema redaction', () => {
   it('redacts apiKey/apiToken, keeps workspace metadata', () => {
-    expect(redactConfigWithSchema(TrelloConfigSchema, { apiKey: 'k', apiToken: 't' })).toEqual({
+    expect(redactConfigWithSchema(TrelloConfig, { apiKey: 'k', apiToken: 't' })).toEqual({
       apiKey: '<REDACTED>',
       apiToken: '<REDACTED>',
     })
     expect(
-      redactConfigWithSchema(TrelloConfigSchema, {
+      redactConfigWithSchema(TrelloConfig, {
         apiKey: 'k',
         apiToken: 't',
         workspaceId: 'w1',

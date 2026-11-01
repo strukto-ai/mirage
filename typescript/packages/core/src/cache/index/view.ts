@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FileStat } from '../../types.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { mutationLock } from '../file/io.ts'
-import type { FileCache } from '../file/mixin.ts'
+import type { FileCacheMixin } from '../file/mixin.ts'
 import {
   LookupStatus,
   type Evicted,
@@ -24,29 +25,6 @@ import {
   type SetDirOptions,
 } from './config.ts'
 import { IndexCacheStore } from './store.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-
-interface IndexViewOptions {
-  readonly excludedPrefixes?: () => readonly string[]
-  /**
-   * Skip the non-reentrant mutation lock already held by the caller.
-   * The view must not outlive that hold.
-   */
-  readonly locked?: boolean
-  /** The mount's cleanup for a child a re-list found gone. */
-  readonly onGone?: (gone: readonly Evicted[]) => Promise<void>
-  /** Seconds a listing may live under this mount; unset means no cap. */
-  readonly readTtl?: number
-  /**
-   * The mount's listing gate, asked before a cached listing is served;
-   * unset serves every cached listing.
-   */
-  readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>
-  /** Told each folder whose listing this view has just written. */
-  readonly noteWritten?: (folder: string) => void
-  /** Whether the running command fetched a folder's listing; unset answers false. */
-  readonly listedThisCommand?: (folder: string) => boolean
-}
 
 /** A mount-owned index view; delayed backend writes retain their original owner. */
 export class IndexView extends IndexCacheStore {
@@ -63,10 +41,30 @@ export class IndexView extends IndexCacheStore {
 
   constructor(
     private readonly inner: IndexCacheStore,
-    private readonly cache: FileCache,
+    private readonly cache: FileCacheMixin,
     private readonly prefix: string,
     private readonly owns: (path: string) => boolean,
-    options: IndexViewOptions = {},
+    options: {
+      readonly excludedPrefixes?: () => readonly string[]
+      /**
+       * Skip the non-reentrant mutation lock already held by the caller.
+       * The view must not outlive that hold.
+       */
+      readonly locked?: boolean
+      /** The mount's cleanup for a child a re-list found gone. */
+      readonly onGone?: (gone: readonly Evicted[]) => Promise<void>
+      /** Seconds a listing may live under this mount; unset means no cap. */
+      readonly readTtl?: number
+      /**
+       * The mount's listing gate, asked before a cached listing is served;
+       * unset serves every cached listing.
+       */
+      readonly mayServeListing?: (folder: string, version: string | null) => Promise<boolean>
+      /** Told each folder whose listing this view has just written. */
+      readonly noteWritten?: (folder: string) => void
+      /** Whether the running command fetched a folder's listing; unset answers false. */
+      readonly listedThisCommand?: (folder: string) => boolean
+    } = {},
   ) {
     super(inner.clock)
     this.locked = options.locked ?? false

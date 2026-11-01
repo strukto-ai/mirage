@@ -15,20 +15,20 @@
 import { lineVersion } from '../../observe/context.ts'
 import {
   type LostPaths,
-  RecordIndex,
   type OpRecord,
   READ_FINGERPRINT_OPS,
+  RecordIndex,
   STAMP_FINGERPRINT_OPS,
 } from '../../observe/record.ts'
 import type { CacheFacts } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import type { FileCache } from './mixin.ts'
 import { KeyLock } from '../lock.ts'
+import type { FileCacheMixin } from './mixin.ts'
 
-const mutationLocks = new WeakMap<FileCache, KeyLock>()
+const mutationLocks = new WeakMap<FileCacheMixin, KeyLock>()
 
 /** Serialize cache fills with mount ownership changes, including remote writes. */
-export function mutationLock<T>(cache: FileCache, fn: () => Promise<T>): Promise<T> {
+export function mutationLock<T>(cache: FileCacheMixin, fn: () => Promise<T>): Promise<T> {
   let lock = mutationLocks.get(cache)
   if (lock === undefined) {
     lock = new KeyLock()
@@ -81,7 +81,7 @@ export function latestFingerprint(
  *   do not count: a concurrent sibling stage records into the same list.
  */
 export async function keepVersions(
-  cache: FileCache,
+  cache: FileCacheMixin,
   records: readonly OpRecord[],
   cacheFacts: (path: string) => CacheFacts,
   lost: LostPaths | null,

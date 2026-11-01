@@ -1,20 +1,15 @@
-import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import { VFSName } from '@struktoai/mirage-core/types'
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import type { PathSpec, ReadRange } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { isShortRangeRefusal, sliceWindow } from '@struktoai/mirage-core/utils/ranges'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { isNotFound, nextcloudKey } from './util.ts'
 
-export interface NextcloudReadOptions {
-  offset?: number
-  size?: number
-}
-
 export async function read(
   accessor: NextcloudAccessor,
   path: PathSpec,
-  options: NextcloudReadOptions = {},
+  options: ReadRange = {},
 ): Promise<Uint8Array> {
   const op = await accessor.operator()
   const readOptions: { offset?: bigint; size?: bigint } = {}

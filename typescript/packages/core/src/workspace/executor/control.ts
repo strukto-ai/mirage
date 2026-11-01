@@ -13,17 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { atoi } from '../../commands/builtin/utils/strtol.ts'
-import type { EvaluationContext } from '../evaluation.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
 import { lineBuffer } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
-import { concat } from '../../utils/bytes.ts'
-import type { HandOff } from '../../policy/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import { type Policies } from '../../policy/index.ts'
+import type { HandOff } from '../../policy/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import type { CallStack } from '../../shell/call_stack.ts'
+import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { ArithError, ExitSignal, ReadonlyVariableError, ReturnSignal } from '../../shell/errors.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
+import type { PathSpec } from '../../types.ts'
+import { wordText } from '../../types.ts'
+import { concat } from '../../utils/bytes.ts'
+import { fnmatch } from '../../utils/fnmatch.ts'
+import type { EvaluationContext } from '../evaluation.ts'
+import type { SessionState } from '../session/session.ts'
+import { sessionView, visibleEnv } from '../session/state.ts'
+import { ExecutionNode } from '../types.ts'
+import { readReply } from './builtins/read/index.ts'
+import type { ExecuteStringFn } from './builtins/types.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
+import { runStatement } from './jobs.ts'
 import {
   errexitActs,
   fd0Binding,
@@ -32,25 +48,7 @@ import {
   land,
   recordStatus,
 } from './statement.ts'
-import type { CallStack } from '../../shell/call_stack.ts'
-import { Channel, type JobConsole } from '../../shell/console/index.ts'
-import { readReply } from './builtins/read/index.ts'
-import type { PathSpec } from '../../types.ts'
-import { wordText } from '../../types.ts'
-import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-
-import { sessionView, visibleEnv } from '../session/state.ts'
-import { ExecutionNode } from '../types.ts'
-import { runStatement } from './jobs.ts'
 import { errTrapArmed, runErrTrap, runReturnTrap } from './traps.ts'
-import type { SessionState } from '../session/session.ts'
-import type { ExecuteStringFn } from './builtins/types.ts'
-import type { ExecuteNodeFn } from './command/types.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
-import { fnmatch } from '../../utils/fnmatch.ts'
-import { encodeText } from '../../shell/bytes.ts'
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 const MAX_WHILE = 10_000
 
@@ -58,7 +56,7 @@ const MAX_WHILE = 10_000
 export type BodyRun = (
   nodes: readonly TSNodeLike[],
   bound?: ReturnType<typeof fd0Binding>,
-) => Promise<Result>
+) => Promise<RedirectResult>
 
 export class LoopSignal extends Error {
   constructor(
@@ -100,7 +98,7 @@ export async function executeBody(
   executeFn: ExecuteStringFn | null = null,
   sink: JobConsole | null = null,
   bound: ReturnType<typeof fd0Binding> = fd0Binding(context.session),
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
@@ -311,7 +309,7 @@ function collectLoopResult(
   allStdout: readonly (ByteSource | null)[],
   mergedIo: IOResult,
   label: string,
-): Result {
+): RedirectResult {
   const execNode = new ExecutionNode({ command: label, exitCode: mergedIo.exitCode })
   const combined = chainNonNull(allStdout)
   return [combined, mergedIo, execNode]
@@ -322,7 +320,7 @@ export async function handleIf(
   branches: readonly [TSNodeLike[], TSNodeLike[]][],
   elseBody: TSNodeLike[] | null,
   session: SessionState,
-): Promise<Result> {
+): Promise<RedirectResult> {
   // Each test and the branch read the fd 0 the `if` started with, so an
   // `exec < f` or `exec <&-` in one reaches the next; a test runs with
   // `set -e` ignored.
@@ -361,7 +359,7 @@ export async function handleFor(
   body: readonly TSNodeLike[],
   context: EvaluationContext,
   policies: Policies | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
@@ -414,7 +412,7 @@ export async function handleWhile(
   body: readonly TSNodeLike[],
   session: SessionState,
   until = false,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const label = until ? 'until' : 'while'
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
@@ -479,7 +477,7 @@ export async function handleCfor(
   body: readonly TSNodeLike[],
   evalExpr: CforEval,
   session: SessionState,
-): Promise<Result> {
+): Promise<RedirectResult> {
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []
   const bound = fd0Binding(session)
@@ -533,7 +531,7 @@ export async function handleCase(
   items: readonly [readonly TSNodeLike[], readonly TSNodeLike[], string][],
   session: SessionState,
   expand: (node: TSNodeLike) => Promise<string>,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const allStdout: (ByteSource | null)[] = []
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: 'case', exitCode: 0 })
@@ -621,7 +619,7 @@ export async function handleSelect(
   policies: Policies | null = null,
   signal?: AbortSignal,
   sink?: JobConsole,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   let mergedIo = new IOResult()
   const allStdout: (ByteSource | null)[] = []

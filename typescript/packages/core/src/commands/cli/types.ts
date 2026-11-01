@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
-import type { Limit, PathSpec } from '../../types.ts'
-import { type ScriptSource } from '../../runtime/types.ts'
-import type { CommandFnResult, Context } from '../config.ts'
 import type { ZodObject, ZodRawShape } from 'zod'
-import { compileSpec } from '../spec/compile.ts'
+import { type Accessor, NOOPAccessor } from '../../accessor/base.ts'
+import { type ScriptSource } from '../../runtime/types.ts'
+import type { Limit, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-
+import type { CommandFnResult, Context } from '../config.ts'
+import { compileSpec } from '../spec/compile.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
 
 /** A leaf callback: the install's accessor, the operands and the `Context` a command gets. */
@@ -38,35 +37,25 @@ export const noopAccessor = (config: unknown): Accessor => new NOOPAccessor(conf
 
 export type CLIConfigModel = ZodObject<ZodRawShape> | ((input: Record<string, unknown>) => unknown)
 
-export interface CLIHandlerInit {
-  // `never` accepts a leaf typed for any accessor.
-  fn?: CLIVerbFn<never> | null
-  write?: boolean
-  limit?: Limit | null
-}
-
 /** Execution and policy for one canonical command path. */
 export class CLIHandler {
   readonly fn: CLIVerbFn | null
   readonly write: boolean
   readonly limit: Limit | null
 
-  constructor(init: CLIHandlerInit = {}) {
+  constructor(
+    init: {
+      // `never` accepts a leaf typed for any accessor.
+      fn?: CLIVerbFn<never> | null
+      write?: boolean
+      limit?: Limit | null
+    } = {},
+  ) {
     this.fn = (init.fn ?? null) as CLIVerbFn | null
     this.write = init.write ?? false
     this.limit = init.limit ?? null
     Object.freeze(this)
   }
-}
-
-export interface CLIInit {
-  spec: CommandSpec
-  handlers?: Readonly<Record<string, CLIHandler>>
-  configModel?: CLIConfigModel | null
-  /** Builds the install's accessor once per install; a `NOOPAccessor` by default. */
-  accessor?: CLIAccessorFn
-  script?: ScriptSource | null
-  runtime?: string | null
 }
 
 /** Bind the shared command grammar to handlers and account configuration. */
@@ -79,7 +68,15 @@ export class CLI {
   readonly script: ScriptSource | null
   readonly runtime: string | null
 
-  constructor(init: CLIInit) {
+  constructor(init: {
+    spec: CommandSpec
+    handlers?: Readonly<Record<string, CLIHandler>>
+    configModel?: CLIConfigModel | null
+    /** Builds the install's accessor once per install; a `NOOPAccessor` by default. */
+    accessor?: CLIAccessorFn
+    script?: ScriptSource | null
+    runtime?: string | null
+  }) {
     this.spec = init.spec
     this.script = init.script ?? null
     this.runtime = init.runtime ?? null
@@ -171,18 +168,6 @@ function validateTree(
 
 export type WalkFlagBag = Record<string, FlagValue>
 
-export interface WalkResultInit {
-  leaf?: CommandSpec | null
-  path?: readonly string[]
-  verbPositions?: readonly number[]
-  operandBases?: readonly PathSpec[]
-  groupFlags?: WalkFlagBag
-  argv?: readonly string[]
-  output?: Uint8Array
-  stream?: 'stdout' | 'stderr'
-  exitCode?: number
-}
-
 /**
  * Outcome of walking a CLI tree with one command line. Exactly one of two
  * shapes: `leaf` set (dispatch: the resolved verb, the group flags
@@ -203,7 +188,22 @@ export class WalkResult {
   readonly stream: 'stdout' | 'stderr'
   readonly exitCode: number
 
-  constructor(init: WalkResultInit = {}) {
+  constructor(
+    init: Partial<
+      Pick<
+        WalkResult,
+        | 'leaf'
+        | 'path'
+        | 'verbPositions'
+        | 'operandBases'
+        | 'groupFlags'
+        | 'argv'
+        | 'output'
+        | 'stream'
+        | 'exitCode'
+      >
+    > = {},
+  ) {
     this.leaf = init.leaf ?? null
     this.path = Object.freeze([...(init.path ?? [])])
     this.verbPositions = Object.freeze([...(init.verbPositions ?? [])])

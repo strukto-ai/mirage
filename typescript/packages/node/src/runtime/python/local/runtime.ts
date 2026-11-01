@@ -20,7 +20,7 @@ import { isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
 import { resolveHome, type RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import { PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '@struktoai/mirage-core/runtime/mixin'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
 import { initArgv } from '@struktoai/mirage-core/runtime/python/flags'
@@ -108,7 +108,10 @@ function notRun(message: string, exitCode: number): RunResult {
  * or the MIRAGE_LOCAL_HOME environment variable at another binary, e.g. a
  * project venv whose packages the code needs.
  */
-export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExecutor<undefined> {
+export class LocalRuntime
+  extends PythonRuntime<undefined>
+  implements ProcessExecutorMixin<undefined>
+{
   readonly name = 'local'
   readonly [PROCESS_EXECUTOR] = true as const
   // Spawns the host interpreter: a real process with the user's own
