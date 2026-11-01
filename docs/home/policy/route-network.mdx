@@ -25,24 +25,16 @@ A second workspace on the same server can route `localhost:5003` to
 
 ## How a route applies
 
-- Every connection the workspace opens follows it: a line's `curl`, a
-  CLI's API call, `requests` or `fetch` in a runtime, a mount's reads. It
-  maps an address, not a URL, so HTTPS, WebSocket and database connections
-  follow it too. A runtime that starts a process on this machine (`local`,
-  Sandlock) refuses to run in a routed workspace, and a sandbox runtime
-  connects from its own machine, which no route reaches.
-- It applies before the name is looked up, so a routed name need not
-  resolve.
-- [`allowed_domains` and `denied_domains`](/home/configuration#network)
-  judge where the route ends, and so does a
+- Every connection in the workspace follows it: `curl`, CLIs, mounts, and
+  Python or JavaScript code. HTTPS, WebSocket and database connections
+  too.
+- [`allowed_domains`, `denied_domains`](/home/configuration#network) and
   [`pre_network`](/home/policy/policies#pre_network-and-post_network)
-  policy, whose context names that end.
-- TLS still checks the name the program asked for. In a browser, where
-  Mirage rewrites the URL itself, a route of an `https` or `wss` address
-  may change only the port.
-- Each side is `host:port`, an IPv6 address in brackets (`[::1]:8080`).
-  Two routes naming the same address, or a route that ends at another
-  route's address, are refused.
+  policies check where the route goes, not the address the agent typed.
+- `local` and Sandlock runtimes don't run in a workspace with routes, and
+  sandbox runtimes (Docker, SSH) aren't routed.
+- In a browser, a route for an `https` or `wss` address can change only
+  the port.
 
 ## Per session
 
