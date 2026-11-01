@@ -121,11 +121,12 @@ async def test_rename_into_own_subtree_fails(accessor, files, remote_root):
 
 
 @pytest.mark.asyncio
-async def test_rename_keeps_a_file_written_after_the_copy(
-    accessor, files, remote_root
+@pytest.mark.parametrize("late", ["file", "directory"])
+async def test_rename_keeps_an_entry_written_after_the_copy(
+    accessor, files, remote_root, late
 ):
-    # Only what the copy carried is deleted: a file written under the source
-    # since stays there, and the move is ENOTEMPTY rather than a loss.
+    # Only what the copy carried is deleted: an entry written under the
+    # source since stays there, and the move is ENOTEMPTY rather than a loss.
     _seed_directory(files, remote_root)
     _seed_directory(files, f"{remote_root}/d")
     _seed_file(files, f"{remote_root}/d/a.txt", b"aaa")
@@ -134,12 +135,18 @@ async def test_rename_keeps_a_file_written_after_the_copy(
     def racing(path, contents, overwrite=False):
         files.upload = inner
         inner(path, contents, overwrite)
-        _seed_file(files, f"{remote_root}/d/late.txt", b"late")
+        if late == "file":
+            _seed_file(files, f"{remote_root}/d/late", b"late")
+        else:
+            _seed_directory(files, f"{remote_root}/d/late")
 
     files.upload = racing
     with pytest.raises(OSError) as refused:
         await rename(accessor, _path("/dbx/d"), _path("/dbx/d2"))
     assert refused.value.errno == errno.ENOTEMPTY
     assert files.downloads[f"{remote_root}/d2/a.txt"] == b"aaa"
-    assert files.downloads[f"{remote_root}/d/late.txt"] == b"late"
     assert f"{remote_root}/d/a.txt" not in files.downloads
+    if late == "file":
+        assert files.downloads[f"{remote_root}/d/late"] == b"late"
+    else:
+        assert f"{remote_root}/d/late" in files.directory_metadata

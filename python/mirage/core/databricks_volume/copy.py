@@ -40,7 +40,8 @@ async def copy_tree(
         remote_src (str): the source directory's backend path.
         remote_dst (str): the destination directory's backend path.
         copied (set[str] | None): filled with the backend path of each
-            source file copied, for a move to delete exactly those.
+            source file and directory copied, for a move to delete exactly
+            those.
     """
     await create_directory(accessor, remote_dst)
     for entry in await list_directory_contents(accessor, remote_src):
@@ -48,6 +49,8 @@ async def copy_tree(
         child_dst = remote_dst.rstrip("/") + "/" + name
         if entry.is_directory:
             await copy_tree(accessor, entry.path, child_dst, copied)
+            if copied is not None:
+                copied.add(entry.path)
         else:
             await upload(
                 accessor,

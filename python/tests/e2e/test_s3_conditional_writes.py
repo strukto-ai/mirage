@@ -612,7 +612,7 @@ async def test_a_directory_op_keeps_and_names_a_changed_file(
     "line, when, directory, prefix, left",
     [
         (
-            "rm -r /s3/d",
+            "rm -r /s3/d /s3/f",
             "delete_objects",
             "d/",
             "rm: cannot remove '/s3/d'",
@@ -649,6 +649,9 @@ async def test_a_child_written_during_a_directory_op_is_left_and_reported(
     assert sorted(k for k in fake.buckets["b"] if k.startswith(directory)) == (
         left
     )
+    # A later operand still goes: the refusal is one failed operand.
+    if "/s3/f" in line:
+        assert "f" not in fake.buckets["b"]
 
 
 @pytest.mark.asyncio

@@ -166,7 +166,7 @@ recursive `rm`, `cp`, and `mv`.
 Standard shell commands like `ls`, `cat`, `head`, `tail`, `grep`, `rg`,
 `find`, `tree`, `touch`, `mkdir`, `rm`, `cp`, and `mv` work through those
 primitives. `mv`/`cp` are non-atomic download + upload — the Files API has no
-server-side rename. A directory `mv` removes only the files it copied: a file written into the source meanwhile stays there, and `mv` fails with `Directory not empty`.
+server-side rename. A directory `mv` removes only what it copied: a file or directory written into the source after the copy listed its directory stays there, and `mv` fails with `Directory not empty`.
 
 ## Snapshot behavior
 

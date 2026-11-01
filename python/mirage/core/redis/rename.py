@@ -26,7 +26,7 @@ from mirage.utils.path import norm
 from mirage.vfs.redis.store import RedisStore
 
 
-async def _move_subtree(store: RedisStore, s: str, d: str) -> None:
+async def _move_subtree(store: RedisStore, s: str, d: str) -> list[str]:
     """Re-key every descendant of a renamed directory.
 
     A synthetic-directory store keeps subdirectories as members of their
@@ -43,6 +43,10 @@ async def _move_subtree(store: RedisStore, s: str, d: str) -> None:
         store (RedisStore): the backing store.
         s (str): normalized source key.
         d (str): normalized destination key.
+
+    Returns:
+        list[str]: the directories removed, whose metadata the caller
+        drops once it knows which ones a late key keeps.
     """
     prefix = s.rstrip("/") + "/"
     new_prefix = d.rstrip("/") + "/"
@@ -73,8 +77,7 @@ async def _move_subtree(store: RedisStore, s: str, d: str) -> None:
         await store.del_attrs(key)
     for key in dirs:
         await store.remove_dir(key)
-        await store.del_modified(key)
-        await store.del_attrs(key)
+    return dirs
 
 
 async def rename(
@@ -110,12 +113,16 @@ async def rename(
         await store.set_modified(d, mod or now)
         if attrs:
             await store.set_attrs(d, attrs)
-        await _move_subtree(store, s, d)
+        removed = await _move_subtree(store, s, d)
         await store.remove_dir(s)
-        await store.del_modified(s)
-        await store.del_attrs(s)
-        # A key written under the source while the subtree moved stayed.
-        if await keep_left(store, s):
+        # A key written under the source while the subtree moved stayed,
+        # and the directories that hold it keep their metadata.
+        kept = await keep_left(store, s)
+        for key in [*removed, s]:
+            if key not in kept:
+                await store.del_modified(key)
+                await store.del_attrs(key)
+        if kept:
             raise enotempty(src_spec)
     else:
         raise await lookup_error(store, src_spec, s)

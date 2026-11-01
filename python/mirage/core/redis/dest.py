@@ -219,34 +219,38 @@ async def check_mkdir_target(
         raise enotdir(named)
 
 
-async def keep_left(store: RedisStore, p: str) -> bool:
+async def keep_left(store: RedisStore, p: str) -> set[str]:
     """Keep what a directory op left under ``p`` inside its directories.
 
     The op lists before it acts, so a key written under ``p`` meanwhile
     stays while the op removes the directories above it, and a key under
     no recorded directory is the orphan ``check_dest_parents`` refuses.
     Each directory from ``p`` down to such a key is recorded again, as
-    ``mkdir -p`` records it.
+    ``mkdir -p`` records it, unless a file took its name since: that file
+    is not hidden behind a directory. The op drops a removed directory's
+    metadata only after this, so a kept one keeps its time and attributes.
 
     Args:
         store (RedisStore): The backing store.
         p (str): Normalized key of the directory the op walked.
 
     Returns:
-        bool: Whether any key was left under ``p``.
+        set[str]: The names whose metadata stays, each directory kept and
+        any file that took one's name; empty when nothing was left.
     """
     prefix = p.rstrip("/") + "/"
     keys = [*await store.list_files(prefix), *await store.list_dirs()]
     left = [k for k in keys if k.startswith(prefix)]
     if not left:
-        return False
+        return set()
     held = {p}
     for key in left:
         held.update(up for up in ancestors(key) if up.startswith(prefix))
     now = now_iso()
     for key in sorted(held):
-        if not await store.has_dir(key):
-            await store.add_dir(key)
-            if not await store.get_modified(key):
-                await store.set_modified(key, now)
-    return True
+        if await store.has_dir(key) or await store.has_file(key):
+            continue
+        await store.add_dir(key)
+        if not await store.get_modified(key):
+            await store.set_modified(key, now)
+    return held

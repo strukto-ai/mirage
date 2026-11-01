@@ -655,7 +655,7 @@ describe('conditional writes on an S3 mount', () => {
 
   it.each(
     [WritePolicy.CONDITIONAL, WritePolicy.UNCONDITIONAL].flatMap((write) => [
-      [write, 'rm -r /s3/d', 'DeleteObjects', 'd/', "rm: cannot remove '/s3/d'", ['d/late']],
+      [write, 'rm -r /s3/d /s3/f', 'DeleteObjects', 'd/', "rm: cannot remove '/s3/d'", ['d/late']],
       [write, 'mv /s3/d /s3/e', 'DeleteObjects', 'd/', "mv: cannot remove '/s3/d'", ['d/late']],
       [
         write,
@@ -678,6 +678,8 @@ describe('conditional writes on an S3 mount', () => {
       })
       expect(await run(ws, line)).toEqual([1, '', `${prefix}: Directory not empty\n`])
       expect(keysUnder(dir)).toEqual(left)
+      // A later operand still goes: the refusal is one failed operand.
+      if (line.includes('/s3/f')) expect(object('f')).toBeUndefined()
     },
   )
 
