@@ -228,8 +228,9 @@ def faketime_env(library: str, env: Mapping[str, str]) -> dict[str, str]:
     through the libfaketime at ``library``: the time now, in epoch
     seconds to the millisecond, which its clock and its children's run
     on from, whatever the machine's own clock or zone; the monotonic
-    clock and file dates, which the workspace already gives, left alone. Empty when the workspace keeps the host's time.
-    Mirrors TypeScript's ``faketimeEnv``.
+    clock and file dates, which the workspace already gives, left
+    alone. Empty when the workspace keeps the host's time. Mirrors
+    TypeScript's ``faketimeEnv``.
 
     Args:
         library (str): the libfaketime path where the process runs.
