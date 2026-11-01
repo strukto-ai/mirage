@@ -1563,6 +1563,7 @@ const MONGODB_BSON_TYPES: ReadonlyArray<Record<string, unknown>> = [
     type: 'dbref',
     a: new DBRef('authors', 1),
     b: new DBRef('authors', 2, 'mirage_integ'),
+    c: new DBRef('authors', Long.fromString('9007199254740993') as never),
   },
   {
     _id: 5,
@@ -1583,6 +1584,7 @@ const MONGODB_BSON_TYPES: ReadonlyArray<Record<string, unknown>> = [
     d: Long.fromString('-9007199254740993'),
     e: Long.MAX_VALUE,
     f: Long.MIN_VALUE,
+    constructor: { n: Long.fromString('9007199254740993') },
   },
 ]
 

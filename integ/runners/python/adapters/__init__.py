@@ -2379,6 +2379,7 @@ MONGODB_BSON_TYPES = [
         "type": "dbref",
         "a": DBRef("authors", 1),
         "b": DBRef("authors", 2, "mirage_integ"),
+        "c": DBRef("authors", Int64(2**53 + 1)),
     },
     {
         "_id": 5,
@@ -2399,6 +2400,7 @@ MONGODB_BSON_TYPES = [
         "d": Int64(-(2**53) - 1),
         "e": Int64(2**63 - 1),
         "f": Int64(-(2**63)),
+        "constructor": {"n": Int64(2**53 + 1)},
     },
 ]
 
