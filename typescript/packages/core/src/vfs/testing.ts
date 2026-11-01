@@ -286,25 +286,33 @@ class Checker {
     return path
   }
 
-  // What an op is handed for its path, and a destination for a two-path op,
-  // each row read fresh.
-  async handed(path: PathSpec, dst?: PathSpec): Promise<Handed> {
-    const [entry, parent] = await rowsAt(this.vfs, path)
-    if (dst === undefined) return taken(this.store, entry, parent)
-    const [dstEntry, dstParent] = await rowsAt(this.vfs, dst)
-    return { ...taken(this.store, entry, parent), dstEntry, dstParent }
+  // What `op` is handed for its path, and a destination for a two-path op:
+  // only the rows its VFS declares it takes, each read fresh, as the mount
+  // hands them.
+  async handed(op: string, path: PathSpec, dst?: PathSpec): Promise<Handed> {
+    const wanted = this.vfs.handed[op] ?? []
+    let rows: Handed = { index: this.store }
+    if (wanted.includes('entry') || wanted.includes('parent')) {
+      const [entry, parent] = await rowsAt(this.vfs, path)
+      rows = { ...rows, entry, parent }
+    }
+    if (dst !== undefined && (wanted.includes('dstEntry') || wanted.includes('dstParent'))) {
+      const [dstEntry, dstParent] = await rowsAt(this.vfs, dst)
+      rows = { ...rows, dstEntry, dstParent }
+    }
+    return rows
   }
 
   async put(path: PathSpec, data: Uint8Array): Promise<void> {
-    await this.vfs.write(path, data, undefined, await this.handed(path))
+    await this.vfs.write(path, data, undefined, await this.handed('write', path))
   }
 
   async bytesAt(path: PathSpec): Promise<Uint8Array> {
-    return bytesOf(this.vfs.read(path, await this.handed(path)))
+    return bytesOf(this.vfs.read(path, await this.handed('read', path)))
   }
 
   async gone(path: PathSpec): Promise<boolean> {
-    const handed = await this.handed(path)
+    const handed = await this.handed('stat', path)
     try {
       await this.vfs.stat(path, handed)
     } catch (error) {
@@ -315,7 +323,7 @@ class Checker {
   }
 
   async version(path: PathSpec): Promise<string> {
-    const info = await this.vfs.stat(path, await this.handed(path))
+    const info = await this.vfs.stat(path, await this.handed('stat', path))
     check(
       info.fingerprint !== null && info.fingerprint !== '',
       'a VFS that declares a match condition must stat a fingerprint',
@@ -324,7 +332,7 @@ class Checker {
   }
 
   async call(op: 'rename' | 'copy' | 'unlink', path: PathSpec, dst?: PathSpec): Promise<unknown> {
-    const handed = await this.handed(path, dst)
+    const handed = await this.handed(op, path, dst)
     if (op === 'unlink') return this.vfs.unlink(path, handed)
     check(dst !== undefined, `${op} needs a destination`)
     if (op === 'rename') return this.vfs.rename(path, dst, handed)

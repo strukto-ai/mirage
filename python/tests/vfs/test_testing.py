@@ -357,6 +357,16 @@ class NeedsRows(RAMVFS):
         await super().copy(src, dst)
 
 
+class CountsListings(RAMVFS):
+    """Takes no rows and counts the listings it serves."""
+
+    listings = 0
+
+    async def readdir(self, path: PathSpec) -> list[FileStat]:
+        self.listings += 1
+        return await super().readdir(path)
+
+
 class KeepsRenameDst(RAMVFS):
     """Refuses to unlink the rename destination."""
 
@@ -422,6 +432,13 @@ async def test_each_op_is_handed_its_rows():
     vfs = NeedsRows()
     await check_mutation_contract(vfs, SCRATCH)
     assert await _names(vfs) == []
+
+
+@pytest.mark.asyncio
+async def test_no_listing_for_ops_that_take_no_rows():
+    vfs = CountsListings()
+    await check_mutation_contract(vfs, SCRATCH)
+    assert vfs.listings == 0
 
 
 @pytest.mark.asyncio
