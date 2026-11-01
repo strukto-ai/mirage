@@ -294,14 +294,16 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     let probe = this.faketime.get(key)
     if (probe === undefined) {
       // Its own deadline, not the first caller's: every waiting run shares it.
+      // It is also raced, as a provider may not stop a line on its signal.
       const deadline = AbortSignal.timeout(FAKETIME_PROBE_SECONDS * 1000)
-      probe = this.execLine(faketimeProbe(), null, { ...this.config.env }, '/', deadline).then(
-        (found) => {
-          if (found.exitCode !== 0)
-            throw new Error(`${this.name}: libfaketime probe exited ${String(found.exitCode)}`)
-          return new TextDecoder().decode(found.stdout).trim() || null
-        },
-      )
+      probe = abortable(
+        this.execLine(faketimeProbe(), null, { ...this.config.env }, '/', deadline),
+        deadline,
+      ).then((found) => {
+        if (found.exitCode !== 0)
+          throw new Error(`${this.name}: libfaketime probe exited ${String(found.exitCode)}`)
+        return new TextDecoder().decode(found.stdout).trim() || null
+      })
       this.faketime.set(key, probe)
     }
     let library: string | null
