@@ -51,7 +51,10 @@ permissions and confinement.
 ## The sandbox image
 
 Every sandbox needs a POSIX shell at `/bin/sh`, which starts each command,
-and `grep`, which finds what a run cut short left running.
+and `grep`, which finds what a run cut short left running. With
+[libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
+see the workspace's [`system_time`](/home/configuration#system-time);
+without it they see the sandbox's clock.
 A sandbox that serves the mounts with its own Mirage needs `fuse3` and
 Mirage. The repository's Dockerfile builds that image from the current
 checkout, with every mountable backend:

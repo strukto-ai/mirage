@@ -33,18 +33,20 @@ from mirage.io.types import ByteSource
 from mirage.process.handle import ProcessHandle
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
+    FAKETIME_LIBRARIES,
     HOST_START_SLACK_SECONDS,
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
     STOP_GRACE_SECONDS,
     STOP_POLL_SECONDS,
+    faketime_env,
     stop_signal,
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.shell.join import shell_join
 from mirage.types import JsonValue
-from mirage.utils.clock import bound_system_clock, system_now
+from mirage.utils.clock import bound_system_clock
 
 logger = logging.getLogger(__name__)
 
@@ -58,24 +60,12 @@ Children = dict[
 # What a pipe's reader buffers, as asyncio.create_subprocess_exec sets it.
 STREAM_LIMIT = 2**16
 
-# Where Linux distributions install libfaketime, which a process on this
-# host reads a workspace's system time through.
-FAKETIME_LIBRARIES = (
-    "/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1",
-    "/usr/lib/aarch64-linux-gnu/faketime/libfaketime.so.1",
-    "/usr/lib64/faketime/libfaketime.so.1",
-    "/usr/lib/faketime/libfaketime.so.1",
-    "/usr/local/lib/faketime/libfaketime.so.1",
-)
-
 
 async def system_time_env(env: Mapping[str, str]) -> dict[str, str]:
     """What a process on this host needs to read the running workspace's
-    system time: libfaketime preloaded at its offset from the host's
-    clock, to the millisecond, with the monotonic clock left alone. Empty
-    when the workspace keeps the host's time, and when this host has no
-    libfaketime, where the process runs on the host's clock. Mirrors
-    TypeScript's ``systemTimeEnv``.
+    system time (``faketime_env``). Empty when the workspace keeps the
+    host's time, and when this host has no libfaketime, where the process
+    runs on the host's clock. Mirrors TypeScript's ``systemTimeEnv``.
 
     Args:
         env (Mapping[str, str]): the process's environment, whose
@@ -89,12 +79,7 @@ async def system_time_env(env: Mapping[str, str]) -> dict[str, str]:
             "libfaketime: none found, so the process runs on the host clock"
         )
         return {}
-    preload = env.get("LD_PRELOAD")
-    return {
-        "LD_PRELOAD": f"{library}:{preload}" if preload else library,
-        "FAKETIME": f"{system_now() - time.time():+.3f}s",
-        "FAKETIME_DONT_FAKE_MONOTONIC": "1",
-    }
+    return faketime_env(library, env)
 
 
 async def _faketime_library() -> str | None:

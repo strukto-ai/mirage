@@ -40,26 +40,15 @@ import { shellJoin } from '@struktoai/mirage-core/shell/join'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
-import { boundSystemClock, systemNow } from '@struktoai/mirage-core/utils/clock'
-
-// Where Linux distributions install libfaketime, which a process on this
-// host reads a workspace's system time through.
-export const FAKETIME_LIBRARIES = [
-  '/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1',
-  '/usr/lib/aarch64-linux-gnu/faketime/libfaketime.so.1',
-  '/usr/lib64/faketime/libfaketime.so.1',
-  '/usr/lib/faketime/libfaketime.so.1',
-  '/usr/local/lib/faketime/libfaketime.so.1',
-]
+import { boundSystemClock } from '@struktoai/mirage-core/utils/clock'
+import { FAKETIME_LIBRARIES, faketimeEnv } from '@struktoai/mirage-core/runtime/sandbox/constants'
 
 /**
  * What a process on this host needs to read the running workspace's system
- * time: libfaketime preloaded at its offset from the host's clock, to the
- * millisecond, with the monotonic clock left alone. Empty when the workspace
- * keeps the host's time, and when this host has no libfaketime, where the
- * process runs on the host's clock. `env` is the process's environment,
- * whose `LD_PRELOAD` libraries load after libfaketime. Mirrors Python's
- * `system_time_env`.
+ * time (`faketimeEnv`). Empty when the workspace keeps the host's time, and
+ * when this host has no libfaketime, where the process runs on the host's
+ * clock. `env` is the process's environment, whose `LD_PRELOAD` libraries
+ * load after libfaketime. Mirrors Python's `system_time_env`.
  */
 export async function systemTimeEnv(env: Record<string, string>): Promise<Record<string, string>> {
   if (boundSystemClock() === null) return {}
@@ -68,13 +57,7 @@ export async function systemTimeEnv(env: Record<string, string>): Promise<Record
     debuglog('mirage')('libfaketime: none found, so the process runs on the host clock')
     return {}
   }
-  const preload = env.LD_PRELOAD
-  const offset = systemNow() - Date.now() / 1000
-  return {
-    LD_PRELOAD: preload === undefined || preload === '' ? library : `${library}:${preload}`,
-    FAKETIME: `${offset >= 0 ? '+' : ''}${offset.toFixed(3)}s`,
-    FAKETIME_DONT_FAKE_MONOTONIC: '1',
-  }
+  return faketimeEnv(library, env)
 }
 
 /**

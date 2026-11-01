@@ -20,7 +20,7 @@ import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { RemoteSandbox } from './base.ts'
-import { EXEC_ID, REAP_ABSENT, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
+import { EXEC_ID, faketimeProbe, REAP_ABSENT, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
 import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
@@ -97,6 +97,57 @@ describe('RemoteSandbox', () => {
       }
     },
   )
+
+  it('hands a program the system time through the libfaketime the sandbox holds', async () => {
+    // Answers the probe as a sandbox holding `holds`, or none when empty.
+    class FaketimeBox extends RecordingSandbox {
+      constructor(private readonly holds: string) {
+        super({ captures: ['python3'] })
+      }
+
+      override execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        if (line !== faketimeProbe()) return super.execLine(line, stdin, env, cwd)
+        this.execs.push([line, stdin, env, cwd])
+        const found = this.holds === '' ? '' : `${this.holds}\n`
+        return Promise.resolve({ stdout: ENC.encode(found), stderr: null, exitCode: 0 })
+      }
+    }
+    for (const [holds, systemTime] of [
+      ['/usr/lib/faketime/libfaketime.so.1', '2026-03-02T09:00:00Z'],
+      ['', '2026-03-02T09:00:00Z'],
+      ['/usr/lib/faketime/libfaketime.so.1', null],
+    ] as const) {
+      const box = new FaketimeBox(holds)
+      const ws = new Workspace(
+        { '/data': new RAMVFS() },
+        {
+          mode: MountMode.EXEC,
+          runtimes: [box, 'workspace'],
+          ...(systemTime === null ? {} : { systemTime }),
+        },
+      )
+      try {
+        await ws.shell('python3 a')
+        await ws.shell('python3 b')
+        const probes = box.execs.filter(([line]) => line === faketimeProbe())
+        expect(probes).toHaveLength(systemTime === null ? 0 : 1)
+        const env = box.execs.at(-1)?.[2] ?? {}
+        if (holds !== '' && systemTime !== null) {
+          expect(env).toMatchObject({ LD_PRELOAD: holds, FAKETIME_FMT: '%s' })
+          expect(Number((env.FAKETIME ?? '').slice(1))).toBeCloseTo(1772442000, -1)
+        } else {
+          expect(env).not.toHaveProperty('FAKETIME')
+        }
+      } finally {
+        await ws.close()
+      }
+    }
+  })
 
   it('connects on the first line only', async () => {
     const box = new RecordingSandbox({ captures: ['python3'] })

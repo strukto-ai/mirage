@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { DiskVFS } from '../../../vfs/disk/disk.ts'
 import { Workspace } from '../../../workspace.ts'
-import { FAKETIME_LIBRARIES } from '../program.ts'
+import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { SandlockRuntime } from './runtime.ts'
 
 const DEC = new TextDecoder()

@@ -49,7 +49,7 @@ FROM python:3.12-slim AS fuse
 ARG MIRAGE_EXTRAS=sandbox
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fuse3 libfuse3-dev \
+    && apt-get install -y --no-install-recommends fuse3 libfuse3-dev libfaketime \
     && rm -rf /var/lib/apt/lists/* \
     && echo user_allow_other >> /etc/fuse.conf
 

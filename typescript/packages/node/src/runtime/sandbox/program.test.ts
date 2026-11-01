@@ -28,7 +28,6 @@ import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
-  FAKETIME_LIBRARIES,
   SERVED,
   serve,
   unserve,
@@ -40,6 +39,7 @@ import {
   systemTimeEnv,
 } from './program.ts'
 import { runWithSystemClock, ShiftedClock, SystemClock } from '@struktoai/mirage-core/utils/clock'
+import { FAKETIME_LIBRARIES } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
@@ -810,14 +810,17 @@ describe('systemTimeEnv', () => {
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { value: 'linux' })
     try {
-      const clock = ShiftedClock.starting(new SystemClock(), Date.now() / 1000 - 3600.25)
+      const start = Date.now() / 1000 - 3600.25
+      const clock = ShiftedClock.starting(new SystemClock(), start)
       const env = await runWithSystemClock(clock, () => systemTimeEnv({ LD_PRELOAD: '/opt/x.so' }))
       expect(env).toMatchObject({
         LD_PRELOAD: `${library}:/opt/x.so`,
+        FAKETIME_FMT: '%s',
+        FAKETIME_DONT_RESET: '1',
         FAKETIME_DONT_FAKE_MONOTONIC: '1',
       })
-      expect(env.FAKETIME).toMatch(/^-\d+\.\d{3}s$/)
-      expect(Number.parseFloat(env.FAKETIME ?? '')).toBeCloseTo(-3600.25, 1)
+      expect(env.FAKETIME).toMatch(/^@\d+\.\d{3}$/)
+      expect(Number.parseFloat((env.FAKETIME ?? '').slice(1))).toBeCloseTo(start, 1)
       rmSync(library)
       expect(await runWithSystemClock(clock, () => systemTimeEnv({}))).toEqual({})
       expect(await systemTimeEnv({})).toEqual({})

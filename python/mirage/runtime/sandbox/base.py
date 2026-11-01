@@ -29,6 +29,8 @@ from mirage.runtime.sandbox.constants import (
     EXEC_ID,
     REAP_ABSENT,
     REAP_WAIT_SECONDS,
+    faketime_env,
+    faketime_probe,
     reap_line,
 )
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
@@ -40,6 +42,7 @@ from mirage.runtime.types import (
 )
 from mirage.shell.join import shell_join
 from mirage.types import PathSpec
+from mirage.utils.clock import bound_system_clock
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +93,10 @@ class RemoteSandbox(
         self._connected = False
         self._connect_lock = asyncio.Lock()
         self._mounts: SandboxMounts | None = None
+        # The libfaketime this sandbox holds, asked once the first program
+        # runs under a system_time: None for none.
+        self._faketime: str | None = None
+        self._faketime_probed = False
         check_mount_type(self.name, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -187,6 +194,8 @@ class RemoteSandbox(
             refusal = await self._mounts.admit(self._binding)
             if refusal is not None:
                 return refusal
+        given = {**self.config.env, **(ctx.env or {})}
+        clock = await self._system_time_env(given)
         exec_id = uuid.uuid4().hex
         runner = current_caller().process
         if runner is not None:
@@ -202,7 +211,7 @@ class RemoteSandbox(
             return await self._exec_argv(
                 argv,
                 ctx.stdin,
-                {**self.config.env, **(ctx.env or {}), EXEC_ID: exec_id},
+                {**given, **clock, EXEC_ID: exec_id},
                 ctx.cwd.virtual,
                 output,
                 errors,
@@ -277,6 +286,35 @@ class RemoteSandbox(
                 done.exit_code,
             )
         return done.exit_code
+
+    async def _system_time_env(self, env: dict[str, str]) -> dict[str, str]:
+        """What a program in this sandbox needs to read the running
+        workspace's system time (``faketime_env``), through the
+        libfaketime the sandbox holds. Empty when the workspace keeps the
+        host's time, and when the sandbox has no libfaketime, where the
+        program runs on the sandbox's clock. Mirrors TypeScript's
+        ``SandboxRuntime.systemTimeEnv``.
+
+        Args:
+            env (dict[str, str]): the program's environment, whose
+                ``LD_PRELOAD`` libraries load after libfaketime.
+        """
+        if bound_system_clock() is None:
+            return {}
+        if not self._faketime_probed:
+            found = await self.exec_line(
+                faketime_probe(), None, dict(self.config.env), "/"
+            )
+            self._faketime = found.stdout.decode().strip() or None
+            self._faketime_probed = True
+            if self._faketime is None:
+                logger.debug(
+                    "%s: no libfaketime, so programs run on its clock",
+                    self.name,
+                )
+        if self._faketime is None:
+            return {}
+        return faketime_env(self._faketime, env)
 
     async def _setup(self, line: str) -> RunResult:
         return await self.exec_line(line, None, dict(self.config.env), "/")
