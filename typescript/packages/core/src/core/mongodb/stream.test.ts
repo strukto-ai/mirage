@@ -19,7 +19,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { DBRef, Long } from 'bson'
-import { follow, lastLines, lineCount, readStream, stringifyDoc } from './stream.ts'
+import { applyElision, follow, lastLines, lineCount, readStream, stringifyDoc } from './stream.ts'
 
 function docs(database: string, kind = 'collections', name = 'users'): PathSpec {
   const virtual = `/mongo/${database}/${kind}/${name}/documents.jsonl`
@@ -278,6 +278,12 @@ describe('mongodb document rendering', () => {
     )
   })
 
+  it('keeps a stored _bsontype field as an ordinary field', () => {
+    expect(
+      stringifyDoc({ a: { _bsontype: 'DBRef', note: 'keep' }, b: { _bsontype: 'Long', n: 1 } }),
+    ).toBe('{"a": {"_bsontype": "DBRef", "note": "keep"}, "b": {"_bsontype": "Long", "n": 1}}')
+  })
+
   it('writes a $date as ISO-8601 for years 1970 through 9999 only', () => {
     expect(
       stringifyDoc({
@@ -290,5 +296,18 @@ describe('mongodb document rendering', () => {
       '{"a": {"$date": "1970-01-01T00:00:00Z"}, "b": {"$date": "9999-12-31T23:59:59.999Z"}, ' +
         '"c": {"$date": {"$numberLong": "253402300800000"}}, "d": {"$date": {"$numberLong": "-1"}}}',
     )
+  })
+})
+
+describe('mongodb field elision', () => {
+  it('leaves a constructor field alone unless a path names it', () => {
+    const doc = { constructor: { constructor: 'part', n: 1 }, secret: 1 }
+    expect(applyElision(doc, new Set(['secret']))).toEqual({
+      constructor: { constructor: 'part', n: 1 },
+    })
+    expect(applyElision(doc, new Set(['constructor.n']))).toEqual({
+      constructor: { constructor: 'part' },
+      secret: 1,
+    })
   })
 })
