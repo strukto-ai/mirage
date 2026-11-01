@@ -3347,3 +3347,28 @@ def test_a_mount_section_names_itself_in_a_paths_refusal():
         SessionProfile.model_validate(
             {"mounts": {"/r": {"paths": {"hide": ["x"]}}}}
         )
+
+
+def test_typed_paths_entries_are_checked_and_kept():
+    show = (ShowEntry("/r/a", MountMode.READ), ShowEntry("/r/a"))
+    block = PathsBlock(
+        hide=("/r",), show=show, reasons=(HideReason(("/r",), "why"),)
+    )
+    assert block.show == show
+    with pytest.raises(ValidationError, match="is relative"):
+        PathsBlock(hide=("secret/file",), show=(ShowEntry("/public"),))
+    with pytest.raises(ValidationError, match="anchor to a place"):
+        PathsBlock(show=(ShowEntry("public"),))
+    mounted = SessionProfile.model_validate(
+        {"mounts": {"/r": {"paths": {"show": [ShowEntry("/r/public")]}}}}
+    )
+    assert mounted.mounts["/r"].paths.show == (ShowEntry("/r/public"),)
+
+
+def test_a_rule_list_mixes_compiled_and_written_rules():
+    kept = CommandRule(reason="x", commands=("rm",))
+    block = CommandsBlock(deny=[kept, "mv"])
+    assert block.deny[0] is kept
+    assert block.deny[1].commands == ("mv",)
+    with pytest.raises(ValidationError, match=re.escape("commands.deny[1]")):
+        CommandsBlock(deny=[kept, {"commands": ["mv"], "paths": ["/x"]}])
