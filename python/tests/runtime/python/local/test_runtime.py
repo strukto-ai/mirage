@@ -25,7 +25,7 @@ import pytest
 from mirage import RAMVFS, DiskVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.runtime.python import LocalRuntime
-from mirage.runtime.sandbox.program import serve, unserve
+from mirage.runtime.sandbox.program import FAKETIME_LIBRARIES, serve, unserve
 from mirage.runtime.types import Program, RunResult
 from mirage.types import PathSpec
 
@@ -652,3 +652,26 @@ async def test_a_file_the_program_makes_shows_in_the_next_listing(tmp_path):
         assert made.exit_code == 0
         listed = await ws.shell(f"ls {root}")
         assert await listed.stdout_str() == "made.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_runs_on_the_system_time_or_refuses_without_libfaketime():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[LocalRuntime(captures=["python3"])],
+        system_time="2026-03-02T09:00:00Z",
+    )
+    try:
+        io = await ws.shell(
+            "python3 -c 'import datetime; print(datetime.date.today())'"
+        )
+        if sys.platform == "linux" and any(
+            os.path.isfile(path) for path in FAKETIME_LIBRARIES
+        ):
+            assert await io.stdout_str() == "2026-03-02\n"
+        else:
+            assert io.exit_code == 126
+            assert await io.stderr_str() == "local: Permission denied\n"
+    finally:
+        await ws.close()

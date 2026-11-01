@@ -29,6 +29,7 @@ from mirage.context.session_context import run_with_execution
 from mirage.process.table import ProcessTable
 from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.runtime.sandbox.program import (
+    FAKETIME_LIBRARIES,
     Children,
     _served,
     close_children,
@@ -37,9 +38,15 @@ from mirage.runtime.sandbox.program import (
     reap_host_run,
     run_program,
     serve,
+    system_time_env,
     unserve,
 )
 from mirage.types import PathSpec
+from mirage.utils.clock import (
+    ShiftedClock,
+    SystemClock,
+    run_with_system_clock,
+)
 
 # A child that starts a sleep in a session of its own, so killing the
 # child's group leaves it running with the output pipes it inherited.
@@ -805,3 +812,31 @@ async def test_a_host_run_it_may_not_signal_is_out_of_reach(
         monkeypatch.undo()
         child.kill()
         await child.wait()
+
+
+@pytest.mark.asyncio
+async def test_system_time_env_preloads_libfaketime_at_the_offset(
+    tmp_path, monkeypatch
+):
+    library = tmp_path / "libfaketime.so.1"
+    library.write_bytes(b"")
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.program.FAKETIME_LIBRARIES", (str(library),)
+    )
+    monkeypatch.setattr(sys, "platform", "linux")
+    clock = ShiftedClock.starting(SystemClock(), time.time() - 3600)
+
+    async def env(given: dict[str, str]) -> dict[str, str] | None:
+        return system_time_env(given)
+
+    assert await run_with_system_clock(
+        clock, env({"LD_PRELOAD": "/opt/x.so"})
+    ) == {
+        "LD_PRELOAD": f"{library}:/opt/x.so",
+        "FAKETIME": "-3600s",
+        "FAKETIME_DONT_FAKE_MONOTONIC": "1",
+    }
+    library.unlink()
+    assert await run_with_system_clock(clock, env({})) is None
+    assert system_time_env({}) == {}
+    assert FAKETIME_LIBRARIES

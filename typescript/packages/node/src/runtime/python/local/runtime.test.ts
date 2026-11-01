@@ -25,7 +25,8 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { DiskVFS } from '../../../vfs/disk/disk.ts'
 import { Workspace } from '../../../workspace.ts'
-import { serve, unserve } from '../../sandbox/program.ts'
+import { FAKETIME_LIBRARIES, serve, unserve } from '../../sandbox/program.ts'
+import { existsSync } from 'node:fs'
 import { LocalRuntime } from './runtime.ts'
 
 const DEC = new TextDecoder()
@@ -236,6 +237,29 @@ describe('LocalRuntime', () => {
     } finally {
       await ws.close()
       await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("runs on the workspace's system_time, or refuses where libfaketime is missing", async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [new LocalRuntime({ captures: ['python3'] })],
+        systemTime: '2026-03-02T09:00:00Z',
+      },
+    )
+    try {
+      const result = await ws.shell("python3 -c 'import datetime; print(datetime.date.today())'")
+      if (process.platform === 'linux' && FAKETIME_LIBRARIES.some((path) => existsSync(path)))
+        expect(DEC.decode(result.stdout)).toBe('2026-03-02\n')
+      else
+        expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+          126,
+          'local: Permission denied\n',
+        ])
+    } finally {
+      await ws.close()
     }
   })
 

@@ -22,8 +22,10 @@ import type { Context } from '@struktoai/mirage-core/commands/config'
 import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { LanguageRuntime } from '@struktoai/mirage-core/runtime/language'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { DiskVFS } from '../../../vfs/disk/disk.ts'
 import { Workspace } from '../../../workspace.ts'
+import { FAKETIME_LIBRARIES } from '../program.ts'
 import { SandlockRuntime } from './runtime.ts'
 
 const DEC = new TextDecoder()
@@ -104,6 +106,36 @@ else {
     expect(data.env).not.toHaveProperty('E')
     expect(data.cwd).toBe(await realpath(dir))
     expect(data.stdin).toBe('input\n')
+  })
+
+  it('hands the system time to the child, or refuses without libfaketime', async () => {
+    const library = join(dir, 'libfaketime.so.1')
+    await writeFile(library, '')
+    const saved = FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, library)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        runtimes: [new SandlockRuntime({ captures: ['node'] })],
+        systemTime: '2026-03-02T09:00:00Z',
+      },
+    )
+    try {
+      const data = JSON.parse(DEC.decode((await ws.shell('node')).stdout)) as Capture
+      expect(data.argv).toContain(`LD_PRELOAD=${library}`)
+      expect(data.argv).toContain('FAKETIME_DONT_FAKE_MONOTONIC=1')
+      await rm(library)
+      const refused = await ws.shell('node')
+      expect([refused.exitCode, DEC.decode(refused.stderr)]).toEqual([
+        126,
+        'sandlock: Permission denied\n',
+      ])
+    } finally {
+      await ws.close()
+      FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, ...saved)
+      if (platform !== undefined) Object.defineProperty(process, 'platform', platform)
+    }
   })
 
   it('keeps shell interpretation explicit', async () => {

@@ -205,3 +205,30 @@ async def test_a_session_restriction_refuses_every_line(cli, profile):
     )
     assert (await (await ws.session("other")).shell("tool run")).exit_code == 0
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_system_time_reaches_the_child_or_refuses(
+    cli, tmp_path, monkeypatch
+):
+    library = tmp_path / "libfaketime.so.1"
+    library.write_bytes(b"")
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.program.FAKETIME_LIBRARIES", (str(library),)
+    )
+    monkeypatch.setattr(sys, "platform", "linux")
+    ws = Workspace(
+        {"/": RAMVFS()},
+        runtimes=[SandlockRuntime(captures=("node",))],
+        system_time="2026-03-02T09:00:00Z",
+    )
+    try:
+        args = json.loads(await (await ws.shell("node")).stdout_str())["argv"]
+        assert f"LD_PRELOAD={library}" in args
+        assert "FAKETIME_DONT_FAKE_MONOTONIC=1" in args
+        library.unlink()
+        refused = await ws.shell("node")
+        assert refused.exit_code == 126
+        assert await refused.stderr_str() == "sandlock: Permission denied\n"
+    finally:
+        await ws.close()

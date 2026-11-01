@@ -23,6 +23,7 @@ from typing import Any, ClassVar
 from mirage.commands.config import Context
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource
+from mirage.runtime.binding import refused_run
 from mirage.runtime.config import RuntimeConfig, resolve_home
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
@@ -34,6 +35,7 @@ from mirage.runtime.sandbox.program import (
     close_children,
     cwd_refusal,
     run_program,
+    system_time_env,
 )
 from mirage.runtime.types import OutputFn, Program, RunResult, RuntimeReach
 from mirage.shell.bytes import encode_text
@@ -227,13 +229,19 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         # nothing, so no child outlives the close.
         if self._closed:
             raise RuntimeError(f"{self.name}: the runtime is closed")
+        given = {**self.config.env, **env}
+        clock = system_time_env(given)
+        if clock is None:
+            return refused_run(
+                self.name, "runtime cannot keep this workspace's system_time"
+            )
         return await run_program(
             program,
             None,
             argv,
             stdin,
             cwd=cwd,
-            env={**self.config.env, **env},
+            env={**given, **clock},
             children=self._children,
             output=output,
             errors=errors,

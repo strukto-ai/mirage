@@ -30,7 +30,8 @@ import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
 import { SANDLOCK_HINT, SYSTEM_READABLE } from './constants.ts'
-import { closeChildren, cwdRefusal, onHostPath, runProgram } from '../program.ts'
+import { closeChildren, cwdRefusal, onHostPath, runProgram, systemTimeEnv } from '../program.ts'
+import { refusedRun } from '@struktoai/mirage-core/runtime/binding'
 
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
 export class SandlockRuntime
@@ -104,8 +105,12 @@ export class SandlockRuntime
     // A run still finding `sandlock` when the runtime closed starts
     // nothing, so no child outlives the close.
     if (this.closed) throw new Error(`${this.name}: the runtime is closed`)
+    const given = { ...this.config.env, ...ctx.env }
+    const clock = systemTimeEnv(given)
+    if (clock === null)
+      return refusedRun(this.name, "runtime cannot keep this workspace's system_time")
     const wrapper = ['run', ...this.policyArgv(), '--clean-env']
-    for (const [key, value] of Object.entries({ ...this.config.env, ...ctx.env }))
+    for (const [key, value] of Object.entries({ ...given, ...clock }))
       wrapper.push('--env', `${key}=${value}`)
     wrapper.push('--', ...argv)
     // Requested variables go to the confined child.
