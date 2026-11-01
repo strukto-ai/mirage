@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { singleQuote } from '../../utils/quote.ts'
+import { boundSystemClock, systemNow } from '../../utils/clock.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { MountType } from '../types.ts'
 
@@ -184,4 +185,43 @@ export function reapLine(execId: string, signum = 15): string {
     'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; ' +
     'kill -KILL $l 2>/dev/null; true'
   )
+}
+
+// Where Linux distributions install libfaketime, which a process reads a
+// workspace's system time through, on this host or in a sandbox.
+export const FAKETIME_LIBRARIES = [
+  '/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1',
+  '/usr/lib/aarch64-linux-gnu/faketime/libfaketime.so.1',
+  '/usr/lib64/faketime/libfaketime.so.1',
+  '/usr/lib/faketime/libfaketime.so.1',
+  '/usr/local/lib/faketime/libfaketime.so.1',
+]
+
+/**
+ * What has a process read the running workspace's system time through the
+ * libfaketime at `library`: the time now, in epoch seconds to the
+ * millisecond, which its clock and its children's run on from, whatever
+ * the machine's own clock or zone; the monotonic clock left alone. `env`'s
+ * `LD_PRELOAD` libraries load after it. Empty when the workspace keeps the
+ * host's time. Mirrors Python's `faketime_env`.
+ */
+export function faketimeEnv(library: string, env: Record<string, string>): Record<string, string> {
+  if (boundSystemClock() === null) return {}
+  const preload = env.LD_PRELOAD
+  return {
+    LD_PRELOAD: preload === undefined || preload === '' ? library : `${library}:${preload}`,
+    FAKETIME: `@${systemNow().toFixed(3)}`,
+    FAKETIME_FMT: '%s',
+    FAKETIME_DONT_RESET: '1',
+    FAKETIME_DONT_FAKE_MONOTONIC: '1',
+  }
+}
+
+/**
+ * A shell line that prints the first of `FAKETIME_LIBRARIES` a sandbox
+ * holds, and nothing when it holds none. Mirrors Python's `faketime_probe`.
+ */
+export function faketimeProbe(): string {
+  const paths = FAKETIME_LIBRARIES.map(singleQuote).join(' ')
+  return `for p in ${paths}; do if [ -f "$p" ]; then echo "$p"; break; fi; done`
 }

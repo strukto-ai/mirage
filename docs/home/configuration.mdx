@@ -183,8 +183,9 @@ Programs that `local` or Sandlock run on this machine see the time through
 [libfaketime](https://github.com/wolfcw/libfaketime) when it is installed,
 on Linux (`apt install libfaketime`). Without it, or on macOS, they run on
 the machine's clock. A statically linked program, as many Go tools are,
-also reads the machine's clock. Sandbox runtimes use their own machine's
-clock.
+also reads the machine's clock. Sandbox runtimes work the same way, with
+libfaketime in the [sandbox image](/home/setup/runtime/sandbox#the-sandbox-image)
+and the sandbox's clock without it.
 
 ## Read and write policies
 

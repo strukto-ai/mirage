@@ -16,6 +16,7 @@ from collections.abc import Mapping, Sequence
 
 from mirage.process.handle import ProcessHandle
 from mirage.runtime.types import MountType
+from mirage.utils.clock import bound_system_clock, system_now
 from mirage.utils.quote import single_quote
 
 
@@ -204,4 +205,50 @@ def reap_line(exec_id: str, signum: int = 15) -> str:
         f"left || exit {REAP_ABSENT}; kill -{signum} $l 2>/dev/null; "
         "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "
         "kill -KILL $l 2>/dev/null; true"
+    )
+
+
+# Where Linux distributions install libfaketime, which a process reads a
+# workspace's system time through, on this host or in a sandbox.
+FAKETIME_LIBRARIES = (
+    "/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1",
+    "/usr/lib/aarch64-linux-gnu/faketime/libfaketime.so.1",
+    "/usr/lib64/faketime/libfaketime.so.1",
+    "/usr/lib/faketime/libfaketime.so.1",
+    "/usr/local/lib/faketime/libfaketime.so.1",
+)
+
+
+def faketime_env(library: str, env: Mapping[str, str]) -> dict[str, str]:
+    """What has a process read the running workspace's system time
+    through the libfaketime at ``library``: the time now, in epoch
+    seconds to the millisecond, which its clock and its children's run
+    on from, whatever the machine's own clock or zone; the monotonic
+    clock left alone. Empty when the workspace keeps the host's time.
+    Mirrors TypeScript's ``faketimeEnv``.
+
+    Args:
+        library (str): the libfaketime path where the process runs.
+        env (Mapping[str, str]): the process's environment, whose
+            ``LD_PRELOAD`` libraries load after libfaketime.
+    """
+    if bound_system_clock() is None:
+        return {}
+    preload = env.get("LD_PRELOAD")
+    return {
+        "LD_PRELOAD": f"{library}:{preload}" if preload else library,
+        "FAKETIME": f"@{system_now():.3f}",
+        "FAKETIME_FMT": "%s",
+        "FAKETIME_DONT_RESET": "1",
+        "FAKETIME_DONT_FAKE_MONOTONIC": "1",
+    }
+
+
+def faketime_probe() -> str:
+    """A shell line that prints the first of ``FAKETIME_LIBRARIES`` a
+    sandbox holds, and nothing when it holds none. Mirrors TypeScript's
+    ``faketimeProbe``."""
+    paths = " ".join(single_quote(path) for path in FAKETIME_LIBRARIES)
+    return (
+        f'for p in {paths}; do if [ -f "$p" ]; then echo "$p"; break; fi; done'
     )

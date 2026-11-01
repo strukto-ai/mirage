@@ -28,7 +28,12 @@ from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
-from mirage.runtime.sandbox.constants import EXEC_ID, REAP_ABSENT, reap_line
+from mirage.runtime.sandbox.constants import (
+    EXEC_ID,
+    REAP_ABSENT,
+    faketime_probe,
+    reap_line,
+)
 from mirage.runtime.types import RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
 
@@ -387,3 +392,59 @@ async def test_remote_line_invalidates_local_read_caches():
 
 def test_reach_is_remote():
     assert RemoteSandbox.reach == "remote"
+
+
+class FaketimeBox(RecordingSandbox):
+    """Answers the libfaketime probe as a sandbox holding ``holds``, or
+    none when it is empty."""
+
+    def __init__(self, holds: str) -> None:
+        super().__init__(captures=("python3",))
+        self.holds = holds
+
+    async def exec_line(
+        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    ) -> RunResult:
+        if line != faketime_probe():
+            return await super().exec_line(line, stdin, env, cwd)
+        self.execs.append((line, stdin, cwd))
+        self.exec_envs.append(dict(env))
+        found = f"{self.holds}\n" if self.holds else ""
+        return RunResult(stdout=found.encode(), stderr=None, exit_code=0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "holds, system_time",
+    [
+        ("/usr/lib/faketime/libfaketime.so.1", "2026-03-02T09:00:00Z"),
+        ("", "2026-03-02T09:00:00Z"),
+        ("/usr/lib/faketime/libfaketime.so.1", None),
+    ],
+)
+async def test_a_program_gets_the_system_time_through_the_sandboxs_libfaketime(
+    holds, system_time
+):
+    box = FaketimeBox(holds)
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[box, "workspace"],
+        system_time=system_time,
+    )
+    try:
+        await ws.shell("python3 a")
+        await ws.shell("python3 b")
+        probes = [line for line, _, _ in box.execs if line == faketime_probe()]
+        assert len(probes) == (0 if system_time is None else 1)
+        env = box.exec_envs[-1]
+        if holds and system_time is not None:
+            assert env["LD_PRELOAD"] == holds
+            assert env["FAKETIME_FMT"] == "%s"
+            assert float(env["FAKETIME"][1:]) == pytest.approx(
+                1772442000, abs=5
+            )
+        else:
+            assert "FAKETIME" not in env
+    finally:
+        await ws.close()

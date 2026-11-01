@@ -826,15 +826,18 @@ async def test_system_time_env_preloads_libfaketime_at_the_offset(
         (str(tmp_path / "none"), str(library)),
     )
     monkeypatch.setattr(sys, "platform", "linux")
-    clock = ShiftedClock.starting(SystemClock(), time.time() - 3600.25)
+    start = time.time() - 3600.25
+    clock = ShiftedClock.starting(SystemClock(), start)
 
     env = await run_with_system_clock(
         clock, system_time_env({"LD_PRELOAD": "/opt/x.so"})
     )
     assert env["LD_PRELOAD"] == f"{library}:/opt/x.so"
+    assert env["FAKETIME_FMT"] == "%s"
+    assert env["FAKETIME_DONT_RESET"] == "1"
     assert env["FAKETIME_DONT_FAKE_MONOTONIC"] == "1"
-    assert re.fullmatch(r"-\d+\.\d{3}s", env["FAKETIME"])
-    assert float(env["FAKETIME"][:-1]) == pytest.approx(-3600.25, abs=0.05)
+    assert re.fullmatch(r"@\d+\.\d{3}", env["FAKETIME"])
+    assert float(env["FAKETIME"][1:]) == pytest.approx(start, abs=0.05)
     library.unlink()
     assert await run_with_system_clock(clock, system_time_env({})) == {}
     assert await system_time_env({}) == {}

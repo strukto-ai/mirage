@@ -35,7 +35,15 @@ import {
   type NormalizedSandboxConfig,
   type SandboxConfig,
 } from './config.ts'
-import { EXEC_ID, REAP_ABSENT, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
+import {
+  EXEC_ID,
+  faketimeEnv,
+  faketimeProbe,
+  REAP_ABSENT,
+  REAP_WAIT_SECONDS,
+  reapLine,
+} from './constants.ts'
+import { boundSystemClock } from '../../utils/clock.ts'
 import { isPipeTransport } from './mixin.ts'
 import { SandboxMounts } from './mounts.ts'
 
@@ -77,6 +85,9 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   // retries.
   private connecting: Promise<void> | null = null
   private mounts: SandboxMounts | null = null
+  // The libfaketime this sandbox holds, asked once the first program runs
+  // under a system_time: null for none, undefined before the probe.
+  private faketime: string | null | undefined = undefined
 
   constructor(options: RuntimeOptions<C> = {}, configKeys?: readonly string[]) {
     super(options as RuntimeOptions, [EXTERNAL_COMMANDS], configKeys ?? BASE_CONFIG_KEYS)
@@ -170,6 +181,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     await this.ensureConnected(ctx.signal)
     const refusal = (await this.mounts?.admit(this.binding, ctx.signal)) ?? null
     if (refusal !== null) return refusal
+    const given = { ...this.config.env, ...ctx.env }
+    const clock = await this.systemTimeEnv(given, ctx.signal)
     const execId = crypto.randomUUID().replaceAll('-', '')
     const runner = currentCaller().process
     runner?.addRun(`box:${execId}`, { runtime: this.name, tag: execId, command: shellJoin(argv) })
@@ -177,7 +190,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
       return await this.execArgv(
         argv,
         ctx.stdin,
-        { ...this.config.env, ...ctx.env, [EXEC_ID]: execId },
+        { ...given, ...clock, [EXEC_ID]: execId },
         ctx.cwd.virtual,
         output,
         errors,
@@ -258,6 +271,25 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   protected disconnected(): void {
     this.connecting = null
+  }
+
+  /**
+   * What a program in this sandbox needs to read the running workspace's
+   * system time (`faketimeEnv`), through the libfaketime the sandbox holds.
+   * Empty when the workspace keeps the host's time, and when the sandbox has
+   * no libfaketime, where the program runs on the sandbox's clock. Mirrors
+   * Python's `SandboxRuntime._system_time_env`.
+   */
+  private async systemTimeEnv(
+    env: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<Record<string, string>> {
+    if (boundSystemClock() === null) return {}
+    if (this.faketime === undefined) {
+      const found = await this.execLine(faketimeProbe(), null, { ...this.config.env }, '/', signal)
+      this.faketime = new TextDecoder().decode(found.stdout).trim() || null
+    }
+    return this.faketime === null ? {} : faketimeEnv(this.faketime, env)
   }
 
   protected async ensureConnected(signal?: AbortSignal): Promise<void> {
