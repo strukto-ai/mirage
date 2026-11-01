@@ -2237,19 +2237,19 @@ jobs:
           cat sdk.env >> "$GITHUB_ENV"
 
       - name: Create a sandbox
+        # Avoid pyqwest async completion callbacks racing interpreter shutdown.
         run: |
           ./python/.venv/bin/python - <<'EOF'
-          import asyncio
           import os
 
-          from e2b import AsyncSandbox
+          from e2b import Sandbox
 
 
-          async def main():
-              sandbox = await AsyncSandbox.create(timeout=1800)
+          def main():
+              sandbox = Sandbox.create(timeout=1800)
               # sshfs, so mount_type can serve the workspace into the
               # sandbox; /boxdata is a mount of its own, for `both`.
-              setup = await sandbox.commands.run(
+              setup = sandbox.commands.run(
                   "sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive "
                   "apt-get install -y -qq sshfs >/dev/null && sudo mkdir -p /boxdata && "
                   "sudo mount -t tmpfs tmpfs /boxdata && "
@@ -2258,15 +2258,15 @@ jobs:
                   timeout=300,
               )
               try:
-                  await setup.wait()
+                  setup.wait()
               finally:
-                  await setup.disconnect()
+                  setup.disconnect()
               with open(os.environ["GITHUB_ENV"], "a") as env:
                   env.write(f"MIRAGE_INTEG_E2B_SANDBOX={sandbox.sandbox_id}\n")
                   env.write("MIRAGE_INTEG_BOX_MOUNTS=1\n")
 
 
-          asyncio.run(main())
+          main()
           EOF
 
       - name: Run the sandbox suites on e2b (python)
