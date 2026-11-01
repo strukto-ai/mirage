@@ -157,16 +157,17 @@ export async function checkMkdirTarget(
  * such a key is recorded again, as `mkdir -p` records it, unless a file took
  * its name since: that file is not hidden behind a directory. The op drops a
  * removed directory's metadata only after this, so a kept one keeps its time
- * and attributes. Returns the names whose metadata stays, each directory kept
- * and any file that took one's name; empty when nothing was left. Mirrors
- * Python's `keep_left`.
+ * and attributes. Returns the names whose metadata stays: each directory kept
+ * or still standing under `p`, and any file that took one's name; empty when
+ * nothing was left. Mirrors Python's `keep_left`.
  */
 export async function keepLeft(store: RedisStoreLike, p: string): Promise<Set<string>> {
   const prefix = `${rstripSlash(p)}/`
-  const keys = [...(await store.listFiles(prefix)), ...(await store.listDirs())]
-  const left = keys.filter((k) => k.startsWith(prefix))
+  const dirs = [...(await store.listDirs())].filter((k) => k.startsWith(prefix))
+  const files = (await store.listFiles(prefix)).filter((k) => k.startsWith(prefix))
+  const left = [...files, ...dirs]
   if (left.length === 0) return new Set()
-  const held = new Set([p])
+  const held = new Set([p, ...dirs])
   for (const key of left) {
     for (const up of ancestors(key)) if (up.startsWith(prefix)) held.add(up)
   }

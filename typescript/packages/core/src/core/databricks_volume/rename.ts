@@ -19,6 +19,7 @@ import { copy, copyTree } from './copy.ts'
 import { backendPath } from './path.ts'
 import { removeTree } from './rm.ts'
 import { stat } from './stat.ts'
+import type { DirectoryEntry } from './types.ts'
 import { unlink } from './unlink.ts'
 
 export async function rename(
@@ -48,7 +49,7 @@ export async function rename(
     }
     // Only what the copy carried is deleted: a file written under the
     // source after its listing stays there, and the move is ENOTEMPTY.
-    const copied = new Set<string>()
+    const copied = new Map<string, DirectoryEntry>()
     await copyTree(accessor, remoteSrc, remoteDst, copied)
     await removeTree(accessor, s, copied)
   } else {

@@ -121,32 +121,42 @@ async def test_rename_into_own_subtree_fails(accessor, files, remote_root):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("late", ["file", "directory"])
+@pytest.mark.parametrize("late", ["file", "directory", "replaced"])
 async def test_rename_keeps_an_entry_written_after_the_copy(
     accessor, files, remote_root, late
 ):
     # Only what the copy carried is deleted: an entry written under the
-    # source since stays there, and the move is ENOTEMPTY rather than a loss.
+    # source since, or one replaced since its copy, stays there, and the
+    # move is ENOTEMPTY rather than a loss.
+    d = f"{remote_root}/d"
     _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/d")
-    _seed_file(files, f"{remote_root}/d/a.txt", b"aaa")
+    _seed_directory(files, d)
+    if late == "replaced":
+        _seed_directory(files, f"{d}/late")
+    _seed_file(files, f"{d}/a.txt", b"aaa")
     inner = files.upload
 
     def racing(path, contents, overwrite=False):
         files.upload = inner
         inner(path, contents, overwrite)
-        if late == "file":
-            _seed_file(files, f"{remote_root}/d/late", b"late")
-        else:
-            _seed_directory(files, f"{remote_root}/d/late")
+        if late == "directory":
+            _seed_directory(files, f"{d}/late")
+            return
+        if late == "replaced":
+            files.directories.pop(f"{d}/late")
+            files.directory_metadata.discard(f"{d}/late")
+            files.directories[d] = [
+                e for e in files.directories[d] if e.path != f"{d}/late"
+            ]
+        _seed_file(files, f"{d}/late", b"late")
 
     files.upload = racing
     with pytest.raises(OSError) as refused:
         await rename(accessor, _path("/dbx/d"), _path("/dbx/d2"))
     assert refused.value.errno == errno.ENOTEMPTY
     assert files.downloads[f"{remote_root}/d2/a.txt"] == b"aaa"
-    assert f"{remote_root}/d/a.txt" not in files.downloads
-    if late == "file":
-        assert files.downloads[f"{remote_root}/d/late"] == b"late"
+    assert f"{d}/a.txt" not in files.downloads
+    if late == "directory":
+        assert f"{d}/late" in files.directory_metadata
     else:
-        assert f"{remote_root}/d/late" in files.directory_metadata
+        assert files.downloads[f"{d}/late"] == b"late"

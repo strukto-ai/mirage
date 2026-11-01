@@ -21,20 +21,20 @@ import { ensurePathSpec } from './_helpers.ts'
 import { backendPath } from './path.ts'
 import { read } from './read.ts'
 import { stat } from './stat.ts'
+import type { DirectoryEntry } from './types.ts'
 import { write } from './write.ts'
 import { eisdir } from '../../errors/fs.ts'
 
 /**
- * Copy a directory tree file by file, adding the backend path of each
- * source file and directory copied to `copied`, for a move to delete
- * exactly those.
- * Mirrors Python's `copy_tree`.
+ * Copy a directory tree file by file, filling `copied` with each source
+ * entry copied, by backend path, as its listing showed it, for a move to
+ * delete only an entry still as it was. Mirrors Python's `copy_tree`.
  */
 export async function copyTree(
   accessor: DatabricksVolumeAccessor,
   remoteSrc: string,
   remoteDst: string,
-  copied: Set<string> | null = null,
+  copied: Map<string, DirectoryEntry> | null = null,
 ): Promise<void> {
   await createDirectory(accessor, remoteDst)
   for (const entry of await listDirectoryContents(accessor, remoteSrc)) {
@@ -42,11 +42,10 @@ export async function copyTree(
     const childDst = `${rstripSlash(remoteDst)}/${name}`
     if (entry.isDirectory) {
       await copyTree(accessor, entry.path, childDst, copied)
-      copied?.add(entry.path)
     } else {
       await upload(accessor, childDst, await download(accessor, entry.path), true)
-      copied?.add(entry.path)
     }
+    copied?.set(entry.path, entry)
   }
 }
 

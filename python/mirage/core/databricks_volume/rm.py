@@ -21,6 +21,7 @@ from mirage.core.databricks_volume.client import (
 from mirage.core.databricks_volume.errors import is_not_found
 from mirage.core.databricks_volume.path import backend_path, virtual_path
 from mirage.core.databricks_volume.stat import stat
+from mirage.core.databricks_volume.types import DirectoryEntry
 from mirage.core.databricks_volume.unlink import unlink
 from mirage.errors.fs import enoent, enotempty
 from mirage.types import FileType, PathSpec
@@ -43,15 +44,27 @@ async def holds_child(
         raise
 
 
+def _as_copied(
+    copied: dict[str, DirectoryEntry], entry: DirectoryEntry
+) -> bool:
+    """Whether a move copied this entry as it is listed now.
+
+    Args:
+        copied (dict[str, DirectoryEntry]): the entries the move copied.
+        entry (DirectoryEntry): the entry listed now.
+    """
+    return copied.get(entry.path) == entry
+
+
 async def _remove_tree_recurse(
     accessor: DatabricksVolumeAccessor,
     remote_dir: str,
     removed: list[str],
-    copied: set[str] | None,
+    copied: dict[str, DirectoryEntry] | None,
 ) -> bool:
     left = False
     for entry in await list_directory_contents(accessor, remote_dir):
-        if copied is not None and entry.path not in copied:
+        if copied is not None and not _as_copied(copied, entry):
             left = True
         elif entry.is_directory:
             left = (
@@ -80,20 +93,21 @@ async def _remove_tree_recurse(
 async def remove_tree(
     accessor: DatabricksVolumeAccessor,
     path: PathSpec,
-    copied: set[str] | None = None,
+    copied: dict[str, DirectoryEntry] | None = None,
 ) -> list[str]:
     """Remove a directory tree, or only what a move copied out of it.
 
     The walk lists each directory once, so a file written under it since,
-    or an entry the move never copied, stays and keeps its directories:
-    the tree is ENOTEMPTY.
+    or an entry the move never copied or that changed since its copy,
+    stays and keeps its directories: the tree is ENOTEMPTY.
 
     Args:
         accessor (DatabricksVolumeAccessor): the volume's client.
         path (PathSpec): the tree's root.
-        copied (set[str] | None): the backend paths of the files and
-            directories a move copied, the only ones deleted; None deletes
-            every entry listed.
+        copied (dict[str, DirectoryEntry] | None): the entries a move
+            copied, by backend path, as their listing showed them; only an
+            entry still listed the same is deleted. None deletes every entry
+            listed.
 
     Returns:
         list[str]: the backend paths removed.
