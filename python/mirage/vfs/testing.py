@@ -417,7 +417,9 @@ class _Checker:
 
     async def gone(self, path: PathSpec) -> bool:
         try:
-            await self.vfs.stat(path, **_taken(self.vfs.stat, self.store, None))
+            await self.vfs.stat(
+                path, **_taken(self.vfs.stat, self.store, None)
+            )
         except FileNotFoundError:
             return True
         return False
@@ -508,7 +510,9 @@ class _Checker:
         )
         lost = None if mode == "absent" else _LOST
         await _rejects(
-            run_with_versions(self.vfs, [(path, lost)], self.put(path, _OTHER)),
+            run_with_versions(
+                self.vfs, [(path, lost)], self.put(path, _OTHER)
+            ),
             StaleWriteError,
             f"a lost put ({mode}) must raise StaleWriteError",
         )
