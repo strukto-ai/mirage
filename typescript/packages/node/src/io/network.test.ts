@@ -134,6 +134,21 @@ async function probed(fn: () => Promise<string>, policy: Policy): Promise<string
   }
 }
 
+// curl's exit code for `url` from a workspace held to `network`.
+async function fetched(network: NetworkSetting, url: string): Promise<number> {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { network })
+  try {
+    return (await ws.shell(`curl -sS ${url}`)).exitCode
+  } finally {
+    await ws.close()
+  }
+}
+
+// What `localhost:5003` answers a workspace.
+async function read5003(ws: Workspace): Promise<string> {
+  return new TextDecoder().decode((await ws.shell('curl -sS http://localhost:5003/')).stdout)
+}
+
 describe('a workspace network rule', () => {
   let server: Server
   let port = 0
@@ -578,14 +593,6 @@ describe('a workspace network rule', () => {
 
   it('sends a routed connection where its route names, judged there', async () => {
     const to = `127.0.0.1:${String(port)}`
-    const fetched = async (network: NetworkSetting, url: string): Promise<number> => {
-      const ws = new Workspace({ '/data': new RAMVFS() }, { network })
-      try {
-        return (await ws.shell(`curl -sS ${url}`)).exitCode
-      } finally {
-        await ws.close()
-      }
-    }
     expect(await fetched({ routes: { 'svc.test:5003': to } }, 'http://svc.test:5003/')).toBe(0)
     expect(await fetched({ routes: { 'SVC.test.:5003': to } }, 'http://svc.test:5003/')).toBe(0)
     const held = { allowed_domains: [to], routes: { 'localhost:5003': to } }
@@ -611,10 +618,12 @@ describe('a workspace network rule', () => {
       { '/data': new RAMVFS() },
       { network: { routes: { 'localhost:5003': `127.0.0.1:${String(at)}` } } },
     )
-    const read = async (ws: Workspace): Promise<string> =>
-      new TextDecoder().decode((await ws.shell('curl -sS http://localhost:5003/')).stdout)
     try {
-      expect(await Promise.all([read(t1), read(t2), read(t1)])).toEqual(['ok\n', 'other\n', 'ok\n'])
+      expect(await Promise.all([read5003(t1), read5003(t2), read5003(t1)])).toEqual([
+        'ok\n',
+        'other\n',
+        'ok\n',
+      ])
     } finally {
       await t1.close()
       await t2.close()
