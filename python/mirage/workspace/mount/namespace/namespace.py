@@ -28,7 +28,7 @@ from mirage.types import (
     MountMode,
     Visibility,
 )
-from mirage.utils.clock import Clock
+from mirage.utils.clock import Clock, bound_system_clock
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.path import ancestors, glob_prefix_match, resolve_symlinks
 from mirage.vfs.base import BaseVFS
@@ -464,7 +464,9 @@ class Namespace:
         ownership survive writes; a symlink entry keeps its own times.
         Content writes (not removals) also record the observed write
         time, the fallback merge_overlay_stat surfaces when the backend
-        reports no mtime of its own.
+        reports no mtime of its own. Under a ``system_time`` the write's
+        time is the file's mtime, over the backend's, which the host's
+        clock stamped.
 
         Args:
             path (str): absolute virtual path that was written.
@@ -476,7 +478,11 @@ class Namespace:
             meta = self._nodes.setdefault(path, NodeMeta())
         if meta is None or meta.target is not None:
             return
-        meta.mtime = None
+        meta.mtime = (
+            observed
+            if observed is not None and bound_system_clock() is not None
+            else None
+        )
         meta.atime = None
         # None (a removal) also drops any prior observed time, so a
         # deleted path's meta does not linger.

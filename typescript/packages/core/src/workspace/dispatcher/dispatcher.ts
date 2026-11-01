@@ -159,6 +159,7 @@ import {
 } from '../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { runWithSystemClock, systemNow } from '../../utils/clock.ts'
 
 /**
  * Whether a completed write op was an append of no bytes. That is an open for
@@ -817,20 +818,22 @@ export class Dispatcher {
       // call must keep the conservative live-session checks rather than
       // borrow the newest binding, which can belong to a wider concurrent
       // session.
-      // Under the workspace's max_memory and network, which FUSE and ws.vfs
-      // calls reach only here.
+      // Under the workspace's max_memory, network and system clock, which
+      // FUSE and ws.vfs calls reach only here.
       const run = (): ReturnType<DispatchFn> =>
         runWithEgress(
           this.namespace.network,
           this.policies,
           () =>
             runWithMemory(this.namespace.memory, () =>
-              name === 'read' &&
-              kwargs?.warm !== true &&
-              kwargs?.admit_only !== true &&
-              !('retained' in (kwargs ?? {}))
-                ? this.readRefusingDirs(path, args, kwargs, report)
-                : this.dispatchAdmitted(name, path, args, kwargs, report),
+              runWithSystemClock(this.namespace.systemClock, () =>
+                name === 'read' &&
+                kwargs?.warm !== true &&
+                kwargs?.admit_only !== true &&
+                !('retained' in (kwargs ?? {}))
+                  ? this.readRefusingDirs(path, args, kwargs, report)
+                  : this.dispatchAdmitted(name, path, args, kwargs, report),
+              ),
             ),
           this.access?.sessionId ?? this.caller?.session?.sessionId ?? null,
           true,
@@ -2943,7 +2946,7 @@ export class Dispatcher {
     created: unknown = null,
   ): Promise<void> {
     const opened = appendsNothing(name, args)
-    const observed = STAMP_WRITE_OPS.has(name) && !opened ? Date.now() / 1000 : null
+    const observed = STAMP_WRITE_OPS.has(name) && !opened ? systemNow() : null
     const removes = name === 'unlink' || name === 'rmdir' || name === 'rm_r'
     const row = created instanceof FileStat ? created : null
     // A copy reads its path, so only its destination changes: the copy is a
@@ -3504,7 +3507,7 @@ export class Dispatcher {
       // that invented the directories above it.
       const refusal = await this.symlinkRefusal(path, issuer)
       if (refusal !== null) throw refusal
-      await this.namespace.symlink(path.virtual, target, Date.now() / 1000)
+      await this.namespace.symlink(path.virtual, target, systemNow())
     } else if (name === 'stat') {
       const row = this.namespace.linkStatAt(path.virtual)
       if (row === null) throw enoent(path)
@@ -3983,7 +3986,7 @@ export class Dispatcher {
         }
       }
       await this.changed(spec.virtual, FileChangeKind.CREATE, null, {
-        observed: Date.now() / 1000,
+        observed: systemNow(),
       })
     }
   }

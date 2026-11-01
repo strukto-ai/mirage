@@ -165,4 +165,6 @@ export interface WorkspaceStateDict {
   max_memory?: number | null
   /** The workspace's network setting, as written. */
   network?: NetworkSetting
+  /** The workspace's system_time, as written; null for the host's time. */
+  system_time?: string | null
 }

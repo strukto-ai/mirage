@@ -49,6 +49,7 @@ import { fullIsoTime } from '../utils/formatting.ts'
 import { UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
 import { linksOf, dispatchOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
+import { systemDate } from '../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -190,7 +191,7 @@ export function quoteHeaderName(name: string): string {
 // input, as POSIX asks and diffutils does.
 async function headerTime(walk: Walk, path: PathSpec, absent: boolean): Promise<string> {
   if (absent) return fullIsoTime(null, walk.zone)
-  if (isStdin(path)) return fullIsoTime(new Date().toISOString(), walk.zone)
+  if (isStdin(path)) return fullIsoTime(systemDate().toISOString(), walk.zone)
   const info =
     (walk.statPath !== null ? await walk.statPath(path) : null) ?? (await walk.stat(path))
   return fullIsoTime(info.modified, walk.zone)

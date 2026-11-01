@@ -128,6 +128,9 @@ export interface Target {
   // with no real time passing. Only the gws opener consults it; main.ts
   // refuses it on any other target.
   clock?: 'manual'
+  // The workspace's system_time, an ISO 8601 instant. Only the ram opener
+  // consults it; main.ts refuses it on any other VFS.
+  system_time?: string
   // The env plane fixture this target declares: 'healthy' registers the
   // counting fake source and builds the managed env block, 'dead' a
   // source whose every fetch fails. Only the ram opener consults it;

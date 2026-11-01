@@ -45,6 +45,7 @@ constructors default to `read`.
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
 | `max_memory` | Bound what the workspace holds in memory, its RAM files and what a command builds, as a [size](#sizes); `32MB` by default, `null` for no cap. See [memory](/home/core/output-limits#limit-a-workspaces-memory). |
 | `network` | Choose where the workspace's connections may go, described [below](#network). |
+| `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
 | `env` | Seed literal or managed environment variables, described below. |
 | `secrets` | Declare named [credential sources](/home/authentication). |
 | `cache`, `index` | Configure cached file content and directory/stat metadata, described [below](#cache-index-and-store). |
@@ -148,6 +149,34 @@ Mirage cannot judge them, so while `network` limits anything, or a policy
 judges connections, it refuses to run: `Permission denied`, exit 126. A
 sandbox runtime connects from its own machine, under that sandbox's own
 network settings.
+
+## System time
+
+`system_time` sets the time the workspace starts at, as an ISO 8601 time
+with a zone offset. From there it moves forward in real time:
+
+```yaml
+system_time: 2026-03-02T09:00:00Z
+env:
+  TZ: America/New_York
+```
+
+```bash
+date -u                 # Mon Mar  2 09:00:00 UTC 2026
+touch notes.txt         # stamped Mar  2 09:00
+python3 -c 'import datetime; print(datetime.date.today())'   # 2026-03-02
+```
+
+`date`, file times, `ls -l`, `find -mtime`, `jq`'s `now`, git commits, and
+Python and JavaScript in the workspace all see this time. `TZ` in `env`
+picks the zone it is shown in. Without `system_time`, the workspace uses
+the machine's time.
+
+Each workspace keeps its own time, so workspaces on one server can each
+start at a different date. Snapshots keep the setting, and `GET
+/v1/workspaces/{id}` returns it. Programs that `local` or Sandlock run as
+processes on this machine, and sandbox runtimes, use their own machine's
+clock.
 
 ## Read and write policies
 

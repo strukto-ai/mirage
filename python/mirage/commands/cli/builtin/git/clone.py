@@ -15,7 +15,6 @@
 import asyncio
 import posixpath
 import re
-import time
 from collections.abc import Mapping
 
 from dulwich.objects import ObjectID
@@ -78,6 +77,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.clock import system_now
 
 
 def default_directory(url: str) -> str:
@@ -311,7 +311,7 @@ async def _populate(
         assert want.local is not None
         await write_ref(vfs, gitdir, want.local, want.oid.encode())
     reason = f"clone: from {url}"
-    now = int(time.time())
+    now = int(system_now())
     if adv.head is not None and adv.head in adv.refs:
         tracking = f"refs/remotes/{remote}/HEAD"
         await write_file(

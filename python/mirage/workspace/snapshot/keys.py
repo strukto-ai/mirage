@@ -36,6 +36,7 @@ class StateKey(StrEnum):
     COMMAND_LIMITS = "command_limits"
     MAX_MEMORY = "max_memory"
     NETWORK = "network"
+    SYSTEM_TIME = "system_time"
 
 
 class MountKey(StrEnum):

@@ -45,6 +45,7 @@ import { helpPage, versionLine } from '../../spec/standard.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { programFileRefusal, readProgramFile } from './program.ts'
+import { systemNow } from '../../../utils/clock.ts'
 
 type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
@@ -247,7 +248,7 @@ export class JqInputs {
    * why it could not be opened or read, in strerror's words.
    */
   async serve(request: Readonly<Record<string, JsonValue>>): Promise<Served> {
-    if (request.op === 'now') return { reply: { kind: 'now', now: Date.now() / 1000 } }
+    if (request.op === 'now') return { reply: { kind: 'now', now: systemNow() } }
     const index = request.input
     const source = typeof index === 'number' ? this.sources[index] : undefined
     if (request.op !== 'read' || typeof index !== 'number' || source === undefined)

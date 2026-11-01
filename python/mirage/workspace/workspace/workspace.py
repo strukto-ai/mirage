@@ -139,7 +139,12 @@ from mirage.types import (
     parse_mount_mode,
 )
 from mirage.utils.abort import MirageAbortError, run_cancellable
-from mirage.utils.clock import Clock, SystemClock
+from mirage.utils.clock import (
+    Clock,
+    ShiftedClock,
+    SystemClock,
+    parse_system_time,
+)
 from mirage.utils.hidden import path_visible
 from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.size import parse_limit
@@ -261,6 +266,7 @@ class Workspace:
         cache_limit: str | int = "32MB",
         max_memory: str | int | None = MAX_MEMORY,
         network: NetworkSetting = True,
+        system_time: str | None = None,
         cache: CacheConfig | None = None,
         index: IndexConfig | None = None,
         mode: MountMode = MountMode.READ,
@@ -331,6 +337,17 @@ class Workspace:
         # workspace's network setting and the process's ceiling.
         self._network = network
         self._registry.network = network_rule(network)
+        # What the agent sees as now starts at system_time and ticks with
+        # the workspace clock; credentials, ids and timeouts stay on that
+        # clock.
+        self._system_time = system_time
+        self._registry.system_clock = (
+            None
+            if system_time is None
+            else ShiftedClock.starting(
+                self._clock, parse_system_time(system_time)
+            )
+        )
         # One provider scopes every control-plane store by workspace id;
         # the per-plane params (observe / namespace_store / session_store)
         # remain as direct overrides that win over the provider.
@@ -1602,6 +1619,12 @@ class Workspace:
         return self._network
 
     @property
+    def system_time(self) -> str | None:
+        """The workspace's ``system_time``, as it was written; None for
+        the host's time."""
+        return self._system_time
+
+    @property
     def registry(self) -> MountRegistry:
         """Mount table; consumed by the event runtime."""
         return self._registry
@@ -2152,6 +2175,7 @@ class Workspace:
             io=args.io,
             max_memory=args.max_memory,
             network=args.network,
+            system_time=args.system_time,
             mode=MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,

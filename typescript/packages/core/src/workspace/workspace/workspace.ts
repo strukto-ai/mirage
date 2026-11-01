@@ -149,7 +149,7 @@ import {
 } from '../../policy/profile.ts'
 import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
-import { type Clock, SystemClock } from '../../utils/clock.ts'
+import { type Clock, parseSystemTime, ShiftedClock, SystemClock } from '../../utils/clock.ts'
 import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { EventRuntime } from '../../events/base.ts'
@@ -192,6 +192,7 @@ export class Workspace {
   private readonly runtimeBinding: WorkspaceBinding
   readonly registry: MountRegistry
   private readonly networkSetting: NetworkSetting
+  private readonly systemTimeSetting: string | null
   readonly sessionManager: SessionManager
   private readonly wsId: string
   private readonly stateStoreInternal: WorkspaceStateStore
@@ -551,6 +552,13 @@ export class Workspace {
     // network setting and the process's ceiling.
     this.networkSetting = options.network ?? true
     this.registry.network = networkRule(this.networkSetting)
+    // What the agent sees as now starts at system_time and ticks with the
+    // workspace clock; credentials, ids and timeouts stay on that clock.
+    this.systemTimeSetting = options.systemTime ?? null
+    this.registry.systemClock =
+      this.systemTimeSetting === null
+        ? null
+        : ShiftedClock.starting(this.clock, parseSystemTime(this.systemTimeSetting))
     for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
       const mount = this.registry.mountForPrefix(prefix)
       for (const [name, limit] of Object.entries(limits)) mount.commandLimits.set(name, limit)
@@ -1144,6 +1152,11 @@ export class Workspace {
   /** The workspace's `network` setting, as it was written. */
   get network(): NetworkSetting {
     return this.networkSetting
+  }
+
+  /** The workspace's `system_time`, as it was written; null for the host's time. */
+  get systemTime(): string | null {
+    return this.systemTimeSetting
   }
 
   /** The profile table every session here runs under. */
@@ -2264,6 +2277,7 @@ export class Workspace {
       io: args.io,
       maxMemory: args.maxMemory,
       network: args.network,
+      systemTime: args.systemTime,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       commandLimits: args.commandLimits,
@@ -2331,6 +2345,7 @@ export class Workspace {
       ids: options.ids ?? this.ids,
       ...(options.commandLimits !== undefined ? { commandLimits: options.commandLimits } : {}),
       ...(options.network !== undefined ? { network: options.network } : {}),
+      ...(options.systemTime !== undefined ? { systemTime: options.systemTime } : {}),
       ...(options.profiles != null ? { profiles: options.profiles, profile: null } : {}),
       ...(options.profile != null ? { profile: options.profile } : {}),
     }

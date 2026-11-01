@@ -20,6 +20,7 @@ import type { JsonValue } from '../types.ts'
 import { parseDateExpr } from '../utils/dates.ts'
 import { UTC_ZONE } from '../utils/timezone.ts'
 import { scanned } from './scan.ts'
+import { systemNow } from '../utils/clock.ts'
 
 export const OPERAND = ''
 export const DAY = 86400
@@ -330,7 +331,7 @@ export class FindParse {
    * resolve. `now` is the clock `-mtime` counts from, the current time by
    * default. Throws UsageError for a `-newermt` text that is no date.
    */
-  bind(newerTimes: readonly number[] = [], now: number = Date.now() / 1000): FindExpr {
+  bind(newerTimes: readonly number[] = [], now: number = systemNow()): FindExpr {
     const binding: Binding = { refs: newerTimes, now, window: null }
     const tree = node(object(this.values.tree), binding)
     const [mtimeMin, mtimeMax] = binding.window ?? [null, null]

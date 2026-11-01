@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 from dataclasses import dataclass, replace
 
 from dulwich.config import ConfigFile
@@ -69,6 +68,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.clock import system_now
 from mirage.workspace.files import Files
 
 FETCH_HEAD = "FETCH_HEAD"
@@ -408,7 +408,7 @@ async def update_refs(
     local = repo.refs.as_dict()
     rows = []
     rejected = False
-    now = int(time.time())
+    now = int(system_now())
     for want in wanted:
         if want.local is None:
             kind = (

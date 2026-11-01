@@ -63,6 +63,8 @@ export interface ExecuteRequest {
   bridge?: string
   /** The mirage-rs module the page compiled, which a browser worker's bundle leaves out. */
   wasm?: WebAssembly.Module
+  /** Seconds the guest's wall clock runs ahead of the host's: the workspace's system_time. */
+  offset?: number
 }
 /**
  * The run's standard streams on the main thread, which the guest's stdio

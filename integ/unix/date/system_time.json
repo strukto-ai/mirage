@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "id": "date_system_time_starts_the_clock",
+      "seq": 995000,
+      "targets": [
+        "ram-system-time"
+      ],
+      "command": "date -u +%F%H",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-03-0209\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_system_time_shows_in_tz",
+      "seq": 995001,
+      "targets": [
+        "ram-system-time"
+      ],
+      "command": "TZ=Asia/Shanghai date +%F%H",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-03-0217\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_system_time_reads_relative_dates",
+      "seq": 995002,
+      "targets": [
+        "ram-system-time"
+      ],
+      "command": "date -u -d tomorrow +%F",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-03-03\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_system_time_stamps_a_write",
+      "seq": 995003,
+      "targets": [
+        "ram-system-time"
+      ],
+      "command": "touch /data/st && find /data/st -newermt 2026-03-01 && find /data/st -newermt 2026-03-03",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/st\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_system_time_counts_find_mtime",
+      "seq": 995004,
+      "targets": [
+        "ram-system-time"
+      ],
+      "command": "echo x > /data/fresh && find /data/fresh -mtime 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/fresh\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_system_time_answers_jq_now",
+      "seq": 995005,
+      "targets": [
+        "ram-system-time"
+      ],
+      "command": "echo '{}' | jq -r 'now | todate | .[0:10]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-03-02\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "date_system_time_answers_python",
+      "seq": 995006,
+      "targets": [
+        "ram-system-time"
+      ],
+      "command": "python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).date(), datetime.date.today())'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026-03-02 2026-03-02\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

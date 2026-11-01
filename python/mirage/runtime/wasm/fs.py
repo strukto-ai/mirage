@@ -70,6 +70,7 @@ from mirage.runtime.wasm.stat import (
 )
 from mirage.runtime.wasm.view import WasmView
 from mirage.shell.constants import INTERRUPTED_STATUS
+from mirage.utils.clock import system_now
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.stat_view import CHAR_MODE
 
@@ -320,7 +321,11 @@ class WasiFs:
     ) -> int:
         if clock not in (0, 1):
             return EINVAL
-        now = time.time_ns() if clock == 0 else time.monotonic_ns()
+        now = (
+            round(system_now() * 1_000_000_000)
+            if clock == 0
+            else time.monotonic_ns()
+        )
         self._store(caller, result, struct.pack("<Q", now))
         return OK
 
@@ -364,7 +369,11 @@ class WasiFs:
                 else:
                     remaining = timeout
                     if flags & 1:
-                        remaining -= time.time_ns() if clock == 0 else now
+                        remaining -= (
+                            round(system_now() * 1_000_000_000)
+                            if clock == 0
+                            else now
+                        )
                     deadline = now + max(0, remaining)
             elif kind in (1, 2):
                 fd = struct.unpack_from("<I", subscriptions, offset + 16)[0]
@@ -927,7 +936,7 @@ class WasiFs:
             fst_flags (int): which stamps to write, and from where.
             nofollow (bool): stamp a trailing link itself.
         """
-        now = time.time()
+        now = system_now()
         atime = _stamp(fst_flags, FST_ATIM, FST_ATIM_NOW, atim, now)
         mtime = _stamp(fst_flags, FST_MTIM, FST_MTIM_NOW, mtim, now)
         if atime is None and mtime is None:

@@ -95,17 +95,33 @@ async function execute(request: ExecuteRequest): Promise<void> {
     // The program the main thread resolved, its script rebuilt from the
     // fields structured clone kept.
     const { scriptPath, ...program } = request.program
-    const value = await runtime.interpret(
-      undefined,
-      { ...program, ...(scriptPath !== undefined ? { scriptPath: new PathSpec(scriptPath) } : {}) },
-      {
-        stdin: null,
-        flags: request.flags,
-        cwd: PathSpec.fromStrPath(request.cwd),
-        env: request.env,
-        ...(request.timeoutSeconds !== undefined ? { timeoutSeconds: request.timeoutSeconds } : {}),
-      },
-    )
+    // The guest's wall clock, which Emscripten reads from this worker's
+    // `Date.now`, runs at the workspace's system_time for the run. The
+    // worker is this runtime's own and its interpreter runs one program
+    // at a time.
+    const hostNow = Date.now
+    const offset = request.offset ?? 0
+    if (offset !== 0) Date.now = () => hostNow() + offset * 1000
+    const value = await runtime
+      .interpret(
+        undefined,
+        {
+          ...program,
+          ...(scriptPath !== undefined ? { scriptPath: new PathSpec(scriptPath) } : {}),
+        },
+        {
+          stdin: null,
+          flags: request.flags,
+          cwd: PathSpec.fromStrPath(request.cwd),
+          env: request.env,
+          ...(request.timeoutSeconds !== undefined
+            ? { timeoutSeconds: request.timeoutSeconds }
+            : {}),
+        },
+      )
+      .finally(() => {
+        Date.now = hostNow
+      })
     post({ kind: 'result', value })
   } catch (error) {
     post({

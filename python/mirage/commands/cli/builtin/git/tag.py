@@ -14,7 +14,6 @@
 
 import asyncio
 import posixpath
-import time
 from collections import Counter
 from dataclasses import dataclass
 
@@ -84,6 +83,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.clock import system_now
 
 # git's own formats for a tag listing: the name, or under -n<num> the
 # name padded to 15 columns and that many lines of the message.
@@ -353,7 +353,7 @@ async def tag(
             target,
             flags.message or "",
             identity(fl, ctx.session),
-            int(time.time()),
+            int(system_now()),
         )
         pointed = written.id
     else:

@@ -31,6 +31,7 @@ import { openRepo } from './repo.ts'
 import { commitEntries } from './tree.ts'
 import { isLocal, openTransport, type Advertisement, type Transport } from './transport.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 
@@ -212,7 +213,7 @@ async function populate(
   for (const want of wants)
     if (want.local !== null) await writeRef(vfs, gitdir, want.local, want.oid)
   const reason = `clone: from ${url}`
-  const now = Math.floor(Date.now() / 1000)
+  const now = Math.floor(systemNow())
   const headOid = adv.head === null ? undefined : adv.refs.get(adv.head)
   if (adv.head !== null && headOid !== undefined) {
     const tracking = `refs/remotes/${remote}/HEAD`

@@ -166,6 +166,9 @@ export class MountRegistry {
   memory: MemoryBudget | null = null
   // The rule the workspace's connections are judged by; null for no limit.
   network: NetworkRule | null = null
+  // The workspace's system_time on its clock, which what the agent sees
+  // reads; null for the host's time.
+  systemClock: Clock | null = null
   // The rule each profile's `network` narrows it to, by the layer it adds,
   // with the rule it narrowed.
   private readonly narrowed = new Map<string, [NetworkRule | null, NetworkRule]>()

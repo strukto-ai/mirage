@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+import time as _time
 from collections.abc import Iterator
 from concurrent.futures import CancelledError
 from contextlib import contextmanager
+from datetime import date, datetime, tzinfo
 from pathlib import PurePosixPath
 from stat import S_ISREG
 from typing import Any
@@ -38,6 +40,7 @@ from mirage.runtime.python.monty.loader import (
 )
 from mirage.runtime.python.monty.stat import stat_result
 from mirage.runtime.types import VFSEntry, VFSStat
+from mirage.utils.clock import bound_system_clock
 from mirage.utils.remnants import entry_name
 
 logger = logging.getLogger(__name__)
@@ -81,7 +84,9 @@ class MontyFs(AbstractOS):
     content goes only through the runtime's view (``RuntimeFiles.serves``:
     the announced mounts and what a link reaches), so a guest lists what
     a shell lists and reads and writes nothing the view withholds. The
-    environment, the clocks and ``urandom`` are the engine's own.
+    environment and ``urandom`` are the engine's own, and so are the
+    clocks unless the workspace sets a ``system_time``: then the wall
+    clocks answer from it.
 
     Monty hands the callbacks whole-file calls: an open, then reads of the
     whole file and appends of each new write. So an open applies its
@@ -109,6 +114,26 @@ class MontyFs(AbstractOS):
         self.max_urandom_bytes = MAX_URANDOM_BYTES
         self._environ = dict(environ)
         self._files = files
+        # The workspace's system clock the run starts on, None for the
+        # engine's own: the engine calls back from its own threads, which
+        # the line's binding does not reach.
+        self.clock = bound_system_clock()
+
+    def datetime_now(self, tz: tzinfo | None = None) -> datetime:
+        return datetime.fromtimestamp(self._wall(), tz)
+
+    def date_today(self) -> date:
+        return datetime.fromtimestamp(self._wall()).date()
+
+    def time(self, caller: str = "time.time") -> float:
+        # The wall clocks read the system clock; monotonic and
+        # perf_counter keep the host's.
+        if caller.startswith(("time.monotonic", "time.perf_counter")):
+            return _time.monotonic()
+        return self._wall()
+
+    def _wall(self) -> float:
+        return _time.time() if self.clock is None else self.clock.now()
 
     def getenv(self, key: str, default: str | None = None) -> str | None:
         return self._environ.get(key, default)

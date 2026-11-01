@@ -147,6 +147,9 @@ class WorkspaceLike(Protocol):
     def network(self) -> NetworkSetting: ...
 
     @property
+    def system_time(self) -> str | None: ...
+
+    @property
     def cache(self) -> FileCacheMixin: ...
 
     @property
@@ -406,6 +409,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         StateKey.NETWORK: (
             ws.network if isinstance(ws.network, bool) else dict(ws.network)
         ),
+        StateKey.SYSTEM_TIME: ws.system_time,
     }
 
 
@@ -624,6 +628,7 @@ def build_mount_args(
         profile=state.get(StateKey.PROFILE),
         max_memory=state.get(StateKey.MAX_MEMORY, MAX_MEMORY),
         network=state.get(StateKey.NETWORK, True),
+        system_time=state.get(StateKey.SYSTEM_TIME),
     )
 
 

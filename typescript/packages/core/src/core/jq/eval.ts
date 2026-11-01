@@ -20,6 +20,7 @@ import { YieldBudget } from '../../io/yield_budget.ts'
 import { StreamRefusal } from '../../rs/errors.ts'
 import { closeStream, openStream, type OpenStream } from '../../rs/stream.ts'
 import { TZ_VAR } from '../../utils/timezone.ts'
+import { systemNow } from '../../utils/clock.ts'
 
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
 const ENC = new TextEncoder()
@@ -176,7 +177,7 @@ export class Engine {
           const asked = stream.request()
           if (asked === null) break
           if (asked[0].op === 'now') {
-            wire = stream.respond({ kind: 'now', now: Date.now() / 1000 }, new Uint8Array())
+            wire = stream.respond({ kind: 'now', now: systemNow() }, new Uint8Array())
           } else if (asked[0].op === 'input') {
             wire = stream.respond({ kind: 'end' }, new Uint8Array())
           } else {

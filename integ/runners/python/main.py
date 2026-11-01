@@ -219,6 +219,15 @@ async def run_target(
         raise ValueError(
             f"target {target['id']}: clock targets ride the gws fake"
         )
+    # So is a system_time, a ram-only option, as the TypeScript runner
+    # refuses it elsewhere.
+    if (
+        target.get("system_time") is not None
+        and target["mounts"][0]["vfs"] != "ram"
+    ):
+        raise ValueError(
+            f"target {target['id']}: system_time targets ride ram mounts"
+        )
     ws, cleanup, faults = await adapters.open_target(target)
     try:
         for mount in target["mounts"]:

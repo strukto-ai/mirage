@@ -447,6 +447,22 @@
       }
     },
     {
+      "id": "ram-system-time",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "system_time": "2026-03-02T09:00:00Z",
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "ram",
+          "backend": "memory",
+          "mode": "exec"
+        }
+      ]
+    },
+    {
       "id": "http-ram",
       "facet": "http",
       "service": "http",

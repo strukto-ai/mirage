@@ -394,6 +394,7 @@ async function openRam(target: Target, options?: OpenOptions): Promise<Open> {
     ...(store !== undefined ? { store } : {}),
     ...(cache !== undefined ? { cache } : {}),
     ...(secretsEnv !== null ? { env: secretsEnv.env } : {}),
+    ...(target.system_time !== undefined ? { systemTime: target.system_time } : {}),
     ...permissionOptions(target),
   })
   installLocalClis(ws, target)

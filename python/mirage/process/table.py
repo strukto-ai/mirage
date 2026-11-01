@@ -1,6 +1,5 @@
 import asyncio
 import errno
-import time
 from collections.abc import Callable
 from threading import RLock
 
@@ -10,6 +9,7 @@ from mirage.process.handle import ExecutionBind, ProcessHandle
 from mirage.process.types import ProcessInfo, ProcessRunner
 from mirage.process.view import ProcessView
 from mirage.types import PathSpec
+from mirage.utils.clock import system_now
 from mirage.utils.ids import IdSource
 
 
@@ -116,7 +116,7 @@ class ProcessTable:
                     session_id,
                     command,
                     cwd,
-                    time.time(),
+                    system_now(),
                     execution_id=execution_id or new_execution_id(self._ids),
                     parent_pid=parent_pid,
                     group_id=group_id,

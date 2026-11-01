@@ -413,6 +413,21 @@ describe('configToWorkspaceArgs', () => {
     expect(() => loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, network })).toThrow(message)
   })
 
+  it('passes the workspace system_time on', async () => {
+    const cfg = loadWorkspaceConfig({
+      mounts: { '/': { vfs: 'ram' } },
+      system_time: '2026-03-02T09:00:00Z',
+    })
+    const args = await configToWorkspaceArgs(cfg)
+    expect(args.options.systemTime).toBe('2026-03-02T09:00:00Z')
+  })
+
+  it.each(['2026-03-02', 20260302])('refuses the workspace system_time %o', (systemTime) => {
+    expect(() =>
+      loadWorkspaceConfig({ mounts: { '/': { vfs: 'ram' } }, system_time: systemTime }),
+    ).toThrow(/system_time/)
+  })
+
   it('refuses a runtime entry script', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },

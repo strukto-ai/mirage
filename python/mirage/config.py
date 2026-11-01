@@ -62,6 +62,7 @@ from mirage.types import (
     WritePolicy,
     parse_mount_mode,
 )
+from mirage.utils.clock import parse_system_time
 from mirage.utils.loader import load_attr, optional_attr
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
@@ -703,6 +704,9 @@ class WorkspaceConfig(BaseModel):
     # Where the workspace's connections may go: true for anywhere, false
     # for nowhere, or {allow: [hosts and ranges]}.
     network: bool | dict[str, list[str] | dict[str, str]] = True
+    # The workspace's time when it starts, an ISO 8601 instant with an
+    # offset (2026-03-02T09:00:00Z); unset is the host's time.
+    system_time: str | None = None
     # Installed CLIs, fully separate from mounts: key = installed head
     # word, value names a registered CLI plus its own config.
     clis: dict[str, CLIBlock] | None = None
@@ -784,6 +788,13 @@ class WorkspaceConfig(BaseModel):
             }
         )
 
+    @field_validator("system_time")
+    @classmethod
+    def _v_system_time(cls, v: str | None) -> str | None:
+        if v is not None:
+            parse_system_time(v)
+        return v
+
     @model_validator(mode="after")
     def _v_profile(self) -> "WorkspaceConfig":
         # The workspace's default profile must be one it defines; the
@@ -849,6 +860,8 @@ class WorkspaceConfig(BaseModel):
             kwargs["max_memory"] = self.max_memory
         if "network" in self.model_fields_set:
             kwargs["network"] = self.network
+        if self.system_time is not None:
+            kwargs["system_time"] = self.system_time
         if self.cache is not None:
             kwargs["cache"] = _build_cache_config(self.cache)
         if self.index is not None:

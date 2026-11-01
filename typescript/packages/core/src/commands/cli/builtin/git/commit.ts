@@ -47,6 +47,7 @@ import type { IndexState } from './types.ts'
 import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 
 // git tags the first commit on a branch so the reflog reads
 // "commit (initial): ..." rather than plain "commit: ...".
@@ -248,7 +249,7 @@ export async function commit(
   }
   const parents = before === null ? [] : [await git.resolveRef({ ...repoArgs(repo), ref: 'HEAD' })]
   const who = identity(fl, ctx.session)
-  const when = Math.floor(Date.now() / 1000)
+  const when = Math.floor(systemNow())
   const oid = await buildCommit(repo, state, message, who, parents, when)
   // The object is written and the ref is not, as git leaves it: the files
   // backend refuses to lock a HEAD whose branch path leaves the ref tree,

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import math
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import timezone
@@ -48,6 +47,7 @@ from mirage.core.generic.find_eval import (
 from mirage.rs.scan import scanned
 from mirage.shell.bytes import text_view
 from mirage.types import JsonValue
+from mirage.utils.clock import system_now
 from mirage.utils.dates import parse_date_expr
 
 OPERAND = ""
@@ -446,7 +446,7 @@ class FindParse:
         Raises:
             UsageError: a ``-newermt`` text that is no date.
         """
-        binding = _Binding(newer_times, time.time() if now is None else now)
+        binding = _Binding(newer_times, system_now() if now is None else now)
         tree = _node(_object(self.values["tree"]), binding)
         window = binding.window or (None, None)
         return FindExpr(

@@ -25,6 +25,7 @@ import {
 import { DateFormatColonError, UnknownDateFormatError } from './errors.ts'
 import { DateKind, type DateMode } from './types.ts'
 import { MONTHS } from '../../../builtin/utils/constants.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
@@ -167,7 +168,7 @@ interface Wall {
  * @param env the command environment, read for `GIT_TEST_DATE_NOW` and `TZ`
  */
 export function dateClock(env: Readonly<Record<string, string>> | null | undefined): DateMode {
-  let now = Math.floor(Date.now() / 1000)
+  let now = Math.floor(systemNow())
   const test = env?.[NOW_VAR]
   if (test !== undefined) {
     const found = LEADING_INT.exec(test)

@@ -83,6 +83,7 @@ import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, splitMarked, startPoint as lineStart, requireVfs } from './util.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 
@@ -408,7 +409,7 @@ async function attach(
   creating: boolean,
   from: string,
 ): Promise<void> {
-  const when = Math.floor(Date.now() / 1000)
+  const when = Math.floor(systemNow())
   if (creating && ref !== null) {
     await writeRef(vfs, repo.location.commondir, ref, oid)
     const log = repo.location.commondir.join('logs', ref)

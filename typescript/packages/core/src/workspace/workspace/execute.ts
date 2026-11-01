@@ -115,6 +115,7 @@ import type { Runtimes } from './runtimes.ts'
 import { ExecuteResult, type ExecuteOptions } from './types.ts'
 import { commandName, forkForCall } from './utils.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { runWithSystemClock } from '../../utils/clock.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -1107,18 +1108,20 @@ async function runParsedLine(
           env.registry.policies,
           () =>
             runWithMemory(env.registry.memory, () =>
-              runWholeLine(
-                lineRuntime,
-                command,
-                stdin,
-                effectiveSession,
-                env.registry,
-                killed,
-                claimantFor(rootNode, handed),
-                route,
-                options.sink,
-                deadline?.seconds ?? null,
-                deadline?.start,
+              runWithSystemClock(env.registry.systemClock, () =>
+                runWholeLine(
+                  lineRuntime,
+                  command,
+                  stdin,
+                  effectiveSession,
+                  env.registry,
+                  killed,
+                  claimantFor(rootNode, handed),
+                  route,
+                  options.sink,
+                  deadline?.seconds ?? null,
+                  deadline?.start,
+                ),
               ),
             ),
           effectiveSession.sessionId,
@@ -1255,23 +1258,26 @@ async function runParsedLine(
         // stop side effects and free producers, not to release the caller.
         const release = deps.parser instanceof ParseScope ? deps.parser.retain() : undefined
         // Every object a line builds must fit in what the workspace's
-        // max_memory has left, a nested line's too, and every connection it
-        // opens must clear the workspace's network.
+        // max_memory has left, a nested line's too, every connection it
+        // opens must clear the workspace's network, and it reads the
+        // workspace's system clock.
         const running = runWithEgress(
           env.registry.networkOf(context.session.network),
           env.registry.policies,
           () =>
-            runWithMemory(env.registry.memory, async () =>
-              runCommandTree(
-                deadline === null ? deps : { ...deps, signal: deadline.signal },
-                rootNode,
-                context,
-                stdin,
-                false,
-                options.callStack ?? null,
-                (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
-                  ? env.router.context(command, context.session, await judged())
-                  : null,
+            runWithMemory(env.registry.memory, () =>
+              runWithSystemClock(env.registry.systemClock, async () =>
+                runCommandTree(
+                  deadline === null ? deps : { ...deps, signal: deadline.signal },
+                  rootNode,
+                  context,
+                  stdin,
+                  false,
+                  options.callStack ?? null,
+                  (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
+                    ? env.router.context(command, context.session, await judged())
+                    : null,
+                ),
               ),
             ),
           context.session.sessionId,

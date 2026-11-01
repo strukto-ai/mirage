@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime, timezone
+from datetime import timezone
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.utils.strftime import gnu_strftime
@@ -29,6 +29,7 @@ from mirage.commands.spec.usage import (
 )
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.clock import system_date
 from mirage.utils.dates import parse_date_expr, parse_posix_time
 from mirage.utils.timezone import zone_from_env
 
@@ -162,7 +163,7 @@ async def date(
         # item at all it names today at midnight. Measured on coreutils
         # 9.4: `date -d ''` and `date -d '   '` both print today 00:00:00
         # in the command's zone.
-        now = datetime.now(zone)
+        now = system_date(zone)
         dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif d is not None:
         parsed_d = parse_date_expr(d, tz=zone)
@@ -172,7 +173,7 @@ async def date(
             return invalid_date(d)
         dt = parsed_d
     else:
-        dt = datetime.now(zone)
+        dt = system_date(zone)
     if zone is None:
         dt = dt.astimezone()
     fmt = formats[0] if formats else DEFAULT_FORMAT

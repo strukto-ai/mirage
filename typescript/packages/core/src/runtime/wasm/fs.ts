@@ -206,6 +206,9 @@ export class WasiFs {
     private readonly wait: (ms: number) => boolean,
     private readonly argv: readonly string[],
     private readonly env: readonly string[],
+    // Seconds the guest's wall clock runs ahead of the host's: the
+    // workspace's system_time.
+    private readonly offset = 0,
   ) {
     this.fds.set(0, new FdEntry('stdin', null, stdin ?? (() => new Uint8Array())))
     this.fds.set(1, new FdEntry('stdout'))
@@ -344,8 +347,14 @@ export class WasiFs {
 
   clock_time_get(clock: number, _precision: bigint, result: number): number {
     if (clock !== 0 && clock !== 1) return EINVAL
-    this.storeU64(result, clockNs(clock))
+    this.storeU64(result, this.now(clock))
     return OK
+  }
+
+  // Nanoseconds on `clock`, the wall clock at the workspace's system time.
+  private now(clock: number): bigint {
+    const ns = clockNs(clock)
+    return clock === 0 && this.offset !== 0 ? ns + BigInt(Math.round(this.offset * 1e9)) : ns
   }
 
   clock_res_get(clock: number, result: number): number {
@@ -370,7 +379,7 @@ export class WasiFs {
         if ((clock !== 0 && clock !== 1) || (flags & ~1) !== 0) error = EINVAL
         else {
           let remaining = timeout
-          if ((flags & 1) !== 0) remaining -= clock === 0 ? clockNs(0) : now
+          if ((flags & 1) !== 0) remaining -= clock === 0 ? this.now(0) : now
           deadline = now + (remaining > 0n ? remaining : 0n)
         }
       } else if (kind === 1 || kind === 2) {
@@ -742,7 +751,7 @@ export class WasiFs {
     fstFlags: number,
     nofollow: boolean,
   ): void {
-    const now = Date.now()
+    const now = Date.now() + this.offset * 1000
     const atime = stamp(fstFlags, FST_ATIM, FST_ATIM_NOW, atim, now)
     const mtime = stamp(fstFlags, FST_MTIM, FST_MTIM_NOW, mtim, now)
     // No stamp selected is a no-op, not an error: utimensat(2) with two
