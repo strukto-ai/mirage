@@ -27,6 +27,7 @@ import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
+  FAKETIME_LIBRARIES,
   SERVED,
   serve,
   unserve,
@@ -35,7 +36,9 @@ import {
   openProgramPipe,
   reapHostRun,
   runProgram,
+  systemTimeEnv,
 } from './program.ts'
+import { runWithSystemClock, ShiftedClock, SystemClock } from '@struktoai/mirage-core/utils/clock'
 import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
@@ -788,6 +791,33 @@ describe('host runs', () => {
       spy.mockRestore()
       process.kill(-pid, 'SIGKILL')
       child.unref()
+    }
+  })
+})
+
+describe('systemTimeEnv', () => {
+  it('preloads libfaketime at the workspace offset, before the env preload', async () => {
+    const library = join(mkdtempSync(join(tmpdir(), 'faketime-')), 'libfaketime.so.1')
+    writeFileSync(library, '')
+    const saved = FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, library)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    try {
+      const clock = ShiftedClock.starting(new SystemClock(), Date.now() / 1000 - 3600)
+      const env = await runWithSystemClock(clock, () =>
+        Promise.resolve(systemTimeEnv({ LD_PRELOAD: '/opt/x.so' })),
+      )
+      expect(env).toEqual({
+        LD_PRELOAD: `${library}:/opt/x.so`,
+        FAKETIME: '-3600s',
+        FAKETIME_DONT_FAKE_MONOTONIC: '1',
+      })
+      FAKETIME_LIBRARIES.splice(0, 1, join(tmpdir(), 'no-such-libfaketime.so.1'))
+      expect(await runWithSystemClock(clock, () => Promise.resolve(systemTimeEnv({})))).toBeNull()
+      expect(systemTimeEnv({})).toEqual({})
+    } finally {
+      FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, ...saved)
+      if (platform !== undefined) Object.defineProperty(process, 'platform', platform)
     }
   })
 })

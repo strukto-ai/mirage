@@ -20,6 +20,7 @@ from typing import Any
 
 from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
+from mirage.runtime.binding import refused_run
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.program import (
@@ -27,6 +28,7 @@ from mirage.runtime.sandbox.program import (
     close_children,
     cwd_refusal,
     run_program,
+    system_time_env,
 )
 from mirage.runtime.sandbox.sandlock.config import SandlockConfig
 from mirage.runtime.sandbox.sandlock.constants import (
@@ -126,8 +128,14 @@ class SandlockRuntime(
         # nothing, so no child outlives the close.
         if self._closed:
             raise RuntimeError(f"{self.name}: the runtime is closed")
+        given = {**self.config.env, **(ctx.env or {})}
+        clock = system_time_env(given)
+        if clock is None:
+            return refused_run(
+                self.name, "runtime cannot keep this workspace's system_time"
+            )
         wrapper = ["run", *self.policy_argv(), "--clean-env"]
-        for key, value in {**self.config.env, **(ctx.env or {})}.items():
+        for key, value in {**given, **clock}.items():
             wrapper += ["--env", f"{key}={value}"]
         # Requested variables go to the confined child.
         return await run_program(

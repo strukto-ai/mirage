@@ -30,7 +30,14 @@ import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OutputFn, Program, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
-import { closeChildren, cwdRefusal, onHostPath, runProgram } from '../../sandbox/program.ts'
+import {
+  closeChildren,
+  cwdRefusal,
+  onHostPath,
+  runProgram,
+  systemTimeEnv,
+} from '../../sandbox/program.ts'
+import { refusedRun } from '@struktoai/mirage-core/runtime/binding'
 import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
@@ -233,8 +240,14 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     // A run still finding its program when the runtime closed starts
     // nothing, so no child outlives the close.
     if (this.closed) return Promise.reject(new Error(`${this.name}: the runtime is closed`))
+    const given = { ...(this.config as LocalConfig).env, ...env }
+    const clock = systemTimeEnv(given)
+    if (clock === null)
+      return Promise.resolve(
+        refusedRun(this.name, "runtime cannot keep this workspace's system_time"),
+      )
     return runProgram(program, null, argv, stdin, {
-      env: { ...(this.config as LocalConfig).env, ...env },
+      env: { ...given, ...clock },
       children: this.children,
       direct: true,
       ...(output === undefined ? {} : { output }),

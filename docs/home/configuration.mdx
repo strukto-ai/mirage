@@ -177,9 +177,12 @@ machine's time.
 
 Each workspace keeps its own time, so workspaces on one server can each
 start at a different date. Snapshots keep the setting, and `GET
-/v1/workspaces/{id}` returns it. Programs that `local` or Sandlock run as
-processes on this machine, and sandbox runtimes, use their own machine's
-clock.
+/v1/workspaces/{id}` returns it.
+
+Programs that `local` or Sandlock run on this machine see the time through
+[libfaketime](https://github.com/wolfcw/libfaketime), on Linux
+(`apt install libfaketime`). Without it, or on macOS, they don't run and
+exit 126. Sandbox runtimes use their own machine's clock.
 
 ## Read and write policies
 

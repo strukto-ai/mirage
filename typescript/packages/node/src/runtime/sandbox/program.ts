@@ -15,7 +15,7 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { constants, hostname } from 'node:os'
 import { once } from 'node:events'
-import { constants as fsConstants, realpathSync } from 'node:fs'
+import { constants as fsConstants, realpathSync, statSync } from 'node:fs'
 import { access, open, stat } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
@@ -40,6 +40,42 @@ import { shellJoin } from '@struktoai/mirage-core/shell/join'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
+import { boundSystemClock, systemNow } from '@struktoai/mirage-core/utils/clock'
+
+// Where Linux distributions install libfaketime, which a process on this
+// host reads a workspace's system time through.
+export const FAKETIME_LIBRARIES = [
+  '/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1',
+  '/usr/lib/aarch64-linux-gnu/faketime/libfaketime.so.1',
+  '/usr/lib64/faketime/libfaketime.so.1',
+  '/usr/lib/faketime/libfaketime.so.1',
+  '/usr/local/lib/faketime/libfaketime.so.1',
+]
+
+/**
+ * What a process on this host needs to read the running workspace's system
+ * time: libfaketime preloaded at its offset from the host's clock, with the
+ * monotonic clock left alone. Empty when the workspace keeps the host's
+ * time; null when this host has no libfaketime. `env` is the process's
+ * environment, whose `LD_PRELOAD` libraries load after libfaketime. Mirrors
+ * Python's `system_time_env`.
+ */
+export function systemTimeEnv(env: Record<string, string>): Record<string, string> | null {
+  if (boundSystemClock() === null) return {}
+  const found =
+    process.platform === 'linux'
+      ? FAKETIME_LIBRARIES.filter((path) => statSync(path, { throwIfNoEntry: false })?.isFile())
+      : []
+  const library = found[0]
+  if (library === undefined) return null
+  const preload = env.LD_PRELOAD
+  const offset = Math.round(systemNow() - Date.now() / 1000)
+  return {
+    LD_PRELOAD: preload === undefined || preload === '' ? library : `${library}:${preload}`,
+    FAKETIME: `${offset >= 0 ? '+' : ''}${String(offset)}s`,
+    FAKETIME_DONT_FAKE_MONOTONIC: '1',
+  }
+}
 
 /**
  * Host folders a kernel mount in this process serves. A child started in
