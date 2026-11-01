@@ -1,0 +1,70 @@
+---
+title: Route Network
+description: Send a workspace's connections to one address to another, per workspace and per session.
+icon: network-wired
+---
+
+`network.routes` sends a connection to one `host:port` to another, as a
+container's port mapping does. The agent keeps the address its task names,
+and each workspace reaches its own copy of the service:
+
+```yaml
+network:
+  allowed_domains: ["127.0.0.1:61001"]
+  routes:
+    localhost:5003: 127.0.0.1:61001
+```
+
+```bash
+curl localhost:5003/messages      # reaches 127.0.0.1:61001
+curl localhost:5004/messages      # refused: no route, not allowed
+```
+
+A second workspace on the same server can route `localhost:5003` to
+`127.0.0.1:61002` and allow only that, so neither reaches the other's.
+
+## How a route applies
+
+- Every connection the workspace opens follows it: a line's `curl`, a
+  CLI's API call, `requests` or `fetch` in a runtime, a mount's reads. It
+  maps an address, not a URL, so HTTPS, WebSocket and database connections
+  follow it too.
+- It applies before the name is looked up, so a routed name need not
+  resolve.
+- [`allowed_domains` and `denied_domains`](/home/configuration#network)
+  judge where the route ends, and so does a
+  [`pre_network`](/home/policy/policies#pre_network-and-post_network)
+  policy, whose context names that end.
+- TLS still checks the name the program asked for. A browser page checks
+  it against the URL it sends, so there a route of an `https` or `wss`
+  address may change only the port.
+- Each side is `host:port`, an IPv6 address in brackets (`[::1]:8080`).
+  Two routes naming the same address, or a route that ends at another
+  route's address, are refused.
+
+## Per session
+
+A [profile](/home/profiles)'s `network` takes `routes` too. A session's
+routes replace the workspace's for the same address, and its lines stay
+held to both lists:
+
+```yaml
+network:
+  allowed_domains: ["127.0.0.1"]
+  routes:
+    localhost:5003: 127.0.0.1:61001
+profiles:
+  staging:
+    network:
+      routes:
+        localhost:5003: 127.0.0.1:61002
+```
+
+A mount serves every session, so it connects under the workspace's routes.
+In a browser page, a file call made inside a session's line follows that
+session's.
+
+A route is a table, not a policy's answer: `pre_network` runs only when a
+policy listens, and after the name is looked up, while a route applies to
+every connection, before the lookup. To route a session apart, give it a
+profile.

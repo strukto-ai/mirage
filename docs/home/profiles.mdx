@@ -55,7 +55,8 @@ every [instance](/home/core/shell#jobs-across-instances) of the workspace.
 `network` takes the workspace's grammar, and a session's lines are held to
 both: the profile can narrow where they connect, never widen it. A mount
 still connects under the workspace's `network`, since it serves every
-session.
+session. A profile's `routes` replace the workspace's for the same address:
+see [Route Network](/home/policy/route-network#per-session).
 
 ## Example: a research agent
 
