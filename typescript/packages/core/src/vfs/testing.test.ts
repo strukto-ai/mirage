@@ -26,7 +26,7 @@ import { sliceWindow } from '../utils/ranges.ts'
 import { BaseVFS } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
 import { RAMStore } from './ram/store.ts'
-import type { ConditionSupport, ReplaceRequest } from '../cache/types.ts'
+import type { ConditionSupport } from '../cache/types.ts'
 import {
   checkMutationContract,
   checkReadContract,
@@ -319,22 +319,59 @@ class ClaimsPutConditions extends RAMVFS {
   override get conditionSupport(): ConditionSupport {
     return { put: ['absent', 'match'] }
   }
+}
 
-  override async _replace(request: ReplaceRequest): Promise<unknown> {
-    return this.write(request.path, request.body)
+/** Declares conditional copies it cannot enforce, as moto does. */
+class ClaimsCopyConditions extends RAMVFS {
+  override get conditionSupport(): ConditionSupport {
+    return { copy: ['absent', 'match'] }
   }
 }
 
+const UNENFORCED_COPY = [
+  ['copy', 'absent'],
+  ['copy', 'match'],
+] as const
+
+async function names(vfs: RAMVFS): Promise<string[]> {
+  return (await vfs.readdir(DIRECTORY)).map((row) => row.name)
+}
+
 describe('checkMutationContract', () => {
-  it('passes on RAM', async () => {
-    await checkMutationContract(new RAMVFS(), SCRATCH)
+  it('passes on RAM and cleans up', async () => {
+    const vfs = new RAMVFS()
+    await checkMutationContract(vfs, SCRATCH)
+    expect(await names(vfs)).toEqual([])
+  })
+
+  it('cleans up after a failed check', async () => {
+    const vfs = new RenameKeepsSource()
+    await expect(checkMutationContract(vfs, SCRATCH)).rejects.toThrow()
+    expect(await names(vfs)).toEqual([])
+  })
+
+  it('skips an unenforced condition with a warning', async () => {
+    const warn = vi.spyOn(console, 'warn')
+    try {
+      await checkMutationContract(new ClaimsCopyConditions(), SCRATCH, undefined, UNENFORCED_COPY)
+      expect(warn).toHaveBeenCalledWith('mutation contract: copy (absent) skipped as unenforced')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('refuses an unenforced condition the VFS does not declare', async () => {
+    await expect(
+      checkMutationContract(new RAMVFS(), SCRATCH, undefined, UNENFORCED_COPY),
+    ).rejects.toThrow('does not declare')
   })
 
   it.each([
     [CopyKeepsDestination, 'over an existing file'],
     [RenameKeepsSource, 'rename must remove the source'],
     [RenameMissingQuietly, 'must raise ENOENT'],
-    [ClaimsPutConditions, 'must raise a stale write'],
+    [ClaimsPutConditions, 'lost put (absent) must raise'],
+    [ClaimsCopyConditions, 'lost copy (absent) must raise'],
   ] as const)('catches %o', async (Cls, message) => {
     await expect(checkMutationContract(new Cls(), SCRATCH)).rejects.toThrow(message)
   })

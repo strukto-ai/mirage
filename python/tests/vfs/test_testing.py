@@ -32,6 +32,7 @@ from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
+from mirage.core.s3.constants import CONDITION_SUPPORT
 from mirage.vfs.s3.config import S3Config
 from mirage.vfs.s3.s3 import S3VFS
 from mirage.vfs.testing import (
@@ -331,13 +332,60 @@ class ClaimsPutConditions(RAMVFS):
     def condition_support(self):
         return {"put": frozenset({"absent", "match"})}
 
-    async def _replace(self, request):
-        await self.write(request.path, request.body)
+
+class ClaimsCopyConditions(RAMVFS):
+    """Declares conditional copies it cannot enforce, as moto does."""
+
+    @property
+    def condition_support(self):
+        return {"copy": frozenset({"absent", "match"})}
+
+
+class AwsS3(S3VFS):
+    """S3 on moto declaring what AWS declares, not what a custom endpoint
+    does; moto ignores a copy's destination conditions."""
+
+    @property
+    def condition_support(self):
+        return CONDITION_SUPPORT
+
+
+UNENFORCED_COPY = frozenset({("copy", "absent"), ("copy", "match")})
+
+
+async def _names(vfs: RAMVFS) -> list[str]:
+    return [row.name for row in await vfs.readdir(DIRECTORY)]
 
 
 @pytest.mark.asyncio
-async def test_ram_meets_the_mutation_contract():
-    await check_mutation_contract(RAMVFS(), SCRATCH)
+async def test_ram_meets_the_mutation_contract_and_cleans_up():
+    vfs = RAMVFS()
+    await check_mutation_contract(vfs, SCRATCH)
+    assert await _names(vfs) == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_check_still_cleans_up():
+    vfs = RenameKeepsSource()
+    with pytest.raises(AssertionError):
+        await check_mutation_contract(vfs, SCRATCH)
+    assert await _names(vfs) == []
+
+
+@pytest.mark.asyncio
+async def test_an_unenforced_condition_is_skipped_with_a_warning():
+    with pytest.warns(UserWarning, match=r"copy \(absent\) skipped"):
+        await check_mutation_contract(
+            ClaimsCopyConditions(), SCRATCH, unenforced=UNENFORCED_COPY
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_unenforced_condition_must_be_declared():
+    with pytest.raises(AssertionError, match="does not declare"):
+        await check_mutation_contract(
+            RAMVFS(), SCRATCH, unenforced=UNENFORCED_COPY
+        )
 
 
 @pytest.fixture()
@@ -364,9 +412,12 @@ def moto_bucket() -> Iterator[tuple[str, str]]:
     raises=ClientError,
     reason="s3 copy of a missing source raises NoSuchKey, not ENOENT",
 )
-async def test_s3_meets_the_mutation_contract(moto_bucket):
+@pytest.mark.parametrize(
+    ("cls", "unenforced"), [(S3VFS, frozenset()), (AwsS3, UNENFORCED_COPY)]
+)
+async def test_s3_meets_the_mutation_contract(cls, unenforced, moto_bucket):
     endpoint, bucket = moto_bucket
-    vfs = S3VFS(
+    vfs = cls(
         S3Config(
             bucket=bucket,
             region="us-east-1",
@@ -376,7 +427,7 @@ async def test_s3_meets_the_mutation_contract(moto_bucket):
         )
     )
     try:
-        await check_mutation_contract(vfs, SCRATCH)
+        await check_mutation_contract(vfs, SCRATCH, unenforced=unenforced)
     finally:
         await vfs.close()
 
@@ -388,7 +439,8 @@ async def test_s3_meets_the_mutation_contract(moto_bucket):
         (CopyKeepsDestination, "over an existing file"),
         (RenameKeepsSource, "rename must remove the source"),
         (RenameMissingQuietly, "must raise FileNotFoundError"),
-        (ClaimsPutConditions, "must raise StaleWriteError"),
+        (ClaimsPutConditions, "lost put \\(absent\\) must raise"),
+        (ClaimsCopyConditions, "lost copy \\(absent\\) must raise"),
     ],
 )
 async def test_the_mutation_contract_catches(cls, message):
