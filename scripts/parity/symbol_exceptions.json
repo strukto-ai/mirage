@@ -1,5 +1,5 @@
 {
- "baseline": 1997,
+ "baseline": 1996,
  "modules": {
   "server/app": {
    "python_only": {
