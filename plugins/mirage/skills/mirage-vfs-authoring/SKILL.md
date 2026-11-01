@@ -170,6 +170,28 @@ listing, stat, byte reads, streams, native ranges, existence, and missing-path
 errors without mutating the resource. It takes the VFS itself, so the same
 probe works for builtins and external backends.
 
+For a writable backend, run `check_mutation_contract` / `checkMutationContract`
+with a `MutationFixture` naming an empty, disposable scratch directory. It checks
+every write precondition the VFS declares in `condition_support` /
+`conditionSupport`, then `rename` and `copy` of one file, and unlinks the files it
+wrote, pass or fail. A fake that cannot enforce a declared condition names it in
+`unenforced`; the check skips it with a warning.
+
+Each conditional op runs through `run_with_versions` / `runWithVersions`, which
+binds the write context a `write: conditional` mount would, holding the version a
+session read at each path (`None` / `null` for a path it found absent). Use it
+to test a backend's own conditional writes, copies and deletes the same way.
+
+```ts
+import { checkMutationContract, runWithVersions, type MutationFixture } from '@struktoai/mirage-core'
+
+const scratch: MutationFixture = {
+  directory: new PathSpec({ virtual: '/resource/scratch', directory: '/resource', vfsPath: 'scratch' }),
+}
+await checkMutationContract(vfs, scratch)
+await runWithVersions(vfs, [[file, null]], () => vfs.write(file, bytes))
+```
+
 Add backend-specific tests for pagination, authorization errors, and query options.
 Use disposable fixtures for mutation tests. Verify a read-only mount refuses
 writes and preserves the fixture. Do not run write probes against production data.

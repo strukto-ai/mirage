@@ -1,14 +1,33 @@
 import inspect
-from collections.abc import Awaitable, Callable
+import logging
+import warnings
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
+from mirage.cache.types import (
+    ConditionMode,
+    Measured,
+    OwnRead,
+    WriteContext,
+    WriteKind,
+)
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
+from mirage.errors.types import StaleWriteError
 from mirage.io.stream import close_quietly
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import get_extension
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.vfs.base import BaseVFS
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,26 +64,35 @@ def _taken(
     store: IndexCacheStore,
     entry: FileStat | None,
     parent: FileStat | None = None,
+    dst_entry: FileStat | None = None,
+    dst_parent: FileStat | None = None,
 ) -> dict[str, Any]:
     """What a VFS function is handed beside its path, as the mount hands
-    it: the store where it takes an index, what is at its path where it
-    declares ``entry``, and its folder's row where it declares
-    ``parent``.
+    it: the store where it takes an index, and each row it declares, what
+    is at its path (``entry``), at its folder (``parent``), and for a
+    two-path op at its destination (``dst_entry``, ``dst_parent``).
 
     Args:
         fn (Callable[..., Any]): the VFS function.
         store (IndexCacheStore): the store for a function that keeps one.
         entry (FileStat | None): what is at the path.
         parent (FileStat | None): what is at the path's folder.
+        dst_entry (FileStat | None): what is at the destination.
+        dst_parent (FileStat | None): what is at the destination's folder.
     """
     params = inspect.signature(fn).parameters
     taken: dict[str, Any] = {}
     if "index" in params:
         taken["index"] = store
-    if "entry" in params and entry is not None:
-        taken["entry"] = entry
-    if "parent" in params and parent is not None:
-        taken["parent"] = parent
+    rows = {
+        "entry": entry,
+        "parent": parent,
+        "dst_entry": dst_entry,
+        "dst_parent": dst_parent,
+    }
+    for name, row in rows.items():
+        if name in params and row is not None:
+            taken[name] = row
     return taken
 
 
@@ -258,3 +286,401 @@ async def check_read_contract(
         pass
     else:
         raise AssertionError("missing paths must raise FileNotFoundError")
+
+
+@dataclass(frozen=True, slots=True)
+class MutationFixture:
+    """An empty, caller-owned scratch directory the check writes its files
+    in, and the bytes it seeds them with."""
+
+    directory: PathSpec
+    content: bytes = b"mutation contract\n"
+
+
+_OTHER = b"replaced\n"
+_LOST = "0" * 32
+
+
+def _child(directory: PathSpec, name: str) -> PathSpec:
+    """The file ``name`` in ``directory``, keyed below the same mount.
+
+    Args:
+        directory (PathSpec): the scratch directory.
+        name (str): the file's name.
+    """
+    key = f"{directory.vfs_path.strip('/')}/{name}".lstrip("/")
+    return PathSpec(
+        virtual=directory.child(name),
+        directory=directory.virtual,
+        vfs_path=key,
+    )
+
+
+async def _rejects(
+    call: Awaitable[Any], error: type[BaseException], message: str
+) -> None:
+    """Check that ``call`` raises ``error``, letting any other propagate.
+
+    Args:
+        call (Awaitable[Any]): the call expected to fail.
+        error (type[BaseException]): the error it must raise.
+        message (str): the failure when it succeeds.
+    """
+    try:
+        await call
+    except error:
+        return
+    raise AssertionError(message)
+
+
+async def run_with_versions(
+    vfs: BaseVFS,
+    versions: Sequence[tuple[PathSpec, str | None]],
+    call: Awaitable[T],
+) -> T:
+    """Await ``call`` under the write context a ``write: conditional``
+    mount of ``vfs`` binds, its cache holding ``versions``.
+
+    Each pair is a path and the version a session read there, None for a
+    path it found no file at. A write, copy or delete of a listed path
+    then carries the condition ``condition_support`` declares for it:
+    ``match`` on the version, ``absent`` on None; an unlisted path goes
+    out unconditioned.
+
+    Args:
+        vfs (BaseVFS): the VFS the call writes through.
+        versions (Sequence[tuple[PathSpec, str | None]]): what the
+            session read at each path.
+        call (Awaitable[T]): the op to run.
+    """
+    held: dict[str, Measured] = {
+        path.virtual: OwnRead.ABSENT if version is None else version
+        for path, version in versions
+    }
+
+    async def read_version(path: PathSpec) -> Measured | None:
+        return held.get(path.virtual)
+
+    async def read_versions(paths: list[PathSpec]) -> list[Measured | None]:
+        return [held.get(path.virtual) for path in paths]
+
+    async def drop(path: PathSpec) -> None:
+        held.pop(path.virtual, None)
+
+    async def keep(path: PathSpec, version: Measured) -> None:
+        held[path.virtual] = version
+
+    support = vfs.condition_support
+    context = WriteContext(
+        vfs=vfs.name,
+        conditions=frozenset(
+            kind for kind, modes in support.items() if "match" in modes
+        ),
+        creates=frozenset(
+            kind for kind, modes in support.items() if "absent" in modes
+        ),
+        read_version=read_version,
+        read_versions=read_versions,
+        drop=drop,
+        keep=keep,
+    )
+    token = bind_caller(current_caller().changed({"write_context": context}))
+    try:
+        return await call
+    finally:
+        reset_caller(token)
+
+
+class _Checker:
+    """One mutation-contract run: the VFS, its store, and the files it
+    wrote in the scratch directory.
+
+    Args:
+        vfs (BaseVFS): the VFS being validated.
+        fixture (MutationFixture): the scratch directory and seed bytes.
+        store (IndexCacheStore): the store handed to every function.
+    """
+
+    def __init__(
+        self, vfs: BaseVFS, fixture: MutationFixture, store: IndexCacheStore
+    ) -> None:
+        self.vfs = vfs
+        self.fixture = fixture
+        self.store = store
+        self.other = fixture.content + _OTHER
+        self.written: dict[str, PathSpec] = {}
+
+    def path(self, name: str) -> PathSpec:
+        path = _child(self.fixture.directory, name)
+        self.written[path.virtual] = path
+        return path
+
+    async def handed(
+        self, fn: Callable[..., Any], *paths: PathSpec
+    ) -> dict[str, Any]:
+        """What ``fn`` is handed for ``paths``: only the rows its
+        parameters take, each read fresh, as the mount hands them.
+
+        Args:
+            fn (Callable[..., Any]): the VFS function.
+            *paths (PathSpec): its path, then a destination for a
+                two-path op.
+        """
+        params = inspect.signature(fn).parameters
+        rows: list[FileStat | None] = []
+        for path, names in zip(
+            paths, (("entry", "parent"), ("dst_entry", "dst_parent"))
+        ):
+            if any(name in params for name in names):
+                rows += await _rows_at(self.vfs, path)
+            else:
+                rows += [None, None]
+        return _taken(fn, self.store, *rows)
+
+    async def put(self, path: PathSpec, data: bytes) -> None:
+        handed = await self.handed(self.vfs.write, path)
+        await self.vfs.write(path, data, **handed)
+
+    async def bytes_at(self, path: PathSpec) -> bytes:
+        handed = await self.handed(self.vfs.read, path)
+        return await _bytes_of(self.vfs.read(path, **handed))
+
+    async def gone(self, path: PathSpec) -> bool:
+        handed = await self.handed(self.vfs.stat, path)
+        try:
+            await self.vfs.stat(path, **handed)
+        except FileNotFoundError:
+            return True
+        return False
+
+    async def version(self, path: PathSpec) -> str:
+        handed = await self.handed(self.vfs.stat, path)
+        info = await self.vfs.stat(path, **handed)
+        assert info.fingerprint, (
+            "a VFS that declares a match condition must stat a fingerprint"
+        )
+        return info.fingerprint
+
+    async def call(self, op: str, *paths: PathSpec) -> None:
+        fn: Callable[..., Awaitable[Any]] = getattr(self.vfs, op)
+        await fn(*paths, **await self.handed(fn, *paths))
+
+    async def clean(self, failed: bool) -> None:
+        """Unlink every file the run named that is still there.
+
+        Every file is tried. A cleanup failure after a failed run is
+        logged, so the run's own failure is the one raised; after a passed
+        run the first one is raised once all are tried.
+
+        Args:
+            failed (bool): whether the run already failed.
+        """
+        first: Exception | None = None
+        for path in self.written.values():
+            try:
+                await self.call("unlink", path)
+            except FileNotFoundError:
+                continue
+            except Exception as error:
+                logger.debug("cleanup of %s failed", path, exc_info=True)
+                first = first or error
+        if first is not None and not failed:
+            raise first
+
+    async def check_moved(self, op: str) -> None:
+        """Check ``rename`` or ``copy`` of one file: onto a fresh name, onto
+        an existing file, and from a missing source.
+
+        Args:
+            op (str): ``rename`` or ``copy``.
+        """
+        content = self.fixture.content
+        src, dst = self.path(f"{op}-src"), self.path(f"{op}-dst")
+        for existing in (False, True):
+            await self.put(src, content)
+            if existing:
+                await self.put(dst, self.other)
+            await self.call(op, src, dst)
+            assert await self.bytes_at(dst) == content, (
+                f"{op} must land the source's bytes"
+                + (" over an existing file" if existing else "")
+            )
+            if op == "rename":
+                assert await self.gone(src), "rename must remove the source"
+            else:
+                assert await self.bytes_at(src) == content, (
+                    "copy must keep the source"
+                )
+        await _rejects(
+            self.call(op, self.path(f"{op}-missing"), dst),
+            FileNotFoundError,
+            f"{op} of a missing source must raise FileNotFoundError",
+        )
+        assert await self.bytes_at(dst) == content, (
+            f"a refused {op} must leave the destination"
+        )
+
+    async def check_put(self, mode: ConditionMode) -> None:
+        """Check a declared conditional write, honoured and refused.
+
+        Args:
+            mode (ConditionMode): ``absent`` or ``match``.
+        """
+        content = self.fixture.content
+        path = self.path(f"put-{mode}")
+        if mode == "match":
+            await self.put(path, self.other)
+        held = None if mode == "absent" else await self.version(path)
+        await run_with_versions(
+            self.vfs, [(path, held)], self.put(path, content)
+        )
+        assert await self.bytes_at(path) == content, (
+            f"a held put ({mode}) must land"
+        )
+        lost = None if mode == "absent" else _LOST
+        await _rejects(
+            run_with_versions(
+                self.vfs, [(path, lost)], self.put(path, self.other)
+            ),
+            StaleWriteError,
+            f"a lost put ({mode}) must raise StaleWriteError",
+        )
+        assert await self.bytes_at(path) == content, (
+            f"a lost put ({mode}) must write nothing"
+        )
+
+    async def check_copy(self, mode: ConditionMode) -> None:
+        """Check a declared conditional copy, honoured and refused.
+
+        Args:
+            mode (ConditionMode): ``absent`` or ``match``.
+        """
+        content = self.fixture.content
+        src, dst = self.path(f"copy-{mode}-src"), self.path(f"copy-{mode}")
+        await self.put(src, content)
+        if mode == "match":
+            await self.put(dst, self.other)
+        held = None if mode == "absent" else await self.version(dst)
+        await run_with_versions(
+            self.vfs, [(dst, held)], self.call("copy", src, dst)
+        )
+        assert await self.bytes_at(dst) == content, (
+            f"a held copy ({mode}) must land"
+        )
+        await self.put(src, self.other)
+        lost = None if mode == "absent" else _LOST
+        await _rejects(
+            run_with_versions(
+                self.vfs, [(dst, lost)], self.call("copy", src, dst)
+            ),
+            StaleWriteError,
+            f"a lost copy ({mode}) must raise StaleWriteError",
+        )
+        assert await self.bytes_at(dst) == content, (
+            f"a lost copy ({mode}) must write nothing"
+        )
+
+    async def check_delete(self) -> None:
+        """Check a declared conditional delete (match), honoured and
+        refused."""
+        path = self.path("delete-match")
+        await self.put(path, self.fixture.content)
+        await _rejects(
+            run_with_versions(
+                self.vfs, [(path, _LOST)], self.call("unlink", path)
+            ),
+            StaleWriteError,
+            "a lost delete (match) must raise StaleWriteError",
+        )
+        assert await self.bytes_at(path) == self.fixture.content, (
+            "a lost delete (match) must keep the file"
+        )
+        held = await self.version(path)
+        await run_with_versions(
+            self.vfs, [(path, held)], self.call("unlink", path)
+        )
+        assert await self.gone(path), "a held delete (match) must remove"
+
+    async def run(
+        self, unenforced: Collection[tuple[WriteKind, ConditionMode]]
+    ) -> None:
+        """Check every declared condition, then ``rename`` and ``copy``.
+
+        Args:
+            unenforced (Collection[tuple[WriteKind, ConditionMode]]): the
+                declared conditions to skip.
+        """
+        support = self.vfs.condition_support
+        for kind, mode in unenforced:
+            assert mode in support.get(kind, frozenset()), (
+                f"unenforced names {kind} ({mode}), which the VFS does not "
+                "declare"
+            )
+            warnings.warn(
+                f"mutation contract: {kind} ({mode}) skipped as unenforced",
+                stacklevel=3,
+            )
+        kinds: tuple[WriteKind, ...] = ("put", "copy", "delete")
+        modes: tuple[ConditionMode, ...] = ("absent", "match")
+        for kind in kinds:
+            for mode in modes:
+                if (kind, mode) in unenforced:
+                    continue
+                if mode not in support.get(kind, frozenset()):
+                    continue
+                if kind == "put":
+                    await self.check_put(mode)
+                elif kind == "copy" and self.vfs.supports("copy"):
+                    await self.check_copy(mode)
+                elif kind == "delete" and mode == "match":
+                    await self.check_delete()
+        for op in ("rename", "copy"):
+            if self.vfs.supports(op):
+                await self.check_moved(op)
+
+
+async def check_mutation_contract(
+    vfs: BaseVFS,
+    fixture: MutationFixture,
+    index: IndexCacheStore | None = None,
+    unenforced: Collection[tuple[WriteKind, ConditionMode]] = frozenset(),
+) -> None:
+    """Verify a VFS's single-file mutations in an empty, caller-owned
+    scratch directory, unlinking the files it wrote there, pass or fail.
+
+    Each op is handed the rows a mount reads for it, fresh, as
+    ``check_read_contract`` hands them. Write preconditions are checked
+    exactly as ``condition_support`` declares them, each op run through
+    ``run_with_versions`` as a ``write: conditional`` mount runs it: a
+    declared condition lands when it holds and raises StaleWriteError,
+    writing nothing, when it does not. An undeclared condition is refused
+    by the mount before the VFS sees it, so it is not probed. ``rename``
+    and ``copy`` are checked where the VFS defines them: onto a fresh name
+    and over an existing file the destination holds the source's bytes,
+    ``rename`` removes the source and ``copy`` keeps it, and a missing
+    source raises FileNotFoundError and leaves the destination.
+
+    Args:
+        vfs (BaseVFS): the VFS being validated.
+        fixture (MutationFixture): the scratch directory and seed bytes.
+        index (IndexCacheStore | None): the store to hand every function;
+            a RAM store at the VFS's ``index_ttl`` by default.
+        unenforced (Collection[tuple[WriteKind, ConditionMode]]): declared
+            conditions the backend under test cannot enforce (a fake), each
+            skipped with a warning; naming an undeclared one fails.
+    """
+    assert vfs.supports("write"), "the mutation contract seeds through write"
+    assert vfs.supports("unlink"), (
+        "the mutation contract cleans up through unlink"
+    )
+    checker = _Checker(
+        vfs,
+        fixture,
+        index if index is not None else RAMIndexCacheStore(ttl=vfs.index_ttl),
+    )
+    try:
+        await checker.run(unenforced)
+    except BaseException:
+        await checker.clean(failed=True)
+        raise
+    await checker.clean(failed=False)

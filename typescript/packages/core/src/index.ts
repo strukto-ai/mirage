@@ -47,7 +47,13 @@ export { ChromaVFS } from './vfs/chroma/chroma.ts'
 export { DevVFS } from './vfs/dev/dev.ts'
 export { DifyVFS } from './vfs/dify/dify.ts'
 export { AirtableVFS } from './vfs/airtable/airtable.ts'
-export { checkReadContract, type ReadFixture } from './vfs/testing.ts'
+export {
+  checkMutationContract,
+  checkReadContract,
+  runWithVersions,
+  type MutationFixture,
+  type ReadFixture,
+} from './vfs/testing.ts'
 export { Mem0VFS } from './vfs/mem0/mem0.ts'
 export { OneDriveVFS } from './vfs/onedrive/onedrive.ts'
 export { QdrantVFS } from './vfs/qdrant/qdrant.ts'

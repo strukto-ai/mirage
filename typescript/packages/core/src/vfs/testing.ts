@@ -1,7 +1,10 @@
 import { RAMIndexCacheStore } from '../cache/index/ram.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
 import { getExtension } from '../utils/filetype.ts'
-import { isEnoent } from '../errors/fs.ts'
+import { isEnoent, isStaleWrite } from '../errors/fs.ts'
+import { runWithWriteContext } from '../cache/context.ts'
+import { OwnRead } from '../cache/types.ts'
+import type { ConditionMode, Measured, WriteContext, WriteKind } from '../cache/types.ts'
 import type { FileStat } from '../types.ts'
 import { DirListing, FileType, PathSpec } from '../types.ts'
 import { mountPrefixOf } from '../utils/key_prefix.ts'
@@ -9,7 +12,7 @@ import type { BaseVFS } from './base.ts'
 import type { Handed } from './types.ts'
 import type { ByteSource } from '../io/types.ts'
 import { concat } from '../utils/bytes.ts'
-import { rstripSlash } from '../utils/slash.ts'
+import { lstripSlash, rstripSlash, stripSlash } from '../utils/slash.ts'
 
 /** A known file, its parent and absent sibling, and an optional chunk bound. */
 export interface ReadFixture {
@@ -181,4 +184,323 @@ export async function checkReadContract(
     }
     throw new Error('missing paths must raise ENOENT')
   }
+}
+
+/**
+ * An empty, caller-owned scratch directory the check writes its files in,
+ * and the bytes it seeds them with. Mirrors Python's `MutationFixture`.
+ */
+export interface MutationFixture {
+  directory: PathSpec
+  content?: Uint8Array
+}
+
+const OTHER = new TextEncoder().encode('replaced\n')
+const LOST = '0'.repeat(32)
+
+// The file `name` in `directory`, keyed below the same mount. Mirrors
+// Python's `_child`.
+function child(directory: PathSpec, name: string): PathSpec {
+  const key = lstripSlash(`${stripSlash(directory.vfsPath)}/${name}`)
+  return new PathSpec({
+    virtual: `${rstripSlash(directory.virtual)}/${name}`,
+    directory: directory.virtual,
+    vfsPath: key,
+  })
+}
+
+// Check that `call` rejects with what `wanted` accepts, letting any other
+// rejection through. Mirrors Python's `_rejects`.
+async function rejects(
+  call: () => Promise<unknown>,
+  wanted: (error: unknown) => boolean,
+  message: string,
+): Promise<void> {
+  try {
+    await call()
+  } catch (error) {
+    if (wanted(error)) return
+    throw error
+  }
+  throw new Error(message)
+}
+
+/**
+ * Run `fn` under the write context a `write: conditional` mount of `vfs`
+ * binds, its cache holding `versions`.
+ *
+ * Each pair is a path and the version a session read there, null for a
+ * path it found no file at. A write, copy or delete of a listed path then
+ * carries the condition `conditionSupport` declares for it: `match` on the
+ * version, `absent` on null; an unlisted path goes out unconditioned.
+ * Mirrors Python's `run_with_versions`.
+ */
+export function runWithVersions<T>(
+  vfs: BaseVFS,
+  versions: readonly (readonly [PathSpec, string | null])[],
+  fn: () => Promise<T>,
+): Promise<T> {
+  const held = new Map<string, Measured>(
+    versions.map(([path, version]) => [path.virtual, version ?? OwnRead.ABSENT]),
+  )
+  const support = Object.entries(vfs.conditionSupport) as [WriteKind, ConditionMode[]][]
+  const context: WriteContext = {
+    vfs: vfs.name,
+    conditions: support.filter(([, modes]) => modes.includes('match')).map(([kind]) => kind),
+    creates: support.filter(([, modes]) => modes.includes('absent')).map(([kind]) => kind),
+    readVersion: (path) => Promise.resolve(held.get(path.virtual) ?? null),
+    readVersions: (paths) => Promise.resolve(paths.map((path) => held.get(path.virtual) ?? null)),
+    drop: (path) => {
+      held.delete(path.virtual)
+      return Promise.resolve()
+    },
+    keep: (path, version) => {
+      held.set(path.virtual, version)
+      return Promise.resolve()
+    },
+  }
+  const [first] = versions
+  const prefix = first === undefined ? '' : mountPrefixOf(first[0].virtual, first[0].vfsPath)
+  return runWithWriteContext(prefix, context, fn)
+}
+
+// One mutation-contract run: the VFS, its store, and the files it wrote in
+// the scratch directory. Mirrors Python's `_Checker`.
+class Checker {
+  readonly content: Uint8Array
+  readonly other: Uint8Array
+  readonly written = new Map<string, PathSpec>()
+
+  constructor(
+    private readonly vfs: BaseVFS,
+    private readonly fixture: MutationFixture,
+    private readonly store: IndexCacheStore,
+  ) {
+    this.content = fixture.content ?? new TextEncoder().encode('mutation contract\n')
+    this.other = concat([this.content, OTHER])
+  }
+
+  path(name: string): PathSpec {
+    const path = child(this.fixture.directory, name)
+    this.written.set(path.virtual, path)
+    return path
+  }
+
+  // What `op` is handed for its path, and a destination for a two-path op:
+  // only the rows its VFS declares it takes, each read fresh, as the mount
+  // hands them.
+  async handed(op: string, path: PathSpec, dst?: PathSpec): Promise<Handed> {
+    const wanted = this.vfs.handed[op] ?? []
+    let rows: Handed = { index: this.store }
+    if (wanted.includes('entry') || wanted.includes('parent')) {
+      const [entry, parent] = await rowsAt(this.vfs, path)
+      rows = { ...rows, entry, parent }
+    }
+    if (dst !== undefined && (wanted.includes('dstEntry') || wanted.includes('dstParent'))) {
+      const [dstEntry, dstParent] = await rowsAt(this.vfs, dst)
+      rows = { ...rows, dstEntry, dstParent }
+    }
+    return rows
+  }
+
+  async put(path: PathSpec, data: Uint8Array): Promise<void> {
+    await this.vfs.write(path, data, undefined, await this.handed('write', path))
+  }
+
+  async bytesAt(path: PathSpec): Promise<Uint8Array> {
+    return bytesOf(this.vfs.read(path, await this.handed('read', path)))
+  }
+
+  async gone(path: PathSpec): Promise<boolean> {
+    const handed = await this.handed('stat', path)
+    try {
+      await this.vfs.stat(path, handed)
+    } catch (error) {
+      if (isEnoent(error)) return true
+      throw error
+    }
+    return false
+  }
+
+  async version(path: PathSpec): Promise<string> {
+    const info = await this.vfs.stat(path, await this.handed('stat', path))
+    check(
+      info.fingerprint !== null && info.fingerprint !== '',
+      'a VFS that declares a match condition must stat a fingerprint',
+    )
+    return info.fingerprint
+  }
+
+  async call(op: 'rename' | 'copy' | 'unlink', path: PathSpec, dst?: PathSpec): Promise<unknown> {
+    const handed = await this.handed(op, path, dst)
+    if (op === 'unlink') return this.vfs.unlink(path, handed)
+    check(dst !== undefined, `${op} needs a destination`)
+    if (op === 'rename') return this.vfs.rename(path, dst, handed)
+    return this.vfs.copy(path, dst, undefined, handed)
+  }
+
+  // Unlink every file the run named that is still there, trying each. A
+  // cleanup failure after a failed run is logged, so the run's own failure is
+  // the one thrown; after a passed run the first is thrown once all are tried.
+  async clean(failed: boolean): Promise<void> {
+    let first: { error: unknown } | null = null
+    for (const path of this.written.values()) {
+      try {
+        await this.call('unlink', path)
+      } catch (error) {
+        if (isEnoent(error)) continue
+        console.debug(`cleanup of ${path.virtual} failed: ${String(error)}`)
+        first ??= { error }
+      }
+    }
+    if (first !== null && !failed) throw first.error
+  }
+
+  // Check `rename` or `copy` of one file: onto a fresh name, onto an
+  // existing file, and from a missing source.
+  async checkMoved(op: 'rename' | 'copy'): Promise<void> {
+    const src = this.path(`${op}-src`)
+    const dst = this.path(`${op}-dst`)
+    for (const existing of [false, true]) {
+      await this.put(src, this.content)
+      if (existing) await this.put(dst, this.other)
+      await this.call(op, src, dst)
+      check(
+        sameBytes(await this.bytesAt(dst), this.content),
+        `${op} must land the source's bytes${existing ? ' over an existing file' : ''}`,
+      )
+      if (op === 'rename') check(await this.gone(src), 'rename must remove the source')
+      else check(sameBytes(await this.bytesAt(src), this.content), 'copy must keep the source')
+    }
+    await rejects(
+      () => this.call(op, this.path(`${op}-missing`), dst),
+      isEnoent,
+      `${op} of a missing source must raise ENOENT`,
+    )
+    check(
+      sameBytes(await this.bytesAt(dst), this.content),
+      `a refused ${op} must leave the destination`,
+    )
+  }
+
+  // Check a declared conditional write, honoured and refused.
+  async checkPut(mode: ConditionMode): Promise<void> {
+    const path = this.path(`put-${mode}`)
+    if (mode === 'match') await this.put(path, this.other)
+    const held = mode === 'absent' ? null : await this.version(path)
+    await runWithVersions(this.vfs, [[path, held]], () => this.put(path, this.content))
+    check(sameBytes(await this.bytesAt(path), this.content), `a held put (${mode}) must land`)
+    const lost = mode === 'absent' ? null : LOST
+    await rejects(
+      () => runWithVersions(this.vfs, [[path, lost]], () => this.put(path, this.other)),
+      isStaleWrite,
+      `a lost put (${mode}) must raise a stale write`,
+    )
+    check(
+      sameBytes(await this.bytesAt(path), this.content),
+      `a lost put (${mode}) must write nothing`,
+    )
+  }
+
+  // Check a declared conditional copy, honoured and refused.
+  async checkCopy(mode: ConditionMode): Promise<void> {
+    const src = this.path(`copy-${mode}-src`)
+    const dst = this.path(`copy-${mode}`)
+    await this.put(src, this.content)
+    if (mode === 'match') await this.put(dst, this.other)
+    const held = mode === 'absent' ? null : await this.version(dst)
+    await runWithVersions(this.vfs, [[dst, held]], () => this.call('copy', src, dst))
+    check(sameBytes(await this.bytesAt(dst), this.content), `a held copy (${mode}) must land`)
+    await this.put(src, this.other)
+    const lost = mode === 'absent' ? null : LOST
+    await rejects(
+      () => runWithVersions(this.vfs, [[dst, lost]], () => this.call('copy', src, dst)),
+      isStaleWrite,
+      `a lost copy (${mode}) must raise a stale write`,
+    )
+    check(
+      sameBytes(await this.bytesAt(dst), this.content),
+      `a lost copy (${mode}) must write nothing`,
+    )
+  }
+
+  // Check a declared conditional delete (match), honoured and refused.
+  async checkDelete(): Promise<void> {
+    const path = this.path('delete-match')
+    await this.put(path, this.content)
+    await rejects(
+      () => runWithVersions(this.vfs, [[path, LOST]], () => this.call('unlink', path)),
+      isStaleWrite,
+      'a lost delete (match) must raise a stale write',
+    )
+    check(
+      sameBytes(await this.bytesAt(path), this.content),
+      'a lost delete (match) must keep the file',
+    )
+    const held = await this.version(path)
+    await runWithVersions(this.vfs, [[path, held]], () => this.call('unlink', path))
+    check(await this.gone(path), 'a held delete (match) must remove')
+  }
+
+  // Check every declared condition, then `rename` and `copy`.
+  async run(unenforced: readonly (readonly [WriteKind, ConditionMode])[]): Promise<void> {
+    const support = this.vfs.conditionSupport
+    const skipped = (kind: WriteKind, mode: ConditionMode): boolean =>
+      unenforced.some(([k, m]) => k === kind && m === mode)
+    for (const [kind, mode] of unenforced) {
+      check(
+        (support[kind] ?? []).includes(mode),
+        `unenforced names ${kind} (${mode}), which the VFS does not declare`,
+      )
+      console.warn(`mutation contract: ${kind} (${mode}) skipped as unenforced`)
+    }
+    for (const kind of ['put', 'copy', 'delete'] as const) {
+      for (const mode of ['absent', 'match'] as const) {
+        if (skipped(kind, mode) || !(support[kind] ?? []).includes(mode)) continue
+        if (kind === 'put') await this.checkPut(mode)
+        else if (kind === 'copy' && this.vfs.supports('copy')) await this.checkCopy(mode)
+        else if (kind === 'delete' && mode === 'match') await this.checkDelete()
+      }
+    }
+    for (const op of ['rename', 'copy'] as const) {
+      if (this.vfs.supports(op)) await this.checkMoved(op)
+    }
+  }
+}
+
+/**
+ * Verify a VFS's single-file mutations in an empty, caller-owned scratch
+ * directory, unlinking the files it wrote there, pass or fail.
+ *
+ * Each op is handed the rows a mount reads for it, fresh, as
+ * `checkReadContract` hands them. Write preconditions are checked exactly as
+ * `conditionSupport` declares them, each op run through `runWithVersions` as
+ * a `write: conditional` mount runs it: a declared condition lands when it
+ * holds and rejects as a stale write, writing nothing, when it does not. An
+ * undeclared condition is refused by the mount before the VFS sees it, so it
+ * is not probed. `rename` and `copy` are checked where the VFS defines them:
+ * onto a fresh name and over an existing file the destination holds the
+ * source's bytes, `rename` removes the source and `copy` keeps it, and a
+ * missing source rejects ENOENT and leaves the destination. `index` is the
+ * store every function is handed, a RAM store at the VFS's `indexTtl` by
+ * default. `unenforced` names declared conditions the backend under test
+ * cannot enforce (a fake), each skipped with a warning; naming an undeclared
+ * one fails. Mirrors Python's `check_mutation_contract`.
+ */
+export async function checkMutationContract(
+  vfs: BaseVFS,
+  fixture: MutationFixture,
+  index?: IndexCacheStore,
+  unenforced: readonly (readonly [WriteKind, ConditionMode])[] = [],
+): Promise<void> {
+  check(vfs.supports('write'), 'the mutation contract seeds through write')
+  check(vfs.supports('unlink'), 'the mutation contract cleans up through unlink')
+  const checker = new Checker(vfs, fixture, index ?? new RAMIndexCacheStore({ ttl: vfs.indexTtl }))
+  try {
+    await checker.run(unenforced)
+  } catch (error) {
+    await checker.clean(true)
+    throw error
+  }
+  await checker.clean(false)
 }

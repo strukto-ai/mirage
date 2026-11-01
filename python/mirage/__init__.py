@@ -106,8 +106,11 @@ if TYPE_CHECKING:
     from mirage.vfs.ram import RAMVFS
     from mirage.vfs.registry import build_vfs, known_vfs_names, register_vfs
     from mirage.vfs.testing import (
+        MutationFixture,
         ReadFixture,
+        check_mutation_contract,
         check_read_contract,
+        run_with_versions,
     )
     from mirage.workspace import (
         ExecutionNode,
@@ -192,8 +195,11 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.policy.types": ("RouteContext", "VfsContext"),
     "mirage.vfs.base": ("BaseVFS",),
     "mirage.vfs.testing": (
+        "MutationFixture",
         "ReadFixture",
+        "check_mutation_contract",
         "check_read_contract",
+        "run_with_versions",
     ),
     "mirage.vfs.registry": ("build_vfs", "known_vfs_names", "register_vfs"),
     "mirage.runtime.base": ("Runtime",),
@@ -222,8 +228,11 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
 __all__ = [
     "ShellExecution",
     "IOConfig",
+    "MutationFixture",
     "ReadFixture",
+    "check_mutation_contract",
     "check_read_contract",
+    "run_with_versions",
     "__version__",
     "Workspace",
     "WorkspaceRunner",
