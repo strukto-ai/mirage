@@ -12,11 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+import uuid
+from collections.abc import AsyncIterator, Iterator
 from types import MappingProxyType
 from unittest.mock import AsyncMock
 
+import boto3
 import pytest
+from botocore.exceptions import ClientError
+from moto.server import ThreadedMotoServer
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.read import read as ram_read
@@ -28,7 +32,14 @@ from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
-from mirage.vfs.testing import ReadFixture, check_read_contract
+from mirage.vfs.s3.config import S3Config
+from mirage.vfs.s3.s3 import S3VFS
+from mirage.vfs.testing import (
+    MutationFixture,
+    ReadFixture,
+    check_mutation_contract,
+    check_read_contract,
+)
 
 FILE = PathSpec(virtual="/data/a.txt", directory="/data", vfs_path="a.txt")
 DIRECTORY = PathSpec(virtual="/data", directory="/", vfs_path="")
@@ -290,3 +301,96 @@ async def test_stream_contract_rejects_oversized_chunks_and_closes_source():
             ReadFixture(FILE, DIRECTORY, MISSING, CONTENT, max_chunk_size=1),
         )
     assert closed == [True]
+
+
+SCRATCH = MutationFixture(DIRECTORY, CONTENT)
+
+
+class CopyKeepsDestination(RAMVFS):
+    async def copy(self, src: PathSpec, dst: PathSpec) -> None:
+        if await self.exists(dst):
+            return
+        await super().copy(src, dst)
+
+
+class RenameKeepsSource(RAMVFS):
+    async def rename(self, src: PathSpec, dst: PathSpec) -> None:
+        await super().copy(src, dst)
+
+
+class RenameMissingQuietly(RAMVFS):
+    async def rename(self, src: PathSpec, dst: PathSpec) -> None:
+        if await self.exists(src):
+            await super().rename(src, dst)
+
+
+class ClaimsPutConditions(RAMVFS):
+    """Declares conditional puts and writes through them unconditioned."""
+
+    @property
+    def condition_support(self):
+        return {"put": frozenset({"absent", "match"})}
+
+    async def _replace(self, request):
+        await self.write(request.path, request.body)
+
+
+@pytest.mark.asyncio
+async def test_ram_meets_the_mutation_contract():
+    await check_mutation_contract(RAMVFS(), SCRATCH)
+
+
+@pytest.fixture()
+def moto_bucket() -> Iterator[tuple[str, str]]:
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=0, verbose=False)
+    server.start()
+    host, port = server.get_host_and_port()
+    endpoint = f"http://{host}:{port}"
+    bucket = f"bkt-{uuid.uuid4().hex[:8]}"
+    boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id="testing",
+        aws_secret_access_key="testing",
+        region_name="us-east-1",
+    ).create_bucket(Bucket=bucket)
+    yield endpoint, bucket
+    server.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True,
+    raises=ClientError,
+    reason="s3 copy of a missing source raises NoSuchKey, not ENOENT",
+)
+async def test_s3_meets_the_mutation_contract(moto_bucket):
+    endpoint, bucket = moto_bucket
+    vfs = S3VFS(
+        S3Config(
+            bucket=bucket,
+            region="us-east-1",
+            endpoint_url=endpoint,
+            aws_access_key_id="testing",
+            aws_secret_access_key="testing",
+        )
+    )
+    try:
+        await check_mutation_contract(vfs, SCRATCH)
+    finally:
+        await vfs.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cls", "message"),
+    [
+        (CopyKeepsDestination, "over an existing file"),
+        (RenameKeepsSource, "rename must remove the source"),
+        (RenameMissingQuietly, "must raise FileNotFoundError"),
+        (ClaimsPutConditions, "must raise StaleWriteError"),
+    ],
+)
+async def test_the_mutation_contract_catches(cls, message):
+    with pytest.raises(AssertionError, match=message):
+        await check_mutation_contract(cls(), SCRATCH)

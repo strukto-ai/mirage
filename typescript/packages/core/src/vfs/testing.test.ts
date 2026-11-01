@@ -26,7 +26,13 @@ import { sliceWindow } from '../utils/ranges.ts'
 import { BaseVFS } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
 import { RAMStore } from './ram/store.ts'
-import { checkReadContract, type ReadFixture } from './testing.ts'
+import type { ConditionSupport, ReplaceRequest } from '../cache/types.ts'
+import {
+  checkMutationContract,
+  checkReadContract,
+  type MutationFixture,
+  type ReadFixture,
+} from './testing.ts'
 
 const FILE = new PathSpec({ virtual: '/data/a.txt', directory: '/data', vfsPath: 'a.txt' })
 const DIRECTORY = new PathSpec({ virtual: '/data', directory: '/', vfsPath: '' })
@@ -285,4 +291,51 @@ it('rejects oversized chunks and closes the stream on contract failure', async (
     'maxChunkSize',
   )
   expect(closed).toBe(true)
+})
+
+const SCRATCH: MutationFixture = { directory: DIRECTORY, content: CONTENT }
+
+class CopyKeepsDestination extends RAMVFS {
+  override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    if (await this.exists(dst)) return
+    await super.copy(src, dst)
+  }
+}
+
+class RenameKeepsSource extends RAMVFS {
+  override rename(src: PathSpec, dst: PathSpec): Promise<void> {
+    return super.copy(src, dst)
+  }
+}
+
+class RenameMissingQuietly extends RAMVFS {
+  override async rename(src: PathSpec, dst: PathSpec): Promise<void> {
+    if (await this.exists(src)) await super.rename(src, dst)
+  }
+}
+
+/** Declares conditional puts and writes through them unconditioned. */
+class ClaimsPutConditions extends RAMVFS {
+  override get conditionSupport(): ConditionSupport {
+    return { put: ['absent', 'match'] }
+  }
+
+  override async _replace(request: ReplaceRequest): Promise<unknown> {
+    return this.write(request.path, request.body)
+  }
+}
+
+describe('checkMutationContract', () => {
+  it('passes on RAM', async () => {
+    await checkMutationContract(new RAMVFS(), SCRATCH)
+  })
+
+  it.each([
+    [CopyKeepsDestination, 'over an existing file'],
+    [RenameKeepsSource, 'rename must remove the source'],
+    [RenameMissingQuietly, 'must raise ENOENT'],
+    [ClaimsPutConditions, 'must raise a stale write'],
+  ] as const)('catches %o', async (Cls, message) => {
+    await expect(checkMutationContract(new Cls(), SCRATCH)).rejects.toThrow(message)
+  })
 })
