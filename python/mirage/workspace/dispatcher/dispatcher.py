@@ -3173,9 +3173,12 @@ class Dispatcher:
         row = created if isinstance(created, FileStat) else None
         dst = kwargs.get("dst") if name in DESTINATION_OPS else None
         if name in COPY_OPS and isinstance(dst, PathSpec):
-            await self._changed(mount, dst, FileChangeKind.CREATE, row)
+            copied = system_now()
+            await self._changed(
+                mount, dst, FileChangeKind.CREATE, row, observed=copied
+            )
             if name == "dir_copy":
-                await self._settle_tree_copy(mount, path, dst)
+                await self._settle_tree_copy(mount, path, dst, copied)
             return
         # rename(2) moves a file without touching its times, which the
         # node table carries to the new name below. rm_r takes everything
@@ -3327,7 +3330,7 @@ class Dispatcher:
                 logger.debug("keeping %s after a refusal: %s", key, exc)
 
     async def _settle_tree_copy(
-        self, mount: MountEntry, src: PathSpec, dst: PathSpec
+        self, mount: MountEntry, src: PathSpec, dst: PathSpec, observed: float
     ) -> None:
         """What a tree copy changed under ``dst``: each entry it wrote.
 
@@ -3341,6 +3344,7 @@ class Dispatcher:
             mount (MountEntry): the mount the copy ran on.
             src (PathSpec): the copied tree.
             dst (PathSpec): where it landed.
+            observed (float): epoch seconds the copy wrote them.
         """
         base = src.virtual.rstrip("/")
         landing = dst.virtual.rstrip("/")
@@ -3349,6 +3353,7 @@ class Dispatcher:
                 mount,
                 PathSpec.from_str_path(landing + virtual[len(base) :]),
                 FileChangeKind.CREATE,
+                observed=observed,
             )
 
     async def _entries_below(self, mount: MountEntry, root: str) -> list[str]:

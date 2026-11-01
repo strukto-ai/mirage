@@ -2950,10 +2950,11 @@ export class Dispatcher {
     const removes = name === 'unlink' || name === 'rmdir' || name === 'rm_r'
     const row = created instanceof FileStat ? created : null
     // A copy reads its path, so only its destination changes: the copy is a
-    // new file there, or a new tree.
+    // new file there, or a new tree, written now.
     if (COPY_OPS.has(name) && dst !== null) {
-      await this.changed(dst.virtual, FileChangeKind.CREATE, row)
-      if (name === 'dir_copy') await this.settleTreeCopy(p, dst)
+      const copied = systemNow()
+      await this.changed(dst.virtual, FileChangeKind.CREATE, row, { observed: copied })
+      if (name === 'dir_copy') await this.settleTreeCopy(p, dst, copied)
       return
     }
     // rename(2) moves a file without touching its times, which the node
@@ -3119,13 +3120,15 @@ export class Dispatcher {
    * empty directory it made drops its folder's listing too. Mirrors Python's
    * Dispatcher._settle_tree_copy.
    */
-  private async settleTreeCopy(src: PathSpec, dst: PathSpec): Promise<void> {
+  private async settleTreeCopy(src: PathSpec, dst: PathSpec, observed: number): Promise<void> {
     const mount = this.namespace.tryMountFor(src.virtual)
     if (mount === null) return
     const base = rstripSlash(src.virtual)
     const landing = rstripSlash(dst.virtual)
     for (const virtual of await this.entriesBelow(mount, src.virtual)) {
-      await this.changed(landing + virtual.slice(base.length), FileChangeKind.CREATE)
+      await this.changed(landing + virtual.slice(base.length), FileChangeKind.CREATE, null, {
+        observed,
+      })
     }
   }
 

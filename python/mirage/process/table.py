@@ -26,6 +26,9 @@ class ProcessTable:
             execution context; None runs its body as supplied.
         changed (Callable[[], None] | None): called once a runner is
             started, so whoever publishes the live runners knows to.
+        now (Callable[[], float]): the epoch seconds a process starts
+            at, which ``ps`` shows; the running workspace's system time
+            by default.
     """
 
     def __init__(
@@ -33,8 +36,10 @@ class ProcessTable:
         ids: IdSource | None = None,
         bind: ExecutionBind | None = None,
         changed: Callable[[], None] | None = None,
+        now: Callable[[], float] = system_now,
     ) -> None:
         self._ids = ids
+        self._now = now
         self._bind = bind
         self._changed = changed
         self._next_pid = 1
@@ -116,7 +121,7 @@ class ProcessTable:
                     session_id,
                     command,
                     cwd,
-                    system_now(),
+                    self._now(),
                     execution_id=execution_id or new_execution_id(self._ids),
                     parent_pid=parent_pid,
                     group_id=group_id,

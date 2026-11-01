@@ -149,7 +149,13 @@ import {
 } from '../../policy/profile.ts'
 import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
-import { type Clock, parseSystemTime, ShiftedClock, SystemClock } from '../../utils/clock.ts'
+import {
+  type Clock,
+  parseSystemTime,
+  ShiftedClock,
+  SystemClock,
+  systemNow,
+} from '../../utils/clock.ts'
 import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { EventRuntime } from '../../events/base.ts'
@@ -297,9 +303,15 @@ export class Workspace {
     // the same order on both hosts.
     this.wsId = options.workspaceId ?? this.ids.uuid7()
     const sessionId = options.sessionId ?? this.ids.uuid7()
-    this.processes = new ProcessTable(runWithExecution, this.ids, () => {
-      this.jobTable.processesChanged()
-    })
+    // A line binds the system clock only once its process has started.
+    this.processes = new ProcessTable(
+      runWithExecution,
+      this.ids,
+      () => {
+        this.jobTable.processesChanged()
+      },
+      () => this.registry.systemClock?.now() ?? systemNow(),
+    )
     this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
       mode: options.mode ?? MountMode.READ,

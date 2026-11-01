@@ -180,13 +180,14 @@ class ShiftedClock:
 
 # An ISO 8601 instant with an offset: `2026-03-02T09:00:00Z`, `+08:00`.
 _INSTANT = re.compile(
-    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})"
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:[0-5]\d)"
 )
 
 
 def parse_system_time(text: str) -> float:
     """Seconds since the unix epoch a ``system_time`` names: an ISO 8601
-    instant with an offset (``Z`` or ``+08:00``). Mirrors TypeScript's
+    instant with an offset (``Z`` or ``+08:00``), from 1970 through 2261,
+    the years a guest's nanosecond clock holds. Mirrors TypeScript's
     ``parseSystemTime``.
 
     Args:
@@ -205,12 +206,14 @@ def parse_system_time(text: str) -> float:
             moment = datetime.fromisoformat(
                 (whole + dot + rest).replace("Z", "+00:00")
             )
-            return moment.astimezone(timezone.utc).timestamp()
+            seconds = moment.astimezone(timezone.utc).timestamp()
+            if 0 <= seconds < 9214646400:
+                return seconds
         except ValueError:
             pass
     raise ValueError(
-        f"system_time {text!r} is not an ISO 8601 instant with an offset, "
-        "as 2026-03-02T09:00:00Z"
+        f"system_time {text!r} is not an ISO 8601 instant with an offset "
+        "from 1970 through 2261, as 2026-03-02T09:00:00Z"
     )
 
 

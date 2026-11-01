@@ -144,6 +144,7 @@ from mirage.utils.clock import (
     ShiftedClock,
     SystemClock,
     parse_system_time,
+    system_now,
 )
 from mirage.utils.hidden import path_visible
 from mirage.utils.ids import IdSource, SystemIdSource
@@ -379,10 +380,16 @@ class Workspace:
         # VFS overrides) stay open here; their origin closes them.
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
+        # A line binds the system clock only once its process has started.
         self.processes = ProcessTable(
             self._ids,
             bind=run_with_execution,
             changed=lambda: self.job_table.processes_changed(),
+            now=lambda: (
+                system_now()
+                if self._registry.system_clock is None
+                else self._registry.system_clock.now()
+            ),
         )
         self.job_table = JobTable(
             stores.jobs, self.processes, clock=self._clock
