@@ -27,8 +27,9 @@ import { type NetworkRule, runWithNetwork } from './network.ts'
  * them listens for the session's connections, so each goes through the
  * gateway, and `listening` holds the answer once it has: the binding starts
  * the line or the op at once, as a browser's storage must keep its frames in
- * step, and a connection opened first waits for it. `nested` is whether a
- * file op inside a line bound it. Mirrors Python's `Egress`.
+ * step, and a connection opened first waits for it. `session` is the
+ * session it runs for (null when unknown), and `op` whether a file op, not a
+ * line, bound it. Mirrors Python's `Egress`.
  */
 export class Egress {
   listening: boolean | null = null
@@ -38,7 +39,8 @@ export class Egress {
     readonly rule: NetworkRule | null,
     readonly policies: Policies | null,
     hooked: Promise<boolean>,
-    readonly nested = false,
+    readonly session: string | null = null,
+    readonly op = false,
   ) {
     this.hooked = hooked.then((answer) => (this.listening = answer))
   }
@@ -58,20 +60,21 @@ async function listens(policies: Policies | null): Promise<boolean> {
 /**
  * `fn` run as a line or a file op of a workspace: every connection it opens
  * clears `rule`, and passes the gateway when a policy listens for the
- * session's connections; `nested` when a file op inside a line binds
- * it. Mirrors
+ * session's connections; for `session`, null when unknown, and `op` when
+ * a file op, not a line, binds it. Mirrors
  * Python's `run_with_egress`.
  */
 export function runWithEgress<T>(
   rule: NetworkRule | null,
   policies: Policies | null,
   fn: () => Promise<T>,
-  nested = false,
+  session: string | null = null,
+  op = false,
 ): Promise<T> {
   const outer = egress.getStore()
   const hooked = outer?.policies === policies ? outer.hooked : listens(policies)
   return runWithNetwork(rule, () =>
-    Promise.resolve(egress.run(new Egress(rule, policies, hooked, nested), fn)),
+    Promise.resolve(egress.run(new Egress(rule, policies, hooked, session, op), fn)),
   )
 }
 

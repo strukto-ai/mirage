@@ -74,14 +74,17 @@ class Egress:
             on.
         hooked (bool): whether a policy listens for the session's
             connections, so each one goes through the gateway.
-        nested (bool): whether a file op inside a line bound it.
+        session (str | None): the session it runs for, None when
+            unknown.
+        op (bool): whether a file op, not a line, bound it.
     """
 
     rule: NetworkRule | None
     policies: Policies | None
     loop: asyncio.AbstractEventLoop
     hooked: bool
-    nested: bool = False
+    session: str | None = None
+    op: bool = False
 
 
 _egress: ContextVar[Egress | None] = ContextVar("mirage_egress", default=None)
@@ -104,7 +107,8 @@ async def run_with_egress(
     rule: NetworkRule | None,
     policies: Policies | None,
     call: Awaitable[T],
-    nested: bool = False,
+    session: str | None = None,
+    op: bool = False,
 ) -> T:
     """``call`` awaited as a line or a file op of a workspace: every
     connection it opens clears ``rule``, and passes the gateway when a
@@ -115,7 +119,9 @@ async def run_with_egress(
         rule (NetworkRule | None): the workspace's rule, None for none.
         policies (Policies | None): the workspace's policies.
         call (Awaitable[T]): the line or the op.
-        nested (bool): whether a file op inside a line binds it.
+        session (str | None): the session it runs for, None when
+            unknown.
+        op (bool): whether a file op, not a line, binds it.
     """
     _watch()
     outer = _egress.get()
@@ -125,7 +131,7 @@ async def run_with_egress(
         else await _listens(policies)
     )
     token = _egress.set(
-        Egress(rule, policies, asyncio.get_running_loop(), hooked, nested)
+        Egress(rule, policies, asyncio.get_running_loop(), hooked, session, op)
     )
     try:
         return await run_with_network(rule, call)

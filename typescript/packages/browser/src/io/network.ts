@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { liveEgress } from '@struktoai/mirage-core/io/gateway'
+import { type Egress, liveEgress } from '@struktoai/mirage-core/io/gateway'
 import { networkBound, networkLets, networkRoute } from '@struktoai/mirage-core/io/network'
 
 // The schemes that reach a host; data:, blob: and the like never leave the page.
@@ -37,17 +37,22 @@ const SECURE = new Set(['https:', 'wss:'])
 /**
  * Where a page's request to `host` on `port` goes instead, null for nowhere
  * else. A page cannot tell one task's binding from another's, so every live
- * line and file op must route it alike, but for a file op inside a line,
- * which goes as its line does (it binds the workspace's own rule over the
- * session's); throws when two do not.
+ * line and file op must route it alike, but for a file op of a session with
+ * a live line, which goes as that line does (a file call inside a line binds
+ * the workspace's own rule over the session's); throws when two do not.
  */
 function routeOf(host: string, port: number): readonly [string, number] | null {
   const live = liveEgress()
   if (live.length === 0) return networkRoute(host, port)
-  const own = live.filter((egress) => !egress.nested)
-  const answers = (own.length === 0 ? live : own).map(
-    (egress) => egress.rule?.route(host, port) ?? null,
-  )
+  // Whether a line of the session `egress` runs for is live in its workspace.
+  const lined = (egress: Egress): boolean =>
+    egress.session !== null &&
+    live.some(
+      (line) => !line.op && line.session === egress.session && line.policies === egress.policies,
+    )
+  const answers = live
+    .filter((egress) => !egress.op || !lined(egress))
+    .map((egress) => egress.rule?.route(host, port) ?? null)
   const first = answers[0] ?? null
   if (answers.some((answer) => answer?.join(':') !== first?.join(':'))) {
     throw new Error(`network: live calls route ${host}:${String(port)} apart`)

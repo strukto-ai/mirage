@@ -1102,22 +1102,26 @@ async function runParsedLine(
         ? env.router.context(command, effectiveSession, await judged())
         : null
       const runLine = (): ReturnType<typeof runWholeLine> =>
-        runWithEgress(env.registry.networkOf(effectiveSession.network), env.registry.policies, () =>
-          runWithMemory(env.registry.memory, () =>
-            runWholeLine(
-              lineRuntime,
-              command,
-              stdin,
-              effectiveSession,
-              env.registry,
-              killed,
-              claimantFor(rootNode, handed),
-              route,
-              options.sink,
-              deadline?.seconds ?? null,
-              deadline?.start,
+        runWithEgress(
+          env.registry.networkOf(effectiveSession.network),
+          env.registry.policies,
+          () =>
+            runWithMemory(env.registry.memory, () =>
+              runWholeLine(
+                lineRuntime,
+                command,
+                stdin,
+                effectiveSession,
+                env.registry,
+                killed,
+                claimantFor(rootNode, handed),
+                route,
+                options.sink,
+                deadline?.seconds ?? null,
+                deadline?.start,
+              ),
             ),
-          ),
+          effectiveSession.sessionId,
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1270,6 +1274,7 @@ async function runParsedLine(
                   : null,
               ),
             ),
+          context.session.sessionId,
         ).finally(release)
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.

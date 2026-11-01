@@ -973,6 +973,7 @@ async def run_prepared_line(
                             budget_start,
                         ),
                     ),
+                    effective_session.session_id,
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest
@@ -1121,6 +1122,7 @@ async def run_prepared_line(
                         budget_start,
                     ),
                 ),
+                effective_session.session_id,
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).
