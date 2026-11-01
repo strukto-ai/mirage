@@ -272,6 +272,10 @@ export async function runTarget(
   if (target.clock !== undefined && target.service !== 'gws') {
     throw new Error(`target ${target.id}: clock targets ride the gws fake`)
   }
+  // So is a system_time, into the ram opener.
+  if (target.system_time !== undefined && target.mounts[0].vfs !== 'ram') {
+    throw new Error(`target ${target.id}: system_time targets ride ram mounts`)
+  }
   // Profiles reach the workspace only through the openers that pass them
   // on, for the same reason: a target that declares one on an opener
   // that drops it would run unbound and read as covered. Python needs no

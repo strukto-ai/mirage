@@ -50,6 +50,7 @@ import type { Repo } from './repo.ts'
 import type { ReadOnlyRefusal, RepoLocation } from './types.ts'
 import { opened } from './session.ts'
 import { checkSwitches, verbUsage } from './util.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 const REFS_PREFIX = 'refs/'
@@ -122,7 +123,7 @@ async function setSymbolic(
     repo.vfs,
     owner,
     `${LOGS_DIR}/${name}`,
-    entry(before ?? ZERO, after, who, Math.floor(Date.now() / 1000), message),
+    entry(before ?? ZERO, after, who, Math.floor(systemNow()), message),
   )
 }
 

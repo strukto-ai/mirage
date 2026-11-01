@@ -25,6 +25,7 @@ import { UsageError } from '../../errors.ts'
 import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv } from '../../../utils/timezone.ts'
+import { systemDate } from '../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 
@@ -134,9 +135,9 @@ function date(
     // all it names today at midnight. Measured on coreutils 9.4: `date -d
     // ''` and `date -d '   '` both print today 00:00:00 in the command's
     // zone.
-    const midnight = parseDateExpr(gnuStrftime(new Date(), '%Y-%m-%d', zone), zone)
+    const midnight = parseDateExpr(gnuStrftime(systemDate(), '%Y-%m-%d', zone), zone)
     // Today's own ISO date always parses; the fallback is for the type.
-    dt = midnight ?? new Date()
+    dt = midnight ?? systemDate()
   } else if (d !== null) {
     const parsed = parseDateExpr(d, zone)
     // GNU's refusal, exit 1: a NaN render with exit 0 poisons whatever
@@ -144,7 +145,7 @@ function date(
     if (parsed === null) return invalidDate(d)
     dt = parsed
   } else {
-    dt = new Date()
+    dt = systemDate()
   }
   const fmt = formats[0] ?? DEFAULT_FORMAT
   const out = ENC.encode(gnuStrftime(dt, fmt, zone) + '\n')

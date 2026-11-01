@@ -7,7 +7,7 @@ from collections.abc import (
     Sequence,
 )
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, tzinfo
+from datetime import tzinfo
 from functools import partial
 
 from mirage.commands.builtin.utils.formatting import full_iso_time
@@ -50,6 +50,7 @@ from mirage.types import (
     PathSpec,
     ReadStreamFn,
 )
+from mirage.utils.clock import system_date
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
@@ -172,7 +173,7 @@ async def _header_time(walk: _Walk, path: PathSpec, absent: bool) -> str:
     if absent:
         return full_iso_time(None, walk.zone)
     if is_stdin(path):
-        now = datetime.now(timezone.utc).isoformat()
+        now = system_date().isoformat()
         return full_iso_time(now, walk.zone)
     info = await walk.stat_path(path) if walk.stat_path is not None else None
     if info is None:

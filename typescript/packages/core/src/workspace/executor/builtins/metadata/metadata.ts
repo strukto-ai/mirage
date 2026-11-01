@@ -44,6 +44,7 @@ import type { Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 import { callerSignal } from '../../../../context/session_context.ts'
+import { systemDate } from '../../../../utils/clock.ts'
 
 export function parseOwner(text: string): [number | string | null, number | string | null] {
   const sep = text.indexOf(':')
@@ -79,7 +80,7 @@ export function parseTouchStamp(t: string | null, d: string | null): string | nu
     }
     if (!/^\d+$/.test(raw)) throw new Error(t)
     if (raw.length === 8) {
-      raw = String(new Date().getUTCFullYear()).padStart(4, '0') + raw
+      raw = String(systemDate().getUTCFullYear()).padStart(4, '0') + raw
     } else if (raw.length === 10) {
       const century = parseInt(raw.slice(0, 2), 10) < 69 ? '20' : '19'
       raw = century + raw
@@ -128,7 +129,7 @@ function isoformat(dt: Date): string {
 }
 
 export function nowIso(): string {
-  return isoformat(new Date())
+  return isoformat(systemDate())
 }
 
 // A refused attribute write. A read-only mount is GNU's per-operand line,

@@ -110,6 +110,7 @@ async def make_detail(
             mode=workspace_mode,
             created_at=entry.created_at,
             fuse_mountpoints=ws.fuse_mountpoints,
+            system_time=ws.system_time,
             mounts=mounts,
             sessions=sessions,
             internals=await _build_internals(ws) if verbose else None,

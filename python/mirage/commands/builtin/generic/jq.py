@@ -4,7 +4,6 @@
 import json
 import logging
 import posixpath
-import time
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -50,6 +49,7 @@ from mirage.rs.stream import (
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue, PathSpec, ReadStreamFn
+from mirage.utils.clock import system_now
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ class JqInputs:
             data (bytes): unused; a read carries no bytes.
         """
         if request.get("op") == "now":
-            return Served({"kind": "now", "now": time.time()})
+            return Served({"kind": "now", "now": system_now()})
         index = request.get("input")
         if request.get("op") != "read" or not isinstance(index, int):
             raise ValueError(f"jq: unknown host request {request}")

@@ -50,6 +50,7 @@ from mirage.runtime.python.host.syscall import as_raised, host_files, syscall
 from mirage.runtime.stat import posix_stat
 from mirage.runtime.types import VFSStat
 from mirage.types import MountMode
+from mirage.utils.clock import system_now
 from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import owner_prefix
 from mirage.utils.remnants import entry_name
@@ -772,7 +773,7 @@ class HostFs:
         elif times is not None:
             access, stamp = (float(value) for value in times)
         else:
-            access = stamp = time.time()
+            access = stamp = system_now()
         # Writes a descriptor still owes land first (the adapter's core
         # sees to it), or landing them at its close would stamp over the
         # times set here.

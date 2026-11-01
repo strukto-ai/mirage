@@ -16,6 +16,7 @@ import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { abortable, makeAbortError, sleep } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
+import { boundSystemClock, systemNow } from '../../utils/clock.ts'
 import type { Descriptor } from '../files.ts'
 import type { OpenMode } from '../handles/mode.ts'
 import type { OutputFn, VFSStat } from '../types.ts'
@@ -36,6 +37,8 @@ export interface GuestRun {
   env: string[]
   /** The run has input, which the guest reads as from a pipe. */
   piped: boolean
+  /** Seconds the guest's wall clock runs ahead of the host's: the workspace's system_time. */
+  offset: number
   /** The page URL the service worker bridges calls at, where no memory is shared. */
   bridge?: string
 }
@@ -329,6 +332,7 @@ export class WasmExecution {
         argv,
         env: env.map(([name, value]) => `${name}=${value}`),
         piped: stdin !== null,
+        offset: boundSystemClock() === null ? 0 : systemNow() - Date.now() / 1000,
         ...(port.bridge !== undefined ? { bridge: port.bridge } : {}),
       } satisfies GuestRun)
       const done = await result

@@ -58,6 +58,7 @@ import { opened } from './session.ts'
 import { resolveObject } from './revparse.ts'
 import { checkSwitches, verbUsage, requireVfs } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 // git's own formats for a tag listing: the name, or under -n<num> the name
@@ -293,7 +294,7 @@ export async function tag(
       target,
       flags.message ?? '',
       identity(fl, ctx.session).line,
-      Math.floor(Date.now() / 1000),
+      Math.floor(systemNow()),
     )
   }
   // After the object is built, which is git's order: an annotated tag whose

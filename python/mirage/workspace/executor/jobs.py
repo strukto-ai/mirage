@@ -15,7 +15,6 @@
 import asyncio
 import logging
 import re
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
@@ -68,6 +67,7 @@ from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.types import TSNodeLike
 from mirage.types import JsonValue, PathSpec, Refusal
+from mirage.utils.clock import system_now
 from mirage.utils.timezone import zone_from_env
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
@@ -1817,7 +1817,7 @@ async def handle_ps(
     if options.columns:
         keys = [key for key, _ in options.columns]
         ctx = _PsContext(
-            now=time.time(),
+            now=system_now(),
             zone=zone_from_env(session.env) if session is not None else None,
             group=session.profile if session is not None else None,
             session_id=sid,

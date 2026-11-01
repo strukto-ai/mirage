@@ -50,6 +50,7 @@ import { KEYS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
 import type { HostStdio } from './worker/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
+import { boundSystemClock, systemNow } from '../../../utils/clock.ts'
 
 /**
  * The run's streams on the main thread: its input taken as the guest
@@ -863,6 +864,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
               env: { ...ctx.env },
               flags: ctx.flags,
               ...(ctx.timeoutSeconds !== undefined ? { timeoutSeconds: ctx.timeoutSeconds } : {}),
+              ...(boundSystemClock() !== null ? { offset: systemNow() - Date.now() / 1000 } : {}),
             },
             ctx,
             files,

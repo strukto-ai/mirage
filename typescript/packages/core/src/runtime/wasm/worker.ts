@@ -96,6 +96,7 @@ async function run(request: GuestRun): Promise<void> {
     (ms) => call({ op: 'sleep', args: [ms] }) as boolean,
     request.argv,
     request.env,
+    request.offset,
   )
   try {
     const instance = await WebAssembly.instantiate(request.module, wasiImports(wasi))

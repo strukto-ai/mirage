@@ -20,6 +20,7 @@ import {
   type WallParts,
   type Zone,
 } from './timezone.ts'
+import { systemDate } from './clock.ts'
 
 /** The UTC day `ts` (epoch milliseconds) falls on, as `YYYY-MM-DD`. */
 export function utcDateFolder(ts: number): string {
@@ -34,7 +35,7 @@ export function toIsoZ(date: Date): string {
 }
 
 export function nowIso(): string {
-  return toIsoZ(new Date())
+  return toIsoZ(systemDate())
 }
 
 // Truncated to whole seconds, matching Python epoch_to_iso.
@@ -1168,7 +1169,7 @@ function splitZone(text: string): [string | null, string] {
 export function parseDateExpr(text: string, zone: Zone, now?: Date): Date | null {
   try {
     const [inner, rest] = splitZone(text)
-    const ms = (now ?? new Date()).getTime()
+    const ms = (now ?? systemDate()).getTime()
     const current = Math.floor(ms / 1000)
     const currentNanos = (ms - current * 1000) * 1_000_000
     const outer = new Clock(zone)
@@ -1209,7 +1210,7 @@ export function parsePosixTime(text: string, zone: Zone, now?: Date): Date | nul
   const minute = pair(6)
   const tail = digits.slice(8)
   let year: number
-  if (tail === '') year = zone.parts(now ?? new Date()).year
+  if (tail === '') year = zone.parts(now ?? systemDate()).year
   else if (tail.length === 2) year = Number(tail) + (Number(tail) <= 68 ? 2000 : 1900)
   else year = Number(tail)
   const second = m[2] !== undefined ? Number(m[2]) : 0

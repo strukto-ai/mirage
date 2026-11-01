@@ -95,6 +95,12 @@ export interface WorkspaceOptions {
    */
   network?: NetworkSetting
   /**
+   * The workspace's time when it starts, an ISO 8601 instant with an offset
+   * (`2026-03-02T09:00:00Z`); it then ticks with `clock`. What `date`, file
+   * times and the runtimes show. Unset is the host's time.
+   */
+  systemTime?: string | null
+  /**
    * The workspace's byte cache, described the way `index` is: the
    * config to build one from. A store core cannot build reaches
    * `buildFileCache` by registering a factory for its `type`

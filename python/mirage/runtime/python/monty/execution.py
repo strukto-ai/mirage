@@ -248,7 +248,15 @@ class MontyExecution:
                 }
             ),
             assert_message_annotations=False,
-            os_policy={"sleep_system_max": float("inf")},
+            # A workspace's system_time answers the wall clocks (MontyFs).
+            os_policy=(
+                {"sleep_system_max": float("inf")}
+                if fs.clock is None
+                else {
+                    "sleep_system_max": float("inf"),
+                    "datetime": "call_host",
+                }
+            ),
             **(
                 {"script_name": main_filename(program, cwd)}
                 if program.script_path is not None

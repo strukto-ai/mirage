@@ -18,7 +18,6 @@ import errno
 import functools
 import logging
 import posixpath
-import time
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -111,6 +110,7 @@ from mirage.types import (
     Visibility,
     WritePolicy,
 )
+from mirage.utils.clock import run_with_system_clock, system_now
 from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import (
     hidden_under,
@@ -999,33 +999,42 @@ class Dispatcher:
         await task_turn()
         memory = self._namespace.registry.memory
         network = self._namespace.registry.network
+        system_clock = self._namespace.registry.system_clock
         policies = self._namespace.registry.policies
         try:
             if caller is None:
                 caller = current_caller()
             if self._admit_write is None or name not in POLICY_WRITE_OPS:
-                return await run_with_egress(
-                    network,
-                    policies,
-                    run_with_memory(
-                        memory, self._bound(name, path, caller, report, kwargs)
+                return await run_with_system_clock(
+                    system_clock,
+                    run_with_egress(
+                        network,
+                        policies,
+                        run_with_memory(
+                            memory,
+                            self._bound(name, path, caller, report, kwargs),
+                        ),
+                        None
+                        if caller.session is None
+                        else caller.session.session_id,
+                        op=True,
                     ),
-                    None
-                    if caller.session is None
-                    else caller.session.session_id,
-                    op=True,
                 )
             async with self._admit_write(caller) as held:
-                return await run_with_egress(
-                    network,
-                    policies,
-                    run_with_memory(
-                        memory, self._bound(name, path, held, report, kwargs)
+                return await run_with_system_clock(
+                    system_clock,
+                    run_with_egress(
+                        network,
+                        policies,
+                        run_with_memory(
+                            memory,
+                            self._bound(name, path, held, report, kwargs),
+                        ),
+                        None
+                        if caller.session is None
+                        else caller.session.session_id,
+                        op=True,
                     ),
-                    None
-                    if caller.session is None
-                    else caller.session.session_id,
-                    op=True,
                 )
         finally:
             if name in ("write", "append", "pwrite"):
@@ -3159,7 +3168,7 @@ class Dispatcher:
         """
         opened = _appends_nothing(name, kwargs)
         observed = (
-            time.time() if name in STAMP_WRITE_OPS and not opened else None
+            system_now() if name in STAMP_WRITE_OPS and not opened else None
         )
         row = created if isinstance(created, FileStat) else None
         dst = kwargs.get("dst") if name in DESTINATION_OPS else None
@@ -3631,7 +3640,7 @@ class Dispatcher:
             refusal = await self._symlink_refusal(path, caller)
             if refusal is not None:
                 raise refusal
-            await self._namespace.symlink(path.virtual, target, time.time())
+            await self._namespace.symlink(path.virtual, target, system_now())
         elif name == "stat":
             row = self._namespace.link_stat_at(path.virtual)
             if row is None:
@@ -4210,7 +4219,7 @@ class Dispatcher:
                     )
                     return
             await self._changed(
-                mount, spec, FileChangeKind.CREATE, observed=time.time()
+                mount, spec, FileChangeKind.CREATE, observed=system_now()
             )
 
     async def _changed(

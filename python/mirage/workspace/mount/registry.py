@@ -189,6 +189,9 @@ class MountRegistry:
         # The rule the workspace's connections are judged by; None for no
         # limit.
         self.network: NetworkRule | None = None
+        # The workspace's system_time on its clock, which what the agent
+        # sees reads; None for the host's time.
+        self.system_clock: Clock | None = None
         # The rule each profile's ``network`` narrows it to, by the layer
         # it adds, with the rule it narrowed.
         self._networks: dict[str, tuple[NetworkRule | None, NetworkRule]] = {}

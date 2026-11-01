@@ -64,6 +64,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
+from mirage.utils.clock import run_with_system_clock
 from mirage.workspace.abort import line_status_writer, set_line_writer
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
@@ -947,33 +948,38 @@ async def run_prepared_line(
                                 await ws.secret_sources(),
                             ),
                         )
-                io = await run_with_egress(
-                    ws.registry.network_of(effective_session.network),
-                    ws.registry.policies,
-                    run_with_memory(
-                        ws.registry.memory,
-                        run_whole_line(
-                            line_runtime,
-                            command,
-                            stdin,
-                            effective_session,
-                            ws.registry,
-                            claimant_for(ast, handed),
-                            cancel,
-                            ws.router.context(
-                                command, effective_session, await judged()
-                            )
-                            if await ws.registry.policies.wants_for(
-                                "post_execute",
-                                effective_session.session_id,
-                            )
-                            else None,
-                            sink,
-                            context.frame.line_timeout if top_level else None,
-                            budget_start,
+                io = await run_with_system_clock(
+                    ws.registry.system_clock,
+                    run_with_egress(
+                        ws.registry.network_of(effective_session.network),
+                        ws.registry.policies,
+                        run_with_memory(
+                            ws.registry.memory,
+                            run_whole_line(
+                                line_runtime,
+                                command,
+                                stdin,
+                                effective_session,
+                                ws.registry,
+                                claimant_for(ast, handed),
+                                cancel,
+                                ws.router.context(
+                                    command, effective_session, await judged()
+                                )
+                                if await ws.registry.policies.wants_for(
+                                    "post_execute",
+                                    effective_session.session_id,
+                                )
+                                else None,
+                                sink,
+                                context.frame.line_timeout
+                                if top_level
+                                else None,
+                                budget_start,
+                            ),
                         ),
+                        effective_session.session_id,
                     ),
-                    effective_session.session_id,
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest
@@ -1088,41 +1094,44 @@ async def run_prepared_line(
             # deadline, which a nested one shares, and every object a
             # line builds must fit in what the workspace's max_memory has
             # left, and every connection it opens must clear its network.
-            io, _ = await run_with_egress(
-                ws.registry.network_of(effective_session.network),
-                ws.registry.policies,
-                run_with_memory(
-                    ws.registry.memory,
-                    run_with_timeout(
-                        run_command_tree(
-                            ws.dispatch,
-                            ws.registry,
-                            ws.namespace,
-                            job_table or ws.job_table,
-                            exec_recursion,
-                            ast,
-                            context,
-                            stdin,
-                            cancel,
-                            handed=handed,
-                            sink=sink,
-                            call_stack=call_stack,
-                            execution_scope=execution_scope,
-                            route=ws.router.context(
-                                command, effective_session, await judged()
-                            )
-                            if await ws.registry.policies.wants_for(
-                                "post_execute",
-                                effective_session.session_id,
-                            )
-                            else None,
+            io, _ = await run_with_system_clock(
+                ws.registry.system_clock,
+                run_with_egress(
+                    ws.registry.network_of(effective_session.network),
+                    ws.registry.policies,
+                    run_with_memory(
+                        ws.registry.memory,
+                        run_with_timeout(
+                            run_command_tree(
+                                ws.dispatch,
+                                ws.registry,
+                                ws.namespace,
+                                job_table or ws.job_table,
+                                exec_recursion,
+                                ast,
+                                context,
+                                stdin,
+                                cancel,
+                                handed=handed,
+                                sink=sink,
+                                call_stack=call_stack,
+                                execution_scope=execution_scope,
+                                route=ws.router.context(
+                                    command, effective_session, await judged()
+                                )
+                                if await ws.registry.policies.wants_for(
+                                    "post_execute",
+                                    effective_session.session_id,
+                                )
+                                else None,
+                            ),
+                            context.frame.line_timeout if top_level else None,
+                            LINE_NAME,
+                            budget_start,
                         ),
-                        context.frame.line_timeout if top_level else None,
-                        LINE_NAME,
-                        budget_start,
                     ),
+                    effective_session.session_id,
                 ),
-                effective_session.session_id,
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).

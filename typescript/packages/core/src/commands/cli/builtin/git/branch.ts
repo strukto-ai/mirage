@@ -114,6 +114,7 @@ import {
   withoutSection,
   requireVfs,
 } from './util.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -193,7 +194,7 @@ async function create(
   await writeRef(vfs, repo.location.commondir, ref, oid)
   const log = repo.location.commondir.join('logs', ref)
   if (await logged(vfs, repo.location, ref, log)) {
-    const when = Math.floor(Date.now() / 1000)
+    const when = Math.floor(systemNow())
     const line = entry(ZERO, oid, IDENTITY, when, `branch: Created from ${from}`)
     await append(vfs, repo.location.commondir, `logs/${ref}`, line)
   }

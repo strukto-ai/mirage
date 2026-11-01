@@ -19,11 +19,24 @@ import yaml
 
 
 class _YamlLoader(yaml.SafeLoader):
-    """Resolve exponent numbers as TypeScript's YAML 1.2 loader does.
+    """Resolve exponent numbers, and leave a timestamp a string, as
+    TypeScript's YAML 1.2 loader does.
 
     The remaining PyYAML resolvers stay unchanged, and this subclass
     leaves ``yaml.safe_load`` untouched for other consumers.
     """
+
+
+# YAML 1.2 has no timestamp type: `system_time: 2026-03-02T09:00:00Z`
+# stays the text it was written as.
+_YamlLoader.yaml_implicit_resolvers = {
+    first: [
+        (tag, regexp)
+        for tag, regexp in resolvers
+        if tag != "tag:yaml.org,2002:timestamp"
+    ]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
 
 
 _YamlLoader.add_implicit_resolver(

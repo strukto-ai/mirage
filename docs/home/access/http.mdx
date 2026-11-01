@@ -278,6 +278,7 @@ Routes that return a workspace yield this object:
   </Expandable>
 </ResponseField>
 <ResponseField name="fuse_mountpoints" type="object">Mount prefix to local folder, for [FUSE](/home/setup/fuse) mounts.</ResponseField>
+<ResponseField name="system_time" type="string | null">Its [`system_time`](/home/configuration#system-time), as written; null for the host's time.</ResponseField>
 <ResponseField name="internals" type="object | null">With `?verbose=true`: `cache_bytes`, `cache_entries`, `history_length`, `in_flight_jobs`.</ResponseField>
 
 ### Create a workspace

@@ -94,6 +94,7 @@ export async function makeDetail(entry: WorkspaceEntry, verbose = false): Promis
     mode: mounts[0]?.mode ?? 'read',
     created_at: entry.createdAt,
     fuse_mountpoints: fuseMountpoints,
+    system_time: ws.systemTime,
     mounts: mountSummaries,
     sessions,
     internals: verbose ? await buildInternals(ws) : null,

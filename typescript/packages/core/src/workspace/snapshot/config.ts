@@ -37,6 +37,8 @@ export interface MountArgs {
   maxMemory: number | null
   // The workspace's network setting, as written.
   network: NetworkSetting
+  // The workspace's system_time, as written; null for the host's time.
+  systemTime: string | null
 }
 
 export interface IndexConfigSnapshot {

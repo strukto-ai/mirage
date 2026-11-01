@@ -21,6 +21,7 @@ import {
   type NetworkSetting,
 } from '@struktoai/mirage-core/io/network'
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
+import { parseSystemTime } from '@struktoai/mirage-core/utils/clock'
 import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import { readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
@@ -197,6 +198,7 @@ const TOP_LEVEL_KEYS = [
   'command_limits',
   'max_memory',
   'network',
+  'system_time',
   'clis',
   'runtimes',
   'route_policy',
@@ -440,6 +442,10 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
       false,
       networkRoutes(raw.network as NetworkSetting),
     )
+  }
+  if (raw.system_time !== undefined && raw.system_time !== null) {
+    if (typeof raw.system_time !== 'string') throw new Error('system_time must be a string')
+    parseSystemTime(raw.system_time)
   }
   // At the sync entry point, as Python's WorkspaceConfig validator is, so the CLI
   // refuses a bad value before it POSTs the document to the daemon.
@@ -830,6 +836,8 @@ export interface WorkspaceConfigRaw {
   maxMemory?: string | number | null
   /** Where the workspace's connections may go; validated by networkLayer. */
   network?: NetworkSetting
+  /** The workspace's time when it starts; validated by parseSystemTime. */
+  systemTime?: string | null
   mounts: Record<string, MountBlock>
   clis?: Record<string, CLIBlock> | null
   runtimes?: (string | Record<string, unknown>)[] | null
@@ -1171,6 +1179,7 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<Wo
       commandLimits: parseCommandLimits(cfg.commandLimits),
       ...(cfg.maxMemory !== undefined ? { maxMemory: cfg.maxMemory } : {}),
       ...(cfg.network !== undefined ? { network: cfg.network } : {}),
+      ...(cfg.systemTime !== undefined ? { systemTime: cfg.systemTime } : {}),
       io: new IOConfig(cfg.io),
       read: defaultRead,
       write: defaultWrite,

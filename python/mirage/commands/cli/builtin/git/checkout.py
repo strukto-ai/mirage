@@ -14,7 +14,6 @@
 
 import asyncio
 import posixpath
-import time
 from collections.abc import Sequence
 
 from dulwich.index import IndexEntry
@@ -124,6 +123,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
+from mirage.utils.clock import system_now
 from mirage.workspace.files import Files
 
 # git's word-for-word warning when HEAD leaves a branch, kept verbatim.
@@ -501,7 +501,7 @@ async def _attach(
         start (str): the start point a new branch was created from, as
             typed.
     """
-    when = int(time.time())
+    when = int(system_now())
     if creating and ref is not None:
         await write_ref(vfs, location.commondir, ref.decode(), commit.id)
         log = location.commondir.join("logs", ref.decode())

@@ -14,7 +14,6 @@
 
 import asyncio
 import posixpath
-import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from io import BytesIO
@@ -137,6 +136,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
+from mirage.utils.clock import system_now
 
 REMOTE = "remotes/"
 AUTO_SETUP_MERGE = "branch.autosetupmerge"
@@ -239,7 +239,7 @@ async def _create(
             ZERO,
             commit.id,
             IDENTITY,
-            int(time.time()),
+            int(system_now()),
             f"branch: Created from {origin}",
         )
         await append(vfs, location.commondir, f"logs/{ref}", line)

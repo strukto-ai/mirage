@@ -37,6 +37,7 @@ from mirage.policy import PolicyDenied
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.clock import system_date
 from mirage.utils.path import CycleError, ancestors
 from mirage.utils.quote import shell_quote_always
 from mirage.view.types import MountView, NamespaceLinks
@@ -136,7 +137,7 @@ def parse_touch_stamp(t: str | None, d: str | None) -> str | None:
             raise ValueError(t)
         raw, _, seconds = t.partition(".")
         if len(raw) == 8:
-            raw = f"{datetime.now(timezone.utc).year:04d}{raw}"
+            raw = f"{system_date().year:04d}{raw}"
         try:
             dt = datetime.strptime(raw, _TOUCH_STAMP_FMT[len(raw)])
             dt = dt.replace(
@@ -154,7 +155,7 @@ def parse_touch_stamp(t: str | None, d: str | None) -> str | None:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return system_date().isoformat()
 
 
 def permission_error(

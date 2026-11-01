@@ -31,7 +31,7 @@ import { RAMNamespaceStore } from './ram.ts'
 import type { NamespaceStore, NodeFields } from './store.ts'
 import type { RecordFields } from '../../record/types.ts'
 import type { MountRegistry } from '../registry.ts'
-import type { Clock } from '../../../utils/clock.ts'
+import { boundSystemClock, type Clock } from '../../../utils/clock.ts'
 import { NamespaceReader } from '../../dispatcher/reader.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { getCurrentSession } from '../../../context/session_context.ts'
@@ -337,7 +337,8 @@ export class Namespace {
   // Drop overlay times after a content write. write(2) refreshes mtime,
   // so a stored overlay time would otherwise shadow the backend's fresh
   // one forever. Permission and ownership survive writes; a symlink entry
-  // keeps its own times.
+  // keeps its own times. Under a system_time the write's time is the
+  // file's mtime, over the backend's, which the host's clock stamped.
   async clearTimes(path: string, observed: number | null = null): Promise<void> {
     let meta = this.nodeTable.get(path)
     if (meta === undefined && observed !== null) {
@@ -345,7 +346,8 @@ export class Namespace {
       this.nodeTable.set(path, meta)
     }
     if (meta === undefined || meta.target !== undefined) return
-    delete meta.mtime
+    if (observed !== null && boundSystemClock() !== null) meta.mtime = observed
+    else delete meta.mtime
     delete meta.atime
     // null (a removal) also drops any prior observed time, so a
     // deleted path's meta does not linger.
@@ -565,6 +567,11 @@ export class Namespace {
   /** The rule the workspace's connections are judged by, null for no limit. */
   get network(): NetworkRule | null {
     return this.registry.network
+  }
+
+  /** The workspace's system clock, null for the host's time. */
+  get systemClock(): Clock | null {
+    return this.registry.systemClock
   }
 
   /**

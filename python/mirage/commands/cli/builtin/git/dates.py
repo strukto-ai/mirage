@@ -33,6 +33,7 @@ from mirage.commands.cli.builtin.git.errors import (
     UnknownDateFormatError,
 )
 from mirage.commands.cli.builtin.git.types import DateKind, DateMode
+from mirage.utils.clock import system_now
 from mirage.utils.timezone import (
     posix_transitions,
     resolve_tz,
@@ -143,7 +144,7 @@ def date_clock(env: Mapping[str, str] | None) -> DateMode:
         env (Mapping[str, str] | None): the command environment, read for
             ``GIT_TEST_DATE_NOW`` and ``TZ``.
     """
-    now = int(time.time())
+    now = int(system_now())
     if env is not None and NOW_VAR in env:
         found = LEADING_INT.match(env[NOW_VAR])
         now = int(found.group(1)) if found else 0

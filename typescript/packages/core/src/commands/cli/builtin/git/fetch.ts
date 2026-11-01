@@ -53,6 +53,7 @@ import {
 } from './transport.ts'
 import type { ReadOnlyRefusal, Refspec } from './types.ts'
 import { checkSwitches } from './util.ts'
+import { systemNow } from '../../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 const FETCH_HEAD = 'FETCH_HEAD'
@@ -300,7 +301,7 @@ export async function updateRefs(
   const local = await resolvedRefs(repo)
   const rows: Row[] = []
   let rejected = false
-  const now = Math.floor(Date.now() / 1000)
+  const now = Math.floor(systemNow())
   for (const want of wants) {
     if (want.local === null) {
       const kind = want.remote.startsWith(TAG_PREFIX)

@@ -46,6 +46,7 @@ export interface WorkspaceDetail {
   mode: string
   created_at: number
   fuse_mountpoints: Record<string, string>
+  system_time: string | null
   sessions: SessionSummary[]
   mounts: MountSummary[]
   internals: WorkspaceInternals | null

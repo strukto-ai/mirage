@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 
+from mirage.utils.clock import system_date, system_now
 from mirage.utils.timezone import posix_transitions, resolve_tz
 
 _POSIX_TIME_RE = re.compile(r"([0-9]{8}|[0-9]{10}|[0-9]{12})(\.[0-9]{2})?")
@@ -1168,7 +1169,9 @@ def parse_date_expr(
     try:
         inner, rest = _split_zone(text)
         if now is None:
-            current, current_nanos = divmod(time.time_ns(), _NANOS)
+            current, current_nanos = divmod(
+                round(system_now() * _NANOS), _NANOS
+            )
         else:
             current = round(now.replace(microsecond=0).timestamp())
             current_nanos = now.microsecond * 1000
@@ -1241,7 +1244,7 @@ def parse_posix_time(
     month, day, hour, minute = (int(digits[i : i + 2]) for i in range(0, 8, 2))
     tail = digits[8:]
     if not tail:
-        year = (now if now is not None else datetime.now(tz)).year
+        year = (now if now is not None else system_date(tz)).year
     elif len(tail) == 2:
         year = int(tail) + (2000 if int(tail) <= 68 else 1900)
     else:
@@ -1324,7 +1327,7 @@ def to_iso_z(dt: datetime) -> str:
 
 
 def now_iso() -> str:
-    return to_iso_z(datetime.now(timezone.utc))
+    return to_iso_z(system_date())
 
 
 def ns_to_iso(ns: int) -> str:

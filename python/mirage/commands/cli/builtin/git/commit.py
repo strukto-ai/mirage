@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 
 from dulwich.index import commit_tree
 from dulwich.objects import Commit, ObjectID
@@ -60,6 +59,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.types import PathSpec
+from mirage.utils.clock import system_now
 from mirage.view.types import SessionView
 
 # git tags the first commit on a branch so the reflog reads
@@ -217,7 +217,7 @@ async def commit(
         return None, IOResult(exit_code=1, rows=report_of)
     parents = [] if before is None else [repo.refs[HEAD_REF]]
     who = identity(fl, ctx.session)
-    when = int(time.time())
+    when = int(system_now())
     written = await asyncio.to_thread(
         build_commit, repo, state, message, who, parents, when
     )

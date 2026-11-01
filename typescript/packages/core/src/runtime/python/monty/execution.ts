@@ -29,6 +29,7 @@ import { displayError } from './errors.ts'
 import { MontyFs } from './fs.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { boundSystemClock } from '../../../utils/clock.ts'
 
 const INTERRUPTED = Symbol('interrupted')
 const ENC = new TextEncoder()
@@ -323,7 +324,11 @@ export class MontyExecution {
           ? this.limits
           : { ...this.limits, maxMemory: own === undefined ? room : Math.min(own, room) },
       assertMessageAnnotations: false,
-      osPolicy: { sleepSystemMax: Infinity },
+      // A workspace's system_time answers the wall clocks (MontyFs).
+      osPolicy:
+        boundSystemClock() === null
+          ? { sleepSystemMax: Infinity }
+          : { sleepSystemMax: Infinity, datetime: 'call_host' },
     })
   }
 

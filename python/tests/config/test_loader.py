@@ -208,6 +208,25 @@ def test_network_must_be_a_setting(network, message):
         )
 
 
+def test_system_time_reaches_the_workspace(tmp_path):
+    # Unquoted, as YAML 1.2 reads it: text, not a timestamp.
+    path = tmp_path / "ws.yaml"
+    path.write_text(
+        "mounts:\n  /:\n    vfs: ram\nsystem_time: 2026-03-02T09:00:00Z\n"
+    )
+    cfg = load_config(path)
+    assert cfg.system_time == "2026-03-02T09:00:00Z"
+    ws = Workspace(**cfg.to_workspace_kwargs())
+    assert ws.system_time == "2026-03-02T09:00:00Z"
+
+
+def test_system_time_must_be_an_instant():
+    with pytest.raises(ValueError, match="is not an ISO 8601 instant"):
+        WorkspaceConfig.model_validate(
+            {"mounts": {"/": {"vfs": "ram"}}, "system_time": "2026-03-02"}
+        )
+
+
 @pytest.mark.asyncio
 async def test_to_workspace_kwargs_emits_redis_cache_config():
     cfg = load_config(FIXTURES / "redis_cache.yaml")

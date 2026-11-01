@@ -3529,6 +3529,7 @@ async def open_target(
             profile=default_profile,
             env=env_block,
             clock=clock,
+            system_time=target.get("system_time"),
             max_memory=None,
         )
     else:
@@ -3541,6 +3542,7 @@ async def open_target(
             profile=default_profile,
             env=env_block,
             clock=clock,
+            system_time=target.get("system_time"),
             max_memory=None,
         )
     if store is not None:

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
-import time
 
 from dulwich.refs import DictRefsContainer
 
@@ -68,6 +67,7 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
+from mirage.utils.clock import system_now
 
 REFS_PREFIX = "refs/"
 
@@ -185,7 +185,7 @@ async def set_symbolic(
         vfs,
         owner,
         f"{LOGS_DIR}/{name}",
-        entry(before or ZERO, after, who, int(time.time()), message),
+        entry(before or ZERO, after, who, int(system_now()), message),
     )
 
 

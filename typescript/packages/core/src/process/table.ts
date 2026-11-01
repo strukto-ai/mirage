@@ -5,6 +5,7 @@ import type { ProcessInfo, ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
 import { newExecutionId } from '../execution/context.ts'
 import type { IdSource } from '../utils/ids.ts'
+import { systemNow } from '../utils/clock.ts'
 
 /** Workspace-owned live runners; exited handles retain their own results. */
 export class ProcessTable {
@@ -87,7 +88,7 @@ export class ProcessTable {
         sessionId: init.sessionId,
         command: init.command,
         cwd: init.cwd,
-        startedAt: Date.now() / 1000,
+        startedAt: systemNow(),
         state: 'running',
         cancellationRequested: false,
         exitCode: null,

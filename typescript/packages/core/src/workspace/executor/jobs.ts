@@ -68,6 +68,7 @@ import { inheritTraps } from './traps.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { ExecuteNodeOpts, ExecuteNodeFn } from './command/types.ts'
 import { builtinUsage } from './builtins/shared.ts'
+import { systemNow } from '../../utils/clock.ts'
 
 export type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -1591,7 +1592,7 @@ export async function handlePs(
   if (options.columns.length > 0) {
     const keys = options.columns.map(([key]) => key)
     const ctx: PsContext = {
-      now: Date.now() / 1000,
+      now: systemNow(),
       zone: (session !== null ? zoneFromEnv(session.env) : null) ?? LOCAL_ZONE,
       group: session?.profile ?? null,
       sessionId: sid,

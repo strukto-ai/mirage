@@ -24,6 +24,7 @@ import { MAX_URANDOM_BYTES, NOT_A_LINK, SCAN_LINK_DEPTH, SCAN_MAX_ENTRIES } from
 import { asGuestError, guestError } from './errors.ts'
 import { childPaths } from './list.ts'
 import { isDirRow, isRegularRow, statResult } from './stat.ts'
+import { boundSystemClock, type Clock } from '../../../utils/clock.ts'
 
 function pathArg(value: unknown): string | null {
   if (typeof value === 'string') return value
@@ -78,15 +79,15 @@ function timeZoneArg(value: unknown): TimeZoneMarker | null {
 }
 
 /**
- * The host clock as monty's DateTime marker, which the engine turns
- * into a real guest `datetime`. No timezone argument means python's
+ * `seconds` since the epoch as monty's DateTime marker, which the engine
+ * turns into a real guest `datetime`. No timezone argument means python's
  * naive local now; a TimeZone marker means an aware now in that
  * offset — both exactly what the python engine's default
  * `datetime_now(tz)` answers.
  */
-function dateTimeMarker(tz: TimeZoneMarker | null): Record<string, unknown> {
+function dateTimeMarker(seconds: number, tz: TimeZoneMarker | null): Record<string, unknown> {
   if (tz === null) {
-    const now = new Date()
+    const now = new Date(seconds * 1000)
     return {
       __monty_type__: 'DateTime',
       year: now.getFullYear(),
@@ -98,7 +99,7 @@ function dateTimeMarker(tz: TimeZoneMarker | null): Record<string, unknown> {
       microsecond: now.getMilliseconds() * 1000,
     }
   }
-  const shifted = new Date(Date.now() + tz.offsetSeconds * 1000)
+  const shifted = new Date((seconds + tz.offsetSeconds) * 1000)
   return {
     __monty_type__: 'DateTime',
     year: shifted.getUTCFullYear(),
@@ -113,8 +114,8 @@ function dateTimeMarker(tz: TimeZoneMarker | null): Record<string, unknown> {
   }
 }
 
-function dateMarker(): Record<string, unknown> {
-  const now = new Date()
+function dateMarker(seconds: number): Record<string, unknown> {
+  const now = new Date(seconds * 1000)
   return {
     __monty_type__: 'Date',
     year: now.getFullYear(),
@@ -178,6 +179,12 @@ export class MontyFs {
   private readonly fileHandle: MontyFsBits['MontyFileHandle']
   private readonly env: Record<string, string>
   private readonly files: RuntimeFiles | null
+  /**
+   * The workspace's system clock the run starts on, null for the host's:
+   * the engine calls back from native code, which the line's binding does
+   * not reach.
+   */
+  readonly clock: Clock | null = boundSystemClock()
 
   constructor(bits: MontyFsBits, env: Record<string, string>, files: RuntimeFiles | null) {
     this.bits = bits
@@ -185,6 +192,10 @@ export class MontyFs {
     this.fileHandle = bits.MontyFileHandle
     this.env = env
     this.files = files
+  }
+
+  private wall(): number {
+    return this.clock === null ? Date.now() / 1000 : this.clock.now()
   }
 
   readonly handle = (
@@ -210,8 +221,16 @@ export class MontyFs {
     // The clock callbacks: python's engine defaults these to the host
     // clock, so declining them (a guest RuntimeError) was a divergence
     // for any program that stamps its output.
-    if (name === 'datetime.now') return dateTimeMarker(timeZoneArg(args[0]))
-    if (name === 'date.today') return dateMarker()
+    if (name === 'datetime.now') return dateTimeMarker(this.wall(), timeZoneArg(args[0]))
+    if (name === 'date.today') return dateMarker(this.wall())
+    // Every `time` module clock asks here, naming itself: the wall clocks
+    // read the system clock; monotonic and perf_counter keep the host's.
+    if (name === 'time.time') {
+      const caller = typeof args[0] === 'string' ? args[0] : 'time.time'
+      return caller.startsWith('time.monotonic') || caller.startsWith('time.perf_counter')
+        ? performance.now() / 1000
+        : this.wall()
+    }
     if (name === 'os.urandom') return urandom(args[0])
     // Everything below serves a path; the callbacks above need none.
     const path = pathArg(args[0])

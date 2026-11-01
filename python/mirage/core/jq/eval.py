@@ -15,7 +15,6 @@
 import json
 import os
 import re
-import time
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass
 
@@ -26,6 +25,7 @@ from mirage.io.memory import memory_room
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import OpenStream, close_stream, open_stream
+from mirage.utils.clock import system_now
 from mirage.utils.timezone import TZ_VAR
 
 FRAME_OUTPUT = 1
@@ -174,7 +174,7 @@ class Engine:
                     op = asked[0].get("op")
                     if op == "now":
                         wire = stream.respond(
-                            {"kind": "now", "now": time.time()}, b""
+                            {"kind": "now", "now": system_now()}, b""
                         )
                     elif op == "input":
                         wire = stream.respond({"kind": "end"}, b"")

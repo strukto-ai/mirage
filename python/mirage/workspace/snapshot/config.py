@@ -49,6 +49,8 @@ class MountArgs:
     max_memory: int | None = MAX_MEMORY
     # The workspace's network setting, as written.
     network: NetworkSetting = True
+    # The workspace's system_time, as written; None for the host's time.
+    system_time: str | None = None
 
 
 def index_config_dump(

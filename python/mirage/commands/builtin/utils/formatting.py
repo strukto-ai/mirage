@@ -14,7 +14,6 @@
 
 import logging
 import re
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone, tzinfo
 
@@ -33,6 +32,7 @@ from mirage.types import (
     FileType,
     LsTimeKind,
 )
+from mirage.utils.clock import system_now
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.stat_view import (
     ALL_MODE_BITS,
@@ -204,7 +204,7 @@ def _is_recent(when: float, *, find_rule: bool) -> bool:
         find_rule (bool): findutils' window (old past 180 days, future
             past an hour) rather than ls's.
     """
-    now = time.time()
+    now = system_now()
     if find_rule:
         return not (
             now > when + constants.FIND_OLD_SECONDS

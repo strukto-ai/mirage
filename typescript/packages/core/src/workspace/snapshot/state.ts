@@ -120,6 +120,7 @@ export interface WorkspaceLike {
   readonly profiles: Readonly<Record<string, SessionProfile>>
   readonly defaultProfileName: string | null
   readonly network: NetworkSetting
+  readonly systemTime: string | null
   adoptDefaultSession(sessionId: string): Promise<void>
   forgetReads(): void
   quiesced<T>(capture: () => Promise<T>): Promise<T>
@@ -270,6 +271,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     command_limits: commandLimitsToJSON(ws.registry.commandLimits),
     max_memory: ws.registry.memory?.limit ?? null,
     network: ws.network,
+    system_time: ws.systemTime,
   }
 }
 
@@ -515,6 +517,7 @@ export function buildMountArgs(
     profile: state.profile ?? null,
     maxMemory: state.max_memory === undefined ? MAX_MEMORY : state.max_memory,
     network: state.network ?? true,
+    systemTime: state.system_time ?? null,
   }
 }
 

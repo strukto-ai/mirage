@@ -33,6 +33,7 @@ import {
   TYPE_CHARS,
 } from './constants.ts'
 import { UNKNOWN_NAME, groupName, ownerName, type Identity } from './identity.ts'
+import { systemNow } from '../../../utils/clock.ts'
 
 // What a stat field a VFS cannot know renders as, in `stat -c` and in
 // the inode and block columns of `find -ls`.
@@ -182,7 +183,7 @@ function parseWhen(modified: string | null | undefined): Date | null {
 // GNU's "recent" test: within the last half year and not in the future
 // for ls, findutils' wider window for `find -ls`.
 function isRecent(when: number, findRule: boolean): boolean {
-  const now = Date.now() / 1000
+  const now = systemNow()
   if (findRule) return !(now > when + FIND_OLD_SECONDS || when > now + FIND_FUTURE_SECONDS)
   return now - LS_RECENT_SECONDS < when && when < now
 }
