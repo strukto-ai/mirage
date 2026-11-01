@@ -51,6 +51,15 @@ describe('system_time', () => {
     expect(await out(ws, "echo '{}' | jq -r 'now|todate'")).toBe('2026-03-02T09:01:00Z\n')
   })
 
+  it('stamps copies and processes', async () => {
+    const ws = started('2026-03-02T09:00:00Z')
+    const line =
+      'mkdir /data/t && echo x > /data/t/a && cp /data/t/a /data/b && ' +
+      'cp -r /data/t /data/u && ls -l --time-style=+%F /data/b /data/u/a'
+    expect((await out(ws, line)).split(' 2026-03-02 ').length - 1).toBe(2)
+    expect(await out(ws, 'ps -o lstart=')).toContain('Mar  2')
+  })
+
   it('ticks with the workspace clock', async () => {
     const clock = new ManualClock(1_000_000)
     const ws = started('2026-03-02T09:00:00+08:00', clock)
@@ -98,6 +107,10 @@ describe('parseSystemTime', () => {
     '2026-03-02T24:00:00Z',
     '2026-03-02T09:00:60Z',
     '2026-03-02T09:00:00+24:00',
+    '2026-03-02T09:00:00+08:99',
+    '1969-12-31T23:59:59Z',
+    '0050-01-01T00:00:00Z',
+    '2262-01-01T00:00:00Z',
   ])('refuses %s', (text) => {
     expect(() => parseSystemTime(text)).toThrow('is not an ISO 8601 instant with an offset')
   })

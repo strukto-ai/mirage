@@ -136,11 +136,12 @@ export class ShiftedClock implements Clock {
 
 // An ISO 8601 instant with an offset: `2026-03-02T09:00:00Z`, `+08:00`.
 const INSTANT =
-  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2}):(\d{2}))$/
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2}):([0-5]\d))$/
 
 /**
  * Seconds since the unix epoch a `system_time` names: an ISO 8601 instant
- * with an offset (`Z` or `+08:00`). Mirrors Python's `parse_system_time`.
+ * with an offset (`Z` or `+08:00`), from 1970 through 2261, the years a
+ * guest's nanosecond clock holds. Mirrors Python's `parse_system_time`.
  *
  * @throws Error when it is not one.
  */
@@ -165,15 +166,14 @@ export function parseSystemTime(text: string): number {
       back.getUTCHours() === hour &&
       back.getUTCMinutes() === minute &&
       back.getUTCSeconds() === second &&
-      Number(m[11] ?? 0) < 60 &&
       Math.abs(offset) < 24 * 60
     ) {
       seconds = (at - offset * 60_000) / 1000
     }
   }
-  if (Number.isNaN(seconds)) {
+  if (!(seconds >= 0 && seconds < 9214646400)) {
     throw new Error(
-      `system_time ${JSON.stringify(text)} is not an ISO 8601 instant with an offset, as 2026-03-02T09:00:00Z`,
+      `system_time ${JSON.stringify(text)} is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z`,
     )
   }
   return seconds

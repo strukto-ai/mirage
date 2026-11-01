@@ -19,6 +19,7 @@ import pytest
 from mirage import Workspace
 from mirage.types import MountMode
 from mirage.utils.clock import ManualClock, parse_system_time
+from mirage.vfs.disk.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 
 
@@ -54,6 +55,26 @@ async def test_system_time_starts_date_file_times_and_jq():
             await _out(ws, "echo '{}' | jq -r 'now|todate'")
             == "2026-03-02T09:01:00Z\n"
         )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_system_time_stamps_copies_and_processes(tmp_path):
+    # A disk mount stamps the host's time itself, which a copy must not show.
+    ws = Workspace(
+        {"/disk": DiskVFS(root=str(tmp_path))},
+        mode=MountMode.EXEC,
+        clock=ManualClock(1_000_000),
+        system_time="2026-03-02T09:00:00Z",
+    )
+    try:
+        line = (
+            "mkdir /disk/t && echo x > /disk/t/a && cp /disk/t/a /disk/b && "
+            "cp -r /disk/t /disk/u && ls -l --time-style=+%F /disk/b /disk/u/a"
+        )
+        assert (await _out(ws, line)).count(" 2026-03-02 ") == 2
+        assert "Mar  2" in await _out(ws, "ps -o lstart=")
     finally:
         await ws.close()
 
@@ -146,6 +167,10 @@ def test_parse_system_time_reads(text, seconds):
         "2026-03-02T24:00:00Z",
         "2026-03-02T09:00:60Z",
         "2026-03-02T09:00:00+24:00",
+        "2026-03-02T09:00:00+08:99",
+        "1969-12-31T23:59:59Z",
+        "0050-01-01T00:00:00Z",
+        "2262-01-01T00:00:00Z",
     ],
 )
 def test_parse_system_time_refuses(text):

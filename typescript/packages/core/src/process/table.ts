@@ -26,11 +26,14 @@ export class ProcessTable {
    *   none; omitted means the system source.
    * @param changed called once a runner is started, so whoever publishes the
    *   live runners knows to.
+   * @param now the epoch seconds a process starts at, which `ps` shows;
+   *   omitted means the running workspace's system time.
    */
   constructor(
     private readonly bind: ExecutionBind = (_id, run) => run(),
     private readonly ids?: IdSource,
     private readonly changed?: () => void,
+    private readonly now: () => number = systemNow,
   ) {}
 
   /** Whether a runner that was started has yet to begin. */
@@ -88,7 +91,7 @@ export class ProcessTable {
         sessionId: init.sessionId,
         command: init.command,
         cwd: init.cwd,
-        startedAt: systemNow(),
+        startedAt: this.now(),
         state: 'running',
         cancellationRequested: false,
         exitCode: null,
