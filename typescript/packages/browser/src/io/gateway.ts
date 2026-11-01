@@ -69,7 +69,12 @@ async function through(
   live.forEach((egress, at) => {
     if (answers[at] === true && egress.policies !== null) owners.set(egress.policies, egress)
   })
-  input = routed(input)
+  try {
+    input = routed(input)
+  } catch (err) {
+    console.debug('gateway:', err)
+    throw new TypeError('Failed to fetch')
+  }
   const target = new URL(input instanceof Request ? input.url : input, globalThis.location.href)
   if (owners.size === 0 || !REACHING.has(target.protocol)) return send(input, init)
   const host = target.hostname

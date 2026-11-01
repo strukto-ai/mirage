@@ -16,7 +16,13 @@ import type { DiffComputer } from '../../rs/diff_types.ts'
 import type { SessionAccess } from '../../view/types.ts'
 import { IOConfig } from '../../io/config.ts'
 import type { MemoryBudget } from '../../io/memory.ts'
-import { NetworkRule, networkLayer, networkRoutes, type NetworkSetting } from '../../io/network.ts'
+import {
+  mergeRoutes,
+  NetworkRule,
+  networkLayer,
+  networkRoutes,
+  type NetworkSetting,
+} from '../../io/network.ts'
 import { backendCommands } from './backends.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { ProcessView } from '../../process/view.ts'
@@ -256,7 +262,7 @@ export class MountRegistry {
         new NetworkRule(
           [...(base?.layers ?? []), ...(layer === null ? [] : [layer])],
           base?.metadata ?? false,
-          { ...base?.routes, ...routes },
+          mergeRoutes(base?.routes ?? {}, routes),
         ),
       ]
       this.narrowed.set(key, held)

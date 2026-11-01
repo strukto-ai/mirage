@@ -30,15 +30,29 @@ function lets(url: string | URL): boolean {
   return !REACHING.has(target.protocol) || networkLets(target.hostname, '', portOf(target))
 }
 
+// The schemes whose TLS checks the URL's own host name.
+const SECURE = new Set(['https:', 'wss:'])
+
 /**
  * `input` sent where the bound rule routes its host and port instead, and
- * judged there; as it is when it routes nowhere.
+ * judged there; as it is when it routes nowhere. A page checks TLS against
+ * the URL it sends, so a secure route may change the port but not the host.
+ * Throws when it cannot be routed.
  */
 export function routed(input: RequestInfo | URL): RequestInfo | URL {
   const target = new URL(input instanceof Request ? input.url : input, globalThis.location.href)
   if (!REACHING.has(target.protocol)) return input
   const route = networkRoute(target.hostname, portOf(target))
   if (route === null) return input
+  const bare = target.hostname
+    .replace(/^\[(.*)\]$/, '$1')
+    .replace(/\.$/, '')
+    .toLowerCase()
+  if (SECURE.has(target.protocol) && route[0] !== bare) {
+    throw new Error(
+      `network: a page cannot route ${target.host} to another host and still check its TLS name`,
+    )
+  }
   target.hostname = route[0].includes(':') ? `[${route[0]}]` : route[0]
   target.port = String(route[1])
   return input instanceof Request ? new Request(target, input) : target
@@ -59,7 +73,12 @@ export function watchNetwork(): void {
   const send = globalThis.fetch.bind(globalThis)
   globalThis.fetch = async (input, init) => {
     if (networkBound() === null) return send(input, init)
-    input = routed(input)
+    try {
+      input = routed(input)
+    } catch (err) {
+      console.debug('network:', err)
+      throw new TypeError('Failed to fetch')
+    }
     if (!lets(input instanceof Request ? input.url : input)) throw new TypeError('Failed to fetch')
     const redirect = init?.redirect ?? (input instanceof Request ? input.redirect : 'follow')
     if (redirect !== 'follow') return send(input, init)
@@ -70,9 +89,16 @@ export function watchNetwork(): void {
   const Socket = globalThis.WebSocket
   globalThis.WebSocket = class extends Socket {
     constructor(url: string | URL, protocols?: string | string[]) {
-      const target = networkBound() === null ? url : (routed(url) as string | URL)
-      if (networkBound() !== null && !lets(target)) {
-        throw new DOMException(`The network rule refuses ${String(target)}`, 'SecurityError')
+      let target = url
+      if (networkBound() !== null) {
+        try {
+          target = routed(url) as string | URL
+        } catch (err) {
+          throw new DOMException(String(err), 'SecurityError')
+        }
+        if (!lets(target)) {
+          throw new DOMException(`The network rule refuses ${String(target)}`, 'SecurityError')
+        }
       }
       super(target, protocols)
     }

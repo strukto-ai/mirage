@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  mergeRoutes,
   NetworkRule,
   networkBound,
   networkLayer,
@@ -119,12 +120,21 @@ describe('NetworkRule', () => {
     [{ 'localhost:0': '127.0.0.1:1' }, /is not host:port/],
     [{ 'localhost:65536': '127.0.0.1:1' }, /is not host:port/],
     [{ '::1:80': '127.0.0.1:1' }, /is not host:port/],
+    [{ 'a.test:80': '127.0.0.1:1', 'A.test.:80': '127.0.0.1:2' }, /name the same end/],
     [
       { 'a.test:80': 'b.test:80', 'B.test:80': 'c.test:80' },
       /goes to b.test:80, which is routed too/,
     ],
   ])('refuses the routes %o', (routes, message) => {
     expect(() => new NetworkRule([], false, routes)).toThrow(message)
+  })
+
+  it('routes over others in place of each spelling of their end', () => {
+    const base = { 'LOCALHOST.:5003': '127.0.0.1:1', 'a.test:80': '127.0.0.1:2' }
+    expect(mergeRoutes(base, { 'localhost:5003': '127.0.0.1:3' })).toEqual({
+      'a.test:80': '127.0.0.1:2',
+      'localhost:5003': '127.0.0.1:3',
+    })
   })
 
   it('is built for routes alone, which the bound call answers by', async () => {

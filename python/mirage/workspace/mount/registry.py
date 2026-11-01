@@ -43,6 +43,7 @@ from mirage.io.memory import MemoryBudget
 from mirage.io.network import (
     NetworkRule,
     NetworkSetting,
+    merge_routes,
     network_layer,
     network_routes,
     watch_network,
@@ -314,7 +315,7 @@ class MountRegistry:
                     *(() if layer is None else (layer,)),
                 ],
                 base is not None and base.metadata,
-                {**(base.routes if base is not None else {}), **routes},
+                merge_routes(base.routes if base is not None else {}, routes),
             )
             watch_network()
             held = (base, rule)

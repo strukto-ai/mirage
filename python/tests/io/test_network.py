@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import socket
 
 import pytest
 import pytest_asyncio
@@ -21,6 +22,7 @@ from mirage import Workspace
 from mirage.io import network
 from mirage.io.network import (
     NetworkRule,
+    merge_routes,
     network_bound,
     network_layer,
     network_lets,
@@ -122,11 +124,63 @@ async def test_routes_alone_build_a_rule_the_bound_call_answers_by():
     assert rule is not None and rule.layers == ()
     assert network_rule({"routes": {}}) is None
     assert network_route("localhost", 5003) is None
+    assert await run_with_network(rule, _route_of_5003()) == (
+        "127.0.0.1",
+        61001,
+    )
 
-    async def ask() -> tuple[str, int] | None:
-        return network_route("localhost", 5003)
 
-    assert await run_with_network(rule, ask()) == ("127.0.0.1", 61001)
+def test_two_spellings_of_one_end_are_refused():
+    with pytest.raises(ValueError, match="name the same end"):
+        NetworkRule(
+            [],
+            routes={
+                "localhost:5003": "127.0.0.1:1",
+                "LOCALHOST.:5003": "127.0.0.1:2",
+            },
+        )
+
+
+def test_routes_over_others_replace_each_spelling_of_their_end():
+    base = {"LOCALHOST.:5003": "127.0.0.1:1", "a.test:80": "127.0.0.1:2"}
+    assert merge_routes(base, {"localhost:5003": "127.0.0.1:3"}) == {
+        "a.test:80": "127.0.0.1:2",
+        "localhost:5003": "127.0.0.1:3",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_routed_lookup_reroutes_one_connect_under_its_own_rule():
+    routes = {"localhost:5003": "127.0.0.1:61001"}
+    rule = NetworkRule([], routes=routes)
+    other = NetworkRule([], routes=routes)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        assert await run_with_network(rule, _connects(rule, other, sock)) == [
+            ("127.0.0.1", 61001),
+            ("127.0.0.1", 5003),
+        ]
+
+
+async def _route_of_5003() -> tuple[str, int] | None:
+    return network_route("localhost", 5003)
+
+
+async def _connects(
+    rule: NetworkRule, other: NetworkRule, sock: socket.socket
+) -> list[tuple[str, int]]:
+    network._getaddrinfo("localhost", 5003, socket.AF_INET, socket.SOCK_STREAM)
+    first = network.routed(sock, ("127.0.0.1", 5003))
+    again = network.routed(sock, ("127.0.0.1", 5003))
+    network._getaddrinfo("localhost", 5003, socket.AF_INET, socket.SOCK_STREAM)
+    assert await run_with_network(other, _routed_to(sock)) == (
+        "127.0.0.1",
+        5003,
+    )
+    return [first, again]
+
+
+async def _routed_to(sock: socket.socket) -> tuple[str, int]:
+    return network.routed(sock, ("127.0.0.1", 5003))
 
 
 @pytest.mark.asyncio
@@ -235,20 +289,26 @@ async def test_a_routed_connection_goes_where_its_route_names(port):
     assert await _fetched(target, "http://localhost:5003/") == 7
 
 
+async def _answer_other(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    await reader.read(1024)
+    writer.write(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n"
+        b"Connection: close\r\n\r\nother\n"
+    )
+    await writer.drain()
+    writer.close()
+
+
+async def _read_5003(ws: Workspace) -> str:
+    io = await ws.shell("curl -sS http://localhost:5003/")
+    return await io.stdout_str()
+
+
 @pytest.mark.asyncio
 async def test_each_workspace_sends_the_same_address_to_its_own_end(port):
-    async def other_answer(
-        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        await reader.read(1024)
-        writer.write(
-            b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n"
-            b"Connection: close\r\n\r\nother\n"
-        )
-        await writer.drain()
-        writer.close()
-
-    other = await asyncio.start_server(other_answer, "127.0.0.1", 0)
+    other = await asyncio.start_server(_answer_other, "127.0.0.1", 0)
     at = other.sockets[0].getsockname()[1]
     t1 = Workspace(
         {"/data": RAMVFS()},
@@ -258,13 +318,10 @@ async def test_each_workspace_sends_the_same_address_to_its_own_end(port):
         {"/data": RAMVFS()},
         network={"routes": {"localhost:5003": f"127.0.0.1:{at}"}},
     )
-
-    async def read(ws: Workspace) -> str:
-        io = await ws.shell("curl -sS http://localhost:5003/")
-        return await io.stdout_str()
-
     try:
-        assert await asyncio.gather(read(t1), read(t2), read(t1)) == [
+        assert await asyncio.gather(
+            _read_5003(t1), _read_5003(t2), _read_5003(t1)
+        ) == [
             "ok\n",
             "other\n",
             "ok\n",

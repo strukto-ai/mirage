@@ -109,10 +109,17 @@ class NetworkRule:
         self.layers = tuple(dict(layer) for layer in layers)
         self.metadata = metadata
         self.routes = dict(routes or {})
-        self._targets = {
-            _endpoint(source): _endpoint(target)
-            for source, target in self.routes.items()
-        }
+        self._targets: dict[tuple[str, int], tuple[str, int]] = {}
+        sources: dict[tuple[str, int], str] = {}
+        for source, target in self.routes.items():
+            end = _endpoint(source)
+            if end in sources:
+                raise ValueError(
+                    f"network: routes {sources[end]} and {source} "
+                    "name the same end"
+                )
+            sources[end] = source
+            self._targets[end] = _endpoint(target)
         for source, target in self.routes.items():
             if _endpoint(target) in self._targets:
                 raise ValueError(
@@ -251,6 +258,26 @@ def network_routes(setting: NetworkSetting) -> dict[str, str]:
     return dict(routes) if isinstance(routes, Mapping) else {}
 
 
+def merge_routes(
+    base: Mapping[str, str], over: Mapping[str, str]
+) -> dict[str, str]:
+    """``base``'s routes with ``over``'s in place of any naming the same
+    end, as a session's profile routes over its workspace's. Mirrors TS's
+    ``mergeRoutes``.
+
+    Args:
+        base (Mapping[str, str]): the routes routed over.
+        over (Mapping[str, str]): the routes that win.
+    """
+    named = {_endpoint(source) for source in over}
+    kept = {
+        source: target
+        for source, target in base.items()
+        if _endpoint(source) not in named
+    }
+    return {**kept, **over}
+
+
 def network_rule(
     setting: NetworkSetting = True, metadata: bool = False
 ) -> NetworkRule | None:
@@ -344,13 +371,14 @@ _lookups: ContextVar[tuple[tuple[str, int | None, tuple[str, ...]], ...]] = (
 )
 # How many of a call's lookups are kept.
 _LOOKUPS_KEPT = 16
-# The addresses the running call's routed lookups answered, each with the
-# port the program asked for and the port its route names: a program that
-# connects an answer's address on the port it asked for is sent on to the
-# route's.
-_hops: ContextVar[tuple[tuple[str, int, int], ...]] = ContextVar(
-    "mirage_hops", default=()
-)
+# The running call's routed lookups not yet connected, newest last: the
+# rule that routed each, the addresses it answered, the port the program
+# asked for and the port its route names. The first connect to each of its
+# addresses on the port asked is sent on to the route's port, and that
+# address leaves the lookup, as a client falling back tries each once.
+_hops: ContextVar[
+    tuple[tuple[NetworkRule, tuple[str, ...], int, int], ...]
+] = ContextVar("mirage_hops", default=())
 _connect = socket.socket.connect
 _connect_ex = socket.socket.connect_ex
 # The listeners the gateway relays from, which a connect may always reach:
@@ -388,8 +416,9 @@ def answers(host: str, port: int | None = None) -> tuple[str, ...]:
 
 def routed(sock: socket.socket, address: Any) -> Any:
     """Where ``sock`` connects instead of ``address``: on to the port a
-    route names when a routed lookup of the running call answered the
-    address for the port asked, else where a route of the bound rule
+    route names when a routed lookup of the running call, under the bound
+    rule and not yet connected, answered the address for the port asked,
+    else where a route of the bound rule
     sends the address and port, its end looked up for the socket's
     family; ``address`` itself when none does.
 
@@ -407,8 +436,13 @@ def routed(sock: socket.socket, address: Any) -> Any:
     ):
         return address
     host, port = address[0], address[1]
-    for answered, asked, to in reversed(_hops.get()):
-        if answered == host and asked == port:
+    hops = _hops.get()
+    for at in range(len(hops) - 1, -1, -1):
+        owner, answered, asked, to = hops[at]
+        if owner is rule and host in answered and asked == port:
+            left = tuple(other for other in answered if other != host)
+            rest = ((owner, left, asked, to),) if left else ()
+            _hops.set(hops[:at] + rest + hops[at + 1 :])
             return (host, to, *address[2:])
     target = rule.route(host, port)
     if target is None:
@@ -502,12 +536,16 @@ def _routed(
 
 
 def _hop(
-    asked: int | None, to: bytes | str | int | None, found: list[Any]
+    rule: NetworkRule | None,
+    asked: int | None,
+    to: bytes | str | int | None,
+    found: list[Any],
 ) -> None:
-    if asked is None or not isinstance(to, int):
+    if rule is None or asked is None or not isinstance(to, int) or not found:
         return
-    hops = tuple((str(info[4][0]), asked, to) for info in found)
-    _hops.set((*_hops.get(), *hops)[-_LOOKUPS_KEPT:])
+    answered = tuple(dict.fromkeys(str(info[4][0]) for info in found))
+    kept = _hops.get()[1 - _LOOKUPS_KEPT :]
+    _hops.set((*kept, (rule, answered, asked, to)))
 
 
 def _getaddrinfo(
@@ -521,7 +559,7 @@ def _getaddrinfo(
     found = _resolve(host, port, *args, **kwargs)
     let = found if rule is None else _judged(rule, host, port, found)
     _remember(host, _port_of(port), let)
-    _hop(asked, port, let)
+    _hop(rule, asked, port, let)
     return let
 
 
@@ -537,7 +575,7 @@ async def _loop_getaddrinfo(
     found = await _loop_resolve(loop, host, port, *args, **kwargs)
     let = found if rule is None else _judged(rule, host, port, found)
     _remember(host, _port_of(port), let)
-    _hop(asked, port, let)
+    _hop(rule, asked, port, let)
     return let
 
 
