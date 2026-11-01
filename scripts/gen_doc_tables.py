@@ -29,6 +29,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
+from typing_extensions import TypeForm
 
 from mirage.types import JsonValue, MountMode
 from mirage.vfs.registry import REGISTRY, build_vfs, resolve_class
@@ -427,11 +428,11 @@ def exports_table(name: str, omit: frozenset[str] = frozenset()) -> Rendered:
     return exports_rows(adapter_exports(name), omit)
 
 
-def placeholder(annotation: type | None) -> JsonValue:
+def placeholder(annotation: TypeForm[typing.Any] | None) -> JsonValue:
     """A value of one required field's type that its model accepts.
 
     Args:
-        annotation (type | None): The field's annotation.
+        annotation (TypeForm[typing.Any] | None): The field's annotation.
     """
     if annotation in (int, float):
         return 1

@@ -64,10 +64,10 @@
     "typescript": "^6.0.0",
     "@types/node": "^22.0.0",
     "vitest": "^4.1.12",
-    "e2b": "^2.45.0"
+    "e2b": "^2.62.0"
   },
   "peerDependencies": {
-    "e2b": "^2.45.0"
+    "e2b": "^2.62.0"
   },
   "peerDependenciesMeta": {
     "e2b": {

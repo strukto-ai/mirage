@@ -14,14 +14,14 @@
 [[python]]
 name = "daytona-analytics-api-client*"
 license = "LicenseRef-Unknown"
-version = "0.207.0"
-reason = "Apache-2.0: the LICENSE in both 0.207.0 wheels. Reached through the daytona extra."
+version = "0.227.0"
+reason = "Apache-2.0: the LICENSE in both 0.227.0 wheels. Reached through the daytona extra."
 
 [[python]]
 name = "protobuf-py-ext"
 license = "LicenseRef-Unknown"
-version = "0.1.1"
-reason = "Apache-2.0: the LICENSE of bufbuild/protobuf-py, which builds it; the wheel carries none. Reached through the e2b extra."
+version = "0.6.0"
+reason = "Apache-2.0: bufbuild/protobuf-py's LICENSE at its 0.6.0 release commit 31342760dd7673273200b0f24e290680827fd203; the package metadata names no license. Reached through the e2b extra."
 
 # --- weak copyleft, accepted as unmodified, separately installed packages ---
 
