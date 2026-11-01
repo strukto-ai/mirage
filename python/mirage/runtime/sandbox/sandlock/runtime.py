@@ -20,7 +20,6 @@ from typing import Any
 
 from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
-from mirage.runtime.binding import refused_run
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.program import (
@@ -126,10 +125,6 @@ class SandlockRuntime(
             raise RuntimeError(SANDLOCK_HINT)
         given = {**self.config.env, **(ctx.env or {})}
         clock = await system_time_env(given)
-        if clock is None:
-            return refused_run(
-                self.name, "runtime cannot keep this workspace's system_time"
-            )
         # A run still finding `sandlock` or libfaketime when the runtime
         # closed starts nothing, so no child outlives the close.
         if self._closed:

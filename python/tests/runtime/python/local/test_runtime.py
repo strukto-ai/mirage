@@ -15,6 +15,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -655,7 +656,7 @@ async def test_a_file_the_program_makes_shows_in_the_next_listing(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_runs_on_the_system_time_or_refuses_without_libfaketime():
+async def test_runs_on_the_system_time_or_the_host_clock_without_libfaketime():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
@@ -673,7 +674,7 @@ async def test_runs_on_the_system_time_or_refuses_without_libfaketime():
         ):
             assert await io.stdout_str() == "2026-03-02\n"
         else:
-            assert io.exit_code == 126
-            assert await io.stderr_str() == "local: Permission denied\n"
+            assert io.exit_code == 0
+            assert re.fullmatch(r"\d{4}-\d\d-\d\d\n", await io.stdout_str())
     finally:
         await ws.close()

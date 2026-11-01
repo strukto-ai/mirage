@@ -831,12 +831,11 @@ async def test_system_time_env_preloads_libfaketime_at_the_offset(
     env = await run_with_system_clock(
         clock, system_time_env({"LD_PRELOAD": "/opt/x.so"})
     )
-    assert env is not None
     assert env["LD_PRELOAD"] == f"{library}:/opt/x.so"
     assert env["FAKETIME_DONT_FAKE_MONOTONIC"] == "1"
     assert re.fullmatch(r"-\d+\.\d{3}s", env["FAKETIME"])
     assert float(env["FAKETIME"][:-1]) == pytest.approx(-3600.25, abs=0.05)
     library.unlink()
-    assert await run_with_system_clock(clock, system_time_env({})) is None
+    assert await run_with_system_clock(clock, system_time_env({})) == {}
     assert await system_time_env({}) == {}
     assert FAKETIME_LIBRARIES

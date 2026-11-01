@@ -816,10 +816,10 @@ describe('systemTimeEnv', () => {
         LD_PRELOAD: `${library}:/opt/x.so`,
         FAKETIME_DONT_FAKE_MONOTONIC: '1',
       })
-      expect(env?.FAKETIME).toMatch(/^-\d+\.\d{3}s$/)
-      expect(Number.parseFloat(env?.FAKETIME ?? '')).toBeCloseTo(-3600.25, 1)
+      expect(env.FAKETIME).toMatch(/^-\d+\.\d{3}s$/)
+      expect(Number.parseFloat(env.FAKETIME ?? '')).toBeCloseTo(-3600.25, 1)
       rmSync(library)
-      expect(await runWithSystemClock(clock, () => systemTimeEnv({}))).toBeNull()
+      expect(await runWithSystemClock(clock, () => systemTimeEnv({}))).toEqual({})
       expect(await systemTimeEnv({})).toEqual({})
     } finally {
       FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, ...saved)

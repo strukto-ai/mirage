@@ -37,7 +37,6 @@ import {
   runProgram,
   systemTimeEnv,
 } from '../../sandbox/program.ts'
-import { refusedRun } from '@struktoai/mirage-core/runtime/binding'
 import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '@struktoai/mirage-core/shell/constants'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
@@ -239,8 +238,6 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
   ): Promise<RunResult> {
     const given = { ...(this.config as LocalConfig).env, ...env }
     const clock = await systemTimeEnv(given)
-    if (clock === null)
-      return refusedRun(this.name, "runtime cannot keep this workspace's system_time")
     // A run still finding its program or libfaketime when the runtime
     // closed starts nothing, so no child outlives the close.
     if (this.closed) throw new Error(`${this.name}: the runtime is closed`)

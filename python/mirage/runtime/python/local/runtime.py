@@ -23,7 +23,6 @@ from typing import Any, ClassVar
 from mirage.commands.config import Context
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource
-from mirage.runtime.binding import refused_run
 from mirage.runtime.config import RuntimeConfig, resolve_home
 from mirage.runtime.mixin import ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
@@ -227,10 +226,6 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
     ) -> RunResult:
         given = {**self.config.env, **env}
         clock = await system_time_env(given)
-        if clock is None:
-            return refused_run(
-                self.name, "runtime cannot keep this workspace's system_time"
-            )
         # A run still finding its program or libfaketime when the runtime
         # closed starts nothing, so no child outlives the close.
         if self._closed:

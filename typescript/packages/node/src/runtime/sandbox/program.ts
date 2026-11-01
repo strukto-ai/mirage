@@ -56,16 +56,18 @@ export const FAKETIME_LIBRARIES = [
  * What a process on this host needs to read the running workspace's system
  * time: libfaketime preloaded at its offset from the host's clock, to the
  * millisecond, with the monotonic clock left alone. Empty when the workspace
- * keeps the host's time; null when this host has no libfaketime. `env` is
- * the process's environment, whose `LD_PRELOAD` libraries load after
- * libfaketime. Mirrors Python's `system_time_env`.
+ * keeps the host's time, and when this host has no libfaketime, where the
+ * process runs on the host's clock. `env` is the process's environment,
+ * whose `LD_PRELOAD` libraries load after libfaketime. Mirrors Python's
+ * `system_time_env`.
  */
-export async function systemTimeEnv(
-  env: Record<string, string>,
-): Promise<Record<string, string> | null> {
+export async function systemTimeEnv(env: Record<string, string>): Promise<Record<string, string>> {
   if (boundSystemClock() === null) return {}
   const library = process.platform === 'linux' ? await faketimeLibrary() : null
-  if (library === null) return null
+  if (library === null) {
+    debuglog('mirage')('libfaketime: none found, so the process runs on the host clock')
+    return {}
+  }
   const preload = env.LD_PRELOAD
   const offset = systemNow() - Date.now() / 1000
   return {

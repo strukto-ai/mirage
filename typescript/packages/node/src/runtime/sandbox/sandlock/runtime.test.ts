@@ -108,7 +108,7 @@ else {
     expect(data.stdin).toBe('input\n')
   })
 
-  it('hands the system time to the child, or refuses without libfaketime', async () => {
+  it('hands the system time to the child, or the host clock without libfaketime', async () => {
     const library = join(dir, 'libfaketime.so.1')
     await writeFile(library, '')
     const saved = FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, library)
@@ -126,11 +126,11 @@ else {
       expect(data.argv).toContain(`LD_PRELOAD=${library}`)
       expect(data.argv).toContain('FAKETIME_DONT_FAKE_MONOTONIC=1')
       await rm(library)
-      const refused = await ws.shell('node')
-      expect([refused.exitCode, DEC.decode(refused.stderr)]).toEqual([
-        126,
-        'sandlock: Permission denied\n',
-      ])
+      const host = await ws.shell('node')
+      expect(host.exitCode).toBe(0)
+      expect((JSON.parse(DEC.decode(host.stdout)) as Capture).argv.join(' ')).not.toContain(
+        'FAKETIME',
+      )
     } finally {
       await ws.close()
       FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, ...saved)
