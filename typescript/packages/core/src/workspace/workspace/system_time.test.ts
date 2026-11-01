@@ -44,7 +44,7 @@ describe('system_time', () => {
     expect(await out(ws, 'TZ=Asia/Shanghai date +%H:%M')).toBe('17:00\n')
     expect(await out(ws, 'date -u -d tomorrow +%F')).toBe('2026-03-03\n')
     await ws.shell('touch /data/a')
-    // ls shows the time of a file stamped before now, as GNU's does.
+    // ls shows the time, not the year, of a file stamped before now.
     clock.advance(60)
     expect(await out(ws, 'ls -l /data')).toContain(' Mar  2 09:00 a\n')
     expect(await out(ws, 'find /data -mtime -1')).toBe('/data/a\n')

@@ -162,11 +162,9 @@ env:
   TZ: America/New_York
 ```
 
-```bash
-date -u                 # Mon Mar  2 09:00:00 UTC 2026
-touch notes.txt         # stamped Mar  2 09:00
-python3 -c 'import datetime; print(datetime.date.today())'   # 2026-03-02
-```
+Right after it starts, `date -u` prints `Mon Mar  2 09:00:00 UTC 2026`, a
+file written then is stamped 09:00 UTC, and Python's
+`datetime.date.today()` is `2026-03-02`.
 
 `date`, file times, `ls -l`, `find -mtime`, `jq`'s `now` and git commits
 all see this time, and so do the
