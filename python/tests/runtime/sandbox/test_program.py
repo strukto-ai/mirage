@@ -836,6 +836,7 @@ async def test_system_time_env_preloads_libfaketime_at_the_offset(
     assert env["FAKETIME_FMT"] == "%s"
     assert env["FAKETIME_DONT_RESET"] == "1"
     assert env["FAKETIME_DONT_FAKE_MONOTONIC"] == "1"
+    assert env["NO_FAKE_STAT"] == "1"
     assert re.fullmatch(r"@\d+\.\d{3}", env["FAKETIME"])
     assert float(env["FAKETIME"][1:]) == pytest.approx(start, abs=0.05)
     library.unlink()

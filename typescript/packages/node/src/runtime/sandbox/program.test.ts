@@ -818,6 +818,7 @@ describe('systemTimeEnv', () => {
         FAKETIME_FMT: '%s',
         FAKETIME_DONT_RESET: '1',
         FAKETIME_DONT_FAKE_MONOTONIC: '1',
+        NO_FAKE_STAT: '1',
       })
       expect(env.FAKETIME).toMatch(/^@\d+\.\d{3}$/)
       expect(Number.parseFloat((env.FAKETIME ?? '').slice(1))).toBeCloseTo(start, 1)
