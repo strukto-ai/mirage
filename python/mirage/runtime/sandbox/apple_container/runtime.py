@@ -106,8 +106,14 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
         probes each container on its first line instead.
         """
 
-    async def _target(self) -> str:
-        """The container this line's session runs in, probed once."""
+    def _sandbox_key(self) -> str:
+        """The container this line's session runs in, which keeps its own
+        libfaketime answer."""
+        return self._container_name()
+
+    def _container_name(self) -> str:
+        """The container this line's session runs in (config
+        ``containers``, else ``container``)."""
         session = get_current_session()
         session_id = session.session_id if session is not None else None
         container = (
@@ -119,6 +125,11 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
             container = self.config.container
         if container is None:
             raise RuntimeError(no_container_hint(session_id))
+        return container
+
+    async def _target(self) -> str:
+        """The container this line's session runs in, probed once."""
+        container = self._container_name()
         async with self._probe_lock:
             if container not in self._running:
                 await self._probe(container)

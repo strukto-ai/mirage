@@ -85,9 +85,11 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   // retries.
   private connecting: Promise<void> | null = null
   private mounts: SandboxMounts | null = null
-  // The libfaketime this sandbox holds, asked once the first program runs
-  // under a system_time: null for none, undefined before the probe.
-  private faketime: string | null | undefined = undefined
+  // The libfaketime each sandbox holds (`sandboxKey`), asked once the first
+  // program runs there under a system_time: null for none. Concurrent first
+  // runs share the probe; a failed probe clears its slot so a later run asks
+  // again.
+  private readonly faketime = new Map<string, Promise<string | null>>()
 
   constructor(options: RuntimeOptions<C> = {}, configKeys?: readonly string[]) {
     super(options as RuntimeOptions, [EXTERNAL_COMMANDS], configKeys ?? BASE_CONFIG_KEYS)
@@ -183,6 +185,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     if (refusal !== null) return refusal
     const given = { ...this.config.env, ...ctx.env }
     const clock = await this.systemTimeEnv(given, ctx.signal)
+    // A deadline that passed during the probe starts nothing.
+    ctx.signal?.throwIfAborted()
     const execId = crypto.randomUUID().replaceAll('-', '')
     const runner = currentCaller().process
     runner?.addRun(`box:${execId}`, { runtime: this.name, tag: execId, command: shellJoin(argv) })
@@ -285,11 +289,36 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     signal?: AbortSignal,
   ): Promise<Record<string, string>> {
     if (boundSystemClock() === null) return {}
-    if (this.faketime === undefined) {
-      const found = await this.execLine(faketimeProbe(), null, { ...this.config.env }, '/', signal)
-      this.faketime = new TextDecoder().decode(found.stdout).trim() || null
+    const key = this.sandboxKey()
+    let probe = this.faketime.get(key)
+    if (probe === undefined) {
+      probe = this.execLine(faketimeProbe(), null, { ...this.config.env }, '/', signal).then(
+        (found) => {
+          if (found.exitCode !== 0)
+            throw new Error(`${this.name}: libfaketime probe exited ${String(found.exitCode)}`)
+          return new TextDecoder().decode(found.stdout).trim() || null
+        },
+      )
+      this.faketime.set(key, probe)
     }
-    return this.faketime === null ? {} : faketimeEnv(this.faketime, env)
+    let library: string | null
+    try {
+      library = await probe
+    } catch {
+      // Unanswered: this run keeps the sandbox's clock, and a later one asks again.
+      if (this.faketime.get(key) === probe) this.faketime.delete(key)
+      return {}
+    }
+    return library === null ? {} : faketimeEnv(library, env)
+  }
+
+  /**
+   * Which sandbox a run of the current session goes to, which the libfaketime
+   * probe is kept for: one per runtime unless a provider picks its sandbox
+   * per session. Mirrors Python's `SandboxRuntime._sandbox_key`.
+   */
+  protected sandboxKey(): string {
+    return ''
   }
 
   protected async ensureConnected(signal?: AbortSignal): Promise<void> {

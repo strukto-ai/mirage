@@ -85,17 +85,28 @@ export class AppleContainerRuntime
     return Promise.resolve()
   }
 
-  /**
-   * Select this session's container. Concurrent first lines share a probe;
-   * a failed probe clears its slot so the next line retries.
-   */
-  private async target(signal?: AbortSignal): Promise<string> {
+  /** The container this line's session runs in, which keeps its own libfaketime answer. */
+  protected override sandboxKey(): string {
+    return this.containerName()
+  }
+
+  /** The container this line's session runs in (config `containers`, else `container`). */
+  private containerName(): string {
     const sessionId = getCurrentSession()?.sessionId ?? null
     const { containers = {} } = this.config
     const mapped =
       sessionId !== null && Object.hasOwn(containers, sessionId) ? containers[sessionId] : undefined
     const container = mapped ?? this.config.container
     if (container === undefined) throw new Error(noContainerHint(sessionId))
+    return container
+  }
+
+  /**
+   * Select this session's container. Concurrent first lines share a probe;
+   * a failed probe clears its slot so the next line retries.
+   */
+  private async target(signal?: AbortSignal): Promise<string> {
+    const container = this.containerName()
     let probe = this.probes.get(container)
     if (probe === undefined) {
       probe = this.probe(container).catch((err: unknown) => {
