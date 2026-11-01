@@ -20,6 +20,7 @@ import { ensurePathSpec } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath, virtualPath } from './path.ts'
 import { stat } from './stat.ts'
+import type { DirectoryEntry } from './types.ts'
 import { unlink } from './unlink.ts'
 import { enoent, enotempty } from '../../errors/fs.ts'
 
@@ -36,15 +37,26 @@ export async function holdsChild(
   }
 }
 
+// Whether a move copied this entry as it is listed now. Mirrors Python's
+// `_as_copied`.
+function asCopied(copied: Map<string, DirectoryEntry>, entry: DirectoryEntry): boolean {
+  const seen = copied.get(entry.path)
+  return (
+    seen?.isDirectory === entry.isDirectory &&
+    seen.fileSize === entry.fileSize &&
+    seen.lastModified === entry.lastModified
+  )
+}
+
 async function removeTreeRecurse(
   accessor: DatabricksVolumeAccessor,
   remoteDir: string,
   removed: string[],
-  copied: Set<string> | null,
+  copied: Map<string, DirectoryEntry> | null,
 ): Promise<boolean> {
   let left = false
   for (const entry of await listDirectoryContents(accessor, remoteDir)) {
-    if (copied !== null && !copied.has(entry.path)) {
+    if (copied !== null && !asCopied(copied, entry)) {
       left = true
     } else if (entry.isDirectory) {
       left = (await removeTreeRecurse(accessor, entry.path, removed, copied)) || left
@@ -67,17 +79,18 @@ async function removeTreeRecurse(
 }
 
 /**
- * Remove a directory tree, or only the files and directories a move copied
- * out of it (`copied`, their backend paths; null deletes every entry
- * listed). The walk lists each directory once, so a file written under it
- * since, or an entry the move never copied, stays and keeps its
- * directories: the tree is ENOTEMPTY. Returns the backend paths removed. Mirrors Python's
+ * Remove a directory tree, or only what a move copied out of it (`copied`,
+ * the entries by backend path as their listing showed them; only an entry
+ * still listed the same is deleted, and null deletes every entry listed).
+ * The walk lists each directory once, so a file written under it since, or
+ * an entry the move never copied or that changed since its copy, stays and
+ * keeps its directories: the tree is ENOTEMPTY. Returns the backend paths removed. Mirrors Python's
  * `remove_tree`.
  */
 export async function removeTree(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
-  copied: Set<string> | null = null,
+  copied: Map<string, DirectoryEntry> | null = null,
 ): Promise<string[]> {
   const removed: string[] = []
   let left: boolean

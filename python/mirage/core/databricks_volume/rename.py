@@ -17,6 +17,7 @@ from mirage.core.databricks_volume.copy import copy, copy_tree
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.rm import remove_tree
 from mirage.core.databricks_volume.stat import stat
+from mirage.core.databricks_volume.types import DirectoryEntry
 from mirage.core.databricks_volume.unlink import unlink
 from mirage.types import FileType, PathSpec
 
@@ -47,7 +48,7 @@ async def rename(
             )
         # Only what the copy carried is deleted: a file written under the
         # source after its listing stays there, and the move is ENOTEMPTY.
-        copied: set[str] = set()
+        copied: dict[str, DirectoryEntry] = {}
         await copy_tree(accessor, remote_src, remote_dst, copied)
         await remove_tree(accessor, src, copied)
     else:

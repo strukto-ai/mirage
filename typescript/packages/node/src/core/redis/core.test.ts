@@ -329,6 +329,24 @@ describe.skipIf(skip)('core/redis ops', () => {
     expect(await store.hasDir('/dir')).toBe(false)
   })
 
+  it('a directory made again during a removal keeps its metadata', async () => {
+    // A removed empty directory made again before the final check is a child
+    // the removal left: ENOTEMPTY, and its new attributes stay.
+    await mkdir(acc, spec('/dir'))
+    await mkdir(acc, spec('/dir/sub'))
+    const removeDir = store.removeDir.bind(store)
+    vi.spyOn(store, 'removeDir').mockImplementation(async (key: string) => {
+      await removeDir(key)
+      if (key !== '/dir/sub') return
+      await store.addDir('/dir/sub')
+      await store.setAttrs('/dir/sub', { mode: '750' })
+    })
+    await expect(rmR(acc, spec('/dir'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    vi.restoreAllMocks()
+    expect(await store.hasDir('/dir')).toBe(true)
+    expect(await store.getAttrs('/dir/sub')).toEqual({ mode: '750' })
+  })
+
   it('copy duplicates contents', async () => {
     await write(acc, spec('/s'), ENC.encode('hi'))
     await copy(acc, spec('/s'), spec('/t'))

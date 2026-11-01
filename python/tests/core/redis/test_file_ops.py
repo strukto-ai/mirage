@@ -260,6 +260,34 @@ async def test_a_file_that_took_a_removed_directory_name_stays_a_file(
 
 
 @pytest.mark.asyncio
+async def test_a_directory_made_again_during_a_removal_keeps_its_metadata(
+    accessor,
+):
+    # A removed empty directory made again before the final check is a
+    # child the removal left: ENOTEMPTY, and its new attributes stay.
+    store = accessor.store
+    await store.add_dir("/dir/sub")
+    inner = store.remove_dir
+
+    async def racing(key: str) -> None:
+        await inner(key)
+        if key == "/dir/sub":
+            store.remove_dir = inner
+            await store.add_dir("/dir/sub")
+            await store.set_attrs("/dir/sub", {"mode": "750"})
+
+    store.remove_dir = racing
+    with pytest.raises(OSError) as excinfo:
+        await rm_r(
+            accessor,
+            PathSpec(vfs_path="dir", virtual="/dir", directory="/dir"),
+        )
+    assert excinfo.value.errno == errno.ENOTEMPTY
+    assert await store.has_dir("/dir")
+    assert await store.get_attrs("/dir/sub") == {"mode": "750"}
+
+
+@pytest.mark.asyncio
 async def test_rmdir_not_found(mk_store):
     a = await mk_store("test:fops:rd2:")
     with pytest.raises(FileNotFoundError):

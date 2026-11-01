@@ -235,15 +235,17 @@ async def keep_left(store: RedisStore, p: str) -> set[str]:
         p (str): Normalized key of the directory the op walked.
 
     Returns:
-        set[str]: The names whose metadata stays, each directory kept and
-        any file that took one's name; empty when nothing was left.
+        set[str]: The names whose metadata stays: each directory kept or
+        still standing under ``p``, and any file that took one's name;
+        empty when nothing was left.
     """
     prefix = p.rstrip("/") + "/"
-    keys = [*await store.list_files(prefix), *await store.list_dirs()]
-    left = [k for k in keys if k.startswith(prefix)]
+    dirs = {k for k in await store.list_dirs() if k.startswith(prefix)}
+    files = [k for k in await store.list_files(prefix) if k.startswith(prefix)]
+    left = [*files, *dirs]
     if not left:
         return set()
-    held = {p}
+    held = {p, *dirs}
     for key in left:
         held.update(up for up in ancestors(key) if up.startswith(prefix))
     now = now_iso()

@@ -22,6 +22,7 @@ from mirage.core.databricks_volume.client import (
 from mirage.core.databricks_volume.path import backend_path
 from mirage.core.databricks_volume.read import read
 from mirage.core.databricks_volume.stat import stat
+from mirage.core.databricks_volume.types import DirectoryEntry
 from mirage.core.databricks_volume.write import write
 from mirage.errors.fs import eisdir
 from mirage.types import FileType, PathSpec
@@ -31,7 +32,7 @@ async def copy_tree(
     accessor: DatabricksVolumeAccessor,
     remote_src: str,
     remote_dst: str,
-    copied: set[str] | None = None,
+    copied: dict[str, DirectoryEntry] | None = None,
 ) -> None:
     """Copy a directory tree file by file.
 
@@ -39,9 +40,9 @@ async def copy_tree(
         accessor (DatabricksVolumeAccessor): the volume's client.
         remote_src (str): the source directory's backend path.
         remote_dst (str): the destination directory's backend path.
-        copied (set[str] | None): filled with the backend path of each
-            source file and directory copied, for a move to delete exactly
-            those.
+        copied (dict[str, DirectoryEntry] | None): filled with each source
+            entry copied, by backend path, as its listing showed it, for a
+            move to delete only an entry still as it was.
     """
     await create_directory(accessor, remote_dst)
     for entry in await list_directory_contents(accessor, remote_src):
@@ -49,8 +50,6 @@ async def copy_tree(
         child_dst = remote_dst.rstrip("/") + "/" + name
         if entry.is_directory:
             await copy_tree(accessor, entry.path, child_dst, copied)
-            if copied is not None:
-                copied.add(entry.path)
         else:
             await upload(
                 accessor,
@@ -58,8 +57,8 @@ async def copy_tree(
                 await download(accessor, entry.path),
                 overwrite=True,
             )
-            if copied is not None:
-                copied.add(entry.path)
+        if copied is not None:
+            copied[entry.path] = entry
 
 
 async def copy(
