@@ -1010,6 +1010,7 @@ class Dispatcher:
                     run_with_memory(
                         memory, self._bound(name, path, caller, report, kwargs)
                     ),
+                    op=True,
                 )
             async with self._admit_write(caller) as held:
                 return await run_with_egress(
@@ -1018,6 +1019,7 @@ class Dispatcher:
                     run_with_memory(
                         memory, self._bound(name, path, held, report, kwargs)
                     ),
+                    op=True,
                 )
         finally:
             if name in ("write", "append", "pwrite"):

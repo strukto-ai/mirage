@@ -43,18 +43,22 @@ const SECURE = new Set(['https:', 'wss:'])
 /**
  * Where a page's request to `host` on `port` goes instead, null for nowhere
  * else. A page cannot tell one task's binding from another's, so every live
- * workspace must route it alike, each by its newest binding (a file call
- * inside a session's line binds the workspace's own rule over the
- * session's); throws when two do not.
+ * line must route it alike, and a file op of a workspace with a live line
+ * goes as its lines do (a file call inside a line binds the workspace's own
+ * rule over the session's); throws when two do not.
  */
 function routeOf(host: string, port: number): readonly [string, number] | null {
-  const newest = new Map<Policies | NetworkRule | null, Egress>()
-  for (const egress of liveEgress()) newest.set(egress.policies ?? egress.rule, egress)
-  if (newest.size === 0) return networkRoute(host, port)
-  const answers = [...newest.values()].map((egress) => egress.rule?.route(host, port) ?? null)
+  const live = liveEgress()
+  if (live.length === 0) return networkRoute(host, port)
+  // The workspace a binding belongs to.
+  const owner = (egress: Egress): Policies | NetworkRule | null => egress.policies ?? egress.rule
+  const lined = new Set(live.filter((egress) => !egress.op).map(owner))
+  const answers = live
+    .filter((egress) => !egress.op || !lined.has(owner(egress)))
+    .map((egress) => egress.rule?.route(host, port) ?? null)
   const first = answers[0] ?? null
   if (answers.some((answer) => answer?.join(':') !== first?.join(':'))) {
-    throw new Error(`network: live workspaces route ${host}:${String(port)} apart`)
+    throw new Error(`network: live lines route ${host}:${String(port)} apart`)
   }
   return first
 }
