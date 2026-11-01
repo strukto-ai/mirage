@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountMode, RAMVFS, Workspace, parseSessionProfile } from '@struktoai/mirage-node'
+import { MountMode, RAMVFS, Workspace, SessionProfile } from '@struktoai/mirage-node'
 
 // An incident-response workspace: the service tree, the runbooks the
 // oncall works from, and the credentials nobody reads by hand.
@@ -185,7 +185,7 @@ async function main(): Promise<void> {
       profiles: Object.fromEntries(
         Object.entries(PROFILES).map(([name, doc]) => [
           name,
-          parseSessionProfile(doc, `profile \`${name}\``),
+          SessionProfile(doc, `profile \`${name}\``),
         ]),
       ),
     },

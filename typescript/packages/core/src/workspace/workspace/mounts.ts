@@ -12,22 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BIN_PREFIX } from '../../shell/constants.ts'
-import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
-import { type Limit, type ReadSpec, MountMode, WritePolicy } from '../../types.ts'
-import { normDir } from '../../utils/slash.ts'
-import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
-import type { MountRegistry } from '../mount/registry.ts'
-import type { MountSpec } from './types.ts'
-import { Mount } from '../mount/spec.ts'
-import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config.ts'
-import type { MountEntry } from '../mount/mount.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import type { FileCache } from '../../cache/file/mixin.ts'
 import { mutationLock } from '../../cache/file/io.ts'
+import type { FileCacheMixin } from '../../cache/file/mixin.ts'
+import { normalizeIndexConfig, type IndexConfig } from '../../cache/index/config.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
+import { BIN_PREFIX } from '../../shell/constants.ts'
+import { MountMode, WritePolicy, type Limit, type ReadSpec } from '../../types.ts'
+import { normDir } from '../../utils/slash.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
+import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import { checkReadCapability } from '../mount/read_policy.ts'
+import type { MountRegistry } from '../mount/registry.ts'
+import { Mount } from '../mount/spec.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
+import type { MountSpec } from './types.ts'
 
 /**
  * The `mounts` mapping in resolved form: every accepted spelling
@@ -35,15 +35,6 @@ import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.t
  * narrowed to three parallel maps. Mirrors the Python
  * `normalize_mounts` in `workspace/mounts.py`.
  */
-export interface NormalizedMounts {
-  bare: Record<string, BaseVFS>
-  modes: Record<string, MountMode>
-  commandLimits: Record<string, Record<string, Limit>>
-  refs: Record<string, string>
-  indexes: Record<string, IndexConfig>
-  read: Record<string, ReadSpec>
-  write: Record<string, WritePolicy>
-}
 
 /** What the write verdict needs beyond the mounts themselves. */
 export interface WriteDefaults {
@@ -64,7 +55,7 @@ export function normalizeMounts(
     write: WritePolicy.UNCONDITIONAL,
     caching: true,
   },
-): NormalizedMounts {
+) {
   const bare: Record<string, BaseVFS> = {}
   const modes: Record<string, MountMode> = {}
   const commandLimits: Record<string, Record<string, Limit>> = {}
@@ -119,7 +110,7 @@ export function normalizeMounts(
 
 /** Drop mount cache state atomically with deferred file-cache fills. */
 async function clearMountCache(
-  cache: FileCache | null,
+  cache: FileCacheMixin | null,
   prefix: string,
   indices: readonly IndexCacheStore[],
 ): Promise<void> {

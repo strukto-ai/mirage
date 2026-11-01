@@ -100,24 +100,6 @@ export enum UsageStyle {
 export type ArgumentAction = 'store' | 'store_true' | 'count' | 'append' | 'extend'
 export type Nargs = number | '?' | '*' | '+' | 'REMAINDER' | null
 
-export interface ArgumentInit {
-  type?: ValueType
-  action?: ArgumentAction
-  nargs?: Nargs
-  choices?: readonly string[]
-  required?: boolean
-  default?: string | null
-  metavar?: string | null
-  env?: string | null
-  help?: string | null
-  numericShorthand?: boolean
-  shortValue?: boolean
-  attachedOnly?: boolean
-  providedBy?: readonly string[]
-  textWhen?: readonly string[]
-  valueTypes?: readonly ValueType[]
-}
-
 /**
  * An option spelling or positional destination, using argparse actions and arity.
  * `valueTypes` describes named value pairs such as jq's name/value and name/file.
@@ -140,7 +122,26 @@ export class Argument {
   readonly textWhen: readonly string[]
   readonly valueTypes: readonly ValueType[]
 
-  constructor(names: string | readonly string[], init: ArgumentInit = {}) {
+  constructor(
+    names: string | readonly string[],
+    init: {
+      type?: ValueType
+      action?: ArgumentAction
+      nargs?: Nargs
+      choices?: readonly string[]
+      required?: boolean
+      default?: string | null
+      metavar?: string | null
+      env?: string | null
+      help?: string | null
+      numericShorthand?: boolean
+      shortValue?: boolean
+      attachedOnly?: boolean
+      providedBy?: readonly string[]
+      textWhen?: readonly string[]
+      valueTypes?: readonly ValueType[]
+    } = {},
+  ) {
     this.names = Object.freeze(typeof names === 'string' ? [names] : [...names])
     this.type = init.type ?? 'str'
     this.action = init.action ?? 'store'

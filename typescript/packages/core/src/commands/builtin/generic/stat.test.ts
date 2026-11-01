@@ -14,33 +14,34 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { BaseVFS } from '../../../vfs/base.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { type Context } from '../../config.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
 import {
   CapacityState,
   ContentType,
   DEVICE_NUMBERS_KEY,
   FileStat,
-  type FileStatInit,
   FileType,
   LINK_TARGET_KEY,
   MountMode,
   PathSpec,
 } from '../../../types.ts'
 import { DIR_SIZE } from '../../../utils/stat_view.ts'
-import { parseSessionProfile } from '../../../policy/profile.ts'
-import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { statGeneric } from './stat.ts'
+import { BaseVFS } from '../../../vfs/base.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Files } from '../../../workspace/files.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import { type Context } from '../../config.ts'
+import { statGeneric } from './stat.ts'
 
 const MTIME = '2026-01-02T15:30:45Z'
 const MTIME_SHOWN = '2026-01-02 15:30:45.000000000 +0000'
 const MTIME_EPOCH = '1767367845'
 const DEC = new TextDecoder()
 
-function fs(overrides: Partial<FileStatInit> = {}): FileStat {
+function fs(
+  overrides: Partial<NonNullable<ConstructorParameters<typeof FileStat>[0]>> = {},
+): FileStat {
   // A content shape rides only on a regular file; an override that picks
   // another kind drops it, the way a backend never reports one for a
   // directory or link.
@@ -294,7 +295,7 @@ describe('stat -c workspace integration', () => {
       { '/data': vfs },
       {
         mode: MountMode.WRITE,
-        profiles: { agent7: parseSessionProfile({}) },
+        profiles: { agent7: SessionProfile({}) },
         profile: 'agent7',
       },
     )

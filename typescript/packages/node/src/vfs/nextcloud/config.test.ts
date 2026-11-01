@@ -1,11 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { NextcloudConfigSchema } from './config.ts'
 import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { describe, expect, it } from 'vitest'
+import { NextcloudConfig } from './config.ts'
 
 describe('NextcloudConfig', () => {
   it('normalizes snake_case from YAML', () => {
     expect(
-      parseConfigWithSchema(NextcloudConfigSchema, {
+      parseConfigWithSchema(NextcloudConfig, {
         url: 'https://cloud.example/remote.php/dav/files/alice/',
         username: 'alice',
         password: 'secret',
@@ -22,12 +22,12 @@ describe('NextcloudConfig', () => {
   })
 
   it('requires a URL', () => {
-    expect(() => parseConfigWithSchema(NextcloudConfigSchema, {})).toThrow('non-empty url')
+    expect(() => parseConfigWithSchema(NextcloudConfig, {})).toThrow('non-empty url')
   })
 
   it('redacts the password', () => {
     expect(
-      redactConfigWithSchema(NextcloudConfigSchema, {
+      redactConfigWithSchema(NextcloudConfig, {
         url: 'https://cloud.example/remote.php/dav/files/alice/',
         username: 'alice',
         password: 'secret',

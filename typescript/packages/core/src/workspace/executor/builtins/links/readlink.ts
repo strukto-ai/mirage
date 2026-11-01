@@ -13,21 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { canonicalize } from '../../../../commands/builtin/generic/realpath.ts'
-import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
+import { missingOperandError } from '../../../../commands/spec/usage.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { fsStrerror, walkRefusal } from '../../../../errors/fs.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
-import { PathSpec } from '../../../../types.ts'
+import { fsErrorLine } from '../../../../errors/render.ts'
 import { PolicyDenied } from '../../../../policy/index.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import { fsErrorLine } from '../../../../errors/render.ts'
-import { fsStrerror, walkRefusal } from '../../../../errors/fs.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import { PathSpec } from '../../../../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { fail, parseLine, result } from '../shared.ts'
 import { scopePath } from '../scope.ts'
+import { fail, parseLine, result } from '../shared.ts'
 import { operandAbs } from './ln.ts'
-import type { Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 // Any filesystem answer other than a target: a refusal (session view or
 // policy), EINVAL (not a link), ENOENT (absent, which is what a hidden
@@ -75,7 +75,7 @@ export async function handleReadlink(
   dispatch: DispatchFn,
   session: SessionState,
   args: (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const [, fl, refused] = parseLine('readlink', args, session.cwd)
   if (refused !== null) return refused
   const operands = operandWords(args)

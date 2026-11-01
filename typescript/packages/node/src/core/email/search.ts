@@ -12,15 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import { ROOT } from '@struktoai/mirage-core/core/hierarchy/scope'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { recordQueries } from '@struktoai/mirage-core/utils/record_search'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { fetchHeaders, listMessageUids, quoteString, type FetchedMessage } from './client.ts'
+import type { fetchMessage } from './client.ts'
+import { fetchHeaders, listMessageUids, quoteString } from './client.ts'
 import { listFolders } from './folders.ts'
 import { dateBucket, msgFilename } from './readdir.ts'
-import { NATIVE_KINDS, detectScope } from './scope.ts'
+import { detectScope, NATIVE_KINDS } from './scope.ts'
 
 // What a mounted .email.json holds besides the headers and body IMAP
 // searches: its key names, JSON literals, the system flags and the name an
@@ -111,7 +112,11 @@ async function searchMessages(
   return listMessageUids(accessor, folder, criteria, maxResults)
 }
 
-export function buildVfsPath(prefix: string, folder: string, msg: FetchedMessage): string {
+export function buildVfsPath(
+  prefix: string,
+  folder: string,
+  msg: Awaited<ReturnType<typeof fetchMessage>>,
+): string {
   const dateStr = dateBucket(msg)
   // The same builder readdir names the file with, not a second spelling of
   // it: the subject's budget depends on the uid and the suffix, so a hit
@@ -163,7 +168,7 @@ export async function filesContaining(
     if (!NATIVE_KINDS.has(match.kind) || folder === undefined) return null
     const segment = scope.mountPath.replace(/^\/+/, '').split('/')[0] ?? ''
     const cap = accessor.config.maxMessages
-    let named: FetchedMessage[]
+    let named: Awaited<ReturnType<typeof fetchMessage>>[]
     try {
       const uids = new Set<string>()
       for (const query of queries) {

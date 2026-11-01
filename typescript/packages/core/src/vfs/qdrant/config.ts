@@ -13,21 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import {
-  type ConfigOf,
-  REDACTED_SECRET,
-  type RedactedConfig,
-  secretSchema,
-  secretStr,
-} from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
+import { REDACTED_SECRET } from '../constants.ts'
+import type { ConfigOf, RedactedSchema } from '../secrets.ts'
+import { secretSchema, secretStr } from '../secrets.ts'
 
 // What `search` vectorizes the query with when the caller brings a model:
 // the text in, its embedding out, in the space the collection was built in.
 export type EmbedFn = (text: string) => Promise<number[]>
 
-export const QdrantConfigSchema = z.object({
+export const QdrantConfig = z.object({
   ...timeoutShape,
   url: z
     .string()
@@ -124,32 +120,9 @@ export const QdrantConfigSchema = z.object({
     ),
 })
 
-export type QdrantConfig = ConfigOf<typeof QdrantConfigSchema>
+export type QdrantConfig = ConfigOf<typeof QdrantConfig>
 
-export interface QdrantConfigResolved {
-  timeout: number
-  url: string | null
-  host: string
-  port: number
-  https: boolean
-  apiKey: string | null
-  collection: string | null
-  groupBy: string[]
-  basenameFields: string[]
-  idField: string
-  nameField: string | null
-  textField: string | null
-  blobField: string | null
-  blobExt: string
-  vectorField: string | null
-  searchLimit: number
-  maxRows: number
-  embeddingModel: string
-  cloudInference: boolean
-  embed: EmbedFn | null
-}
-
-export function resolveQdrantConfig(config: QdrantConfig): QdrantConfigResolved {
+export function resolveQdrantConfig(config: QdrantConfig) {
   return {
     timeout: config.timeout ?? DEFAULT_TIMEOUT,
     url: config.url ?? null,
@@ -174,14 +147,9 @@ export function resolveQdrantConfig(config: QdrantConfig): QdrantConfigResolved 
   }
 }
 
-// `apiKey` is the credential, and it is the field Python annotates secret
-// on this config. A null one stays null: a local Qdrant reached without a
-// credential has nothing to mask, and planting the marker anyway would
-// make `Workspace.load` demand a fresh config for a self-contained
-// snapshot. Python's redactor skips None for the same reason.
-export type QdrantConfigRedacted = RedactedConfig<QdrantConfigResolved, 'apiKey' | 'embed'>
-
-export function redactQdrantConfig(config: QdrantConfigResolved): QdrantConfigRedacted {
+export function redactQdrantConfig(
+  config: ReturnType<typeof resolveQdrantConfig>,
+): RedactedSchema<typeof QdrantConfig, ReturnType<typeof resolveQdrantConfig>> {
   return {
     ...config,
     apiKey: config.apiKey === null ? null : REDACTED_SECRET,

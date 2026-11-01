@@ -12,29 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chunks as byteChunks } from '../../io/cooperative.ts'
-import { spooledPair } from '../../io/spool.ts'
-import { asyncChain, discardStreams } from '../../io/stream.ts'
-import { ByteWriter } from '../../io/writer.ts'
-
-import type { EvaluationContext } from '../evaluation.ts'
-import { PipeClosed } from '../../io/errors.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
 import {
   currentCaller,
   runLanding,
-  type RedirectGuard,
   runWithCaller,
   runWithRedirectPaths,
+  type RedirectGuard,
 } from '../../context/session_context.ts'
 import { isAborting, isFsError, isMissingPath, strerrorOf } from '../../errors/fs.ts'
-import { ownerPrefix } from '../../utils/slash.ts'
-import { toScope } from './builtins/scope.ts'
-import { endsAtDot } from '../../utils/path.ts'
-import { SharedInput, share } from '../../io/async_line_iterator.ts'
+import { posixPhrase } from '../../errors/posix.ts'
+import { share, SharedInput } from '../../io/async_line_iterator.ts'
+import { chunks as byteChunks } from '../../io/cooperative.ts'
+import { PipeClosed } from '../../io/errors.ts'
+import { spooledPair } from '../../io/spool.ts'
+import { asyncChain, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { DeviceInput, IOResult, PipeStream, materialize } from '../../io/types.ts'
+import { DeviceInput, IOResult, materialize, PipeStream } from '../../io/types.ts'
+import { ByteWriter } from '../../io/writer.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import type { JobConsole } from '../../shell/console/index.ts'
+import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
 import {
   FD_BOTH,
   FD_CLOSE,
@@ -45,43 +45,43 @@ import {
   SIGPIPE_STATUS,
 } from '../../shell/constants.ts'
 import {
+  badDescriptorLine,
+  deliver,
   FileDescription,
   FileInput,
   Inherited,
   Recorder,
-  type Descriptor,
-  type StreamOwner,
-  badDescriptorLine,
-  deliver,
   unreadableStdin,
   unsupportedDescriptor,
+  type Descriptor,
+  type StreamOwner,
 } from '../../shell/descriptors.ts'
-import { getText, literalWord } from '../../shell/helpers.ts'
 import { ExitSignal } from '../../shell/errors.ts'
-import { type Redirect, RedirectKind } from '../../shell/types.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { getText, literalWord } from '../../shell/helpers.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { RedirectKind, type Redirect } from '../../shell/types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { endsAtDot } from '../../utils/path.ts'
+import { ownerPrefix } from '../../utils/slash.ts'
+import type { EvaluationContext } from '../evaluation.ts'
+import { DEV_PREFIX } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
 import { ExecutionNode } from '../types.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
-import { createFile, writeDescription } from './create.ts'
 import {
   CLOSED as EXEC_CLOSED,
   EXEC_STREAM_UNBOUND,
-  OPEN_FOR_READ_WRITE,
-  OPEN_FOR_READING,
   TO_STDERR as EXEC_TO_STDERR,
   TO_STDIN as EXEC_TO_STDIN,
   TO_STDOUT as EXEC_TO_STDOUT,
+  OPEN_FOR_READ_WRITE,
+  OPEN_FOR_READING,
 } from './builtins/exec/constants.ts'
-import { drained, pump } from './jobs.ts'
-import { DEV_PREFIX } from '../mount/registry.ts'
+import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
-import type { JobConsole } from '../../shell/console/index.ts'
-import { Channel, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
-import { posixPhrase } from '../../errors/posix.ts'
+import { createFile, writeDescription } from './create.ts'
+import { drained, pump } from './jobs.ts'
 
 // These producers write no named file while their output is consumed (curl
 // writes its cookie jar once its body has ended), so their output streams
@@ -232,8 +232,6 @@ const logger = {
     console.error(message)
   },
 }
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 const TO_STDOUT = Symbol('stdout')
 const TO_STDERR = Symbol('stderr')
@@ -400,7 +398,7 @@ export async function handleRedirect(
   args: readonly string[] = [],
   // Whether bash forks to run the command, so a closed pipe ends it alone.
   forked = false,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const owned: SharedInput[] = []
   try {
     return await runRedirects(
@@ -442,7 +440,7 @@ async function runRedirects(
   args: readonly string[] = [],
   // Whether bash forks to run the command, so a closed pipe ends it alone.
   forked = false,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
@@ -483,9 +481,9 @@ async function runRedirects(
   let deferred: FileDescription | null = null
   let openingStderr: FdDest | undefined = TO_STDERR
   const failed = async (
-    result: Result,
+    result: RedirectResult,
     failedFile: FileDescription | null = null,
-  ): Promise<Result> => {
+  ): Promise<RedirectResult> => {
     let [stdout] = result
     const [, io, node] = result
     const data = await io.materializeStderr()
@@ -1064,7 +1062,7 @@ function closedWriteLine(command: TSNodeLike, unwound: Unwinding | null = null):
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */
-function redirectFailure(scope: PathSpec, err: unknown): Result {
+function redirectFailure(scope: PathSpec, err: unknown): RedirectResult {
   const [stdout, io, node] = shellFailure(redirectErrorLine(scope, err))
   node.unopened = true
   return [stdout, io, node]
@@ -1077,7 +1075,7 @@ function redirectFailure(scope: PathSpec, err: unknown): Result {
  * failure, so this replaces the whole result. Returning an IOResult rather
  * than rethrowing is what keeps the rest of the line alive.
  */
-function shellFailure(line: Uint8Array, status = 1): Result {
+function shellFailure(line: Uint8Array, status = 1): RedirectResult {
   const io = new IOResult({ exitCode: status, stderr: line })
   return [null, io, new ExecutionNode({ command: 'redirect', exitCode: status })]
 }
@@ -1175,7 +1173,7 @@ async function openRefusal(
   dispatch: DispatchFn,
   context: EvaluationContext,
   redirects: readonly Redirect[],
-): Promise<Result | null> {
+): Promise<RedirectResult | null> {
   const session = context.session
   const noclobber = session.shellOptions.noclobber === true
   for (const r of redirects) {

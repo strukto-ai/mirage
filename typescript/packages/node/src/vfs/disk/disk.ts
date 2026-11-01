@@ -12,43 +12,48 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
-import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type {
+  CapacityResult,
+  DirListing,
+  FileStat,
+  SetAttrFields,
+} from '@struktoai/mirage-core/types'
+import { CapacityState, ListingVersion, PathSpec, VFSName } from '@struktoai/mirage-core/types'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import {
   type Charge,
   type StorageUsage,
   charge,
   storageUsage,
 } from '@struktoai/mirage-core/vfs/capacity'
-import { count, isCounted, sizeOf } from '../../core/disk/capacity.ts'
-import { chmod, mkdir, stat as fsStat, statfs as fsStatfs, writeFile } from 'node:fs/promises'
-import { createWriteStream, mkdirSync, realpathSync } from 'node:fs'
-import { pipeline } from 'node:stream/promises'
-import path from 'node:path'
-import { CapacityState, ListingVersion, PathSpec, VFSName } from '@struktoai/mirage-core/types'
-import type { CapacityResult } from '@struktoai/mirage-core/types'
-import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
-import { DiskAccessor } from '../../accessor/disk.ts'
-import type { DirListing, FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
+import { LOCAL_WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
+import { type VFSStateBase } from '@struktoai/mirage-core/vfs/types'
+import { createWriteStream, mkdirSync, realpathSync } from 'node:fs'
+import { chmod, stat as fsStat, statfs as fsStatfs, mkdir, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import { pipeline } from 'node:stream/promises'
+import { DiskAccessor } from '../../accessor/disk.ts'
+import { count, isCounted, sizeOf } from '../../core/disk/capacity.ts'
+import { copy as diskCopy } from '../../core/disk/copy.ts'
+import { create as diskCreate } from '../../core/disk/create.ts'
+import { exists as diskExists } from '../../core/disk/exists.ts'
+import { mkdir as diskMkdir } from '../../core/disk/mkdir.ts'
+import { pwrite as diskPwrite } from '../../core/disk/pwrite.ts'
 import { read as diskRead } from '../../core/disk/read.ts'
+import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
+import { rename as diskRename } from '../../core/disk/rename.ts'
+import { rmR as diskRmR } from '../../core/disk/rm.ts'
+import { rmdir as diskRmdir } from '../../core/disk/rmdir.ts'
+import { setAttrs as diskSetAttrs } from '../../core/disk/set_attrs.ts'
 import { stat as diskStat } from '../../core/disk/stat.ts'
 import { readStream as diskStream } from '../../core/disk/stream.ts'
-import { exists as diskExists } from '../../core/disk/exists.ts'
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { write as diskWrite } from '../../core/disk/write.ts'
-import { pwrite as diskPwrite } from '../../core/disk/pwrite.ts'
-import { create as diskCreate } from '../../core/disk/create.ts'
-import { mkdir as diskMkdir } from '../../core/disk/mkdir.ts'
-import { unlink as diskUnlink } from '../../core/disk/unlink.ts'
-import { rmdir as diskRmdir } from '../../core/disk/rmdir.ts'
-import { rmR as diskRmR } from '../../core/disk/rm.ts'
-import { rename as diskRename } from '../../core/disk/rename.ts'
-import { copy as diskCopy } from '../../core/disk/copy.ts'
 import { truncate as diskTruncate } from '../../core/disk/truncate.ts'
-import { setAttrs as diskSetAttrs } from '../../core/disk/set_attrs.ts'
-import { LOCAL_WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { unlink as diskUnlink } from '../../core/disk/unlink.ts'
+import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
+import { write as diskWrite } from '../../core/disk/write.ts'
 
 const isMountedOp = (a: DiskAccessor) => a.root !== ''
 

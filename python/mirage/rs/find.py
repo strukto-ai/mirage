@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -28,7 +29,7 @@ from mirage.commands.builtin.types import (
     RowAction,
 )
 from mirage.commands.errors import UsageError
-from mirage.core.generic.find_eval import (
+from mirage.core.generic.types import (
     Action,
     ActionKind,
     And,

@@ -13,14 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { GCalAccessor } from '../../../src/accessor/gcal.ts'
-import { type JsonValue, PathSpec } from '../../../src/types.ts'
-import { type GCalConfig, GCalConfigSchema } from '../../../src/vfs/gcal/config.ts'
+import type { CalendarApi } from '../../../src/core/gcal/api.ts'
+import { eventSpan } from '../../../src/core/gcal/day.ts'
 import { TokenManager } from '../../../src/core/google/client.ts'
 import type { TimeRange } from '../../../src/core/time_range.ts'
-import { eventSpan } from '../../../src/core/gcal/day.ts'
-import type { CalendarApi } from '../../../src/core/gcal/api.ts'
-import { installApi } from '../google/_test_util.ts'
+import { type JsonValue, PathSpec } from '../../../src/types.ts'
+import { GCalConfig } from '../../../src/vfs/gcal/config.ts'
 import { parseConfigWithSchema } from '../../../src/vfs/secrets.ts'
+import { installApi } from '../google/_test_util.ts'
 
 export const HK = 'Asia/Hong_Kong'
 const TODAY = '2026-08-11'
@@ -189,7 +189,7 @@ export function installCalendar(): void {
 
 /** A mount config against the fake, today pinned to `TODAY`. */
 export function gcalConfig(overrides: Record<string, unknown> = {}): GCalConfig {
-  return parseConfigWithSchema(GCalConfigSchema, {
+  return parseConfigWithSchema(GCalConfig, {
     client_id: 'cid',
     refresh_token: 'rt',
     today: TODAY,

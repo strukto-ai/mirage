@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, type RedactedConfig, secretStr } from '../../vfs/secrets.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
+import { secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-export const NotionConfigSchema = z.object({
+export const NotionConfig = z.object({
   ...timeoutShape,
   apiKey: secretStr().describe('Notion integration token.'),
   baseUrl: z.string().optional().meta({
@@ -30,6 +31,4 @@ export const NotionConfigSchema = z.object({
   }),
 })
 
-export type NotionConfig = ConfigOf<typeof NotionConfigSchema>
-
-export type NotionConfigRedacted = RedactedConfig<NotionConfig, 'apiKey'>
+export type NotionConfig = ConfigOf<typeof NotionConfig>

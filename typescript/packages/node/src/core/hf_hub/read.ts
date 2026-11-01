@@ -14,17 +14,13 @@
 
 import { fileEntry } from '@struktoai/mirage-core/core/hierarchy/probe'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import type { ReadRange } from '@struktoai/mirage-core/types'
 import { type FileStat, type PathSpec } from '@struktoai/mirage-core/types'
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { etagValue, hubBytesTagged, resolveUrl } from './client.ts'
 import { REFUSED_STATUSES } from './constants.ts'
 import { refusalsDenied } from './lookup.ts'
-
-export interface HfHubReadOptions {
-  offset?: number
-  size?: number
-}
 
 /**
  * The row's oid, if the response's ETag shows the bytes are that row's.
@@ -48,7 +44,7 @@ export function rowToken(entry: FileStat, etag: string): string | null {
 export async function read(
   accessor: HfHubAccessor,
   path: PathSpec,
-  options: HfHubReadOptions = {},
+  options: ReadRange = {},
   entry?: FileStat | null,
 ): Promise<Uint8Array> {
   const row = fileEntry(path, entry)

@@ -14,20 +14,18 @@
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 
-export interface AfterIdPagesOpts {
-  endpoint: string
-  baseParams?: Record<string, string | number>
-  lastIdFn: (item: Record<string, unknown>) => string
-  pageSize?: number
-  startAfter?: string
-  // The endpoint answers newest-first. Messages do (GET /channels/{id}/
-  // messages documents "newest to oldest"); members and guilds do not.
-  newestFirst?: boolean
-}
-
 export async function* afterIdPages<T extends Record<string, unknown>>(
   accessor: DiscordAccessor,
-  opts: AfterIdPagesOpts,
+  opts: {
+    endpoint: string
+    baseParams?: Record<string, string | number>
+    lastIdFn: (item: Record<string, unknown>) => string
+    pageSize?: number
+    startAfter?: string
+    // The endpoint answers newest-first. Messages do (GET /channels/{id}/
+    // messages documents "newest to oldest"); members and guilds do not.
+    newestFirst?: boolean
+  },
 ): AsyncIterableIterator<T[]> {
   const {
     endpoint,
@@ -61,19 +59,17 @@ function getNested(obj: unknown, path: readonly string[]): unknown {
   return cur
 }
 
-export interface OffsetPagesOpts {
-  endpoint: string
-  baseParams?: Record<string, string | number>
-  itemsPath: readonly string[]
-  totalKey?: string
-  pageSize?: number
-  startOffset?: number
-  maxPages?: number
-}
-
 export async function* offsetPages<T>(
   accessor: DiscordAccessor,
-  opts: OffsetPagesOpts,
+  opts: {
+    endpoint: string
+    baseParams?: Record<string, string | number>
+    itemsPath: readonly string[]
+    totalKey?: string
+    pageSize?: number
+    startOffset?: number
+    maxPages?: number
+  },
 ): AsyncIterableIterator<T[]> {
   const {
     endpoint,

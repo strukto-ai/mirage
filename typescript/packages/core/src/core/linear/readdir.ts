@@ -12,12 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonlBytesByCreatedAt, jsonBytes } from '../render/json.ts'
 import type { LinearAccessor } from '../../accessor/linear.ts'
 import { ContentType, FileStat, FileType } from '../../types.ts'
+import { keptText, unsearchedText } from '../../utils/record_search.ts'
+import { stringOf as pickString } from '../../utils/records.ts'
 import { cutListing, type Listed, makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
+import { jsonBytes, jsonlBytesByCreatedAt } from '../render/json.ts'
 import {
   listIssueComments,
   listTeamCycles,
@@ -36,7 +38,6 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
-  type NormalizedProjectIssue,
   SEARCHED_FIELDS,
 } from './normalize.ts'
 import {
@@ -48,14 +49,8 @@ import {
   teamDirname,
 } from './pathing.ts'
 import { detectScope } from './scope.ts'
-import { keptText, unsearchedText } from '../../utils/record_search.ts'
 
 export const TEAM_DIRS = ['members', 'issues', 'projects', 'cycles', 'documents'] as const
-
-function pickString(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
 
 function extraSize(entry: FileStat): number | null {
   const value = entry.extra.json_size
@@ -207,7 +202,7 @@ async function listProjects(
   )
   const rows = projects.map((project) => {
     const projectId = pickString(project, 'id')
-    const projectIssues: NormalizedProjectIssue[] = []
+    const projectIssues: ReturnType<typeof buildProjectIssue>[] = []
     for (const issue of teamIssues) {
       const projField = issue.project
       const projObj =

@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
 import {
   parseConfigWithSchema,
   redactConfigWithSchema,
   secretStr,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 export const HF_ENDPOINT = 'https://huggingface.co'
 
@@ -60,7 +60,7 @@ export interface HfBucketsConfig {
   keyPrefix?: string
 }
 
-const HfBucketsConfigSchema = z.object({
+const HfBucketsConfig = z.object({
   bucket: z.string().describe('Bucket id in `namespace/name` form.'),
   token: secretStr().optional().describe('Hugging Face access token.'),
   endpoint: z.string().optional().meta({
@@ -76,22 +76,17 @@ const HfBucketsConfigSchema = z.object({
     ),
 })
 
-// Only the redacted twin derives: the schema is the resolved shape, with
-// the endpoint the redactor fills in.
-export type HfBucketsConfigRedacted = RedactedConfig<
-  ConfigOf<typeof HfBucketsConfigSchema>,
-  'token'
->
-
-export function redactHfBucketsConfig(config: HfBucketsConfig): HfBucketsConfigRedacted {
-  return redactConfigWithSchema(HfBucketsConfigSchema, {
+export function redactHfBucketsConfig(
+  config: HfBucketsConfig,
+): RedactedSchema<typeof HfBucketsConfig> {
+  return redactConfigWithSchema(HfBucketsConfig, {
     ...config,
     endpoint: config.endpoint ?? HF_ENDPOINT,
-  }) as unknown as HfBucketsConfigRedacted
+  }) as unknown as RedactedSchema<typeof HfBucketsConfig>
 }
 
 export function normalizeHfBucketsConfig(input: Record<string, unknown>): HfBucketsConfig {
-  const config = parseConfigWithSchema(HfBucketsConfigSchema, input)
+  const config = parseConfigWithSchema(HfBucketsConfig, input)
   assertHfRepoId(config.bucket, 'bucket')
   return config
 }
@@ -114,7 +109,7 @@ export interface HfRepoConfig {
   expandCommits?: boolean
 }
 
-const HfRepoConfigSchema = z.object({
+const HfRepoConfig = z.object({
   repoId: z
     .string()
     .describe(
@@ -148,19 +143,15 @@ const HfRepoConfigSchema = z.object({
     ),
 })
 
-// Only the redacted twin derives: the schema is the resolved shape, with
-// the endpoint the redactor fills in.
-export type HfRepoConfigRedacted = RedactedConfig<ConfigOf<typeof HfRepoConfigSchema>, 'token'>
-
-export function redactHfRepoConfig(config: HfRepoConfig): HfRepoConfigRedacted {
-  return redactConfigWithSchema(HfRepoConfigSchema, {
+export function redactHfRepoConfig(config: HfRepoConfig): RedactedSchema<typeof HfRepoConfig> {
+  return redactConfigWithSchema(HfRepoConfig, {
     ...config,
     endpoint: config.endpoint ?? HF_ENDPOINT,
-  }) as unknown as HfRepoConfigRedacted
+  }) as unknown as RedactedSchema<typeof HfRepoConfig>
 }
 
 export function normalizeHfRepoConfig(input: Record<string, unknown>): HfRepoConfig {
-  const config = parseConfigWithSchema(HfRepoConfigSchema, input)
+  const config = parseConfigWithSchema(HfRepoConfig, input)
   assertHfRepoRef(config.repoId, 'repo_id')
   return config
 }

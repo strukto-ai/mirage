@@ -13,10 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { FetchedMessage } from './client.ts'
+import type { fetchMessage } from './client.ts'
 import { envelopesJsonBytes, messageJsonBytes } from './render.ts'
 
-const MESSAGE: FetchedMessage = {
+const MESSAGE: Awaited<ReturnType<typeof fetchMessage>> = {
   from: { name: 'Alice', email: 'alice@example.com' },
   reply_to: [],
   to: [{ name: '', email: 'bob@example.com' }],
@@ -56,7 +56,7 @@ describe('messageJsonBytes', () => {
   })
 })
 
-const FULL: FetchedMessage = {
+const FULL: Awaited<ReturnType<typeof fetchMessage>> = {
   ...MESSAGE,
   body_html: '<p>hi there</p>',
   has_attachments: true,

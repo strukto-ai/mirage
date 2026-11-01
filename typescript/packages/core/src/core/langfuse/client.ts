@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../types.ts'
-import { apiRequest, buildUrl } from '../api/client.ts'
 import { enoent } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
+import { asObject } from '../../utils/records.ts'
+import type { LangfuseConfig } from '../../vfs/langfuse/config.ts'
+import { apiRequest, buildUrl } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
 
 export class LangfuseApiError extends ApiError {
@@ -45,13 +47,6 @@ export async function fetchOrEnoent<T>(pending: Promise<T>, path: PathSpec): Pro
 
 export interface LangfuseTransport {
   request(path: string, query?: Record<string, string | number | undefined>): Promise<unknown>
-}
-
-export interface HttpLangfuseTransportOptions {
-  publicKey: string
-  secretKey: string
-  host?: string
-  timeout?: number
 }
 
 function encodeBasicAuth(publicKey: string, secretKey: string): string {
@@ -87,7 +82,7 @@ export class HttpLangfuseTransport implements LangfuseTransport {
   private readonly auth: string
   private readonly timeout: number | undefined
 
-  constructor(opts: HttpLangfuseTransportOptions) {
+  constructor(opts: Pick<LangfuseConfig, 'publicKey' | 'secretKey' | 'host' | 'timeout'>) {
     this.host = opts.host ?? 'https://cloud.langfuse.com'
     this.auth = encodeBasicAuth(opts.publicKey, opts.secretKey)
     this.timeout = opts.timeout
@@ -126,13 +121,6 @@ function getData(body: unknown): Record<string, unknown>[] {
   if (body === null || typeof body !== 'object') return []
   const data = (body as Record<string, unknown>).data
   return asArray(data)
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>
-  }
-  return {}
 }
 
 // A root observation stands for its trace: v4 keeps no trace entity, and the

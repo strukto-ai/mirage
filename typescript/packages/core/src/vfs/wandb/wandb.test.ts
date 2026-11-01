@@ -1,15 +1,15 @@
 import { expect, it, vi } from 'vitest'
-import { WandbVFS } from './wandb.ts'
-import { WandbConfigSchema } from '../../core/wandb/config.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { WandbConfig } from '../../core/wandb/config.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { Limit, MountMode } from '../../types.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { parseConfigWithSchema } from '../secrets.ts'
+import { WandbVFS } from './wandb.ts'
 
 it('isolates mount scopes and directory indexes', async () => {
   const mounts = [
-    new WandbVFS(parseConfigWithSchema(WandbConfigSchema, { entities: ['lab', 'lab'] })),
-    new WandbVFS(parseConfigWithSchema(WandbConfigSchema, { entities: ['other'] })),
+    new WandbVFS(parseConfigWithSchema(WandbConfig, { entities: ['lab', 'lab'] })),
+    new WandbVFS(parseConfigWithSchema(WandbConfig, { entities: ['other'] })),
   ]
   const requests = mounts.map((vfs) => vi.spyOn(vfs.accessor.client, 'request'))
   const workspaces = mounts.map((vfs) => new Workspace({ '/wandb': vfs }))
@@ -27,7 +27,7 @@ it('isolates mount scopes and directory indexes', async () => {
 })
 
 it('refuses W&B mutations and CLI dispatch even in a write workspace', async () => {
-  const vfs = new WandbVFS(parseConfigWithSchema(WandbConfigSchema, { entities: ['lab'] }))
+  const vfs = new WandbVFS(parseConfigWithSchema(WandbConfig, { entities: ['lab'] }))
   const request = vi.spyOn(vfs.accessor.client, 'request')
   const ws = new Workspace(
     { '/wandb': vfs },
@@ -50,9 +50,7 @@ it('refuses W&B mutations and CLI dispatch even in a write workspace', async () 
 
 // Twin of test_find_pages_projects_no_further_than_its_walk_limit.
 it('lets find page projects no further than its walk limit', async () => {
-  const vfs = new WandbVFS(
-    parseConfigWithSchema(WandbConfigSchema, { entities: ['lab'], page_size: 1 }),
-  )
+  const vfs = new WandbVFS(parseConfigWithSchema(WandbConfig, { entities: ['lab'], page_size: 1 }))
   const request = vi
     .spyOn(vfs.accessor.client, 'request')
     .mockImplementation((_query, variables) => {

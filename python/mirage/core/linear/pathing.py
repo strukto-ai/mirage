@@ -15,6 +15,7 @@
 from typing import Any
 
 from mirage.utils.naming import SEPARATOR, fit_id_name
+from mirage.utils.records import first_text, require_id
 from mirage.utils.sanitize import sanitize_name
 
 
@@ -28,37 +29,31 @@ def team_dirname(team: dict[str, Any]) -> str:
             parts.append(sanitized_name)
     if not parts:
         parts.append("team")
-    # fit_id_name rather than make_id_name: the parts are already
-    # sanitized and joined with the separator, and re-sanitizing would
-    # collapse that `__` to `_`.
-    return fit_id_name(SEPARATOR.join(parts), team["id"])
+    return fit_id_name(SEPARATOR.join(parts), require_id(team))
 
 
 def member_filename(user: dict[str, Any]) -> str:
     label = sanitize_name(
-        user.get("displayName")
-        or user.get("name")
-        or user.get("email")
-        or "user"
+        first_text(user, "displayName", "name", "email") or "user"
     )
-    return fit_id_name(label, user["id"], ".json")
+    return fit_id_name(label, require_id(user), ".json")
 
 
 def issue_dirname(issue: dict[str, Any]) -> str:
-    key = issue.get("identifier") or issue.get("id") or "issue"
-    return fit_id_name(sanitize_name(key), issue["id"])
+    key = first_text(issue, "identifier", "id") or "issue"
+    return fit_id_name(sanitize_name(key), require_id(issue))
 
 
 def project_filename(project: dict[str, Any]) -> str:
-    label = sanitize_name(project.get("name") or "project")
-    return fit_id_name(label, project["id"], ".json")
+    label = sanitize_name(first_text(project, "name") or "project")
+    return fit_id_name(label, require_id(project), ".json")
 
 
 def cycle_filename(cycle: dict[str, Any]) -> str:
-    label = sanitize_name(cycle.get("name") or "cycle")
-    return fit_id_name(label, cycle["id"], ".json")
+    label = sanitize_name(first_text(cycle, "name") or "cycle")
+    return fit_id_name(label, require_id(cycle), ".json")
 
 
 def document_filename(document: dict[str, Any]) -> str:
-    label = sanitize_name(document.get("title") or "document")
-    return fit_id_name(label, document["id"], ".json")
+    label = sanitize_name(first_text(document, "title") or "document")
+    return fit_id_name(label, require_id(document), ".json")

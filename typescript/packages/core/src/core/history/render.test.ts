@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { EventDict } from '../../observe/observer.ts'
+import type { JsonObject } from '../../types.ts'
 import { renderBashHistory, renderHistoryListing } from './render.ts'
 
-function command(cmd: string, timestamp = 0): EventDict {
+function command(cmd: string, timestamp = 0): JsonObject {
   return { type: 'command', command: cmd, timestamp }
 }
 
 describe('renderBashHistory', () => {
   it('emits GNU histfile format', () => {
-    const events: EventDict[] = [
+    const events: JsonObject[] = [
       { type: 'command', session: 's1', timestamp: 1718000000000, command: 'ls /data' },
       { type: 'command', session: 's2', timestamp: 1718000001000, command: 'cat /data/a.txt' },
     ]
@@ -30,7 +30,7 @@ describe('renderBashHistory', () => {
   })
 
   it('ignores non-command events', () => {
-    const events: EventDict[] = [
+    const events: JsonObject[] = [
       { type: 'clear', session: 's1', timestamp: 1000 },
       { type: 'vfs', session: 's1', timestamp: 2000, vfs: 'read' },
     ]

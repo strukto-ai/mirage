@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { NotionVFSBase } from '../../vfs/notion/notion.ts'
+import { NotionVFS } from '../../vfs/notion/notion.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { NotionTransport } from './client.ts'
 
@@ -45,7 +45,7 @@ function transport(
 }
 
 function mounted(through: NotionTransport): Workspace {
-  return new Workspace({ '/': new NotionVFSBase({ accessor: { transport: through } }) })
+  return new Workspace({ '/': new NotionVFS({ accessor: { transport: through } }) })
 }
 
 const routes = [

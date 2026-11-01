@@ -12,25 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ParseScope } from '../../../../shell/parse/scope.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
+import { program } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
-import { program } from '../../../lookup/lookup.ts'
+import { builtinUsage } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
 import { describe, locations, programFile } from './classify.ts'
 import { TYPE_OPTIONS, WHICH_OPTIONS, WHICH_USAGE } from './constants.ts'
 import { NameKind } from './types.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
-import { builtinUsage } from '../shared.ts'
 
 /**
  * The refusal shape both builtins use for an unknown option; `voice` is
  * `bash: ` for `type`, a builtin, and empty for `which`, a program.
  */
-function optionError(cmd: string, bad: string, usage: string, voice = ''): Result {
+function optionError(cmd: string, bad: string, usage: string, voice = ''): RedirectResult {
   const err = encodeText(`${voice}${cmd}: ${bad}: invalid option\n${usage}`)
   return [
     null,
@@ -58,7 +59,7 @@ export function handleType(
   session: SessionState,
   registry: MountRegistry,
   parser?: ParseScope,
-): Result {
+): RedirectResult {
   const scan = scanOptions(args, TYPE_OPTIONS)
   if (scan.bad !== null) return optionError('type', scan.bad, builtinUsage('type'), 'bash: ')
   const mode = lastOf(scan.letters, 'tpP')
@@ -113,7 +114,7 @@ export function handleWhich(
   args: readonly string[],
   session: SessionState,
   registry: MountRegistry,
-): Result {
+): RedirectResult {
   const scan = scanOptions(args, WHICH_OPTIONS)
   if (scan.bad !== null) return optionError('which', scan.bad, WHICH_USAGE)
   const silent = scan.letters.includes('s')
@@ -136,13 +137,13 @@ export function handleWhich(
 }
 
 /** The `type` arm. */
-export function typeBuiltin(call: BuiltinCall): Promise<Result> {
+export function typeBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(
     handleType([...call.argv.args], call.context.session, call.registry, call.parser),
   )
 }
 
 /** The `which` arm. */
-export function whichBuiltin(call: BuiltinCall): Promise<Result> {
+export function whichBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleWhich([...call.argv.args], call.context.session, call.registry))
 }

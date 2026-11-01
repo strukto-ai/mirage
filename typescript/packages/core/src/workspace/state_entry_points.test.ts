@@ -11,36 +11,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { seedVar, setAttr } from '../workspace/session/state.ts'
-import { VarAttr } from '../shell/variable.ts'
 import { afterEach, describe, expect, it } from 'vitest'
-import { Command, type Context } from '../commands/config.ts'
-import { CommandSpec, Argument } from '../commands/spec/types.ts'
-import { runWithSession } from '../context/session_context.ts'
-import { IOResult } from '../io/types.ts'
-import { BaseVFS } from '../vfs/base.ts'
-import type {
-  Action,
-  Decision,
-  CommandContext,
-  VfsContext,
-  Policy,
-  SessionContext,
-} from '../policy/index.ts'
-import { Outcome, Scope, type AskHandler } from '../policy/index.ts'
-import { RAMVFS } from '../vfs/ram/ram.ts'
-import { dispatched, ops } from '../test-utils.ts'
-import { Runtime } from '../runtime/base.ts'
-import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
-import { ScriptSource, type RunResult } from '../runtime/types.ts'
-import { MountMode, PathSpec, VFSName } from '../types.ts'
-import { cliSpecFor } from '../commands/cli/specs.ts'
-import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
 import {
   stderrStr,
   stdoutStr,
   voicedStderr,
 } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { cliSpecFor } from '../commands/cli/specs.ts'
+import { Command, type Context } from '../commands/config.ts'
+import { Argument, CommandSpec } from '../commands/spec/types.ts'
+import { runWithSession } from '../context/session_context.ts'
+import { IOResult } from '../io/types.ts'
+import type {
+  Action,
+  CommandContext,
+  Decision,
+  Policy,
+  SessionContext,
+  VfsContext,
+} from '../policy/index.ts'
+import { Outcome, Scope, type AskHandler } from '../policy/index.ts'
+import { SessionProfile } from '../policy/profile.ts'
+import { Runtime } from '../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from '../runtime/mixin.ts'
+import { ScriptSource, type RunResult } from '../runtime/types.ts'
+import { VarAttr } from '../shell/variable.ts'
+import { dispatched, ops } from '../test-utils.ts'
+import { MountMode, PathSpec, VFSName } from '../types.ts'
+import { BaseVFS } from '../vfs/base.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { seedVar, setAttr } from '../workspace/session/state.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -1148,7 +1148,7 @@ describe('session profiles', () => {
     a.store.dirs.add('/secrets')
     const ws = new Workspace({ '/a': a }, { mode: MountMode.WRITE })
     open.push(ws)
-    const analyst = parseSessionProfile({
+    const analyst = SessionProfile({
       mounts: { '/a': 'write' },
       paths: { hide: ['/a/secrets'] },
       vars: { hide: ['SLACK_TOKEN'] },
@@ -1173,7 +1173,7 @@ describe('session profiles', () => {
     // narrowed from whatever the workspace gave it, never raised.
     const ws = new Workspace({ '/a': new RAMVFS(), '/b': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(ws)
-    const profile = parseSessionProfile({
+    const profile = SessionProfile({
       mounts: { '/a': 'write' },
       paths: { hide: ['/a/secrets'] },
     })
@@ -1196,12 +1196,12 @@ describe('session profiles', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             cwd: '/b',
             env: { PAGER: 'cat' },
             mounts: { '/a': 'rw', '/b': 'rwx' },
           }),
-          reviewer: parseSessionProfile({
+          reviewer: SessionProfile({
             cwd: '/b',
             env: { PAGER: 'cat' },
             mounts: { '/a': 'r', '/b': 'rwx' },
@@ -1225,7 +1225,7 @@ describe('session profiles', () => {
     // hides union, and an allow list there is refused outright.
     const inline = ws.createSession('i', {
       profile: 'reviewer',
-      permissions: parseSessionProfile({
+      permissions: SessionProfile({
         cwd: '/a',
         mounts: { '/a': 'rw' },
         paths: { hide: ['*.key'] },
@@ -1238,7 +1238,7 @@ describe('session profiles', () => {
     expect(() =>
       ws.createSession('wide', {
         profile: 'reviewer',
-        permissions: parseSessionProfile({ commands: { allow: ['ls'] } }),
+        permissions: SessionProfile({ commands: { allow: ['ls'] } }),
       }),
     ).toThrow('not an allow list')
     expect(inline.visibility.vars).toEqual({ names: [], patterns: ['AWS_*'] })
@@ -1248,7 +1248,7 @@ describe('session profiles', () => {
   })
 
   it('a misspelled document field fails at the parser', () => {
-    expect(() => parseSessionProfile({ extends: 'default' })).toThrow('unknown field `extends`')
+    expect(() => SessionProfile({ extends: 'default' })).toThrow('unknown field `extends`')
   })
 
   it('a profile keeps a mount away by hiding it, not by omitting it', async () => {
@@ -1260,7 +1260,7 @@ describe('session profiles', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({ mounts: { '/b': 'rwx' }, paths: { hide: ['/a'] } }),
+          default: SessionProfile({ mounts: { '/b': 'rwx' }, paths: { hide: ['/a'] } }),
         },
       },
     )
@@ -1277,8 +1277,8 @@ describe('session profiles', () => {
     // `profile:` on the workspace picks which profile shapes a session
     // created without one, including its own.
     const profiles = {
-      default: parseSessionProfile({ mounts: { '/a': 'rw' } }),
-      reviewer: parseSessionProfile({ mounts: { '/a': 'r' } }),
+      default: SessionProfile({ mounts: { '/a': 'rw' } }),
+      reviewer: SessionProfile({ mounts: { '/a': 'r' } }),
     }
     const ws = new Workspace(
       { '/a': new RAMVFS() },
@@ -1302,7 +1302,7 @@ describe('session profiles', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             cwd: '/b',
             env: { PAGER: 'cat' },
             mounts: { '/b': 'rwx' },
@@ -1339,7 +1339,7 @@ describe('session profiles', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             paths: { hide: ['/other/finance', '*.key'] },
             // Anchored on purpose: a bare `*.pem` is a name pattern and
             // means the same thing inside a mount section as outside
@@ -1384,7 +1384,7 @@ describe('command permissions end to end', () => {
       deny: [{ reason: 'history is read-only here', commands: ['git commit', 'git reset --hard'] }],
     },
   }
-  const COMMANDS_DOC = parseSessionProfile({
+  const COMMANDS_DOC = SessionProfile({
     commands: {
       allow: [
         'ls',
@@ -1413,7 +1413,7 @@ describe('command permissions end to end', () => {
     },
     mounts: { '/repo': REPO_SECTION },
   })
-  const REVIEWER: SessionProfile = parseSessionProfile({
+  const REVIEWER: SessionProfile = SessionProfile({
     commands: {
       allow: ['ls', 'cat', 'echo', 'git log', 'git status', 'xargs', 'type', 'eval'],
     },
@@ -1514,12 +1514,12 @@ describe('command permissions end to end', () => {
     expect(() =>
       ws.createSession('tight', {
         profile: 'reviewer',
-        permissions: parseSessionProfile({ commands: { allow: ['cat', 'git'] } }),
+        permissions: SessionProfile({ commands: { allow: ['cat', 'git'] } }),
       }),
     ).toThrow('not an allow list')
     ws.createSession('tight', {
       profile: 'reviewer',
-      permissions: parseSessionProfile({ commands: { deny: ['ls'] } }),
+      permissions: SessionProfile({ commands: { deny: ['ls'] } }),
     })
     expect((await line(ws, 'cat /repo/d/x', 'tight'))[0]).toBe(0)
     expect(await line(ws, 'ls /repo', 'tight')).toEqual([
@@ -1593,7 +1593,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             commands: {
               deny: [
                 { reason: 'sealed', commands: { cat: ['/data/secret*'], head: ['/data/secret*'] } },
@@ -1645,7 +1645,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             commands: {
               deny: [
                 { reason: 'sealed', commands: { cat: ['/data/secret*'] } },
@@ -1689,7 +1689,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             mounts: {
               '/scratch/child': {
                 commands: { deny: [{ reason: 'boxed', commands: ['grep'] }] },
@@ -1748,7 +1748,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             mounts: {
               '/a/b/c': {
                 commands: {
@@ -1804,7 +1804,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             commands: {
               deny: [
                 {
@@ -1934,7 +1934,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             commands: {
               deny: [
                 { reason: 'no deletes', commands: ['rm'] },
@@ -2016,7 +2016,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             commands: {
               deny: [
                 {
@@ -2072,7 +2072,7 @@ describe('command permissions end to end', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             commands: {
               allow: ['mkdir', 'echo', 'touch', 'cat', 'rm', 'ls', 'head'],
               ask: [{ reason: 'sign-off', commands: { rm: ['/repo/shared/*'] } }],
@@ -2091,7 +2091,7 @@ describe('command permissions end to end', () => {
       'mkdir -p /repo/private /repo/shared && echo k > /repo/private/k && touch /repo/shared/a',
     )
     ws.createSession('veiled', {
-      permissions: parseSessionProfile({
+      permissions: SessionProfile({
         paths: { hide: ['/repo/private', '/repo/shared', '/repo/sealed'] },
       }),
     })
@@ -2151,7 +2151,7 @@ function afterEcho(): Record<string, unknown> {
   }
 }
 
-class Box extends Runtime implements LineExecutor {
+class Box extends Runtime implements LineExecutorMixin {
   override readonly reach = 'workspace' as const
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'box'
@@ -2171,7 +2171,7 @@ class Box extends Runtime implements LineExecutor {
 describe('ask end to end', () => {
   // Through the document parser, as the YAML loader reads it: a bare
   // string under `ask` is one pattern with the default reason.
-  const ASK_DOC = parseSessionProfile({
+  const ASK_DOC = SessionProfile({
     commands: {
       ask: [{ reason: 'sign-off', commands: ['rm'] }, 'head'],
       deny: [{ reason: 'no deletes in the repo', commands: { rm: ['/repo/*'] } }],
@@ -2357,7 +2357,7 @@ describe('ask end to end', () => {
 })
 
 describe('a walk below the operand meets the rule guard', () => {
-  const WALK_DOC: SessionProfile = parseSessionProfile({
+  const WALK_DOC: SessionProfile = SessionProfile({
     paths: { hide: ['/data/t/ghost'] },
     commands: {
       allow: [
@@ -2513,7 +2513,7 @@ describe('a walk below the operand meets the rule guard', () => {
 })
 
 describe('a relayed walk meets the command rules', () => {
-  const RELAY_DOC: SessionProfile = parseSessionProfile({
+  const RELAY_DOC: SessionProfile = SessionProfile({
     paths: { hide: ['/data/r/ghost'] },
     commands: {
       deny: [
@@ -2647,7 +2647,7 @@ describe('a relayed walk meets the command rules', () => {
 })
 
 describe('a warm walk is refused as the cold walk is', () => {
-  const WARM_DOC: SessionProfile = parseSessionProfile({
+  const WARM_DOC: SessionProfile = SessionProfile({
     paths: { hide: ['/data/w/h.txt'] },
     commands: {
       deny: [
@@ -2733,7 +2733,7 @@ describe('a warm walk is refused as the cold walk is', () => {
 })
 
 describe('a dispatched read through a link meets the target rule', () => {
-  const LINKED_DOC: SessionProfile = parseSessionProfile({
+  const LINKED_DOC: SessionProfile = SessionProfile({
     commands: {
       deny: [{ reason: 'sealed', commands: { awk: ['/data/secret'], sed: ['/data/secret'] } }],
     },
@@ -2817,7 +2817,7 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
   // or moved. The rule on the real path holds there for an op on the name
   // itself (unlink, rename) as for one that follows it.
   it('holds the rule through a linked parent', async () => {
-    const doc = parseSessionProfile({
+    const doc = SessionProfile({
       commands: {
         deny: [{ reason: 'sealed', commands: { zap: ['/data/real/secret'] } }],
       },
@@ -2847,7 +2847,7 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
   // walk reaches, so a rule written through a link holds for the command's
   // own ops exactly as it holds for a named operand.
   it('binds a rule spelled through a linked parent', async () => {
-    const doc = parseSessionProfile({
+    const doc = SessionProfile({
       commands: {
         deny: [
           {
@@ -2881,7 +2881,7 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
 })
 
 describe('a walk the executor fans out meets the command rules', () => {
-  const FANOUT_DOC: SessionProfile = parseSessionProfile({
+  const FANOUT_DOC: SessionProfile = SessionProfile({
     commands: {
       deny: [
         {
@@ -2953,12 +2953,12 @@ describe('a walk the executor fans out meets the command rules', () => {
 })
 
 describe('a dispatched op is judged by the gate of the command that issued it', () => {
-  const SEALED_DOC = parseSessionProfile({
+  const SEALED_DOC = SessionProfile({
     commands: {
       deny: [{ reason: 'sealed', commands: { sed: ['/data/real/secret'] } }],
     },
   })
-  const OPEN_DOC = parseSessionProfile({})
+  const OPEN_DOC = SessionProfile({})
 
   async function sealedWs(): Promise<Workspace> {
     const ws = new Workspace(
@@ -3018,7 +3018,7 @@ describe('a dispatched op is judged by the gate of the command that issued it', 
       {
         mode: MountMode.WRITE,
         profiles: {
-          mixed: parseSessionProfile({
+          mixed: SessionProfile({
             commands: {
               deny: [
                 { reason: 'sealed', commands: { cat: ['/data/real/secret'] } },

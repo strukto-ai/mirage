@@ -11,12 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../commands/spec/types.ts'
-import { CLIHandler } from '../commands/cli/types.ts'
-
 import { describe, expect, it, vi } from 'vitest'
 import type { CacheConfig } from '../cache/file/config.ts'
-import type { FileCache } from '../cache/file/mixin.ts'
+import type { FileCacheMixin } from '../cache/file/mixin.ts'
 import {
   IndexType,
   LookupStatus,
@@ -24,31 +21,32 @@ import {
   type RedisIndexConfig,
 } from '../cache/index/config.ts'
 import { RedisIndexCacheStore } from '../cache/index/redis.ts'
-import { CLI } from '../commands/cli/types.ts'
+import type { IndexCacheStore } from '../cache/index/store.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { PolicyError } from '../policy/errors.ts'
-import { vfsCall } from '../vfs/call.ts'
-import { Effect } from '../vfs/types.ts'
+import type { WorkspaceBinding } from '../runtime/binding.ts'
+import { LanguageRuntime } from '../runtime/language.ts'
+import type { MountResolver } from '../runtime/resolver.ts'
+import type { DispatchFn, RunResult } from '../runtime/types.ts'
 import {
   DEFAULT_READ_TTL,
   FileStat,
   FileType,
   MountMode,
+  PathSpec,
   ReadPolicy,
   VFSName,
-  PathSpec,
 } from '../types.ts'
 import { BaseVFS } from '../vfs/base.ts'
+import { vfsCall } from '../vfs/call.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import type { WorkspaceBinding } from '../runtime/binding.ts'
-import { LanguageRuntime } from '../runtime/language.ts'
-import type { MountResolver } from '../runtime/resolver.ts'
-import type { DispatchFn, RunResult } from '../runtime/types.ts'
-import type { IndexCacheStore } from '../cache/index/store.ts'
 import type { Handed } from '../vfs/types.ts'
-import { Workspace } from './workspace/workspace.ts'
-import { Mount } from './mount/spec.ts'
+import { Effect } from '../vfs/types.ts'
 import { expandOperands } from './executor/builtins/shared.ts'
+import { Mount } from './mount/spec.ts'
+import { Workspace } from './workspace/workspace.ts'
 
 class MockVFS extends BaseVFS {
   override readonly name = 'mock'
@@ -495,7 +493,7 @@ describe('Workspace dynamic mount index', () => {
 })
 
 describe('Workspace custom cache option', () => {
-  class StubCache extends BaseVFS implements FileCache {
+  class StubCache extends BaseVFS implements FileCacheMixin {
     override readonly name = VFSName.RAM
     readonly store = new Map<string, Uint8Array>()
     getCalls = 0

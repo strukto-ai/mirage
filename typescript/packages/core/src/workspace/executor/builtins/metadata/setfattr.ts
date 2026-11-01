@@ -15,14 +15,14 @@
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { type PathSpec, wordText } from '../../../../types.ts'
 import { decodeBase64 } from '../../../../utils/base64.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { finish, result } from '../shared.ts'
-import type { Result } from '../types.ts'
-import { SETFATTR_USAGE, attrError, attrOperands, attrUsageRefusal } from './xattr.ts'
-import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { attrError, attrOperands, attrUsageRefusal, SETFATTR_USAGE } from './xattr.ts'
 
 const HEX = /^[0-9a-fA-F]*$/
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
@@ -89,7 +89,7 @@ export async function handleSetfattr(
   dispatch: DispatchFn,
   session: SessionState,
   args: (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const spec = specOf('setfattr')
   const parsed = parseCommand(
     spec,

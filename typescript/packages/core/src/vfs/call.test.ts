@@ -13,17 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { enoent } from '../errors/fs.ts'
-import type { Action, VfsContext } from '../policy/types.ts'
 import { runWithSession } from '../context/session_context.ts'
+import { enoent } from '../errors/fs.ts'
+import { SessionProfile } from '../policy/profile.ts'
+import type { Action, VfsContext } from '../policy/types.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../types.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { SessionState } from '../workspace/session/session.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { parseSessionProfile } from '../policy/profile.ts'
-import { RAMVFS } from './ram/ram.ts'
 import { BaseVFS } from './base.ts'
 import { callNames, declaredCalls, vfsCall } from './call.ts'
+import { RAMVFS } from './ram/ram.ts'
 import { Effect, Target } from './types.ts'
 
 const ENC = new TextEncoder()
@@ -201,7 +201,7 @@ describe('VFS functions', () => {
     shelf.files.set('b.txt', ENC.encode('older\n'))
     const ws = new Workspace({ '/shelf': shelf }, { mode: MountMode.WRITE })
     const session = ws.createSession('rev', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         paths: { show: { '/shelf/a.txt': 'r', '/shelf/b.txt': 'rw' } },
       }),
     })
@@ -314,7 +314,7 @@ describe('custom answers under hides', () => {
     finder.files.set('secret.txt', ENC.encode('s\n'))
     const ws = new Workspace({ '/shelf': finder }, { mode: MountMode.WRITE })
     const session = ws.createSession('agent', {
-      profile: parseSessionProfile({ paths: { hide: ['/shelf/secret.txt'] } }),
+      profile: SessionProfile({ paths: { hide: ['/shelf/secret.txt'] } }),
     })
     try {
       await runWithSession(session, async () => {

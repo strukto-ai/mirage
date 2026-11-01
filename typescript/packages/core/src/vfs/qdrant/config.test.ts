@@ -13,39 +13,39 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-
-import { REDACTED_SECRET, parseConfigWithSchema } from '../secrets.ts'
-import { QdrantConfigSchema, redactQdrantConfig, resolveQdrantConfig } from './config.ts'
+import { REDACTED_SECRET } from '../constants.ts'
+import { parseConfigWithSchema } from '../secrets.ts'
+import { QdrantConfig, redactQdrantConfig, resolveQdrantConfig } from './config.ts'
 
 const embed = (text: string): Promise<number[]> => Promise.resolve([text.length])
 
 describe('qdrant config embed hook', () => {
   it('keeps a function through the config loader and resolves it', () => {
     const config = resolveQdrantConfig(
-      parseConfigWithSchema(QdrantConfigSchema, { collection: 'c', embed }),
+      parseConfigWithSchema(QdrantConfig, { collection: 'c', embed }),
     )
     expect(config.embed).toBe(embed)
   })
 
   it('resolves to null when absent', () => {
     expect(
-      resolveQdrantConfig(parseConfigWithSchema(QdrantConfigSchema, { collection: 'c' })).embed,
+      resolveQdrantConfig(parseConfigWithSchema(QdrantConfig, { collection: 'c' })).embed,
     ).toBeNull()
   })
 
   it('refuses a non-function', () => {
-    expect(() =>
-      parseConfigWithSchema(QdrantConfigSchema, { collection: 'c', embed: 'model' }),
-    ).toThrow(/embed/)
+    expect(() => parseConfigWithSchema(QdrantConfig, { collection: 'c', embed: 'model' })).toThrow(
+      /embed/,
+    )
   })
 
   it('redacts the hook so no snapshot carries it', () => {
     const withHook = redactQdrantConfig(
-      resolveQdrantConfig(parseConfigWithSchema(QdrantConfigSchema, { embed })),
+      resolveQdrantConfig(parseConfigWithSchema(QdrantConfig, { embed })),
     )
     expect(withHook.embed).toBe(REDACTED_SECRET)
     expect(
-      redactQdrantConfig(resolveQdrantConfig(parseConfigWithSchema(QdrantConfigSchema, {}))).embed,
+      redactQdrantConfig(resolveQdrantConfig(parseConfigWithSchema(QdrantConfig, {}))).embed,
     ).toBeNull()
   })
 })

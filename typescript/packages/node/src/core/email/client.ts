@@ -14,14 +14,7 @@
 
 import type { ImapFlow, MailboxLockObject } from 'imapflow'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { parseRfc822, parseWithPayloads, type ParsedRfc822 } from './_parse.ts'
-
-export interface FetchedMessage extends ParsedRfc822 {
-  uid: string
-  flags: string[]
-  /** IMAP's own arrival stamp, ISO-8601, empty when the server omits it. */
-  internalDate: string
-}
+import { parseRfc822, parseWithPayloads } from './_parse.ts'
 
 function internalDateOf(value: Date | string | undefined): string {
   if (value === undefined) return ''
@@ -332,11 +325,7 @@ export async function fetchRawMessage(
   }
 }
 
-export async function fetchMessage(
-  accessor: EmailAccessor,
-  folder: string,
-  uid: string,
-): Promise<FetchedMessage> {
+export async function fetchMessage(accessor: EmailAccessor, folder: string, uid: string) {
   checkUid(uid)
   const imap = await accessor.getImap()
   const lock = await lockMailbox(imap, folder)
@@ -372,13 +361,13 @@ export async function fetchHeaders(
   folder: string,
   uids: readonly string[],
   headerOnly = false,
-): Promise<FetchedMessage[]> {
+): Promise<Awaited<ReturnType<typeof fetchMessage>>[]> {
   if (uids.length === 0) return []
   for (const uid of uids) checkUid(uid)
   const imap = await accessor.getImap()
   const lock = await lockMailbox(imap, folder)
   try {
-    const results: FetchedMessage[] = []
+    const results: Awaited<ReturnType<typeof fetchMessage>>[] = []
     const batchSize = 25
     for (let i = 0; i < uids.length; i += batchSize) {
       // One UID FETCH per batch. Full source (not headers-only) by default:

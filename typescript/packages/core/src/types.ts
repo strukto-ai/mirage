@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rstripSlash, stripSlash } from './utils/slash.ts'
 import { dottedSpelling, resolvePath } from './utils/path.ts'
+import { rstripSlash, stripSlash } from './utils/slash.ts'
 
 // Any value that survives a JSON round trip: what a decoded payload holds,
 // what jq evaluates over, what an API field hands back. The mirror of
@@ -335,14 +335,6 @@ export const OnExceed = Object.freeze({
 
 export type OnExceed = (typeof OnExceed)[keyof typeof OnExceed]
 
-export interface LimitInit {
-  maxBytes?: number | null
-  maxLines?: number | null
-  timeoutSeconds?: number | null
-  walkLimit?: number | null
-  onExceed?: OnExceed
-}
-
 function minBound(values: (number | null)[]): number | null {
   const bounds = values.filter((v): v is number => v !== null)
   return bounds.length > 0 ? Math.min(...bounds) : null
@@ -376,10 +368,14 @@ export class Limit {
   readonly timeoutSeconds: number | null
   readonly walkLimit: number | null
   /** The fields the limit names, null among them; the rest inherit. Mirrors Python's model_fields_set. */
-  readonly fieldsSet: ReadonlySet<keyof LimitInit>
+  readonly fieldsSet: ReadonlySet<keyof NonNullable<ConstructorParameters<typeof Limit>[0]>>
   private readonly exceed: OnExceed | null
 
-  constructor(init: LimitInit = {}) {
+  constructor(
+    init: Partial<
+      Pick<Limit, 'maxBytes' | 'maxLines' | 'timeoutSeconds' | 'walkLimit' | 'onExceed'>
+    > = {},
+  ) {
     const maxBytes = init.maxBytes ?? null
     const maxLines = init.maxLines ?? null
     const timeoutSeconds = init.timeoutSeconds ?? null
@@ -404,7 +400,9 @@ export class Limit {
     this.walkLimit = walkLimit
     this.exceed = init.onExceed ?? null
     this.fieldsSet = new Set(
-      (Object.keys(init) as (keyof LimitInit)[]).filter((key) => init[key] !== undefined),
+      (Object.keys(init) as (keyof NonNullable<ConstructorParameters<typeof Limit>[0]>)[]).filter(
+        (key) => init[key] !== undefined,
+      ),
     )
   }
 
@@ -421,7 +419,7 @@ export class Limit {
   static layered(limits: Iterable<Limit | null>): Limit | null {
     const present = [...limits].filter((s): s is Limit => s !== null)
     if (present.length === 0) return null
-    const init: LimitInit = {}
+    const init: NonNullable<ConstructorParameters<typeof Limit>[0]> = {}
     for (const key of LIMIT_FIELDS) {
       const layer = present.find((s) => s.fieldsSet.has(key))
       if (layer !== undefined) Object.assign(init, { [key]: layer.named(key) })
@@ -429,7 +427,11 @@ export class Limit {
     return new Limit(init)
   }
 
-  private named(key: keyof LimitInit): LimitInit[keyof LimitInit] {
+  private named(
+    key: keyof NonNullable<ConstructorParameters<typeof Limit>[0]>,
+  ): NonNullable<ConstructorParameters<typeof Limit>[0]>[keyof NonNullable<
+    ConstructorParameters<typeof Limit>[0]
+  >] {
     return key === 'onExceed' ? this.onExceed : this[key]
   }
 
@@ -445,7 +447,7 @@ export class Limit {
   static aggr(limits: Iterable<Limit | null>): Limit | null {
     const present = [...limits].filter((s): s is Limit => s !== null)
     if (present.length === 0) return null
-    const init: LimitInit = {}
+    const init: NonNullable<ConstructorParameters<typeof Limit>[0]> = {}
     for (const key of Object.keys(LIMIT_AGGR) as LimitAggrField[]) {
       if (present.some((s) => s.fieldsSet.has(key)))
         Object.assign(init, { [key]: LIMIT_AGGR[key](present) })
@@ -457,7 +459,7 @@ export class Limit {
 /** Every Limit field that composes; `kind` is the wire discriminant, not a bound. */
 type LimitAggrField = Exclude<keyof Limit, 'kind' | 'fieldsSet'>
 
-const LIMIT_FIELDS: readonly (keyof LimitInit)[] = [
+const LIMIT_FIELDS: readonly (keyof NonNullable<ConstructorParameters<typeof Limit>[0]>)[] = [
   'maxBytes',
   'maxLines',
   'timeoutSeconds',
@@ -754,24 +756,6 @@ export interface SetAttrFields {
   nofollow?: boolean
 }
 
-export interface FileStatInit {
-  name: string
-  size?: number | null
-  modified?: string | null
-  fingerprint?: string | null
-  revision?: string | null
-  type: FileType
-  content?: ContentType | null
-  mode?: number | null
-  uid?: number | string | null
-  gid?: number | string | null
-  atime?: string | null
-  ctime?: string | null
-  birthtime?: string | null
-  dev?: number | null
-  extra?: Record<string, unknown>
-}
-
 export class FileStat {
   readonly name: string
   readonly size: number | null
@@ -789,7 +773,27 @@ export class FileStat {
   readonly dev: number | null
   readonly extra: Record<string, unknown>
 
-  constructor(init: FileStatInit) {
+  constructor(
+    init: Pick<FileStat, 'name' | 'type'> &
+      Partial<
+        Pick<
+          FileStat,
+          | 'size'
+          | 'modified'
+          | 'fingerprint'
+          | 'revision'
+          | 'content'
+          | 'mode'
+          | 'uid'
+          | 'gid'
+          | 'atime'
+          | 'ctime'
+          | 'birthtime'
+          | 'dev'
+          | 'extra'
+        >
+      >,
+  ) {
     this.name = init.name
     this.size = init.size ?? null
     this.modified = init.modified ?? null
@@ -821,7 +825,7 @@ export class FileStat {
   // silently drops whatever it forgot, which is how link ownership went
   // missing. This is the one place the field list is repeated, and it
   // sits next to the declarations so an added field is hard to miss.
-  with(update: Partial<FileStatInit>): FileStat {
+  with(update: Partial<NonNullable<ConstructorParameters<typeof FileStat>[0]>>): FileStat {
     return new FileStat({
       name: this.name,
       size: this.size,
@@ -841,14 +845,6 @@ export class FileStat {
       ...update,
     })
   }
-}
-
-export interface DirListingInit {
-  entries: readonly FileStat[]
-  seeds?: ReadonlyMap<string, readonly FileStat[]>
-  partial?: boolean
-  window?: boolean
-  version?: string | null
 }
 
 /**
@@ -884,7 +880,13 @@ export class DirListing {
   readonly window: boolean
   readonly version: string | null
 
-  constructor(init: DirListingInit) {
+  constructor(init: {
+    entries: readonly FileStat[]
+    seeds?: ReadonlyMap<string, readonly FileStat[]>
+    partial?: boolean
+    window?: boolean
+    version?: string | null
+  }) {
     this.entries = init.entries
     this.seeds = init.seeds ?? new Map()
     this.partial = init.partial ?? false
@@ -904,31 +906,17 @@ export const FileChangeKind = Object.freeze({
 
 export type FileChangeKind = (typeof FileChangeKind)[keyof typeof FileChangeKind]
 
-export interface FileMetadataInit {
-  fingerprint?: string | null
-  size?: number | null
-  modified?: string | null
-}
-
 export class FileMetadata {
   readonly fingerprint: string | null
   readonly size: number | null
   readonly modified: string | null
 
-  constructor(init: FileMetadataInit = {}) {
+  constructor(init: Partial<Pick<FileMetadata, 'fingerprint' | 'size' | 'modified'>> = {}) {
     this.fingerprint = init.fingerprint ?? null
     this.size = init.size ?? null
     this.modified = init.modified ?? null
     Object.freeze(this)
   }
-}
-
-export interface FileEventInit {
-  kind: FileChangeKind
-  path: PathSpec
-  timestamp: Date
-  previousPath?: PathSpec | null
-  metadata?: FileMetadata | null
 }
 
 export class FileEvent {
@@ -938,7 +926,10 @@ export class FileEvent {
   readonly previousPath: PathSpec | null
   readonly metadata: FileMetadata | null
 
-  constructor(init: FileEventInit) {
+  constructor(
+    init: Pick<FileEvent, 'kind' | 'path' | 'timestamp'> &
+      Partial<Pick<FileEvent, 'previousPath' | 'metadata'>>,
+  ) {
     this.kind = init.kind
     this.path = init.path
     this.timestamp = init.timestamp
@@ -948,16 +939,11 @@ export class FileEvent {
   }
 }
 
-export interface DeltaInit {
-  changes: readonly FileEvent[]
-  checkpoint: string | null
-}
-
 export class Delta {
   readonly changes: readonly FileEvent[]
   readonly checkpoint: string | null
 
-  constructor(init: DeltaInit) {
+  constructor(init: Pick<Delta, 'changes' | 'checkpoint'>) {
     this.changes = Object.freeze([...init.changes])
     this.checkpoint = init.checkpoint
     Object.freeze(this)
@@ -1093,17 +1079,6 @@ export interface SearchQuery {
 // Mirrors Python's WalkErrno.
 export type WalkErrno = 'ENOENT' | 'ELOOP'
 
-export interface PathSpecInit {
-  virtual: string
-  directory: string
-  vfsPath: string
-  pattern?: string | null
-  resolved?: boolean
-  rawPath?: string
-  dotted?: string | null
-  walkError?: WalkErrno | null
-}
-
 export class PathSpec {
   readonly virtual: string
   readonly directory: string
@@ -1123,7 +1098,10 @@ export class PathSpec {
   // words the refusal as its own. Mirrors Python's PathSpec.walk_error.
   readonly walkError: WalkErrno | null
 
-  constructor(init: PathSpecInit) {
+  constructor(
+    init: Pick<PathSpec, 'virtual' | 'directory' | 'vfsPath'> &
+      Partial<Pick<PathSpec, 'pattern' | 'resolved' | 'rawPath' | 'dotted' | 'walkError'>>,
+  ) {
     this.virtual = init.virtual
     this.directory = init.directory
     this.vfsPath = init.vfsPath
@@ -1233,4 +1211,13 @@ export class PathSpec {
 // `virtual`.
 export function wordText(word: string | PathSpec): string {
   return word instanceof PathSpec ? word.rawPath : word
+}
+
+/** A JSON object received from a service, before its fields are checked. */
+export type JsonObject = Record<string, unknown>
+
+/** An optional byte range requested by a file read. */
+export interface ReadRange {
+  offset?: number
+  size?: number
 }

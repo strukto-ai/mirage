@@ -13,20 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VersionHistory } from '../../cache/versions.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
-import { type FunctionSite, functionSources } from './functions.ts'
-import { STARTUP_VALUES } from './constants.ts'
-import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
-
+import { releaseInputs, type SharedInput } from '../../io/async_line_iterator.ts'
+import type { NetworkSetting } from '../../io/network.ts'
+import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
+import type { AdmissionRules, Decision, HideReason, ProfileScripts } from '../../policy/types.ts'
 import {
   DEFAULT_PROCESS_PERMISSIONS,
   parseProcessPermissions,
   type ProcessPermissions,
 } from '../../process/config.ts'
-import type { NetworkSetting } from '../../io/network.ts'
-import type { Limit } from '../../types.ts'
-import { type SharedInput, releaseInputs } from '../../io/async_line_iterator.ts'
-import { parseCommandLimits, commandLimitsToJSON } from '../../policy/builtin/output_cap.ts'
+import { EnvVar, type EnvEntries } from '../../secrets/config.ts'
+import type { ShellArray } from '../../shell/array.ts'
+import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import {
   BIN_PREFIX,
   IFS_DEFAULT,
@@ -34,11 +32,18 @@ import {
   RANDOM_UNSET,
   SHELL_ARGV0,
 } from '../../shell/constants.ts'
-import { EnvVarSchema, type EnvEntries } from '../../secrets/config.ts'
-import type { ShellArray } from '../../shell/array.ts'
+import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
+import type { JobTable, JobWaits } from '../../shell/job_table/index.ts'
+import type { AliasExpansion } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
-import type { AdmissionRules, Decision, HideReason, ProfileScripts } from '../../policy/types.ts'
+import type { Limit, MountMode } from '../../types.ts'
+import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types.ts'
+import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import type { StatusWriter } from '../types.ts'
+import { STARTUP_VALUES } from './constants.ts'
+import { functionSources, type FunctionSite } from './functions.ts'
 import {
   commandsFromDict,
   commandsToDict,
@@ -46,17 +51,9 @@ import {
   decisionToDict,
   scriptsFromDict,
   scriptsToDict,
-  type CommandsJSON,
   type DecisionJSON,
   type ScriptJSON,
 } from './serialize.ts'
-import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types.ts'
-import { type JobOutput, Terminal } from '../../shell/console/index.ts'
-import type { JobTable, JobWaits } from '../../shell/job_table/index.ts'
-import type { MountMode } from '../../types.ts'
-import type { StatusWriter } from '../types.ts'
-import type { AliasExpansion } from '../../shell/types.ts'
-import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
 
 /**
  * Read one entry of a session record, ignoring anything inherited from
@@ -229,7 +226,7 @@ export function varsFromDict(
 export function varsFromEntries(entries: EnvEntries): Record<string, ShellVar> {
   const out = ownRecord<ShellVar>()
   for (const [name, rawEntry] of Object.entries(entries)) {
-    const entry = EnvVarSchema.parse(typeof rawEntry === 'string' ? { value: rawEntry } : rawEntry)
+    const entry = EnvVar.parse(typeof rawEntry === 'string' ? { value: rawEntry } : rawEntry)
     const attrs = new Set<VarAttr>()
     if (entry.from !== undefined) {
       const managed: ManagedRef = {
@@ -999,7 +996,7 @@ export class SessionState {
     shown_paths?: { entries?: { path: string; mode?: MountMode }[] } | null
     hide_reasons?: { patterns?: string[]; reason?: string }[] | null
     hidden_vars?: { names?: string[]; patterns?: string[] } | null
-    commands?: CommandsJSON | null
+    commands?: ReturnType<typeof commandsToDict> | null
     scripts?: Record<string, ScriptJSON[]> | null
     profile?: string | null
     command_limits?: unknown

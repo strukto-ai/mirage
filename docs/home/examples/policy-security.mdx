@@ -108,7 +108,7 @@ for writes.
       Scope,
       ScriptSource,
       Workspace,
-      parseSessionProfile,
+      SessionProfile,
       type Policy,
     } from '@struktoai/mirage-node'
 
@@ -121,7 +121,7 @@ for writes.
       },
     }
 
-    const analyst = parseSessionProfile(
+    const analyst = SessionProfile(
       {
         cwd: '/data',
         paths: { hide: ['/data/secrets', '*.pem'], show: ['/data/secrets/README.md'] },

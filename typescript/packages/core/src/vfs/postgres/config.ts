@@ -13,13 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, REDACTED_SECRET, type RedactedConfig, secretStr } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
+import { REDACTED_SECRET } from '../constants.ts'
+import type { ConfigOf, RedactedSchema } from '../secrets.ts'
+import { secretStr } from '../secrets.ts'
 
 // `dsn` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `PostgresConfig` declares.
-export const PostgresConfigSchema = z.object({
+export const PostgresConfig = z.object({
   ...timeoutShape,
   dsn: secretStr().describe(
     "Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.",
@@ -51,18 +53,9 @@ export const PostgresConfigSchema = z.object({
     }),
 })
 
-export type PostgresConfig = ConfigOf<typeof PostgresConfigSchema>
+export type PostgresConfig = ConfigOf<typeof PostgresConfig>
 
-export interface PostgresConfigResolved {
-  timeout: number
-  dsn: string
-  schemas: readonly string[] | null
-  defaultRowLimit: number
-  maxReadRows: number
-  maxReadBytes: number
-}
-
-export function resolvePostgresConfig(config: PostgresConfig): PostgresConfigResolved {
+export function resolvePostgresConfig(config: PostgresConfig) {
   return {
     timeout: config.timeout ?? DEFAULT_TIMEOUT,
     dsn: config.dsn,
@@ -73,12 +66,8 @@ export function resolvePostgresConfig(config: PostgresConfig): PostgresConfigRes
   }
 }
 
-// `dsn` is the credential. Masking it is what makes
-// `vfsStateRequiresOverride` demand a fresh one at load instead of
-// quietly rebuilding the mount as an empty RAMVFS. Mirrors the
-// field Python annotates secret on this config.
-export type PostgresConfigRedacted = RedactedConfig<PostgresConfigResolved, 'dsn'>
-
-export function redactPostgresConfig(config: PostgresConfigResolved): PostgresConfigRedacted {
+export function redactPostgresConfig(
+  config: ReturnType<typeof resolvePostgresConfig>,
+): RedactedSchema<typeof PostgresConfig, ReturnType<typeof resolvePostgresConfig>> {
   return { ...config, dsn: REDACTED_SECRET }
 }

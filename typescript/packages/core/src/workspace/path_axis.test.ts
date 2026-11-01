@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { RAMVFS } from '../vfs/ram/ram.ts'
-import { type FileStat, MountMode, type PathSpec } from '../types.ts'
-import { parseSessionProfile, type SessionProfile } from '../policy/profile.ts'
-import type { Action, VfsContext, VfsResultContext, Policy } from '../policy/index.ts'
-import { runWithSession } from '../context/session_context.ts'
 import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { runWithSession } from '../context/session_context.ts'
+import type { Action, Policy, VfsContext, VfsResultContext } from '../policy/index.ts'
+import { SessionProfile } from '../policy/profile.ts'
+import { type FileStat, MountMode, type PathSpec } from '../types.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Session, Workspace } from './workspace/workspace.ts'
 
 const DEC = new TextDecoder()
@@ -56,7 +56,7 @@ class FailingRAM extends RAMVFS {
   }
 }
 
-const CARVE_PROFILE = parseSessionProfile({
+const CARVE_PROFILE = SessionProfile({
   mounts: { '/repo': 'r' },
   paths: { hide: ['/repo'], show: { '/repo/public': 'r' } },
 })
@@ -72,7 +72,7 @@ function hiding(): Workspace {
     { '/data': [new RAMVFS(), MountMode.WRITE] as const },
     {
       mode: MountMode.WRITE,
-      profiles: { agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }) },
+      profiles: { agent: SessionProfile({ paths: { hide: ['/data/vault'] } }) },
       profile: 'agent',
     },
   )
@@ -178,7 +178,7 @@ describe('the path axis end to end', () => {
     open.push(ws)
     expect((await ws.shell('mkdir -p /a/sec && echo v > /a/vault/v')).exitCode).toBe(0)
     ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { hide: ['/a/vault', '/a/sec'] } }),
+      profile: SessionProfile({ paths: { hide: ['/a/vault', '/a/sec'] } }),
     })
     for (const line of ['cd /a/vault', 'cd -P /a/vault', 'cd /a && cd vault']) {
       const moved = await ws.shell(line, { sessionId: 'rev' })
@@ -205,12 +205,12 @@ describe('the path axis end to end', () => {
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
-        profiles: { agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }) },
+        profiles: { agent: SessionProfile({ paths: { hide: ['/data/vault'] } }) },
         profile: 'agent',
       },
     )
     open.push(ws)
-    const host = ws.createSession('host', { profile: parseSessionProfile({}) })
+    const host = ws.createSession('host', { profile: SessionProfile({}) })
     const files = new Session(ws, host.sessionId).vfs
     await files.mkdir('/data/vault')
     expect(ws.vfs.records.map((r) => [r.op, r.path]).at(-1)).toEqual(['mkdir', '/data/vault'])
@@ -240,9 +240,9 @@ describe('the path axis end to end', () => {
       { mode: MountMode.WRITE },
     )
     open.push(other)
-    const wide = other.createSession('wide', { profile: parseSessionProfile({}) })
+    const wide = other.createSession('wide', { profile: SessionProfile({}) })
     const ws = hiding()
-    const host = ws.createSession('host', { profile: parseSessionProfile({}) })
+    const host = ws.createSession('host', { profile: SessionProfile({}) })
     const files = new Session(ws, host.sessionId).vfs
     await files.mkdir('/data/vault')
     await files.write('/data/vault/secret', 'top\n')
@@ -269,7 +269,7 @@ describe('the path axis end to end', () => {
     // the hide. The follow now runs as the session and only from a
     // path it can see, so the link reads as absent.
     const ws = hiding()
-    const host = ws.createSession('host', { profile: parseSessionProfile({}) })
+    const host = ws.createSession('host', { profile: SessionProfile({}) })
     const files = new Session(ws, host.sessionId).vfs
     await files.write('/data/pub.txt', 'pub\n')
     await files.mkdir('/data/vault')
@@ -296,7 +296,7 @@ describe('the path axis end to end', () => {
     // dispatcher instead of refusing the command outright.
     const ws = await seeded()
     ws.createSession('rev', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         mounts: { '/repo': 'r' },
         paths: { show: { '/repo/build': 'rw' } },
       }),
@@ -321,7 +321,7 @@ describe('the path axis end to end', () => {
     )
     open.push(ws)
     ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { show: { '/repo/build': 'rw' } } }),
+      profile: SessionProfile({ paths: { show: { '/repo/build': 'rw' } } }),
     })
     const refused = await ws.shell('echo x > /repo/build/a.txt', { sessionId: 'rev' })
     expect(refused.exitCode).not.toBe(0)
@@ -333,7 +333,7 @@ describe('the path axis end to end', () => {
     // allowlist; a path outside every show entry stays visible.
     const ws = await seeded()
     ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { show: { '/repo/public': 'r' } } }),
+      profile: SessionProfile({ paths: { show: { '/repo/public': 'r' } } }),
     })
     const ok = await ws.shell('cat /repo/README.md', { sessionId: 'rev' })
     expect(ok.exitCode).toBe(0)
@@ -346,7 +346,7 @@ describe('the path axis end to end', () => {
     // it, in file-operand voice, exit 126.
     const ws = await seeded(MountMode.EXEC)
     ws.createSession('rev', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         mounts: { '/repo': 'r' },
         paths: { show: { '/repo/tools': 'rwx' } },
       }),
@@ -369,7 +369,7 @@ describe('the path axis end to end', () => {
     expect(() =>
       ws.createSession('rev', {
         profile: CARVE_PROFILE,
-        permissions: parseSessionProfile({ paths: { show: ['/repo/secrets'] } }),
+        permissions: SessionProfile({ paths: { show: ['/repo/secrets'] } }),
       }),
     ).toThrow('not show entries')
   })
@@ -380,7 +380,7 @@ describe('the path axis end to end', () => {
     // region, so the whole-mount admission opens no side entry point.
     const ws = await seeded()
     ws.createSession('rev', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         mounts: { '/repo': 'r' },
         paths: { show: { '/repo/build': 'rw' } },
       }),
@@ -418,7 +418,7 @@ describe('the path axis end to end', () => {
     )
     expect(grown.exitCode).toBe(0)
     ws.createSession('rev', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         paths: { show: { '/repo/tree/locked': 'r' } },
       }),
     })
@@ -442,7 +442,7 @@ describe('the path axis end to end', () => {
     // exists.
     const ws = await seeded()
     ws.createSession('rev', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         mounts: { '/repo': 'r' },
         paths: { hide: ['/repo'], show: ['/repo/public/*'] },
       }),
@@ -494,7 +494,7 @@ describe('subtree mutations against hides', () => {
     // The hide anchors at /repo/box/sec; the move would re-anchor its
     // content to /repo/moved/sec, which nothing hides, so it refuses
     // in GNU's permission-denied voice and the source stays whole.
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const refused = await ws.shell('mv /repo/box /repo/moved', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
     expect(stderrStr(refused)).toBe(
@@ -511,7 +511,7 @@ describe('subtree mutations against hides', () => {
       // shown a.txt: moving it, within the mount or across one, would carry
       // sec/k out from under the hide, so it refuses and the source stays.
       const ws = await boxed(
-        parseSessionProfile({ paths: { hide: ['/repo/box'], show: { '/repo/box/a.txt': 'rw' } } }),
+        SessionProfile({ paths: { hide: ['/repo/box'], show: { '/repo/box/a.txt': 'rw' } } }),
         '/out',
       )
       const refused = await ws.shell(`mv /repo/box ${dst}`, { sessionId: 'rev' })
@@ -527,7 +527,7 @@ describe('subtree mutations against hides', () => {
   it('mv rides a component-pattern hide along', async () => {
     // *.tkn follows the name wherever the content goes, so nothing is
     // revealed and the move proceeds, the hidden file riding along.
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['*.tkn'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['*.tkn'] } }))
     const ok = await ws.shell('mv /repo/box /repo/moved', { sessionId: 'rev' })
     expect(ok.exitCode).toBe(0)
     const listing = await ws.shell('ls /repo/moved', { sessionId: 'rev' })
@@ -541,7 +541,7 @@ describe('subtree mutations against hides', () => {
     // /repo/*/sec could match below any directory under /repo, so a
     // directory move refuses conservatively, but a regular file
     // carries nothing below it: renaming one reveals nothing.
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/*/sec'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['/repo/*/sec'] } }))
     const moved = await ws.shell('mv /repo/box/a.txt /repo/box/b.txt', { sessionId: 'rev' })
     expect(moved.exitCode).toBe(0)
     const listing = await ws.shell('ls /repo/box', { sessionId: 'rev' })
@@ -549,7 +549,7 @@ describe('subtree mutations against hides', () => {
   })
 
   it('mv of a directory under an anchored-pattern hide refuses', async () => {
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/*/sec'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['/repo/*/sec'] } }))
     const refused = await ws.shell('mv /repo/box /repo/moved', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
     expect(stderrStr(refused)).toContain('Permission denied')
@@ -559,7 +559,7 @@ describe('subtree mutations against hides', () => {
     // The reveal guard answers before -b renames the destination
     // aside, so a refused move mutates nothing: no backup, destination
     // intact.
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const prep = await ws.shell('mkdir /repo/moved', { sessionId: 'rev' })
     expect(prep.exitCode).toBe(0)
     const refused = await ws.shell('mv -b -T /repo/box /repo/moved', { sessionId: 'rev' })
@@ -572,7 +572,7 @@ describe('subtree mutations against hides', () => {
   })
 
   it('cp -r copies the visible view silently', async () => {
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const copied = await ws.shell('cp -r /repo/box /repo/copy', { sessionId: 'rev' })
     expect(copied.exitCode).toBe(0)
     expect(stderrStr(copied)).toBe('')
@@ -583,7 +583,7 @@ describe('subtree mutations against hides', () => {
   it('rmdir takes hidden remnants with the directory', async () => {
     // The session sees an empty directory; a not-empty refusal would
     // leak that something invisible exists, so the remnants go with it.
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/only/h'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['/repo/only/h'] } }))
     const empty = await ws.shell('ls -A /repo/only', { sessionId: 'rev' })
     expect(stdoutStr(empty)).toBe('')
     const removed = await ws.shell('rmdir /repo/only', { sessionId: 'rev' })
@@ -598,7 +598,7 @@ describe('subtree mutations against hides', () => {
     // finds under it; a rule naming rmdir on the hidden file refuses its
     // deletion, so the parent's refusal stands and the file stays.
     const ws = await boxed(
-      parseSessionProfile({
+      SessionProfile({
         paths: { hide: ['/repo/only/h'] },
         commands: { deny: [{ reason: 'kept', commands: { rmdir: ['/repo/only/h'] } }] },
       }),
@@ -612,14 +612,14 @@ describe('subtree mutations against hides', () => {
   })
 
   it('rmdir with a visible child keeps the refusal', async () => {
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const refused = await ws.shell('rmdir /repo/box', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
     expect(stderrStr(refused)).toContain('Directory not empty')
   })
 
   it('rm -r still destroys hidden content below', async () => {
-    const ws = await boxed(parseSessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
+    const ws = await boxed(SessionProfile({ paths: { hide: ['/repo/box/sec'] } }))
     const removed = await ws.shell('rm -r /repo/box', { sessionId: 'rev' })
     expect(removed.exitCode).toBe(0)
     const gone = await ws.shell('test -e /repo/box')
@@ -633,7 +633,7 @@ describe('subtree mutations against hides', () => {
     // answers for its own path's mode, so the protected remnant
     // survives and the rmdir keeps a not-empty refusal.
     const ws = await boxed(
-      parseSessionProfile({ paths: { hide: ['/repo/only/h'], show: { '/repo/only/h': 'r' } } }),
+      SessionProfile({ paths: { hide: ['/repo/only/h'], show: { '/repo/only/h': 'r' } } }),
     )
     const refused = await ws.shell('rmdir /repo/only', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
@@ -659,7 +659,7 @@ describe('subtree mutations against hides', () => {
     const io = await ws.shell("mkdir -p /repo/only && printf 'h\\n' > /repo/only/h")
     expect(io.exitCode).toBe(0)
     ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { hide: ['/repo/only/h'] } }),
+      profile: SessionProfile({ paths: { hide: ['/repo/only/h'] } }),
     })
     const refused = await ws.shell('rmdir /repo/only', { sessionId: 'rev' })
     expect(refused.exitCode).toBe(1)
@@ -683,7 +683,7 @@ describe('ws.vfs against hides', () => {
     const io = await ws.shell("mkdir -p /repo/only && printf 'h\\n' > /repo/only/h")
     expect(io.exitCode).toBe(0)
     const sess = ws.createSession('rev', {
-      profile: parseSessionProfile({
+      profile: SessionProfile({
         paths: { hide: ['/repo/only/h'], show: { '/repo/only/h': 'r' } },
       }),
     })
@@ -712,7 +712,7 @@ describe('ws.vfs against hides', () => {
     const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
     expect(io.exitCode).toBe(0)
     const sess = ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { hide: ['/a/d/sec'] } }),
+      profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
     })
     await runWithSession(sess, async () => {
       await expect(ws.dispatch('rmdir', '/a/d')).rejects.toMatchObject({
@@ -741,7 +741,7 @@ describe('ws.vfs against hides', () => {
     const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
     expect(io.exitCode).toBe(0)
     const sess = ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { hide: ['/a/d/sec'] } }),
+      profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
     })
     await runWithSession(sess, async () => {
       await expect(ws.dispatch('rmdir', '/a/d')).rejects.toMatchObject({
@@ -764,7 +764,7 @@ describe('ws.vfs against hides', () => {
       const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
       expect(io.exitCode).toBe(0)
       const sess = ws.createSession('rev', {
-        profile: parseSessionProfile({ paths: { hide: ['/a/d/sec'] } }),
+        profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
       })
       a.failing = failing
       await runWithSession(sess, async () => {
@@ -791,7 +791,7 @@ describe('ws.vfs against hides', () => {
     const io = await ws.shell("mkdir -p /a/d/sec && printf 'k\\n' > /a/d/sec/k")
     expect(io.exitCode).toBe(0)
     const sess = ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { hide: ['/a/d/sec'] } }),
+      profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
     })
     await runWithSession(sess, () => ws.dispatch('rmdir', '/a/d'))
     const gone = await ws.shell('test -e /a/d')
@@ -810,7 +810,7 @@ describe('ws.vfs against hides', () => {
     )
     expect(io.exitCode).toBe(0)
     const sess = ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { hide: ['/a/d/sec', '/a/d/lnk'] } }),
+      profile: SessionProfile({ paths: { hide: ['/a/d/sec', '/a/d/lnk'] } }),
     })
     await runWithSession(sess, async () => {
       await ws.dispatch('rmdir', '/a/d')
@@ -834,7 +834,7 @@ describe('ws.vfs against hides', () => {
     )
     expect(io.exitCode).toBe(0)
     const sess = ws.createSession('rev', {
-      profile: parseSessionProfile({ paths: { hide: ['/a/d/sec'] } }),
+      profile: SessionProfile({ paths: { hide: ['/a/d/sec'] } }),
     })
     await runWithSession(sess, async () => {
       await expect(ws.dispatch('rmdir', '/a/d')).rejects.toMatchObject({
@@ -862,7 +862,7 @@ async function twoMounts(profile: object): Promise<Workspace> {
       "printf 't\\n' > /a/bag/x.tkn && printf 'v\\n' > /a/bag/a.txt",
   )
   expect(io.exitCode).toBe(0)
-  ws.createSession('rev', { profile: parseSessionProfile(profile) })
+  ws.createSession('rev', { profile: SessionProfile(profile) })
   return ws
 }
 

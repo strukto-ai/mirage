@@ -13,13 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, REDACTED_SECRET, type RedactedConfig, secretStr } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
+import { REDACTED_SECRET } from '../constants.ts'
+import type { ConfigOf, RedactedSchema } from '../secrets.ts'
+import { secretStr } from '../secrets.ts'
 
 // `uri` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `MongoDBConfig` declares.
-export const MongoDBConfigSchema = z.object({
+export const MongoDBConfig = z.object({
   ...timeoutShape,
   uri: secretStr().describe(
     'MongoDB connection URI in Node; in the browser, the URL of a backend route that holds the connection URI.',
@@ -43,17 +45,9 @@ export const MongoDBConfigSchema = z.object({
   }),
 })
 
-export type MongoDBConfig = ConfigOf<typeof MongoDBConfigSchema>
+export type MongoDBConfig = ConfigOf<typeof MongoDBConfig>
 
-export interface MongoDBConfigResolved {
-  timeout: number
-  uri: string
-  databases: readonly string[] | null
-  maxDocLimit: number
-  elideFields: Record<string, readonly string[]>
-}
-
-export function resolveMongoDBConfig(config: MongoDBConfig): MongoDBConfigResolved {
+export function resolveMongoDBConfig(config: MongoDBConfig) {
   return {
     timeout: config.timeout ?? DEFAULT_TIMEOUT,
     uri: config.uri,
@@ -63,12 +57,8 @@ export function resolveMongoDBConfig(config: MongoDBConfig): MongoDBConfigResolv
   }
 }
 
-// `uri` is the credential. Masking it is what makes
-// `vfsStateRequiresOverride` demand a fresh one at load instead of
-// quietly rebuilding the mount as an empty RAMVFS. Mirrors the
-// field Python annotates secret on this config.
-export type MongoDBConfigRedacted = RedactedConfig<MongoDBConfigResolved, 'uri'>
-
-export function redactMongoDBConfig(config: MongoDBConfigResolved): MongoDBConfigRedacted {
+export function redactMongoDBConfig(
+  config: ReturnType<typeof resolveMongoDBConfig>,
+): RedactedSchema<typeof MongoDBConfig, ReturnType<typeof resolveMongoDBConfig>> {
   return { ...config, uri: REDACTED_SECRET }
 }

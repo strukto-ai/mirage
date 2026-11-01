@@ -18,10 +18,10 @@ import {
   Scope,
   type CommandContext,
   type Deny,
-  type VfsContext,
   type Policy,
+  type VfsContext,
 } from '../../policy/index.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
@@ -44,7 +44,7 @@ describe('session.explain.vfs', () => {
     await ws.vfs.mkdir('/data/sec')
     await ws.vfs.write('/data/sec/k', 'key')
     await ws.vfs.symlink('/data/link', '/data/sec/k')
-    ws.createSession('agent', { profile: parseSessionProfile(PROFILE) })
+    ws.createSession('agent', { profile: SessionProfile(PROFILE) })
   })
 
   afterEach(async () => {

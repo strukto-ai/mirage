@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type SupabaseConfig, type SupabaseConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { SupabaseConfig } from './config.ts'
 
-export type SupabaseVFSState = S3AliasVFSState<SupabaseConfigRedacted>
-
-export class SupabaseVFS extends S3AliasVFS<SupabaseConfig, SupabaseConfigRedacted> {
+export class SupabaseVFS extends S3AliasVFS<SupabaseConfig, RedactedSchema<typeof SupabaseConfig>> {
   constructor(config: SupabaseConfig) {
-    super(VFSName.SUPABASE, config, ALIAS)
+    super(VFSName.SUPABASE, config, SupabaseConfig)
   }
 }

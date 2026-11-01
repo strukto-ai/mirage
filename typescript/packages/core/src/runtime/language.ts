@@ -23,7 +23,7 @@ import type { Language, OutputFn, Program, RunResult } from './types.ts'
  *
  * The engine inside a single command (python3, node): the workspace
  * splits the line, and a captured stage's operands land here as run().
- * Never the whole line; that is LineExecutor's entry point.
+ * Never the whole line; that is LineExecutorMixin's entry point.
  *
  * The language it interprets is declared once, on its language tier
  * (PythonRuntime, JsRuntime), and a script CLI finds its interpreter by

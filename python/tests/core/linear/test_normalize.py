@@ -12,7 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.linear.normalize import normalize_document, normalize_label
+import json
+from pathlib import Path
+
+import pytest
+
+from mirage.core.linear.normalize import (
+    normalize_document,
+    normalize_label,
+    normalize_team,
+    normalize_user,
+)
 
 
 def test_normalize_label_maps_fields():
@@ -72,3 +82,22 @@ def test_normalize_document_defaults_content_and_nulls():
         "updated_at": None,
         "url": None,
     }
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        case
+        for case in json.loads(
+            (
+                Path(__file__).resolve().parents[4]
+                / "integ/fixtures/normalized_records.json"
+            ).read_text()
+        )["cases"]
+        if case["backend"] == "linear"
+    ],
+    ids=lambda case: case["id"],
+)
+def test_shared_normalized_records(case):
+    normalizers = {"user": normalize_user, "team": normalize_team}
+    assert normalizers[case["kind"]](case["value"]) == case["expect"]

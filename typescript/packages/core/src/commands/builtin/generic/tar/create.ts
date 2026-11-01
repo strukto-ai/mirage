@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LinkView, MountView } from '../../../../view/types.ts'
-import type { PathSpec, StatFn } from '../../../../types.ts'
 import { fsStrerror, isFsError, walkRefusal } from '../../../../errors/fs.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
+import type { PathSpec, StatFn } from '../../../../types.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { respellOne } from '../../../../utils/path.ts'
 import { lstripSlash, rstripSlash } from '../../../../utils/slash.ts'
+import type { LinkView, MountView } from '../../../../view/types.ts'
 import type { MemberKind } from '../archive/types.ts'
 import { OTHER_FILESYSTEM, scanOperand, type DirProbe, type WalkFn } from '../archive/walk.ts'
 import {
@@ -29,22 +30,6 @@ import {
   USAGE_HINT,
 } from './constants.ts'
 import type { CreateResult, Member } from './types.ts'
-import { posixPhrase } from '../../../../errors/posix.ts'
-
-export interface CreateDeps {
-  archive: PathSpec
-  exclude: string | null
-  dereference: boolean
-  stat: StatFn
-  walk: WalkFn
-  isDir: DirProbe
-  // Every `-C` the operands were based on, in order, checked inside
-  // the plan because GNU chdirs at each one before reading anything.
-  directories?: readonly PathSpec[]
-  links?: LinkView | null
-  mounts?: MountView | null
-  oneFileSystem?: boolean
-}
 
 function refusal(notices: string[]): CreateResult {
   return { members: [], notices, exitCode: CREATE_ERROR_EXIT, write: false }
@@ -182,7 +167,20 @@ export async function checkDirectories(
  */
 export async function planCreate(
   paths: readonly PathSpec[],
-  deps: CreateDeps,
+  deps: {
+    archive: PathSpec
+    exclude: string | null
+    dereference: boolean
+    stat: StatFn
+    walk: WalkFn
+    isDir: DirProbe
+    // Every `-C` the operands were based on, in order, checked inside
+    // the plan because GNU chdirs at each one before reading anything.
+    directories?: readonly PathSpec[]
+    links?: LinkView | null
+    mounts?: MountView | null
+    oneFileSystem?: boolean
+  },
 ): Promise<CreateResult> {
   if (paths.length === 0) return refusal([EMPTY_ARCHIVE, USAGE_HINT])
   const directoryErrors = await checkDirectories(deps.directories ?? [], deps.isDir, deps.stat)

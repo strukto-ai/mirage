@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
+import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 /**
  * Run the words as a line of the caller's own: in its frame, so `$1`,
@@ -33,7 +34,7 @@ export async function handleEval(
   stdin: ByteSource | null = null,
   sink?: JobConsole,
   callStack: CallStack = new CallStack(session.shellNesting),
-): Promise<Result> {
+): Promise<RedirectResult> {
   const script = args.join(' ')
   let io: IOResult
   try {
@@ -53,7 +54,7 @@ export async function handleEval(
 }
 
 /** The `eval` arm. */
-export async function evalBuiltin(call: BuiltinCall): Promise<Result> {
+export async function evalBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleEval(
     call.executeFn,
     [...call.argv.args],

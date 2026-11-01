@@ -12,30 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonBytes } from '../render/json.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import { DirListing, FileStat, FileType } from '../../types.ts'
+import { asArray, asObject, stringOf as strOf } from '../../utils/records.ts'
 import { makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
+import { jsonBytes } from '../render/json.ts'
 import {
-  dataSourceSegmentName,
   databaseSegmentName,
-  normalizeDataSource,
+  dataSourceSegmentName,
   normalizeDatabase,
+  normalizeDataSource,
   pageSegmentName,
 } from './normalize.ts'
 import {
   getChildPages,
-  getDataSource,
   getDatabase,
+  getDataSource,
   searchDataSources,
   searchPages,
 } from './pages.ts'
 import { formatSegment } from './pathing.ts'
-import { asArray, asObject, strOf } from './render.ts'
-import { detectScope } from './scope.ts'
 import { guardRow } from './resolve.ts'
+import { detectScope } from './scope.ts'
 
 export const PAGE = entryStat('page_id', FileType.DIRECTORY)
 export const DATABASE = entryStat('database_id', FileType.DIRECTORY)

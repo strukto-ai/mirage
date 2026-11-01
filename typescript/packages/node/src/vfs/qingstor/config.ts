@@ -12,25 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  makeS3Alias,
-  REGION_ALIAS_SCHEMA,
-  type S3AliasConfig,
-  type S3AliasConfigRedacted,
-} from '../s3_alias.ts'
+import { makeS3Alias, REGION_ALIAS_SCHEMA, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface QingStorConfig extends S3AliasConfig {
   region: string
 }
 
-export type QingStorConfigRedacted = S3AliasConfigRedacted
-
-export const QingStorConfigSchema = REGION_ALIAS_SCHEMA
-
-export const ALIAS = makeS3Alias<QingStorConfig, QingStorConfigRedacted>({
-  schema: QingStorConfigSchema,
+export const QingStorConfig = makeS3Alias({
+  schema: REGION_ALIAS_SCHEMA,
   endpointFor: (config) => `https://s3.${config.region}.qingstor.com`,
 })
-
-export const resolvedQingStorEndpoint = ALIAS.resolvedEndpoint
-export const qingStorToS3Config = ALIAS.toS3Config

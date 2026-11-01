@@ -12,23 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SlackVFSBase } from '@struktoai/mirage-core/vfs/slack/slack'
 import { SlackAccessor } from '@struktoai/mirage-core/accessor/slack'
-
 import { BrowserSlackTransport } from '@struktoai/mirage-core/core/slack/client_browser'
-
-import { VFS_MD } from '@struktoai/mirage-core/vfs/slack/slack'
 import { VFSName } from '@struktoai/mirage-core/types'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { SlackVFS as CoreSlackVFS, VFS_MD } from '@struktoai/mirage-core/vfs/slack/slack'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
+import { SlackConfig } from './config.ts'
 
-import { SlackConfigSchema, type SlackConfig, type SlackConfigRedacted } from './config.ts'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-
-export interface SlackVFSState {
-  type: string
-  config: SlackConfigRedacted
-}
-
-export class SlackVFS extends SlackVFSBase {
+export class SlackVFS extends CoreSlackVFS {
   override readonly name: string = VFSName.SLACK
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: chat.jsonl and users/*.json
@@ -54,10 +46,7 @@ export class SlackVFS extends SlackVFSBase {
     this.vfsMd = VFS_MD + this.accessor.timeRange.vfsMd()
   }
 
-  override getState(): Promise<SlackVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(SlackConfigSchema, this.config) as SlackConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof SlackConfig>>> {
+    return Promise.resolve(this.configState(SlackConfig, this.config))
   }
 }

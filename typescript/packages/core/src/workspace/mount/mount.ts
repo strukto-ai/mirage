@@ -12,16 +12,38 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ReplaceRequest } from '../../cache/types.ts'
-import { DevVFS } from '../../vfs/dev/dev.ts'
-import { HistoryViewVFS } from '../../vfs/history/history.ts'
+import type { Accessor } from '../../accessor/base.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
-import { activePipe, pipeBelow } from '../../core/dev/device.ts'
-import type { DevicePipe } from '../../core/dev/pipe.ts'
-import { norm } from '../../utils/path.ts'
+import { publishRead, readVersioned, requireSupported } from '../../cache/context.ts'
+import { latestFingerprint } from '../../cache/file/io.ts'
+import { type IndexConfig, LookupStatus } from '../../cache/index/config.ts'
+import { buildIndex } from '../../cache/index/factory.ts'
+import { indexLock } from '../../cache/index/lock.ts'
+import { ListingCheckStore } from '../../cache/index/ram.ts'
+import type { IndexCacheStore } from '../../cache/index/store.ts'
+import { KeyLock } from '../../cache/lock.ts'
+import type { CacheManager } from '../../cache/manager.ts'
+import type { ReplaceRequest } from '../../cache/types.ts'
+import { type WriteContext } from '../../cache/types.ts'
+import { linkView } from '../../commands/builtin/utils/links.ts'
+import {
+  dispatchStat,
+  linkFollow,
+  vfsStatPath,
+  virtualFlags,
+  virtualKey,
+} from '../../commands/builtin/utils/paths.ts'
+import { CLI, type CLIHandler, noopAccessor } from '../../commands/cli/types.ts'
+import { Command, type CommandFnResult, type Context } from '../../commands/config.ts'
+import { ROOT_CWD } from '../../commands/constants.ts'
+import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
+import { flagOccurrences } from '../../commands/spec/flag_view.ts'
+import { hasInjectedHelp, hasInjectedVersion } from '../../commands/spec/standard.ts'
+import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
 import {
   awaitsAs,
   type Caller,
+  callerSignal,
   currentCaller,
   effectiveMountMode,
   requirePathsWritable,
@@ -30,85 +52,74 @@ import {
   strongestModeUnder,
   withCaller,
 } from '../../context/session_context.ts'
-import { mountKey } from '../../utils/key_prefix.ts'
-import { pathVisible } from '../../utils/hidden.ts'
-import { coerceReadPolicy } from './read_policy.ts'
-import { coerceWritePolicy, createConditions, writeConditions } from './write_policy.ts'
-import { KeyLock } from '../../cache/lock.ts'
-import { type IndexConfig, LookupStatus } from '../../cache/index/config.ts'
-import { buildIndex } from '../../cache/index/factory.ts'
-import { indexLock } from '../../cache/index/lock.ts'
-import { ListingCheckStore } from '../../cache/index/ram.ts'
-import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { Command, type CommandFnResult, type Context } from '../../commands/config.ts'
-import { STDIN_DASH_COMMANDS, STDIN_DASH_LEADING } from '../../commands/spec/constants.ts'
-import { hasInjectedHelp, hasInjectedVersion } from '../../commands/spec/standard.ts'
-import { ROOT_CWD } from '../../commands/constants.ts'
-import type { OpKwargs, SessionAccess } from '../../view/types.ts'
+import { activePipe, pipeBelow } from '../../core/dev/device.ts'
+import type { DevicePipe } from '../../core/dev/pipe.ts'
 import {
   appendByRewrite,
   expectOffset,
   pwriteByStreamedRewrite,
-  truncateByRewrite,
   refuseTaken,
+  truncateByRewrite,
 } from '../../core/generic/rewrite.ts'
-import { declared, declaredCalls, methodName } from '../../vfs/call.ts'
-import { WRITE_EFFECTS } from '../../vfs/constants.ts'
-import { Effect, type Handed } from '../../vfs/types.ts'
-import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
-import type { Clock } from '../../utils/clock.ts'
-
-import { getExtension } from '../../utils/filetype.ts'
+import { ebusy, enotdir, enotsup, isEnoent } from '../../errors/fs.ts'
 import { type Egress, withEgress } from '../../io/gateway.ts'
-import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
-import { OutputStream, closeQuietly, rechunk } from '../../io/stream.ts'
+import { checkMemory } from '../../io/memory.ts'
 import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
-import { flagOccurrences } from '../../commands/spec/flag_view.ts'
-import { CommandSpec, type CommandSpecInit, type FlagValue } from '../../commands/spec/types.ts'
-import { publishRead, readVersioned, requireSupported } from '../../cache/context.ts'
-import { latestFingerprint } from '../../cache/file/io.ts'
-import type { OpRecord } from '../../observe/record.ts'
-import { type WriteContext } from '../../cache/types.ts'
-import type { CacheManager } from '../../cache/manager.ts'
-import {
-  answered,
-  cliVoice,
-  mountVoice,
-  runHandler,
-  type HandlerVoice,
-} from '../executor/command/handler.ts'
-import { CLI, type CLIHandler, noopAccessor } from '../../commands/cli/types.ts'
-import { callerSignal } from '../../context/session_context.ts'
+import { closeQuietly, OutputStream, rechunk } from '../../io/stream.ts'
+import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import {
   activeRecords,
   commandRecords,
   runWithRecording,
   withMountContext,
 } from '../../observe/context.ts'
-import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
-import { Activity } from '../../utils/activity.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
-import type { Accessor } from '../../accessor/base.ts'
+import type { OpRecord } from '../../observe/record.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import { NOT_FOUND_STATUS } from '../../shell/constants.ts'
 import type { DirListing } from '../../types.ts'
 import {
+  DEFAULT_READ_SPEC,
+  FileChangeKind,
+  FileStat,
+  FileType,
   Limit,
+  ListingVersion,
+  MountMode,
+  PathSpec,
   type Producer,
+  ReadPolicy,
   type ReadSpec,
   type SearchQuery,
   type SetAttrFields,
   type WalkProbe,
-  DEFAULT_READ_SPEC,
-  FileChangeKind,
-  FileStat,
   WritePolicy,
-  FileType,
-  ListingVersion,
-  MountMode,
-  PathSpec,
-  ReadPolicy,
 } from '../../types.ts'
-import { ebusy, enotdir, enotsup, isEnoent } from '../../errors/fs.ts'
+import { Activity } from '../../utils/activity.ts'
+import type { Clock } from '../../utils/clock.ts'
+import { getExtension } from '../../utils/filetype.ts'
+import { pathVisible } from '../../utils/hidden.ts'
+import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { norm } from '../../utils/path.ts'
+import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
+import { declared, declaredCalls, methodName } from '../../vfs/call.ts'
+import { WRITE_EFFECTS } from '../../vfs/constants.ts'
+import { DevVFS } from '../../vfs/dev/dev.ts'
+import { HistoryViewVFS } from '../../vfs/history/history.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Effect, type Handed } from '../../vfs/types.ts'
+import type { OpKwargs, SessionAccess } from '../../view/types.ts'
+import {
+  answered,
+  cliVoice,
+  type HandlerVoice,
+  mountVoice,
+  runHandler,
+} from '../executor/command/handler.ts'
 import { HANDED, STORED_OPS } from './constants.ts'
 import {
   beyondWindow,
@@ -122,20 +133,8 @@ import {
   storedTree,
   unprovenMiss,
 } from './listing.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import {
-  dispatchStat,
-  linkFollow,
-  vfsStatPath,
-  virtualFlags,
-  virtualKey,
-} from '../../commands/builtin/utils/paths.ts'
-import { linkView } from '../../commands/builtin/utils/links.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
-import { encodeText } from '../../shell/bytes.ts'
-import { NOT_FOUND_STATUS } from '../../shell/constants.ts'
-import { checkMemory } from '../../io/memory.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { coerceReadPolicy } from './read_policy.ts'
+import { coerceWritePolicy, createConditions, writeConditions } from './write_policy.ts'
 
 type CmdKey = string
 
@@ -759,7 +758,7 @@ export class MountEntry {
     access?: SessionAccess,
   ): void {
     const mark = declared(this.vfs.constructor, name)
-    if (mark === null || !WRITE_EFFECTS.includes(mark.effect)) return
+    if (mark === null || !WRITE_EFFECTS.some((writeEffect) => writeEffect === mark.effect)) return
     const others = values.filter((value): value is PathSpec => value instanceof PathSpec)
     requirePathsWritable(
       mark.effect === Effect.COPY ? others : [path, ...others],

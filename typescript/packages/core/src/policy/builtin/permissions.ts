@@ -16,14 +16,14 @@ import { getAdmission, lineRunning, redirectTargetJudged } from '../../context/s
 import type { Policy } from '../base.ts'
 import { decide } from '../match/decide.ts'
 import { opRuling, posixLevel } from '../match/rule.ts'
-import { SESSION_SCOPED, type SessionScoped } from '../mixin.ts'
+import { SESSION_SCOPED, type SessionScopedMixin } from '../mixin.ts'
 import {
   Outcome,
   type Action,
   type CommandContext,
-  type VfsContext,
   type PolicyMethod,
   type SessionCommandsQuery,
+  type VfsContext,
 } from '../types.ts'
 
 /**
@@ -49,7 +49,7 @@ import {
  * to the approval ledger keyed by rule and path; inside a line it
  * refuses, since the line was admitted without it.
  */
-export class PermissionsPolicy implements Policy, SessionScoped {
+export class PermissionsPolicy implements Policy, SessionScopedMixin {
   readonly [SESSION_SCOPED] = true as const
   private readonly sessions: SessionCommandsQuery
 

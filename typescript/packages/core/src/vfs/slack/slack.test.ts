@@ -1,10 +1,10 @@
 import { expect, it, vi } from 'vitest'
+import { seedChannel } from '../../../tests/vfs/slack/_test_util.ts'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { NodeSlackTransport } from '../../core/slack/client.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { SlackVFSBase } from './slack.ts'
-import { seedChannel } from '../../../tests/vfs/slack/_test_util.ts'
+import { SlackVFS } from './slack.ts'
 
 it.each([false, true])(
   'aborting cat releases a stalled attachment body (prefix=%s)',
@@ -36,7 +36,7 @@ it.each([false, true])(
       return Promise.resolve(new Response(body))
     })
     vi.stubGlobal('fetch', fakeFetch)
-    const vfs = new SlackVFSBase({
+    const vfs = new SlackVFS({
       name: 'slack',
       accessor: new SlackAccessor(new NodeSlackTransport('token')),
     })

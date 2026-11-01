@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 
-export const SSHConfigSchema = z.object({
+export const SSHConfig = z.object({
   host: z.string().describe('DNS name or IP address of the remote.'),
   hostname: z.string().optional().describe('Address to connect to instead of `host`.'),
   port: z.number().optional().meta({ description: 'SSH port.', default: 22 }),
@@ -46,6 +46,4 @@ export const SSHConfigSchema = z.object({
     .describe('Accepted but not applied: this backend does not verify host keys.'),
 })
 
-export type SSHConfig = ConfigOf<typeof SSHConfigSchema>
-
-export type SSHConfigRedacted = RedactedConfig<SSHConfig, 'password' | 'passphrase'>
+export type SSHConfig = ConfigOf<typeof SSHConfig>

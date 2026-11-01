@@ -34,7 +34,7 @@ import type {
   Workspace,
   WorkspaceOptions,
 } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
@@ -251,7 +251,7 @@ function profileDocument(raw: Record<string, unknown>) {
       ]),
     )
   }
-  return parseSessionProfile(doc)
+  return SessionProfile(doc)
 }
 
 interface Host {
@@ -854,7 +854,7 @@ async function run(host: Host, testCase: Case): Promise<number> {
   const profiles = Object.fromEntries(
     Object.entries(testCase.settings.profiles ?? {}).map(([name, profile]) => [
       name,
-      parseSessionProfile(profile),
+      SessionProfile(profile),
     ]),
   )
   let ws = new host.workspace(mounts, {

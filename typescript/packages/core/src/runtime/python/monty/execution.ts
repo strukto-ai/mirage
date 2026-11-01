@@ -12,29 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CommandTimeoutError } from '../../../errors/types.ts'
-import { mainFilename } from '../execution.ts'
 import type { Context } from '../../../commands/config.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { memoryRoom } from '../../../io/memory.ts'
+import type { StreamName } from '../../../io/types.ts'
 import { materialize } from '../../../io/types.ts'
+import { concat } from '../../../utils/bytes.ts'
+import { boundSystemClock } from '../../../utils/clock.ts'
+import type { RuntimeFiles } from '../../files.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
+import { mainFilename } from '../execution.ts'
+import { DEFAULT_PROG, LIMITS, POOL_WORKERS } from './constants.ts'
+import { displayError } from './errors.ts'
+import { MontyFs } from './fs.ts'
 import {
   loadMontyModule,
   type MontyModuleLike,
   type MontyPoolLike,
   type MontySessionLike,
 } from './loader.ts'
-import { DEFAULT_PROG, LIMITS, POOL_WORKERS } from './constants.ts'
-import { displayError } from './errors.ts'
-import { MontyFs } from './fs.ts'
-import type { RuntimeFiles } from '../../files.ts'
-import { concat } from '../../../utils/bytes.ts'
-import { boundSystemClock } from '../../../utils/clock.ts'
 
 const INTERRUPTED = Symbol('interrupted')
 const ENC = new TextEncoder()
-
-type Stream = 'stdout' | 'stderr'
 
 interface RunInterruption {
   promise: Promise<typeof INTERRUPTED>
@@ -385,8 +384,8 @@ export class MontyExecution {
  * `end` reports it.
  */
 class Prints {
-  private readonly sinks: Record<Stream, OutputFn | undefined>
-  private readonly kept: Record<Stream, string[]> = { stdout: [], stderr: [] }
+  private readonly sinks: Record<StreamName, OutputFn | undefined>
+  private readonly kept: Record<StreamName, string[]> = { stdout: [], stderr: [] }
   private writing: Promise<void> = Promise.resolve()
   private failure: { error: unknown } | null = null
   private stopped = false
@@ -399,7 +398,7 @@ class Prints {
     this.sinks = { stdout: output, stderr: errors }
   }
 
-  readonly write = (stream: Stream, text: string): void => {
+  readonly write = (stream: StreamName, text: string): void => {
     const sink = this.sinks[stream]
     if (sink === undefined) {
       this.kept[stream].push(text)

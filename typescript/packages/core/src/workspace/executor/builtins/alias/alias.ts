@@ -12,23 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
 import { aliasRewrite, getText } from '../../../../shell/helpers.ts'
 import type { TSNodeLike } from '../../../../shell/types.ts'
-import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
+import { singleQuote } from '../../../../utils/quote.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import {
   ownRecord,
-  type SessionState,
   sessionEntry,
   setSessionEntry,
+  type SessionState,
 } from '../../../session/session.ts'
-import { singleQuote } from '../../../../utils/quote.ts'
 import { scanOptions } from '../getopt.ts'
-import { compareCodePoints } from '../../../../utils/sort.ts'
 import { builtinUsage, fail, finish, ok, result } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
 import { BAD_NAME_CHARS } from './constants.ts'
 import type { AliasMark } from './types.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 /** Whether a name holds a character bash refuses in an alias name. */
 function hasBadChar(name: string): boolean {
@@ -41,7 +42,11 @@ function hasBadChar(name: string): boolean {
 /** Define or print aliases. `mark` is the read the definition sits in:
  * bash expands aliases as it reads, so the commands of that read still see
  * the value from before it. */
-export function handleAlias(args: string[], session: SessionState, mark: AliasMark): Result {
+export function handleAlias(
+  args: string[],
+  session: SessionState,
+  mark: AliasMark,
+): RedirectResult {
   const scan = scanOptions(args, 'p')
   if (scan.bad !== null)
     return fail('alias', `bash: alias: ${scan.bad}: invalid option\n${builtinUsage('alias')}`, 2)
@@ -86,7 +91,11 @@ export function handleAlias(args: string[], session: SessionState, mark: AliasMa
 
 /** Remove aliases: the named ones, or all under `-a`. The commands of the
  * read at `mark` still see the aliases it removes. */
-export function handleUnalias(args: string[], session: SessionState, mark: AliasMark): Result {
+export function handleUnalias(
+  args: string[],
+  session: SessionState,
+  mark: AliasMark,
+): RedirectResult {
   const scan = scanOptions(args, 'a')
   if (scan.bad !== null)
     return fail(
@@ -265,13 +274,13 @@ export function aliasMark(session: SessionState, row: number): AliasMark {
 }
 
 /** The `alias` arm; the row marks the read the definition sits in. */
-export function aliasBuiltin(call: BuiltinCall): Promise<Result> {
+export function aliasBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const session = call.context.session
   return Promise.resolve(handleAlias([...call.argv.args], session, aliasMark(session, call.row)))
 }
 
 /** The `unalias` arm. */
-export function unaliasBuiltin(call: BuiltinCall): Promise<Result> {
+export function unaliasBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   const session = call.context.session
   return Promise.resolve(handleUnalias([...call.argv.args], session, aliasMark(session, call.row)))
 }

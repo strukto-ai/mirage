@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-
 import { parseLimit } from '../../utils/size.ts'
-import { parseConfigWithSchema, refuseRepeatedFields, type ConfigOf } from '../../vfs/secrets.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, refuseRepeatedFields } from '../../vfs/secrets.ts'
 
 export const CacheType = Object.freeze({
   RAM: 'ram',
@@ -26,13 +26,13 @@ export type CacheType = (typeof CacheType)[keyof typeof CacheType]
 
 // The type is any registered one: `registerFileCacheStore` takes names
 // this module does not list, and the registry names a missing factory.
-const CacheConfigSchema = z.object({
+const CacheConfig = z.object({
   type: z.custom<CacheType>((value) => typeof value === 'string').optional(),
   limit: z.union([z.string(), z.number()]).optional(),
   maxDrainBytes: z.number().nullable().optional(),
 })
 
-const RedisCacheConfigSchema = CacheConfigSchema.extend({
+const RedisCacheConfig = CacheConfig.extend({
   url: z.string().optional(),
   // Absent scopes the keys to the workspace; a prefix shares them with
   // every workspace that names it.
@@ -43,9 +43,9 @@ const RedisCacheConfigSchema = CacheConfigSchema.extend({
  * Declarative description of the workspace's file cache, the twin of
  * {@link IndexConfig} for the byte cache. Mirrors Python `CacheConfig`.
  */
-export type CacheConfig = ConfigOf<typeof CacheConfigSchema>
+export type CacheConfig = ConfigOf<typeof CacheConfig>
 
-export type RedisCacheConfig = ConfigOf<typeof RedisCacheConfigSchema>
+export type RedisCacheConfig = ConfigOf<typeof RedisCacheConfig>
 
 /**
  * Check a cache config the way python's `CacheConfig` checks one on
@@ -65,8 +65,8 @@ export function normalizeCacheConfig(config: CacheConfig): CacheConfig {
   refuseRepeatedFields(input)
   const parsed: CacheConfig =
     (input.type ?? CacheType.RAM) === CacheType.RAM
-      ? parseConfigWithSchema(CacheConfigSchema, input)
-      : parseConfigWithSchema(RedisCacheConfigSchema, input)
+      ? parseConfigWithSchema(CacheConfig, input)
+      : parseConfigWithSchema(RedisCacheConfig, input)
   if (parsed.limit !== undefined) parseLimit(parsed.limit, 'limit')
   return parsed
 }

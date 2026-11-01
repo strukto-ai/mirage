@@ -15,7 +15,8 @@
 
 from collections.abc import Sequence
 
-from mirage.rs.policy import admission_matcher, from_units, units
+from mirage.rs.document import from_units, units
+from mirage.rs.policy import admission_matcher
 
 
 def split_pattern(pattern: str) -> tuple[str, ...]:

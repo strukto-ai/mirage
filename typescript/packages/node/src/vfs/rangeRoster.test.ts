@@ -12,17 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import { EmailConfigSchema } from '../core/email/config.ts'
+import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { describe, expect, it } from 'vitest'
+import { EmailConfig } from '../core/email/config.ts'
 import { DiskVFS } from './disk/disk.ts'
 import { EmailVFS } from './email/email.ts'
 import { GridFSVFS } from './gridfs/gridfs.ts'
 import { HfBucketsVFS } from './hf_buckets/hf_buckets.ts'
-import { NextcloudConfigSchema } from './nextcloud/config.ts'
+import { NextcloudConfig } from './nextcloud/config.ts'
 import { NextcloudVFS } from './nextcloud/nextcloud.ts'
 import { SSHVFS } from './ssh/ssh.ts'
-import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
 
 // The node backends' half of core's vfs/rangeRoster.test.ts: who takes the
 // window itself, and who leaves it to the read-and-slice fallback.
@@ -34,7 +34,7 @@ const NATIVE: [string, () => BaseVFS][] = [
     'nextcloud',
     () =>
       new NextcloudVFS(
-        parseConfigWithSchema(NextcloudConfigSchema, {
+        parseConfigWithSchema(NextcloudConfig, {
           url: 'https://cloud.test/dav/',
           username: 'u',
           password: 'p',
@@ -51,7 +51,7 @@ const SLICED: [string, () => BaseVFS][] = [
     'email',
     () =>
       new EmailVFS(
-        parseConfigWithSchema(EmailConfigSchema, {
+        parseConfigWithSchema(EmailConfig, {
           imap_host: 'h',
           smtp_host: 'h',
           username: 'me@example.com',

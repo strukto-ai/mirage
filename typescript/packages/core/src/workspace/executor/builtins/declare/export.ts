@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { sessionView } from '../../../session/state.ts'
-import type { SessionView } from '../../../../view/types.ts'
+import type { BuiltinCall } from '../types.ts'
 import { markNames } from './declare.ts'
 import type { DeclarationOperand } from './types.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import type { ParseScope } from '../../../../shell/parse/scope.ts'
 
 /**
  * Export names, or print them (`export -p` / bare `export`). The exported
@@ -33,12 +34,12 @@ export async function handleExport(
   session: SessionState,
   state: SessionView | null = null,
   parser?: ParseScope,
-): Promise<Result> {
+): Promise<RedirectResult> {
   return markNames(assignments, session, state, VarAttr.Export, parser)
 }
 
 /** The `export` arm. */
-export async function exportBuiltin(call: BuiltinCall): Promise<Result> {
+export async function exportBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleExport(
     [...call.argv.args],
     call.context.session,

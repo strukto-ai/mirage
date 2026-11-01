@@ -13,12 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Client, Item } from '@1password/sdk'
-
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import type { ResolvedSecret } from '@struktoai/mirage-core/secrets/types'
-
-import type { OnePasswordConfig } from './config.ts'
 import { VERSION } from '../version.ts'
+import type { OnePasswordConfig } from './config.ts'
 
 export const OP_SCHEME = 'op://'
 export const TOKEN_VAR = 'OP_SERVICE_ACCOUNT_TOKEN'
@@ -30,12 +28,6 @@ export const INTEGRATION_NAME = 'mirage'
 export const NOTES_KEY = 'notesPlain'
 
 /** A 1Password reference split into its parts. */
-export interface OpRef {
-  readonly vault: string
-  readonly item: string
-  /** The field label; empty for an item reference. */
-  readonly field: string
-}
 
 /**
  * Split a 1Password secret reference into vault, item and field.
@@ -49,7 +41,7 @@ export interface OpRef {
  * Throws SecretsError on an empty ref, one that is not an `op://` url,
  * or one naming less than a vault and an item.
  */
-export function parseOpRef(ref: string): OpRef {
+export function parseOpRef(ref: string) {
   if (ref === '') {
     throw new SecretsError("the '1password' source needs a ref: op://<vault>/<item>")
   }

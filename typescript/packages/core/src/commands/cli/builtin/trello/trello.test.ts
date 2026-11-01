@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { TrelloConfig } from '../../../../core/trello/config.ts'
 import { compileSpec } from '../../../spec/compile.ts'
 import type { CommandSpec } from '../../../spec/types.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { TRELLO } from './index.ts'
-import { TrelloConfigSchema } from '../../../../core/trello/config.ts'
 
 function leaf(...path: string[]): CommandSpec {
   let node = TRELLO.spec
@@ -51,7 +51,7 @@ describe('trello tree', () => {
       'comments',
       ...WRITES,
     ])
-    expect(TRELLO.configModel).toBe(TrelloConfigSchema)
+    expect(TRELLO.configModel).toBe(TrelloConfig)
     expect(cliSpecFor('trello')).toBe(TRELLO)
   })
 

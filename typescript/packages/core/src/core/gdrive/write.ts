@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { eacces, eisdir } from '../../errors/fs.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
-import type { Handed } from '../../vfs/types.ts'
-import { eacces, eisdir } from '../../errors/fs.ts'
 import { uploadToken } from '../../utils/upload.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { NATIVE_RESOURCE_TYPES } from './fingerprint.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import { eaccesOnDenied, parentFolder } from './resolve.ts'
@@ -31,7 +31,7 @@ import { eaccesOnDenied, parentFolder } from './resolve.ts'
  * length; `signal` stops it. Answers the stored file's stat, null for a reply
  * that names none. Mirrors Python's `write`.
  */
-async function writeImpl(
+export const write = eaccesOnDenied(async function writeImpl(
   accessor: GDriveAccessor,
   path: PathSpec,
   data: ByteSource | ByteSpool,
@@ -76,6 +76,4 @@ async function writeImpl(
   )
   const item: unknown = reply
   return typeof item === 'object' && item !== null ? statFromItem(reply) : null
-}
-
-export const write = eaccesOnDenied(writeImpl)
+})

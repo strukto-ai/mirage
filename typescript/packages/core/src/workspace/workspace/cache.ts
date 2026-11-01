@@ -19,12 +19,12 @@ import {
   type RedisCacheConfig,
 } from '../../cache/file/config.ts'
 import { DEFAULT_KEY_PREFIX } from '../../cache/file/constants.ts'
-import type { FileCache } from '../../cache/file/mixin.ts'
+import type { FileCacheMixin } from '../../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
 import type { Clock } from '../../utils/clock.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 
-export type FileCacheStore = FileCache & BaseVFS
+export type FileCacheStore = FileCacheMixin & BaseVFS
 export type FileCacheFactory = (config: RedisCacheConfig) => FileCacheStore
 
 const FACTORIES: Record<string, FileCacheFactory> = {}
@@ -68,7 +68,7 @@ export function buildFileCache(
   // structurally assignable to it and would slip through to the RAM
   // branch below — silently replaced by a cache that never sees a read.
   // Structural typing cannot refuse this; say so instead.
-  if (cache !== undefined && typeof (cache as Partial<FileCache>).get === 'function') {
+  if (cache !== undefined && typeof (cache as Partial<FileCacheMixin>).get === 'function') {
     throw new Error(
       'options.cache takes the config to build a cache from, not a built store; ' +
         'register a factory for its type with registerFileCacheStore(type, ...) ' +

@@ -12,17 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childContext, type EvaluationContext } from '../evaluation.ts'
-import { commandInvocations } from '../../shell/parse/names.ts'
-import { retainPrograms } from '../../shell/parse/program.ts'
-
-import { ExecutionScope } from '../execution.ts'
-import { type SharedInput, holdInputs } from '../../io/async_line_iterator.ts'
+import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
+import { gnuStrftime } from '../../commands/builtin/utils/strftime.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
+import {
+  type Caller,
+  currentCaller,
+  isProgramInvocation,
+  runWithCaller,
+} from '../../context/session_context.ts'
+import { CommandTimeoutError } from '../../errors/types.ts'
+import { holdInputs, type SharedInput } from '../../io/async_line_iterator.ts'
+import { PipeClosed } from '../../io/errors.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { PipeClosed } from '../../io/errors.ts'
-import { CommandTimeoutError } from '../../errors/types.ts'
+import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
+import { type Decisions, isPending } from '../../policy/decisions.ts'
+import type { HandOff } from '../../policy/types.ts'
+import type { ProcessInfo, ProcessState } from '../../process/types.ts'
+import type { ProcessView } from '../../process/view.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
+import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
+import { PipeConsole } from '../../shell/console/pipe.ts'
 import {
   FD_BOTH,
   FD_CLOSE,
@@ -33,44 +45,30 @@ import {
 } from '../../shell/constants.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
-import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
-import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
-import { PipeConsole } from '../../shell/console/pipe.ts'
-import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
-import {
-  type Caller,
-  currentCaller,
-  isProgramInvocation,
-  runWithCaller,
-} from '../../context/session_context.ts'
-import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
+import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
+import { commandInvocations } from '../../shell/parse/names.ts'
+import { retainPrograms } from '../../shell/parse/program.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
+import { type JsonValue, PathSpec, type Refusal } from '../../types.ts'
 import { abortable, atDeadline } from '../../utils/abort.ts'
-import type { SessionView } from '../../view/types.ts'
-import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
-import { type Decisions, isPending } from '../../policy/decisions.ts'
-import type { HandOff } from '../../policy/types.ts'
-import { PathSpec, type JsonValue, type Refusal } from '../../types.ts'
-import type { RecordFields } from '../record/types.ts'
-import type { ProcessInfo, ProcessState } from '../../process/types.ts'
-import type { ProcessView } from '../../process/view.ts'
-import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
-import { gnuStrftime } from '../../commands/builtin/utils/strftime.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { systemNow } from '../../utils/clock.ts'
 import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
-import type { SessionState } from '../session/session.ts'
+import type { SessionView } from '../../view/types.ts'
+import { childContext, type EvaluationContext } from '../evaluation.ts'
+import { ExecutionScope } from '../execution.ts'
 import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
-import { scanOptions } from './builtins/getopt.ts'
-import { answerClosed, failedRead, statementStdin } from './statement.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
+import type { RecordFields } from '../record/types.ts'
+import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import { inheritTraps } from './traps.ts'
-import { encodeText } from '../../shell/bytes.ts'
-import type { ExecuteNodeOpts, ExecuteNodeFn } from './command/types.ts'
+import { scanOptions } from './builtins/getopt.ts'
 import { builtinUsage } from './builtins/shared.ts'
-import { systemNow } from '../../utils/clock.ts'
-
-export type JobHandlerResult = [ByteSource | null, IOResult, ExecutionNode]
+import type { ExecuteNodeFn, ExecuteNodeOpts } from './command/types.ts'
+import { answerClosed, failedRead, statementStdin } from './statement.ts'
+import { inheritTraps } from './traps.ts'
 
 /**
  * Send a command's output to a console as chunks arrive.
@@ -239,7 +237,7 @@ export async function handleBackground(
   // job revokes it when it ends.
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
-): Promise<JobHandlerResult> {
+): Promise<RedirectResult> {
   const session = context.session
   const releaseProgram = retainPrograms([left])
   const childEvaluation = childContext(context)
@@ -515,7 +513,7 @@ export function runStatement(
   jobTable: JobTable | null,
   handed: HandOff | null = null,
   decisions: Decisions | null = null,
-): Promise<JobHandlerResult> {
+): Promise<RedirectResult> {
   const session = context.session
   if (!isBackgrounded(node)) {
     return executeNode(node, context, statementStdin(session, stdin, bound), callStack)
@@ -538,7 +536,7 @@ export function runStatement(
 
 const JOB_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-function jobResult(cmdStr: string, msg: string, code: number): JobHandlerResult {
+function jobResult(cmdStr: string, msg: string, code: number): RedirectResult {
   const err = encodeText(msg)
   return [
     null,
@@ -622,7 +620,7 @@ async function waitFirst(jobTable: JobTable, jobs: Job[], signal?: AbortSignal):
  * Report one finished job's status, and reap it. Its output already went
  * where its shell writes as it was written.
  */
-async function reaped(jobTable: JobTable, job: Job, cmdStr: string): Promise<JobHandlerResult> {
+async function reaped(jobTable: JobTable, job: Job, cmdStr: string): Promise<RedirectResult> {
   // Reaped like GNU bash reaps a job waited on by id, so a later bare
   // `wait` does not answer for it again.
   await jobTable.reap(job.id, job.sessionId)
@@ -651,7 +649,7 @@ export async function handleWait(
   session: SessionState | null = null,
   view: SessionView | null = null,
   signal?: AbortSignal,
-): Promise<JobHandlerResult> {
+): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
   let nextJob = false
@@ -784,7 +782,7 @@ export async function handleDisown(
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
-): Promise<JobHandlerResult> {
+): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
   const scan = scanOptions(parts.slice(1), 'arh')
@@ -852,7 +850,7 @@ export async function handleFg(
   _view: SessionView | null = null,
   signal?: AbortSignal,
   sink?: JobConsole,
-): Promise<JobHandlerResult> {
+): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
   await jobTable.sync(sid)
@@ -967,7 +965,7 @@ export async function handleKill(
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
-): Promise<JobHandlerResult> {
+): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
   let signal = KILL_SIGNALS.TERM ?? 15
@@ -1106,7 +1104,7 @@ export async function handleJobs(
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
-): Promise<JobHandlerResult> {
+): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
   const flags = new Set<string>()
@@ -1553,7 +1551,7 @@ export async function handlePs(
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
-): Promise<JobHandlerResult> {
+): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   let options: PsOptions
   try {

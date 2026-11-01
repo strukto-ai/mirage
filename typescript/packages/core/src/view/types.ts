@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ShellValue, type VarAttr } from '../shell/variable.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { FileStat, Limit, MountMode, PathSpec, SetAttrFields, Visibility } from '../types.ts'
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
+import { type ShellValue, type VarAttr } from '../shell/variable.ts'
+import type { FileStat, Limit, MountMode, PathSpec, SetAttrFields, Visibility } from '../types.ts'
 
 /**
  * The keywords an op carries through the dispatcher: the mount's index, the
@@ -86,11 +86,11 @@ export type FollowOperands = (
 // (`tar` prunes by one and warns by the other) reads both.
 export interface MountView {
   // Every mount root strictly under a path, for a caller avoiding one.
-  descendants(path: string): string[]
+  descendants: MountDescendants
   // The ones this session may be told about, for a caller naming one.
-  visibleDescendants(path: string): string[]
+  visibleDescendants: MountDescendants
   // Whether a path is a mount root itself.
-  isRoot(path: string): boolean
+  isRoot: MountIsRoot
   // The mount serving a path, so a walker can tell "still mine" from
   // "another backend" before it tries to read something it cannot.
   rootOf(path: string): string
@@ -120,9 +120,9 @@ export interface MountView {
 // clear the gate.
 export interface SessionView {
   // One variable's value, null when unset.
-  get(name: string): string | null
+  get: EnvGet
   // A process-view copy of the whole environment.
-  snapshot(): Record<string, string>
+  snapshot: EnvSnapshot
   // Write one variable through the session plane (readonly + preSession).
   // General over variable shapes: a string stores a scalar, a ShellArray
   // stores a whole array, and the session view keeps the two storages exclusive.
@@ -135,17 +135,11 @@ export interface SessionView {
   // false. `assigned` names the elements an array write assigns; the rest
   // are carried over as stored. `added` is an integer `+=`'s text, which
   // they evaluate after their held one.
-  set(
-    name: string,
-    value: ShellValue,
-    followRef?: boolean,
-    assigned?: ReadonlySet<number | string> | null,
-    added?: string | null,
-  ): Promise<void>
+  set: EnvSet
   // Drop one variable through the session plane; a missing name is quiet.
   // `followRef` (default true) resolves a reference to its target;
   // `unset -n r` drops the reference itself and passes false.
-  unset(name: string, followRef?: boolean): Promise<void>
+  unset: EnvUnset
   // Turn one attribute on or off through the session plane, or with a
   // null attribute declare the name and change nothing. Separate from
   // `set` because it writes no value: `export NAME`, `readonly NAME`
@@ -154,15 +148,15 @@ export interface SessionView {
   // -- a mark is a session write, so a hidden name refuses and
   // `preSession` rules. `followRef` is `set`'s: `declare -rn r` marks the
   // reference itself.
-  mark(name: string, attr: VarAttr | null, on: boolean, followRef?: boolean): Promise<void>
+  mark: EnvMark
   // Whether `readonly` has marked the name; `followRef` false asks about
   // a `declare -n` reference itself rather than its target.
-  isReadonly(name: string, followRef?: boolean): boolean
+  isReadonly: EnvIsReadonly
   // The name of the profile the session runs under, null for an
   // unrestricted session. What an owner-rendering command (ls -l, stat
   // %g, find -printf %g) prints in the group column: the profile is the
   // permission set the session acts with, which is what a group is.
-  profile(): string | null
+  profile: ProfileName
   // The session's working directory, the one an operand resolves against.
   cwd(): string
   readonly sessionId: string
@@ -219,19 +213,19 @@ export interface NamespaceLinks {
 // Read off a command's files (`linksOf(opts)`).
 export interface LinkView {
   // lstat one path (a link operand: `ls -l link`, `stat link`).
-  statAt(path: string): FileStat | null
+  statAt: LinkStat
   // The links under a directory, which the dispatcher lists and reads with
   // the backend's own.
-  subtree(directory: string): [string, FileStat][]
+  subtree: LinkSubtree
   // Where a path really points, for deciding whether a link is broken.
-  resolve(path: string): string
+  resolve: LinkResolve
   // Whether anything is actually there, resolved through the workspace
   // rather than one backend, so a link across mounts answers correctly.
-  exists(path: string): Promise<boolean>
+  exists: LinkExists
   // What a link points at (`-L` reports the target's identity, not the
   // link's), null when it dangles or loops. Resolved through the
   // workspace too, for the same reason.
-  targetStat(path: string): Promise<FileStat | null>
+  targetStat: LinkTargetStat
 }
 
 /**
@@ -342,3 +336,42 @@ export interface FileView {
   rename(src: string | PathSpec, dst: string | PathSpec, sessionId?: string): Promise<void>
   listFiles(path: string | PathSpec, sessionId?: string): Promise<string[]>
 }
+
+export type MountDescendants = (path: string) => string[]
+
+export type MountIsRoot = (path: string) => boolean
+
+export type EnvGet = (name: string) => string | null
+
+export type EnvSnapshot = () => Record<string, string>
+
+export type EnvSet = (
+  name: string,
+  value: ShellValue,
+  followRef?: boolean,
+  assigned?: ReadonlySet<number | string> | null,
+  added?: string | null,
+) => Promise<void>
+
+export type EnvUnset = (name: string, followRef?: boolean) => Promise<void>
+
+export type EnvMark = (
+  name: string,
+  attr: VarAttr | null,
+  on: boolean,
+  followRef?: boolean,
+) => Promise<void>
+
+export type EnvIsReadonly = (name: string, followRef?: boolean) => boolean
+
+export type ProfileName = () => string | null
+
+export type LinkStat = (path: string) => FileStat | null
+
+export type LinkSubtree = (directory: string) => [string, FileStat][]
+
+export type LinkResolve = (path: string) => string
+
+export type LinkExists = (path: string) => Promise<boolean>
+
+export type LinkTargetStat = (path: string) => Promise<FileStat | null>

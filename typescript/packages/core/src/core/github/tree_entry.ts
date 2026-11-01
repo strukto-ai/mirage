@@ -14,13 +14,6 @@
 
 import type { GitHubTreeItem } from './client.ts'
 
-export interface TreeEntry {
-  path: string
-  type: string
-  sha: string
-  size: number | null
-}
-
 export function makeTreeEntry(item: GitHubTreeItem): TreeEntry {
   return {
     path: item.path,
@@ -28,4 +21,11 @@ export function makeTreeEntry(item: GitHubTreeItem): TreeEntry {
     sha: item.sha,
     size: item.size ?? null,
   }
+}
+
+export interface TreeEntry {
+  path: string
+  type: string
+  sha: string
+  size: number | null
 }

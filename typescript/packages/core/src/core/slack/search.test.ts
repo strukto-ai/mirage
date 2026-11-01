@@ -13,17 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import type * as History from './history.ts'
-
-vi.mock('./history.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof History>()
-  return { ...actual, getHistoryJsonl: vi.fn(actual.getHistoryJsonl) }
-})
-
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { Limit, MountMode } from '../../types.ts'
-import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { SlackVFS } from '../../vfs/slack/slack.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import {
@@ -32,8 +25,14 @@ import {
   type SlackResponse,
   type SlackTransport,
 } from './client.ts'
+import type * as History from './history.ts'
 import { getHistoryJsonl } from './history.ts'
 import { MAX_PAGES, searchFiles, searchMessages } from './search.ts'
+
+vi.mock('./history.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof History>()
+  return { ...actual, getHistoryJsonl: vi.fn(actual.getHistoryJsonl) }
+})
 
 const DEC = new TextDecoder()
 
@@ -322,7 +321,7 @@ class FakeSlack implements SlackTransport {
   }
 }
 
-class SearchSlackVFS extends SlackVFSBase {
+class SearchSlackVFS extends SlackVFS {
   override readonly name = 'slack'
   override readonly accessor: SlackAccessor
   constructor(transport: SlackTransport) {

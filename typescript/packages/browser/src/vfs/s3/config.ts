@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { S3ConfigSchema as S3CoreConfigSchema } from '@struktoai/mirage-core/vfs/s3/config'
+import { S3Config as CoreS3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { FIELD_NORMALIZERS } from '@struktoai/mirage-core/vfs/secrets'
 
 // The one field whose camelCase spelling is not what `snakeToCamel` would
@@ -23,7 +23,7 @@ export const S3_BROWSER_RENAME: Record<string, string> = { endpoint_url: 'endpoi
 
 // The core shape under the browser's own renames, so the core schema
 // carries none of a host's spellings.
-export const S3ConfigSchema = S3CoreConfigSchema.clone().register(FIELD_NORMALIZERS, {
+export const S3Config = CoreS3Config.clone().register(FIELD_NORMALIZERS, {
   rename: S3_BROWSER_RENAME,
 })
 
@@ -31,6 +31,6 @@ export type {
   S3BrowserOperation,
   S3BrowserPresignedUrlProvider,
   S3BrowserSignOptions,
-  S3Config,
-  S3ConfigRedacted,
 } from '@struktoai/mirage-core/vfs/s3/config'
+
+export type S3Config = CoreS3Config

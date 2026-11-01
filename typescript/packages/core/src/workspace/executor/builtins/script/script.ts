@@ -12,19 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolvePath } from '../../../../utils/path.ts'
-import { materialize, IOResult } from '../../../../io/types.ts'
-import type { ByteSource } from '../../../../io/types.ts'
-import { FileType } from '../../../../types.ts'
-import { eisdir, fsStrerror } from '../../../../errors/fs.ts'
-import type { SessionState } from '../../../session/session.ts'
-import { ExecutionNode } from '../../../types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
 import { resolvePathStat } from '../../../../commands/builtin/utils/paths.ts'
-import { toScope } from '../scope.ts'
-import type { Result } from '../types.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { eisdir, fsStrerror } from '../../../../errors/fs.ts'
+import type { ByteSource } from '../../../../io/types.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
+import { FileType } from '../../../../types.ts'
+import { resolvePath } from '../../../../utils/path.ts'
+import type { SessionState } from '../../../session/session.ts'
+import { ExecutionNode } from '../../../types.ts'
+import { toScope } from '../scope.ts'
 
 /**
  * A diagnostic from a shell that never got as far as running.
@@ -38,7 +38,7 @@ export function scriptError(
   message: string,
   code: number,
   command?: string,
-): Result {
+): RedirectResult {
   const err = encodeText(`${prefix}: ${message}\n`)
   return [
     null,
@@ -116,7 +116,7 @@ export async function readScriptFile(
   name: string,
   path: string,
   session: SessionState,
-): Promise<[string, null] | [null, Result]> {
+): Promise<[string, null] | [null, RedirectResult]> {
   try {
     const data = await readScriptBytes(dispatch, path, session.cwd)
     if (isBinary(data)) {

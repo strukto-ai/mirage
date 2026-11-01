@@ -28,7 +28,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from mirage.errors.fs import eacces, enoent, erofs
-from mirage.rs.policy import from_units, units, visibility_matcher
+from mirage.rs.document import from_units, units
+from mirage.rs.policy import visibility_matcher
 from mirage.types import (
     Limit,
     MountMode,

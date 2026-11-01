@@ -12,9 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { networkLayer, networkRoutes, NetworkRule, type NetworkSetting } from '../io/network.ts'
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
-import { NetworkRule, networkLayer, networkRoutes, type NetworkSetting } from '../io/network.ts'
-import type { Limit } from '../types.ts'
+import { validateDocument } from '../rs/document.ts'
+import { type Language, ScriptSource } from '../runtime/types.ts'
+import { type EnvEntries, EnvVar, SecretRef } from '../secrets/config.ts'
+import type { Limit, ProcessScope, ShowEntry, Visibility } from '../types.ts'
+import { type MountMode, parseMountMode, weakerMode } from '../types.ts'
+import { normalizeFields, snakeToCamel } from '../utils/normalize.ts'
+import { norm } from '../utils/path.ts'
+import { isPlainObject } from '../utils/records.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 import {
   checkCommandLimits,
   commandLimitsToJSON,
@@ -28,26 +36,13 @@ import {
   PROGRAM_RUNTIME,
 } from './constants.ts'
 import type {
-  CommandRule,
   AdmissionRules,
+  CommandRule,
+  HideReason,
   ProfileScript,
   ProfileScripts,
   ScriptMethod,
 } from './types.ts'
-import { type Language, ScriptSource } from '../runtime/types.ts'
-import {
-  EnvVarSchema,
-  SecretRefSchema,
-  type EnvEntries,
-  type SecretRef,
-} from '../secrets/config.ts'
-import type { ProcessScope, ShowEntry, Visibility } from '../types.ts'
-import { type MountMode, parseMountMode, weakerMode } from '../types.ts'
-import type { HideReason } from './types.ts'
-import { isGlob } from '../utils/hidden.ts'
-import { normalizeFields, snakeToCamel } from '../utils/normalize.ts'
-import { norm } from '../utils/path.ts'
-import { compareCodePoints } from '../utils/sort.ts'
 
 /**
  * `paths:` of a profile, or of one of its mount sections. `hide` entries
@@ -258,8 +253,6 @@ export interface CompiledProfile {
   readonly profile: string | null
 }
 
-const RULE_FIELDS = ['reason', 'commands', 'paths'] as const
-const PATHS_FIELDS = ['hide', 'show', 'reasons'] as const
 const VARS_FIELDS = ['hide'] as const
 const COMMANDS_FIELDS = ['allow', 'ask', 'deny'] as const
 const MOUNT_COMMANDS_FIELDS = ['ask', 'deny'] as const
@@ -282,11 +275,6 @@ const PROGRAM_FIELDS = ['script', 'runtime', 'env'] as const
 // instance has no own enumerable string keys, so Object.entries would read
 // one as an empty mapping and a `mounts` Set would compile to a session
 // granting nothing at all. Python refuses the same values loudly.
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  if (typeof v !== 'object' || v === null) return false
-  const proto: unknown = Object.getPrototypeOf(v)
-  return proto === Object.prototype || proto === null
-}
 
 function rejectUnknownKeys(
   block: Record<string, unknown>,
@@ -305,25 +293,13 @@ function asObject(raw: unknown, where: string): Record<string, unknown> {
   return raw
 }
 
-/** A document list, refused before a scalar can be iterated (python's `_list`). */
-function asList(raw: unknown, where: string, expected = 'a list'): readonly unknown[] {
-  if (raw === undefined || raw === null) return []
-  if (!Array.isArray(raw)) throw new Error(`${where} must be ${expected}`)
-  return raw as readonly unknown[]
-}
-
 // An entry that names something must hold a token: a blank command
 // pattern is a prefix of every line, so a stray "" would allow, ask about
 // or deny every command, and a blank path entry is the root, so it would
 // hide or deny the whole tree. `names` says what an entry names ("a
 // command", "a path"); omitted, blank entries pass.
 function stringList(raw: unknown, where: string, names?: string): readonly string[] {
-  return asList(raw, where, 'a list of strings').map((entry, i) => {
-    if (typeof entry !== 'string') throw new Error(`${where}[${String(i)}] must be a string`)
-    if (names !== undefined && entry.trim() === '')
-      throw new Error(`${where}[${String(i)}] must name ${names}`)
-    return entry
-  })
+  return validateDocument('strings', raw, where, names === undefined ? {} : { names }) as string[]
 }
 
 /**
@@ -333,18 +309,12 @@ function stringList(raw: unknown, where: string, names?: string): readonly strin
  * anchored `secrets/*` would otherwise be read from the root (`/xxx`,
  * `/secrets/*`), which is never what a relative spelling meant. There is
  * no relative spelling anywhere: a mount section spells its paths in
- * full and they are checked against the mount root (`requireUnderMount`),
+ * full and they are checked against the mount root (`underMount`),
  * which is what a rebase used to do silently and wrongly (`/repo/secret`
  * under `/repo` became `/repo/repo/secret`).
  */
-function requireAbsolute(entries: readonly string[], where: string): void {
-  entries.forEach((entry, i) => {
-    if (entry.startsWith('/') || (isGlob(entry) && !entry.includes('/'))) return
-    throw new Error(
-      `${where}[${String(i)}] must be an absolute path or a name pattern: ` +
-        `${JSON.stringify(entry)} is relative`,
-    )
-  })
+function absolutePaths(entries: readonly string[], where: string): void {
+  validateDocument('absolute', entries, where)
 }
 
 /**
@@ -358,39 +328,8 @@ function requireAbsolute(entries: readonly string[], where: string): void {
  * workspace mounted at `/` could write a section for its one mount and
  * then name nothing inside it.
  */
-function requireUnderMount(entries: readonly string[], root: string, where: string): void {
-  if (root === '/') return
-  entries.forEach((entry, i) => {
-    if (!entry.startsWith('/')) return
-    if (entry === root || entry.startsWith(root + '/')) return
-    throw new Error(
-      `${where}[${String(i)}] is outside the mount it is written under: ` +
-        `${JSON.stringify(entry)} is not below ${JSON.stringify(root)}`,
-    )
-  })
-}
-
-/**
- * The rules of a `commands` mapping: each command on its own paths, one
- * rule per entry, so the document never states a command beside a path
- * it was not meant for (`{rm: ['/repo/*'], mv: ['/shared/*']}` scopes
- * `rm` to the repo and `mv` to the share, nothing else).
- */
-function scopedRules(
-  commands: Record<string, unknown>,
-  reason: string,
-  where: string,
-): CommandRule[] {
-  const entries = Object.entries(commands)
-  if (entries.length === 0) throw new Error(`${where}.commands must name at least one command`)
-  return entries.map(([pattern, paths]) => {
-    if (pattern.trim() === '') throw new Error(`${where}.commands keys must name a command`)
-    const entries = stringList(paths, `${where}.commands[${pattern}]`, 'a path')
-    if (entries.length === 0) {
-      throw new Error(`${where}.commands[${pattern}] must list at least one path`)
-    }
-    return { reason, commands: [pattern], paths: entries }
-  })
+function underMount(entries: readonly string[], root: string, where: string): void {
+  validateDocument('under', entries, where, { root })
 }
 
 /**
@@ -404,43 +343,10 @@ function scopedRules(
  * which command the paths belong to, and a rule naming neither is
  * refused rather than read as "every command".
  */
-function parseRule(raw: unknown, where: string, defaultReason: string): CommandRule[] {
-  if (typeof raw === 'string') {
-    return [
-      { reason: defaultReason, commands: stringList([raw], `${where}.commands`, 'a command') },
-    ]
-  }
-  if (!isPlainObject(raw)) throw new Error(`${where} must be a command pattern or a mapping`)
-  rejectUnknownKeys(raw, RULE_FIELDS, where)
-  const reason = raw.reason ?? defaultReason
-  if (typeof reason !== 'string') throw new Error(`${where}.reason must be a string`)
-  const { commands, paths } = raw
-  if (isPlainObject(commands)) {
-    if (paths !== undefined && paths !== null) {
-      throw new Error(`${where} maps each command to its paths, so it takes no paths of its own`)
-    }
-    return scopedRules(commands, reason, where)
-  }
-  const hasCommands = commands !== undefined && commands !== null
-  const hasPaths = paths !== undefined && paths !== null
-  if (hasCommands && hasPaths) {
-    throw new Error(`${where} lists commands beside paths; map each command to its paths instead`)
-  }
-  if (!hasCommands && !hasPaths) throw new Error(`${where} names no command and no path`)
-  return [
-    {
-      reason,
-      commands: stringList(commands, `${where}.commands`, 'a command'),
-      paths: stringList(paths, `${where}.paths`, 'a path'),
-    },
-  ]
-}
 
-function parseRules(raw: unknown, where: string, arm: 'ask' | 'deny'): readonly CommandRule[] {
-  const fallback = arm === 'ask' ? DEFAULT_ASK_REASON : DEFAULT_DENY_REASON
-  return asList(raw, `${where}.${arm}`, 'a list of rules').flatMap((entry, i) =>
-    parseRule(entry, `${where}.${arm}[${String(i)}]`, fallback),
-  )
+function rules(raw: unknown, where: string, arm: 'ask' | 'deny'): readonly CommandRule[] {
+  const reason = arm === 'ask' ? DEFAULT_ASK_REASON : DEFAULT_DENY_REASON
+  return validateDocument('rules', raw, `${where}.${arm}`, { reason }) as CommandRule[]
 }
 
 function parseAllow(raw: unknown, where: string): readonly string[] | null {
@@ -448,101 +354,38 @@ function parseAllow(raw: unknown, where: string): readonly string[] | null {
   return stringList(raw, `${where}.allow`, 'a command')
 }
 
-function parseHideGroup(entry: Record<string, unknown>, where: string): HideReason {
-  rejectUnknownKeys(entry, ['patterns', 'reason'], where)
-  const patterns = stringList(entry.patterns, `${where} patterns`, 'a path')
-  if (patterns.length === 0) throw new Error(`${where} must list at least one pattern`)
-  const reason = entry.reason
-  if (typeof reason !== 'string' || reason.trim() === '')
-    throw new Error(`${where} reason must be a non-empty string`)
-  return { patterns, reason }
-}
-
-function parseShowEntries(raw: unknown, where: string): readonly ShowEntry[] {
-  if (raw === undefined || raw === null) return []
-  let pairs: [unknown, unknown][]
-  if (Array.isArray(raw)) {
-    pairs = raw.map((entry) => [entry, null])
-  } else if (isPlainObject(raw)) {
-    pairs = Object.entries(raw)
-  } else {
-    throw new Error(`${where} must be a mapping of path to mode or a list of paths`)
-  }
-  return pairs.map(([path, mode]) => {
-    if (typeof path !== 'string' || path.trim() === '')
-      throw new Error(`${where} entries must name a path`)
-    if (!path.startsWith('/'))
-      throw new Error(`${where} entries anchor to a place, so each is absolute: '${path}' is not`)
-    let parsed: MountMode | null = null
-    if (mode !== null && mode !== undefined) {
-      if (typeof mode !== 'string') throw new Error(`${where} modes must be a mode name or alias`)
-      parsed = parseMountMode(mode)
-    }
-    return { path, mode: parsed }
-  })
-}
-
 /** Validate a `paths:` block. Every entry is absolute or a name pattern. */
-export function parsePathsBlock(raw: unknown, where = 'paths'): PathsBlock {
-  const obj = asObject(raw, where)
-  rejectUnknownKeys(obj, PATHS_FIELDS, where)
-  // Reason groups are a spelling of `hide`, so they are split out
-  // before the flat list is read.
-  const flat: unknown[] = []
-  const reasons: HideReason[] = []
-  for (const [i, entry] of asList(obj.hide, `${where}.hide`).entries()) {
-    if (isPlainObject(entry)) {
-      const group = parseHideGroup(entry, `${where}.hide[${String(i)}] group`)
-      for (const item of group.patterns) flat.push(item)
-      reasons.push(group)
-    } else {
-      flat.push(entry)
-    }
-  }
-  for (const entry of asList(obj.reasons, `${where}.reasons`, 'a list of groups')) {
-    if (!isPlainObject(entry))
-      throw new Error(`${where}.reasons entries must be groups of patterns and a reason`)
-    reasons.push(parseHideGroup(entry, `${where}.reasons group`))
-  }
-  const hide = stringList(flat, `${where}.hide`, 'a path')
-  requireAbsolute(hide, `${where}.hide`)
-  const show = parseShowEntries(obj.show, `${where}.show`)
-  // An unsaid field stays absent, so a `{hide: [...]}` literal reads
-  // equal to its parsed form.
-  return {
-    hide,
-    ...(show.length > 0 ? { show } : {}),
-    ...(reasons.length > 0 ? { reasons } : {}),
-  }
+export function PathsBlock(raw: unknown, where = 'paths'): PathsBlock {
+  return validateDocument('paths', raw, where) as PathsBlock
 }
 
-export function parseVarsBlock(raw: unknown, where = 'vars'): VarsBlock {
+export function VarsBlock(raw: unknown, where = 'vars'): VarsBlock {
   const obj = asObject(raw, where)
   rejectUnknownKeys(obj, VARS_FIELDS, where)
   return { hide: stringList(obj.hide, `${where}.hide`) }
 }
 
-export function parseCommandsBlock(raw: unknown, where = 'commands'): CommandsBlock {
+export function CommandsBlock(raw: unknown, where = 'commands'): CommandsBlock {
   const obj = asObject(raw, where)
   rejectUnknownKeys(obj, COMMANDS_FIELDS, where)
-  const ask = parseRules(obj.ask, where, 'ask')
-  const deny = parseRules(obj.deny, where, 'deny')
+  const ask = rules(obj.ask, where, 'ask')
+  const deny = rules(obj.deny, where, 'deny')
   // This block is the profile's own, never a mount section's, so a rule's
   // paths are virtual paths: absolute, or name patterns.
-  for (const rule of ask) requireAbsolute(rule.paths ?? [], `${where}.ask rule paths`)
-  for (const rule of deny) requireAbsolute(rule.paths ?? [], `${where}.deny rule paths`)
+  for (const rule of ask) absolutePaths(rule.paths ?? [], `${where}.ask rule paths`)
+  for (const rule of deny) absolutePaths(rule.paths ?? [], `${where}.deny rule paths`)
   return { allow: parseAllow(obj.allow, where), ask, deny }
 }
 
 /** Validate a mount section's `commands:` block (`ask` and `deny` only). */
-export function parseMountCommandsBlock(raw: unknown, where = 'commands'): MountCommandsBlock {
+export function MountCommandsBlock(raw: unknown, where = 'commands'): MountCommandsBlock {
   const obj = asObject(raw, where)
   rejectUnknownKeys(obj, MOUNT_COMMANDS_FIELDS, where)
-  return { ask: parseRules(obj.ask, where, 'ask'), deny: parseRules(obj.deny, where, 'deny') }
+  return { ask: rules(obj.ask, where, 'ask'), deny: rules(obj.deny, where, 'deny') }
 }
 
 /** Validate one `mounts.<prefix>` section of a profile. */
-export function parseProfileMount(raw: unknown, root: string, where: string): ProfileMount {
+export function ProfileMount(raw: unknown, root: string, where: string): ProfileMount {
   // A bare mode string is sugar for the section that carries only a mode.
   const obj = typeof raw === 'string' ? { mode: raw } : asObject(raw, where)
   rejectUnknownKeys(obj, PROFILE_MOUNT_FIELDS, where)
@@ -552,9 +395,9 @@ export function parseProfileMount(raw: unknown, root: string, where: string): Pr
     out.mode = parseMountMode(obj.mode)
   }
   if (obj.paths !== undefined && obj.paths !== null) {
-    const paths = parsePathsBlock(obj.paths, `${where}.paths`)
-    requireUnderMount(paths.hide, root, `${where}.paths.hide`)
-    requireUnderMount(
+    const paths = PathsBlock(obj.paths, `${where}.paths`)
+    underMount(paths.hide, root, `${where}.paths.hide`)
+    underMount(
       (paths.show ?? []).map((e) => e.path),
       root,
       `${where}.paths.show`,
@@ -562,11 +405,11 @@ export function parseProfileMount(raw: unknown, root: string, where: string): Pr
     out.paths = paths
   }
   if (obj.commands !== undefined && obj.commands !== null) {
-    const commands = parseMountCommandsBlock(obj.commands, `${where}.commands`)
+    const commands = MountCommandsBlock(obj.commands, `${where}.commands`)
     for (const rule of commands.ask ?? [])
-      requireUnderMount(rule.paths ?? [], root, `${where}.commands.ask`)
+      underMount(rule.paths ?? [], root, `${where}.commands.ask`)
     for (const rule of commands.deny ?? [])
-      requireUnderMount(rule.paths ?? [], root, `${where}.commands.deny`)
+      underMount(rule.paths ?? [], root, `${where}.commands.deny`)
     out.commands = commands
   }
   return out
@@ -592,12 +435,11 @@ export function parseProfileMounts(
   for (const [prefix, entry] of entries) {
     if (typeof prefix !== 'string') throw new Error(`${where} keys must be strings`)
     const root = norm(prefix)
-    sections.set(root, parseProfileMount(entry, root, `${where}[${root}]`))
+    sections.set(root, ProfileMount(entry, root, `${where}[${root}]`))
   }
   return sections
 }
 
-/** Validate one profile (a `profiles.<name>` block, or an inline document). */
 /**
  * Validate a profile's `policy` block: per method, a list of programs,
  * each naming its program and the runtime that runs it, monty when it
@@ -682,7 +524,7 @@ export function parseProgram(raw: unknown, at: string, code = false): ProfilePol
       )
     }
     const parsed = Object.entries(entries).map(([name, value]) => {
-      const pointer = typeof value === 'string' ? null : SecretRefSchema.safeParse(value)
+      const pointer = typeof value === 'string' ? null : SecretRef.safeParse(value)
       if (pointer !== null && !pointer.success) {
         throw new Error(`${at}.env.${name} must be a string or a {from, ref, key} pointer`)
       }
@@ -739,8 +581,7 @@ export function compileProgram(program: ProfilePolicySpec, profile: string): Pro
   }
 }
 
-/** Validate one profile (a `profiles.<name>` block, or an inline document). */
-export function parseSessionProfile(raw: unknown, where = 'profile'): SessionProfile {
+export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile {
   const obj = asObject(raw, where)
   // The keys this was first shipped under, a `script` named for what
   // the file is rather than what it does and a `runtime` beside it
@@ -791,7 +632,7 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     for (const [k, v] of Object.entries(env)) {
       if (typeof v === 'string') continue
       if (!isPlainObject(v)) throw new Error(`${where}.env.${k} must be a string or an env entry`)
-      const parsed = EnvVarSchema.safeParse(v)
+      const parsed = EnvVar.safeParse(v)
       if (!parsed.success) {
         throw new Error(
           `${where}.env.${k}: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
@@ -804,11 +645,10 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     out.mounts = parseProfileMounts(obj.mounts, `${where}.mounts`)
   }
   if (obj.paths !== undefined && obj.paths !== null)
-    out.paths = parsePathsBlock(obj.paths, `${where}.paths`)
-  if (obj.vars !== undefined && obj.vars !== null)
-    out.vars = parseVarsBlock(obj.vars, `${where}.vars`)
+    out.paths = PathsBlock(obj.paths, `${where}.paths`)
+  if (obj.vars !== undefined && obj.vars !== null) out.vars = VarsBlock(obj.vars, `${where}.vars`)
   if (obj.commands !== undefined && obj.commands !== null)
-    out.commands = parseCommandsBlock(obj.commands, `${where}.commands`)
+    out.commands = CommandsBlock(obj.commands, `${where}.commands`)
   return out
 }
 
@@ -873,7 +713,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
  * Mirrors Python `profile_from_dict`.
  */
 export function profileFromDict(doc: Readonly<Record<string, unknown>>): SessionProfile {
-  if (!isPlainObject(doc.policy)) return parseSessionProfile(doc)
+  if (!isPlainObject(doc.policy)) return SessionProfile(doc)
   const policy = Object.fromEntries(
     Object.entries(doc.policy).map(([method, programs]) => [
       method,
@@ -895,7 +735,7 @@ export function profileFromDict(doc: Readonly<Record<string, unknown>>): Session
         : programs,
     ]),
   )
-  return parseSessionProfile({ ...doc, policy })
+  return SessionProfile({ ...doc, policy })
 }
 
 function mountDoc(entry: ProfileMount): Record<string, unknown> {

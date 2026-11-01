@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { TrelloConfigSchema } from '../../../../core/trello/config.ts'
+import { TrelloConfig } from '../../../../core/trello/config.ts'
 import { Argument, CommandSpec } from '../../../spec/types.ts'
 import { CLI, CLIHandler } from '../../types.ts'
 import { assign } from './card/assign.ts'
@@ -169,6 +169,6 @@ export const TRELLO = new CLI({
     'card comment': new CLIHandler({ fn: comment, write: true }),
     'card comment-update': new CLIHandler({ fn: commentUpdate, write: true }),
   },
-  configModel: TrelloConfigSchema,
+  configModel: TrelloConfig,
   accessor: trelloAccessor,
 })

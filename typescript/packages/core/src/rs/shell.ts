@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Heredoc, ShellNode } from '../shell/types.ts'
 import { decodeText, encodeText } from '../shell/bytes.ts'
+import type { Heredoc, ShellNode } from '../shell/types.ts'
 import { moduleSync } from './stream.ts'
 
 interface Exports {
@@ -69,17 +69,6 @@ function instance(): Exports {
 }
 
 /** What a parse says of the line beyond its nodes. */
-interface Extras {
-  /** What the nodes read: the line with its heredoc bodies folded in and its line continuations dropped. */
-  readonly source: string
-  /** Where each UTF-16 unit of `source` came from in the line as typed, then its end. */
-  readonly offsets: Uint32Array
-  readonly heredocs: readonly Heredoc[]
-  /** Per node index, its text with the heredoc bodies the line reads after a substitution in it moved inside it. */
-  readonly inlined: ReadonlyMap<number, string>
-  /** What bash warns of while it reads the line's heredocs. */
-  readonly warnings: string
-}
 
 /** A shell program as mirage's own parser reads it. Mirrors Python's ShellTree. */
 export class ShellTree {
@@ -100,7 +89,7 @@ export class ShellTree {
       readonly message: string
       readonly status: number
     } | null,
-    private readonly extras: Extras,
+    private readonly extras: ReturnType<typeof readExtras>,
   ) {}
 
   get rootNode(): ShellTreeNode {
@@ -343,7 +332,7 @@ export function parseShell(
 }
 
 /** The parse's extras, laid out as `mirage_rs_shell_extras` describes them. */
-function readExtras(wasm: Exports): Extras {
+export function readExtras(wasm: Exports) {
   const words = new Uint32Array(
     wasm.memory.buffer,
     wasm.mirage_rs_shell_extras(),

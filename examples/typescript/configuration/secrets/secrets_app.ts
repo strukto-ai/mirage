@@ -12,19 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SecretSource } from '@struktoai/mirage-core/secrets/config'
+import { resolveSources } from '@struktoai/mirage-core/secrets/sources'
+import { buildVfs,MountMode,Workspace } from '@struktoai/mirage-node'
+import dotenv from 'dotenv'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import dotenv from 'dotenv'
 
-import { SecretSourceSchema } from '@struktoai/mirage-core/secrets/config'
-import { resolveSources } from '@struktoai/mirage-core/secrets/sources'
-import { MountMode, Workspace, buildVfs } from '@struktoai/mirage-node'
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(HERE, '../../../../.env.development') })
 
-const OP = SecretSourceSchema.parse({
+const OP = SecretSource.parse({
   source: '1password',
   config: { token: { from: 'env', key: 'OP_SERVICE_ACCOUNT_TOKEN' } },
 })

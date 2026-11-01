@@ -13,10 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, secretStr } from '../../vfs/secrets.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
+import { secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
-export const DiscordConfigSchema = z.object({
+export const DiscordConfig = z.object({
   ...timeoutShape,
   token: secretStr().describe('Discord bot token, sent as `Authorization: Bot <token>`.'),
   baseUrl: z.string().optional().meta({
@@ -25,4 +26,4 @@ export const DiscordConfigSchema = z.object({
   }),
 })
 
-export type DiscordConfig = ConfigOf<typeof DiscordConfigSchema>
+export type DiscordConfig = ConfigOf<typeof DiscordConfig>

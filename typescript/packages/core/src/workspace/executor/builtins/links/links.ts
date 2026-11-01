@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { destKind } from '../../../../commands/builtin/generic/cp.ts'
-import { FlagView, SPECS, parseCommand } from '../../../../commands/spec/index.ts'
+import { dispatchStat, walkSpelling } from '../../../../commands/builtin/utils/paths.ts'
+import { FlagView, parseCommand, SPECS } from '../../../../commands/spec/index.ts'
 import { parseToKwargs } from '../../../../commands/spec/parser.ts'
-import type { FileStat } from '../../../../types.ts'
-import { FileType, Follow, PathSpec } from '../../../../types.ts'
-import { posixPhrase } from '../../../../errors/posix.ts'
+import type { FlagValue } from '../../../../commands/spec/types.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import {
   fsStrerror,
   isDotWalkError,
@@ -25,16 +25,16 @@ import {
   isFsError,
   isRefusal,
 } from '../../../../errors/fs.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import type { FileStat } from '../../../../types.ts'
+import { FileType, Follow, PathSpec } from '../../../../types.ts'
 import { CycleError, gnuBasename, posixNormpath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
-import { fail } from '../shared.ts'
-import { dispatchStat, walkSpelling } from '../../../../commands/builtin/utils/paths.ts'
-import { statOrNull } from '../../../mount/namespace/probe.ts'
-import type { Result } from '../types.ts'
-import type { FlagValue } from '../../../../commands/spec/types.ts'
 import type { FollowOperands, NamespaceLinks } from '../../../../view/types.ts'
-import { SLASH_KEEPS_LAST, lineFacts } from '../../../lookup/constants.ts'
+import { lineFacts, SLASH_KEEPS_LAST } from '../../../lookup/constants.ts'
+import { statOrNull } from '../../../mount/namespace/probe.ts'
+import { fail } from '../shared.ts'
 
 // Opt in by assigning a debug sink, as Python's module logger is off until
 // configured.
@@ -244,7 +244,7 @@ async function slashedLinkRefusal(
   src: PathSpec,
   dst: PathSpec,
   dstStat: FileStat | null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   let followed: string
   try {
     followed = links.follow(src.virtual)
@@ -349,7 +349,7 @@ export function operandFollow(
 
 export interface PreparedMv {
   items: (string | PathSpec)[]
-  early: Result | null
+  early: RedirectResult | null
 }
 
 /** Resolve the destination directory without transferring any source. */

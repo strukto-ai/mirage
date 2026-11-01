@@ -12,55 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-type Json = Record<string, unknown>
+import type { JsonObject } from '../../types.ts'
+import {
+  pickBoolOrNull,
+  pickNumberOrNull,
+  pickString,
+  pickStringArray,
+} from '../../utils/records.ts'
 
-function pickString(record: Json, ...keys: readonly string[]): string | null {
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'string') return value
-  }
-  return null
-}
-
-function pickBoolOrNull(record: Json, key: string): boolean | null {
-  const value = record[key]
-  return typeof value === 'boolean' ? value : null
-}
-
-function pickNumberOrNull(record: Json, key: string): number | null {
-  const value = record[key]
-  return typeof value === 'number' ? value : null
-}
-
-function pickStringArray(record: Json, key: string): string[] {
-  const value = record[key]
-  if (!Array.isArray(value)) return []
-  const result: string[] = []
-  for (const v of value) if (typeof v === 'string') result.push(v)
-  return result
-}
-
-export interface NormalizedWorkspace {
-  workspace_id: string | null
-  workspace_name: string | null
-}
-
-export function normalizeWorkspace(workspace: Json): NormalizedWorkspace {
+export function normalizeWorkspace(workspace: JsonObject) {
   return {
     workspace_id: pickString(workspace, 'id'),
     workspace_name: pickString(workspace, 'displayName', 'name'),
   }
 }
 
-export interface NormalizedBoard {
-  board_id: string | null
-  board_name: string | null
-  workspace_id: string | null
-  closed: boolean | null
-  url: string | null
-}
-
-export function normalizeBoard(board: Json): NormalizedBoard {
+export function normalizeBoard(board: JsonObject) {
   return {
     board_id: pickString(board, 'id'),
     board_name: pickString(board, 'name'),
@@ -70,15 +37,7 @@ export function normalizeBoard(board: Json): NormalizedBoard {
   }
 }
 
-export interface NormalizedList {
-  list_id: string | null
-  list_name: string | null
-  board_id: string | null
-  closed: boolean | null
-  pos: number | null
-}
-
-export function normalizeList(lst: Json): NormalizedList {
+export function normalizeList(lst: JsonObject) {
   return {
     list_id: pickString(lst, 'id'),
     list_name: pickString(lst, 'name'),
@@ -88,13 +47,7 @@ export function normalizeList(lst: Json): NormalizedList {
   }
 }
 
-export interface NormalizedMember {
-  member_id: string | null
-  username: string | null
-  full_name: string | null
-}
-
-export function normalizeMember(member: Json): NormalizedMember {
+export function normalizeMember(member: JsonObject) {
   return {
     member_id: pickString(member, 'id'),
     username: pickString(member, 'username'),
@@ -102,14 +55,7 @@ export function normalizeMember(member: Json): NormalizedMember {
   }
 }
 
-export interface NormalizedLabel {
-  label_id: string | null
-  label_name: string | null
-  color: string | null
-  board_id: string | null
-}
-
-export function normalizeLabel(label: Json): NormalizedLabel {
+export function normalizeLabel(label: JsonObject) {
   return {
     label_id: pickString(label, 'id'),
     label_name: pickString(label, 'name'),
@@ -118,27 +64,13 @@ export function normalizeLabel(label: Json): NormalizedLabel {
   }
 }
 
-export interface NormalizedCard {
-  card_id: string | null
-  card_name: string | null
-  board_id: string | null
-  list_id: string | null
-  member_ids: string[]
-  label_ids: string[]
-  due: string | null
-  due_complete: boolean | null
-  closed: boolean | null
-  desc: string
-  url: string | null
-}
-
-export function normalizeCard(card: Json): NormalizedCard {
+export function normalizeCard(card: JsonObject) {
   const labelIds: string[] = []
   const labels = card.labels
   if (Array.isArray(labels)) {
     for (const lbl of labels) {
       if (lbl !== null && typeof lbl === 'object') {
-        const id = pickString(lbl as Json, 'id')
+        const id = pickString(lbl as JsonObject, 'id')
         if (id !== null) labelIds.push(id)
       }
     }
@@ -158,25 +90,16 @@ export function normalizeCard(card: Json): NormalizedCard {
   }
 }
 
-export interface NormalizedComment {
-  comment_id: string | null
-  card_id: string
-  member_id: string | null
-  member_name: string | null
-  text: string
-  created_at: string | null
-}
-
-export function normalizeComment(comment: Json, cardId: string): NormalizedComment {
+export function normalizeComment(comment: JsonObject, cardId: string) {
   const memberRaw = comment.memberCreator
-  const member: Json =
+  const member: JsonObject =
     memberRaw !== null && typeof memberRaw === 'object' && !Array.isArray(memberRaw)
-      ? (memberRaw as Json)
+      ? (memberRaw as JsonObject)
       : {}
   const dataRaw = comment.data
-  const data: Json =
+  const data: JsonObject =
     dataRaw !== null && typeof dataRaw === 'object' && !Array.isArray(dataRaw)
-      ? (dataRaw as Json)
+      ? (dataRaw as JsonObject)
       : {}
   return {
     comment_id: pickString(comment, 'id'),

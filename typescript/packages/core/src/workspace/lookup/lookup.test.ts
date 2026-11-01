@@ -11,32 +11,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../commands/spec/types.ts'
-import { CLIHandler } from '../../commands/cli/types.ts'
-import { command } from '../../commands/config.ts'
-
 import { describe, expect, it, vi } from 'vitest'
-import { CLI } from '../../commands/cli/types.ts'
-import { IOResult } from '../../io/types.ts'
-import { Runtime } from '../../runtime/base.ts'
-import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
-import { PROCESS_EXECUTOR, type ProcessExecutor } from '../../runtime/mixin.ts'
-import { PythonRuntime } from '../../runtime/python/base.ts'
-import type { RunResult } from '../../runtime/types.ts'
-import { headAllowed } from '../../policy/match/allow.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { Follow, LineFacts, MountMode, PathSpec, wordText } from '../../types.ts'
-import { ParsedArgs } from '../../commands/spec/parser.ts'
-import { parseCommand } from '../../commands/spec/index.ts'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { command } from '../../commands/config.ts'
 import { specOf } from '../../commands/spec/builtins.ts'
 import { PARSES_KEPT } from '../../commands/spec/constants.ts'
-import * as stream from '../../rs/stream.ts'
+import { parseCommand } from '../../commands/spec/index.ts'
+import { ParsedArgs } from '../../commands/spec/parser.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
+import { IOResult } from '../../io/types.ts'
+import { headAllowed } from '../../policy/match/allow.ts'
 import { SCANS } from '../../rs/scan.ts'
+import * as stream from '../../rs/stream.ts'
+import { Runtime } from '../../runtime/base.ts'
+import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
+import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '../../runtime/mixin.ts'
+import { PythonRuntime } from '../../runtime/python/base.ts'
+import type { RunResult } from '../../runtime/types.ts'
+import { Follow, LineFacts, MountMode, PathSpec, wordText } from '../../types.ts'
 import { declaredCalls, methodName } from '../../vfs/call.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Effect } from '../../vfs/types.ts'
+import { SessionState } from '../session/session.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import {
   Consumer,
-  SHELL_CONSUMERS,
   execs,
   lineFacts,
   lookup,
@@ -44,11 +43,10 @@ import {
   program,
   programNote,
   programs,
+  SHELL_CONSUMERS,
 } from './index.ts'
-import { SessionState } from '../session/session.ts'
-import { Workspace } from '../workspace/workspace.ts'
 
-class Sandbox extends Runtime implements ProcessExecutor {
+class Sandbox extends Runtime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'sandbox'
   constructor() {
@@ -59,7 +57,7 @@ class Sandbox extends Runtime implements ProcessExecutor {
   }
 }
 
-class HostPython extends PythonRuntime implements ProcessExecutor {
+class HostPython extends PythonRuntime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'host-python'
   interpret(): Promise<RunResult> {

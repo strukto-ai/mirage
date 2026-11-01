@@ -13,18 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Files } from '../files.ts'
+import { runWithSession } from '../../context/session_context.ts'
+import type { Policy } from '../../policy/base.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { SessionProfile } from '../../policy/profile.ts'
+import type { VfsContext } from '../../policy/types.ts'
+import { Outcome } from '../../policy/types.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Files } from '../files.ts'
+import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import { Session, Workspace } from '../workspace/workspace.ts'
 import { MirageToolOperations, TOOL_NAMES } from './tool_operations.ts'
-import { Outcome } from '../../policy/types.ts'
-import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
-import type { Policy } from '../../policy/base.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
-import type { VfsContext } from '../../policy/types.ts'
-import { runWithSession } from '../../context/session_context.ts'
-import { RAMWorkspaceStateStore } from '../store/ram.ts'
 
 const DEC = new TextDecoder()
 
@@ -254,7 +254,7 @@ async function guardedWs(): Promise<Workspace> {
     {
       mode: MountMode.WRITE,
       profiles: {
-        guarded: parseSessionProfile({
+        guarded: SessionProfile({
           paths: { hide: ['/vault'] },
           mounts: { '/ro': { mode: 'r' } },
         }),
@@ -400,7 +400,7 @@ describe('the tool list', () => {
     [{ mounts: { '/': 'read' }, paths: { show: { '/out': 'rw' } } }, MountMode.WRITE, TOOL_NAMES],
   ] as const)('follows the profile: %j on %s', (profile, mode, names) => {
     const own = new Workspace({ '/': new RAMVFS() }, { mode })
-    if (profile !== null) own.createSession('agent', { profile: parseSessionProfile(profile) })
+    if (profile !== null) own.createSession('agent', { profile: SessionProfile(profile) })
     const session = new Session(own, profile === null ? null : 'agent')
     expect(session.tools.names()).toEqual(names)
   })
@@ -413,15 +413,15 @@ describe('the tool list', () => {
       { mode: MountMode.WRITE },
     )
     const noLs = { commands: { deny: [{ reason: 'no', commands: ['ls'] }] } }
-    own.createSession('scoped', { profile: parseSessionProfile({ mounts: { '/data': noLs } }) })
-    own.createSession('rooted', { profile: parseSessionProfile({ mounts: { '/': noLs } }) })
+    own.createSession('scoped', { profile: SessionProfile({ mounts: { '/data': noLs } }) })
+    own.createSession('rooted', { profile: SessionProfile({ mounts: { '/': noLs } }) })
     expect(new Session(own, 'scoped').tools.names()).toContain('ls')
     expect(new Session(own, 'rooted').tools.names()).not.toContain('ls')
   })
 
   it('a tool the profile does not offer is no tool', async () => {
     const own = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
-    own.createSession('ro', { profile: parseSessionProfile({ mounts: { '/': 'read' } }) })
+    own.createSession('ro', { profile: SessionProfile({ mounts: { '/': 'read' } }) })
     await expect(
       new Session(own, 'ro').tools.call('write', { path: '/x', content: 'y' }),
     ).rejects.toThrow(/unknown tool: write/)

@@ -12,23 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { PostgresVFSBase } from '@struktoai/mirage-core/vfs/postgres/postgres'
 import { PostgresAccessor } from '@struktoai/mirage-core/accessor/postgres'
-
 import type { PgDriver } from '@struktoai/mirage-core/core/postgres/_driver'
-
+import { VFSName } from '@struktoai/mirage-core/types'
+import type { PostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 import {
   redactPostgresConfig,
   resolvePostgresConfig,
 } from '@struktoai/mirage-core/vfs/postgres/config'
-import type {
-  PostgresConfig,
-  PostgresConfigRedacted,
-  PostgresConfigResolved,
-} from '@struktoai/mirage-core/vfs/postgres/config'
-import { VFS_MD } from '@struktoai/mirage-core/vfs/postgres/postgres'
-import { VFSName } from '@struktoai/mirage-core/types'
-
+import {
+  PostgresVFS as CorePostgresVFS,
+  VFS_MD,
+} from '@struktoai/mirage-core/vfs/postgres/postgres'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 import { NeonPgDriver } from './neon_driver.ts'
 
 export interface PostgresVFSOptions {
@@ -37,18 +33,12 @@ export interface PostgresVFSOptions {
   driver?: PgDriver
 }
 
-export interface PostgresVFSState {
-  type: string
-  config: PostgresConfigRedacted
-  needs_override: true
-}
-
-export class PostgresVFS extends PostgresVFSBase {
+export class PostgresVFS extends CorePostgresVFS {
   override readonly name: string = VFSName.POSTGRES
   override readonly cachesReads: boolean = false
   override readonly indexTtl: number = 0
   override vfsMd: string
-  readonly config: PostgresConfigResolved
+  readonly config: ReturnType<typeof resolvePostgresConfig>
   readonly driver: PgDriver
   override readonly accessor: PostgresAccessor
 
@@ -62,7 +52,9 @@ export class PostgresVFS extends PostgresVFSBase {
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }
 
-  override getState(): PostgresVFSState {
+  override getState(): ConfigState<ReturnType<typeof redactPostgresConfig>> & {
+    needs_override: true
+  } {
     return {
       type: this.name,
       config: redactPostgresConfig(this.config),

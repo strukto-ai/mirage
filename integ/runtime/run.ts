@@ -45,7 +45,7 @@ import {
   RedisVFS,
   registerRuntime,
   LINE_EXECUTOR,
-  type LineExecutor,
+  type LineExecutorMixin,
   Runtime,
   S3VFS,
   ScriptSource,
@@ -65,11 +65,15 @@ import {
   type FilesystemOperation,
   type Context,
 } from '@struktoai/mirage-node'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
 import { norm } from '@struktoai/mirage-core/utils/path'
-import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core'
+import {
+  EXTERNAL_COMMANDS,
+  PROCESS_EXECUTOR,
+  type ProcessExecutorMixin,
+} from '@struktoai/mirage-core'
 import type { Language } from '@struktoai/mirage-core/runtime/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import type { FileStat } from '@struktoai/mirage-core/types'
@@ -235,7 +239,7 @@ interface Suite {
 let s3Seeded = false
 let mongoSeeded = false
 
-class EchoBox extends Runtime<undefined> implements LineExecutor<undefined> {
+class EchoBox extends Runtime<undefined> implements LineExecutorMixin<undefined> {
   override readonly reach = 'workspace' as const
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'echobox'
@@ -258,7 +262,7 @@ class EchoBox extends Runtime<undefined> implements LineExecutor<undefined> {
 // unknown-name refusal lists it. The registry suite pins that entry point.
 registerRuntime('echobox', EchoBox)
 
-class ProcessBox extends Runtime<undefined> implements ProcessExecutor<undefined> {
+class ProcessBox extends Runtime<undefined> implements ProcessExecutorMixin<undefined> {
   override readonly reach = 'workspace' as const
   readonly [PROCESS_EXECUTOR] = true as const
   readonly name = 'processbox'
@@ -400,7 +404,7 @@ class ReadControl implements Policy {
       if (['hide', 'deny'].includes(mode) || ['hide', 'deny'].includes(previous)) {
         await this.ws.setSessionProfile(
           this.ws.defaultSessionId,
-          parseSessionProfile(profile, 'read control'),
+          SessionProfile(profile, 'read control'),
         )
       }
     }
@@ -931,7 +935,7 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
     options.profiles = Object.fromEntries(
       Object.entries(world.profiles).map(([name, doc]) => [
         name,
-        parseSessionProfile(doc, `profile \`${name}\``),
+        SessionProfile(doc, `profile \`${name}\``),
       ]),
     )
   }
@@ -1206,10 +1210,7 @@ async function performStep(
     // The default session's profile from here on: a world's own profile
     // applies before its files are seeded, so a case that hides a seeded
     // file sets it as a step. Mirrors run.py.
-    await ws.setSessionProfile(
-      ws.defaultSessionId,
-      parseSessionProfile(step.profile, 'step profile'),
-    )
+    await ws.setSessionProfile(ws.defaultSessionId, SessionProfile(step.profile, 'step profile'))
     return []
   }
   if (step.rename !== undefined) {

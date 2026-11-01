@@ -11,15 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../../spec/types.ts'
-import { CLI } from '../../types.ts'
-import { CLIHandler } from '../../types.ts'
 
 import { GoogleApiAccessor } from '../../../../accessor/google_api.ts'
 import { TokenManager } from '../../../../core/google/client.ts'
-import { type GoogleConfig, GoogleConfigSchema } from '../../../../core/google/config.ts'
-
-import { Argument } from '../../../spec/types.ts'
+import { GoogleConfig } from '../../../../core/google/config.ts'
+import { Argument, CommandSpec } from '../../../spec/types.ts'
+import { CLI, CLIHandler } from '../../types.ts'
 import { apiGroups, apiHandlers } from './api.ts'
 import { write as docsWrite } from './docs/write.ts'
 import { forward } from './gmail/forward.ts'
@@ -191,6 +188,6 @@ export const GWS = new CLI({
     'gmail forward': new CLIHandler({ fn: forward, write: true }),
     'gmail triage': new CLIHandler({ fn: triage }),
   },
-  configModel: GoogleConfigSchema,
+  configModel: GoogleConfig,
   accessor: googleApiAccessor,
 })

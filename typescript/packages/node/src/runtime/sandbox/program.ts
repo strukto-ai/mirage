@@ -166,25 +166,6 @@ export async function onHostPath(name: string): Promise<string> {
   return name
 }
 
-/** Where and how `runProgram` starts its child. */
-export interface ProgramOptions {
-  // The working directory; this process's when unset.
-  cwd?: string
-  // The whole environment; this process's when unset.
-  env?: Record<string, string>
-  // Aborting kills the child and everything it started.
-  signal?: AbortSignal
-  // Where the child is kept while it runs, for `closeChildren`.
-  children?: Set<ChildProcess>
-  output?: OutputFn
-  // Receives stderr as it arrives instead of returning it.
-  errors?: OutputFn
-  // The child is the program itself, not a client that runs it elsewhere
-  // and exits on its own terms (`docker exec` answers a TERM with 0 and
-  // leaves the program running).
-  direct?: boolean
-}
-
 async function untilInputCloses<T>(
   stream: Writable,
   work: (signal: AbortSignal) => Promise<T>,
@@ -279,7 +260,23 @@ export async function runProgram(
   hint: string | null,
   args: string[],
   stdin: ByteSource | null,
-  options: ProgramOptions = {},
+  options: {
+    // The working directory; this process's when unset.
+    cwd?: string
+    // The whole environment; this process's when unset.
+    env?: Record<string, string>
+    // Aborting kills the child and everything it started.
+    signal?: AbortSignal
+    // Where the child is kept while it runs, for `closeChildren`.
+    children?: Set<ChildProcess>
+    output?: OutputFn
+    // Receives stderr as it arrives instead of returning it.
+    errors?: OutputFn
+    // The child is the program itself, not a client that runs it elsewhere
+    // and exits on its own terms (`docker exec` answers a TERM with 0 and
+    // leaves the program running).
+    direct?: boolean
+  } = {},
 ): Promise<RunResult> {
   const { signal, children } = options
   signal?.throwIfAborted()

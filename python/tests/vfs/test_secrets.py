@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
+from mirage.vfs.constants import REDACTED_SECRET
 from mirage.vfs.secrets import (
-    REDACTED_SECRET,
     has_redacted_secret,
     redacted_config_dump,
     revealed_config_dump,

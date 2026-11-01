@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JsonObject } from '../../types.ts'
 import { VFSName } from '../../types.ts'
-import { CacheKey, JobKey, MountKey, VFSStateKey, StateKey } from './keys.ts'
+import { CacheKey, JobKey, MountKey, StateKey, VFSStateKey } from './keys.ts'
 import { BLOB_REF_KEY, isSafeBlobPath } from './utils.ts'
 
 class BlobAllocator {
@@ -27,9 +28,7 @@ class BlobAllocator {
   }
 }
 
-type AnyDict = Record<string, unknown>
-
-function isDict(v: unknown): v is AnyDict {
+function isDict(v: unknown): v is JsonObject {
   return typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Uint8Array)
 }
 
@@ -45,15 +44,15 @@ function isDict(v: unknown): v is AnyDict {
  * ride as host paths, read only when the tar is written.
  */
 export function splitManifestAndBlobs(
-  state: AnyDict,
-): [AnyDict, Record<string, Uint8Array | string>] {
+  state: JsonObject,
+): [JsonObject, Record<string, Uint8Array | string>] {
   const a = new BlobAllocator()
-  const cache = (state[StateKey.CACHE] as AnyDict | undefined) ?? {}
-  const cacheEntries = (cache[CacheKey.ENTRIES] as AnyDict[] | undefined) ?? []
-  const jobs = (state[StateKey.JOBS] as AnyDict[] | undefined) ?? []
-  const mounts = (state[StateKey.MOUNTS] as AnyDict[] | undefined) ?? []
+  const cache = (state[StateKey.CACHE] as JsonObject | undefined) ?? {}
+  const cacheEntries = (cache[CacheKey.ENTRIES] as JsonObject[] | undefined) ?? []
+  const jobs = (state[StateKey.JOBS] as JsonObject[] | undefined) ?? []
+  const mounts = (state[StateKey.MOUNTS] as JsonObject[] | undefined) ?? []
 
-  const manifest: AnyDict = { ...state }
+  const manifest: JsonObject = { ...state }
   manifest[StateKey.HISTORY] = historyToManifest(state[StateKey.HISTORY], a)
   manifest[StateKey.MOUNTS] = mounts.map((m) => mountToManifest(m, a))
   manifest[StateKey.CACHE] = {
@@ -66,7 +65,7 @@ export function splitManifestAndBlobs(
 }
 
 /** One cache entry with its data stashed as a blob reference. */
-function cacheEntryToManifest(entry: AnyDict, a: BlobAllocator): AnyDict {
+function cacheEntryToManifest(entry: JsonObject, a: BlobAllocator): JsonObject {
   const e = { ...entry }
   const data = e[CacheKey.DATA]
   if (data instanceof Uint8Array) {
@@ -78,7 +77,7 @@ function cacheEntryToManifest(entry: AnyDict, a: BlobAllocator): AnyDict {
 }
 
 /** One job with its streams stashed as blob references. */
-function jobToManifest(job: AnyDict, a: BlobAllocator): AnyDict {
+function jobToManifest(job: JsonObject, a: BlobAllocator): JsonObject {
   const j = { ...job }
   for (const f of [JobKey.STDOUT, JobKey.STDERR] as const) {
     const data = j[f]
@@ -93,9 +92,9 @@ function jobToManifest(job: AnyDict, a: BlobAllocator): AnyDict {
   return j
 }
 
-function mountToManifest(mount: AnyDict, a: BlobAllocator): AnyDict {
+function mountToManifest(mount: JsonObject, a: BlobAllocator): JsonObject {
   const idx = mount[MountKey.INDEX] as number
-  const ps = { ...(mount[MountKey.VFS_STATE] as AnyDict) }
+  const ps = { ...(mount[MountKey.VFS_STATE] as JsonObject) }
   const ptype = ps[VFSStateKey.TYPE] as string
   const files = (ps[VFSStateKey.FILES] as Record<string, Uint8Array> | undefined) ?? {}
   if (ptype === VFSName.RAM || ptype === VFSName.OPFS) {
@@ -106,7 +105,7 @@ function mountToManifest(mount: AnyDict, a: BlobAllocator): AnyDict {
       `mounts/${String(idx)}/files`,
     )
   } else if (ptype === VFSName.DISK) {
-    const newFiles: Record<string, AnyDict> = {}
+    const newFiles: Record<string, JsonObject> = {}
     for (const [rel, data] of Object.entries(files)) {
       const tarPath = `mounts/${String(idx)}/files/${rel}`
       a.blobs[tarPath] = data
@@ -121,7 +120,7 @@ function mountToManifest(mount: AnyDict, a: BlobAllocator): AnyDict {
       `mounts/${String(idx)}/data`,
     )
   }
-  const out: AnyDict = {}
+  const out: JsonObject = {}
   for (const [k, v] of Object.entries(mount)) {
     if (k !== MountKey.VFS_STATE) out[k] = v
   }
@@ -134,8 +133,8 @@ function stashBlobs(
   a: BlobAllocator,
   category: string,
   tarDir: string,
-): Record<string, AnyDict> {
-  const out: Record<string, AnyDict> = {}
+): Record<string, JsonObject> {
+  const out: Record<string, JsonObject> = {}
   for (const [k, data] of Object.entries(files)) {
     const slot = a.alloc(category).split('/').pop() ?? ''
     const tarPath = `${tarDir}/${slot}`
@@ -148,9 +147,9 @@ function stashBlobs(
 function historyToManifest(records: unknown, a: BlobAllocator): unknown {
   if (records === null || records === undefined) return null
   if (!Array.isArray(records)) return records
-  const out: AnyDict[] = []
-  for (const r of records as AnyDict[]) {
-    const rd: AnyDict = { ...r }
+  const out: JsonObject[] = []
+  for (const r of records as JsonObject[]) {
+    const rd: JsonObject = { ...r }
     for (const f of ['stdout', 'stdin', 'stderr'] as const) {
       const data = rd[f]
       if (data instanceof Uint8Array && data.byteLength > 0) {
@@ -169,7 +168,7 @@ function historyToManifest(records: unknown, a: BlobAllocator): unknown {
 
 function nodeToManifest(node: unknown, a: BlobAllocator): unknown {
   if (!isDict(node)) return node
-  const out: AnyDict = { ...node }
+  const out: JsonObject = { ...node }
   const data = out.stderr
   if (data instanceof Uint8Array && data.byteLength > 0) {
     const tarPath = 'history/blobs/' + a.alloc('_history')
@@ -199,7 +198,7 @@ function resolve(node: unknown, blobReader: (path: string) => Uint8Array): unkno
       if (!isSafeBlobPath(path)) throw new Error(`Unsafe blob path in manifest: ${String(path)}`)
       return blobReader(path)
     }
-    const out: AnyDict = {}
+    const out: JsonObject = {}
     for (const [k, v] of Object.entries(node)) out[k] = resolve(v, blobReader)
     return out
   }

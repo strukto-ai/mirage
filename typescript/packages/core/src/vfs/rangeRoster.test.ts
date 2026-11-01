@@ -15,20 +15,20 @@
 import { describe, expect, it } from 'vitest'
 import type { BaseVFS } from './base.ts'
 import { BoxVFS } from './box/box.ts'
-import { DatabricksVolumeVFSBase } from './databricks_volume/databricks_volume.ts'
+import { DatabricksVolumeVFS } from './databricks_volume/databricks_volume.ts'
 import { DifyVFS } from './dify/dify.ts'
-import { DiscordVFSBase } from './discord/discord.ts'
+import { DiscordVFS } from './discord/discord.ts'
 import { DropboxVFS } from './dropbox/dropbox.ts'
 import { GoogleDriveVFS } from './gdrive/gdrive.ts'
-import { NotionVFSBase } from './notion/notion.ts'
+import { NotionVFS } from './notion/notion.ts'
 import { OneDriveVFS } from './onedrive/onedrive.ts'
-import { PostgresVFSBase } from './postgres/postgres.ts'
+import { PostgresVFS } from './postgres/postgres.ts'
 import { RAMVFS } from './ram/ram.ts'
 import { RedisVFS } from './redis/redis.ts'
-import { S3VFSBase } from './s3/s3.ts'
+import { S3VFS } from './s3/s3.ts'
 import { SharePointVFS } from './sharepoint/sharepoint.ts'
-import { SlackVFSBase } from './slack/slack.ts'
-import { TiDBFilesystemVFSBase } from './tidb_filesystem/tidb_filesystem.ts'
+import { SlackVFS } from './slack/slack.ts'
+import { TiDBFilesystemVFS } from './tidb_filesystem/tidb_filesystem.ts'
 
 // Every backend that takes the window itself instead of leaving it to the
 // read-and-slice fallback. Most push it down to the store (one ranged GET
@@ -42,23 +42,23 @@ import { TiDBFilesystemVFSBase } from './tidb_filesystem/tidb_filesystem.ts'
 // build over their own transport is pinned here by its shared base.
 const NATIVE: [string, () => BaseVFS][] = [
   ['box', () => new BoxVFS({ accessToken: 'fake' })],
-  ['databricks_volume', () => new DatabricksVolumeVFSBase()],
+  ['databricks_volume', () => new DatabricksVolumeVFS()],
   ['dify', () => new DifyVFS({ apiKey: 'k', baseUrl: 'http://dify.test', datasetId: 'd' })],
-  ['discord', () => new DiscordVFSBase()],
+  ['discord', () => new DiscordVFS()],
   ['dropbox', () => new DropboxVFS({ clientId: 'i', refreshToken: 'r' })],
   ['gdrive', () => new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' })],
   ['onedrive', () => new OneDriveVFS({ accessToken: 'tok' })],
   ['ram', () => new RAMVFS()],
   ['redis', () => new RedisVFS({ url: 'redis://test' } as never)],
-  ['s3', () => new S3VFSBase()],
+  ['s3', () => new S3VFS()],
   ['sharepoint', () => new SharePointVFS({ accessToken: 'tok' })],
-  ['slack', () => new SlackVFSBase()],
-  ['tidb_filesystem', () => new TiDBFilesystemVFSBase()],
+  ['slack', () => new SlackVFS()],
+  ['tidb_filesystem', () => new TiDBFilesystemVFS()],
 ]
 
 const SLICED: [string, () => BaseVFS][] = [
-  ['notion', () => new NotionVFSBase()],
-  ['postgres', () => new PostgresVFSBase()],
+  ['notion', () => new NotionVFS()],
+  ['postgres', () => new PostgresVFS()],
 ]
 
 describe('native read range roster', () => {

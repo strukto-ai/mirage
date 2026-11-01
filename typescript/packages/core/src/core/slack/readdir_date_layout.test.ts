@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import type { DirListing } from '../../types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { SlackVFS } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { SlackApiError, type SlackResponse, type SlackTransport } from './client.ts'
@@ -98,7 +98,7 @@ describe('readdir: date directory layout', () => {
       throw new Error(`unexpected ${endpoint}`)
     })
     const ws = new Workspace({
-      [`${PREFIX}/`]: new SlackVFSBase({ accessor: new SlackAccessor(t) }),
+      [`${PREFIX}/`]: new SlackVFS({ accessor: new SlackAccessor(t) }),
     })
     const day = `${PREFIX}/channels/general__C1/2024-01-01`
     await ws.dispatch('readdir', day)

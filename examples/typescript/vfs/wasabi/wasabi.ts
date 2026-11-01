@@ -19,8 +19,8 @@ import {
   MountMode,
   WasabiVFS,
   Workspace,
-  resolvedWasabiEndpoint,
-  type WasabiConfig,
+
+  WasabiConfig,
   type FileStat,
 } from '@struktoai/mirage-node'
 
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const config = configFromEnv()
   const ws = new Workspace({ '/wasabi/': new WasabiVFS(config) }, { mode: MountMode.READ })
   try {
-    console.log(`=== Wasabi at ${resolvedWasabiEndpoint(config)} ===`)
+    console.log(`=== Wasabi at ${WasabiConfig.resolvedEndpoint(config)} ===`)
 
     let r = await ws.shell('ls /wasabi/')
     console.log('ls /wasabi/:\n' + r.stdoutText)

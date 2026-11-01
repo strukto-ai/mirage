@@ -12,17 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
+import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 import { accountOf, HfDatasetsAccessor } from '../../accessor/hf_hub.ts'
 import { assertHfRepoRef, redactHfRepoConfig } from '../hf_buckets/config.ts'
 import { HfHubVFS } from '../hf_hub/base.ts'
-import { type HfDatasetsConfig, type HfDatasetsConfigRedacted } from './config.ts'
-
-export interface HfDatasetsVFSState {
-  type: string
-  config: HfDatasetsConfigRedacted
-}
+import { type HfDatasetsConfig } from './config.ts'
 
 export class HfDatasetsVFS extends HfHubVFS {
   override readonly name: string = VFSName.HF_DATASETS
@@ -43,7 +39,7 @@ export class HfDatasetsVFS extends HfHubVFS {
     this.accessor = new HfDatasetsAccessor(accountOf(this.config), this.config)
   }
 
-  getState(): Promise<HfDatasetsVFSState> {
+  getState(): Promise<ConfigState<ReturnType<typeof redactHfRepoConfig>>> {
     return Promise.resolve({
       type: this.name,
       config: redactHfRepoConfig(this.config),

@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonlBytesByCreatedAt } from '../render/json.ts'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import type { JsonObject } from '../../types.ts'
+import { jsonlBytesByCreatedAt } from '../render/json.ts'
 import {
   normalizeComment,
   normalizeCycle,
@@ -23,7 +25,6 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
-  type NormalizedComment,
 } from './normalize.ts'
 
 describe('normalize', () => {
@@ -144,7 +145,7 @@ describe('normalize', () => {
   })
 
   it('jsonlBytesByCreatedAt sorts by created_at', () => {
-    const rows: NormalizedComment[] = [
+    const rows: ReturnType<typeof normalizeComment>[] = [
       {
         comment_id: 'a',
         issue_id: 'i',
@@ -241,3 +242,20 @@ describe('normalizeDocument', () => {
     })
   })
 })
+
+const corpus = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/fixtures/normalized_records.json', import.meta.url),
+    'utf8',
+  ),
+) as { cases: { id: string; backend: string; kind: string; value: JsonObject; expect: unknown }[] }
+
+for (const entry of corpus.cases.filter((entry) => entry.backend === 'linear')) {
+  it(entry.id, () => {
+    const normalizers: Record<string, (record: JsonObject) => unknown> = {
+      user: normalizeUser,
+      team: normalizeTeam,
+    }
+    expect(normalizers[entry.kind]?.(entry.value)).toEqual(entry.expect)
+  })
+}

@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type QingStorConfig, type QingStorConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { QingStorConfig } from './config.ts'
 
-export type QingStorVFSState = S3AliasVFSState<QingStorConfigRedacted>
-
-export class QingStorVFS extends S3AliasVFS<QingStorConfig, QingStorConfigRedacted> {
+export class QingStorVFS extends S3AliasVFS<QingStorConfig, RedactedSchema<typeof QingStorConfig>> {
   constructor(config: QingStorConfig) {
-    super(VFSName.QINGSTOR, config, ALIAS)
+    super(VFSName.QINGSTOR, config, QingStorConfig)
   }
 }

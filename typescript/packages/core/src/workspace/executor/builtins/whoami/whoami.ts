@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { ExecutionNode } from '../../../types.ts'
-import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { ExecutionNode } from '../../../types.ts'
+import type { BuiltinCall } from '../types.ts'
 
-export function handleWhoami(profile: string | null): Result {
+export function handleWhoami(profile: string | null): RedirectResult {
   // GNU whoami reports the effective user and never consults $USER; the
   // session's profile is the effective identity here. With no profile it
   // fails like GNU does for a uid with no passwd entry.
@@ -34,6 +35,6 @@ export function handleWhoami(profile: string | null): Result {
 }
 
 /** The `whoami` arm. */
-export function whoamiBuiltin(call: BuiltinCall): Promise<Result> {
+export function whoamiBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleWhoami(call.context.session.profile ?? null))
 }

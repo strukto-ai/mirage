@@ -16,24 +16,23 @@ import { describe, expect, it } from 'vitest'
 import { Command, type Context } from '../commands/config.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
-import { Runtime } from '../runtime/base.ts'
-import { LanguageRuntime } from '../runtime/language.ts'
-import { WorkspaceRuntime } from '../runtime/workspace.ts'
-import { isLineExecutor, LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
-import { runtimeForLanguage } from '../runtime/routing/index.ts'
-import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
-import type { OutputFn, RunResult } from '../runtime/types.ts'
-import { MontyRuntime } from '../runtime/python/monty/index.ts'
-import { QuickJsRuntime } from '../runtime/js/quickjs/runtime.ts'
-import { ScriptSource } from '../runtime/types.ts'
-import { Channel, JobConsole } from '../shell/console/index.ts'
-import { RAMVFS } from '../vfs/ram/ram.ts'
-import { Limit, MountMode, VFSName, type PathSpec } from '../types.ts'
-import { Workspace } from './workspace/workspace.ts'
-import type { WorkspaceOptions } from './workspace/types.ts'
 import type { Policy } from '../policy/base.ts'
-import type { Deny, Route, ShellExplanation } from '../policy/types.ts'
-import type { RouteContext } from '../policy/types.ts'
+import type { Deny, Route, RouteContext, ShellExplanation } from '../policy/types.ts'
+import { Runtime } from '../runtime/base.ts'
+import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
+import { QuickJsRuntime } from '../runtime/js/quickjs/runtime.ts'
+import { LanguageRuntime } from '../runtime/language.ts'
+import { isLineExecutor, LINE_EXECUTOR, type LineExecutorMixin } from '../runtime/mixin.ts'
+import { MontyRuntime } from '../runtime/python/monty/index.ts'
+import { runtimeForLanguage } from '../runtime/routing/index.ts'
+import type { OutputFn, RunResult } from '../runtime/types.ts'
+import { ScriptSource } from '../runtime/types.ts'
+import { WorkspaceRuntime } from '../runtime/workspace.ts'
+import { Channel, JobConsole } from '../shell/console/index.ts'
+import { Limit, MountMode, VFSName, type PathSpec } from '../types.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import type { WorkspaceOptions } from './workspace/types.ts'
+import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -583,7 +582,7 @@ describe('script context', () => {
   })
 })
 
-class LineBox extends Runtime implements LineExecutor {
+class LineBox extends Runtime implements LineExecutorMixin {
   readonly [LINE_EXECUTOR] = true as const
   readonly name = 'sandbox'
   declare captures: readonly string[]

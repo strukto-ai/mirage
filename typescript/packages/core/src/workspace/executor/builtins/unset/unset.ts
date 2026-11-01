@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FUNCNAME } from '../../../../shell/constants.ts'
-import { ArithError } from '../../../../shell/errors.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { arrayExtent, arrayUnset } from '../../../../shell/array.ts'
+import { FUNCNAME } from '../../../../shell/constants.ts'
+import { ArithError } from '../../../../shell/errors.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import { type SessionState, sessionEntry } from '../../../session/session.ts'
 import {
   deref,
@@ -25,11 +27,10 @@ import {
   visibleArrays,
   visibleAssocs,
 } from '../../../session/state.ts'
-import type { SessionView } from '../../../../view/types.ts'
+import { TARGET_RE } from '../constants.ts'
 import { flagHelp } from '../help/help.ts'
 import { builtinUsage, fail, ok, refusal, requireView } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { TARGET_RE } from '../constants.ts'
+import type { BuiltinCall } from '../types.ts'
 
 /**
  * Clear the getopts residue after a whole-variable unset.
@@ -131,7 +132,7 @@ export async function handleUnset(
   args: string[],
   session: SessionState,
   state: SessionView | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   if (args[0] === '--help') {
     const answered = flagHelp('unset')
     if (answered !== null) return answered
@@ -226,7 +227,7 @@ export async function handleUnset(
 }
 
 /** The `unset` arm. */
-export async function unsetBuiltin(call: BuiltinCall): Promise<Result> {
+export async function unsetBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleUnset(
     [...call.argv.args],
     call.context.session,

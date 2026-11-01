@@ -12,21 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mergeSignals } from '../../../../utils/abort.ts'
-import { chunks } from '../../../../io/cooperative.ts'
-import { PipeConsole } from '../../../../shell/console/pipe.ts'
-import { Channel } from '../../../../shell/console/types.ts'
-import { pump } from '../../jobs.ts'
-import { PipeClosed } from '../../../../io/errors.ts'
 import { UsageError } from '../../../../commands/errors.ts'
-import { boundedMapStream } from '../../../../concurrency/limiter.ts'
-import type { EvaluationContext } from '../../../evaluation.ts'
-
-import { versionLine } from '../../../../commands/spec/standard.ts'
 import { quoteText } from '../../../../commands/quote.ts'
-import { runAsProgram, runWithEvaluation } from '../../../../context/session_context.ts'
 import { renderHelp } from '../../../../commands/spec/help.ts'
-import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
+import { parseShellOptions, SHELL_SPECS } from '../../../../commands/spec/shell.ts'
+import { versionLine } from '../../../../commands/spec/standard.ts'
 import { SYNOPSES } from '../../../../commands/spec/synopsis.ts'
 import {
   ambiguousOptionError,
@@ -35,25 +25,34 @@ import {
   unknownOptionError,
   usageHint,
 } from '../../../../commands/spec/usage.ts'
-import { IOResult } from '../../../../io/types.ts'
-import type { ByteSource } from '../../../../io/types.ts'
+import { boundedMapStream } from '../../../../concurrency/limiter.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { runAsProgram, runWithEvaluation } from '../../../../context/session_context.ts'
+import { enoent, fsStrerror } from '../../../../errors/fs.ts'
+import { chunks } from '../../../../io/cooperative.ts'
+import { PipeClosed } from '../../../../io/errors.ts'
 import { SharedStdin, yieldBytes } from '../../../../io/stream.ts'
+import type { ByteSource } from '../../../../io/types.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { PipeConsole } from '../../../../shell/console/pipe.ts'
+import { Channel } from '../../../../shell/console/types.ts'
+import { NOT_FOUND_STATUS, SIGPIPE_STATUS } from '../../../../shell/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
+import { mergeSignals } from '../../../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../../../utils/async_context.ts'
-import { fsStrerror, enoent } from '../../../../errors/fs.ts'
+import { concat, findBytes } from '../../../../utils/bytes.ts'
 import { shellQuote } from '../../../../utils/quote.ts'
+import type { EvaluationContext } from '../../../evaluation.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { varsFromEnv } from '../../../session/session.ts'
-
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { pump } from '../../jobs.ts'
 import { readScriptBytes } from '../script/script.ts'
-import type { BuiltinCall, ExecuteStringFn, Result } from '../types.ts'
-import { concat, findBytes } from '../../../../utils/bytes.ts'
-import { NOT_FOUND_STATUS, SIGPIPE_STATUS } from '../../../../shell/constants.ts'
+import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 // The sizes GNU findutils 4.10 reports with --show-limits on Linux with an
 // 8 MiB stack: exec takes 2 MiB of arguments and environment, 2 KiB of
@@ -113,7 +112,7 @@ const CANCELLED: Readonly<Record<Grouping, string>> = Object.freeze({
 type Grouping = 'template' | 'lines' | 'group'
 type XargsEvent = string | Uint8Array[]
 
-function refusal(stderr: string | Uint8Array, code = 1): Result {
+function refusal(stderr: string | Uint8Array, code = 1): RedirectResult {
   const data = typeof stderr === 'string' ? encodeText(stderr) : stderr
   return [
     null,
@@ -122,7 +121,7 @@ function refusal(stderr: string | Uint8Array, code = 1): Result {
   ]
 }
 
-function answer(option: string, notes: string): Result {
+function answer(option: string, notes: string): RedirectResult {
   // --help and --version answer where they stand, after the warnings of
   // the options before them.
   const text =
@@ -916,15 +915,6 @@ export function xargsMissing(name: string): string {
   return `xargs: ${name}: No such file or directory\n`
 }
 
-interface RunOptions {
-  trace?: boolean
-  slotVar?: string | null
-  registry?: MountRegistry | null
-  stdin?: ByteSource | null
-  /** Filled at teardown with the runs still going, for the caller to record. */
-  torn: IOResult[]
-}
-
 /**
  * Run one command into its pipe, keeping its stderr and status when cut
  * short; one cut short before answering died of SIGPIPE.
@@ -964,7 +954,14 @@ async function* runLines(
   events: (signal: AbortSignal) => AsyncGenerator<XargsEvent>,
   context: EvaluationContext,
   procs: number,
-  opts: RunOptions,
+  opts: {
+    trace?: boolean
+    slotVar?: string | null
+    registry?: MountRegistry | null
+    stdin?: ByteSource | null
+    /** Filled at teardown with the runs still going, for the caller to record. */
+    torn: IOResult[]
+  },
 ): AsyncGenerator<[IOResult[], number | null]> {
   const session = context.session
   const slotVar = opts.slotVar ?? null
@@ -1113,13 +1110,6 @@ async function* runLines(
   }
 }
 
-export interface XargsOptions {
-  /** The op dispatcher, which reads -a's file. */
-  dispatch?: DispatchFn | null
-  /** Where command names are looked up; absent runs every name. */
-  registry?: MountRegistry | null
-}
-
 /**
  * Run a command with words read from stdin (GNU xargs).
  *
@@ -1144,8 +1134,13 @@ export async function handleXargs(
   args: readonly string[],
   context: EvaluationContext,
   stdin: ByteSource | null,
-  options: XargsOptions = {},
-): Promise<Result> {
+  options: {
+    /** The op dispatcher, which reads -a's file. */
+    dispatch?: DispatchFn | null
+    /** Where command names are looked up; absent runs every name. */
+    registry?: MountRegistry | null
+  } = {},
+): Promise<RedirectResult> {
   const session = context.session
   const parse = parseShellOptions(SHELL_SPECS.xargs, args)
   let environment = 0
@@ -1282,7 +1277,7 @@ export async function handleXargs(
 }
 
 /** The `xargs` arm. */
-export async function xargsBuiltin(call: BuiltinCall): Promise<Result> {
+export async function xargsBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleXargs(call.executeFn, [...call.argv.args], call.context, call.stdin, {
     dispatch: call.dispatch,
     registry: call.registry,

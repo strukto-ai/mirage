@@ -12,17 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const SeaweedFSConfigSchema = browserAliasSchema({})
+export const SeaweedFSConfig = makeBrowserS3Alias({ schema: browserAliasSchema({}) })
 
-export type SeaweedFSConfig = ConfigOf<typeof SeaweedFSConfigSchema>
-
-export type SeaweedFSConfigRedacted = RedactedConfig<SeaweedFSConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<SeaweedFSConfig, SeaweedFSConfigRedacted>({
-  schema: SeaweedFSConfigSchema,
-})
-
-export const seaweedfsToS3Config = ALIAS.toS3Config
+export type SeaweedFSConfig = ConfigOf<typeof SeaweedFSConfig>

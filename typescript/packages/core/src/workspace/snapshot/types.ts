@@ -12,14 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { IndexConfigSnapshot } from './config.ts'
 import type { NetworkSetting } from '../../io/network.ts'
-import type { EventDict } from '../../observe/observer.ts'
-import type { VFSStateBase } from '../../vfs/base.ts'
+import type { JsonObject, MountMode } from '../../types.ts'
 import type { RAMVFSState } from '../../vfs/ram/ram.ts'
-import type { MountMode } from '../../types.ts'
-import type { VarFields } from '../session/session.ts'
+import type { VFSStateBase } from '../../vfs/types.ts'
 import type { NodeFields } from '../mount/namespace/store.ts'
+import type { VarFields } from '../session/session.ts'
+import type { IndexConfigSnapshot } from './config.ts'
 
 export type VFSState = RAMVFSState | (VFSStateBase & Record<string, unknown>)
 
@@ -122,7 +121,7 @@ export interface WorkspaceStateDict {
   sessions: SessionSnapshot[]
   mounts: MountSnapshot[]
   cache: CacheSnapshot
-  history: EventDict[]
+  history: JsonObject[]
   jobs: JobSnapshot[]
   /**
    * Per-path fingerprint/revision pairs captured at snapshot time.

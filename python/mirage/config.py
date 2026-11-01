@@ -44,6 +44,7 @@ from mirage.policy.profile import (
     compile_program,
 )
 from mirage.policy.types import ProfileScript, ProfileScripts
+from mirage.rs.document import validate_document
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import Language, ScriptSource
@@ -295,26 +296,7 @@ class StoreBlock(BaseModel):
             ValueError: an s3 group was given for namespace, observer or
                 jobs, redis for observer, or disk for jobs.
         """
-        for group in ("namespace", "observer", "jobs"):
-            block = getattr(self, group)
-            if block is not None and block.type == "s3":
-                raise ValueError(
-                    f"config `store.{group}` cannot be s3: the s3 store hosts "
-                    f"only the sessions+meta group; keep the {group} plane on "
-                    "ram or redis and pass the s3 store as the 'workspace' "
-                    "group override"
-                )
-        if self.observer is not None and self.observer.type == "redis":
-            raise ValueError(
-                "config `store.observer` cannot be redis: history only "
-                "grows; keep it on ram or disk"
-            )
-        if self.jobs is not None and self.jobs.type == "disk":
-            raise ValueError(
-                "config `store.jobs` cannot be disk: a job's console is a "
-                "stream other processes follow; keep the jobs plane on ram "
-                "or redis"
-            )
+        validate_document("config", self.model_dump(), "store", names="store")
         return self
 
 

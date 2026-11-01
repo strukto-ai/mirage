@@ -20,11 +20,6 @@ import type {
   simpleParser,
 } from 'mailparser'
 
-interface EmailAddress {
-  name: string
-  email: string
-}
-
 interface ParsedAttachment {
   filename: string
   content_type: string
@@ -33,23 +28,6 @@ interface ParsedAttachment {
 
 interface ParsedAttachmentWithPayload extends ParsedAttachment {
   payload: Uint8Array
-}
-
-export interface ParsedRfc822 {
-  from: EmailAddress
-  reply_to: EmailAddress[]
-  to: EmailAddress[]
-  cc: EmailAddress[]
-  subject: string
-  date: string
-  body_text: string
-  body_html: string
-  snippet: string
-  message_id: string
-  in_reply_to: string | null
-  references: string[]
-  has_attachments: boolean
-  attachments: ParsedAttachment[]
 }
 
 let parserPromise: Promise<typeof simpleParser> | null = null
@@ -68,12 +46,14 @@ async function getParser(): Promise<typeof simpleParser> {
   return parserPromise
 }
 
-function toAddr(a: MailparserEmailAddress | undefined): EmailAddress {
+export function toAddr(a: MailparserEmailAddress | undefined) {
   if (a === undefined) return { name: '', email: '' }
   return { name: a.name, email: a.address ?? '' }
 }
 
-function toAddrList(list: AddressObject | AddressObject[] | undefined): EmailAddress[] {
+function toAddrList(
+  list: AddressObject | AddressObject[] | undefined,
+): ReturnType<typeof toAddr>[] {
   if (list === undefined) return []
   const objs = Array.isArray(list) ? list : [list]
   return objs.flatMap((obj) => obj.value.map((a) => toAddr(a)))
@@ -88,7 +68,7 @@ function rawDateHeader(parsed: ParsedMail): string {
   return colon === -1 ? '' : found.line.slice(colon + 1).trim()
 }
 
-function fromParsed(parsed: ParsedMail, headersOnly: boolean): ParsedRfc822 {
+export function fromParsed(parsed: ParsedMail, headersOnly: boolean) {
   const text = headersOnly ? '' : (parsed.text ?? '')
   const html = headersOnly ? '' : typeof parsed.html === 'string' ? parsed.html : ''
   const attachments = headersOnly
@@ -120,7 +100,7 @@ function fromParsed(parsed: ParsedMail, headersOnly: boolean): ParsedRfc822 {
   }
 }
 
-export async function parseRfc822(raw: Uint8Array, headersOnly = false): Promise<ParsedRfc822> {
+export async function parseRfc822(raw: Uint8Array, headersOnly = false) {
   const parser = await getParser()
   const parsed = await parser(Buffer.from(raw), { skipHtmlToText: false })
   return fromParsed(parsed, headersOnly)

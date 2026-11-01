@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { OneDriveConfigResolved } from '../../accessor/onedrive.ts'
+import type { resolveOneDriveConfig } from '../../accessor/onedrive.ts'
+import { stripSlash } from '../../utils/slash.ts'
 import { encodedPath } from '../msgraph/client.ts'
 import { graphApi } from '../msgraph/config.ts'
 import { DriveLoc } from '../msgraph/drive.ts'
-import { stripSlash } from '../../utils/slash.ts'
 
 /**
  * The drive this mount addresses, as a Graph URL prefix.
@@ -29,7 +29,7 @@ import { stripSlash } from '../../utils/slash.ts'
  * Args:
  *   config: mount config.
  */
-export function driveBase(config: OneDriveConfigResolved): string {
+export function driveBase(config: ReturnType<typeof resolveOneDriveConfig>): string {
   const api = graphApi(config)
   if (config.driveId !== null) return `${api}/drives/${encodeURIComponent(config.driveId)}`
   if (config.siteId !== null) return `${api}/sites/${encodeURIComponent(config.siteId)}/drive`
@@ -38,7 +38,7 @@ export function driveBase(config: OneDriveConfigResolved): string {
   return `${api}/me/drive`
 }
 
-function fullPath(config: OneDriveConfigResolved, path: string): string {
+function fullPath(config: ReturnType<typeof resolveOneDriveConfig>, path: string): string {
   const stripped = stripSlash(path)
   if (config.keyPrefix !== '' && stripped !== '') return `${config.keyPrefix}/${stripped}`
   return config.keyPrefix || stripped
@@ -55,7 +55,11 @@ function fullPath(config: OneDriveConfigResolved, path: string): string {
  *   full: path from the drive root; empty for the root itself.
  *   action: a trailing Graph segment such as `/children`.
  */
-export function fullItemUrl(config: OneDriveConfigResolved, full: string, action = ''): string {
+export function fullItemUrl(
+  config: ReturnType<typeof resolveOneDriveConfig>,
+  full: string,
+  action = '',
+): string {
   const base = driveBase(config)
   const path = stripSlash(full)
   if (path === '') return `${base}/root${action}`
@@ -63,19 +67,26 @@ export function fullItemUrl(config: OneDriveConfigResolved, full: string, action
   return action !== '' ? `${stem}:${action}` : stem
 }
 
-export function itemUrl(config: OneDriveConfigResolved, path: string, action = ''): string {
+export function itemUrl(
+  config: ReturnType<typeof resolveOneDriveConfig>,
+  path: string,
+  action = '',
+): string {
   return fullItemUrl(config, fullPath(config, path), action)
 }
 
 // `folder` is mount-relative; the keyPrefix applies here exactly like
 // itemUrl, or copy and rename destinations land at the drive root.
-export function driveRefPath(config: OneDriveConfigResolved, folder = ''): string {
+export function driveRefPath(
+  config: ReturnType<typeof resolveOneDriveConfig>,
+  folder = '',
+): string {
   const base = driveBase(config).slice(graphApi(config).length)
   const full = fullPath(config, folder)
   return full !== '' ? `${base}/root:/${encodedPath(full)}` : `${base}/root:`
 }
 
-export function driveLoc(config: OneDriveConfigResolved, path: string): DriveLoc {
+export function driveLoc(config: ReturnType<typeof resolveOneDriveConfig>, path: string): DriveLoc {
   const stripped = stripSlash(path)
   return new DriveLoc({
     drive: '',

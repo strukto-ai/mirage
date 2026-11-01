@@ -19,14 +19,6 @@ export enum Holds {
   VERSION = 'version',
 }
 
-export interface CacheEntryInit {
-  size: number
-  cachedAt: number
-  fingerprint?: string | null
-  ttl?: number | null
-  holds?: Holds
-}
-
 export class CacheEntry {
   readonly size: number
   readonly cachedAt: number
@@ -34,7 +26,10 @@ export class CacheEntry {
   readonly ttl: number | null
   readonly holds: Holds
 
-  constructor(init: CacheEntryInit) {
+  constructor(
+    init: Pick<CacheEntry, 'size' | 'cachedAt'> &
+      Partial<Pick<CacheEntry, 'fingerprint' | 'ttl' | 'holds'>>,
+  ) {
     this.size = init.size
     this.cachedAt = init.cachedAt
     this.fingerprint = init.fingerprint ?? null

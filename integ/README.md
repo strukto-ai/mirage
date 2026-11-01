@@ -356,6 +356,14 @@ additional jobs:
 Shared TypeScript fixtures under `packages/*/tests/` and the
 `packages/openai-agents/` adapter remain covered by the whole-host
 TypeScript filters. Integration runners import some of those fixtures.
+Rust filename sanitization (`rust/mirage-rs/src/sanitize.rs`), its mirrored
+`utils/sanitize` adapters, `core/generic/types`, and the condition `errors`
+modules stay under the same whole-host core and TypeScript filters.
+The shared Rust document validator (`rust/mirage-rs/src/document.rs`),
+mirrored `rs/document` and `utils/records` adapters, and Jaeger config in
+TypeScript core use the same filters. `integ/policy/documents.json` and
+`integ/fixtures/normalized_records.json` pin document validation and backend
+record normalization on both hosts.
 Formatting and stream unit tests consolidated under `commands/builtin/utils/`
 remain covered by the same whole-host filters on both hosts.
 

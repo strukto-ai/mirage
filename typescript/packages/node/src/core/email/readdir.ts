@@ -16,10 +16,11 @@ import { makeReaddir, type Listed } from '@struktoai/mirage-core/core/hierarchy/
 import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
 import { entryStat } from '@struktoai/mirage-core/core/hierarchy/stat'
 import { ContentType, DirListing, FileStat, FileType } from '@struktoai/mirage-core/types'
-import { NAME_MAX_BYTES, byteLength, sanitizeLabel } from '@struktoai/mirage-core/utils/sanitize'
+import { byteLength, NAME_MAX_BYTES, sanitizeLabel } from '@struktoai/mirage-core/utils/sanitize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { EmailAccessor } from '../../accessor/email.ts'
-import { fetchHeaders, listMessageUids, type FetchedMessage } from './client.ts'
+import type { fetchMessage } from './client.ts'
+import { fetchHeaders, listMessageUids } from './client.ts'
 import { listFolders } from './folders.ts'
 import { messageJsonBytes } from './render.ts'
 import { detectScope } from './scope.ts'
@@ -106,14 +107,14 @@ function parseDate(value: string): string | null {
  * axis into a single 1970 directory. IMAP's own INTERNALDATE (RFC 3501,
  * server-assigned and always present) fills that hole.
  */
-export function dateBucket(message: FetchedMessage): string {
+export function dateBucket(message: Awaited<ReturnType<typeof fetchMessage>>): string {
   return parseDate(message.date) ?? parseDate(message.internalDate) ?? EPOCH_DATE
 }
 
 const ATTACHMENT = entryStat('attachment_id')
 
 /** One date directory's children, plus its attachment-dir seeds. */
-function dateChildren(headers: readonly FetchedMessage[]): {
+function dateChildren(headers: readonly Awaited<ReturnType<typeof fetchMessage>>[]): {
   children: FileStat[]
   seeds: Map<string, FileStat[]>
 } {
@@ -148,7 +149,7 @@ function dateChildren(headers: readonly FetchedMessage[]): {
 async function folderHeaders(
   accessor: EmailAccessor,
   folderName: string,
-): Promise<FetchedMessage[]> {
+): Promise<Awaited<ReturnType<typeof fetchMessage>>[]> {
   const uids = await listMessageUids(accessor, folderName, 'ALL', accessor.config.maxMessages)
   return fetchHeaders(accessor, folderName, uids)
 }
@@ -164,7 +165,7 @@ async function listFolder(
   _own: FileStat,
 ): Promise<Listed> {
   const headersList = await folderHeaders(accessor, match.slots.folder ?? '')
-  const dateGroups = new Map<string, FetchedMessage[]>()
+  const dateGroups = new Map<string, Awaited<ReturnType<typeof fetchMessage>>[]>()
   for (const hdr of headersList) {
     const dateStr = dateBucket(hdr)
     let bucket = dateGroups.get(dateStr)

@@ -19,10 +19,10 @@ import {
   type FileStat,
   type LsTimeKind,
 } from '../../../types.ts'
-import { gnuStrftime } from './strftime.ts'
-import { UTC_ZONE, type Zone } from '../../../utils/timezone.ts'
+import { systemNow } from '../../../utils/clock.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
 import { ALL_MODE_BITS, contentSize, posixMode, sizeUnknown } from '../../../utils/stat_view.ts'
+import { UTC_ZONE, type Zone } from '../../../utils/timezone.ts'
 import {
   EPOCH_LS_TIME,
   FIND_FUTURE_SECONDS,
@@ -32,8 +32,8 @@ import {
   MONTHS,
   TYPE_CHARS,
 } from './constants.ts'
-import { UNKNOWN_NAME, groupName, ownerName, type Identity } from './identity.ts'
-import { systemNow } from '../../../utils/clock.ts'
+import { groupName, ownerName, UNKNOWN_NAME, type Identity } from './identity.ts'
+import { gnuStrftime } from './strftime.ts'
 
 // What a stat field a VFS cannot know renders as, in `stat -c` and in
 // the inode and block columns of `find -ls`.
@@ -258,18 +258,6 @@ export function lsPrefix(columns: LsColumns): string {
   return out
 }
 
-export interface LsLongOptions {
-  human?: boolean
-  // Who the session is; null outside a workspace, where both the owner
-  // and the group column fall back to `-`.
-  identity?: Identity | null
-  // Which columns to carry and how to spell the time.
-  columns?: LsColumns
-  // The name column per row when the caller decorated it
-  // (--hyperlink), else the row's own.
-  names?: readonly string[]
-}
-
 // The name column: GNU appends `-> target` for a symlink row.
 export function lsName(s: FileStat): string {
   if (s.type !== FileType.SYMLINK) return s.name
@@ -314,7 +302,20 @@ function lsSizeAndTime(
 // `-` when nothing names one. A row whose stat failed is GNU's: the type
 // letter the listing gave, then `?` for every stat field, the time
 // right-aligned in its column.
-export function formatLsLong(stats: readonly FileStat[], opts: LsLongOptions = {}): string[] {
+export function formatLsLong(
+  stats: readonly FileStat[],
+  opts: {
+    human?: boolean
+    // Who the session is; null outside a workspace, where both the owner
+    // and the group column fall back to `-`.
+    identity?: Identity | null
+    // Which columns to carry and how to spell the time.
+    columns?: LsColumns
+    // The name column per row when the caller decorated it
+    // (--hyperlink), else the row's own.
+    names?: readonly string[]
+  } = {},
+): string[] {
   const identity = opts.identity ?? null
   const human = opts.human ?? false
   const columns = opts.columns ?? DEFAULT_COLUMNS

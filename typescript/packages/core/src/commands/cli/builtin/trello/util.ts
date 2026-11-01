@@ -16,9 +16,9 @@ import { TrelloAccessor } from '../../../../accessor/trello.ts'
 import { HttpTrelloTransport } from '../../../../core/trello/client.ts'
 import type { TrelloConfig } from '../../../../core/trello/config.ts'
 import type { PathSpec } from '../../../../types.ts'
+import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 import type { Context } from '../../../config.ts'
 import type { FlagView } from '../../../spec/flag_view.ts'
-import { readStdinAsync } from '../../../builtin/utils/stream.ts'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
@@ -49,12 +49,6 @@ export function requiredFlag(fl: FlagView, name: string): string {
   return value
 }
 
-export interface ResolveTextInputOptions {
-  value: string
-  file: string
-  errorMessage: string
-}
-
 /**
  * A card's text from its flag, its `--*_file` operand, or stdin. The operand
  * is a workspace file the line names, read through `ctx.vfs` as any CLI reads
@@ -65,7 +59,11 @@ export interface ResolveTextInputOptions {
 export async function resolveTextInput(
   ctx: Context,
   fl: FlagView,
-  opts: ResolveTextInputOptions,
+  opts: {
+    value: string
+    file: string
+    errorMessage: string
+  },
 ): Promise<string> {
   const inline = fl.asStr(opts.value)
   if (inline !== undefined) return inline

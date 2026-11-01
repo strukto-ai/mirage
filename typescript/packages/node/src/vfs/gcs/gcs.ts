@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type GCSConfig, type GCSConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { GCSConfig } from './config.ts'
 
-export type GCSVFSState = S3AliasVFSState<GCSConfigRedacted>
-
-export class GCSVFS extends S3AliasVFS<GCSConfig, GCSConfigRedacted> {
+export class GCSVFS extends S3AliasVFS<GCSConfig, RedactedSchema<typeof GCSConfig>> {
   constructor(config: GCSConfig) {
-    super(VFSName.GCS, config, ALIAS)
+    super(VFSName.GCS, config, GCSConfig)
   }
 }

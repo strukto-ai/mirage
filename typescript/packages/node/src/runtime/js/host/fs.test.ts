@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { render } from '@struktoai/mirage-core/test-utils'
+import { MountMode } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type fs from 'node:fs'
 import {
   existsSync,
@@ -28,13 +32,9 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { render } from '@struktoai/mirage-core/test-utils'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskVFS } from '../../../vfs/disk/disk.ts'
-import { patchNodeFs } from './fs.ts'
 import { Workspace } from '../../../workspace.ts'
+import { patchNodeFs } from './fs.ts'
 
 type Fs = typeof fs
 
@@ -1091,7 +1091,7 @@ describe('patchNodeFs — access', () => {
     await fs.promises.access('/data/f.txt', W_OK)
     await ws.setSessionProfile(
       ws.defaultSessionId,
-      parseSessionProfile({ mounts: { '/data': 'read' }, paths: { show: { '/data/out': 'rw' } } }),
+      SessionProfile({ mounts: { '/data': 'read' }, paths: { show: { '/data/out': 'rw' } } }),
     )
     await expect(fs.promises.access('/data/f.txt', W_OK)).rejects.toMatchObject({ code: 'EACCES' })
     await fs.promises.access('/data/f.txt', R_OK)

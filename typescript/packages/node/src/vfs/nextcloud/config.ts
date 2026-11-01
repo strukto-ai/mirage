@@ -1,11 +1,7 @@
-import {
-  type ConfigOf,
-  type RedactedConfig,
-  secretStr,
-  z,
-} from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
+import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 
-export const NextcloudConfigSchema = z.object({
+export const NextcloudConfig = z.object({
   url: z
     .string({ error: 'nextcloud config requires a non-empty url' })
     .min(1, 'nextcloud config requires a non-empty url')
@@ -32,6 +28,4 @@ export const NextcloudConfigSchema = z.object({
   }),
 })
 
-export type NextcloudConfig = ConfigOf<typeof NextcloudConfigSchema>
-
-export type NextcloudConfigRedacted = RedactedConfig<NextcloudConfig, 'password'>
+export type NextcloudConfig = ConfigOf<typeof NextcloudConfig>

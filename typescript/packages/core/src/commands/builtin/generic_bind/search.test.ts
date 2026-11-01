@@ -13,13 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { expect, it } from 'vitest'
-import type { Handed } from '../../../vfs/types.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { parseSessionProfile } from '../../../policy/profile.ts'
-import { Workspace } from '../../../workspace/workspace/workspace.ts'
+import type { ByteSource } from '../../../io/types.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
 import { MountMode, type PathSpec } from '../../../types.ts'
 import { mountedPath } from '../../../utils/key_prefix.ts'
-import type { ByteSource } from '../../../io/types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import type { Handed } from '../../../vfs/types.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const TREE: Record<string, string> = {
   '/d/a.txt': 'ada here\nnothing\n',
@@ -127,7 +127,7 @@ async function run(
     if (scoped) {
       const rules = deny === undefined ? [] : [{ reason: 'sealed', paths: deny }]
       ws.createSession('agent', {
-        profile: parseSessionProfile({ paths: { hide: hide ?? [] }, commands: { deny: rules } }),
+        profile: SessionProfile({ paths: { hide: hide ?? [] }, commands: { deny: rules } }),
       })
     }
     const out = await ws.shell(line, scoped ? { sessionId: 'agent' } : {})

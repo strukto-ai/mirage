@@ -13,25 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-
-import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
-import { MountMode } from '../types.ts'
 import { ScriptSource } from '../runtime/types.ts'
+import { MountMode } from '../types.ts'
+import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import {
+  CommandsBlock,
   compileProgram,
-  parseProfileMount,
   parseProfileMounts,
   parseProfilePolicy,
-  parseSessionProfile,
   profileFromDict,
+  ProfileMount,
   profileToDict,
+  SessionProfile,
 } from './profile.ts'
 
-const mountSection = (raw: unknown): unknown => parseProfileMount(raw, '/repo', 'mounts[/repo]')
+const mountSection = (raw: unknown): unknown => ProfileMount(raw, '/repo', 'mounts[/repo]')
 
-describe('parseSessionProfile', () => {
+describe('SessionProfile', () => {
   it('regroups paths and vars and normalizes mounts', () => {
-    const p = parseSessionProfile({
+    const p = SessionProfile({
       cwd: '/scratch',
       env: { PAGER: 'cat' },
       mounts: { '/repo': 'r', 'scratch/': 'rwx' },
@@ -52,11 +52,11 @@ describe('parseSessionProfile', () => {
   })
 
   it('leaves unsaid fields absent so a reader can tell', () => {
-    expect(parseSessionProfile({})).toEqual({})
+    expect(SessionProfile({})).toEqual({})
   })
 
   it('a mount section carries a mode, rules and hides', () => {
-    const p = parseSessionProfile({
+    const p = SessionProfile({
       mounts: {
         '/repo': {
           mode: 'rw',
@@ -79,7 +79,7 @@ describe('parseSessionProfile', () => {
     // A list used to mean "only these mounts are reachable"; a mount a
     // profile does not name now keeps its own mode, so the list would
     // quietly drop the confinement it used to carry.
-    expect(() => parseSessionProfile({ mounts: ['/repo'] })).toThrow(
+    expect(() => SessionProfile({ mounts: ['/repo'] })).toThrow(
       /mounts must be a mapping of prefix to its settings/,
     )
   })
@@ -95,35 +95,33 @@ describe('parseSessionProfile', () => {
     // The message is asserted, not just the throw: a mode that is not a
     // string used to reach parseMountMode and come back as a bare type
     // error, which is not the failure the loader's contract promises.
-    expect(() => parseSessionProfile({ mounts })).toThrow(message)
+    expect(() => SessionProfile({ mounts })).toThrow(message)
     expect(() => parseProfileMounts(mounts)).toThrow(message)
   })
 
   it('rejects unknown and unshipped fields loudly', () => {
-    expect(() => parseSessionProfile({ extends: 'default' })).toThrow(/unknown field `extends`/)
-    expect(() => parseSessionProfile({ hidden_paths: {} })).toThrow(/unknown field `hidden_paths`/)
-    expect(() => parseSessionProfile({ hiddenPaths: {} })).toThrow(/unknown field/)
-    expect(() => parseSessionProfile({ commands: { hide: [] } })).toThrow(/unknown field `hide`/)
-    expect(() => parseSessionProfile({ paths: { carve: {} } })).toThrow(
-      /paths: unknown field `carve`/,
-    )
-    expect(() => parseSessionProfile({ vars: { mask: [] } })).toThrow(/unknown field `mask`/)
-    expect(() => parseSessionProfile({ mounts: { '/a': 'w' } })).toThrow(/invalid mount mode/)
-    expect(() => parseSessionProfile({ env: { A: 1 } })).toThrow(/env.A must be a string/)
-    expect(() => parseSessionProfile([])).toThrow(/must be a mapping/)
+    expect(() => SessionProfile({ extends: 'default' })).toThrow(/unknown field `extends`/)
+    expect(() => SessionProfile({ hidden_paths: {} })).toThrow(/unknown field `hidden_paths`/)
+    expect(() => SessionProfile({ hiddenPaths: {} })).toThrow(/unknown field/)
+    expect(() => SessionProfile({ commands: { hide: [] } })).toThrow(/unknown field `hide`/)
+    expect(() => SessionProfile({ paths: { carve: {} } })).toThrow(/paths: unknown field `carve`/)
+    expect(() => SessionProfile({ vars: { mask: [] } })).toThrow(/unknown field `mask`/)
+    expect(() => SessionProfile({ mounts: { '/a': 'w' } })).toThrow(/invalid mount mode/)
+    expect(() => SessionProfile({ env: { A: 1 } })).toThrow(/env.A must be a string/)
+    expect(() => SessionProfile([])).toThrow(/must be a mapping/)
     // A mount's own permissions block is gone: the section is the block.
-    expect(() => parseSessionProfile({ mounts: { '/repo': { permissions: {} } } })).toThrow(
+    expect(() => SessionProfile({ mounts: { '/repo': { permissions: {} } } })).toThrow(
       /unknown field `permissions`/,
     )
   })
 
   it('processes takes a scope or its fields', () => {
-    expect(parseSessionProfile({ processes: 'workspace' }).processes).toEqual({
+    expect(SessionProfile({ processes: 'workspace' }).processes).toEqual({
       list: 'workspace',
       kill: 'workspace',
       max: null,
     })
-    expect(parseSessionProfile({ processes: { max: 4 } }).processes).toEqual({
+    expect(SessionProfile({ processes: { max: 4 } }).processes).toEqual({
       list: 'session',
       kill: 'session',
       max: 4,
@@ -135,11 +133,11 @@ describe('parseSessionProfile', () => {
       { max: true },
       { spawn: false },
     ])
-      expect(() => parseSessionProfile({ processes: bad })).toThrow(/processes/)
+      expect(() => SessionProfile({ processes: bad })).toThrow(/processes/)
   })
 
   it('the commands block takes allow, ask and deny', () => {
-    const p = parseSessionProfile({
+    const p = SessionProfile({
       commands: {
         allow: ['ls', 'git log'],
         ask: ['git push', { reason: 'sign-off', commands: { rm: ['/shared/*'] } }],
@@ -154,7 +152,7 @@ describe('parseSessionProfile', () => {
     ])
     expect(p.commands?.deny?.[0]?.reason).toBe('no')
     // Unstated allow is null (everything installed), not an empty list.
-    expect(parseSessionProfile({ commands: { deny: ['rm'] } }).commands?.allow).toBeNull()
+    expect(SessionProfile({ commands: { deny: ['rm'] } }).commands?.allow).toBeNull()
   })
 
   it.each([
@@ -168,11 +166,11 @@ describe('parseSessionProfile', () => {
   ])('refuses scalars, blank patterns and the compiler field: %j', (bad) => {
     // A blank pattern is a prefix of every line, so it would allow, ask
     // about or deny every command; `mount` is the compiler's field.
-    expect(() => parseSessionProfile({ commands: bad })).toThrow()
+    expect(() => SessionProfile({ commands: bad })).toThrow()
   })
 
   it('deny accepts rules and bare names', () => {
-    const p = parseSessionProfile({
+    const p = SessionProfile({
       commands: {
         deny: [
           { reason: 'no deletes', commands: { rm: ['/repo/*'] } },
@@ -192,14 +190,14 @@ describe('parseSessionProfile', () => {
 
   it('requires deny itself to be a list', () => {
     for (const deny of ['rm', { rm: 'no' }, 7]) {
-      expect(() => parseSessionProfile({ commands: { deny } })).toThrow(/deny must be a list/)
+      expect(() => SessionProfile({ commands: { deny } })).toThrow(/deny must be a list/)
     }
   })
 
   it('maps each command to its own paths, one rule per command', () => {
     // One command to many paths, never a list of commands beside a list
     // of paths: the document says which command each path belongs to.
-    const p = parseSessionProfile({
+    const p = SessionProfile({
       commands: {
         deny: [
           {
@@ -233,8 +231,8 @@ describe('parseSessionProfile', () => {
     [{ reason: 'x', command: ['rm'] }, /unknown field `command`/],
     [7, /must be a command pattern or a mapping/],
   ])('refuses a rule that does not say which command a path belongs to: %j', (bad, message) => {
-    expect(() => parseSessionProfile({ commands: { deny: [bad] } })).toThrow(message)
-    expect(() => parseSessionProfile({ commands: { ask: [bad] } })).toThrow(message)
+    expect(() => SessionProfile({ commands: { deny: [bad] } })).toThrow(message)
+    expect(() => SessionProfile({ commands: { ask: [bad] } })).toThrow(message)
     expect(() => mountSection({ commands: { deny: [bad] } })).toThrow(message)
   })
 
@@ -245,17 +243,17 @@ describe('parseSessionProfile', () => {
       // silently read as `/xxx` and `secrets/*` as `/secrets/*`. A name
       // pattern (no slash) is the one relative spelling with a meaning,
       // and it means the same thing inside a mount section as outside.
-      expect(() => parseSessionProfile({ paths: { hide: [entry] } })).toThrow(/is relative/)
+      expect(() => SessionProfile({ paths: { hide: [entry] } })).toThrow(/is relative/)
       expect(() =>
-        parseSessionProfile({ commands: { ask: [{ commands: { rm: ['/ok', entry] } }] } }),
+        SessionProfile({ commands: { ask: [{ commands: { rm: ['/ok', entry] } }] } }),
       ).toThrow(/is relative/)
-      expect(() => parseSessionProfile({ commands: { deny: [{ paths: [entry] }] } })).toThrow(
+      expect(() => SessionProfile({ commands: { deny: [{ paths: [entry] }] } })).toThrow(
         /is relative/,
       )
-      expect(() =>
-        parseSessionProfile({ mounts: { '/repo': { paths: { hide: [entry] } } } }),
-      ).toThrow(/is relative/)
-      parseSessionProfile({ paths: { hide: ['/' + entry, '*.pem', '?'] } })
+      expect(() => SessionProfile({ mounts: { '/repo': { paths: { hide: [entry] } } } })).toThrow(
+        /is relative/,
+      )
+      SessionProfile({ paths: { hide: ['/' + entry, '*.pem', '?'] } })
     },
   )
 
@@ -270,12 +268,10 @@ describe('parseSessionProfile', () => {
         { paths: { hide: [entry] } },
         { commands: { deny: [{ paths: [entry] }] } },
       ]) {
-        expect(() => parseSessionProfile({ mounts: { '/repo': block } })).toThrow(
-          /outside the mount/,
-        )
+        expect(() => SessionProfile({ mounts: { '/repo': block } })).toThrow(/outside the mount/)
       }
       // The root itself, anything under it, and a name pattern all pass.
-      const ok = parseSessionProfile({
+      const ok = SessionProfile({
         mounts: { '/repo': { paths: { hide: ['/repo', '/repo/a', '*.pem'] } } },
       })
       expect(ok.mounts?.get('/repo')?.paths?.hide).toEqual(['/repo', '/repo/a', '*.pem'])
@@ -284,25 +280,25 @@ describe('parseSessionProfile', () => {
 
   it('refuses a blank hide entry, in a profile and in a mount section', () => {
     // "" is the root under the subtree rule: it would hide the whole tree.
-    expect(() => parseSessionProfile({ paths: { hide: ['/a', ''] } })).toThrow(
+    expect(() => SessionProfile({ paths: { hide: ['/a', ''] } })).toThrow(
       /hide\[1\] must name a path/,
     )
-    expect(() =>
-      parseSessionProfile({ mounts: { '/a': { paths: { hide: ['/a/x', ''] } } } }),
-    ).toThrow(/hide\[1\] must name a path/)
+    expect(() => SessionProfile({ mounts: { '/a': { paths: { hide: ['/a/x', ''] } } } })).toThrow(
+      /hide\[1\] must name a path/,
+    )
   })
 
   it('paths.show takes a mapping or a plain list', () => {
     // A mapping states path -> mode; a plain list inherits the mount's
     // mode, which the entry records as null until the mode law asks.
-    const p = parseSessionProfile({
+    const p = SessionProfile({
       paths: { hide: ['/repo'], show: { '/repo/public': 'r', '/repo/build': 'rw' } },
     })
     expect(p.paths?.show).toEqual([
       { path: '/repo/public', mode: MountMode.READ },
       { path: '/repo/build', mode: MountMode.WRITE },
     ])
-    const bare = parseSessionProfile({ paths: { show: ['/repo/public', '/repo/docs/*'] } })
+    const bare = SessionProfile({ paths: { show: ['/repo/public', '/repo/docs/*'] } })
     expect(bare.paths?.show).toEqual([
       { path: '/repo/public', mode: null },
       { path: '/repo/docs/*', mode: null },
@@ -314,17 +310,17 @@ describe('parseSessionProfile', () => {
     (entry) => {
       // A show anchors to a place and a name pattern names none, so the
       // slashless spelling hide accepts is refused here.
-      expect(() => parseSessionProfile({ paths: { show: [entry] } })).toThrow(
+      expect(() => SessionProfile({ paths: { show: [entry] } })).toThrow(
         /anchor to a place|must name a path/,
       )
     },
   )
 
   it('a show mode must be a mode name or alias', () => {
-    expect(() => parseSessionProfile({ paths: { show: { '/repo/public': 7 } } })).toThrow(
+    expect(() => SessionProfile({ paths: { show: { '/repo/public': 7 } } })).toThrow(
       /mode name or alias/,
     )
-    expect(() => parseSessionProfile({ paths: { show: { '/repo/public': 'admin' } } })).toThrow(
+    expect(() => SessionProfile({ paths: { show: { '/repo/public': 'admin' } } })).toThrow(
       /invalid mount mode/,
     )
   })
@@ -333,7 +329,7 @@ describe('parseSessionProfile', () => {
     // The group is a spelling of `hide`: its patterns join the flat list
     // (so matching never consults the reason) and the reason lands in
     // `reasons`, which no agent-facing surface renders.
-    const p = parseSessionProfile({
+    const p = SessionProfile({
       paths: {
         hide: ['/repo/.env', { patterns: ['/repo/secrets', '*.pem'], reason: 'credentials' }],
       },
@@ -350,14 +346,14 @@ describe('parseSessionProfile', () => {
     [{ patterns: ['/a'] }, /non-empty string/],
     [{ patterns: ['/a'], reason: 'x', why: 'no' }, /unknown field/],
   ])('a malformed hide group is refused: %j', (group, message) => {
-    expect(() => parseSessionProfile({ paths: { hide: [group] } })).toThrow(message)
+    expect(() => SessionProfile({ paths: { hide: [group] } })).toThrow(message)
   })
 
   it("a mount section's show must lie under that mount", () => {
     expect(() =>
-      parseSessionProfile({ mounts: { '/repo': { paths: { show: { '/other/x': 'r' } } } } }),
+      SessionProfile({ mounts: { '/repo': { paths: { show: { '/other/x': 'r' } } } } }),
     ).toThrow(/outside the mount/)
-    const ok = parseSessionProfile({
+    const ok = SessionProfile({
       mounts: { '/repo': { paths: { hide: ['/repo'], show: ['/repo/public'] } } },
     })
     expect(ok.mounts?.get('/repo')?.paths?.show).toEqual([{ path: '/repo/public', mode: null }])
@@ -367,7 +363,7 @@ describe('parseSessionProfile', () => {
     // A workspace mounted at `/` has one section to write, and `root +
     // '/'` is `'//'` there, which no path starts with, so the boundary
     // check used to leave it able to name nothing but `/` itself.
-    const profile = parseSessionProfile({
+    const profile = SessionProfile({
       mounts: {
         '/': {
           paths: { hide: ['/secret', '*.pem'] },
@@ -565,4 +561,10 @@ describe('profileToDict', () => {
       '/docs': 'write',
     })
   })
+})
+
+it('refuses an explicit null command reason', () => {
+  expect(() => CommandsBlock({ deny: [{ commands: ['rm'], reason: null }] })).toThrow(
+    'reason must be a string',
+  )
 })

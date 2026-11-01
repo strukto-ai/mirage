@@ -13,27 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 import { GitHubAccount } from '../../../../accessor/github.ts'
+import type { ApiResponse } from '../../../../core/api/client.ts'
+import { GitHubApiError, type GitHubTransport } from '../../../../core/github/client.ts'
 import type { GhConfig } from '../../../../core/github/config.ts'
-import { bodyValue, readCliFile, repoNumber } from './accessor.ts'
-import {
-  GitHubApiError,
-  type GitHubResponse,
-  type GitHubTransport,
-} from '../../../../core/github/client.ts'
-import { cliSpecFor } from '../../specs.ts'
-import type { CommandFnResult, Context } from '../../../config.ts'
-import { FlagView } from '../../../spec/flag_view.ts'
 import { issueComments } from '../../../../core/github/issue.ts'
-import { commentsFor, commentsText } from './issue.ts'
-import { GH } from './index.ts'
+import { IOResult, materialize } from '../../../../io/types.ts'
+import { StreamRefusal } from '../../../../rs/errors.ts'
 import { PathSpec } from '../../../../types.ts'
 import { Files } from '../../../../workspace/files.ts'
-import { StreamRefusal } from '../../../../rs/errors.ts'
-import { IOResult, materialize } from '../../../../io/types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
+import { cliSpecFor } from '../../specs.ts'
+import { bodyValue, readCliFile, repoNumber } from './accessor.ts'
 import { api } from './api.ts'
+import { GH } from './index.ts'
+import { commentsFor, commentsText } from './issue.ts'
 import { deleteCmd, editCmd, fork, listCmd, rename, summary, view } from './repo.ts'
-import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const DEC = new TextDecoder()
 
@@ -46,7 +43,7 @@ interface Call {
 
 const CALLS: Call[] = []
 let REPLY: unknown = {}
-let RESPONSES: (GitHubResponse | GitHubApiError)[] = []
+let RESPONSES: (ApiResponse | GitHubApiError)[] = []
 
 class FakeTransport implements GitHubTransport {
   get(path: string, params?: Record<string, string>): Promise<unknown> {
@@ -72,7 +69,7 @@ class FakeTransport implements GitHubTransport {
     body?: unknown,
     params?: Record<string, string>,
     headers?: Record<string, string>,
-  ): Promise<GitHubResponse> {
+  ): Promise<ApiResponse> {
     const call: Call & { headers?: Record<string, string> } = { method, path }
     if (body !== undefined) call.body = body
     if (params !== undefined) call.params = params

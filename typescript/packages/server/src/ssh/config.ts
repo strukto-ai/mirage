@@ -14,7 +14,6 @@
 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-
 import { readDaemonTable } from '../daemon_config.ts'
 import { mirageHome } from '../paths.ts'
 import {
@@ -42,12 +41,6 @@ export interface SSHConfig {
   host: string
   hostKeyFile: string
   authorizedKeysFile: string
-}
-
-export interface ResolveSSHOptions {
-  env?: Record<string, string | undefined>
-  table?: Record<string, string>
-  home?: string
 }
 
 /** The directory holding the host key and authorized keys: `<home>/ssh`. */
@@ -91,7 +84,11 @@ function parsePort(raw: string): number {
  * second port. An explicit `env` with no `table` stays hermetic and reads
  * no file.
  */
-export function resolveSSHConfig(opts?: ResolveSSHOptions): SSHConfig {
+export function resolveSSHConfig(opts?: {
+  env?: Record<string, string | undefined>
+  table?: Record<string, string>
+  home?: string
+}): SSHConfig {
   const env = opts?.env ?? process.env
   const table = opts?.table ?? (opts?.env !== undefined ? {} : readDaemonTable(mirageHome()))
   const rawPort = setting('ssh_port', env, table)

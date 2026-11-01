@@ -12,12 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { CONFIG_ENV_KEYS } from '@struktoai/mirage-server/auth/config'
 import { defaultTokenFile, readTokenFile } from '@struktoai/mirage-server/auth/storage'
+import {
+  ALLOWED_KEYS,
+  DaemonConfigError,
+  DEFAULT_RATE_LIMITS,
+  NUMERIC_KEYS,
+  parseDaemonTable,
+  readDaemonTable,
+} from '@struktoai/mirage-server/daemon_config'
 import {
   ENV_ALLOWED_HOSTS,
   ENV_DAEMON_PORT,
@@ -31,24 +37,17 @@ import {
   ENV_WORKER_TYPE,
   ENV_WORKERS,
 } from '@struktoai/mirage-server/env'
-import {
-  ALLOWED_KEYS,
-  DEFAULT_RATE_LIMITS,
-  DaemonConfigError,
-  NUMERIC_KEYS,
-  parseDaemonTable,
-  readDaemonTable,
-} from '@struktoai/mirage-server/daemon_config'
 import { DEFAULT_ALLOWED_HOSTS } from '@struktoai/mirage-server/host_validation_constants'
 import { mirageHome } from '@struktoai/mirage-server/paths'
+import { defaultSSHDir } from '@struktoai/mirage-server/ssh/config'
 import {
   AUTHORIZED_KEYS_NAME,
   DEFAULT_SSH_HOST,
   HOST_KEY_NAME,
   SSH_ENV_KEYS,
 } from '@struktoai/mirage-server/ssh/constants'
-import { defaultSSHDir } from '@struktoai/mirage-server/ssh/config'
-
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { loginPath, readLogin, type Login } from './credentials.ts'
 import { ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
 
@@ -80,13 +79,13 @@ export interface DaemonSettings {
   login?: Login
 }
 
-export interface LoadOptions {
-  env?: Record<string, string | undefined>
-  configPath?: string
-  tokenFile?: string
-}
-
-export function loadDaemonSettings(options: LoadOptions = {}): DaemonSettings {
+export function loadDaemonSettings(
+  options: {
+    env?: Record<string, string | undefined>
+    configPath?: string
+    tokenFile?: string
+  } = {},
+): DaemonSettings {
   const env = options.env ?? (process.env as Record<string, string | undefined>)
   const table =
     options.configPath !== undefined

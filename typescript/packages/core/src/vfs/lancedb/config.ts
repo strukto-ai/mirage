@@ -13,11 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { type ConfigOf, REDACTED_SECRET, type RedactedConfig, secretStr } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
+import { REDACTED_SECRET } from '../constants.ts'
+import type { ConfigOf, RedactedSchema } from '../secrets.ts'
+import { secretStr } from '../secrets.ts'
 
-export const LanceDBConfigSchema = z.object({
+export const LanceDBConfig = z.object({
   ...timeoutShape,
   uri: z
     .string()
@@ -82,27 +84,9 @@ export const LanceDBConfigSchema = z.object({
   }),
 })
 
-export type LanceDBConfig = ConfigOf<typeof LanceDBConfigSchema>
+export type LanceDBConfig = ConfigOf<typeof LanceDBConfig>
 
-export interface LanceDBConfigResolved {
-  timeout: number
-  uri: string
-  apiKey: string | null
-  region: string
-  hostOverride: string | null
-  storageOptions: Record<string, string> | null
-  table: string | null
-  groupBy: string[]
-  idColumn: string
-  titleColumn: string | null
-  blobColumn: string | null
-  blobExt: string
-  vectorColumn: string | null
-  searchLimit: number
-  maxRows: number
-}
-
-export function resolveLanceDBConfig(config: LanceDBConfig): LanceDBConfigResolved {
+export function resolveLanceDBConfig(config: LanceDBConfig) {
   return {
     timeout: config.timeout ?? DEFAULT_TIMEOUT,
     uri: config.uri,
@@ -122,13 +106,8 @@ export function resolveLanceDBConfig(config: LanceDBConfig): LanceDBConfigResolv
   }
 }
 
-// `apiKey` is the credential, and it is the field Python annotates secret
-// on this config. A null one stays null: a local on-disk LanceDB has no
-// credential to mask, and planting the marker anyway would make
-// `Workspace.load` demand a fresh config for a self-contained snapshot.
-// Python's redactor skips None for the same reason.
-export type LanceDBConfigRedacted = RedactedConfig<LanceDBConfigResolved, 'apiKey'>
-
-export function redactLanceDBConfig(config: LanceDBConfigResolved): LanceDBConfigRedacted {
+export function redactLanceDBConfig(
+  config: ReturnType<typeof resolveLanceDBConfig>,
+): RedactedSchema<typeof LanceDBConfig, ReturnType<typeof resolveLanceDBConfig>> {
   return { ...config, apiKey: config.apiKey === null ? null : REDACTED_SECRET }
 }

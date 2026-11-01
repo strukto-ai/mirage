@@ -11,24 +11,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { EvaluationContext } from '../../evaluation.ts'
 import { describe, expect, it } from 'vitest'
-import { command } from '../../../commands/config.ts'
 import { CLI, CLIHandler } from '../../../commands/cli/types.ts'
-import { CommandSpec, type FlagValue, Argument } from '../../../commands/spec/types.ts'
+import { command } from '../../../commands/config.ts'
+import { Argument, CommandSpec, type FlagValue } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { parseSessionProfile } from '../../../policy/profile.ts'
-import { JobTable } from '../../../shell/job_table/index.ts'
-import { BaseVFS } from '../../../vfs/base.ts'
-import { MountMode, PathSpec } from '../../../types.ts'
-import { MountRegistry } from '../../mount/registry.ts'
-import { SessionState } from '../../session/session.ts'
-import type { ExecuteNodeFn } from './types.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
-import { handleCommand } from './command.ts'
+import { JobTable } from '../../../shell/job_table/index.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
+import { BaseVFS } from '../../../vfs/base.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { EvaluationContext } from '../../evaluation.ts'
+import { MountRegistry } from '../../mount/registry.ts'
+import { SessionState } from '../../session/session.ts'
 import { Workspace } from '../../workspace/workspace.ts'
+import { handleCommand } from './command.ts'
+import type { ExecuteNodeFn } from './types.ts'
 
 function treeFallbackRegistry(): MountRegistry {
   const registry = new MountRegistry(
@@ -546,7 +546,7 @@ describe('a wrapper', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             mounts: {
               '/scratch/child': {
                 commands: { deny: [{ reason: 'boxed', commands: ['egrep'] }] },
@@ -579,7 +579,7 @@ describe('a wrapper', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             commands: {
               deny: [{ reason: 'sealed', commands: { fgrep: ['/private/*'] } }],
             },

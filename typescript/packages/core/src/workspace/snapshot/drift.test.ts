@@ -20,19 +20,18 @@ import {
   STAMP_FINGERPRINT_OPS,
   SUBTREE_RETRACT_OPS,
 } from '../../observe/record.ts'
+import { DriftPolicy, FileStat, FileType } from '../../types.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { BaseVFS } from '../../vfs/base.ts'
-import { FileStat, FileType } from '../../types.ts'
 import type { MountEntry } from '../mount/mount.ts'
-import { DriftPolicy } from '../../types.ts'
 import {
   captureFingerprints,
   checkDrift,
   ContentDriftError,
   DriftQueue,
-  installDriftState,
+  installFingerprints,
   liveOnlyMountPrefixes,
 } from './drift.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 interface RegistryLike {
   tryMountFor(path: string): MountEntry | null
@@ -497,7 +496,7 @@ describe('checkDrift', () => {
   })
 })
 
-describe('installDriftState under DriftPolicy.OFF', () => {
+describe('installFingerprints under DriftPolicy.OFF', () => {
   it('evicts the snapshot bytes before it returns', async () => {
     const evicted: string[] = []
     const cache = {
@@ -507,7 +506,7 @@ describe('installDriftState under DriftPolicy.OFF', () => {
       },
     }
     const drift = new DriftQueue()
-    await installDriftState(
+    await installFingerprints(
       { tryMountFor: () => null, allMounts: () => [] },
       cache,
       drift,

@@ -215,24 +215,6 @@ export const RedirectKind = Object.freeze({
 
 export type RedirectKind = (typeof RedirectKind)[keyof typeof RedirectKind]
 
-export interface RedirectInit {
-  // The descriptor the redirect claims, FD_BOTH (-1) for `&>`.
-  fd: number
-  // The target path, the dup'd fd number, or FD_CLOSE (-1) for `>&-`.
-  target: unknown
-  // The parsed node the target came from.
-  targetNode?: unknown
-  // Which stream the redirect moves.
-  kind?: RedirectKind
-  // Whether the write appends rather than truncates.
-  append?: boolean
-  // Whether the operator was `>|`, which overrides `set -C` for this one
-  // redirect and nothing else.
-  clobber?: boolean
-  // Whether the target undergoes expansion.
-  expandVars?: boolean
-}
-
 export class Redirect {
   readonly fd: number
   readonly target: unknown
@@ -242,7 +224,10 @@ export class Redirect {
   readonly clobber: boolean
   readonly expandVars: boolean
 
-  constructor(init: RedirectInit) {
+  constructor(
+    init: Pick<Redirect, 'fd' | 'target'> &
+      Partial<Pick<Redirect, 'targetNode' | 'kind' | 'append' | 'clobber' | 'expandVars'>>,
+  ) {
     this.fd = init.fd
     this.target = init.target
     this.targetNode = init.targetNode ?? null

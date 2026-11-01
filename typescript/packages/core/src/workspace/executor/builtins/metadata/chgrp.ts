@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../types.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import type { PathSpec } from '../../../../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { fail, parseLine } from '../shared.ts'
 import { changeOwner, parseGroup } from './metadata.ts'
-import type { Result } from '../types.ts'
 
 // chgrp GROUP FILE...: set group ownership via setattr. The group half of
 // chown: writes gid and leaves uid untouched. Group is stored, not enforced
@@ -30,7 +30,7 @@ export async function handleChgrp(
   dispatch: DispatchFn,
   session: SessionState,
   args: readonly (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('chgrp', args, session.cwd)
   if (refused !== null) return refused
   const groupText = parsed.texts[0]

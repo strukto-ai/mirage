@@ -30,8 +30,8 @@ from mirage.policy.types import (
     SessionContext,
     VfsContext,
 )
+from mirage.rs.document import units
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.policy import units
 from mirage.rs.stream import open_stream
 from mirage.types import Limit
 

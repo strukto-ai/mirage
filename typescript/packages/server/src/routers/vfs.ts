@@ -12,26 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Console } from 'node:console'
-import { Readable } from 'node:stream'
-import { stderr } from 'node:process'
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
-import type { FastifyInstance, FastifyReply } from 'fastify'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
-import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { CallArgsError, answered, checked, customAnswer, failureToDict } from '../io_serde.ts'
+import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { FastifyInstance, FastifyReply } from 'fastify'
+import { Console } from 'node:console'
+import { stderr } from 'node:process'
+import { Readable } from 'node:stream'
+import { answered, CallArgsError, checked, customAnswer, failureToDict } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
 
 const logger = new Console({ stdout: stderr, stderr })
-
-export interface VfsRoutesDeps {
-  registry: WorkspaceRegistry
-}
 
 interface CallQuery {
   session_id?: string
@@ -125,7 +121,12 @@ export function failure(reply: FastifyReply, err: unknown): FastifyReply {
  * bytes as they are pulled, over HTTP only, where the body can carry them
  * raw. Mirrors Python's `vfs_route`.
  */
-export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): void {
+export function registerVfsRoutes(
+  app: FastifyInstance,
+  deps: {
+    registry: WorkspaceRegistry
+  },
+): void {
   for (const call of VFS_CALLS) {
     app.post<{ Params: { wsId: string }; Querystring: CallQuery }>(
       `/v1/workspaces/:wsId/vfs/${call.name}`,

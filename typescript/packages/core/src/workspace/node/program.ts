@@ -12,53 +12,51 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { EvaluationContext } from '../evaluation.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
+import { isFsError } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { isControlFlowError } from '../workspace/failure.ts'
-import { concat } from '../../utils/bytes.ts'
 import { asyncChain } from '../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
+import type { Decisions } from '../../policy/decisions.ts'
+import type { HandOff } from '../../policy/types.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { Channel, type JobConsole } from '../../shell/console/index.ts'
+import { Recorder, type StreamOwner } from '../../shell/descriptors.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
 import { getText, sameLine } from '../../shell/helpers.ts'
+import type { JobTable } from '../../shell/job_table/index.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
-import { NodeType as NT } from '../../shell/types.ts'
 import { PARSED_WORDS } from '../../shell/parse/constants.ts'
-import { expandingAliases } from '../executor/builtins/alias/alias.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { isFsError } from '../../errors/fs.ts'
-import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
+import { NodeType as NT } from '../../shell/types.ts'
+import { concat } from '../../utils/bytes.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import type { EvaluationContext } from '../evaluation.ts'
+import { expandingAliases } from '../executor/builtins/alias/alias.ts'
 import { divertStatement } from '../executor/builtins/exec/index.ts'
-import { handleBackground } from '../executor/jobs.ts'
 import type { ExecuteNodeFn } from '../executor/command/types.ts'
+import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
+import { handleBackground } from '../executor/jobs.ts'
 import {
   asWritten,
   errexitActs,
   failedRead,
   fd0Binding,
   land,
-  recordStatus,
   landLate,
-  recordJobs,
   recording,
+  recordJobs,
+  recordStatus,
   statementOutput,
   statementStdin,
 } from '../executor/statement.ts'
 import { errTrapArmed, runErrTrap, runExitTrap } from '../executor/traps.ts'
 import type { ExecuteFn } from '../expand/types.ts'
-import { Recorder, type StreamOwner } from '../../shell/descriptors.ts'
-import { Channel, type JobConsole } from '../../shell/console/index.ts'
-import type { Decisions } from '../../policy/decisions.ts'
-import type { HandOff } from '../../policy/types.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
-
-import { ExecutionNode } from '../types.ts'
-import { encodeText } from '../../shell/bytes.ts'
 import type { SessionState } from '../session/session.ts'
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
+import { ExecutionNode } from '../types.ts'
+import { isControlFlowError } from '../workspace/failure.ts'
 
 /** Forward ordinary output while retaining chunks needing descriptor routing. */
 class StatementRecorder extends Recorder {
@@ -117,7 +115,7 @@ export async function executeProgram(
   sink: JobConsole | null = null,
   inline = false,
   executeFn: ExecuteFn | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   // Every program loop is one parse, which is the unit bash's alias rule
   // counts in: an alias defined on this parse and row is not expanded by
@@ -168,7 +166,7 @@ async function runProgram(
   own: StreamOwner | null = null,
   inline = false,
   executeFn: ExecuteFn | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const children = node.children
   const allStdout: (ByteSource | null)[] = []

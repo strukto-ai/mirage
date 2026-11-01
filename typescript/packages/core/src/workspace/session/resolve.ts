@@ -12,13 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  DEFAULT_PROCESS_PERMISSIONS,
-  parseProcessPermissions,
-  restrictProcesses,
-} from '../../process/config.ts'
-import { checkRules } from './validate.ts'
 import { PolicyError } from '../../policy/errors.ts'
+import {
+  compileProgram,
+  type CompiledProfile,
+  type PathsBlock,
+  type ProfileMount,
+  type SessionProfile,
+} from '../../policy/profile.ts'
 import type {
   AdmissionRules,
   CommandRule,
@@ -27,27 +28,20 @@ import type {
   ProfileScripts,
   ScriptMethod,
 } from '../../policy/types.ts'
+import {
+  DEFAULT_PROCESS_PERMISSIONS,
+  parseProcessPermissions,
+  restrictProcesses,
+} from '../../process/config.ts'
+import { fromUnits, units } from '../../rs/document.ts'
+import { StreamRefusal } from '../../rs/errors.ts'
+import { admissionMatcher, rulesWire, visibilityFrom, type Wire } from '../../rs/policy.ts'
 import type { MountMode } from '../../types.ts'
 import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
-import { StreamRefusal } from '../../rs/errors.ts'
-import {
-  admissionMatcher,
-  fromUnits,
-  rulesWire,
-  units,
-  visibilityFrom,
-  type Wire,
-} from '../../rs/policy.ts'
-import {
-  compileProgram,
-  type CompiledProfile,
-  type PathsBlock,
-  type ProfileMount,
-  type SessionProfile,
-} from '../../policy/profile.ts'
 import { DEFAULT_PROFILE } from './constants.ts'
 import { varsFromEntries, type SessionState } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
+import { checkRules } from './validate.ts'
 
 /**
  * The profile a session is created from. A name is looked up as written; a

@@ -12,12 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { FileCacheMixin } from '../cache/file/mixin.ts'
 import type { Evicted } from '../cache/index/config.ts'
 import { ListingCheckStore } from '../cache/index/ram.ts'
-import type { FileCache } from '../cache/file/mixin.ts'
-import { BaseVFS } from '../vfs/base.ts'
-import { callNames, declaredCalls } from '../vfs/call.ts'
-import { Effect, Target } from '../vfs/types.ts'
+import { enoent, isEnoent, isEnotdir, isMissingOp } from '../errors/fs.ts'
 import {
   FileChangeKind,
   FileStat,
@@ -26,10 +24,12 @@ import {
   PathSpec,
   ReadPolicy,
 } from '../types.ts'
-import { enoent, isEnoent, isEnotdir, isMissingOp } from '../errors/fs.ts'
 import { mountKey } from '../utils/key_prefix.ts'
-import { rstripSlash } from '../utils/slash.ts'
 import { ancestors } from '../utils/path.ts'
+import { rstripSlash } from '../utils/slash.ts'
+import { BaseVFS } from '../vfs/base.ts'
+import { callNames, declaredCalls } from '../vfs/call.ts'
+import { Effect, Target } from '../vfs/types.ts'
 import type { MountEntry } from './mount/mount.ts'
 import type { Namespace } from './mount/namespace/namespace.ts'
 
@@ -87,10 +87,10 @@ enum Verdict {
  * it.
  */
 export class Reconciler {
-  private readonly cache: FileCache & BaseVFS
+  private readonly cache: FileCacheMixin & BaseVFS
   private readonly namespace: Namespace
 
-  constructor(cache: FileCache & BaseVFS, namespace: Namespace) {
+  constructor(cache: FileCacheMixin & BaseVFS, namespace: Namespace) {
     this.cache = cache
     this.namespace = namespace
   }

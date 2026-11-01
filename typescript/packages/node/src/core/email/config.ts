@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
+import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 
 // Doubles as the himalaya CLI's configModel: parse applies the same
 // defaults buildEmailConfig fills in, and secretStr marks the password
 // for snapshot redaction.
-export const EmailConfigSchema = z.object({
+export const EmailConfig = z.object({
   ...timeoutShape,
   imapHost: z.string().describe('IMAP server hostname.'),
   imapPort: z.number().default(993).describe('IMAP server port.'),
@@ -63,12 +63,10 @@ export const EmailConfigSchema = z.object({
     ),
 })
 
-export type EmailConfig = ConfigOf<typeof EmailConfigSchema>
-
-export type EmailConfigRedacted = RedactedConfig<EmailConfig, 'password'>
+export type EmailConfig = ConfigOf<typeof EmailConfig>
 
 // What a caller writes, which is the schema before its defaults land.
-export type EmailConfigInput = z.input<typeof EmailConfigSchema>
+export type EmailConfigInput = z.input<typeof EmailConfig>
 
 export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
   return {

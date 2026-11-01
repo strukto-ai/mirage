@@ -37,7 +37,7 @@ import {
   Mount,
   MountBackend,
   MountMode,
-  parseSessionProfile,
+  SessionProfile,
   RAMVFS,
   Workspace,
   type Action,
@@ -307,7 +307,7 @@ async function runSessionProbe(
   res.store.files.set('/vault/secret.txt', enc.encode('secret\n'))
   const ws = new Workspace({ '/data': new Mount(res, { mode: MountMode.WRITE }) })
   const session = ws.createSession('agent', {
-    profile: parseSessionProfile({
+    profile: SessionProfile({
       paths: { hide: ['/data/vault', '/data/hl'] },
       mounts: { '/data': 'read' },
     }),
@@ -357,7 +357,7 @@ async function runSessionProbe(
       result.document_kernel_profile =
         dec.decode(body.buffer.subarray(0, body.bytesRead)) === expected
       result.document_kernel_size = (await stat(documentPath)).size === body.bytesRead
-      await ws.setSessionProfile('agent', parseSessionProfile({ paths: { hide: ['/data'] } }))
+      await ws.setSessionProfile('agent', SessionProfile({ paths: { hide: ['/data'] } }))
       const updated = await document.read(Buffer.alloc(65536), 0, 65536, 0)
       result.document_kernel_live_handle = !dec
         .decode(updated.buffer.subarray(0, updated.bytesRead))

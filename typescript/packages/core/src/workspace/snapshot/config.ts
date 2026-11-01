@@ -13,13 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IndexType, type IndexConfig, type RedisIndexConfig } from '../../cache/index/config.ts'
-import { REDACTED_SECRET, hasRedactedSecret } from '../../vfs/secrets.ts'
 import type { CLI } from '../../commands/cli/types.ts'
-import type { Mount } from '../mount/spec.ts'
 import type { IOConfig } from '../../io/config.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
 import type { Limit, WritePolicy } from '../../types.ts'
+import { REDACTED_SECRET } from '../../vfs/constants.ts'
+import { hasRedactedSecret } from '../../vfs/secrets.ts'
+import type { Mount } from '../mount/spec.ts'
 
 export interface MountArgs {
   clis?: Record<string, [string | CLI, Record<string, unknown> | null]>

@@ -14,9 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { JaegerAccessor, type JaegerAccessorConfig } from '../../accessor/jaeger.ts'
-import { type FileStat, PathSpec } from '../../types.ts'
+import { ContentType, type FileStat, FileType, PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import { JaegerVFS } from '../../vfs/jaeger/jaeger.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 import type { JaegerTransport } from './client.ts'
+import { stat } from './stat.ts'
 
 const TRACE_A = 'a'.repeat(32)
 const TRACE_B = 'b'.repeat(32)
@@ -47,16 +50,11 @@ function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: stripSlash(virtual) })
 }
 
-import { ContentType, FileType } from '../../types.ts'
-import { JaegerVFSBase } from '../../vfs/jaeger/jaeger.ts'
-import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { stat } from './stat.ts'
-
 const SERVICES = { '/api/services': { data: ['checkout'] } }
 const LISTED = { ...SERVICES, '/api/traces': { data: [{ traceID: TRACE_A }] } }
 
 async function mountedStat(transport: JaegerTransport, path: string): Promise<FileStat> {
-  const ws = new Workspace({ '/j/': new JaegerVFSBase({ accessor: accessor(transport) }) })
+  const ws = new Workspace({ '/j/': new JaegerVFS({ accessor: accessor(transport) }) })
   return (await ws.dispatch('stat', path)) as FileStat
 }
 

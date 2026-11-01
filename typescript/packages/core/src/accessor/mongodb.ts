@@ -12,20 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { MongoDriver } from '../core/mongodb/_driver.ts'
+import type { resolveMongoDBConfig } from '../vfs/mongodb/config.ts'
 import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
-import type { MongoDriver } from '../core/mongodb/_driver.ts'
-import type { MongoDBConfigResolved } from '../vfs/mongodb/config.ts'
 
 export class MongoDBAccessor extends Accessor {
   readonly driver: MongoDriver
-  readonly config: MongoDBConfigResolved
+  readonly config: ReturnType<typeof resolveMongoDBConfig>
   /** The database and collection names a listing or an existence check reads. */
   readonly listings: ResponseCache<string, string[]>
 
   constructor(
     driver: MongoDriver,
-    config: MongoDBConfigResolved,
+    config: ReturnType<typeof resolveMongoDBConfig>,
     options: { listingCacheTtlMs?: number } = {},
   ) {
     super()

@@ -13,37 +13,31 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { util } from 'zod'
-import { specOf } from '../../../spec/builtins.ts'
-import { FlagView } from '../../../spec/flag_view.ts'
-import { mountKey } from '../../../../utils/key_prefix.ts'
-import { IOResult } from '../../../../io/types.ts'
-import { Follow, LineFacts, PathSpec } from '../../../../types.ts'
-import type { CommandFnResult, Context } from '../../../config.ts'
-import { rstripSlash } from '../../../../utils/slash.ts'
-import { byteView } from '../../../../shell/bytes.ts'
-import type { FlagValue } from '../../../spec/types.ts'
-import { checkDirectories, planCreate } from './create.ts'
-import type { StatFn } from '../../../../types.ts'
-import type { DirProbe, WalkFn } from '../archive/walk.ts'
 import { fsStrerror, walkRefusal } from '../../../../errors/fs.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import { refused } from '../../../../rs/scan.ts'
 import { openStreamSync } from '../../../../rs/stream.ts'
-import { extractDest } from '../archive/extract.ts'
-import { linksOf, mountView, mountRoot } from '../../utils/links.ts'
+import { byteView } from '../../../../shell/bytes.ts'
+import type { StatFn } from '../../../../types.ts'
+import { Follow, LineFacts, PathSpec } from '../../../../types.ts'
+import { mountKey } from '../../../../utils/key_prefix.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
+import type { FlagValue } from '../../../spec/types.ts'
+import { linksOf, mountRoot, mountView } from '../../utils/links.ts'
 import { formatOptionalRecords } from '../../utils/output.ts'
-import { StreamHost, hostedStream } from '../../utils/stream_host.ts'
+import { hostedStream, StreamHost } from '../../utils/stream_host.ts'
+import { extractDest } from '../archive/extract.ts'
+import type { DirProbe, WalkFn } from '../archive/walk.ts'
+import { checkDirectories, planCreate } from './create.ts'
 
 // What tar needs from the mount it runs on. `stat` and `walk` are what
 // make a directory operand archivable at all; `isDir` answers on two
 // channels so a prefix-store directory (no object of its own) is not
 // mistaken for an absent one.
-export interface TarDeps {
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>
-  stat: StatFn
-  walk: WalkFn
-  isDir: DirProbe
-}
 
 function makePathSpec(virtual: string, prefix: string, operand?: PathSpec): PathSpec {
   return new PathSpec({
@@ -123,7 +117,12 @@ export async function tarGeneric(
   paths: PathSpec[],
   texts: readonly string[],
   ctx: Context,
-  deps: TarDeps,
+  deps: {
+    stream: (p: PathSpec) => AsyncIterable<Uint8Array>
+    stat: StatFn
+    walk: WalkFn
+    isDir: DirProbe
+  },
   relay = false,
 ): Promise<CommandFnResult> {
   const prefix = relay ? '' : mountRoot(ctx)

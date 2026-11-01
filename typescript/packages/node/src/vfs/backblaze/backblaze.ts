@@ -13,13 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type BackblazeConfig, type BackblazeConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { BackblazeConfig } from './config.ts'
 
-export type BackblazeVFSState = S3AliasVFSState<BackblazeConfigRedacted>
-
-export class BackblazeVFS extends S3AliasVFS<BackblazeConfig, BackblazeConfigRedacted> {
+export class BackblazeVFS extends S3AliasVFS<
+  BackblazeConfig,
+  RedactedSchema<typeof BackblazeConfig>
+> {
   constructor(config: BackblazeConfig) {
-    super(VFSName.BACKBLAZE, config, ALIAS)
+    super(VFSName.BACKBLAZE, config, BackblazeConfig)
   }
 }

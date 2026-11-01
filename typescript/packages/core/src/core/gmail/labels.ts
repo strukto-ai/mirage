@@ -20,12 +20,10 @@ export interface GmailLabel {
   type?: string
 }
 
-interface LabelsResponse {
-  labels?: GmailLabel[]
-}
-
 export async function listLabels(tokenManager: TokenManager): Promise<GmailLabel[]> {
   const url = `${gmailBase(tokenManager)}/users/me/labels`
-  const data = (await googleGet(tokenManager, url)) as LabelsResponse
+  const data = (await googleGet(tokenManager, url)) as {
+    labels?: GmailLabel[]
+  }
   return data.labels ?? []
 }

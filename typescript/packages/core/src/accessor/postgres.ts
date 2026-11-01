@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Accessor } from './base.ts'
 import type { PgDriver } from '../core/postgres/_driver.ts'
-import type { PostgresConfigResolved } from '../vfs/postgres/config.ts'
+import type { resolvePostgresConfig } from '../vfs/postgres/config.ts'
+import { Accessor } from './base.ts'
 
 /**
  * The session every connection opens: read only, and the settings a date or
@@ -65,9 +65,9 @@ export function readAsText(defaults: {
 
 export class PostgresAccessor extends Accessor {
   readonly driver: PgDriver
-  readonly config: PostgresConfigResolved
+  readonly config: ReturnType<typeof resolvePostgresConfig>
 
-  constructor(driver: PgDriver, config: PostgresConfigResolved) {
+  constructor(driver: PgDriver, config: ReturnType<typeof resolvePostgresConfig>) {
     super()
     this.driver = driver
     this.config = config

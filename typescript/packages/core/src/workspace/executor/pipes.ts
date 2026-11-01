@@ -12,17 +12,42 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { childContext, type EvaluationContext } from '../evaluation.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
 import { runWithEvaluation } from '../../context/session_context.ts'
-
-import type { ProcessHandle } from '../../process/handle.ts'
-import type { ProcessTable } from '../../process/table.ts'
-import { PathSpec } from '../../types.ts'
+import { CAPACITY } from '../../io/pipe.ts'
 import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
+import type { Decisions } from '../../policy/decisions.ts'
+import type { HandOff } from '../../policy/types.ts'
+import type { ProcessHandle } from '../../process/handle.ts'
+import type { ProcessTable } from '../../process/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import { CallStack } from '../../shell/call_stack.ts'
+import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
+import { PipeConsole } from '../../shell/console/pipe.ts'
+import { Channel } from '../../shell/console/types.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS, SIGPIPE_STATUS } from '../../shell/constants.ts'
+import { Recorder } from '../../shell/descriptors.ts'
+import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
+import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
+import { simpleCommand } from '../../shell/node_kind.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
+import { NodeType as NT } from '../../shell/types.ts'
+import { PathSpec } from '../../types.ts'
+import { abortable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { concat } from '../../utils/bytes.ts'
+import { childContext, type EvaluationContext } from '../evaluation.ts'
+import type { ExecuteFn } from '../expand/types.ts'
+import type { SessionState } from '../session/session.ts'
+import { ExecutionNode } from '../types.ts'
 import { divertStatement } from './builtins/exec/index.ts'
+import type { ExecuteStringFn } from './builtins/types.ts'
+import type { ExecuteNodeFn } from './command/types.ts'
+import { carried, ended, isUnwinding } from './control.ts'
+import { handleBackground, pump } from './jobs.ts'
 import {
   answerClosed,
   asWritten,
@@ -32,45 +57,15 @@ import {
   finishStatement,
   ignoringErrexit,
   land,
-  recordStatus,
   landLate,
-  recordJobs,
   recording,
+  recordJobs,
+  recordStatus,
   statementOutput,
   statementStdin,
   writerForks,
 } from './statement.ts'
-import { CallStack } from '../../shell/call_stack.ts'
-import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
-import { carried, ended, isUnwinding } from './control.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS, SIGPIPE_STATUS } from '../../shell/constants.ts'
-import { NodeType as NT } from '../../shell/types.ts'
-import { simpleCommand } from '../../shell/node_kind.ts'
-import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
-
-import type { TSNodeLike } from '../../shell/types.ts'
-import { ExecutionNode } from '../types.ts'
-import type { SessionState } from '../session/session.ts'
-import { handleBackground, pump } from './jobs.ts'
-import type { ExecuteNodeFn } from './command/types.ts'
 import { endShell, errTrapArmed, inheritTraps, runErrTrap, runExitTrap } from './traps.ts'
-import type { ExecuteStringFn } from './builtins/types.ts'
-import type { ExecuteFn } from '../expand/types.ts'
-import type { Decisions } from '../../policy/decisions.ts'
-import type { HandOff } from '../../policy/types.ts'
-
-import { PipeConsole } from '../../shell/console/pipe.ts'
-import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
-import { Recorder } from '../../shell/descriptors.ts'
-import { Channel } from '../../shell/console/types.ts'
-
-import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { abortable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
-import { concat } from '../../utils/bytes.ts'
-import { encodeText } from '../../shell/bytes.ts'
-import { CAPACITY } from '../../io/pipe.ts'
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
 
 export async function handlePipe(
   executeNode: ExecuteNodeFn,
@@ -88,7 +83,7 @@ export async function handlePipe(
   // Where the statement's output goes as it arrives; the last stage
   // streams into it instead of being collected first.
   sink?: JobConsole,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   // Reassociated pipelines can enter here without executeNode resetting
   // the parent. An exemption belongs to the preceding statement only;
@@ -304,7 +299,7 @@ export async function handleConnection(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   executeFn: ExecuteStringFn | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const bound = fd0Binding(session)
   const [leftStdout, leftIo, leftExec] = await ignoringErrexit(session, () =>
@@ -427,7 +422,7 @@ export async function handleSubshell(
   sink: JobConsole | null = null,
   // Runs the subshell's own EXIT action as it ends.
   executeFn: ExecuteFn | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   inheritTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
@@ -459,7 +454,7 @@ export async function handleSubshell(
     const isBg = body[i + 1]?.type === NT.BACKGROUND
     const armed = errTrapArmed(session)
     if (isBg && jobTable !== null) {
-      let launched: Result
+      let launched: RedirectResult
       try {
         launched = await handleBackground(
           executeNode,

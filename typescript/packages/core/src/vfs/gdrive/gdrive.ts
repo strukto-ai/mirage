@@ -12,39 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { TokenManager } from '../../core/google/client.ts'
-import { VFSName } from '../../types.ts'
-import {
-  GoogleDriveConfigSchema,
-  type GoogleDriveConfig,
-  type GoogleDriveConfigRedacted,
-} from './config.ts'
-import { buildDeltaHook } from '../../core/gdrive/events.ts'
-import { type DeltaHook } from '../../events/index.ts'
-import type { CapacityResult, DirListing, FileStat, PathSpec, SetAttrFields } from '../../types.ts'
-import type { Handed } from '../types.ts'
-import { readdir as gdriveReaddir } from '../../core/gdrive/readdir.ts'
-import { read as gdriveRead, readStream as gdriveStream } from '../../core/gdrive/read.ts'
 import { capacity as gdriveCapacity } from '../../core/gdrive/capacity.ts'
 import { checksum as gdriveChecksum } from '../../core/gdrive/checksum.ts'
+import { copy as gdriveCopy } from '../../core/gdrive/copy.ts'
+import { create as gdriveCreate } from '../../core/gdrive/create.ts'
+import { buildDeltaHook } from '../../core/gdrive/events.ts'
+import { exists as gdriveExists } from '../../core/gdrive/exists.ts'
+import { mkdir as gdriveMkdir } from '../../core/gdrive/mkdir.ts'
+import { read as gdriveRead, readStream as gdriveStream } from '../../core/gdrive/read.ts'
+import { readdir as gdriveReaddir } from '../../core/gdrive/readdir.ts'
+import { rename as gdriveRename } from '../../core/gdrive/rename.ts'
+import { rmR as gdriveRmR } from '../../core/gdrive/rm.ts'
+import { rmdir as gdriveRmdir } from '../../core/gdrive/rmdir.ts'
+import { filesContaining as gdriveFilesContaining } from '../../core/gdrive/search.ts'
 import { setAttrs as gdriveSetAttrs } from '../../core/gdrive/set_attrs.ts'
 import { stat as gdriveStat } from '../../core/gdrive/stat.ts'
-import { exists as gdriveExists } from '../../core/gdrive/exists.ts'
-import type { ByteSource } from '../../io/types.ts'
-import { write as gdriveWrite } from '../../core/gdrive/write.ts'
-import { create as gdriveCreate } from '../../core/gdrive/create.ts'
-import { mkdir as gdriveMkdir } from '../../core/gdrive/mkdir.ts'
-import { unlink as gdriveUnlink } from '../../core/gdrive/unlink.ts'
-import { rmdir as gdriveRmdir } from '../../core/gdrive/rmdir.ts'
-import { rmR as gdriveRmR } from '../../core/gdrive/rm.ts'
-import { rename as gdriveRename } from '../../core/gdrive/rename.ts'
-import { copy as gdriveCopy } from '../../core/gdrive/copy.ts'
-import { truncate as gdriveTruncate } from '../../core/gdrive/truncate.ts'
-import { filesContaining as gdriveFilesContaining } from '../../core/gdrive/search.ts'
 import { tree as gdriveTree } from '../../core/gdrive/tree.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { truncate as gdriveTruncate } from '../../core/gdrive/truncate.ts'
+import { unlink as gdriveUnlink } from '../../core/gdrive/unlink.ts'
+import { write as gdriveWrite } from '../../core/gdrive/write.ts'
+import { TokenManager } from '../../core/google/client.ts'
+import { type DeltaHook } from '../../events/index.ts'
+import type { ByteSource } from '../../io/types.ts'
+import type { CapacityResult, DirListing, FileStat, PathSpec, SetAttrFields } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { GoogleDriveConfig } from './config.ts'
 
 export const VFS_MD = `{prefix}
   Mirrors Google Drive folder hierarchy. May contain:
@@ -62,11 +58,6 @@ export const VFS_MD = `{prefix}
 
   To act on Drive items by id (create, update, export, permissions),
   use the gws CLI if installed: gws drive --help`
-
-export interface GDriveVFSState {
-  type: string
-  config: GoogleDriveConfigRedacted
-}
 
 export class GoogleDriveVFS extends BaseVFS {
   override readonly name: string = VFSName.GDRIVE
@@ -235,13 +226,7 @@ export class GoogleDriveVFS extends BaseVFS {
     return buildDeltaHook(this.accessor)
   }
 
-  override getState(): Promise<GDriveVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(
-        GoogleDriveConfigSchema,
-        this.config,
-      ) as GoogleDriveConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof GoogleDriveConfig>>> {
+    return Promise.resolve(this.configState(GoogleDriveConfig, this.config))
   }
 }

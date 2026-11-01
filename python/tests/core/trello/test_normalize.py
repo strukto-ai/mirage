@@ -13,6 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from pathlib import Path
+
+import pytest
 
 from mirage.core.render.json import jsonl_bytes_by_created_at
 from mirage.core.trello.normalize import (
@@ -129,3 +132,26 @@ def test_jsonl_bytes_by_created_at():
 
 def test_to_jsonl_bytes_empty():
     assert jsonl_bytes_by_created_at([]) == b""
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        case
+        for case in json.loads(
+            (
+                Path(__file__).resolve().parents[4]
+                / "integ/fixtures/normalized_records.json"
+            ).read_text()
+        )["cases"]
+        if case["backend"] == "trello"
+    ],
+    ids=lambda case: case["id"],
+)
+def test_shared_normalized_records(case):
+    normalizers = {
+        "workspace": normalize_workspace,
+        "list": normalize_list,
+        "card": normalize_card,
+    }
+    assert normalizers[case["kind"]](case["value"]) == case["expect"]

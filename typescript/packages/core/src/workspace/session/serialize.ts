@@ -12,28 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { METHODS } from '../../policy/constants.ts'
 import type {
-  CommandRule,
   AdmissionRules,
+  CommandRule,
   Decision,
   Outcome,
   ProfileScript,
   ProfileScripts,
+  Scope,
   ScriptMethod,
 } from '../../policy/types.ts'
-import { METHODS } from '../../policy/constants.ts'
-import type { Scope } from '../../policy/types.ts'
-import { ScriptSource } from '../../runtime/types.ts'
-import { snakeToCamel } from '../../utils/normalize.ts'
 import type { Language } from '../../runtime/types.ts'
+import { ScriptSource } from '../../runtime/types.ts'
 import type { SecretRef } from '../../secrets/config.ts'
+import { snakeToCamel } from '../../utils/normalize.ts'
 
 /** A compiled command tier as the session record stores it (the Python spelling). */
-export interface CommandsJSON {
-  allow: string[] | null
-  ask: RuleJSON[]
-  deny: RuleJSON[]
-}
 
 export interface RuleJSON {
   reason: string
@@ -61,7 +56,7 @@ export function ruleFromDict(data: RuleJSON): CommandRule {
   }
 }
 
-export function commandsToDict(spec: AdmissionRules): CommandsJSON {
+export function commandsToDict(spec: AdmissionRules) {
   return {
     allow: spec.allow === null ? null : [...spec.allow],
     ask: spec.ask.map(ruleToDict),
@@ -69,7 +64,7 @@ export function commandsToDict(spec: AdmissionRules): CommandsJSON {
   }
 }
 
-export function commandsFromDict(data: CommandsJSON): AdmissionRules {
+export function commandsFromDict(data: ReturnType<typeof commandsToDict>): AdmissionRules {
   return {
     allow: data.allow ?? null,
     ask: data.ask.map(ruleFromDict),

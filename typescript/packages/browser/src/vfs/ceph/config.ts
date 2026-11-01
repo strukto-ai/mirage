@@ -12,17 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const CephConfigSchema = browserAliasSchema({})
+export const CephConfig = makeBrowserS3Alias({ schema: browserAliasSchema({}) })
 
-export type CephConfig = ConfigOf<typeof CephConfigSchema>
-
-export type CephConfigRedacted = RedactedConfig<CephConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<CephConfig, CephConfigRedacted>({
-  schema: CephConfigSchema,
-})
-
-export const cephToS3Config = ALIAS.toS3Config
+export type CephConfig = ConfigOf<typeof CephConfig>

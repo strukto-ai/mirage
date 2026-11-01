@@ -13,36 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { DirListing, FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import { VFSName } from '@struktoai/mirage-core/types'
+import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
-import { VFSName } from '@struktoai/mirage-core/types'
+import type { ConfigState, Handed } from '@struktoai/mirage-core/vfs/types'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import {
-  assertHfRepoId,
-  HF_ENDPOINT,
-  type HfBucketsConfig,
-  type HfBucketsConfigRedacted,
-  redactHfBucketsConfig,
-} from './config.ts'
-import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { readdir as hfReaddir } from '../../core/hf_buckets/readdir.ts'
+import { create as hfCreate } from '../../core/hf_buckets/create.ts'
+import { exists as hfExists } from '../../core/hf_buckets/exists.ts'
+import { mkdir as hfMkdir } from '../../core/hf_buckets/mkdir.ts'
 import { read as hfRead } from '../../core/hf_buckets/read.ts'
+import { readdir as hfReaddir, tree as hfTree } from '../../core/hf_buckets/readdir.ts'
+import { rmR as hfRmR } from '../../core/hf_buckets/rm.ts'
 import { stat as hfStat } from '../../core/hf_buckets/stat.ts'
 import { readStream as hfStream } from '../../core/hf_buckets/stream.ts'
-import { exists as hfExists } from '../../core/hf_buckets/exists.ts'
-import { write as hfWrite } from '../../core/hf_buckets/write.ts'
-import { create as hfCreate } from '../../core/hf_buckets/create.ts'
-import { mkdir as hfMkdir } from '../../core/hf_buckets/mkdir.ts'
 import { unlink as hfUnlink } from '../../core/hf_buckets/unlink.ts'
-import { rmR as hfRmR } from '../../core/hf_buckets/rm.ts'
-import { tree as hfTree } from '../../core/hf_buckets/readdir.ts'
-import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
-
-export interface HfBucketsVFSState {
-  type: string
-  config: HfBucketsConfigRedacted
-}
+import { write as hfWrite } from '../../core/hf_buckets/write.ts'
+import type { HfBucketsConfig } from './config.ts'
+import { assertHfRepoId, HF_ENDPOINT, redactHfBucketsConfig } from './config.ts'
 
 export class HfBucketsVFS extends BaseVFS {
   override readonly name: string = VFSName.HF_BUCKETS
@@ -130,7 +119,7 @@ export class HfBucketsVFS extends BaseVFS {
     return prefix === '' ? base : `${base}/${prefix}`
   }
 
-  override getState(): Promise<HfBucketsVFSState> {
+  override getState(): Promise<ConfigState<ReturnType<typeof redactHfBucketsConfig>>> {
     return Promise.resolve({
       type: this.name,
       config: redactHfBucketsConfig(this.config),

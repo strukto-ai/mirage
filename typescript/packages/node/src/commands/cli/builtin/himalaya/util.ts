@@ -14,23 +14,24 @@
 
 import type { CommandFnResult } from '@struktoai/mirage-core/commands/config'
 import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
+import { compactJsonBytes } from '@struktoai/mirage-core/core/render/json'
+import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
+import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import { IOResult, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { fsStrerror, isEnotdir, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { mimeTypeFor } from '@struktoai/mirage-core/utils/filetype'
-import { parseRfc822, type ParsedRfc822 } from '../../../../core/email/_parse.ts'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
+import type { fromParsed } from '../../../../core/email/_parse.ts'
+import { parseRfc822 } from '../../../../core/email/_parse.ts'
 import { build, readBody, splitAddresses, type Attachment, type Source } from './builder.ts'
 import { deliver, saveSentCopy } from './deliver.ts'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
-import type { Files } from '@struktoai/mirage-core/workspace/files'
-import { compactJsonBytes } from '@struktoai/mirage-core/core/render/json'
 
 const ENC = new TextEncoder()
 
 /** The `to` field both outcomes report, spelled as the header reads. */
-function addressList(addresses: ParsedRfc822['to']): string {
+function addressList(addresses: ReturnType<typeof fromParsed>['to']): string {
   return addresses
     .map((entry) => (entry.name === '' ? entry.email : `${entry.name} <${entry.email}>`))
     .join(', ')

@@ -16,7 +16,7 @@ import { SlackAccessor } from '../../../src/accessor/slack.ts'
 import type { IndexCacheStore } from '../../../src/cache/index/store.ts'
 import type { SlackResponse, SlackTransport } from '../../../src/core/slack/client.ts'
 import { FileStat, FileType } from '../../../src/types.ts'
-import { SlackVFSBase } from '../../../src/vfs/slack/slack.ts'
+import { SlackVFS } from '../../../src/vfs/slack/slack.ts'
 
 export interface FakeCall {
   endpoint: string
@@ -39,14 +39,14 @@ export class FakeSlackTransport implements SlackTransport {
   }
 }
 
-class FakeSlackVFS extends SlackVFSBase {
+class FakeSlackVFS extends SlackVFS {
   override readonly name = 'slack'
   constructor(override readonly accessor: SlackAccessor) {
     super()
   }
 }
 
-export function makeFakeVfs(transport: SlackTransport): SlackVFSBase {
+export function makeFakeVfs(transport: SlackTransport): SlackVFS {
   return new FakeSlackVFS(new SlackAccessor(transport))
 }
 

@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { admissionMatcher, units } from '../../rs/policy.ts'
+import { units } from '../../rs/document.ts'
+import { admissionMatcher } from '../../rs/policy.ts'
 import type { AdmissionRules } from '../types.ts'
 
 /**

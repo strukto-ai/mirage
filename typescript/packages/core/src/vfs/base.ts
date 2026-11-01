@@ -12,13 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConditionSupport, ReplaceRequest } from '../cache/types.ts'
+import type { z } from 'zod'
 import { type Accessor, NOOPAccessor } from '../accessor/base.ts'
-import type { Command } from '../commands/config.ts'
+import type { ConditionSupport, ReplaceRequest } from '../cache/types.ts'
 import type { CLI } from '../commands/cli/types.ts'
+import type { Command } from '../commands/config.ts'
 import { enotsup } from '../errors/fs.ts'
-import type { ByteSource } from '../io/types.ts'
+import type { DeltaHook } from '../events/base.ts'
 import { closeQuietly } from '../io/stream.ts'
+import type { ByteSource } from '../io/types.ts'
 import type {
   CapacityResult,
   DirListing,
@@ -28,38 +30,13 @@ import type {
   SetAttrFields,
 } from '../types.ts'
 import { CapacityState, ListingVersion } from '../types.ts'
-import type { DeltaHook } from '../events/base.ts'
 import { methodName, vfsCall } from './call.ts'
 import type { StorageUsage } from './capacity.ts'
 import { WALK_LIMIT } from './constants.ts'
-import { Effect, type Handed, Target } from './types.ts'
-
-/**
- * The two keys the snapshot machinery reads out of a VFS's state.
- *
- * `type` is the registry name, and it is what rebuilds the VFS:
- * Python's `_vfs_class_for` looks it up in the registry first and
- * only falls back to the mount's `vfs_class` import path when it
- * misses. `config` is what `vfsStateRequiresOverride` scans for the
- * `<REDACTED>` marker, which is what makes load demand a fresh config
- * instead of silently substituting an empty mount.
- *
- * This lived as a private interface in `workspace/snapshot/types.ts`,
- * where `VFSState` still widens it with each backend's own keys; it
- * moved here so the `BaseVFS` contract and the snapshot format name
- * one shape rather than two identical ones. Python needs no such type —
- * `get_state` is annotated `dict[str, Any]` — but a TS interface is not
- * assignable to `Record<string, unknown>` (no implicit index signature),
- * so the literal twin would reject every named `XVFSState`.
- */
-export interface VFSStateBase {
-  type: string
-  config?: unknown
-  // Set by a backend whose mount cannot be rebuilt from this state alone,
-  // so `Workspace.load` asks for the live VFS back instead of
-  // rebuilding one. See `vfsStateRequiresOverride`.
-  needs_override?: boolean
-}
+import type { RedactedSchema } from './secrets.ts'
+import { redactConfigWithSchema } from './secrets.ts'
+import type { VFSOptions, VFSStateBase } from './types.ts'
+import { type ConfigState, Effect, type Handed, Target } from './types.ts'
 
 // The accessor a driver that brings none runs over: the default Python's
 // `BaseVFS.accessor` class attribute carries too, so a mount and a caller
@@ -72,53 +49,6 @@ const NO_ACCESSOR = new NOOPAccessor()
  * loader's check: the class identity may differ, the brand does not.
  */
 export const VFS_BRAND: unique symbol = Symbol.for('mirage.BaseVFS')
-
-/**
- * The facts a subclass that does not declare them as members hands the
- * constructor. Every field is optional, so a class that declares its facts
- * as members calls `super()` bare. Mirrors the keyword arguments of
- * Python's `BaseVFS.__init__`.
- */
-export interface VFSOptions<A extends Accessor = Accessor> {
-  /**
-   * VFS name commands register under, and the `type` key `getState`
-   * writes into a snapshot. Also the registry key when the backend is
-   * exposed through `registerVfs`.
-   */
-  name?: string
-  /** Backend handle the functions use. */
-  accessor?: A
-  /**
-   * This VFS's part of VFS.md: its layout and file formats, `{prefix}`
-   * standing for the mount path.
-   */
-  vfsMd?: string
-  /**
-   * Extra commands, from `command({...})`, or `CLI` trees: bespoke verbs, a
-   * program's verbs as one command tree under its root's name, or
-   * replacements that win over the generic command of the same name.
-   */
-  commands?: readonly (Command | CLI)[]
-  /** Serve repeat reads from the file cache. Read-mostly content only. */
-  cachesReads?: boolean
-  /**
-   * Whether `stat` sizes every regular file without fetching it, which is
-   * also what makes the mount legal on FSKit.
-   */
-  sizesAlwaysKnown?: boolean
-  /**
-   * Whether `stat` fills `FileStat.fingerprint` with a stable per-path
-   * version marker. Setting it without that is not drift detection.
-   */
-  supportsSnapshot?: boolean
-  /**
-   * Whether `stat` and the read record stamp the *same kind* of content
-   * token, so a `read: fresh` mount can compare them. Setting it without
-   * that makes every read verdict stale; a mount declaring `fresh` on a
-   * backend that leaves it false is refused.
-   */
-  readRevalidatable?: boolean
-}
 
 /**
  * A backend: an accessor, the facts about it, and its functions.
@@ -303,7 +233,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * optional, so a class that declares its facts as members calls
    * `super()` bare.
    */
-  constructor(options: VFSOptions<A> = {}) {
+  constructor(options: VFSOptions<Command | CLI, A> = {}) {
     if (options.name !== undefined) {
       if (options.name === '') throw new Error('a VFS needs a non-empty name')
       this.name = options.name
@@ -829,6 +759,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   getState(): VFSStateBase | Promise<VFSStateBase> {
     return { type: this.name, needs_override: true }
+  }
+
+  /** Snapshot a config-backed driver through its schema's secret markers. */
+  configState<S extends z.ZodObject>(schema: S, config: unknown): ConfigState<RedactedSchema<S>> {
+    return { type: this.name, config: redactConfigWithSchema(schema, config) }
   }
 
   /**

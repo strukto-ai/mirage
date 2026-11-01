@@ -12,24 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ByteSource } from '../../io/types.ts'
-import { BaseVFS } from '../base.ts'
 import { DifyAccessor } from '../../accessor/dify.ts'
-
-import { VFSName } from '../../types.ts'
-import {
-  type DifyConfigRedacted,
-  redactDifyConfig,
-  resolveDifyConfig,
-  type DifyConfig,
-  type DifyConfigResolved,
-} from './config.ts'
-import type { DirListing, PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import type { Handed } from '../types.ts'
-import { DIFY_TREE } from '../../core/dify/tree.ts'
 import { read, readStream } from '../../core/dify/read.ts'
-import { stat } from '../../core/dify/stat.ts'
 import { searchMany } from '../../core/dify/search.ts'
+import { stat } from '../../core/dify/stat.ts'
+import { DIFY_TREE } from '../../core/dify/tree.ts'
+import { type ByteSource } from '../../io/types.ts'
+import type { DirListing, FileStat, PathSpec, SearchQuery } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { redactDifyConfig, resolveDifyConfig, type DifyConfig } from './config.ts'
 
 export const VFS_MD = `This is a Dify Knowledge Base mounted as a read-only filesystem.
 
@@ -39,12 +32,6 @@ on these files.`
 
 export interface DifyVFSOptions {
   config: DifyConfig
-}
-
-export interface DifyVFSState {
-  type: string
-  config: DifyConfigRedacted
-  needs_override: true
 }
 
 export class DifyVFS extends BaseVFS {
@@ -57,7 +44,7 @@ export class DifyVFS extends BaseVFS {
     read: ['entry'],
     stat: ['entry'],
   } as const
-  readonly config: DifyConfigResolved
+  readonly config: ReturnType<typeof resolveDifyConfig>
   override readonly accessor: DifyAccessor
 
   constructor(options: DifyVFSOptions | DifyConfig) {
@@ -67,7 +54,7 @@ export class DifyVFS extends BaseVFS {
     this.accessor = new DifyAccessor(this.config)
   }
 
-  override getState(): DifyVFSState {
+  override getState(): ConfigState<ReturnType<typeof redactDifyConfig>> & { needs_override: true } {
     return {
       type: this.name,
       config: redactDifyConfig(this.config),

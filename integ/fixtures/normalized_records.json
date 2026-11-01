@@ -1,0 +1,138 @@
+{
+  "cases": [
+    {
+      "id": "linear_empty_name_and_typed_flags",
+      "backend": "linear",
+      "kind": "user",
+      "value": {
+        "id": "u",
+        "name": "Alice",
+        "displayName": "",
+        "active": "true",
+        "admin": 1
+      },
+      "expect": {
+        "user_id": "u",
+        "name": "Alice",
+        "display_name": "",
+        "email": null,
+        "is_active": null,
+        "is_admin": null,
+        "updated_at": null,
+        "url": null
+      }
+    },
+    {
+      "id": "linear_connection_filters_non_records",
+      "backend": "linear",
+      "kind": "team",
+      "value": {
+        "id": "t",
+        "states": {
+          "nodes": [
+            null,
+            {},
+            {
+              "id": "s",
+              "name": "",
+              "type": 123
+            }
+          ]
+        }
+      },
+      "expect": {
+        "team_id": "t",
+        "team_key": null,
+        "team_name": null,
+        "name": null,
+        "description": null,
+        "timezone": null,
+        "updated_at": null,
+        "states": [
+          {
+            "state_id": null,
+            "state_name": null,
+            "type": null
+          },
+          {
+            "state_id": "s",
+            "state_name": "",
+            "type": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "trello_empty_workspace_name_is_kept",
+      "backend": "trello",
+      "kind": "workspace",
+      "value": {
+        "id": "w",
+        "displayName": "",
+        "name": "fallback"
+      },
+      "expect": {
+        "workspace_id": "w",
+        "workspace_name": ""
+      }
+    },
+    {
+      "id": "trello_boolean_is_not_a_position",
+      "backend": "trello",
+      "kind": "list",
+      "value": {
+        "id": "l",
+        "pos": true,
+        "closed": false
+      },
+      "expect": {
+        "list_id": "l",
+        "list_name": null,
+        "board_id": null,
+        "closed": false,
+        "pos": null
+      }
+    },
+    {
+      "id": "trello_arrays_keep_typed_ids",
+      "backend": "trello",
+      "kind": "card",
+      "value": {
+        "id": "c",
+        "idMembers": [
+          3,
+          "u"
+        ],
+        "labels": [
+          {},
+          null,
+          {
+            "id": 4
+          },
+          {
+            "id": "label"
+          }
+        ],
+        "shortUrl": "",
+        "url": "fallback"
+      },
+      "expect": {
+        "card_id": "c",
+        "card_name": null,
+        "board_id": null,
+        "list_id": null,
+        "member_ids": [
+          "u"
+        ],
+        "label_ids": [
+          "label"
+        ],
+        "due": null,
+        "due_complete": null,
+        "closed": null,
+        "desc": "",
+        "url": ""
+      }
+    }
+  ]
+}

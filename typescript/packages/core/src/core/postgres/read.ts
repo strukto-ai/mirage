@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type FileStat, PathSpec } from '../../types.ts'
-import { encodeBase64 } from '../../utils/base64.ts'
-import { efbig } from '../../errors/fs.ts'
-import { jsonBytes } from '../render/json.ts'
 import type { PostgresAccessor } from '../../accessor/postgres.ts'
+import { efbig } from '../../errors/fs.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
+import { abortable, sleep } from '../../utils/abort.ts'
+import { encodeBase64 } from '../../utils/base64.ts'
 import {
   makeRead,
   perKind,
@@ -25,6 +25,8 @@ import {
   type WindowedReader,
 } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
+import { jsonBytes } from '../render/json.ts'
+import { buildDatabaseJson, buildEntitySchemaJson } from './_schema_json.ts'
 import {
   countRows,
   estimateSize,
@@ -35,16 +37,9 @@ import {
   fetchRows,
   fetchRowsAfter,
 } from './client.ts'
-import { abortable, sleep } from '../../utils/abort.ts'
 import { entityGuard } from './readdir.ts'
-import { buildDatabaseJson, buildEntitySchemaJson } from './_schema_json.ts'
-import { buildEntitySemanticJson } from './semantic.ts'
 import { detectScope } from './scope.ts'
-
-export interface ReadOptions {
-  limit?: number | null
-  offset?: number | null
-}
+import { buildEntitySemanticJson } from './semantic.ts'
 
 /**
  * Stream a keyed table's rows.jsonl a page of rows at a time, in key order,
@@ -65,7 +60,7 @@ export async function* readStream(
   path: PathSpec | string,
   entry: FileStat | null = null,
   parent: FileStat | null = null,
-  options: ReadOptions = {},
+  options: ReadWindow = {},
 ): AsyncIterable<Uint8Array> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   const match = detectScope(spec)
@@ -185,7 +180,7 @@ export async function read(
   path: PathSpec | string,
   entry: FileStat | null = null,
   parent: FileStat | null = null,
-  options: ReadOptions = {},
+  options: ReadWindow = {},
 ): Promise<Uint8Array> {
   const spec = typeof path === 'string' ? PathSpec.fromStrPath(path) : path
   return kitRead(accessor, spec, entry, parent, options)

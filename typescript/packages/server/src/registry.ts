@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolve } from 'node:path'
 import {
   networkRule,
   type NetworkRule,
@@ -33,6 +32,7 @@ import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
 import { watchNetwork } from '@struktoai/mirage-node/io/network'
+import { resolve } from 'node:path'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
 import {
   ENV_GRACEFUL_TIMEOUT,
@@ -78,33 +78,6 @@ export class WorkspaceEntry {
     this.owner = owner
     this.createdAt = Date.now() / 1000
   }
-}
-
-export interface WorkspaceRegistryOptions {
-  idleGraceSeconds?: number
-  onIdleExit?: () => void
-  /**
-   * Refuse callers with no account (jwt mode); otherwise such a caller
-   * may use every workspace.
-   */
-  accountsRequired?: boolean
-  /**
-   * Where each workspace id's owning account is kept across restarts, so
-   * a stored workspace is only ever reopened by its owner. Absent keeps
-   * ownership in memory.
-   */
-  owners?: DiskRecordClient
-  /** The most workspaces held at once, those being built among them; null for no cap. */
-  maxWorkspaces?: number | null
-  /**
-   * The server's own policies, which answer `preWorkspace` and are
-   * registered on every workspace it builds, after the workspace's own.
-   */
-  policies?: readonly Policy[]
-  /** The server's policy programs, by method, which answer the same way. */
-  programs?: ProfileScripts
-  /** The most sessions each workspace holds, its default among them; null for no cap. */
-  maxSessions?: number | null
 }
 
 /**
@@ -233,7 +206,34 @@ export class WorkspaceRegistry {
   private readonly admissionPrograms: ScriptPolicy
   private readonly admission: Policies
 
-  constructor(options: WorkspaceRegistryOptions = {}) {
+  constructor(
+    options: {
+      idleGraceSeconds?: number
+      onIdleExit?: () => void
+      /**
+       * Refuse callers with no account (jwt mode); otherwise such a caller
+       * may use every workspace.
+       */
+      accountsRequired?: boolean
+      /**
+       * Where each workspace id's owning account is kept across restarts, so
+       * a stored workspace is only ever reopened by its owner. Absent keeps
+       * ownership in memory.
+       */
+      owners?: DiskRecordClient
+      /** The most workspaces held at once, those being built among them; null for no cap. */
+      maxWorkspaces?: number | null
+      /**
+       * The server's own policies, which answer `preWorkspace` and are
+       * registered on every workspace it builds, after the workspace's own.
+       */
+      policies?: readonly Policy[]
+      /** The server's policy programs, by method, which answer the same way. */
+      programs?: ProfileScripts
+      /** The most sessions each workspace holds, its default among them; null for no cap. */
+      maxSessions?: number | null
+    } = {},
+  ) {
     this.maxWorkspaces = options.maxWorkspaces ?? null
     this.maxSessions = options.maxSessions ?? null
     this.policies = [...(options.policies ?? [])]

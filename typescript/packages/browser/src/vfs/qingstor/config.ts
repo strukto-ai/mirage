@@ -12,19 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const QingStorConfigSchema = browserAliasSchema({})
-
-export type QingStorConfig = ConfigOf<typeof QingStorConfigSchema>
-
-export type QingStorConfigRedacted = RedactedConfig<QingStorConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<QingStorConfig, QingStorConfigRedacted>({
-  schema: QingStorConfigSchema,
+export const QingStorConfig = makeBrowserS3Alias({
+  schema: browserAliasSchema({}),
   endpointFor: derivedEndpoint('region', (region) => `https://s3.${region}.qingstor.com`),
 })
 
-export const resolvedQingStorEndpoint = ALIAS.resolvedEndpoint
-export const qingStorToS3Config = ALIAS.toS3Config
+export type QingStorConfig = ConfigOf<typeof QingStorConfig>

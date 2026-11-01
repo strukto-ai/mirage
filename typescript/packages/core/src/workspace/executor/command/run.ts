@@ -12,38 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { EntryGate } from '../../../policy/types.ts'
-import { sessionAccess } from '../../../context/session_context.ts'
-import type { EvaluationContext } from '../../evaluation.ts'
-import { type ByteSource, IOResult } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
-import type { MountEntry } from '../../mount/mount.ts'
-import { ExecutionNode } from '../../types.ts'
-import type { FollowOperands } from '../../../view/types.ts'
-import type { Namespace } from '../../mount/namespace/namespace.ts'
-import { envSnapshot, sessionView } from '../../session/state.ts'
-import { Files } from '../../files.ts'
-import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
-import { MountCommandAmbiguous } from '../../mount/errors.ts'
-import type { Runtime } from '../../../runtime/base.ts'
-import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
-import type { RouteDecision } from '../../../runtime/types.ts'
-import type { SessionState } from '../../session/session.ts'
-import type { DispatchFn, ShellFn } from '../../../runtime/types.ts'
-import type { ExecuteFn } from '../../expand/types.ts'
-import type { FindExpr } from '../../../rs/find.ts'
 import { UsageError } from '../../../commands/errors.ts'
-import { PipeClosed } from '../../../io/errors.ts'
-import { CommandTimeoutError } from '../../../errors/types.ts'
-import { readFailExitCode } from '../../../commands/spec/usage.ts'
-import { formatFsError } from '../../../errors/render.ts'
-
-import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
-import type { Flags } from './types.ts'
-import { parseFlags } from './flags.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
+import { readFailExitCode } from '../../../commands/spec/usage.ts'
+import { sessionAccess } from '../../../context/session_context.ts'
+import { formatFsError } from '../../../errors/render.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
+import { PipeClosed } from '../../../io/errors.ts'
+import { type ByteSource, IOResult } from '../../../io/types.ts'
+import type { EntryGate } from '../../../policy/types.ts'
+import type { FindExpr } from '../../../rs/find.ts'
+import type { Runtime } from '../../../runtime/base.ts'
+import type { DispatchFn, RouteDecision, ShellFn } from '../../../runtime/types.ts'
+import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../shell/constants.ts'
+import { PathSpec } from '../../../types.ts'
+import { makeAbortError, mergeSignals } from '../../../utils/abort.ts'
+import type { FollowOperands } from '../../../view/types.ts'
+import type { EvaluationContext } from '../../evaluation.ts'
+import type { ExecuteFn } from '../../expand/types.ts'
+import { Files } from '../../files.ts'
+import { MountCommandAmbiguous } from '../../mount/errors.ts'
+import type { MountEntry } from '../../mount/mount.ts'
+import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
+import type { SessionState } from '../../session/session.ts'
+import { envSnapshot, sessionView } from '../../session/state.ts'
+import { ExecutionNode } from '../../types.ts'
+import { parseFlags } from './flags.ts'
+import type { Flags } from './types.ts'
 
 export interface RunOnMountCtx {
   admission: EntryGate | null
@@ -92,19 +90,6 @@ export function findStartPoints(
 ): PathSpec[] {
   const head = argv.slice(0, start)
   return parseFlags(head, spec, 'find', cwd).paths
-}
-
-interface RunOnMountOpts {
-  signal?: AbortSignal
-  stdin?: ByteSource | null
-  resolveHint?: PathSpec | null
-  mount?: MountEntry | null
-  // The words after the command name, as the line spelled them; absent for
-  // a run split out of a line.
-  argv?: readonly string[]
-  // find's expression, parsed once for the line, which its handler reads in
-  // place of `texts`.
-  find?: FindExpr
 }
 
 /**
@@ -202,7 +187,18 @@ export async function runOnMount(
   paths: PathSpec[],
   texts: string[],
   flagKwargs: Flags,
-  opts: RunOnMountOpts = {},
+  opts: {
+    signal?: AbortSignal
+    stdin?: ByteSource | null
+    resolveHint?: PathSpec | null
+    mount?: MountEntry | null
+    // The words after the command name, as the line spelled them; absent for
+    // a run split out of a line.
+    argv?: readonly string[]
+    // find's expression, parsed once for the line, which its handler reads in
+    // place of `texts`.
+    find?: FindExpr
+  } = {},
 ): Promise<[ByteSource | null, IOResult]> {
   const { registry, context, dispatch, namespace } = ctx
   const session = context.session

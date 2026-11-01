@@ -13,20 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseSessionProfile } from '../../../policy/profile.ts'
-import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
-import { MountMode } from '../../../types.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import {
   makeWorkspace,
   stderrStr,
   stdoutStr,
 } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
+import { MontyRuntime } from '../../../runtime/python/monty/runtime.ts'
+import { MountMode } from '../../../types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const PYODIDE = { runtimes: ['pyodide', 'workspace'] }
 
-const GUARDED = parseSessionProfile({
+const GUARDED = SessionProfile({
   commands: { deny: [{ reason: 'protected', commands: { python3: ['/secret.py'] } }] },
 })
 

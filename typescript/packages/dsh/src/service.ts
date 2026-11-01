@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
+import { Service } from '@deepseek-ai/cordis'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
@@ -21,8 +21,8 @@ import { parseMountMode } from '@struktoai/mirage-core/types'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { Workspace, buildVfs, parseSessionProfile } from '@struktoai/mirage-node'
-import type { NodeWorkspaceOptions, SessionProfile } from '@struktoai/mirage-node'
+import type { NodeWorkspaceOptions } from '@struktoai/mirage-node'
+import { buildVfs, SessionProfile, Workspace } from '@struktoai/mirage-node'
 import { askThroughApproval } from './approval.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -87,7 +87,7 @@ export interface MirageConfig {
    * `workspaceOptions.profiles`; pass one or the other, not both.
    *
    * Written as the document, not as an already-parsed profile: every
-   * entry goes through `parseSessionProfile`, so a misspelled field is a
+   * entry goes through `SessionProfile`, so a misspelled field is a
    * load error rather than a first-session one. That parse is what lets
    * a dsh bundle patch carry a policy at all, since
    * `workspaceOptions.profiles` wants profiles already parsed and a
@@ -135,7 +135,7 @@ async function resolveMount(prefix: string, entry: MirageMountBlock): Promise<Mo
 function parseProfiles(raw: Record<string, unknown>): Record<string, SessionProfile> {
   const out: Record<string, SessionProfile> = {}
   for (const [name, block] of Object.entries(raw)) {
-    out[name] = parseSessionProfile(block, `profile \`${name}\``)
+    out[name] = SessionProfile(block, `profile \`${name}\``)
   }
   return out
 }

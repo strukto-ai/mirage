@@ -11,14 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CLI } from '@struktoai/mirage-core/commands/cli/types'
-import { CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 
 import { registerCliSpec } from '@struktoai/mirage-core/commands/cli/specs'
-import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
+import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { Argument } from '@struktoai/mirage-core/commands/spec/index'
+import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
-import { HfConfigSchema, type HfConfig } from '../../../../core/hf_hub/config.ts'
+import { HfConfig } from '../../../../core/hf_hub/config.ts'
 import { listCmd, whoamiCmd } from './auth.ts'
 import { downloadCmd } from './download.ts'
 import { envCmd, versionCmd } from './env.ts'
@@ -260,7 +259,7 @@ export const HF = new CLI({
     env: new CLIHandler({ fn: envCmd }),
     version: new CLIHandler({ fn: versionCmd }),
   },
-  configModel: HfConfigSchema,
+  configModel: HfConfig,
   accessor: (config) => new HfAccountAccessor(config as HfConfig),
 })
 

@@ -13,16 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-
+import type { JsonObject } from '../../types.ts'
 import { blocksToMarkdown } from './render.ts'
 
-type Json = Record<string, unknown>
-
-function paragraph(richText: Json[]): Json {
+function paragraph(richText: JsonObject[]): JsonObject {
   return { type: 'paragraph', paragraph: { rich_text: richText } }
 }
 
-function renderOne(block: Json): string {
+function renderOne(block: JsonObject): string {
   const out = blocksToMarkdown([block])
   return out.endsWith('\n') ? out.slice(0, -1) : out
 }

@@ -14,10 +14,16 @@
 
 import { backupControl, backupTarget } from '../../../../commands/builtin/utils/backup.ts'
 import { DEFAULT_BACKUP_SUFFIX } from '../../../../commands/builtin/utils/constants.ts'
+import {
+  absentDestError,
+  dispatchStat,
+  dotRefusal,
+  resolvePathStat,
+} from '../../../../commands/builtin/utils/paths.ts'
 import { UsageError } from '../../../../commands/errors.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
-import { parseCommand, parseToKwargs, type ParsedArgs } from '../../../../commands/spec/parser.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
+import { parseCommand, type ParsedArgs, parseToKwargs } from '../../../../commands/spec/parser.ts'
 import {
   ambiguousOptionError,
   missingValueError,
@@ -25,20 +31,8 @@ import {
   unknownOptionError,
   usageHint,
 } from '../../../../commands/spec/usage.ts'
-import { type ByteSource, materialize } from '../../../../io/types.ts'
-import { type FileStat, FileType, PathSpec, wordText } from '../../../../types.ts'
-import {
-  absentDestError,
-  dispatchStat,
-  dotRefusal,
-} from '../../../../commands/builtin/utils/paths.ts'
-import {
-  CycleError,
-  dottedSpelling,
-  gnuBasename,
-  gnuDirname,
-  posixNormpath,
-} from '../../../../utils/path.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { classify } from '../../../../errors/classify.ts'
 import {
   fsStrerror,
   isEexist,
@@ -47,21 +41,27 @@ import {
   isEnotdir,
   isRefusal,
 } from '../../../../errors/fs.ts'
-import { rstripSlash } from '../../../../utils/slash.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
+import type { FsCondition } from '../../../../errors/types.ts'
+import { type ByteSource, materialize } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { type FileStat, FileType, PathSpec, wordText } from '../../../../types.ts'
+import {
+  CycleError,
+  dottedSpelling,
+  gnuBasename,
+  gnuDirname,
+  posixNormpath,
+} from '../../../../utils/path.ts'
+import { rstripSlash } from '../../../../utils/slash.ts'
 import type { NamespaceLinks } from '../../../../view/types.ts'
 import type { NamespaceReader } from '../../../dispatcher/reader.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import { linkTargetStat, missCondition, pathReaddir } from '../../../mount/namespace/probe.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { absPath, fail, result } from '../shared.ts'
 import { posixRelative } from './links.ts'
-import { linkTargetStat, missCondition, pathReaddir } from '../../../mount/namespace/probe.ts'
-import { resolvePathStat } from '../../../../commands/builtin/utils/paths.ts'
-import type { Result } from '../types.ts'
-import { decodeText, encodeText } from '../../../../shell/bytes.ts'
-import { classify } from '../../../../errors/classify.ts'
-import { posixPhrase } from '../../../../errors/posix.ts'
-import type { FsCondition } from '../../../../errors/types.ts'
 
 // Opt in by assigning a debug sink, as Python's module logger is off until
 // configured.
@@ -831,7 +831,7 @@ export async function handleLn(
   dispatch: DispatchFn,
   session: SessionState,
   args: (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const spec = specOf('ln')
   const parsed = parseCommand(
     spec,

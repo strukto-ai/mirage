@@ -13,18 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Octokit } from '@octokit/core'
-import { RequestError } from '@octokit/request-error'
 import { retry } from '@octokit/plugin-retry'
 import { throttling } from '@octokit/plugin-throttling'
+import { RequestError } from '@octokit/request-error'
+import type { ApiResponse } from '../api/client.ts'
 import {
-  MAX_BODY_BYTES,
   bodyChunks,
   loweredHeaders,
+  MAX_BODY_BYTES,
   readBytes,
   stallTimeout,
 } from '../api/client.ts'
-import { GRAPHQL_PATH, RAW_MEDIA_TYPE, SEARCH_PAGE_SIZE } from './constants.ts'
 import { ApiError } from '../api/errors.ts'
+import { GRAPHQL_PATH, RAW_MEDIA_TYPE, SEARCH_PAGE_SIZE } from './constants.ts'
 
 export const GITHUB_API_BASE = 'https://api.github.com'
 export const GITHUB_API_VERSION = '2022-11-28'
@@ -57,15 +58,9 @@ export interface GitHubTransport {
     body?: unknown,
     params?: Record<string, string>,
     headers?: Record<string, string>,
-  ): Promise<GitHubResponse>
+  ): Promise<ApiResponse>
   /** GET a path's raw media type as its bytes arrive. */
   stream?(path: string): AsyncIterable<Uint8Array>
-}
-
-export interface GitHubResponse {
-  data: unknown
-  status: number
-  headers: Record<string, string>
 }
 
 const Kit = Octokit.plugin(retry, throttling)
@@ -160,7 +155,7 @@ export class HttpGitHubTransport implements GitHubTransport {
     body?: unknown,
     params?: Record<string, string>,
     headers?: Record<string, string>,
-  ): Promise<GitHubResponse> {
+  ): Promise<ApiResponse> {
     const r = await this.send(method, path, body, params, headers)
     // Collect outside Octokit's retry policy: exceeding the byte limit
     // is a refusal, never a reason to send the request again.
@@ -369,13 +364,6 @@ export interface GitHubTreeItem {
   size?: number
 }
 
-interface GitHubBlob {
-  content: string
-  encoding: string
-  sha: string
-  size: number
-}
-
 export interface GitHubRepoInfo {
   default_branch: string
 }
@@ -395,7 +383,12 @@ export async function fetchBlob(
   repo: string,
   sha: string,
 ): Promise<Uint8Array> {
-  const data = (await transport.get(blobPath(owner, repo, sha))) as GitHubBlob
+  const data = (await transport.get(blobPath(owner, repo, sha))) as {
+    content: string
+    encoding: string
+    sha: string
+    size: number
+  }
   if (data.encoding !== 'base64') {
     throw new GitHubApiError(`unexpected blob encoding: ${data.encoding}`, 0)
   }
@@ -428,11 +421,6 @@ export interface GitHubCodeSearchResult {
   sha: string
 }
 
-export interface GitHubCodeSearch {
-  results: GitHubCodeSearchResult[]
-  truncated: boolean
-}
-
 // The literal is sent verbatim, so the answer has to vouch for itself: an
 // item is kept only when its repository.full_name names this repository
 // (compared case-insensitively, as GitHub resolves `repo:`), and the answer is
@@ -445,7 +433,7 @@ export async function searchCode(
   repo: string,
   query: string,
   pathFilter?: string,
-): Promise<GitHubCodeSearch> {
+) {
   let q = `${query} repo:${owner}/${repo}`
   if (pathFilter !== undefined && pathFilter !== '') q += ` path:${pathFilter}`
   const data = (await transport.get(`/search/code`, {

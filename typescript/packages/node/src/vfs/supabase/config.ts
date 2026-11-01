@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { aliasSchema, makeS3Alias, type S3AliasConfig } from '../s3_alias.ts'
 
 export interface SupabaseConfig extends S3AliasConfig {
@@ -21,34 +20,25 @@ export interface SupabaseConfig extends S3AliasConfig {
   projectRef?: string
 }
 
-export const SupabaseConfigSchema = aliasSchema({
-  forcePathStyle: z.boolean().optional().meta({ default: true }),
-  region: z
-    .string()
-    .describe(
-      'Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.',
-    ),
-  endpoint: z
-    .string()
-    .optional()
-    .describe('Endpoint URL that replaces the one the provider derives.'),
-  projectRef: z
-    .string()
-    .optional()
-    .describe(
-      'Supabase project reference. It builds the endpoint `https://<projectRef>.storage.supabase.co/storage/v1/s3` unless `endpoint` is set; one of the two is required.',
-    ),
-})
-
-// Only the redacted twin derives; the redactor fills in the region and
-// endpoint the provider's rule resolves.
-export type SupabaseConfigRedacted = RedactedConfig<
-  ConfigOf<typeof SupabaseConfigSchema>,
-  'accessKeyId' | 'secretAccessKey' | 'sessionToken' | 'proxy'
->
-
-export const ALIAS = makeS3Alias<SupabaseConfig, SupabaseConfigRedacted>({
-  schema: SupabaseConfigSchema,
+export const SupabaseConfig = makeS3Alias({
+  schema: aliasSchema({
+    forcePathStyle: z.boolean().optional().meta({ default: true }),
+    region: z
+      .string()
+      .describe(
+        'Provider region every request is signed for. Most providers also build their endpoint URL from it unless `endpoint` is set.',
+      ),
+    endpoint: z
+      .string()
+      .optional()
+      .describe('Endpoint URL that replaces the one the provider derives.'),
+    projectRef: z
+      .string()
+      .optional()
+      .describe(
+        'Supabase project reference. It builds the endpoint `https://<projectRef>.storage.supabase.co/storage/v1/s3` unless `endpoint` is set; one of the two is required.',
+      ),
+  }),
   endpointFor: (config) => {
     if (config.projectRef !== undefined && config.projectRef !== '') {
       return `https://${config.projectRef}.storage.supabase.co/storage/v1/s3`
@@ -57,6 +47,3 @@ export const ALIAS = makeS3Alias<SupabaseConfig, SupabaseConfigRedacted>({
   },
   forcePathStyle: true,
 })
-
-export const resolvedSupabaseEndpoint = ALIAS.resolvedEndpoint
-export const supabaseToS3Config = ALIAS.toS3Config

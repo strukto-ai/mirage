@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import { parseChmod } from '../../../../utils/mode.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { scanOptions } from '../getopt.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { scanOptions } from '../getopt.ts'
 import { builtinUsage, fail } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
+import type { BuiltinCall } from '../types.ts'
 
 /** Render a mask the way `umask -S` does: the bits it leaves on. */
 export function symbolicUmask(mask: number): string {
@@ -78,7 +79,7 @@ export function parseUmask(text: string, current: number): number | string {
  * operands are ignored, an unknown option is exit 2, a bad mode exit 1
  * with the mask unchanged.
  */
-export function handleUmask(args: string[], session: SessionState): Result {
+export function handleUmask(args: string[], session: SessionState): RedirectResult {
   const scan = scanOptions(args, 'Sp')
   if (scan.bad !== null)
     return fail('umask', `bash: umask: ${scan.bad}: invalid option\n${builtinUsage('umask')}`, 2)
@@ -101,6 +102,6 @@ export function handleUmask(args: string[], session: SessionState): Result {
 }
 
 /** The `umask` arm. */
-export function umaskBuiltin(call: BuiltinCall): Promise<Result> {
+export function umaskBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleUmask([...call.argv.args], call.context.session))
 }

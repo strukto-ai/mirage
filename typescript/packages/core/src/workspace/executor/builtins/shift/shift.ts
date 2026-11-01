@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
+import { ExitSignal } from '../../../../shell/errors.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { positionalParams, setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { ExitSignal } from '../../../../shell/errors.ts'
 import { builtinError, isCountWord, numericOperands } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
+import type { BuiltinCall } from '../types.ts'
 
 /**
  * Shift positional parameters, with bash's argument checks: a count past
@@ -31,7 +32,7 @@ export function handleShift(
   args: readonly string[],
   callStack: CallStack | null,
   session: SessionState,
-): Result {
+): RedirectResult {
   const words = numericOperands(args)
   const first = words[0]
   if (first !== undefined && !isCountWord(first)) {
@@ -67,6 +68,6 @@ export function handleShift(
 }
 
 /** The `shift` arm. */
-export function shiftBuiltin(call: BuiltinCall): Promise<Result> {
+export function shiftBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleShift([...call.argv.args], call.callStack, call.context.session))
 }

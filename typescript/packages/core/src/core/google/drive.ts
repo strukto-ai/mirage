@@ -13,6 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ByteSpool } from '../../io/spool.ts'
+import { sha256Hex } from '../../utils/hash.ts'
+import type { ByteWindow } from '../../utils/ranges.ts'
+import type { TokenManager } from './client.ts'
 import {
   driveBase,
   driveUploadBase,
@@ -22,12 +25,9 @@ import {
   googleGetStream,
   googlePatch,
   googlePost,
-  googleSendBytes,
   googleResumable,
+  googleSendBytes,
 } from './client.ts'
-import type { TokenManager } from './client.ts'
-import type { ByteWindow } from '../../utils/ranges.ts'
-import { sha256Hex } from '../../utils/hash.ts'
 
 // md5Checksum and headRevisionId are a file's token (driveFingerprint).
 const FIELDS =
@@ -90,11 +90,6 @@ interface ListResponse {
 export interface SharedDrive {
   id: string
   name: string
-}
-
-interface ListDrivesResponse {
-  drives?: SharedDrive[]
-  nextPageToken?: string
 }
 
 export function listFiles(
@@ -204,7 +199,10 @@ export async function listSharedDrives(
     }
     if (pageToken !== null) params.pageToken = pageToken
     const url = `${driveBase(tm)}/drives`
-    const data = (await googleGet(tm, url, params)) as ListDrivesResponse
+    const data = (await googleGet(tm, url, params)) as {
+      drives?: SharedDrive[]
+      nextPageToken?: string
+    }
     if (data.drives !== undefined) for (const item of data.drives) drives.push(item)
     pageToken = data.nextPageToken ?? null
     if (pageToken === null) break
@@ -398,12 +396,6 @@ export interface DriveChange {
   file?: DriveFile
 }
 
-interface ChangesResponse {
-  changes?: DriveChange[]
-  nextPageToken?: string
-  newStartPageToken?: string
-}
-
 /**
  * The changes page token at the present, which lists nothing. Mirrors Python
  * `start_page_token`.
@@ -434,7 +426,11 @@ export async function listChanges(
       pageSize: 1000,
       includeItemsFromAllDrives: 'true',
       supportsAllDrives: 'true',
-    })) as ChangesResponse
+    })) as {
+      changes?: DriveChange[]
+      nextPageToken?: string
+      newStartPageToken?: string
+    }
     for (const item of data.changes ?? []) found.push(item)
     if (data.newStartPageToken !== undefined && data.newStartPageToken !== '') {
       return [found, data.newStartPageToken]

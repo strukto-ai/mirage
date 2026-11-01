@@ -1,32 +1,28 @@
-import { BaseVFS } from '../base.ts'
-import {
-  SharePointConfigSchema,
-  SharePointAccessor,
-  type SharePointConfig,
-  type SharePointConfigRedacted,
-} from '../../accessor/sharepoint.ts'
-import { VFSName } from '../../types.ts'
-import type { DeltaHook } from '../../events/base.ts'
+import { SharePointAccessor, SharePointConfig } from '../../accessor/sharepoint.ts'
+import { copy } from '../../core/sharepoint/copy.ts'
+import { create } from '../../core/sharepoint/create.ts'
 import { buildDeltaHook } from '../../core/sharepoint/events.ts'
-import type { DirListing, PathSpec, FileStat } from '../../types.ts'
-import type { Handed } from '../types.ts'
-import { readdir, tree } from '../../core/sharepoint/readdir.ts'
+import { exists } from '../../core/sharepoint/exists.ts'
+import { mkdir } from '../../core/sharepoint/mkdir.ts'
 import { read } from '../../core/sharepoint/read.ts'
+import { readdir, tree } from '../../core/sharepoint/readdir.ts'
+import { rename } from '../../core/sharepoint/rename.ts'
+import { rmR } from '../../core/sharepoint/rm.ts'
+import { rmdir } from '../../core/sharepoint/rmdir.ts'
+import { filesContaining } from '../../core/sharepoint/search.ts'
 import { stat } from '../../core/sharepoint/stat.ts'
 import { readStream } from '../../core/sharepoint/stream.ts'
-import { exists } from '../../core/sharepoint/exists.ts'
-import type { ByteSource } from '../../io/types.ts'
-import { write } from '../../core/sharepoint/write.ts'
-import { create } from '../../core/sharepoint/create.ts'
-import { mkdir } from '../../core/sharepoint/mkdir.ts'
-import { unlink } from '../../core/sharepoint/unlink.ts'
-import { rmdir } from '../../core/sharepoint/rmdir.ts'
-import { rmR } from '../../core/sharepoint/rm.ts'
-import { rename } from '../../core/sharepoint/rename.ts'
-import { copy } from '../../core/sharepoint/copy.ts'
 import { truncate } from '../../core/sharepoint/truncate.ts'
-import { filesContaining } from '../../core/sharepoint/search.ts'
+import { unlink } from '../../core/sharepoint/unlink.ts'
+import { write } from '../../core/sharepoint/write.ts'
+import type { DeltaHook } from '../../events/base.ts'
+import type { ByteSource } from '../../io/types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
 import { redactConfigWithSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
 
 export const VFS_MD = `{prefix}
   SharePoint Enterprise document libraries. Multi-site, multi-drive discovery.
@@ -36,11 +32,6 @@ export const VFS_MD = `{prefix}
   Unscoped level 2+ (ls /site/lib/...): lists files and folders in the drive.
   IMPORTANT: This is a remote mount. Prefer targeted reads (grep, head) over full scans. Avoid cat on large files without piping to head/tail.
   File versions are retained, snapshots pin and read prior versions.`
-
-export interface SharePointVFSState {
-  type: string
-  config: SharePointConfigRedacted
-}
 
 export class SharePointVFS extends BaseVFS {
   override readonly name: string = VFSName.SHAREPOINT
@@ -155,11 +146,11 @@ export class SharePointVFS extends BaseVFS {
     return buildDeltaHook(this.accessor)
   }
 
-  override getState(): SharePointVFSState {
-    const config: SharePointConfigRedacted = redactConfigWithSchema(
-      SharePointConfigSchema,
+  override getState(): ConfigState<RedactedSchema<typeof SharePointConfig>> {
+    const config: RedactedSchema<typeof SharePointConfig> = redactConfigWithSchema(
+      SharePointConfig,
       this.config,
-    ) as SharePointConfigRedacted
+    ) as RedactedSchema<typeof SharePointConfig>
     return { type: this.name, config }
   }
 }

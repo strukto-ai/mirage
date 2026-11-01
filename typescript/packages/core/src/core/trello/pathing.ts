@@ -12,24 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fitIdName } from '../../utils/naming.ts'
+import { firstText as pickString, requireId } from '../../utils/records.ts'
 import { sanitizeName } from '../../utils/sanitize.ts'
 
 export { sanitizeName } from '../../utils/sanitize.ts'
-import { fitIdName } from '../../utils/naming.ts'
-
-function pickString(record: Record<string, unknown>, ...keys: readonly string[]): string {
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'string' && value !== '') return value
-  }
-  return ''
-}
-
-function requireId(record: Record<string, unknown>): string {
-  const id = pickString(record, 'id')
-  if (id === '') throw new Error('record missing id')
-  return id
-}
 
 export function workspaceDirname(workspace: Record<string, unknown>): string {
   const label = sanitizeName(pickString(workspace, 'displayName', 'name') || 'workspace')

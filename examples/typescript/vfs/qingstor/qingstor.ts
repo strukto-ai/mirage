@@ -19,8 +19,8 @@ import {
   MountMode,
   QingStorVFS,
   Workspace,
-  resolvedQingStorEndpoint,
-  type QingStorConfig,
+
+  QingStorConfig,
   type FileStat,
 } from '@struktoai/mirage-node'
 
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   const config = configFromEnv()
   const ws = new Workspace({ '/qs/': new QingStorVFS(config) }, { mode: MountMode.READ })
   try {
-    console.log(`=== QingStor at ${resolvedQingStorEndpoint(config)} ===`)
+    console.log(`=== QingStor at ${QingStorConfig.resolvedEndpoint(config)} ===`)
 
     let r = await ws.shell('ls /qs/')
     console.log('ls /qs/:\n' + r.stdoutText)

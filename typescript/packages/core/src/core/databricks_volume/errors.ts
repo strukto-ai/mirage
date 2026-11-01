@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from 'zod'
 import { ApiError } from '../api/errors.ts'
 
 export class DatabricksVolumeCredentialError extends Error {
@@ -39,5 +40,24 @@ export function isNotFound(exc: unknown): boolean {
     exc instanceof DatabricksVolumeApiError &&
     (exc.status === 404 ||
       (exc.status === 400 && exc.errorCode !== null && NOT_FOUND_CODES.has(exc.errorCode)))
+  )
+}
+
+const ErrorBody = z.object({ error_code: z.string().nullish(), message: z.string().nullish() })
+
+export function errorOf(response: Response, text: string): Error {
+  let payload: unknown = null
+  try {
+    payload = JSON.parse(text)
+  } catch {
+    payload = null
+  }
+  const parsed = ErrorBody.safeParse(payload)
+  const code = parsed.success ? (parsed.data.error_code ?? null) : null
+  const message = parsed.success ? (parsed.data.message ?? text) : text
+  return new DatabricksVolumeApiError(
+    `databricks_volume: HTTP ${String(response.status)} ${message}`,
+    response.status,
+    code,
   )
 }

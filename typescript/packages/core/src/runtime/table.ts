@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { EXTERNAL_COMMANDS, WHOLE_LINE } from './constants.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 import type { Runtime } from './base.ts'
-import { isProcessExecutor, isLineExecutor, type LineExecutor } from './mixin.ts'
+import type { RuntimeOptions } from './config.ts'
+import { EXTERNAL_COMMANDS, WHOLE_LINE } from './constants.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
+import { isLineExecutor, isProcessExecutor, type LineExecutorMixin } from './mixin.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
-import type { RuntimeOptions } from './config.ts'
 import { WorkspaceRuntime } from './workspace.ts'
-import { compareCodePoints } from '../utils/sort.ts'
 
 // Null prototype: runtime names come from config, and a name like
 // `constructor` must miss instead of resolving an `Object.prototype`
@@ -236,7 +236,7 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
  */
 export function wholeLineRuntime(
   bindings: Readonly<Record<string, Runtime | null | undefined>>,
-): (Runtime & LineExecutor) | null {
+): (Runtime & LineExecutorMixin) | null {
   const whole = Object.hasOwn(bindings, WHOLE_LINE) ? bindings[WHOLE_LINE] : null
   if (whole != null && isLineExecutor(whole)) return whole
   return null

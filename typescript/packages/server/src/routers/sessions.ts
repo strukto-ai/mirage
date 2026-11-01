@@ -12,18 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { refused } from '../metrics.ts'
-import { randomBytes } from 'node:crypto'
-import type { FastifyInstance } from 'fastify'
-import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { WorkspaceRegistry } from '../registry.ts'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { MountMode } from '@struktoai/mirage-core/types'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { loadProfilePolicy } from '@struktoai/mirage-node'
-
-export interface SessionsRoutesDeps {
-  registry: WorkspaceRegistry
-}
+import type { FastifyInstance } from 'fastify'
+import { randomBytes } from 'node:crypto'
+import { refused } from '../metrics.ts'
+import type { WorkspaceRegistry } from '../registry.ts'
 
 interface WsIdParams {
   wsId: string
@@ -50,7 +46,12 @@ interface CreateSessionRequest {
   profile?: string | null
 }
 
-export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoutesDeps): void {
+export function registerSessionsRoutes(
+  app: FastifyInstance,
+  deps: {
+    registry: WorkspaceRegistry
+  },
+): void {
   app.post<{ Params: WsIdParams; Body: CreateSessionRequest }>(
     '/v1/workspaces/:wsId/sessions',
     async (req, reply) => {
@@ -127,7 +128,7 @@ export function registerSessionsRoutes(app: FastifyInstance, deps: SessionsRoute
         const profile =
           typeof asked === 'string' || asked === null
             ? asked
-            : loadProfilePolicy(parseSessionProfile(asked))
+            : loadProfilePolicy(SessionProfile(asked))
         const session = await ws.setSessionProfile(req.params.sessionId, profile)
         return { session_id: session.sessionId, cwd: session.cwd }
       } catch (err) {

@@ -12,11 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { enoent, enotempty } from '@struktoai/mirage-core/errors/fs'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { FileEntryWithStats, SFTPWrapper, Stats } from 'ssh2'
-
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent, enotempty } from '@struktoai/mirage-core/errors/fs'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { holdsEntries, isDirectoryAttrs, isFailure, isNoSuchFile, joinRoot } from './utils.ts'
 
@@ -56,14 +55,14 @@ async function rmdirRemote(sftp: SFTPWrapper, remote: string): Promise<void> {
   })
 }
 
-async function rmRecurse(sftp: SFTPWrapper, remote: string, root: PathSpec): Promise<void> {
+async function rmRInner(sftp: SFTPWrapper, remote: string, root: PathSpec): Promise<void> {
   const stats = await statRemote(sftp, remote)
   if (isDirectoryAttrs(stats)) {
     const entries = await readdirRemote(sftp, remote)
     for (const entry of entries) {
       if (entry.filename === '.' || entry.filename === '..') continue
       const child = remote === '/' ? `/${entry.filename}` : `${remote}/${entry.filename}`
-      await rmRecurse(sftp, child, root)
+      await rmRInner(sftp, child, root)
     }
     try {
       await rmdirRemote(sftp, remote)
@@ -83,7 +82,7 @@ export async function rmR(accessor: SSHAccessor, p: PathSpec): Promise<void> {
   const virtual = rawPathOf(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   try {
-    await rmRecurse(sftp, remote, p)
+    await rmRInner(sftp, remote, p)
   } catch (err) {
     if (isNoSuchFile(err)) throw enoent(p)
     throw err

@@ -12,23 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import type { S3BrowserPresignedUrlProvider, S3Config } from './s3/config.ts'
-import { aliyunToS3Config, AliyunConfigSchema, resolvedAliyunEndpoint } from './aliyun/config.ts'
-import { backblazeToS3Config, resolvedBackblazeEndpoint } from './backblaze/config.ts'
-import { cephToS3Config } from './ceph/config.ts'
-import { digitalOceanToS3Config, resolvedDigitalOceanEndpoint } from './digitalocean/config.ts'
-import { gcsToS3Config } from './gcs/config.ts'
-import { minioToS3Config } from './minio/config.ts'
-import { ociToS3Config, resolvedOciEndpoint } from './oci/config.ts'
-import { qingStorToS3Config, resolvedQingStorEndpoint } from './qingstor/config.ts'
-import { r2ToS3Config, resolvedR2Endpoint } from './r2/config.ts'
-import { resolvedScalewayEndpoint, scalewayToS3Config } from './scaleway/config.ts'
-import { seaweedfsToS3Config } from './seaweedfs/config.ts'
-import { resolvedSupabaseEndpoint, supabaseToS3Config } from './supabase/config.ts'
-import { resolvedTencentEndpoint, tencentToS3Config } from './tencent/config.ts'
-import { resolvedWasabiEndpoint, wasabiToS3Config } from './wasabi/config.ts'
 import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { describe, expect, it } from 'vitest'
+import { AliyunConfig } from './aliyun/config.ts'
+import { BackblazeConfig } from './backblaze/config.ts'
+import { CephConfig } from './ceph/config.ts'
+import { DigitalOceanConfig } from './digitalocean/config.ts'
+import { GCSConfig } from './gcs/config.ts'
+import { MinIOConfig } from './minio/config.ts'
+import { OCIConfig } from './oci/config.ts'
+import { QingStorConfig } from './qingstor/config.ts'
+import { R2Config } from './r2/config.ts'
+import type { S3BrowserPresignedUrlProvider, S3Config } from './s3/config.ts'
+import { ScalewayConfig } from './scaleway/config.ts'
+import { SeaweedFSConfig } from './seaweedfs/config.ts'
+import { SupabaseConfig } from './supabase/config.ts'
+import { TencentConfig } from './tencent/config.ts'
+import { WasabiConfig } from './wasabi/config.ts'
 
 const provider: S3BrowserPresignedUrlProvider = () => Promise.resolve('https://signed.example.com')
 
@@ -45,64 +45,64 @@ const DERIVED = [
     field: 'region',
     value: 'cn-hangzhou',
     endpoint: 'https://s3.oss-cn-hangzhou.aliyuncs.com',
-    resolved: resolvedAliyunEndpoint as (config: never) => string | undefined,
-    toS3: aliyunToS3Config as ToS3,
+    resolved: AliyunConfig.resolvedEndpoint as (config: never) => string | undefined,
+    toS3: AliyunConfig.toS3Config as ToS3,
   },
   {
     name: 'backblaze',
     field: 'region',
     value: 'us-west-004',
     endpoint: 'https://s3.us-west-004.backblazeb2.com',
-    resolved: resolvedBackblazeEndpoint as (config: never) => string | undefined,
-    toS3: backblazeToS3Config as ToS3,
+    resolved: BackblazeConfig.resolvedEndpoint as (config: never) => string | undefined,
+    toS3: BackblazeConfig.toS3Config as ToS3,
   },
   {
     name: 'digitalocean',
     field: 'region',
     value: 'nyc3',
     endpoint: 'https://nyc3.digitaloceanspaces.com',
-    resolved: resolvedDigitalOceanEndpoint as (config: never) => string | undefined,
-    toS3: digitalOceanToS3Config as ToS3,
+    resolved: DigitalOceanConfig.resolvedEndpoint as (config: never) => string | undefined,
+    toS3: DigitalOceanConfig.toS3Config as ToS3,
   },
   {
     name: 'qingstor',
     field: 'region',
     value: 'pek3a',
     endpoint: 'https://s3.pek3a.qingstor.com',
-    resolved: resolvedQingStorEndpoint as (config: never) => string | undefined,
-    toS3: qingStorToS3Config as ToS3,
+    resolved: QingStorConfig.resolvedEndpoint as (config: never) => string | undefined,
+    toS3: QingStorConfig.toS3Config as ToS3,
   },
   {
     name: 'scaleway',
     field: 'region',
     value: 'fr-par',
     endpoint: 'https://s3.fr-par.scw.cloud',
-    resolved: resolvedScalewayEndpoint as (config: never) => string | undefined,
-    toS3: scalewayToS3Config as ToS3,
+    resolved: ScalewayConfig.resolvedEndpoint as (config: never) => string | undefined,
+    toS3: ScalewayConfig.toS3Config as ToS3,
   },
   {
     name: 'tencent',
     field: 'region',
     value: 'ap-guangzhou',
     endpoint: 'https://cos.ap-guangzhou.myqcloud.com',
-    resolved: resolvedTencentEndpoint as (config: never) => string | undefined,
-    toS3: tencentToS3Config as ToS3,
+    resolved: TencentConfig.resolvedEndpoint as (config: never) => string | undefined,
+    toS3: TencentConfig.toS3Config as ToS3,
   },
   {
     name: 'r2',
     field: 'accountId',
     value: 'account123',
     endpoint: 'https://account123.r2.cloudflarestorage.com',
-    resolved: resolvedR2Endpoint as (config: never) => string | undefined,
-    toS3: r2ToS3Config as ToS3,
+    resolved: R2Config.resolvedEndpoint as (config: never) => string | undefined,
+    toS3: R2Config.toS3Config as ToS3,
   },
   {
     name: 'supabase',
     field: 'projectRef',
     value: 'projref',
     endpoint: 'https://projref.storage.supabase.co/storage/v1/s3',
-    resolved: resolvedSupabaseEndpoint as (config: never) => string | undefined,
-    toS3: supabaseToS3Config as ToS3,
+    resolved: SupabaseConfig.resolvedEndpoint as (config: never) => string | undefined,
+    toS3: SupabaseConfig.toS3Config as ToS3,
   },
 ] as const
 
@@ -140,9 +140,9 @@ describe('derived-endpoint browser S3 aliases', () => {
 
 describe('pass-through browser S3 aliases (ceph/minio/seaweedfs)', () => {
   const CASES = [
-    { name: 'ceph', toS3: cephToS3Config as ToS3 },
-    { name: 'minio', toS3: minioToS3Config as ToS3 },
-    { name: 'seaweedfs', toS3: seaweedfsToS3Config as ToS3 },
+    { name: 'ceph', toS3: CephConfig.toS3Config as ToS3 },
+    { name: 'minio', toS3: MinIOConfig.toS3Config as ToS3 },
+    { name: 'seaweedfs', toS3: SeaweedFSConfig.toS3Config as ToS3 },
   ] as const
 
   for (const c of CASES) {
@@ -163,31 +163,35 @@ describe('pass-through browser S3 aliases (ceph/minio/seaweedfs)', () => {
 
 describe('browser S3 aliases with their own rule', () => {
   it('gcs defaults both the region and the endpoint', () => {
-    const s3 = gcsToS3Config(BASE)
+    const s3 = GCSConfig.toS3Config(BASE)
     expect(s3.region).toBe('auto')
     expect(s3.endpoint).toBe('https://storage.googleapis.com')
   })
 
   it('gcs still honors an explicit endpoint and region', () => {
-    const s3 = gcsToS3Config({ ...BASE, region: 'eu', endpoint: 'https://custom.example.com' })
+    const s3 = GCSConfig.toS3Config({
+      ...BASE,
+      region: 'eu',
+      endpoint: 'https://custom.example.com',
+    })
     expect(s3.region).toBe('eu')
     expect(s3.endpoint).toBe('https://custom.example.com')
   })
 
   it('r2 reports region auto while deriving from the account id', () => {
-    expect(r2ToS3Config({ ...BASE, accountId: 'acct' }).region).toBe('auto')
+    expect(R2Config.toS3Config({ ...BASE, accountId: 'acct' }).region).toBe('auto')
   })
 
   it('oci needs both a namespace and a region', () => {
-    expect(resolvedOciEndpoint({ ...BASE, namespace: 'ns' })).toBeUndefined()
-    expect(resolvedOciEndpoint({ ...BASE, region: 'us-ashburn-1' })).toBeUndefined()
-    expect(resolvedOciEndpoint({ ...BASE, namespace: 'ns', region: 'us-ashburn-1' })).toBe(
+    expect(OCIConfig.resolvedEndpoint({ ...BASE, namespace: 'ns' })).toBeUndefined()
+    expect(OCIConfig.resolvedEndpoint({ ...BASE, region: 'us-ashburn-1' })).toBeUndefined()
+    expect(OCIConfig.resolvedEndpoint({ ...BASE, namespace: 'ns', region: 'us-ashburn-1' })).toBe(
       'https://ns.compat.objectstorage.us-ashburn-1.oci.customer-oci.com',
     )
   })
 
   it('oci forwards the region it derived from', () => {
-    expect(ociToS3Config({ ...BASE, namespace: 'ns', region: 'us-ashburn-1' }).region).toBe(
+    expect(OCIConfig.toS3Config({ ...BASE, namespace: 'ns', region: 'us-ashburn-1' }).region).toBe(
       'us-ashburn-1',
     )
   })
@@ -195,15 +199,15 @@ describe('browser S3 aliases with their own rule', () => {
   // supabase is the one alias whose gateway does not serve virtual-hosted
   // style, so it pins path style on where the others leave it unset.
   it('supabase forces path style', () => {
-    expect(supabaseToS3Config({ ...BASE, projectRef: 'p' }).forcePathStyle).toBe(true)
+    expect(SupabaseConfig.toS3Config({ ...BASE, projectRef: 'p' }).forcePathStyle).toBe(true)
   })
 
   it('wasabi always resolves an endpoint, defaulting to the us-east-1 host', () => {
-    expect(resolvedWasabiEndpoint(BASE)).toBe('https://s3.wasabisys.com')
-    expect(resolvedWasabiEndpoint({ ...BASE, region: 'us-east-1' })).toBe(
+    expect(WasabiConfig.resolvedEndpoint(BASE)).toBe('https://s3.wasabisys.com')
+    expect(WasabiConfig.resolvedEndpoint({ ...BASE, region: 'us-east-1' })).toBe(
       'https://s3.wasabisys.com',
     )
-    expect(resolvedWasabiEndpoint({ ...BASE, region: 'us-west-1' })).toBe(
+    expect(WasabiConfig.resolvedEndpoint({ ...BASE, region: 'us-west-1' })).toBe(
       'https://s3.us-west-1.wasabisys.com',
     )
   })
@@ -211,14 +215,14 @@ describe('browser S3 aliases with their own rule', () => {
   // The endpoint default does not leak into the region: an unset region
   // stays unset on the S3Config, which is where wasabi differs from node's.
   it('wasabi leaves an unset region unset', () => {
-    expect(wasabiToS3Config(BASE).region).toBeUndefined()
-    expect(wasabiToS3Config(BASE).endpoint).toBe('https://s3.wasabisys.com')
+    expect(WasabiConfig.toS3Config(BASE).region).toBeUndefined()
+    expect(WasabiConfig.toS3Config(BASE).endpoint).toBe('https://s3.wasabisys.com')
   })
 })
 
 describe('browser S3 alias redaction', () => {
   it('hides the presigned-url provider', () => {
-    const redacted = redactConfigWithSchema(AliyunConfigSchema, {
+    const redacted = redactConfigWithSchema(AliyunConfig, {
       ...BASE,
       region: 'cn-hangzhou',
     }) as unknown as Record<string, unknown>

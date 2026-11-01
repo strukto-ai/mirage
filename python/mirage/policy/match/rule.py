@@ -25,7 +25,8 @@ from mirage.policy.types import (
     CommandRule,
     VfsContext,
 )
-from mirage.rs.policy import admission_matcher, units
+from mirage.rs.document import units
+from mirage.rs.policy import admission_matcher
 from mirage.types import PathSpec
 
 

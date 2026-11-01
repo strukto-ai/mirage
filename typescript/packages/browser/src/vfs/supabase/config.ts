@@ -12,25 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const SupabaseConfigSchema = browserAliasSchema({
-  projectRef: z
-    .string()
-    .optional()
-    .describe(
-      'Supabase project reference. It builds the endpoint `https://<projectRef>.storage.supabase.co/storage/v1/s3` unless `endpoint` is set.',
-    ),
-})
-
-export type SupabaseConfig = ConfigOf<typeof SupabaseConfigSchema>
-
-export type SupabaseConfigRedacted = RedactedConfig<SupabaseConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<SupabaseConfig, SupabaseConfigRedacted>({
-  schema: SupabaseConfigSchema,
+export const SupabaseConfig = makeBrowserS3Alias({
+  schema: browserAliasSchema({
+    projectRef: z
+      .string()
+      .optional()
+      .describe(
+        'Supabase project reference. It builds the endpoint `https://<projectRef>.storage.supabase.co/storage/v1/s3` unless `endpoint` is set.',
+      ),
+  }),
   endpointFor: derivedEndpoint(
     'projectRef',
     (projectRef) => `https://${projectRef}.storage.supabase.co/storage/v1/s3`,
@@ -38,5 +32,4 @@ export const ALIAS = makeBrowserS3Alias<SupabaseConfig, SupabaseConfigRedacted>(
   forcePathStyle: true,
 })
 
-export const resolvedSupabaseEndpoint = ALIAS.resolvedEndpoint
-export const supabaseToS3Config = ALIAS.toS3Config
+export type SupabaseConfig = ConfigOf<typeof SupabaseConfig>

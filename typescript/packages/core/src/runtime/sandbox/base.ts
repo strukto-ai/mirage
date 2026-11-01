@@ -13,22 +13,22 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../../commands/config.ts'
+import { currentCaller } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
+import { shellJoin } from '../../shell/join.ts'
 import type { PathSpec } from '../../types.ts'
-import { EXTERNAL_COMMANDS } from '../constants.ts'
+import { abortable } from '../../utils/abort.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import { Runtime } from '../base.ts'
+import type { RuntimeOptions } from '../config.ts'
+import { EXTERNAL_COMMANDS } from '../constants.ts'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
-  type LineExecutor,
-  type ProcessExecutor,
+  type LineExecutorMixin,
+  type ProcessExecutorMixin,
 } from '../mixin.ts'
 import type { MountType, OutputFn, RunResult } from '../types.ts'
-import type { RuntimeOptions } from '../config.ts'
-import { abortable } from '../../utils/abort.ts'
-import { currentCaller } from '../../context/session_context.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { shellJoin } from '../../shell/join.ts'
 import {
   BASE_CONFIG_KEYS,
   checkMountType,
@@ -71,7 +71,7 @@ import { SandboxMounts } from './mounts.ts'
  */
 export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   extends Runtime<undefined>
-  implements LineExecutor<undefined>, ProcessExecutor<undefined>
+  implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
   // Lines execute on the provider's machine and act on that machine's
   // world (its filesystem, its network); the workspace gate never sees

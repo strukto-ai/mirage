@@ -18,8 +18,8 @@ import { TiDBFilesystemAccessor } from '../../../src/accessor/tidb_filesystem.ts
 import { PathSpec } from '../../../src/types.ts'
 import { mountKey } from '../../../src/utils/key_prefix.ts'
 import { rstripSlash } from '../../../src/utils/slash.ts'
-import { TiDBFilesystemConfigSchema } from '../../../src/vfs/tidb_filesystem/config.ts'
 import { parseConfigWithSchema } from '../../../src/vfs/secrets.ts'
+import { TiDBFilesystemConfig } from '../../../src/vfs/tidb_filesystem/config.ts'
 
 export const TOKEN = 'fs-token'
 const MTIME = 1792965402
@@ -513,7 +513,7 @@ export function makeAccessor(
   config: Record<string, unknown> = {},
 ): TiDBFilesystemAccessor {
   return new TiDBFilesystemAccessor(
-    parseConfigWithSchema(TiDBFilesystemConfigSchema, {
+    parseConfigWithSchema(TiDBFilesystemConfig, {
       host: fake.url,
       token: TOKEN,
       root_path: '/root',

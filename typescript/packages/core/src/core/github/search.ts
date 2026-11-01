@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey, mountPrefixOf, rawPathOf } from '../../utils/key_prefix.ts'
 import type { GitHubAccessor } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
+import { mountKey, mountPrefixOf, rawPathOf } from '../../utils/key_prefix.ts'
 import { lstripSlash, stripSlash } from '../../utils/slash.ts'
-import { type GitHubTransport, type GitHubCodeSearch, searchCode } from './client.ts'
+import { type GitHubTransport, searchCode } from './client.ts'
 import { SCOPE_WARN } from './constants.ts'
 import { countScopeFiles, searchSafe, unsearchableKeys } from './pushdown.ts'
 
@@ -39,7 +39,7 @@ export async function narrowPaths(
   for (const p of paths) {
     const key = rawPathOf(p)
     const pathFilter = stripSlash(key)
-    let answer: GitHubCodeSearch
+    let answer: Awaited<ReturnType<typeof searchCode>>
     try {
       answer = await searchCode(
         accessor.account.transport,

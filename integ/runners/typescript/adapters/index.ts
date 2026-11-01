@@ -12,9 +12,108 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SlackConfigSchema } from '@struktoai/mirage-core/vfs/slack/config'
-import { DiscordConfigSchema } from '@struktoai/mirage-core/vfs/discord/config'
-import { GCalConfigSchema } from '@struktoai/mirage-core/vfs/gcal/config'
+import {
+  CreateBucketCommand,
+  DeleteBucketCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import * as lancedb from '@lancedb/lancedb'
+import { QdrantClient } from '@qdrant/js-client-rest'
+import { Workspace as BrowserWorkspace, OPFSVFS } from '@struktoai/mirage-browser'
+import { TrelloConfig } from '@struktoai/mirage-core/core/trello/config'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
+import { ManualClock } from '@struktoai/mirage-core/utils/clock'
+import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
+import { DiscordConfig } from '@struktoai/mirage-core/vfs/discord/config'
+import { GCalConfig } from '@struktoai/mirage-core/vfs/gcal/config'
+import { MongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/config'
+import { PostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
+import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { SlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
+import { TiDBFilesystemConfig } from '@struktoai/mirage-core/vfs/tidb_filesystem/config'
+import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
+import type { ReadSpec, RedisCacheConfig } from '@struktoai/mirage-node'
+import {
+  AIRTABLE,
+  AirtableVFS,
+  AliyunVFS,
+  BackblazeVFS,
+  BoxVFS,
+  CephVFS,
+  ChromaVFS,
+  Mount as CoreMount,
+  DatabricksVolumeVFS,
+  DifyVFS,
+  DigitalOceanVFS,
+  DISCORD,
+  DiscordVFS,
+  DiskVFS,
+  DropboxVFS,
+  EmailVFS,
+  GCalVFS,
+  GCSVFS,
+  GDocsVFS,
+  GH,
+  GIT,
+  GitHubVFS,
+  GmailVFS,
+  GoogleDriveVFS,
+  GridFSVFS,
+  GSheetsVFS,
+  GSlidesVFS,
+  GWS,
+  HF,
+  HfBucketsVFS,
+  HfDatasetsVFS,
+  HfModelsVFS,
+  HfSpacesVFS,
+  HIMALAYA,
+  JaegerVFS,
+  LanceDBVFS,
+  LangfuseVFS,
+  LINEAR,
+  LinearVFS,
+  Mem0VFS,
+  MinIOVFS,
+  MongoDBVFS,
+  MountMode,
+  NextcloudVFS,
+  NotionVFS,
+  NTN,
+  OCIVFS,
+  OneDriveVFS,
+  PathSpec,
+  PostgresVFS,
+  QdrantVFS,
+  QingStorVFS,
+  R2VFS,
+  RAMVFS,
+  RedisVFS,
+  RedisWorkspaceStateStore,
+  S3VFS,
+  ScalewayVFS,
+  SEARCH,
+  SeaweedFSVFS,
+  SharePointVFS,
+  SLACK,
+  SlackVFS,
+  SSHVFS,
+  SupabaseVFS,
+  TencentVFS,
+  TiDBFilesystemVFS,
+  TRELLO,
+  TrelloVFS,
+  WasabiVFS,
+  Workspace,
+  type BaseVFS,
+  type WritePolicy,
+} from '@struktoai/mirage-node'
+import { commit as hubCommit } from '@struktoai/mirage-node/core/hf_hub/commit'
+import { ChromaClient } from 'chromadb'
+import { Binary, DBRef, Decimal128, Double, Long, MongoClient } from 'mongodb'
 import { randomBytes, randomUUID } from 'node:crypto'
 import {
   chmodSync,
@@ -29,118 +128,19 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import {
-  CreateBucketCommand,
-  DeleteBucketCommand,
-  DeleteObjectCommand,
-  ListObjectsV2Command,
-  S3Client,
-} from '@aws-sdk/client-s3'
-import { OPFSVFS, Workspace as BrowserWorkspace } from '@struktoai/mirage-browser'
-import type { ReadSpec, RedisCacheConfig } from '@struktoai/mirage-node'
-import {
-  AIRTABLE,
-  AirtableVFS,
-  AliyunVFS,
-  BackblazeVFS,
-  BoxVFS,
-  CephVFS,
-  ChromaVFS,
-  DatabricksVolumeVFS,
-  DifyVFS,
-  DigitalOceanVFS,
-  DiscordVFS,
-  DiskVFS,
-  DropboxVFS,
-  EmailVFS,
-  GDocsVFS,
-  GoogleDriveVFS,
-  GmailVFS,
-  GCalVFS,
-  GCSVFS,
-  GitHubVFS,
-  GridFSVFS,
-  GSheetsVFS,
-  GSlidesVFS,
-  DISCORD,
-  GWS,
-  HIMALAYA,
-  GH,
-  HF,
-  GIT,
-  LINEAR,
-  NTN,
-  SEARCH,
-  SLACK,
-  TRELLO,
-  HfBucketsVFS,
-  HfDatasetsVFS,
-  HfModelsVFS,
-  HfSpacesVFS,
-  JaegerVFS,
-  LanceDBVFS,
-  LangfuseVFS,
-  LinearVFS,
-  MinIOVFS,
-  Mem0VFS,
-  MongoDBVFS,
-  NotionVFS,
-  Mount as CoreMount,
-  MountMode,
-  NextcloudVFS,
-  OCIVFS,
-  OneDriveVFS,
-  PathSpec,
-  PostgresVFS,
-  QdrantVFS,
-  QingStorVFS,
-  R2VFS,
-  RAMVFS,
-  RedisVFS,
-  RedisWorkspaceStateStore,
-  type BaseVFS,
-  type WritePolicy,
-  S3VFS,
-  ScalewayVFS,
-  SeaweedFSVFS,
-  SharePointVFS,
-  SlackVFS,
-  SSHVFS,
-  SupabaseVFS,
-  TencentVFS,
-  TiDBFilesystemVFS,
-  TrelloVFS,
-  WasabiVFS,
-  Workspace,
-} from '@struktoai/mirage-node'
-import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
-import { PostgresConfigSchema } from '@struktoai/mirage-core/vfs/postgres/config'
-import { MongoDBConfigSchema } from '@struktoai/mirage-core/vfs/mongodb/config'
-import { TiDBFilesystemConfigSchema } from '@struktoai/mirage-core/vfs/tidb_filesystem/config'
-import { TrelloConfigSchema } from '@struktoai/mirage-core/core/trello/config'
-import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
-import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
-import { ManualClock } from '@struktoai/mirage-core/utils/clock'
-import * as lancedb from '@lancedb/lancedb'
-import { QdrantClient } from '@qdrant/js-client-rest'
-import { ChromaClient } from 'chromadb'
-import { Binary, DBRef, Decimal128, Double, Long, MongoClient } from 'mongodb'
 import pg from 'pg'
 import {
   installFakeNavigator,
   makeMockRoot,
 } from '../../../../typescript/packages/browser/tests/test-utils.ts'
-import { integRoot, walkFiles } from '../harness.ts'
-import { commit as hubCommit } from '@struktoai/mirage-node/core/hf_hub/commit'
-import type { Mount, Target } from '../harness.ts'
-import type { ExecWorkspace } from '../execution.ts'
-import { buildSecretsEnv } from './secrets.ts'
-import { CommandService, CLI as COMMAND_CLI } from './commands.ts'
 import { start as startKitFake } from '../../../server/kit/typescript/index.ts'
-import { buildRfc822 } from '../../../server/mail/rfc822.ts'
 import type { MailEntry } from '../../../server/mail/rfc822.ts'
-import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
+import { buildRfc822 } from '../../../server/mail/rfc822.ts'
+import type { ExecWorkspace } from '../execution.ts'
+import type { Mount, Target } from '../harness.ts'
+import { integRoot, walkFiles } from '../harness.ts'
+import { CLI as COMMAND_CLI, CommandService } from './commands.ts'
+import { buildSecretsEnv } from './secrets.ts'
 
 export interface Open {
   ws: ExecWorkspace
@@ -361,7 +361,7 @@ function permissionOptions(target: Target): {
 } {
   const profiles: Record<string, SessionProfile> = {}
   for (const [name, doc] of Object.entries(target.profiles ?? {})) {
-    profiles[name] = parseSessionProfile(scriptedProfile(doc), `profile \`${name}\``)
+    profiles[name] = SessionProfile(scriptedProfile(doc), `profile \`${name}\``)
   }
   return {
     ...(Object.keys(profiles).length > 0 ? { profiles } : {}),
@@ -1621,7 +1621,7 @@ async function openMongodb(target: Target): Promise<Open> {
   const mounts: Record<string, MongoDBVFS | [MongoDBVFS, MountMode]> = {}
   for (const mount of target.mounts) {
     const vfs = new MongoDBVFS(
-      parseConfigWithSchema(MongoDBConfigSchema, { uri, databases: [MONGODB_DB], ...mount.config }),
+      parseConfigWithSchema(MongoDBConfig, { uri, databases: [MONGODB_DB], ...mount.config }),
     )
     created.push(vfs)
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
@@ -1756,7 +1756,7 @@ async function openPostgres(target: Target): Promise<Open> {
   const mounts: Record<string, PostgresVFS | [PostgresVFS, MountMode]> = {}
   for (const mount of target.mounts) {
     const vfs = new PostgresVFS(
-      parseConfigWithSchema(PostgresConfigSchema, { dsn, max_read_rows: 200, ...mount.config }),
+      parseConfigWithSchema(PostgresConfig, { dsn, max_read_rows: 200, ...mount.config }),
     )
     created.push(vfs)
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
@@ -1866,7 +1866,7 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
   const admin = new Workspace(
     {
       '/admin': await TiDBFilesystemVFS.create(
-        parseConfigWithSchema(TiDBFilesystemConfigSchema, { host, token }),
+        parseConfigWithSchema(TiDBFilesystemConfig, { host, token }),
       ),
     },
     { mode: MountMode.WRITE },
@@ -1876,7 +1876,7 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
   const mounts: Record<string, TiDBFilesystemVFS> = {}
   for (const m of target.mounts) {
     mounts[m.path] = await TiDBFilesystemVFS.create(
-      parseConfigWithSchema(TiDBFilesystemConfigSchema, {
+      parseConfigWithSchema(TiDBFilesystemConfig, {
         host,
         token,
         root_path: `${base}/${String(m.root)}`,
@@ -2052,7 +2052,7 @@ function gwsNativeVfs(
   // lands on the seeded events.
   if (vfs === 'gcal')
     return new GCalVFS(
-      parseConfigWithSchema(GCalConfigSchema, { ...config, today: '2026-02-11', ...mountConfig }),
+      parseConfigWithSchema(GCalConfig, { ...config, today: '2026-02-11', ...mountConfig }),
     )
   return new GSlidesVFS(config)
 }
@@ -2192,7 +2192,7 @@ async function openSlack(target: Target): Promise<Open> {
       continue
     }
     mounts[m.path] = new SlackVFS(
-      parseConfigWithSchema(SlackConfigSchema, {
+      parseConfigWithSchema(SlackConfig, {
         ...m.config,
         token: `xoxb-${workspace}`,
         searchToken: `xoxp-${workspace}`,
@@ -2374,7 +2374,7 @@ async function openTrello(target: Target): Promise<Open> {
       continue
     }
     const vfs = new TrelloVFS(
-      parseConfigWithSchema(TrelloConfigSchema, {
+      parseConfigWithSchema(TrelloConfig, {
         apiKey: 'integ-key',
         apiToken: 'integ-token',
         baseUrl: endpoint,
@@ -2416,7 +2416,7 @@ async function openDiscord(target: Target): Promise<Open> {
       continue
     }
     mounts[m.path] = new DiscordVFS(
-      parseConfigWithSchema(DiscordConfigSchema, {
+      parseConfigWithSchema(DiscordConfig, {
         ...m.config,
         token: 'integ-bot-token',
         baseUrl: `${endpoint}/api/v10`,

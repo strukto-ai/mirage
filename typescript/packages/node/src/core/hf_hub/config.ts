@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
+import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 import { API_BASE } from './constants.ts'
 
 /**
@@ -26,13 +26,13 @@ import { API_BASE } from './constants.ts'
  * anything that writes) say so when it is missing rather than failing at the
  * transport.
  */
-export const HfConfigSchema = z.object({
+export const HfConfig = z.object({
   token: secretStr().optional(),
   endpoint: z.string().default(API_BASE),
   ...timeoutShape,
 })
 
-export type HfConfig = ConfigOf<typeof HfConfigSchema>
+export type HfConfig = ConfigOf<typeof HfConfig>
 
 export function hfEndpoint(config: HfConfig): string {
   const endpoint = config.endpoint

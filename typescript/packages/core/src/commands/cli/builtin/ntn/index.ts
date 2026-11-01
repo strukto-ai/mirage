@@ -11,24 +11,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../../../spec/types.ts'
-import { CLI } from '../../types.ts'
-import { CLIHandler } from '../../types.ts'
 
-import { NotionConfigSchema } from '../../../../core/notion/config.ts'
-
-import { Argument, UsageStyle } from '../../../spec/types.ts'
+import { NotionConfig } from '../../../../core/notion/config.ts'
+import { Argument, CommandSpec, UsageStyle } from '../../../spec/types.ts'
+import { CLI, CLIHandler } from '../../types.ts'
 import { api } from './api.ts'
-import { guarded } from './failure.ts'
 import { token } from './auth/token.ts'
 import { query } from './datasources/query.ts'
 import { resolve } from './datasources/resolve.ts'
+import { guarded } from './failure.ts'
 import { create } from './pages/create.ts'
 import { edit } from './pages/edit.ts'
 import { get } from './pages/get.ts'
 import { trash } from './pages/trash.ts'
-import { whoami } from './whoami.ts'
 import { ntnAccessor } from './util.ts'
+import { whoami } from './whoami.ts'
 
 // Operand names are upstream's, verbatim: they are what the refusal for a
 // missing one prints, so they are part of the grammar rather than
@@ -176,6 +173,6 @@ export const NTN = new CLI({
     'pages trash': new CLIHandler({ fn: guarded(trash), write: true }),
     whoami: new CLIHandler({ fn: guarded(whoami) }),
   },
-  configModel: NotionConfigSchema,
+  configModel: NotionConfig,
   accessor: ntnAccessor,
 })

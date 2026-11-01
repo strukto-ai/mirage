@@ -17,7 +17,7 @@ import {
   RAMVFS,
   ScriptSource,
   Workspace,
-  parseSessionProfile,
+  SessionProfile,
   type Deny,
   type Policy,
   type SessionContext,
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
       // The workspace takes parsed profiles; the document is validated
       // here rather than in the constructor, as in permissions.ts.
       profiles: {
-        reviewer: parseSessionProfile(
+        reviewer: SessionProfile(
           {
             policy: {
               pre_command: [{ script: MARKED, runtime: 'monty' }],

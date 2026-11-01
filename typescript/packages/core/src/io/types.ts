@@ -189,17 +189,6 @@ export interface Rows<R extends PathRow = PathRow> {
   render(shown: R[]): Promise<ByteSource | null>
 }
 
-export interface IOResultInit {
-  stdout?: ByteSource | null
-  stderr?: ByteSource | null
-  exitCode?: number
-  producer?: Producer | null
-  records?: PathRecord[] | null
-  refusal?: Refusal | null
-  closedStdout?: ClosedPipe | null
-  rows?: Rows | null
-}
-
 export class IOResult {
   // What the command found before it is rendered, for commands whose output
   // a later step renders again (find's actions, a line spanning mounts):
@@ -233,7 +222,21 @@ export class IOResult {
   closedStdout: ClosedPipe | null
   streamSource: IOResult | null
 
-  constructor(init: IOResultInit = {}) {
+  constructor(
+    init: Partial<
+      Pick<
+        IOResult,
+        | 'stdout'
+        | 'stderr'
+        | 'exitCode'
+        | 'producer'
+        | 'records'
+        | 'refusal'
+        | 'closedStdout'
+        | 'rows'
+      >
+    > = {},
+  ) {
     this.records = init.records ?? null
     this.rows = init.rows ?? null
     this.stdout = init.stdout ?? null

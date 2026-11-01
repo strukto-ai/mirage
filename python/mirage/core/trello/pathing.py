@@ -15,38 +15,39 @@
 from typing import Any
 
 from mirage.utils.naming import fit_id_name
+from mirage.utils.records import first_text, require_id
 from mirage.utils.sanitize import sanitize_name
 
 
 def workspace_dirname(workspace: dict[str, Any]) -> str:
     label = sanitize_name(
-        workspace.get("displayName") or workspace.get("name") or "workspace"
+        first_text(workspace, "displayName", "name") or "workspace"
     )
-    return fit_id_name(label, workspace["id"])
+    return fit_id_name(label, require_id(workspace))
 
 
 def board_dirname(board: dict[str, Any]) -> str:
-    label = sanitize_name(board.get("name") or "board")
-    return fit_id_name(label, board["id"])
+    label = sanitize_name(first_text(board, "name") or "board")
+    return fit_id_name(label, require_id(board))
 
 
 def list_dirname(lst: dict[str, Any]) -> str:
-    label = sanitize_name(lst.get("name") or "list")
-    return fit_id_name(label, lst["id"])
+    label = sanitize_name(first_text(lst, "name") or "list")
+    return fit_id_name(label, require_id(lst))
 
 
 def card_dirname(card: dict[str, Any]) -> str:
-    label = sanitize_name(card.get("name") or "card")
-    return fit_id_name(label, card["id"])
+    label = sanitize_name(first_text(card, "name") or "card")
+    return fit_id_name(label, require_id(card))
 
 
 def member_filename(member: dict[str, Any]) -> str:
     label = sanitize_name(
-        member.get("fullName") or member.get("username") or "member"
+        first_text(member, "fullName", "username") or "member"
     )
-    return fit_id_name(label, member["id"], ".json")
+    return fit_id_name(label, require_id(member), ".json")
 
 
 def label_filename(label: dict[str, Any]) -> str:
-    name = label.get("name") or label.get("color") or "label"
-    return fit_id_name(sanitize_name(name), label["id"], ".json")
+    name = first_text(label, "name", "color") or "label"
+    return fit_id_name(sanitize_name(name), require_id(label), ".json")

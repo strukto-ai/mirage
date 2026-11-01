@@ -13,12 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
-import type { PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { graphList } from '../msgraph/client.ts'
-import { graphApi, type MsGraphConfigResolved } from '../msgraph/config.ts'
+import type { resolveMsGraphConfig } from '../msgraph/config.ts'
+import { graphApi } from '../msgraph/config.ts'
 import { DriveLoc } from '../msgraph/drive.ts'
 import { driveRefPath, itemUrl } from './client.ts'
 
@@ -205,7 +206,7 @@ export async function resolveItem(
 }
 
 export function driveLoc(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   resolved: ResolvedPath,
   virtual: string,
 ): DriveLoc {

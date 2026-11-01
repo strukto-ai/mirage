@@ -12,18 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import {
   HfHubError,
-  WRITE_RETRY,
   hubGet,
   hubPost,
   hubRequest,
   repoUrl,
   revSegment,
+  WRITE_RETRY,
 } from './client.ts'
 import { API_SEGMENTS, DEFAULT_REVISION, HTTP_CONFLICT } from './constants.ts'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 
 /**
  * The organization and name halves the repo endpoints take.
@@ -48,28 +48,26 @@ function repoApiUrl(
   return `${rstripSlash(account.endpoint)}/api/${segment}/${repoId}${suffix}`
 }
 
-export interface CreateRepoOptions {
-  repoType?: string
-  private?: boolean
-  spaceSdk?: string | undefined
-  /**
-   * Treat the Hub's 409 as success, answering with the repository url
-   * derived from the id rather than the one the create call would have
-   * returned.
-   */
-  existOk?: boolean
-  /**
-   * The Enterprise resource group to create the repository in. Spelled
-   * `resourceGroupId` on the wire, which is huggingface_hub's own spelling.
-   */
-  resourceGroupId?: string | undefined
-}
-
 /** Create a repository on the Hub. */
 export async function createRepo(
   account: HfAccountAccessor,
   repoId: string,
-  options: CreateRepoOptions = {},
+  options: {
+    repoType?: string
+    private?: boolean
+    spaceSdk?: string | undefined
+    /**
+     * Treat the Hub's 409 as success, answering with the repository url
+     * derived from the id rather than the one the create call would have
+     * returned.
+     */
+    existOk?: boolean
+    /**
+     * The Enterprise resource group to create the repository in. Spelled
+     * `resourceGroupId` on the wire, which is huggingface_hub's own spelling.
+     */
+    resourceGroupId?: string | undefined
+  } = {},
 ): Promise<Record<string, unknown>> {
   const [organization, name] = splitRepoId(repoId)
   const body: Record<string, unknown> = {

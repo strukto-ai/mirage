@@ -12,11 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createHash } from 'node:crypto'
-
 import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import { materialize } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import { materialize } from '@struktoai/mirage-core/io/types'
 import {
   assertHeaderValue,
   encodeBase64Lines,
@@ -25,7 +23,8 @@ import {
   foldContentDisposition,
   foldUnstructured,
 } from '@struktoai/mirage-core/utils/mime'
-import type { FetchedMessage } from '../../../../core/email/client.ts'
+import { createHash } from 'node:crypto'
+import type { fetchMessage } from '../../../../core/email/client.ts'
 
 type SourceMode = 'reply' | 'forward'
 export type PostingStyle = 'top' | 'bottom'
@@ -71,7 +70,7 @@ export function mixedBoundary(body: string, attachments: readonly Attachment[]):
 }
 
 export interface Source {
-  message: FetchedMessage
+  message: Awaited<ReturnType<typeof fetchMessage>>
   mode: SourceMode
   postingStyle: PostingStyle
   quoteHeadline: string
@@ -111,7 +110,7 @@ export function hasPrefix(subject: string, prefix: string): boolean {
 }
 
 /** Derives a reply's To from the source's Reply-To, else its From. */
-function replyRecipients(message: FetchedMessage): string[] {
+function replyRecipients(message: Awaited<ReturnType<typeof fetchMessage>>): string[] {
   if (message.reply_to.length > 0) return message.reply_to.map((entry) => formatAddress(entry))
   const rendered = formatAddress(message.from)
   return rendered === '' ? [] : [rendered]

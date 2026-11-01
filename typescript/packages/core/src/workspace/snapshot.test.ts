@@ -11,37 +11,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '../commands/spec/types.ts'
-import { CLIHandler } from '../commands/cli/types.ts'
 
-import { BoxVFS } from '../vfs/box/box.ts'
-import type { GDocsConfig } from '../vfs/gdocs/config.ts'
-import { setCwd } from './session/shell_dirs.ts'
-import { IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
-import { Mount } from './mount/spec.ts'
-import { REDACTED_SECRET } from '../vfs/secrets.ts'
-import { seedVar } from './session/state.ts'
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-
-import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
+import type { NOOPAccessor } from '../accessor/base.ts'
+import { IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
 import { GWS } from '../commands/cli/builtin/gws/index.ts'
-import { CLI } from '../commands/cli/types.ts'
+import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
+import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { ALL_COMMANDS } from '../policy/builtin/output_cap.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
-import { secretStr } from '../vfs/secrets.ts'
-import { RAMVFS, type RAMVFSState } from '../vfs/ram/ram.ts'
-import type { VFSStateBase } from '../vfs/base.ts'
+import { ScriptSource } from '../runtime/types.ts'
 import { type JobResult } from '../shell/job_table/index.ts'
 import { DEFAULT_READ_TTL, Limit, MountMode, ReadPolicy } from '../types.ts'
+import { ManualClock } from '../utils/clock.ts'
 import { VERSION } from '../version.ts'
+import { BoxVFS } from '../vfs/box/box.ts'
+import { REDACTED_SECRET } from '../vfs/constants.ts'
+import type { GDocsConfig } from '../vfs/gdocs/config.ts'
+import { RAMVFS, type RAMVFSState } from '../vfs/ram/ram.ts'
+import { secretStr } from '../vfs/secrets.ts'
+import type { VFSStateBase } from '../vfs/types.ts'
+import { Mount } from './mount/spec.ts'
+import { setCwd } from './session/shell_dirs.ts'
+import { seedVar } from './session/state.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import {
   applyStateDict,
@@ -51,12 +51,9 @@ import {
   toStateDict,
 } from './snapshot/state.ts'
 import type { MountSnapshot } from './snapshot/types.ts'
-import { ScriptSource } from '../runtime/types.ts'
-import { ExecutionNode } from './types.ts'
 import { RAMWorkspaceStateStore } from './store/ram.ts'
+import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
-import { ManualClock } from '../utils/clock.ts'
-import type { NOOPAccessor } from '../accessor/base.ts'
 
 let tempDir: string
 

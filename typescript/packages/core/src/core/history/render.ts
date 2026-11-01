@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { EventDict } from '../../observe/observer.ts'
 import { EVENT_COMMAND } from '../../observe/log_entry.ts'
+import type { JsonObject } from '../../types.ts'
 
 const HISTSIZE = 500
 
@@ -22,7 +22,7 @@ const HISTSIZE = 500
  * timestamp comment line per entry followed by the command line.
  * Non-command events (ops, clear tombstones) are ignored.
  */
-export function renderBashHistory(events: EventDict[]): string {
+export function renderBashHistory(events: JsonObject[]): string {
   const lines: string[] = []
   for (const e of events) {
     if (e.type !== EVENT_COMMAND) continue
@@ -38,13 +38,13 @@ export function renderBashHistory(events: EventDict[]): string {
  * right-justified, two-space-separated listing.
  */
 export function renderHistoryListing(
-  events: EventDict[],
+  events: JsonObject[],
   n?: number,
   histsize: number = HISTSIZE,
 ): string {
   const commands = events.filter((e) => e.type === EVENT_COMMAND)
   const scoped = commands.slice(Math.max(0, commands.length - histsize))
-  let entries: EventDict[]
+  let entries: JsonObject[]
   if (n === undefined || n < 0) {
     entries = scoped
   } else if (n > 0) {

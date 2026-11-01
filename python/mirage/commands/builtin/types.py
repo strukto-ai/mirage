@@ -12,10 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from dataclasses import dataclass
 from enum import Enum
 
-from mirage.core.generic.find_eval import RowActionKind
+from mirage.core.generic.types import RowActionKind
 
 
 @dataclass(frozen=True, slots=True)

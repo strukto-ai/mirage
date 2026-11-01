@@ -12,34 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { EvaluationContext } from '../evaluation.ts'
+import { guardOutput } from '../../commands/builtin/utils/limit.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
 import { runWithAdmission } from '../../context/session_context.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { isControlFlowError } from '../workspace/failure.ts'
-import { guardOutput } from '../../commands/builtin/utils/limit.ts'
-import { postExecuteGate, refusalOf, renderDeny } from '../../policy/index.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
+import { postExecuteGate, refusalOf, renderDeny } from '../../policy/index.ts'
+import type { RouteContext } from '../../policy/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
-import { concat } from '../../utils/bytes.ts'
-import { Terminal } from '../../shell/console/index.ts'
+import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { Terminal } from '../../shell/console/index.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
-import { expandRedirect } from '../expand/redirects.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
+import { PathSpec } from '../../types.ts'
+import { concat } from '../../utils/bytes.ts'
+import type { EvaluationContext } from '../evaluation.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { handleRedirect } from '../executor/redirect.ts'
+import { expandRedirect } from '../expand/redirects.ts'
 import { sessionView } from '../session/state.ts'
-
-import type { TSNodeLike } from '../../shell/types.ts'
-import type { RouteContext } from '../../policy/types.ts'
 import { ExecutionNode } from '../types.ts'
-import { Admitted, admit } from './admission.ts'
-import { claimantFor } from './occurrence.ts'
-import { PathSpec } from '../../types.ts'
+import { isControlFlowError } from '../workspace/failure.ts'
+import { admit, Admitted } from './admission.ts'
 import { executeNode, type ExecuteNodeDeps } from './execute_node.ts'
-import { encodeText } from '../../shell/bytes.ts'
-
-type Result = [ByteSource | null, IOResult, ExecutionNode]
+import { claimantFor } from './occurrence.ts'
 
 export async function runCommandTree(
   deps: ExecuteNodeDeps,
@@ -53,10 +51,10 @@ export async function runCommandTree(
   // What `preExecute` saw of the line, which `postExecute` sees with what
   // came back; null when no policy reads `postExecute`.
   route: RouteContext | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const redirect = commandSubstitution ? inputSubstitutionRedirect(node) : null
-  let result: Result
+  let result: RedirectResult
   if (redirect === null) {
     result = await executeNode(deps, node, context, stdin, callStack)
   } else {

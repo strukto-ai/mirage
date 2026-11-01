@@ -12,24 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compileSpec } from '@struktoai/mirage-core/commands/spec/compile'
-import type * as ClientModule from '../../../../core/email/client.ts'
-import {
-  fetchHeaders,
-  listMessageUids,
-  type FetchedMessage,
-} from '../../../../core/email/client.ts'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import type { Context } from '@struktoai/mirage-core/commands/config'
+import { compileSpec } from '@struktoai/mirage-core/commands/spec/compile'
+import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { materialize, type IOResult } from '@struktoai/mirage-core/io/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { Files } from '@struktoai/mirage-core/workspace/files'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EmailAccessor } from '../../../../accessor/email.ts'
-import { EmailVFS } from '../../../../vfs/email/email.ts'
+import type * as ClientModule from '../../../../core/email/client.ts'
+import type { fetchMessage } from '../../../../core/email/client.ts'
+import { fetchHeaders, listMessageUids } from '../../../../core/email/client.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 import { messageJsonBytes } from '../../../../core/email/render.ts'
+import { EmailVFS } from '../../../../vfs/email/email.ts'
 import { Workspace } from '../../../../workspace.ts'
 import {
   build,
@@ -807,7 +804,11 @@ describe('himalaya writes and a mounted account', () => {
       Promise.resolve([...(store.get(folder) ?? [])]),
     )
     vi.mocked(fetchHeaders).mockImplementation((_accessor, _folder, uids) =>
-      Promise.resolve(uids.map((uid) => added.get(uid) ?? HEADERS[uid]) as FetchedMessage[]),
+      Promise.resolve(
+        uids.map((uid) => added.get(uid) ?? HEADERS[uid]) as Awaited<
+          ReturnType<typeof fetchMessage>
+        >[],
+      ),
     )
     appendMock.mockImplementation((folder: string, raw: Uint8Array) => {
       file(folder, raw)
@@ -832,7 +833,9 @@ describe('himalaya writes and a mounted account', () => {
   afterEach(() => {
     vi.mocked(listMessageUids).mockImplementation(() => Promise.resolve(['1', '2']))
     vi.mocked(fetchHeaders).mockImplementation((_accessor, _folder, uids) =>
-      Promise.resolve(uids.map((uid) => HEADERS[uid]) as FetchedMessage[]),
+      Promise.resolve(
+        uids.map((uid) => HEADERS[uid]) as Awaited<ReturnType<typeof fetchMessage>>[],
+      ),
     )
   })
 

@@ -12,18 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SHELL_SPECS, parseShellOptions } from '../../../../commands/spec/shell.ts'
+import { parseShellOptions, SHELL_SPECS } from '../../../../commands/spec/shell.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { isFsError } from '../../../../errors/fs.ts'
 import { type AsyncLineIterator, lineBuffer } from '../../../../io/async_line_iterator.ts'
 import { checkMemory } from '../../../../io/memory.ts'
-import { IOResult } from '../../../../io/types.ts'
 import type { ByteSource } from '../../../../io/types.ts'
-import { isFsError } from '../../../../errors/fs.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { endsEscaped } from '../../../../shell/escapes.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { visibleEnv } from '../../../session/state.ts'
-import type { SessionView } from '../../../../view/types.ts'
+import { sessionView, visibleEnv } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { TARGET_RE } from '../constants.ts'
 import {
   builtinUsage,
   countOperand,
@@ -33,12 +37,8 @@ import {
   refusal,
   requireView,
 } from '../shared.ts'
-import { TARGET_RE } from '../constants.ts'
+import type { BuiltinCall } from '../types.ts'
 import { READ_VALUE_LETTERS } from './constants.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { sessionView } from '../../../session/state.ts'
-import { decodeText, encodeText } from '../../../../shell/bytes.ts'
-import { endsEscaped } from '../../../../shell/escapes.ts'
 
 /** Split on whitespace runs with a maxsplit, like Python's split(None, n). */
 function splitOnWhitespace(text: string, maxsplit: number): string[] {
@@ -59,7 +59,7 @@ function splitOnWhitespace(text: string, maxsplit: number): string[] {
   return out
 }
 
-function readRefusal(msg: string): Result {
+function readRefusal(msg: string): RedirectResult {
   const err = encodeText(msg)
   return [
     null,
@@ -207,7 +207,7 @@ export async function handleRead(
   stdin: ByteSource | null,
   state: SessionView | null = null,
   signal?: AbortSignal,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const parse = parseShellOptions(SHELL_SPECS.read, args)
   if (parse.invalid !== null) {
     const token = parse.invalid.startsWith('--') ? parse.invalid : `-${parse.invalid}`
@@ -330,7 +330,7 @@ async function readStore(
   view: SessionView,
   varName: string,
   value: string,
-): Promise<Result | null> {
+): Promise<RedirectResult | null> {
   const match = TARGET_RE.exec(varName)
   const base = match?.[1] ?? varName
   const subscript = match?.[2] ?? null
@@ -372,7 +372,7 @@ async function readStore(
 }
 
 /** The `read` arm. */
-export async function readBuiltin(call: BuiltinCall): Promise<Result> {
+export async function readBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleRead(
     [...call.argv.args],
     call.context.session,

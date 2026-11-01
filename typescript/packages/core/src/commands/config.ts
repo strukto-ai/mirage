@@ -1,5 +1,21 @@
+import type { Accessor } from '../accessor/base.ts'
+import { IOResult, type ByteSource, type CommandOutput } from '../io/types.ts'
+import type { EntryGate } from '../policy/types.ts'
+import type { ProcessView } from '../process/view.ts'
 import type { DiffComputer } from '../rs/diff_types.ts'
+import type { FindExpr } from '../rs/find.ts'
+import type { CommandRuntime, ShellFn } from '../runtime/types.ts'
+import type { Limit, PathSpec } from '../types.ts'
 import type { IdSource } from '../utils/ids.ts'
+import type { SessionView } from '../view/types.ts'
+import type { Files } from '../workspace/files.ts'
+import type { AggregateResult } from './builtin/aggregators.ts'
+import { isBuiltinGrammar, registeredSpec } from './spec/builtins.ts'
+import { compileSpec } from './spec/compile.ts'
+import { OWN_OPTION_LOOP } from './spec/constants.ts'
+import { helpPage, versionLine } from './spec/standard.ts'
+import type { CommandSpec, FlagValue } from './spec/types.ts'
+
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,22 +29,6 @@ import type { IdSource } from '../utils/ids.ts'
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-import type { EntryGate } from '../policy/types.ts'
-import { compileSpec } from './spec/compile.ts'
-import type { ProcessView } from '../process/view.ts'
-import type { Accessor } from '../accessor/base.ts'
-import { IOResult, type ByteSource, type CommandOutput } from '../io/types.ts'
-import type { Limit, PathSpec } from '../types.ts'
-import type { CommandRuntime, ShellFn } from '../runtime/types.ts'
-import type { SessionView } from '../view/types.ts'
-import type { AggregateResult } from './builtin/aggregators.ts'
-import { isBuiltinGrammar, registeredSpec } from './spec/builtins.ts'
-import { OWN_OPTION_LOOP } from './spec/constants.ts'
-import { helpPage, versionLine } from './spec/standard.ts'
-import type { CommandSpec, FlagValue } from './spec/types.ts'
-import type { Files } from '../workspace/files.ts'
-import type { FindExpr } from '../rs/find.ts'
 
 /**
  * Everything a handler gets besides its handle and its operands.
@@ -104,17 +104,6 @@ export type CommandFn<A extends Accessor = Accessor> = (
 
 export type AggregateFn = (results: AggregateResult[]) => Uint8Array
 
-export interface CommandInit {
-  name: string
-  spec: CommandSpec
-  vfs: string | null
-  filetype?: string | null
-  fn: CommandFn
-  aggregate?: AggregateFn | null
-  write?: boolean
-  limit?: Limit | null
-}
-
 /**
  * One command as a mount registers it: the grammar (with `--help` and
  * `--version` added), the backend it belongs to, the file extension it
@@ -131,7 +120,10 @@ export class Command {
   readonly write: boolean
   readonly limit: Limit | null
 
-  constructor(init: CommandInit) {
+  constructor(
+    init: Pick<Command, 'name' | 'spec' | 'vfs' | 'fn'> &
+      Partial<Pick<Command, 'filetype' | 'aggregate' | 'write' | 'limit'>>,
+  ) {
     this.name = init.name
     this.spec = init.spec
     this.vfs = init.vfs

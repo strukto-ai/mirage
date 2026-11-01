@@ -12,20 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { FlagValue } from '../../../commands/spec/types.ts'
 import type { WordChoices } from '../../../commands/spec/word_choice.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
-import type { ExecutionNode } from '../../types.ts'
-import type { FlagValue } from '../../../commands/spec/types.ts'
-import type { PathSpec } from '../../../types.ts'
-import type { ExecutionScope } from '../../execution.ts'
+import type { HandOff } from '../../../policy/types.ts'
 import type { CallStack } from '../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../shell/console/index.ts'
-import type { HandOff } from '../../../policy/types.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
-import type { EvaluationContext } from '../../evaluation.ts'
 import type { TSNodeLike } from '../../../shell/types.ts'
+import type { PathSpec } from '../../../types.ts'
+import type { EvaluationContext } from '../../evaluation.ts'
+import type { ExecutionScope } from '../../execution.ts'
+import type { ExecutionNode } from '../../types.ts'
 
-export type Result = [ByteSource | null, IOResult, ExecutionNode]
 export type Flags = Record<string, FlagValue>
 
 /**

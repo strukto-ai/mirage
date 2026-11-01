@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { stderr, stdout } from 'node:process'
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
+import { stderr, stdout } from 'node:process'
 import { describe, expect, it, vi } from 'vitest'
 import * as ioSerde from '../io_serde.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
@@ -64,7 +64,7 @@ describe('createMirageMcpServer', () => {
 
   it("lists the tools the session's profile leaves it", async () => {
     const workspace = mkWs()
-    workspace.createSession('ro', { profile: parseSessionProfile({ mounts: { '/': 'read' } }) })
+    workspace.createSession('ro', { profile: SessionProfile({ mounts: { '/': 'read' } }) })
     const server = createMirageMcpServer(workspace, { sessionId: 'ro' })
     const client = new Client({ name: 'mirage-test', version: '1.0.0' })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
@@ -85,7 +85,7 @@ describe('createMirageMcpServer', () => {
     // The server is built before the session exists, as it is for a
     // stored session that loads later: the list still follows its profile.
     const server = createMirageMcpServer(workspace, { sessionId: 'late' })
-    workspace.createSession('late', { profile: parseSessionProfile({ mounts: { '/': 'read' } }) })
+    workspace.createSession('late', { profile: SessionProfile({ mounts: { '/': 'read' } }) })
     const client = new Client({ name: 'mirage-test', version: '1.0.0' })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     await server.connect(serverTransport)

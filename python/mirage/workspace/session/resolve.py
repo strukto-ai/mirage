@@ -39,13 +39,12 @@ from mirage.policy.types import (
     ProfileScripts,
 )
 from mirage.process.config import ProcessPermissions
+from mirage.rs.document import from_units, units
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.policy import (
     Wire,
     admission_matcher,
-    from_units,
     rules_wire,
-    units,
     visibility_from,
 )
 from mirage.types import MountMode, ShowEntry, weaker_mode

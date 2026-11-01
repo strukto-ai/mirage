@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, TypeAlias, assert_never
 
+from mirage.rs.document import from_units, units
 from mirage.rs.stream import OpenStream, open_stream
 from mirage.types import (
     HiddenPaths,
@@ -76,24 +77,6 @@ class PolicyMatcher:
         with self._lock:
             self._stream.feed(data)
             return json.loads(self._stream.finish())
-
-
-def units(value: str) -> list[int]:
-    """Text as the code points the stream reads, lone surrogates kept.
-
-    Args:
-        value (str): the text.
-    """
-    return [*map(ord, value)]
-
-
-def from_units(value: Iterable[int]) -> str:
-    """Code points from the stream back as text.
-
-    Args:
-        value (Iterable[int]): the code points.
-    """
-    return "".join(map(chr, value))
 
 
 def rule_wire(rule: CommandRule) -> Wire:

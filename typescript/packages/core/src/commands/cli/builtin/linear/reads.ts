@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonBytes } from '../../../../core/render/json.ts'
 import type { LinearAccessor } from '../../../../accessor/linear.ts'
 import {
   getIssue,
@@ -37,13 +36,13 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
-  type NormalizedProjectIssue,
 } from '../../../../core/linear/normalize.ts'
-import { FlagView } from '../../../spec/flag_view.ts'
-import { IOResult } from '../../../../io/types.ts'
+import { jsonBytes } from '../../../../core/render/json.ts'
 import { enoent } from '../../../../errors/fs.ts'
-import type { CommandFnResult, Context } from '../../../config.ts'
+import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
 import { firstText, resolveIssue } from './util.ts'
 
 function requireTeam(fl: FlagView): string {
@@ -61,9 +60,9 @@ async function teamProjectRows(
   accessor: LinearAccessor,
   teamId: string,
   projectId: string,
-): Promise<NormalizedProjectIssue[]> {
+): Promise<ReturnType<typeof buildProjectIssue>[]> {
   const teamIssues = await listTeamIssues(accessor.transport, teamId, undefined, [projectId])
-  const rows: NormalizedProjectIssue[] = []
+  const rows: ReturnType<typeof buildProjectIssue>[] = []
   for (const issue of teamIssues) {
     const proj = issue.project
     const projObj =

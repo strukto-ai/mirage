@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { UsageError } from '../commands/errors.ts'
 import type { FindAction, PrintfPart } from '../commands/builtin/types.ts'
-import type { ActionKind, PredNode, RowActionKind } from '../core/generic/find_eval.ts'
+import { UsageError } from '../commands/errors.ts'
+import type { ActionKind, PredNode, RowActionKind } from '../core/generic/types.ts'
 import { textView } from '../shell/bytes.ts'
 import type { JsonValue } from '../types.ts'
+import { systemNow } from '../utils/clock.ts'
 import { parseDateExpr } from '../utils/dates.ts'
 import { UTC_ZONE } from '../utils/timezone.ts'
 import { scanned } from './scan.ts'
-import { systemNow } from '../utils/clock.ts'
 
 export const OPERAND = ''
 export const DAY = 86400

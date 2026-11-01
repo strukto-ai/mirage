@@ -11,31 +11,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CLIHandler } from '../commands/cli/types.ts'
 
-import { readFileSync, readdirSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Accessor, NOOPAccessor } from '../accessor/base.ts'
 import { RAMAccessor } from '../accessor/ram.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { command, type Command, type Context } from '../commands/config.ts'
-import { CommandSpec, Argument } from '../commands/spec/types.ts'
-import { CLI } from '../commands/cli/types.ts'
-import { RuntimeFiles } from '../runtime/files.ts'
+import { Argument, CommandSpec } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
+import { RuntimeFiles } from '../runtime/files.ts'
 import { ops } from '../test-utils.ts'
 import { CapacityState, ContentType, FileStat, FileType, MountMode, PathSpec } from '../types.ts'
-import { stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
-import { buildMountArgs, toStateDict } from '../workspace/snapshot/state.ts'
 import { MountEntry } from '../workspace/mount/mount.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
+import { buildMountArgs, toStateDict } from '../workspace/snapshot/state.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { BaseVFS, VFS_BRAND, type VFSOptions } from './base.ts'
+import { BaseVFS, VFS_BRAND } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
 import { RAMStore } from './ram/store.ts'
 import { vfsStateRequiresOverride } from './secrets.ts'
 import { TrelloVFS } from './trello/trello.ts'
 import type { Handed } from './types.ts'
+import { type VFSOptions } from './types.ts'
 
 const ENC = new TextEncoder()
 
@@ -128,7 +128,7 @@ class WikiVFS extends BaseVFS<WikiAccessor> {
   }
 }
 
-function makeVfs(extra: VFSOptions<WikiAccessor> = {}): WikiVFS {
+function makeVfs(extra: VFSOptions<Command | CLI, WikiAccessor> = {}): WikiVFS {
   return new WikiVFS({ name: 'wiki', accessor: new WikiAccessor(PAGES), ...extra })
 }
 

@@ -22,8 +22,8 @@ import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import {
   LINE_EXECUTOR,
   PROCESS_EXECUTOR,
-  type LineExecutor,
-  type ProcessExecutor,
+  type LineExecutorMixin,
+  type ProcessExecutorMixin,
 } from '@struktoai/mirage-core/runtime/mixin'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
@@ -35,7 +35,7 @@ import { closeChildren, cwdRefusal, onHostPath, runProgram, systemTimeEnv } from
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
 export class SandlockRuntime
   extends Runtime<undefined>
-  implements LineExecutor<undefined>, ProcessExecutor<undefined>
+  implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
   readonly name = 'sandlock'
   readonly [LINE_EXECUTOR] = true as const

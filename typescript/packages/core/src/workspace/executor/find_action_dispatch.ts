@@ -12,69 +12,38 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compareCodePoints } from '../../utils/sort.ts'
-import { contentSize } from '../../utils/stat_view.ts'
-import { resolvePath } from '../../utils/path.ts'
+import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
+import { expandPrintf, type PrintfStatFacts } from '../../commands/builtin/find_printf.ts'
+import type { ExecAction, FindAction, PrintfAction } from '../../commands/builtin/types.ts'
+import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
+import type { Identity } from '../../commands/builtin/utils/identity.ts'
+import { linkView } from '../../commands/builtin/utils/links.ts'
+import { getCurrentSession, runAsProgram } from '../../context/session_context.ts'
+import { modifiedTs } from '../../core/generic/find.ts'
+import { printfKind } from '../../core/generic/find_eval.ts'
 import { enoent, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
-import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
-import { expandPrintf, type PrintfStatFacts } from '../../commands/builtin/find_printf.ts'
-import { printfKind } from '../../core/generic/find_eval.ts'
-import { modifiedTs } from '../../core/generic/find.ts'
-import type { Identity } from '../../commands/builtin/utils/identity.ts'
-import { PolicyDenied } from '../../policy/errors.ts'
-import { shellJoin } from '../../shell/join.ts'
+import { SharedStdin } from '../../io/stream.ts'
 import { type ByteSource, materialize, type PathRecord } from '../../io/types.ts'
-import { getCurrentSession, runAsProgram } from '../../context/session_context.ts'
-import { type FileStat, type PathSpec, FileType } from '../../types.ts'
-import type { MountRegistry } from '../mount/registry.ts'
-import type { SessionState } from '../session/session.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
+import type { FindExpr } from '../../rs/find.ts'
+import type { DispatchFn } from '../../runtime/types.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import { shellJoin } from '../../shell/join.ts'
+import { type FileStat, FileType, type PathSpec } from '../../types.ts'
+import { concat } from '../../utils/bytes.ts'
+import { resolvePath } from '../../utils/path.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { contentSize } from '../../utils/stat_view.ts'
+import type { StatPath } from '../../view/types.ts'
+import type { ExecuteFn } from '../expand/types.ts'
+import type { Files } from '../files.ts'
 import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lookupAll } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
-import type { StatPath } from '../../view/types.ts'
-import { SharedStdin } from '../../io/stream.ts'
-import type { FindExpr } from '../../rs/find.ts'
-import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
-import type { ExecAction, FindAction, PrintfAction } from '../../commands/builtin/types.ts'
-import type { ExecuteFn } from '../expand/types.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import { concat } from '../../utils/bytes.ts'
-import { encodeText } from '../../shell/bytes.ts'
-import type { Files } from '../files.ts'
-import { linkView } from '../../commands/builtin/utils/links.ts'
-
-export interface FindActionOptions {
-  // Runs an `-exec` line in the session; absent outside a workspace,
-  // where `-exec` is refused.
-  executeFn?: ExecuteFn
-  // The session find runs in: its `-exec` lines run there, and the head
-  // each one names is looked up in it.
-  session?: SessionState
-  // The invocation's abort, checked between matches so a cancelled
-  // `-delete` or `-exec` stops at the next row instead of the last one.
-  signal?: AbortSignal
-  // The name plane's facts, threaded into the -ls sub-dispatch so a
-  // namespace-only row (a mount point, a symlink) renders the way
-  // `ls -l` renders it.
-  vfs?: Files | null
-  // Dispatcher stat, threaded with it and used to find a
-  // slash-carrying `-exec` head.
-  statPath?: StatPath | null
-  // The op dispatcher a `-delete` unlinks a symlink row through, since
-  // the row is namespace state no mount's `rm` can reach.
-  dispatch?: DispatchFn | null
-  // Who the session is, for the owner and group columns of `-ls`.
-  identity?: Identity | null
-  // find's own input, which its `-exec` children share as one cursor, as
-  // GNU's do (a pipe feeds one reader, and a child that never reads leaves
-  // it for the next).
-  stdin?: ByteSource | null
-  /** The start operands, whose rows GNU statted when it opened the
-   * walk; empty means the working directory. */
-  readonly starts?: readonly PathSpec[]
-}
+import type { MountRegistry } from '../mount/registry.ts'
+import type { SessionState } from '../session/session.ts'
 
 /**
  * The shell line one `-exec` run becomes. GNU execs the words directly, so
@@ -406,7 +375,36 @@ export async function applyFindActions(
   expr: FindExpr,
   registry: MountRegistry,
   cwd: string,
-  options: FindActionOptions = {},
+  options: {
+    // Runs an `-exec` line in the session; absent outside a workspace,
+    // where `-exec` is refused.
+    executeFn?: ExecuteFn
+    // The session find runs in: its `-exec` lines run there, and the head
+    // each one names is looked up in it.
+    session?: SessionState
+    // The invocation's abort, checked between matches so a cancelled
+    // `-delete` or `-exec` stops at the next row instead of the last one.
+    signal?: AbortSignal
+    // The name plane's facts, threaded into the -ls sub-dispatch so a
+    // namespace-only row (a mount point, a symlink) renders the way
+    // `ls -l` renders it.
+    vfs?: Files | null
+    // Dispatcher stat, threaded with it and used to find a
+    // slash-carrying `-exec` head.
+    statPath?: StatPath | null
+    // The op dispatcher a `-delete` unlinks a symlink row through, since
+    // the row is namespace state no mount's `rm` can reach.
+    dispatch?: DispatchFn | null
+    // Who the session is, for the owner and group columns of `-ls`.
+    identity?: Identity | null
+    // find's own input, which its `-exec` children share as one cursor, as
+    // GNU's do (a pipe feeds one reader, and a child that never reads leaves
+    // it for the next).
+    stdin?: ByteSource | null
+    /** The start operands, whose rows GNU statted when it opened the
+     * walk; empty means the working directory. */
+    readonly starts?: readonly PathSpec[]
+  } = {},
 ): Promise<[ByteSource | null, Uint8Array, number]> {
   const reorders = expr.depthFirst
   if (stdout === null || !(hasActions(expr) || reorders)) return [stdout, new Uint8Array(), 0]

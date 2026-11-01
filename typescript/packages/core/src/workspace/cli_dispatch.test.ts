@@ -11,27 +11,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec, WordKind } from '../commands/spec/types.ts'
-import { CLIHandler } from '../commands/cli/types.ts'
-
-import { Outcome } from '../policy/index.ts'
-import { parseSessionProfile } from '../policy/profile.ts'
 import { describe, expect, it } from 'vitest'
-
-import { CLI } from '../commands/cli/types.ts'
+import type { NOOPAccessor } from '../accessor/base.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import type { Context } from '../commands/config.ts'
-import { Argument } from '../commands/spec/types.ts'
+import { Argument, CommandSpec, WordKind } from '../commands/spec/types.ts'
 import { IOResult, type Rows } from '../io/types.ts'
 import type { Policy } from '../policy/base.ts'
+import { Outcome } from '../policy/index.ts'
+import { SessionProfile } from '../policy/profile.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
-import { RAMVFS } from '../vfs/ram/ram.ts'
-import { vfsCall } from '../vfs/call.ts'
-import { Effect } from '../vfs/types.ts'
-import { MountMode, PathSpec } from '../types.ts'
-import { ScriptSource } from '../runtime/types.ts'
 import type { Language } from '../runtime/types.ts'
+import { ScriptSource } from '../runtime/types.ts'
+import { MountMode, PathSpec } from '../types.ts'
+import { vfsCall } from '../vfs/call.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { Effect } from '../vfs/types.ts'
 import { Workspace } from './workspace/workspace.ts'
-import type { NOOPAccessor } from '../accessor/base.ts'
 
 // Mirrors python/tests/e2e/test_cli_dispatch.py.
 
@@ -454,7 +450,7 @@ describe('policy cli fact', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          sealed: parseSessionProfile({
+          sealed: SessionProfile({
             commands: {
               deny: [
                 {
@@ -753,7 +749,7 @@ describe('a session hides reach what a CLI prints', () => {
             paths: { hide: ['/data/secret.txt'] },
             commands: { allow: ['*', 'shelf'] },
           },
-          sealed: parseSessionProfile({
+          sealed: SessionProfile({
             commands: { deny: [{ reason: 'sealed', commands: { shelf: ['/data'] } }] },
           }),
         },

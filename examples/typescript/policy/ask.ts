@@ -19,13 +19,13 @@ import {
   RAMVFS,
   Scope,
   Workspace,
-  parseSessionProfile,
+  SessionProfile,
 } from "@struktoai/mirage-node";
 import type { AskHandler, Decision } from "@struktoai/mirage-node";
 
 // One profile, one rule. `allow` is what the session may run at all;
 // `ask` puts one of those commands to a person before it runs.
-const ROLE = parseSessionProfile(
+const ROLE = SessionProfile(
   {
     commands: {
       allow: ["ls", "rm", "printf", "xargs", "sleep", "wait", "eval", "shopt", "alias"],

@@ -14,7 +14,8 @@
 
 
 from mirage.policy.types import AdmissionRules
-from mirage.rs.policy import admission_matcher, units
+from mirage.rs.document import units
+from mirage.rs.policy import admission_matcher
 
 
 def has_rules(rules: AdmissionRules | None) -> bool:

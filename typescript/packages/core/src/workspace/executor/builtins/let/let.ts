@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
+import type { SessionView } from '../../../../view/types.ts'
 import { landedArith } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
-import type { SessionView } from '../../../../view/types.ts'
-import { fail, readonlyRefusal, refusal, requireView, result } from '../shared.ts'
-import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
+import { fail, readonlyRefusal, refusal, requireView, result } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
 
 /**
  * `(( ))` as a builtin: every operand is one expression, the writes land
@@ -33,7 +34,7 @@ export async function handleLet(
   args: string[],
   session: SessionState,
   state: SessionView | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   if (args.length === 0) return fail('let', 'bash: let: expression expected\n')
   const view = requireView(state)
   let value = 0n
@@ -52,7 +53,7 @@ export async function handleLet(
 }
 
 /** The `let` arm. */
-export async function letBuiltin(call: BuiltinCall): Promise<Result> {
+export async function letBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleLet(
     [...call.argv.args],
     call.context.session,

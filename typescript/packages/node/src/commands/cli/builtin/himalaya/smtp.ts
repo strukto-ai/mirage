@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
+import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type * as Nodemailer from 'nodemailer'
-import { parseRfc822, type ParsedRfc822 } from '../../../../core/email/_parse.ts'
+import type { fromParsed } from '../../../../core/email/_parse.ts'
+import { parseRfc822 } from '../../../../core/email/_parse.ts'
 import type { EmailConfig } from '../../../../core/email/config.ts'
 
 const IMPLICIT_TLS_PORT = 465
@@ -54,7 +55,10 @@ async function getTransporter(config: EmailConfig): Promise<Nodemailer.Transport
  * is the only thing that sends. Returns the parsed message so callers can
  * report its headers.
  */
-export async function sendRaw(config: EmailConfig, raw: Uint8Array): Promise<ParsedRfc822> {
+export async function sendRaw(
+  config: EmailConfig,
+  raw: Uint8Array,
+): Promise<ReturnType<typeof fromParsed>> {
   const transporter = await getTransporter(config)
   const parsed = await parseRfc822(raw)
   const recipients = [

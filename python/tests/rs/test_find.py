@@ -10,7 +10,8 @@ from mirage.commands.builtin.types import (
     RowAction,
 )
 from mirage.commands.errors import UsageError
-from mirage.core.generic.find_eval import (
+from mirage.core.generic.find_eval import evaluate
+from mirage.core.generic.types import (
     Action,
     And,
     Effects,
@@ -24,7 +25,6 @@ from mirage.core.generic.find_eval import (
     Prune,
     TrueNode,
     Type,
-    evaluate,
 )
 from mirage.rs.find import (
     find_layout,

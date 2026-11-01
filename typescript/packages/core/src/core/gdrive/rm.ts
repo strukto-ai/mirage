@@ -13,14 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { enoent } from '../../errors/fs.ts'
 import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 
 // A Drive folder delete removes its subtree in one call.
-async function rmRImpl(
+export const rmR = eaccesOnDenied(async function (
   accessor: GDriveAccessor,
   path: PathSpec,
   handed: Handed = {},
@@ -29,6 +29,4 @@ async function rmRImpl(
   const entry = await liveRow(accessor, path, handed.entry)
   if (entry === null) throw enoent(path)
   await accessor.drive.deleteFile(entry.extra.file_id as string)
-}
-
-export const rmR = eaccesOnDenied(rmRImpl)
+})

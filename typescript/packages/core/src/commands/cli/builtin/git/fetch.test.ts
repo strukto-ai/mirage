@@ -16,8 +16,8 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import {
   cpSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -26,11 +26,11 @@ import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { ignoreFunny, prettify, summaryLines, type Wanted } from './fetch.ts'
+import type { wanted } from './fetch.ts'
+import { ignoreFunny, prettify, summaryLines } from './fetch.ts'
 import { GIT } from './index.ts'
 import { ensureDir } from './io.ts'
 
@@ -107,7 +107,7 @@ afterAll(() => {
 
 it('drops a ref git refuses to name locally, with its error', () => {
   const oid = 'a'.repeat(40)
-  const want = (remote: string, local: string | null): Wanted => ({
+  const want = (remote: string, local: string | null): ReturnType<typeof wanted> => ({
     remote,
     oid,
     local,

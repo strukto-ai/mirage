@@ -13,16 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { NamespaceLinks } from '../../view/types.ts'
-import { BaseVFS } from '../../vfs/base.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { IOResult } from '../../io/types.ts'
+import { SessionProfile } from '../../policy/profile.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
+import { BaseVFS } from '../../vfs/base.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import { MountRegistry } from '../mount/registry.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
 import { resolveGlobs } from './globs.ts'
 
 class PlainVFS extends BaseVFS {
@@ -313,7 +313,7 @@ describe('a glob under a session that hides paths', () => {
         await ws.shell(seed)
       }
       ws.createSession('n', {
-        profile: parseSessionProfile({
+        profile: SessionProfile({
           paths: { hide: ['*.key', '/base/inner', '/base/sub/f2'] },
         }),
       })

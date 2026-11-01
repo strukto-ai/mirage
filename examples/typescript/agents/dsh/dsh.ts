@@ -33,7 +33,7 @@ import {
   RedisVFS,
   SlackVFS,
   Workspace,
-  parseSessionProfile,
+  SessionProfile,
 } from '@struktoai/mirage-node'
 import { Outcome, Scope } from '@struktoai/mirage-core/policy/types'
 import { MirageFileSystem, MirageService, MirageShellExecutor } from '@struktoai/mirage-dsh'
@@ -52,7 +52,7 @@ const RECENT_DAYS = 5
 // section scopes it to, so the run's own /redis cleanup is not caught by
 // it. Nothing here composes an approval channel, so an asked line has
 // nobody to reach and waits in the ledger instead.
-const ROLE = parseSessionProfile(
+const ROLE = SessionProfile(
   {
     commands: {
       allow: ['cat', 'ls', 'grep', 'head', 'rm', 'echo', 'python', 'python3'],

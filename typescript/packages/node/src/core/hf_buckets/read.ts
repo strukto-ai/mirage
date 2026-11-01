@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record, startOp } from '@struktoai/mirage-core/observe/context'
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir, enoent } from '@struktoai/mirage-core/errors/fs'
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import type { PathSpec, ReadRange } from '@struktoai/mirage-core/types'
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
@@ -26,11 +26,6 @@ import { readToken, resolveUrl } from './hub.ts'
 const MISSING_ENTRY = 'EntryNotFound'
 
 const UNSATISFIABLE = 416
-
-export interface HfReadOptions {
-  offset?: number
-  size?: number
-}
 
 /**
  * Whether a download refusal says the file does not exist.
@@ -53,7 +48,7 @@ export function isMissing(err: unknown): boolean {
 export async function read(
   accessor: HfBucketsAccessor,
   path: PathSpec,
-  options: HfReadOptions = {},
+  options: ReadRange = {},
 ): Promise<Uint8Array> {
   const rel = path.mountPath
   if (stripSlash(rel) === '') throw eisdir(path)

@@ -12,23 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { JaegerVFSBase } from '@struktoai/mirage-core/vfs/jaeger/jaeger'
 import { JaegerAccessor } from '@struktoai/mirage-core/accessor/jaeger'
-
 import { HttpJaegerTransport } from '@struktoai/mirage-core/core/jaeger/client'
-
-import { VFS_MD } from '@struktoai/mirage-core/vfs/jaeger/jaeger'
 import { VFSName } from '@struktoai/mirage-core/types'
+import { JaegerConfig } from '@struktoai/mirage-core/vfs/jaeger/config'
+import { JaegerVFS as CoreJaegerVFS, VFS_MD } from '@struktoai/mirage-core/vfs/jaeger/jaeger'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 
-import { JaegerConfigSchema, type JaegerConfig, type JaegerConfigRedacted } from './config.ts'
-import { redactConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-
-export interface JaegerVFSState {
-  type: string
-  config: JaegerConfigRedacted
-}
-
-export class JaegerVFS extends JaegerVFSBase {
+export class JaegerVFS extends CoreJaegerVFS {
   override readonly name: string = VFSName.JAEGER
   override readonly cachesReads: boolean = true
   // Every listed file carries an exact size: a trace is rendered at readdir
@@ -62,10 +54,7 @@ export class JaegerVFS extends JaegerVFSBase {
     this.accessor = new JaegerAccessor(new HttpJaegerTransport(transportOpts), accessorConfig)
   }
 
-  override getState(): Promise<JaegerVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(JaegerConfigSchema, this.config) as JaegerConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof JaegerConfig>>> {
+    return Promise.resolve(this.configState(JaegerConfig, this.config))
   }
 }

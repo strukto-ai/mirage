@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { sleep } from '../../utils/abort.ts'
-import { graphApi, type MsGraphConfigResolved } from './config.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 import {
   apiRequest,
@@ -22,8 +21,10 @@ import {
   type ApiRequestOptions,
   type RetryPolicy,
 } from '../api/client.ts'
-import { MAX_BACKOFF, RETRY_STATUSES } from './constants.ts'
 import { ApiError } from '../api/errors.ts'
+import type { resolveMsGraphConfig } from './config.ts'
+import { graphApi } from './config.ts'
+import { MAX_BACKOFF, RETRY_STATUSES } from './constants.ts'
 
 // A drive-relative item path as a Graph URL path: each segment escaped on
 // its own, so a `/` inside the path stays a separator.
@@ -46,30 +47,30 @@ export class GraphError extends ApiError {
   }
 }
 
-type GraphRead = 'json' | 'bytes' | 'none' | 'location'
-
 interface RequestOptions {
   params?: Record<string, string | number | boolean>
   json?: Record<string, unknown>
   data?: Uint8Array
   headers?: Record<string, string>
   auth?: boolean
-  read?: GraphRead
+  read?: 'json' | 'bytes' | 'none' | 'location'
   window?: ByteWindow | undefined
 }
 
-async function tokenOf(config: MsGraphConfigResolved): Promise<string> {
+async function tokenOf(config: ReturnType<typeof resolveMsGraphConfig>): Promise<string> {
   return typeof config.accessToken === 'function' ? await config.accessToken() : config.accessToken
 }
 
-async function graphHeaders(config: MsGraphConfigResolved): Promise<Record<string, string>> {
+async function graphHeaders(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+): Promise<Record<string, string>> {
   return {
     Authorization: `Bearer ${await tokenOf(config)}`,
     'Content-Type': 'application/json',
   }
 }
 
-function policy(config: MsGraphConfigResolved): RetryPolicy {
+function policy(config: ReturnType<typeof resolveMsGraphConfig>): RetryPolicy {
   return {
     statuses: RETRY_STATUSES,
     maxRetries: config.maxRetries,
@@ -103,7 +104,7 @@ function lenientJson(text: string): Record<string, unknown> {
 }
 
 async function graphRequest(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   method: string,
   rawUrl: string,
   options: RequestOptions = {},
@@ -150,7 +151,7 @@ async function graphRequest(
 }
 
 export async function graphGet(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   params?: Record<string, string | number | boolean>,
 ): Promise<Record<string, unknown>> {
@@ -165,7 +166,7 @@ export async function graphGet(
  * one that brings `limit` items. Mirrors Python's `graph_list`.
  */
 export async function graphList(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   params?: Record<string, string | number | boolean>,
   limit?: number,
@@ -190,7 +191,7 @@ export async function graphList(
 }
 
 export async function graphGetBytes(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   window?: ByteWindow,
   auth = true,
@@ -203,7 +204,7 @@ export async function graphGetBytes(
 }
 
 export async function* graphStream(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   auth = true,
 ): AsyncIterable<Uint8Array> {
@@ -237,7 +238,7 @@ export async function* graphStream(
 }
 
 export async function graphPost(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   body: Record<string, unknown> = {},
 ): Promise<Record<string, unknown>> {
@@ -256,7 +257,7 @@ export async function graphPost(
  * the answer names none. Mirrors Python's `graph_batch`.
  */
 export async function graphBatch(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   urls: readonly string[],
 ): Promise<[number, Record<string, unknown>, number][]> {
   const root = graphApi(config)
@@ -297,7 +298,7 @@ export function retryAfter(headers: Record<string, unknown>): number {
 }
 
 export async function graphPostMonitor(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   body: Record<string, unknown> = {},
 ): Promise<string> {
@@ -309,19 +310,22 @@ export async function graphPostMonitor(
 }
 
 export async function graphPatch(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   return (await graphRequest(config, 'PATCH', url, { json: body })) as Record<string, unknown>
 }
 
-export async function graphDelete(config: MsGraphConfigResolved, url: string): Promise<void> {
+export async function graphDelete(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  url: string,
+): Promise<void> {
   await graphRequest(config, 'DELETE', url, { read: 'none' })
 }
 
 export async function graphPutBytes(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   data: Uint8Array,
 ): Promise<Record<string, unknown>> {
@@ -354,7 +358,7 @@ export async function pollMonitor(
 }
 
 export async function uploadChunk(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   uploadUrl: string,
   data: Uint8Array,
   start: number,
@@ -369,7 +373,7 @@ export async function uploadChunk(
 }
 
 export async function cancelUpload(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   uploadUrl: string,
 ): Promise<void> {
   await graphRequest(config, 'DELETE', uploadUrl, { auth: false, read: 'none' })

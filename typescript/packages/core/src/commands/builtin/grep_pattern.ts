@@ -12,14 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { decodeText } from '../../shell/bytes.ts'
-import { RegexSyntax } from './types.ts'
+import { materialize } from '../../io/types.ts'
 import { RegexError } from '../../rs/errors.ts'
 import { LineRegex, type LineSyntax } from '../../rs/regex.ts'
-import { UsageError } from '../errors.ts'
-import { materialize } from '../../io/types.ts'
+import { decodeText } from '../../shell/bytes.ts'
 import { PathSpec } from '../../types.ts'
+import { UsageError } from '../errors.ts'
 import type { FlagView } from '../spec/flag_view.ts'
+import { RegexSyntax } from './types.ts'
 
 export const NEVER_MATCH = '(?!)'
 
@@ -41,12 +41,6 @@ export function patternArg(texts: readonly string[], flags: FlagView): string | 
   return null
 }
 
-export interface PatternResolution {
-  pattern: string | null
-  neverMatch: boolean
-  error: string | null
-}
-
 // Resolve the full pattern list from -e values, the positional, and -f
 // pattern files (read via the backend stream). Shared by the grep, rg, and
 // zgrep generics. When -f supplies zero patterns the NEVER_MATCH sentinel is
@@ -56,7 +50,7 @@ export async function resolvePattern(
   texts: readonly string[],
   flags: FlagView,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-): Promise<PatternResolution> {
+) {
   let pattern = patternArg(texts, flags)
   let neverMatch = false
   // `raw` rather than `asList`, mirroring Python's `flags.raw(file_key)`: an

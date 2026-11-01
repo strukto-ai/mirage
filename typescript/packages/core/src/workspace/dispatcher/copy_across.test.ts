@@ -14,16 +14,15 @@
 
 // Mirrors python/tests/workspace/dispatcher/test_copy_across.py.
 
-import type { ByteSource } from '../../io/types.ts'
 import { describe, expect, it } from 'vitest'
-
+import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { exdev } from '../../errors/fs.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
+import type { ByteSource } from '../../io/types.ts'
+import { SessionProfile } from '../../policy/profile.ts'
 import { MountMode, type PathSpec, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mount } from '../mount/spec.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
@@ -64,7 +63,7 @@ async function seeded(
     { '/a': a, '/b': new Mount(b, { mode }) },
     {
       mode: MountMode.WRITE,
-      profiles: { hiding: parseSessionProfile({ paths: { hide: ['/b/g'] } }) },
+      profiles: { hiding: SessionProfile({ paths: { hide: ['/b/g'] } }) },
     },
   )
   const io = await ws.shell("printf 'payload\\n' > /a/f")

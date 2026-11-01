@@ -12,19 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 import { LangfuseAccessor } from '../../accessor/langfuse.ts'
-
 import { HttpLangfuseTransport } from '../../core/langfuse/client.ts'
-import { type DirListing, VFSName } from '../../types.ts'
-
-import { LangfuseConfigSchema, type LangfuseConfig, type LangfuseConfigRedacted } from './config.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { read as langfuseRead } from '../../core/langfuse/read.ts'
+import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { stat as langfuseStat } from '../../core/langfuse/stat.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { VFSName, type DirListing } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { LangfuseConfig } from './config.ts'
 
 export const VFS_MD = `{prefix}
   traces/
@@ -40,11 +38,6 @@ export const VFS_MD = `{prefix}
       items.jsonl
       runs/
         <run-name>.jsonl`
-
-export interface LangfuseVFSState {
-  type: string
-  config: LangfuseConfigRedacted
-}
 
 export class LangfuseVFS extends BaseVFS {
   override readonly handed = {
@@ -92,10 +85,7 @@ export class LangfuseVFS extends BaseVFS {
     return langfuseStat(this.accessor, path, handed?.entry)
   }
 
-  override getState(): Promise<LangfuseVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(LangfuseConfigSchema, this.config) as LangfuseConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof LangfuseConfig>>> {
+    return Promise.resolve(this.configState(LangfuseConfig, this.config))
   }
 }

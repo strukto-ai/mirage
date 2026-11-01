@@ -12,28 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 import { GSheetsAccessor } from '../../accessor/gsheets.ts'
-
 import { TokenManager } from '../../core/google/client.ts'
-import { type DirListing, VFSName } from '../../types.ts'
-
-import { GSheetsConfigSchema, type GSheetsConfig, type GSheetsConfigRedacted } from './config.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
-import { SHEETS_WORDS } from '../../utils/generated/google_vocabulary.ts'
+import type { GoogleConfig } from '../../core/google/config.ts'
+import { appDeltaHook } from '../../core/google/events.ts'
 import { filesContaining as googleFilesContaining } from '../../core/google/search.ts'
 import { MIME } from '../../core/gsheets/constants.ts'
-import { readdir as gsheetsReaddir } from '../../core/gsheets/readdir.ts'
 import { read as gsheetsRead } from '../../core/gsheets/read.ts'
-import { stat as gsheetsStat } from '../../core/gsheets/stat.ts'
-import { appDeltaHook } from '../../core/google/events.ts'
-import { makeFilename } from './sheet_entry.ts'
-import type { DeltaHook } from '../../events/base.ts'
-import { unlink as gsheetsUnlink } from '../../core/gsheets/unlink.ts'
+import { readdir as gsheetsReaddir } from '../../core/gsheets/readdir.ts'
 import { rename as gsheetsRename } from '../../core/gsheets/rename.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { stat as gsheetsStat } from '../../core/gsheets/stat.ts'
+import { unlink as gsheetsUnlink } from '../../core/gsheets/unlink.ts'
+import type { DeltaHook } from '../../events/base.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { VFSName, type DirListing } from '../../types.ts'
+import { SHEETS_WORDS } from '../../utils/generated/google_vocabulary.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { GSheetsConfig } from './config.ts'
+import { makeFilename } from './sheet_entry.ts'
 
 export const VFS_MD = `{prefix}
   owned/
@@ -96,11 +95,6 @@ export const VFS_MD = `{prefix}
        {prefix}/owned/<date>_<new>__<id>.gsheet.json
     Keep the folder, the date and the id, and spell the title the way
     the listing does (spaces->_); any other name is refused.`
-
-export interface GSheetsVFSState {
-  type: string
-  config: GSheetsConfigRedacted
-}
 
 export class GSheetsVFS extends BaseVFS {
   override readonly name: string = VFSName.GSHEETS
@@ -176,10 +170,7 @@ export class GSheetsVFS extends BaseVFS {
     return appDeltaHook(this.accessor, MIME, makeFilename)
   }
 
-  override getState(): Promise<GSheetsVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(GSheetsConfigSchema, this.config) as GSheetsConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof GoogleConfig>>> {
+    return Promise.resolve(this.configState(GSheetsConfig, this.config))
   }
 }

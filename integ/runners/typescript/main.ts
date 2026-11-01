@@ -16,7 +16,7 @@ import { writeFileSync } from 'node:fs'
 import { RAMVFS, type ReadSpec, Workspace } from '@struktoai/mirage-node'
 import { resolveReadSpec } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
-import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { ConcurrencyLimiter } from '@struktoai/mirage-core/concurrency/limiter'
 import { ADAPTERS, openConsistency } from './adapters/index.ts'
 import type { EmitRow, ServiceEnv, Target, TargetRunner } from './harness.ts'
@@ -319,7 +319,7 @@ export async function runTarget(
         ws.createSession(sessionId, { profile: spec })
       } else if (spec !== null && Object.keys(spec).length > 0) {
         ws.createSession(sessionId, {
-          permissions: parseSessionProfile(spec, `session ${sessionId}`),
+          permissions: SessionProfile(spec, `session ${sessionId}`),
         })
       } else {
         ws.createSession(sessionId, {})

@@ -12,20 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runWithAdmission } from '../../../../context/session_context.ts'
 import { RegexError } from '../../../../rs/errors.ts'
 import { posixRegex } from '../../../../rs/regex.ts'
-import { randomReader, seedVar, sessionArith, visibleEnv } from '../../../session/state.ts'
-import { byteView, textView, utf8Locale } from '../../../../shell/bytes.ts'
-import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
-import { assignElement } from '../../../session/elements.ts'
-import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
 import { makeArray } from '../../../../shell/array.ts'
+import { byteView, textView, utf8Locale } from '../../../../shell/bytes.ts'
+import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
+import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
-import { FILE_PAIR_BINARY, INT_COMPARATORS } from './constants.ts'
-import { applyFilePair, applyUnary } from './operators.ts'
-import { runWithAdmission } from '../../../../context/session_context.ts'
-import { CondError } from './types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { assignElement } from '../../../session/elements.ts'
+import { randomReader, seedVar, sessionArith, visibleEnv } from '../../../session/state.ts'
+import { FILE_PAIR_BINARY, INT_COMPARATORS } from './constants.ts'
+import { CondError } from './errors.ts'
+import { applyFilePair, applyUnary } from './operators.ts'
 import type { CondContext, CondNode } from './types.ts'
 
 /**

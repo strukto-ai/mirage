@@ -16,18 +16,18 @@
 // licenses/third_party/info-zip.txt).
 
 import type { util } from 'zod'
+import { IOResult } from '../../../io/types.ts'
+import { byteView } from '../../../shell/bytes.ts'
+import { Follow, LineFacts, type PathSpec, type StatFn } from '../../../types.ts'
+import { respellOne } from '../../../utils/path.ts'
+import { rstripSlash } from '../../../utils/slash.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
-import { IOResult } from '../../../io/types.ts'
-import { Follow, LineFacts, type PathSpec, type StatFn } from '../../../types.ts'
-import type { CommandFnResult, Context } from '../../config.ts'
-import { byteView } from '../../../shell/bytes.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
-import { respellOne } from '../../../utils/path.ts'
-import { OTHER_FILESYSTEM, scanOperand, type WalkFn } from './archive/walk.ts'
 import { linksOf, mountView } from '../utils/links.ts'
-import { StreamHost, hostedStream } from '../utils/stream_host.ts'
+import { hostedStream, StreamHost } from '../utils/stream_host.ts'
+import { OTHER_FILESYSTEM, scanOperand, type WalkFn } from './archive/walk.ts'
 
 // What Info-ZIP calls a path it could not reach. It does not distinguish
 // absent from unreadable, and a dangling symlink under the default follow
@@ -36,11 +36,6 @@ const NOT_MATCHED = 'name not matched: '
 
 // What zip needs from the mount it runs on: a reader for the archive and
 // each member, and the stat and walk that make a directory archivable.
-export interface ZipDeps {
-  stream: (p: PathSpec) => AsyncIterable<Uint8Array>
-  stat: StatFn
-  walk: WalkFn
-}
 
 interface ZipFlags {
   readonly recursive: boolean
@@ -72,7 +67,11 @@ function parseFlags(bag: Record<string, FlagValue>): ZipFlags {
 export async function zipGeneric(
   paths: PathSpec[],
   ctx: Context,
-  deps: ZipDeps,
+  deps: {
+    stream: (p: PathSpec) => AsyncIterable<Uint8Array>
+    stat: StatFn
+    walk: WalkFn
+  },
 ): Promise<CommandFnResult> {
   const flags = parseFlags(ctx.flags)
   const archive = paths[0]

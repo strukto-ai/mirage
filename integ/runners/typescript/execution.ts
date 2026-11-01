@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Outcome, Scope } from '@struktoai/mirage-core/policy/index'
-import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { FaultReport } from '../../server/kit/typescript/fault.ts'
 
@@ -449,7 +449,7 @@ export async function runCase(
   notes: string[]
 }> {
   for (const [id, raw] of Object.entries(c.session_profiles ?? {})) {
-    const profile = parseSessionProfile(raw, `session ${id}`)
+    const profile = SessionProfile(raw, `session ${id}`)
     if (ws.listSessions().some((session) => session.sessionId === id))
       await ws.setSessionProfile(id, profile)
     else ws.createSession(id, { profile })

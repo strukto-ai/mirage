@@ -12,24 +12,24 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { z } from 'zod'
 import type { util } from 'zod'
-import { Limit, type LimitInit, OnExceed } from '../types.ts'
-import { units } from '../rs/policy.ts'
-import { openStreamSync, type OpenStream } from '../rs/stream.ts'
+import { z } from 'zod'
+import { units } from '../rs/document.ts'
 import { StreamRefusal } from '../rs/errors.ts'
+import { openStreamSync, type OpenStream } from '../rs/stream.ts'
+import { Limit, OnExceed } from '../types.ts'
 import { askRule, sameRule } from './decisions.ts'
 import { PolicyError } from './errors.ts'
 import type {
   Ask,
+  CommandContext,
   CommandRule,
   Deny,
-  Route,
-  CommandContext,
-  RouteContext,
-  VfsContext,
-  SessionContext,
   NetworkContext,
+  Route,
+  RouteContext,
+  SessionContext,
+  VfsContext,
 } from './types.ts'
 
 type Answer = Deny | Ask | Route
@@ -335,7 +335,7 @@ export class Composition {
     }
     let limit: Limit | null = null
     if (result.limit !== null) {
-      const init: LimitInit = {}
+      const init: NonNullable<ConstructorParameters<typeof Limit>[0]> = {}
       for (const [key, field] of Object.entries(limitFields)) {
         if (field in result.limit) Object.assign(init, { [key]: result.limit[field] })
       }

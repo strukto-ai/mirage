@@ -14,8 +14,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
-
-import { SecretSourceSchema } from './config.ts'
+import { SecretSource } from './config.ts'
 import { SecretsError } from './errors.ts'
 import { fetchSecret, registerSecrets } from './registry.ts'
 import {
@@ -37,8 +36,8 @@ function fetchDemo(config: DemoConfig, _ref: string): Promise<ResolvedSecret> {
   return Promise.resolve({ fields: { credential: `${config.account}:${config.token ?? 'none'}` } })
 }
 
-function block(config: Record<string, unknown>): ReturnType<typeof SecretSourceSchema.parse> {
-  return SecretSourceSchema.parse({ source: 'demo-sources', config })
+function block(config: Record<string, unknown>): ReturnType<typeof SecretSource.parse> {
+  return SecretSource.parse({ source: 'demo-sources', config })
 }
 
 function instance(built: Record<string, ResolvedSource>, name: string): ResolvedSource {
@@ -123,9 +122,9 @@ describe('resolveSources', () => {
   })
 
   it('names the known sources for an unknown one', async () => {
-    await expect(
-      resolveSources({ prod: SecretSourceSchema.parse({ source: 'nope' }) }),
-    ).rejects.toThrow(SecretsError)
+    await expect(resolveSources({ prod: SecretSource.parse({ source: 'nope' }) })).rejects.toThrow(
+      SecretsError,
+    )
   })
 
   it('reports field and reason for config the source refuses', async () => {
@@ -182,7 +181,7 @@ describe('resolveSources', () => {
     process.env.SOURCES_LOUD = 's3cr3t-value'
     try {
       const caught = await resolveSources({
-        prod: SecretSourceSchema.parse({
+        prod: SecretSource.parse({
           source: 'loud-sources',
           config: { token: { from: 'env', key: 'SOURCES_LOUD' } },
         }),
@@ -206,7 +205,7 @@ describe('resolveSources', () => {
       return Promise.resolve({ fields: { A: 'a', B: 'b' } })
     })
     const built = await resolveSources({
-      prod: SecretSourceSchema.parse({
+      prod: SecretSource.parse({
         source: 'demo-sources',
         config: {
           account: { from: 'dotenv', ref: '/one/file', key: 'A' },
@@ -231,7 +230,7 @@ describe('resolveSources', () => {
     process.env.SOURCES_THROWN = 's3cr3t-value'
     try {
       const caught = await resolveSources({
-        prod: SecretSourceSchema.parse({
+        prod: SecretSource.parse({
           source: 'throwing-sources',
           config: { token: { from: 'env', key: 'SOURCES_THROWN' } },
         }),
@@ -249,7 +248,7 @@ describe('resolveSources', () => {
   it('reports a bootstrap field named after a prototype member absent', async () => {
     registerSecrets('dotenv', DeadConfig, () => Promise.resolve({ fields: { A: 'a' } }))
     const caught = await resolveSources({
-      prod: SecretSourceSchema.parse({
+      prod: SecretSource.parse({
         source: 'demo-sources',
         config: { token: { from: 'dotenv', ref: '/f', key: 'constructor' } },
       }),
@@ -265,7 +264,7 @@ describe('resolveSources', () => {
       Promise.reject(new SecretsError('dotenv file not found: /host/only/.env')),
     )
     const caught = await resolveSources({
-      prod: SecretSourceSchema.parse({
+      prod: SecretSource.parse({
         source: 'demo-sources',
         config: { token: { from: 'dotenv', ref: '/host/only/.env', key: 'TOKEN' } },
       }),

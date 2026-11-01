@@ -12,17 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { HttpDiscordTransport } from './client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-
-export interface BrowserDiscordTransportOptions {
-  proxyUrl: string
-  getHeaders?: () => Promise<Record<string, string>> | Record<string, string>
-  timeout?: number
-}
+import { HttpDiscordTransport } from './client.ts'
 
 export class BrowserDiscordTransport extends HttpDiscordTransport {
-  constructor(private readonly opts: BrowserDiscordTransportOptions) {
+  constructor(
+    private readonly opts: {
+      proxyUrl: string
+      getHeaders?: () => Promise<Record<string, string>> | Record<string, string>
+      timeout?: number
+    },
+  ) {
     super(opts.timeout)
     const probe = new URL(opts.proxyUrl, 'http://localhost')
     if (probe.search !== '' || probe.hash !== '') {

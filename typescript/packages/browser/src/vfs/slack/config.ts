@@ -12,18 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 import {
-  timeRangeShape,
   orderedTimes,
   timeRangeOrderError,
+  timeRangeShape,
 } from '@struktoai/mirage-core/core/time_config'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { secretSchema, z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 type HeaderProvider = () => Promise<Record<string, string>> | Record<string, string>
 
-export const SlackConfigSchema = z
+export const SlackConfig = z
   .object({
     ...timeoutShape,
     ...timeRangeShape,
@@ -40,6 +40,4 @@ export const SlackConfigSchema = z
   })
   .refine(orderedTimes, timeRangeOrderError)
 
-export type SlackConfig = ConfigOf<typeof SlackConfigSchema>
-
-export type SlackConfigRedacted = RedactedConfig<SlackConfig, 'getHeaders'>
+export type SlackConfig = ConfigOf<typeof SlackConfig>

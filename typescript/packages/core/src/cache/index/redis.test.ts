@@ -12,16 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileChangeKind, FileStat, FileType } from '../../types.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { IndexDirectorySchema, LookupStatus } from './config.ts'
+import { FileChangeKind, FileStat, FileType } from '../../types.ts'
+import { ManualClock } from '../../utils/clock.ts'
+import { SeededIdSource } from '../../utils/ids.ts'
+import { storedStat } from '../../workspace/mount/listing.ts'
 import { CacheManager } from '../manager.ts'
+import { IndexDirectory, LookupStatus } from './config.ts'
 import { ENTRY_PREFIX, GENERATION_KEY, REGISTRY_PAGE } from './constants.ts'
 import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
 import { runInCommandScope } from './scope.ts'
-import { storedStat } from '../../workspace/mount/listing.ts'
-import { ManualClock } from '../../utils/clock.ts'
-import { SeededIdSource } from '../../utils/ids.ts'
 
 describe('RedisIndexCacheStore default keyPrefix', () => {
   it('namespaces keys under mirage:index: by default', () => {
@@ -618,7 +618,7 @@ ${script}`,
         expect(await store.getMany([...rows.keys()])).toEqual(rows)
         const raw = await client.get(`${prefix}mirage:idx:directory:/dir`)
         if (raw === null) throw new Error('missing final seeded listing')
-        const snapshot = IndexDirectorySchema.parse(JSON.parse(raw))
+        const snapshot = IndexDirectory.parse(JSON.parse(raw))
         expect(snapshot.entries).toEqual(['/dir/c'])
         expect(snapshot.version).toBe('dir-3')
         expect(snapshot.expires_at).toBe((deadline.getTime() + 4 * 3600000) / 1000)
@@ -797,7 +797,7 @@ ${script}`,
     const raw = await client.get(`${prefix}mirage:idx:directory:/snapshot`)
     expect(raw).not.toBeNull()
     if (raw === null) throw new Error('missing parent listing')
-    expect(IndexDirectorySchema.parse(JSON.parse(raw)).expires_at).toBe(deadline.getTime() / 1000)
+    expect(IndexDirectory.parse(JSON.parse(raw)).expires_at).toBe(deadline.getTime() / 1000)
   })
 
   it('learning a child directory preserves parent freshness fields', async () => {
@@ -812,8 +812,8 @@ ${script}`,
     await store.setDir('/dir/sub', [])
     const after = await client.get(`${prefix}mirage:idx:directory:/dir`)
     if (after === null) throw new Error('missing parent listing')
-    const original = IndexDirectorySchema.parse(JSON.parse(before))
-    const updated = IndexDirectorySchema.parse(JSON.parse(after))
+    const original = IndexDirectory.parse(JSON.parse(before))
+    const updated = IndexDirectory.parse(JSON.parse(after))
     expect(updated).toEqual({ ...original, folders: [1] })
     expect(updated.expires_at).toBe(deadline.getTime() / 1000)
   })
@@ -878,7 +878,7 @@ ${script}`,
       await store.listDir('/dir')
       const raw = await (await redis()).get(`${prefix}mirage:idx:directory:/dir`)
       if (raw === null) throw new Error('missing seeded directory')
-      expect(IndexDirectorySchema.parse(JSON.parse(raw)).folders).toEqual([1])
+      expect(IndexDirectory.parse(JSON.parse(raw)).folders).toEqual([1])
     },
   )
 
@@ -1053,8 +1053,8 @@ ${script}`,
           (await store.listDir('/dir/a')).status,
         )
       expect(
-        IndexDirectorySchema.parse(JSON.parse((await client.get(listingKey)) ?? '')).expires_at,
-      ).toBe(IndexDirectorySchema.parse(JSON.parse(expectedListing)).expires_at)
+        IndexDirectory.parse(JSON.parse((await client.get(listingKey)) ?? '')).expires_at,
+      ).toBe(IndexDirectory.parse(JSON.parse(expectedListing)).expires_at)
       expect(await client.get(generationKey)).not.toBe(expectedGeneration)
     },
   )
@@ -1065,7 +1065,7 @@ ${script}`,
     await store.addEntry('/dir/a', new FileStat({ name: 'a', type: FileType.FILE, size: 11 }))
     const raw = await (await redis()).get(`${prefix}mirage:idx:directory:/dir`)
     if (raw === null) throw new Error('missing parent listing')
-    const listing = IndexDirectorySchema.parse(JSON.parse(raw))
+    const listing = IndexDirectory.parse(JSON.parse(raw))
     expect(listing.expires_at).toBe(deadline.getTime() / 1000)
     expect(listing.version).toBe('v1')
     expect(listing.window).toBe(true)
@@ -1632,7 +1632,7 @@ describe.skipIf(skip)('RedisIndexCacheStore listing reads in one command', () =>
       await runInCommandScope(async () => {
         expect((await store.listDir('/d')).entries).toEqual(['/d/a', '/d/b'])
         if (known) {
-          const listing = IndexDirectorySchema.parse(JSON.parse((await client.get(key)) ?? '{}'))
+          const listing = IndexDirectory.parse(JSON.parse((await client.get(key)) ?? '{}'))
           listing.entries.push('/d/new')
           listing.folders.push(0)
           await client.set(key, JSON.stringify(listing))

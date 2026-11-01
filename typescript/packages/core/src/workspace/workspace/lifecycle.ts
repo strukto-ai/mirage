@@ -12,19 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { FileCacheMixin } from '../../cache/file/mixin.ts'
 import { releaseInputs } from '../../io/async_line_iterator.ts'
-import type { FileCache } from '../../cache/file/mixin.ts'
-import type { BaseVFS } from '../../vfs/base.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
+import { ABORT_JOIN_MS } from '../../utils/abort.ts'
+import type { BaseVFS } from '../../vfs/base.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionManager } from '../session/manager.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
-import { ABORT_JOIN_MS } from '../../utils/abort.ts'
 import type { EventManager } from './events.ts'
 
 export interface CloseDeps {
   events: EventManager
-  cache: FileCache & BaseVFS
+  cache: FileCacheMixin & BaseVFS
   ownsStateStore: boolean
   stateStore: WorkspaceStateStore
   closers: (() => Promise<void>)[]

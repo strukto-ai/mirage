@@ -12,17 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountEntry } from '../../workspace/mount/mount.ts'
-import { commandsFor } from '../../workspace/mount/backends.ts'
+import { describe, expect, it } from 'vitest'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { Command } from '../../commands/config.ts'
-import { describe, expect, it } from 'vitest'
 import { MountMode } from '../../types.ts'
+import { commandsFor } from '../../workspace/mount/backends.ts'
+import { MountEntry } from '../../workspace/mount/mount.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { RAMVFS } from '../ram/ram.ts'
-import { BinViewVFS } from './bin.ts'
 import { declared } from '../call.ts'
 import { WRITE_EFFECTS } from '../constants.ts'
+import { RAMVFS } from '../ram/ram.ts'
+import { BinViewVFS } from './bin.ts'
 
 const DEC = new TextDecoder()
 
@@ -57,9 +57,11 @@ describe('BinViewVFS', () => {
       'setattr',
     ]) {
       const effect = declared(BinViewVFS, name)?.effect
-      expect(mount.answers(name) && effect !== undefined && WRITE_EFFECTS.includes(effect)).toBe(
-        true,
-      )
+      expect(
+        mount.answers(name) &&
+          effect !== undefined &&
+          WRITE_EFFECTS.some((writeEffect) => writeEffect === effect),
+      ).toBe(true)
     }
   })
 

@@ -12,19 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
 import { browserAliasSchema, derivedEndpoint, makeBrowserS3Alias } from '../s3_alias.ts'
 
-export const AliyunConfigSchema = browserAliasSchema({})
-
-export type AliyunConfig = ConfigOf<typeof AliyunConfigSchema>
-
-export type AliyunConfigRedacted = RedactedConfig<AliyunConfig, 'presignedUrlProvider'>
-
-export const ALIAS = makeBrowserS3Alias<AliyunConfig, AliyunConfigRedacted>({
-  schema: AliyunConfigSchema,
+export const AliyunConfig = makeBrowserS3Alias({
+  schema: browserAliasSchema({}),
   endpointFor: derivedEndpoint('region', (region) => `https://s3.oss-${region}.aliyuncs.com`),
 })
 
-export const resolvedAliyunEndpoint = ALIAS.resolvedEndpoint
-export const aliyunToS3Config = ALIAS.toS3Config
+export type AliyunConfig = ConfigOf<typeof AliyunConfig>

@@ -19,8 +19,8 @@ import {
   MountMode,
   AliyunVFS,
   Workspace,
-  resolvedAliyunEndpoint,
-  type AliyunConfig,
+
+  AliyunConfig,
   type FileStat,
 } from '@struktoai/mirage-node'
 
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const config = configFromEnv()
   const ws = new Workspace({ '/oss/': new AliyunVFS(config) }, { mode: MountMode.READ })
   try {
-    console.log(`=== Alibaba OSS at ${resolvedAliyunEndpoint(config)} ===`)
+    console.log(`=== Alibaba OSS at ${AliyunConfig.resolvedEndpoint(config)} ===`)
 
     let r = await ws.shell('ls /oss/')
     console.log('ls /oss/:\n' + r.stdoutText)

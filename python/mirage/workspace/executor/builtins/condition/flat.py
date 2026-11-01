@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from mirage.types import PathSpec, word_text
+from mirage.workspace.executor.builtins.condition.errors import CondError
 from mirage.workspace.executor.builtins.condition.operators import (
     apply_binary,
     apply_unary,
@@ -20,7 +22,6 @@ from mirage.workspace.executor.builtins.condition.operators import (
 from mirage.workspace.executor.builtins.condition.shape import flat_shape
 from mirage.workspace.executor.builtins.condition.types import (
     CondContext,
-    CondError,
     FlatAnd,
     FlatBinary,
     FlatFail,

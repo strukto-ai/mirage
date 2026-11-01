@@ -11,84 +11,83 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 
-import { IOConfig } from '@struktoai/mirage-core/io/config'
-import {
-  NetworkRule,
-  networkLayer,
-  networkRoutes,
-  type NetworkSetting,
-} from '@struktoai/mirage-core/io/network'
-import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
-import { parseSystemTime } from '@struktoai/mirage-core/utils/clock'
-import { parseLimit } from '@struktoai/mirage-core/utils/size'
-import { readFileSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
-import { parseYaml } from './utils/yaml.ts'
 import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
 import { CLI } from '@struktoai/mirage-core/commands/cli/types'
-import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
-import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
-import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
+import { IOConfig } from '@struktoai/mirage-core/io/config'
 import {
-  EnvVarSchema,
-  SecretSourceSchema,
-  type EnvEntries,
-  type SecretEntries,
-} from '@struktoai/mirage-core/secrets/config'
-import {
-  type ReadSpec,
-  KERNEL_BACKENDS,
-  MountBackend,
-  MountMode,
-  ReadPolicy,
-  parseMountMode,
-} from '@struktoai/mirage-core/types'
-import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import {
-  coerceReadPolicy,
-  resolveReadSpec,
-} from '@struktoai/mirage-core/workspace/mount/read_policy'
-import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
-import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
+  networkLayer,
+  networkRoutes,
+  NetworkRule,
+  type NetworkSetting,
+} from '@struktoai/mirage-core/io/network'
+import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
+import { METHODS } from '@struktoai/mirage-core/policy/constants'
 import {
   compileProgram,
   parseProgram,
-  parseSessionProfile,
+  SessionProfile,
   type ProfilePolicySpec,
-  type SessionProfile,
 } from '@struktoai/mirage-core/policy/profile'
-import { METHODS } from '@struktoai/mirage-core/policy/constants'
 import type {
   PolicyMethod,
   ProfileScript,
   ProfileScripts,
 } from '@struktoai/mirage-core/policy/types'
-import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
-import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
-import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
-import { S3WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/s3'
-import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { S3ConfigSchema } from './vfs/s3/config.ts'
-import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
-import { isModulePath, loadAttr, splitRef } from './utils/loader.ts'
-// The config loader is a workspace entry point of its own (the daemon
-// builds from here), so it arms the builtin secrets sources like the
-// node Workspace module does.
+import { validateDocument } from '@struktoai/mirage-core/rs/document'
+import { Runtime, type RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
+import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { buildRuntime, checkRuntimeOptions } from '@struktoai/mirage-core/runtime/table'
+import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
+import {
+  EnvVar,
+  SecretSource,
+  type EnvEntries,
+  type SecretEntries,
+} from '@struktoai/mirage-core/secrets/config'
 import {
   configHoldsPointer,
   resolveConfigSecrets,
   resolveSourcesFor,
 } from '@struktoai/mirage-core/secrets/sources'
+import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
+import {
+  KERNEL_BACKENDS,
+  MountBackend,
+  MountMode,
+  parseMountMode,
+  ReadPolicy,
+} from '@struktoai/mirage-core/types'
+import { parseSystemTime } from '@struktoai/mirage-core/utils/clock'
+import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
+import { isPlainObject } from '@struktoai/mirage-core/utils/records'
+import { parseLimit } from '@struktoai/mirage-core/utils/size'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { parseConfigWithSchema } from '@struktoai/mirage-core/vfs/secrets'
+import {
+  coerceReadPolicy,
+  resolveReadSpec,
+} from '@struktoai/mirage-core/workspace/mount/read_policy'
+import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
+import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
+import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
+import { S3WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/s3'
+import { readFileSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import './secrets/constants.ts'
+import { isModulePath, loadAttr, splitRef } from './utils/loader.ts'
+import { parseYaml } from './utils/yaml.ts'
 import { buildVfs } from './vfs/registry.ts'
+import { S3Config } from './vfs/s3/config.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
 import { RedisWorkspaceStateStore } from './workspace/store/redis.ts'
-import type { S3Config } from './vfs/s3/config.ts'
-import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+
+// The config loader is a workspace entry point of its own (the daemon
+// builds from here), so it arms the builtin secrets sources like the
+// node Workspace module does.
 
 function coerceMountMode(value: string | undefined, fallback: MountMode): MountMode {
   if (value === undefined) return fallback
@@ -174,164 +173,9 @@ function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
   return out
 }
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
-}
-
-// Python sets extra="forbid" on every workspace-config block, so a typo
-// like `mount_point:` for `mountpoint:`, `consistancy:` or `limitt:` is
-// a hard ValueError there. These tables mirror those models field for
-// field so the same YAML is accepted (and rejected) by both languages.
-//
-// The spellings are Python's canonical snake_case ones on purpose: a
-// camelCase alias that TS would accept for free is a key Python rejects,
-// which is the same portability break pointing the other way.
-//
-// `mounts.*.config` is the one block with no table, because Python types
-// it as a bare dict and validates it in the VFS's own model. Do not
-// generalize that to every credential-carrying block: an s3 store group
-// has a strict Python model (`S3StoreBlock`, extra="forbid"), so it is
-// tabled here like the rest.
-const TOP_LEVEL_KEYS = [
-  'mounts',
-  'io',
-  'command_limits',
-  'max_memory',
-  'network',
-  'system_time',
-  'clis',
-  'runtimes',
-  'route_policy',
-  'profiles',
-  'profile',
-  'mode',
-  'read',
-  'write',
-  'default_session_id',
-  'workspace_id',
-  'cache',
-  'index',
-  'store',
-  'env',
-  'secrets',
-] as const
-const MOUNT_KEYS = [
-  'vfs',
-  'mode',
-  'config',
-  'command_limits',
-  'backend',
-  'mountpoint',
-  'read',
-  'ttl',
-  'write',
-  'index',
-] as const
-// A source instance is a type beside a config, the way a mount is. Its
-// `config:` block has no table for the same reason `mounts.*.config`
-// has none: each source owns its own model and validates there.
-const SOURCE_KEYS = ['source', 'config'] as const
-const CACHE_KEYS: Record<string, readonly string[]> = {
-  ram: ['type', 'limit', 'max_drain_bytes'],
-  redis: ['type', 'limit', 'max_drain_bytes', 'url', 'key_prefix'],
-}
-const INDEX_KEYS: Record<string, readonly string[]> = {
-  ram: ['type', 'ttl'],
-  redis: ['type', 'ttl', 'url', 'key_prefix'],
-}
 const STORE_GROUPS = ['namespace', 'observer', 'workspace', 'jobs'] as const
-const STORE_KEYS = ['type', 'url', 'key_prefix', 'root', ...STORE_GROUPS] as const
-// An s3 group IS `S3Config` plus the discriminator, so its keys are that
-// model's, spelled Python's way. Python declares it as
-// `S3StoreBlock(S3Config)` with extra="forbid" — a strict model, unlike
-// the untyped `mounts.*.config` — so a typo is a load error there and
-// must be one here.
-const STORE_GROUP_KEYS: Record<string, readonly string[]> = {
-  ram: ['type'],
-  disk: ['type', 'root'],
-  redis: ['type', 'url', 'key_prefix'],
-  s3: [
-    'type',
-    'bucket',
-    'region',
-    'endpoint_url',
-    'aws_access_key_id',
-    'aws_secret_access_key',
-    'aws_session_token',
-    'aws_profile',
-    'path_style',
-    'timeout',
-    'proxy',
-    'key_prefix',
-  ],
-}
-// The s3 store hosts only the sessions+meta plane, so it is valid as the
-// `workspace` override and nowhere else — as the top-level default it is
-// already refused above. Its store raises when asked to build another
-// plane; both languages now refuse the config instead of the plane.
-const S3_HOSTED_GROUP = 'workspace'
-const PLAIN_STORE_GROUP_KEYS: Record<string, readonly string[]> = Object.fromEntries(
-  Object.entries(STORE_GROUP_KEYS).filter(([type]) => type !== 's3'),
-)
+
 const CLI_KEYS: readonly string[] = ['cli', 'script', 'runtime', 'config']
-
-// A store group whose `type` names a backend carries that backend's own
-// spellings: `aws_access_key_id` is `accessKeyId`, not `awsAccessKeyId`,
-// so camelizing here would hide the key from the translation that does
-// know it. Its *keys* are still checked — the backend's model declares
-// them (see STORE_GROUP_KEYS above) — only the renaming is skipped.
-const BACKEND_SPELLED_TYPES: ReadonlySet<string> = new Set(['s3'])
-
-function keepsBackendSpellings(block: Record<string, unknown>): boolean {
-  return typeof block.type === 'string' && BACKEND_SPELLED_TYPES.has(block.type)
-}
-
-function rejectUnknownKeys(
-  block: Record<string, unknown>,
-  allowed: readonly string[],
-  what: string,
-): void {
-  for (const key of Object.keys(block)) {
-    if (allowed.includes(key)) continue
-    throw new Error(`unknown ${what} key \`${key}\` (allowed: ${allowed.join(', ')})`)
-  }
-}
-
-/**
- * The `type:` discriminator of a typed block. `fallback` is the type
- * assumed when the key is absent; leave it out where Python models the
- * block as a discriminated union, which makes `type` mandatory.
- */
-function blockType(
-  block: Record<string, unknown>,
-  what: string,
-  known: readonly string[],
-  fallback?: string,
-): string {
-  const type = block.type ?? fallback
-  if (type === undefined) {
-    throw new Error(`config \`${what}\` needs a \`type\` (one of ${known.join(', ')})`)
-  }
-  if (typeof type !== 'string') {
-    throw new Error(`config \`${what}\` type must be a string (one of ${known.join(', ')})`)
-  }
-  if (!known.includes(type)) {
-    throw new Error(`unknown ${what} type \`${type}\` (expected one of ${known.join(', ')})`)
-  }
-  return type
-}
-
-function validateTypedBlock(
-  value: unknown,
-  table: Record<string, readonly string[]>,
-  what: string,
-  fallback?: string,
-): void {
-  if (value === undefined || value === null) return
-  if (!isPlainObject(value)) throw new Error(`config \`${what}\` must be a mapping`)
-  const type = blockType(value, what, Object.keys(table), fallback)
-  rejectUnknownKeys(value, table[type] ?? [], `${what} (${type})`)
-}
 
 // Python's index block models refuse a ttl that is not a number
 // (StrictFloat) and a non-string url or key_prefix at load. This stops at
@@ -346,41 +190,6 @@ function validateIndexValues(value: unknown, what: string): void {
   }
   if (value.key_prefix !== undefined && typeof value.key_prefix !== 'string') {
     throw new Error(`config \`${what}.key_prefix\` must be a string`)
-  }
-}
-
-function validateStoreBlock(value: unknown): void {
-  if (value === undefined || value === null) return
-  if (!isPlainObject(value)) throw new Error('config `store` must be a mapping')
-  // The top level picks the default backend for every plane; s3 hosts
-  // only the sessions+meta group, so it is a `workspace` override and
-  // never the default. Mirrors Python's StoreBlock.
-  blockType(value, 'store', ['ram', 'disk', 'redis'], 'ram')
-  rejectUnknownKeys(value, STORE_KEYS, 'store')
-  for (const group of STORE_GROUPS) {
-    const block = value[group]
-    if (block === undefined || block === null) continue
-    if (!isPlainObject(block)) throw new Error(`config \`store.${group}\` must be a mapping`)
-    if (block.type === 's3' && group !== S3_HOSTED_GROUP) {
-      throw new Error(
-        `config \`store.${group}\` cannot be s3: the s3 store hosts only the ` +
-          `sessions+meta group; keep the ${group} plane on ram or redis and pass ` +
-          `the s3 store as the '${S3_HOSTED_GROUP}' group override`,
-      )
-    }
-    if (group === 'observer' && block.type === 'redis') {
-      throw new Error(
-        'config `store.observer` cannot be redis: history only grows; keep it on ram or disk',
-      )
-    }
-    if (group === 'jobs' && block.type === 'disk') {
-      throw new Error(
-        "config `store.jobs` cannot be disk: a job's console is a stream other " +
-          'processes follow; keep the jobs plane on ram or redis',
-      )
-    }
-    const table = group === S3_HOSTED_GROUP ? STORE_GROUP_KEYS : PLAIN_STORE_GROUP_KEYS
-    validateTypedBlock(block, table, `store.${group}`, 'ram')
   }
 }
 
@@ -430,7 +239,7 @@ function validateReadBlock(prefix: string, block: Record<string, unknown>): void
  * folds snake_case into camelCase and the distinction is gone.
  */
 function validateConfigKeys(raw: Record<string, unknown>): void {
-  rejectUnknownKeys(raw, TOP_LEVEL_KEYS, 'config')
+  validateDocument('config', raw, 'config')
   parseCommandLimits(raw.command_limits)
   if (raw.max_memory !== undefined && raw.max_memory !== null) {
     parseLimit(raw.max_memory as string | number, 'max_memory')
@@ -454,9 +263,9 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   if (isPlainObject(raw.mounts)) {
     for (const [prefix, block] of Object.entries(raw.mounts)) {
       if (!isPlainObject(block)) throw new Error(`mount \`${prefix}\` must be a mapping`)
-      rejectUnknownKeys(block, MOUNT_KEYS, `mount \`${prefix}\``)
+      validateDocument('config', block, `mount \`${prefix}\``, { names: 'mount' })
       // Before the read rules, as pydantic checks fields before them.
-      validateTypedBlock(block.index, INDEX_KEYS, `mounts.${prefix}.index`)
+      validateDocument('config', block.index, `mounts.${prefix}.index`, { names: 'index' })
       validateIndexValues(block.index, `mounts.${prefix}.index`)
       validateReadBlock(prefix, block)
       if (block.write !== undefined && block.write !== null) coerceWritePolicy(block.write)
@@ -466,7 +275,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   if (isPlainObject(raw.clis)) {
     for (const [name, block] of Object.entries(raw.clis)) {
       if (!isPlainObject(block)) throw new Error(`cli \`${name}\` must be a mapping`)
-      rejectUnknownKeys(block, CLI_KEYS, `cli \`${name}\``)
+      validateDocument('config', block, `cli \`${name}\``, { names: 'cli' })
       // A pointer may only fill a config that a model validates, because
       // the model is what a snapshot redacts by. A script's config is
       // opaque: nothing declares which key is a credential, so the
@@ -499,16 +308,16 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   }
   if (raw.io !== undefined) {
     if (!isPlainObject(raw.io)) throw new Error('io must be a mapping')
-    rejectUnknownKeys(raw.io, ['buffer_bytes'], 'io')
+    validateDocument('config', raw.io, 'io', { names: 'io' })
     new IOConfig(camelizeKeys(raw.io))
   }
-  validateTypedBlock(raw.cache, CACHE_KEYS, 'cache')
+  validateDocument('config', raw.cache, 'cache', { names: 'cache' })
   if (isPlainObject(raw.cache) && raw.cache.limit !== undefined) {
     parseLimit(raw.cache.limit as string | number, 'limit')
   }
-  validateTypedBlock(raw.index, INDEX_KEYS, 'index')
+  validateDocument('config', raw.index, 'index', { names: 'index' })
   validateIndexValues(raw.index, 'index')
-  validateStoreBlock(raw.store)
+  validateDocument('config', raw.store, 'store', { names: 'store' })
   validateEnvBlock(raw.env)
   validateSecretsBlock(raw.secrets)
 }
@@ -526,8 +335,8 @@ function validateSecretsBlock(value: unknown): void {
   if (!isPlainObject(value)) throw new Error('config `secrets` must be a mapping')
   for (const [name, block] of Object.entries(value)) {
     if (!isPlainObject(block)) throw new Error(`config \`secrets.${name}\` must be a mapping`)
-    rejectUnknownKeys(block, SOURCE_KEYS, `config \`secrets.${name}\``)
-    const parsed = SecretSourceSchema.safeParse(block)
+    validateDocument('config', block, `config \`secrets.${name}\``, { names: 'source' })
+    const parsed = SecretSource.safeParse(block)
     if (!parsed.success) {
       const detail = parsed.error.issues[0]?.message ?? parsed.error.message
       throw new Error(`config \`secrets.${name}\`: ${detail}`)
@@ -550,7 +359,7 @@ function validateEnvBlock(value: unknown): void {
     if (!isPlainObject(entry)) {
       throw new Error(`config \`env.${name}\` must be a string or a mapping`)
     }
-    const parsed = EnvVarSchema.safeParse(entry)
+    const parsed = EnvVar.safeParse(entry)
     if (!parsed.success) {
       const detail = parsed.error.issues[0]?.message ?? parsed.error.message
       throw new Error(`config \`env.${name}\`: ${detail}`)
@@ -586,7 +395,7 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
     for (const group of STORE_GROUPS) {
       const block = store[group]
       if (!isPlainObject(block)) continue
-      if (keepsBackendSpellings(block)) continue
+      if (block.type === 's3') continue
       store[group] = camelizeKeys(block)
     }
     out.store = store
@@ -624,7 +433,7 @@ function parseProfiles(raw: unknown): Record<string, SessionProfile> {
     // has rebased the path onto the config file's directory, so reading
     // it here would resolve against the process cwd. The workspace entry point
     // (`toWorkspaceOptions`) loads it, the python loader's split.
-    out[name] = parseSessionProfile(block, `profile \`${name}\``)
+    out[name] = SessionProfile(block, `profile \`${name}\``)
   }
   return out
 }
@@ -1044,23 +853,6 @@ export function loadWorkspaceConfigFile(
   return normalizeConfigKeys(checkWorkspaceConfigFile(path, env)) as unknown as WorkspaceConfigRaw
 }
 
-export interface WorkspaceArgs {
-  // A `Mount` rather than a tuple: the read policy has to reach the
-  // workspace, and every consumer that flattened the tuple would have
-  // dropped it. `Mount` is core's own carrier and already holds mode and
-  // commandLimits.
-  mounts: Record<string, Mount>
-  /**
-   * Exactly what `new Workspace` takes, minus the two the loader always
-   * resolves. Spelling the fields out here instead is what once dropped
-   * `clis` and the deny rules on the way to the daemon: a config knob was
-   * parsed and validated, then discarded by a list nobody remembered to
-   * extend.
-   */
-  options: WorkspaceOptions & { mode: MountMode; read: ReadSpec }
-  kernelMounts: Record<string, [MountBackend, string | undefined]>
-}
-
 function buildIndexConfig(
   block: RamIndexBlock | RedisIndexBlock | null | undefined,
 ): IndexConfig | undefined {
@@ -1098,7 +890,7 @@ function buildStoreGroup(block: StoreGroupBlock): WorkspaceStateStore {
     // not survive a plain camelize.
     const s3: Record<string, unknown> = { key_prefix: 'mirage/', ...block }
     delete s3.type
-    return new S3WorkspaceStateStore(parseConfigWithSchema(S3ConfigSchema, s3))
+    return new S3WorkspaceStateStore(parseConfigWithSchema(S3Config, s3))
   }
   return new RAMWorkspaceStateStore()
 }
@@ -1128,7 +920,7 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
   return new RAMWorkspaceStateStore(overrides)
 }
 
-export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<WorkspaceArgs> {
+export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw) {
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const defaultRead = resolveReadSpec(cfg.read, undefined)
   const defaultWrite = coerceWritePolicy(cfg.write)

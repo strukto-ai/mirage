@@ -12,20 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chmod, stat as fsStat, utimes } from 'node:fs/promises'
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
+import type { PathSpec, SetAttrFields } from '@struktoai/mirage-core/types'
+import { chmod, stat as fsStat, utimes } from 'node:fs/promises'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
-
-export interface SetAttrsFields {
-  mode?: number
-  uid?: number | string
-  gid?: number | string
-  atime?: string
-  mtime?: string
-}
 
 // Write metadata fields (the write side of stat). Applies natively what the
 // real inode can take and returns the residual: fields the caller must
@@ -37,7 +29,7 @@ export interface SetAttrsFields {
 export async function setAttrs(
   accessor: DiskAccessor,
   path: PathSpec,
-  fields: SetAttrsFields,
+  fields: SetAttrFields,
 ): Promise<Record<string, number | string>> {
   const full = await resolveInside(accessor.root, path)
   let st

@@ -12,13 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { DeltaHook } from '../../events/base.ts'
+import { changesUnder, folderPath, justMade, movedBelow, settle } from '../../events/delta.ts'
 import { Delta, FileChangeKind, type PathSpec } from '../../types.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { sortedJson } from '../../utils/sort.ts'
-import type { DeltaHook } from '../../events/base.ts'
-import { changesUnder, folderPath, justMade, movedBelow, settle } from '../../events/delta.ts'
 import { encodedPath, GraphError, graphGet } from './client.ts'
-import type { MsGraphConfigResolved } from './config.ts'
+import type { resolveMsGraphConfig } from './config.ts'
 import { parentId } from './drive.ts'
 
 /** One drive a delta pull reads, and where its mount root sits. Mirrors Python `DeltaTarget`. */
@@ -76,10 +76,13 @@ interface GraphItem {
  * Mirrors Python `GraphDeltaHook` (`core/msgraph/events.py`).
  */
 export class GraphDeltaHook implements DeltaHook {
-  private readonly config: MsGraphConfigResolved
+  private readonly config: ReturnType<typeof resolveMsGraphConfig>
   private readonly targets: (root: PathSpec) => Promise<DeltaTarget[]>
 
-  constructor(config: MsGraphConfigResolved, targets: (root: PathSpec) => Promise<DeltaTarget[]>) {
+  constructor(
+    config: ReturnType<typeof resolveMsGraphConfig>,
+    targets: (root: PathSpec) => Promise<DeltaTarget[]>,
+  ) {
     this.config = config
     this.targets = targets
   }

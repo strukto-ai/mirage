@@ -12,30 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { eexist, enoent, enotdir, enotsup, listingError } from '../../errors/fs.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { enotsup } from '../../errors/fs.ts'
 import {
   record,
-  recordStream,
   recordingActive,
+  recordStream,
   revisionFor,
   startOp,
 } from '../../observe/context.ts'
 import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
-import { eexist, enoent, enotdir, listingError } from '../../errors/fs.ts'
+import { sleep } from '../../utils/abort.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { windowFor } from '../../utils/ranges.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
-import type { MsGraphConfigResolved } from './config.ts'
-import { BATCH_LIMIT } from './constants.ts'
-import { checkItem } from './paths.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import {
-  GraphError,
+  cancelUpload,
   graphBatch,
   graphDelete,
+  GraphError,
   graphGet,
   graphGetBytes,
   graphList,
@@ -46,10 +45,10 @@ import {
   graphStream,
   pollMonitor,
   uploadChunk,
-  cancelUpload,
 } from './client.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
-import { sleep } from '../../utils/abort.ts'
+import type { resolveMsGraphConfig } from './config.ts'
+import { BATCH_LIMIT } from './constants.ts'
+import { checkItem } from './paths.ts'
 
 const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 const UPLOAD_CHUNK = 10 * 327680
@@ -158,7 +157,7 @@ function parentReference(src: DriveLoc, dst: DriveLoc): Record<string, unknown> 
 }
 
 async function copyOnce(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   src: DriveLoc,
   dst: DriveLoc,
   srcVirtual?: string,
@@ -197,7 +196,7 @@ async function copyOnce(
 }
 
 export async function copyTree(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   src: DriveLoc,
   dst: DriveLoc,
   srcVirtual?: string,
@@ -253,7 +252,7 @@ export interface MovedItem {
  * that was not positively a file.
  */
 export async function renameReplace(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   src: DriveLoc,
   dst: DriveLoc,
   srcVirtual?: string,
@@ -286,7 +285,7 @@ export async function renameReplace(
 }
 
 async function urlItem(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
 ): Promise<Record<string, unknown> | null> {
   try {
@@ -318,7 +317,7 @@ export interface FolderTarget {
  * `create_child_folder`.
  */
 export async function createChildFolder(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   parentUrl: string,
   name: string,
   target: FolderTarget,
@@ -345,7 +344,7 @@ export async function createChildFolder(
 }
 
 async function uploadSessionWrite(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   sessionUrl: string,
   data: Uint8Array | ByteSpool,
 ): Promise<void> {
@@ -389,7 +388,7 @@ async function uploadSessionWrite(
  * picks between the two; `signal` stops it.
  */
 export async function writeItem(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   data: ByteSource,
   signal?: AbortSignal,
@@ -467,7 +466,7 @@ function currentVersionId(versions: Record<string, unknown>[]): string | null {
 // null. Every shell line records, so only reads outside one (FUSE, a runtime's
 // guest, `ws.vfs`) skip it.
 async function captureItemMetadata(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   virtual: string,
   versions: boolean,
@@ -489,7 +488,7 @@ async function captureItemMetadata(
 }
 
 export async function readItem(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   virtual: string,
   backend: string,
@@ -532,7 +531,7 @@ export async function readItem(
 }
 
 export async function* streamItem(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   virtual: string,
   backend: string,
@@ -573,7 +572,7 @@ export async function* streamItem(
 }
 
 export async function* iterTree(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   virtual?: string,
 ): AsyncIterable<[string, Record<string, unknown>, boolean]> {
@@ -583,7 +582,7 @@ export async function* iterTree(
 
 /** Walk a checked scope using canonical names returned by Graph. */
 async function* walkTree(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
 ): AsyncIterable<[string, Record<string, unknown>, boolean]> {
   for (const child of await graphList(config, loc.item('/children'))) {
@@ -625,7 +624,7 @@ export function parentId(item: { parentReference?: unknown }): string {
  * the folders' listings. Mirrors Python's `delta_tree`.
  */
 export async function deltaTree(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   virtual?: string,
 ): Promise<Map<string, FileStat> | null> {
@@ -695,7 +694,7 @@ export async function deltaTree(
  * is paged past. Mirrors Python's `batch_tree`.
  */
 export async function batchTree(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   path: PathSpec,
   limit?: number,
@@ -759,7 +758,7 @@ export async function batchTree(
  * Python's `_batch_page`.
  */
 async function batchPage(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   status: number,
   body: Record<string, unknown>,
@@ -848,7 +847,7 @@ function placed(
 // more times, not fewer -- which is why this sends the request itself.
 // $select drops a driveItem payload this never reads.
 export async function driveRootEmpty(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   virtual?: string,
 ): Promise<boolean> {
@@ -858,7 +857,7 @@ export async function driveRootEmpty(
 }
 
 async function itemOrNull(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   path: string,
 ): Promise<Record<string, unknown> | null> {
@@ -871,7 +870,7 @@ async function itemOrNull(
 }
 
 async function isFile(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   path: string,
 ): Promise<boolean> {
@@ -879,7 +878,11 @@ async function isFile(
   return item !== null && !('folder' in item)
 }
 
-async function isDir(config: MsGraphConfigResolved, loc: DriveLoc, path: string): Promise<boolean> {
+async function isDir(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  loc: DriveLoc,
+  path: string,
+): Promise<boolean> {
   const item = await itemOrNull(config, loc, path)
   return item !== null && 'folder' in item
 }
@@ -890,7 +893,7 @@ async function isDir(config: MsGraphConfigResolved, loc: DriveLoc, path: string)
  * `readdir_items`.
  */
 export async function readdirItems(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   path: PathSpec,
   limit?: number,
@@ -921,7 +924,7 @@ export async function readdirItems(
 
 /** One drive item's stat, from Graph. Mirrors Python's `stat_item`. */
 export async function statItem(
-  config: MsGraphConfigResolved,
+  config: ReturnType<typeof resolveMsGraphConfig>,
   loc: DriveLoc,
   path: PathSpec,
 ): Promise<FileStat> {

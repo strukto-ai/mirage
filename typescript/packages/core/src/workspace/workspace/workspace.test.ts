@@ -13,20 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import { parseSessionProfile } from '../../policy/profile.ts'
+import { SessionProfile } from '../../policy/profile.ts'
+import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
+import type { RunResult } from '../../runtime/types.ts'
+import { RAMJobStore } from '../../shell/job_table/ram.ts'
+import { MountMode } from '../../types.ts'
+import { ManualClock } from '../../utils/clock.ts'
+import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
-import { MountMode } from '../../types.ts'
-import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
-import { ManualClock } from '../../utils/clock.ts'
-import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
-import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
-import { RAMJobStore } from '../../shell/job_table/ram.ts'
-import type { RunResult } from '../../runtime/types.ts'
 
 const DEC = new TextDecoder()
 
@@ -41,7 +41,7 @@ async function seeded(): Promise<Workspace> {
     { '/repo': [new RAMVFS(), MountMode.WRITE] as const },
     {
       mode: MountMode.WRITE,
-      profiles: { reviewer: parseSessionProfile({ paths: { hide: ['/repo/secrets'] } }) },
+      profiles: { reviewer: SessionProfile({ paths: { hide: ['/repo/secrets'] } }) },
     },
   )
   open.push(ws)
@@ -94,7 +94,7 @@ describe('Session', () => {
         { '/repo': [new RAMVFS(), MountMode.WRITE] as const },
         {
           mode: MountMode.WRITE,
-          profiles: { reviewer: parseSessionProfile({ paths: { hide: ['/repo/secrets'] } }) },
+          profiles: { reviewer: SessionProfile({ paths: { hide: ['/repo/secrets'] } }) },
           sessionStore: store,
         },
       )

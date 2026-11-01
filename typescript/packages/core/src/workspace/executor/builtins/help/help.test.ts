@@ -15,15 +15,15 @@
 import { describe, expect, it } from 'vitest'
 import { SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import { SHELL_SYNOPSES } from '../../../../commands/spec/synopsis.ts'
-import { parseSessionProfile } from '../../../../policy/profile.ts'
+import { SessionProfile } from '../../../../policy/profile.ts'
 import { MountMode } from '../../../../types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { VERSION } from '../../../../version.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { BASH_BUILTINS } from '../../../lookup/constants.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { OPERAND_HELP } from './constants.ts'
-import { TOPICS, fill, topicHelp } from './help.ts'
+import { fill, topicHelp, TOPICS } from './help.ts'
 
 type Ran = [string, string, number]
 
@@ -33,7 +33,7 @@ async function run(line: string, profiled = false): Promise<Ran> {
     profiled
       ? {
           mode: MountMode.WRITE,
-          profiles: { p: parseSessionProfile({ commands: { allow: ['help', 'echo'] } }) },
+          profiles: { p: SessionProfile({ commands: { allow: ['help', 'echo'] } }) },
           profile: 'p',
         }
       : { mode: MountMode.WRITE },

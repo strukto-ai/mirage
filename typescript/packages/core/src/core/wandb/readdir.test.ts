@@ -1,16 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fileTree, readdir } from './readdir.ts'
 import { WandbAccessor } from '../../accessor/wandb.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import type { Evicted } from '../../cache/index/config.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { IndexView } from '../../cache/index/view.ts'
-import { WandbConfigSchema } from './config.ts'
 import { type FileStat, PathSpec } from '../../types.ts'
+import { parseConfigWithSchema } from '../../vfs/secrets.ts'
 import { WandbVFS } from '../../vfs/wandb/wandb.ts'
 import { keepListing } from '../../workspace/mount/listing.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { parseConfigWithSchema } from '../../vfs/secrets.ts'
+import { WandbConfig } from './config.ts'
+import { fileTree, readdir } from './readdir.ts'
+
 const file = (name: string) => ({ name, url: 'https://example.com', sizeBytes: 1 })
 const path = (key: string) => PathSpec.fromStrPath('/wandb/' + key, key)
 describe('W&B file tree', () => {
@@ -21,9 +22,7 @@ describe('W&B file tree', () => {
     expect(() => fileTree([file('a'), file('a/b')])).toThrow('collision')
   })
   it('answers every directory below files from one catalog', async () => {
-    const accessor = new WandbAccessor(
-      parseConfigWithSchema(WandbConfigSchema, { entities: ['lab'] }),
-    )
+    const accessor = new WandbAccessor(parseConfigWithSchema(WandbConfig, { entities: ['lab'] }))
     vi.spyOn(accessor.client, 'run').mockResolvedValue({ name: 'run' })
     const files = vi.spyOn(accessor.client, 'files').mockResolvedValue([
       { name: 'nested/old.txt', sizeBytes: 3 },
@@ -38,9 +37,7 @@ describe('W&B file tree', () => {
     expect(files).toHaveBeenCalledTimes(1)
   })
   it('does not publish a partial catalog after a collision', async () => {
-    const accessor = new WandbAccessor(
-      parseConfigWithSchema(WandbConfigSchema, { entities: ['lab'] }),
-    )
+    const accessor = new WandbAccessor(parseConfigWithSchema(WandbConfig, { entities: ['lab'] }))
     vi.spyOn(accessor.client, 'files').mockResolvedValue([
       { name: 'nested/child', sizeBytes: 3 },
       { name: 'nested', sizeBytes: 1 },
@@ -51,9 +48,7 @@ describe('W&B file tree', () => {
     // The catalog is one complete fetch, so a re-list that no longer names
     // a file or a folder is the backend saying it went away.
     const gone: Evicted[] = []
-    const accessor = new WandbAccessor(
-      parseConfigWithSchema(WandbConfigSchema, { entities: ['lab'] }),
-    )
+    const accessor = new WandbAccessor(parseConfigWithSchema(WandbConfig, { entities: ['lab'] }))
     vi.spyOn(accessor.client, 'files')
       .mockResolvedValueOnce([
         { name: 'nested/old.txt', sizeBytes: 3 },

@@ -12,28 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS } from '../base.ts'
-import type { Handed } from '../types.ts'
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
-
-import { TokenManager } from '../../core/google/client.ts'
-import { type DirListing, VFSName } from '../../types.ts'
-
-import { GDocsConfigSchema, type GDocsConfig, type GDocsConfigRedacted } from './config.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
-import { DOCS_WORDS } from '../../utils/generated/google_vocabulary.ts'
-import { filesContaining as googleFilesContaining } from '../../core/google/search.ts'
 import { MIME } from '../../core/gdocs/constants.ts'
-import { readdir as gdocsReaddir } from '../../core/gdocs/readdir.ts'
 import { read as gdocsRead } from '../../core/gdocs/read.ts'
-import { stat as gdocsStat } from '../../core/gdocs/stat.ts'
-import { appDeltaHook } from '../../core/google/events.ts'
-import { makeFilename } from './doc_entry.ts'
-import type { DeltaHook } from '../../events/base.ts'
-import { unlink as gdocsUnlink } from '../../core/gdocs/unlink.ts'
+import { readdir as gdocsReaddir } from '../../core/gdocs/readdir.ts'
 import { rename as gdocsRename } from '../../core/gdocs/rename.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { stat as gdocsStat } from '../../core/gdocs/stat.ts'
+import { unlink as gdocsUnlink } from '../../core/gdocs/unlink.ts'
+import { TokenManager } from '../../core/google/client.ts'
+import type { GoogleConfig } from '../../core/google/config.ts'
+import { appDeltaHook } from '../../core/google/events.ts'
+import { filesContaining as googleFilesContaining } from '../../core/google/search.ts'
+import type { DeltaHook } from '../../events/base.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { VFSName, type DirListing } from '../../types.ts'
+import { DOCS_WORDS } from '../../utils/generated/google_vocabulary.ts'
+import { sliceWindow } from '../../utils/ranges.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { GDocsConfig } from './config.ts'
+import { makeFilename } from './doc_entry.ts'
 
 export const VFS_MD = `{prefix}
   owned/
@@ -123,11 +122,6 @@ export const VFS_MD = `{prefix}
     Keep the folder, the date and the id, and spell the title the way
     the listing does (spaces->_); any other name is refused.`
 
-export interface GDocsVFSState {
-  type: string
-  config: GDocsConfigRedacted
-}
-
 export class GDocsVFS extends BaseVFS {
   override readonly name: string = VFSName.GDOCS
   override readonly cachesReads: boolean = true
@@ -202,10 +196,7 @@ export class GDocsVFS extends BaseVFS {
     return appDeltaHook(this.accessor, MIME, makeFilename)
   }
 
-  override getState(): Promise<GDocsVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(GDocsConfigSchema, this.config) as GDocsConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof GoogleConfig>>> {
+    return Promise.resolve(this.configState(GDocsConfig, this.config))
   }
 }

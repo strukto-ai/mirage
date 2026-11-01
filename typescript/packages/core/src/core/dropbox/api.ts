@@ -12,19 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { conditionVersion } from '../../cache/context.ts'
-import { DropboxApiError, dropboxRpc } from './client.ts'
-import type { DropboxTokenManager } from './client.ts'
-import { stale } from '../../cache/context.ts'
+import { conditionVersion, stale } from '../../cache/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import type { PathSpec } from '../../types.ts'
+import type { DropboxTokenManager } from './client.ts'
+import { DropboxApiError, dropboxRpc } from './client.ts'
 import { GONE_SUMMARIES, LOST_SUMMARIES, MISS_SUMMARIES } from './constants.ts'
 
-type DropboxEntryTag = 'file' | 'folder' | 'deleted'
-
 export interface DropboxEntry {
-  '.tag': DropboxEntryTag
+  '.tag': 'file' | 'folder' | 'deleted'
   id?: string
   name: string
   path_lower?: string
@@ -42,14 +39,12 @@ interface ListFolderResponse {
   has_more: boolean
 }
 
-interface SearchMatchV2 {
-  match_type?: { '.tag': string }
-  metadata?: { metadata: DropboxEntry }
-  highlight_spans?: { highlight_str: string; is_highlighted: boolean }[]
-}
-
 interface SearchResponseV2 {
-  matches?: SearchMatchV2[]
+  matches?: {
+    match_type?: { '.tag': string }
+    metadata?: { metadata: DropboxEntry }
+    highlight_spans?: { highlight_str: string; is_highlighted: boolean }[]
+  }[]
   has_more?: boolean
   cursor?: string
 }
@@ -97,11 +92,6 @@ export async function listFolder(
   return out
 }
 
-export interface ListFolderState {
-  entries: DropboxEntry[]
-  cursor: string
-}
-
 /**
  * A cursor at the folder's present state, without listing it.
  *
@@ -123,10 +113,7 @@ export async function latestCursor(
 /**
  * Replay changes since `cursor`, following every continuation page.
  */
-export async function continueFolder(
-  tm: DropboxTokenManager,
-  cursor: string,
-): Promise<ListFolderState> {
+export async function continueFolder(tm: DropboxTokenManager, cursor: string) {
   const out: DropboxEntry[] = []
   let resp = (await dropboxRpc(tm, '/files/list_folder/continue', {
     cursor,
@@ -227,11 +214,6 @@ export const SEARCH_PAGE = 1000
 // to narrow a scan.
 export const MAX_SEARCH_MATCHES = 10_000
 
-export interface SearchFilesResult {
-  paths: [string, string][]
-  truncated: boolean
-}
-
 /**
  * Collect `[path_lower, path_display]` file matches for a search query.
  *
@@ -245,7 +227,7 @@ export async function searchFiles(
   tm: DropboxTokenManager,
   query: string,
   opts: { path?: string; filenameOnly?: boolean } = {},
-): Promise<SearchFilesResult> {
+) {
   const options: Record<string, unknown> = {
     max_results: SEARCH_PAGE,
     file_status: 'active',

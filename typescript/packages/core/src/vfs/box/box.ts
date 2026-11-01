@@ -12,34 +12,34 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CONDITION_SUPPORT } from '../../core/box/constants.ts'
-import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
-import { BaseVFS } from '../base.ts'
 import { BoxAccessor } from '../../accessor/box.ts'
-import { BoxTokenManager } from '../../core/box/client.ts'
-import { VFSName } from '../../types.ts'
-import { BoxConfigSchema, type BoxConfig, type BoxConfigRedacted } from './config.ts'
-import { buildDeltaHook } from '../../core/box/events.ts'
-import { type DeltaHook } from '../../events/index.ts'
-import type { CapacityResult, DirListing, PathSpec, FileStat } from '../../types.ts'
+import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
 import { capacity as boxCapacity } from '../../core/box/capacity.ts'
-import type { Handed } from '../types.ts'
-import { readdir as boxReaddir } from '../../core/box/readdir.ts'
-import { read as boxRead, readStream as boxStream } from '../../core/box/read.ts'
 import { checksum as boxChecksum } from '../../core/box/checksum.ts'
-import { stat as boxStat } from '../../core/box/stat.ts'
-import { exists as boxExists } from '../../core/box/exists.ts'
-import type { ByteSource } from '../../io/types.ts'
-import { write as boxWrite, replace as boxReplace } from '../../core/box/write.ts'
-import { create as boxCreate } from '../../core/box/create.ts'
-import { mkdir as boxMkdir } from '../../core/box/mkdir.ts'
-import { unlink as boxUnlink } from '../../core/box/unlink.ts'
-import { rmdir as boxRmdir, rmR as boxRmR } from '../../core/box/rmdir.ts'
-import { rename as boxRename } from '../../core/box/rename.ts'
+import { BoxTokenManager } from '../../core/box/client.ts'
+import { CONDITION_SUPPORT } from '../../core/box/constants.ts'
 import { copy as boxCopy } from '../../core/box/copy.ts'
-import { truncate as boxTruncate } from '../../core/box/truncate.ts'
+import { create as boxCreate } from '../../core/box/create.ts'
+import { buildDeltaHook } from '../../core/box/events.ts'
+import { exists as boxExists } from '../../core/box/exists.ts'
+import { mkdir as boxMkdir } from '../../core/box/mkdir.ts'
+import { read as boxRead, readStream as boxStream } from '../../core/box/read.ts'
+import { readdir as boxReaddir } from '../../core/box/readdir.ts'
+import { rename as boxRename } from '../../core/box/rename.ts'
+import { rmdir as boxRmdir, rmR as boxRmR } from '../../core/box/rmdir.ts'
 import { filesContaining as boxFilesContaining } from '../../core/box/search.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { stat as boxStat } from '../../core/box/stat.ts'
+import { truncate as boxTruncate } from '../../core/box/truncate.ts'
+import { unlink as boxUnlink } from '../../core/box/unlink.ts'
+import { replace as boxReplace, write as boxWrite } from '../../core/box/write.ts'
+import { type DeltaHook } from '../../events/index.ts'
+import type { ByteSource } from '../../io/types.ts'
+import type { CapacityResult, DirListing, FileStat, PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { BoxConfig } from './config.ts'
 
 export const VFS_MD = `{prefix}
   Mirrors Box folder hierarchy. Every item is served as its raw bytes:
@@ -53,11 +53,6 @@ export const VFS_MD = `{prefix}
   Box uses numeric folder IDs internally (root = 0); mirage caches the
   path -> id mapping, so nested dirs cost one API call per level on first
   access. Use ls on the parent dir before constructing a path.`
-
-export interface BoxVFSState {
-  type: string
-  config: BoxConfigRedacted
-}
 
 export class BoxVFS extends BaseVFS {
   override get conditionSupport(): ConditionSupport {
@@ -234,10 +229,7 @@ export class BoxVFS extends BaseVFS {
     return buildDeltaHook(this.accessor)
   }
 
-  override getState(): Promise<BoxVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(BoxConfigSchema, this.config) as BoxConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof BoxConfig>>> {
+    return Promise.resolve(this.configState(BoxConfig, this.config))
   }
 }

@@ -13,13 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '@struktoai/mirage-core/types'
-import { S3AliasVFS, type S3AliasVFSState } from '../s3_alias.ts'
-import { ALIAS, type TencentConfig, type TencentConfigRedacted } from './config.ts'
+import type { RedactedSchema } from '@struktoai/mirage-core/vfs/secrets'
+import { S3AliasVFS } from '../s3_alias.ts'
+import { TencentConfig } from './config.ts'
 
-export type TencentVFSState = S3AliasVFSState<TencentConfigRedacted>
-
-export class TencentVFS extends S3AliasVFS<TencentConfig, TencentConfigRedacted> {
+export class TencentVFS extends S3AliasVFS<TencentConfig, RedactedSchema<typeof TencentConfig>> {
   constructor(config: TencentConfig) {
-    super(VFSName.TENCENT, config, ALIAS)
+    super(VFSName.TENCENT, config, TencentConfig)
   }
 }

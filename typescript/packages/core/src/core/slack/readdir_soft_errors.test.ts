@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { SlackVFSBase } from '../../vfs/slack/slack.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { SlackVFS } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { SlackApiError, type SlackResponse, type SlackTransport } from './client.ts'
 import { read } from './read.ts'
@@ -67,7 +67,7 @@ describe('a channel Slack refuses', () => {
     'is EACCES on %s',
     async (code) => {
       const ws = new Workspace({
-        '/slack/': new SlackVFSBase({ accessor: new SlackAccessor(historyFails(code)) }),
+        '/slack/': new SlackVFS({ accessor: new SlackAccessor(historyFails(code)) }),
       })
       await ws.dispatch('readdir', '/slack/channels')
       await expect(ws.dispatch('readdir', CHANNEL)).rejects.toMatchObject({
@@ -79,7 +79,7 @@ describe('a channel Slack refuses', () => {
 
   it('propagates any other Slack error', async () => {
     const ws = new Workspace({
-      '/slack/': new SlackVFSBase({ accessor: new SlackAccessor(historyFails('ratelimited')) }),
+      '/slack/': new SlackVFS({ accessor: new SlackAccessor(historyFails('ratelimited')) }),
     })
     await ws.dispatch('readdir', '/slack/channels')
     await expect(ws.dispatch('readdir', CHANNEL)).rejects.toThrow(/ratelimited/)

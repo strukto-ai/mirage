@@ -1,13 +1,13 @@
-import { API_KEY } from '../server/wandb/store.ts'
+import { Kind, parse, visit } from 'graphql'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { Kind, parse, visit } from 'graphql'
-import { Workspace } from '../../typescript/packages/core/src/workspace/workspace/workspace.ts'
-import { WandbVFS } from '../../typescript/packages/core/src/vfs/wandb/wandb.ts'
-import { WandbConfigSchema } from '../../typescript/packages/core/src/core/wandb/config.ts'
-import { parseConfigWithSchema } from '../../typescript/packages/core/src/vfs/secrets.ts'
+import { WandbConfig } from '../../typescript/packages/core/src/core/wandb/config.ts'
 import { MountMode } from '../../typescript/packages/core/src/types.ts'
+import { parseConfigWithSchema } from '../../typescript/packages/core/src/vfs/secrets.ts'
+import { WandbVFS } from '../../typescript/packages/core/src/vfs/wandb/wandb.ts'
+import { Workspace } from '../../typescript/packages/core/src/workspace/workspace/workspace.ts'
 import type { RequestRecord, startWandb } from '../server/wandb/fake.ts'
+import { API_KEY } from '../server/wandb/store.ts'
 
 interface Step {
   command: string
@@ -92,7 +92,7 @@ export async function requestChecks(server: Awaited<ReturnType<typeof startWandb
   const results: RequestResult[] = []
   for (const scenario of scenarios) {
     const vfs = new WandbVFS(
-      parseConfigWithSchema(WandbConfigSchema, {
+      parseConfigWithSchema(WandbConfig, {
         entities: ['lab'],
         api_key: API_KEY,
         base_url: server.base,

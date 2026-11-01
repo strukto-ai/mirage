@@ -23,7 +23,6 @@ export {
   loadWorkspaceConfig,
   loadWorkspaceConfigFile,
   type MountBlock,
-  type WorkspaceArgs,
   type WorkspaceConfigRaw,
 } from '@struktoai/mirage-node'
 export {

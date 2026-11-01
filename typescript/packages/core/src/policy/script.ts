@@ -36,7 +36,7 @@ import {
   PROGRAM_MEMORY,
   PROGRAM_RUNTIMES,
 } from './constants.ts'
-import { SESSION_SCOPED, type SessionScoped } from './mixin.ts'
+import { SESSION_SCOPED, type SessionScopedMixin } from './mixin.ts'
 import {
   Answer,
   VALIDITY,
@@ -284,7 +284,7 @@ export interface ScriptWiring {
  * sources an `env` pointer is read from; absent reads each from its
  * source's ambient defaults. Mirrors the Python `ScriptPolicy`.
  */
-export class ScriptPolicy implements Policy, SessionScoped {
+export class ScriptPolicy implements Policy, SessionScopedMixin {
   readonly [SESSION_SCOPED] = true as const
   private readonly sessions: SessionScriptsQuery
   private readonly wiring: ScriptWiring | null

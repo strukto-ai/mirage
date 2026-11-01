@@ -11,14 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { CLI } from '@struktoai/mirage-core/commands/cli/types'
-import { CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 
 import { registerCliSpec } from '@struktoai/mirage-core/commands/cli/specs'
-import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
+import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { Argument } from '@struktoai/mirage-core/commands/spec/index'
+import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { EmailAccessor } from '../../../../accessor/email.ts'
-import { EmailConfigSchema, type EmailConfig } from '../../../../core/email/config.ts'
+import { EmailConfig } from '../../../../core/email/config.ts'
 import { compose } from './compose.ts'
 import { forward } from './forward.ts'
 import { listEnvelopes } from './list.ts'
@@ -164,7 +163,7 @@ export const HIMALAYA = new CLI({
     'message reply': new CLIHandler({ fn: reply, write: true }),
     'message forward': new CLIHandler({ fn: forward, write: true }),
   },
-  configModel: EmailConfigSchema,
+  configModel: EmailConfig,
   accessor: (config) => new EmailAccessor(config as EmailConfig),
 })
 

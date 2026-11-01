@@ -12,11 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from contextlib import AbstractAsyncContextManager
 from functools import partial
 from typing import Any, cast
 from urllib.parse import quote
 
+from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.capacity import capacity as _capacity
 from mirage.core.redis.capacity import count as _count
 from mirage.core.redis.capacity import size_of as _size_of
@@ -39,7 +41,11 @@ from mirage.core.redis.unlink import unlink as _unlink
 from mirage.core.redis.write import write as _write
 from mirage.errors.types import QuotaExceededError
 from mirage.io.types import ByteSource
-from mirage.types import CapacityResult, FileStat, PathSpec
+from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.capacity import Charge, charge, storage_usage
+from mirage.vfs.constants import REDACTED_SECRET
+from mirage.vfs.redis.store import RedisStore, escape_glob
 
 try:
     import redis as sync_redis
@@ -48,13 +54,6 @@ except ImportError as _err:
         "RedisVFS requires the 'redis' extra. "
         "Install with: pip install mirage-ai[redis]"
     ) from _err
-
-from mirage.accessor.redis import RedisAccessor
-from mirage.types import VFSName
-from mirage.vfs.base import BaseVFS
-from mirage.vfs.capacity import Charge, charge, storage_usage
-from mirage.vfs.redis.store import RedisStore, escape_glob
-from mirage.vfs.secrets import REDACTED_SECRET
 
 
 class RedisVFS(BaseVFS):

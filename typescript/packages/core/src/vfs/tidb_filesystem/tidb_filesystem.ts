@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSource } from '../../io/types.ts'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { append as tfsAppend } from '../../core/tidb_filesystem/append.ts'
 import { create as tfsCreate } from '../../core/tidb_filesystem/create.ts'
@@ -27,6 +26,7 @@ import { stat as tfsStat } from '../../core/tidb_filesystem/stat.ts'
 import { readStream as tfsStream } from '../../core/tidb_filesystem/stream.ts'
 import { unlink as tfsUnlink } from '../../core/tidb_filesystem/unlink.ts'
 import { write as tfsWrite } from '../../core/tidb_filesystem/write.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
@@ -35,7 +35,7 @@ import type { Handed } from '../types.ts'
  * TiDBFilesystem's functions over its accessor, which a host package builds
  * over its own transport.
  */
-export class TiDBFilesystemVFSBase extends BaseVFS<TiDBFilesystemAccessor> {
+export class TiDBFilesystemVFS extends BaseVFS<TiDBFilesystemAccessor> {
   override readonly readsRanges: boolean = true
 
   override readdir(path: PathSpec): Promise<FileStat[]> {

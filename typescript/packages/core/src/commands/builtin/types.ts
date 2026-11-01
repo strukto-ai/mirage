@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RowActionKind } from '../../core/generic/types.ts'
+
 /** One `-exec` action: the words between `-exec` and its terminator, `{}`
  * still in place, and whether it is `{} +` (one run over every match)
  * rather than `;` (one run per match). */
-import type { RowActionKind } from '../../core/generic/find_eval.ts'
 
 export interface ExecAction {
   readonly kind: 'exec'

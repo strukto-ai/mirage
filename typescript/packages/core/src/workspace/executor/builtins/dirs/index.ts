@@ -13,5 +13,5 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { handleCd } from './cd.ts'
-export { type DirArgs, type ModeOptions, splitModeOptions } from './dirs.ts'
+export { splitModeOptions, type DirArgs } from './dirs.ts'
 export { handlePwd } from './pwd.ts'

@@ -12,24 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { isStdin, stdinStream } from '../utils/stream.ts'
-import { guardInput } from '../utils/limit.ts'
-import { IOResult, type ByteSource, type PathRecord } from '../../../io/types.ts'
-import type { PathSpec, ReadStreamFn } from '../../../types.ts'
-import type { CommandFnResult, Context } from '../../config.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
-import { resolveSource } from '../utils/stream.ts'
-import { formatRecords } from '../utils/output.ts'
-import { wordRefusalError } from '../../spec/usage.ts'
-import { matchWord } from '../../spec/word_choice.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { IOResult, type ByteSource, type PathRecord } from '../../../io/types.ts'
+import { openStreamSync, runStream } from '../../../rs/stream.ts'
+import { byteView, decodeText, encodeText } from '../../../shell/bytes.ts'
+import type { PathSpec, ReadStreamFn } from '../../../types.ts'
+import { concat } from '../../../utils/bytes.ts'
+import type { CommandFnResult, Context } from '../../config.ts'
+import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { type FlagValue } from '../../spec/types.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { runStream, openStreamSync } from '../../../rs/stream.ts'
-import { byteView, decodeText, encodeText } from '../../../shell/bytes.ts'
-
-import { concat } from '../../../utils/bytes.ts'
+import { wordRefusalError } from '../../spec/usage.ts'
+import { matchWord } from '../../spec/word_choice.ts'
+import { guardInput } from '../utils/limit.ts'
+import { formatRecords } from '../utils/output.ts'
+import { isStdin, resolveSource, stdinStream } from '../utils/stream.ts'
 
 const decoder = new TextDecoder()
 
@@ -88,7 +86,7 @@ export function parseFlags(bag: Record<string, FlagValue>): WcFlags | string {
 // decoding; any other count decodes UTF-8, and a byte that decodes to no
 // character is part of a word but no character and no column. Mirrors
 // Python's wc.
-async function countsOf(source: ByteSource, ctx: Context, flags: WcFlags): Promise<WcCounts> {
+async function wc(source: ByteSource, ctx: Context, flags: WcFlags): Promise<WcCounts> {
   const config = {
     lines: flags.lines,
     words: flags.words,
@@ -243,7 +241,7 @@ export async function wcGeneric(
         } else if (size !== null) {
           counts = { lines: 0, words: 0, bytes: size, chars: 0, maxLineLength: 0 }
         } else {
-          counts = await countsOf(stream(p), ctx, parsed)
+          counts = await wc(stream(p), ctx, parsed)
         }
       } catch (e) {
         if (!isFsError(e)) throw e
@@ -274,7 +272,7 @@ export async function wcGeneric(
       io,
     ]
   }
-  const counts = await countsOf(resolveSource(ctx.stdin), ctx, parsed)
+  const counts = await wc(resolveSource(ctx.stdin), ctx, parsed)
   const values = selectedValues(counts, parsed)
   if (parsed.total === 'only') {
     return [encodeText(`${values.join(' ')}\n`), new IOResult()]

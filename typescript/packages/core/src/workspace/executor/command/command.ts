@@ -12,94 +12,85 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  type CallerDispatchFn,
-  currentCaller,
-  getAdmission,
-  sessionAccess,
-} from '../../../context/session_context.ts'
-import type { EntryGate } from '../../../policy/types.ts'
-import type { EvaluationContext } from '../../evaluation.ts'
-import { isBuiltinGrammar, registeredSpec } from '../../../commands/spec/builtins.ts'
-import { STANDARD_AFTER_SCAN } from '../../../commands/spec/constants.ts'
-import { spreadOperands } from '../../../commands/spec/flag_view.ts'
-import { SPECS } from '../../../commands/spec/index.ts'
-import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
-import type { CallStack } from '../../../shell/call_stack.ts'
-import type { JobConsole } from '../../../shell/console/index.ts'
-import type { JobTable } from '../../../shell/job_table/index.ts'
-import { Follow, PathSpec } from '../../../types.ts'
-import { invokedEnvNames, suppliedEnvNames } from '../../../commands/cli/walk.ts'
-import type { CLI } from '../../../commands/cli/types.ts'
-import {
-  PROGRAM_FILE_COMMANDS,
-  prepareProgram,
-  programFiles,
-  valueRefusal,
-} from '../../../commands/builtin/generic/program.ts'
-import { type ParsedCommand, type ExecuteNodeFn, type Result } from './types.ts'
-import { identityFrom } from '../../../commands/builtin/utils/identity.ts'
-import type { MountEntry } from '../../mount/mount.ts'
-import type { Namespace } from '../../mount/namespace/namespace.ts'
-import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
-import { MountCommandAmbiguous } from '../../mount/errors.ts'
-import { makeCheckUnlink, makeStorageKey } from '../../mount/storage.ts'
-import { Consumer, JOB_BUILTINS, lineFacts, lookup, runsAs } from '../../lookup/index.ts'
-import { EXEC_WRAPPERS } from '../../lookup/constants.ts'
-import { type SessionState, sessionEntry } from '../../session/session.ts'
-import { abortable, mergeSignals } from '../../../utils/abort.ts'
-import { ExecutionNode } from '../../types.ts'
 import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
 import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
-import type { OperandMount } from '../../../commands/builtin/generic/crossmount/types.ts'
-import { globOptions, resolveGlobs } from '../../expand/globs.ts'
 import {
   handleCrossMount,
   isCrossMount,
   type RunSingle,
 } from '../../../commands/builtin/generic/crossmount/index.ts'
-import { fanOutTraversal, runWithFanout, shouldFanOut } from '../fanout.ts'
-import { parseFind, type FindExpr } from '../../../rs/find.ts'
-import { resolveNewerRefs } from '../find_refs.ts'
-import type { ExecuteFn } from '../../expand/types.ts'
-import { UsageError } from '../../../commands/errors.ts'
+import type { OperandMount } from '../../../commands/builtin/generic/crossmount/types.ts'
 import {
-  type JobHandlerResult,
-  handleDisown,
-  handleFg,
-  handleJobs,
-  handleKill,
-  handlePs,
-  handleWait,
-} from '../jobs.ts'
+  prepareProgram,
+  PROGRAM_FILE_COMMANDS,
+  programFiles,
+  valueRefusal,
+} from '../../../commands/builtin/generic/program.ts'
+import { identityFrom } from '../../../commands/builtin/utils/identity.ts'
+import type { CLI } from '../../../commands/cli/types.ts'
+import { invokedEnvNames, suppliedEnvNames } from '../../../commands/cli/walk.ts'
+import { UsageError } from '../../../commands/errors.ts'
+import { isBuiltinGrammar, registeredSpec } from '../../../commands/spec/builtins.ts'
+import { STANDARD_AFTER_SCAN } from '../../../commands/spec/constants.ts'
+import { spreadOperands } from '../../../commands/spec/flag_view.ts'
+import { SPECS } from '../../../commands/spec/index.ts'
 import { standardRequest } from '../../../commands/spec/standard.ts'
-
-import { handleCli, handleMountCli, reachesService, walkLeaf, type LeafCall } from './cli.ts'
-import { pathStat } from '../../mount/namespace/probe.ts'
-import { Files } from '../../files.ts'
-import { execNode, findStartPoints, nestedShell, runOnMount, type RunOnMountCtx } from './run.ts'
-import type { FollowOperands, SessionView, StatPath } from '../../../view/types.ts'
-import { applyFindActions } from '../find_action_dispatch.ts'
-import { operandFollow } from '../builtins/links/links.ts'
-import { sessionView } from '../../session/state.ts'
-import { optionError, parseFlags } from './flags.ts'
-import type { HandOff } from '../../../policy/types.ts'
+import type { RedirectResult } from '../../../context/session_context.ts'
+import {
+  currentCaller,
+  getAdmission,
+  sessionAccess,
+  type CallerDispatchFn,
+} from '../../../context/session_context.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import type { EntryGate, HandOff } from '../../../policy/types.ts'
+import { parseFind, type FindExpr } from '../../../rs/find.ts'
+import { encodeText } from '../../../shell/bytes.ts'
+import type { CallStack } from '../../../shell/call_stack.ts'
+import type { JobConsole } from '../../../shell/console/index.ts'
+import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
+import type { JobTable } from '../../../shell/job_table/index.ts'
 import type { ParseScope } from '../../../shell/parse/scope.ts'
+import { Follow, PathSpec } from '../../../types.ts'
+import { abortable, mergeSignals } from '../../../utils/abort.ts'
+import { concat } from '../../../utils/bytes.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
+import type { FollowOperands, SessionView, StatPath } from '../../../view/types.ts'
+import type { EvaluationContext } from '../../evaluation.ts'
+import { globOptions, resolveGlobs } from '../../expand/globs.ts'
+import type { ExecuteFn } from '../../expand/types.ts'
+import { Files } from '../../files.ts'
+import { EXEC_WRAPPERS } from '../../lookup/constants.ts'
+import { Consumer, JOB_BUILTINS, lineFacts, lookup, runsAs } from '../../lookup/index.ts'
+import { MountCommandAmbiguous } from '../../mount/errors.ts'
+import type { MountEntry } from '../../mount/mount.ts'
+import type { Namespace } from '../../mount/namespace/namespace.ts'
+import { pathStat } from '../../mount/namespace/probe.ts'
+import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
+import { makeCheckUnlink, makeStorageKey } from '../../mount/storage.ts'
+import { sessionEntry, type SessionState } from '../../session/session.ts'
+import { sessionView } from '../../session/state.ts'
+import { ExecutionNode } from '../../types.ts'
+import { operandFollow } from '../builtins/links/links.ts'
+import { fanOutTraversal, runWithFanout, shouldFanOut } from '../fanout.ts'
+import { applyFindActions } from '../find_action_dispatch.ts'
+import { resolveNewerRefs } from '../find_refs.ts'
+import { handleDisown, handleFg, handleJobs, handleKill, handlePs, handleWait } from '../jobs.ts'
+import { handleCli, handleMountCli, reachesService, walkLeaf, type LeafCall } from './cli.ts'
+import { optionError, parseFlags } from './flags.ts'
 import { runShellFunction } from './functions.ts'
 import {
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
   mergeScopes,
   operandPaths,
+  optionLoopExits,
   pathFlagScopes,
   routableScopes,
-  optionLoopExits,
   routedOperands,
 } from './routing.ts'
-import { compareCodePoints } from '../../../utils/sort.ts'
-import { concat } from '../../../utils/bytes.ts'
-import { encodeText } from '../../../shell/bytes.ts'
-import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
+import { execNode, findStartPoints, nestedShell, runOnMount, type RunOnMountCtx } from './run.ts'
+import { type ExecuteNodeFn, type ParsedCommand } from './types.ts'
 
 // One handler per JOB_BUILTINS member but ps, which also takes the workspace
 // user; lookup already narrowed the name.
@@ -112,7 +103,7 @@ const JOB_HANDLERS: Record<
     view: SessionView | null,
     signal?: AbortSignal,
     sink?: JobConsole,
-  ) => JobHandlerResult | Promise<JobHandlerResult>
+  ) => RedirectResult | Promise<RedirectResult>
 > = {
   wait: handleWait,
   fg: handleFg,
@@ -271,7 +262,7 @@ export async function handleCommand(
   sink?: JobConsole,
   parser?: ParseScope,
   admission: EntryGate | null = getAdmission(),
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   if (parts.length === 0) {
     return [null, new IOResult(), new ExecutionNode({ command: '', exitCode: 0 })]
@@ -409,7 +400,11 @@ export async function handleCommand(
     ]
   }
 
-  const runTree = async (mount: MountEntry, cli: CLI, prepared?: LeafCall): Promise<Result> => {
+  const runTree = async (
+    mount: MountEntry,
+    cli: CLI,
+    prepared?: LeafCall,
+  ): Promise<RedirectResult> => {
     await mount.ensureReady()
     const treeSignal = mergeSignals(signal, context.frame.abortSignal)
     return handleMountCli(

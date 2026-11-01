@@ -12,79 +12,79 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { pathVisible } from '../../utils/hidden.ts'
+import { walk } from '../../commands/cli/walk.ts'
+import type { ValueType } from '../../commands/spec/types.ts'
 import { callerSignal, sessionAccess } from '../../context/session_context.ts'
-import { YieldBudget } from '../../io/yield_budget.ts'
 import type { ByteSource } from '../../io/types.ts'
-import {
-  Outcome,
-  PermissionsPolicy,
-  Scope,
-  askRule,
-  policyDenied,
-  refusalOf,
-  renderCommandDeny,
-} from '../../policy/index.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import type {
+  AdmissionRules,
   Ask,
   Claimant,
   CommandContext,
   CommandRule,
-  AdmissionRules,
   Deny,
   Pending,
 } from '../../policy/index.ts'
-import { settled } from '../../policy/policies.ts'
-import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
+import {
+  askRule,
+  Outcome,
+  PermissionsPolicy,
+  policyDenied,
+  refusalOf,
+  renderCommandDeny,
+  Scope,
+} from '../../policy/index.ts'
 import { lineTokens } from '../../policy/match/allow.ts'
 import { patternMatches, splitPattern } from '../../policy/match/pattern.ts'
-import type { ValueType } from '../../commands/spec/types.ts'
-import { getRedirects, literalWord } from '../../shell/helpers.ts'
-import { NodeType, RedirectKind } from '../../shell/types.ts'
-import type { Redirect, TSNodeLike } from '../../shell/types.ts'
-import { Follow, PathSpec, type LineFacts, type Refusal } from '../../types.ts'
-import type { NamespaceLinks } from '../../view/types.ts'
+import { ioReach, ioRefusal } from '../../policy/match/rule.ts'
+import { settled } from '../../policy/policies.ts'
 import { CommandWord, type EntryGate } from '../../policy/types.ts'
-import { resolvePath } from '../../utils/path.ts'
-import { getExtension } from '../../utils/filetype.ts'
+import { getRedirects, literalWord } from '../../shell/helpers.ts'
+import type { Redirect, TSNodeLike } from '../../shell/types.ts'
+import { NodeType, RedirectKind } from '../../shell/types.ts'
+import { Follow, PathSpec, type LineFacts, type Refusal } from '../../types.ts'
 import { makeAbortError } from '../../utils/abort.ts'
-import { toScope } from '../executor/builtins/scope.ts'
+import { getExtension } from '../../utils/filetype.ts'
+import { pathVisible } from '../../utils/hidden.ts'
+import { resolvePath } from '../../utils/path.ts'
+import { rstripSlash } from '../../utils/slash.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
+import { CondRefused } from '../executor/builtins/condition/errors.ts'
+import { fileOperands, TEST_NAMES } from '../executor/builtins/condition/operands.ts'
 import { followPaths } from '../executor/builtins/links/links.ts'
-import { TEST_NAMES, fileOperands } from '../executor/builtins/condition/operands.ts'
-import { CondRefused } from '../executor/builtins/condition/types.ts'
+import { toScope } from '../executor/builtins/scope.ts'
+import { reachesService } from '../executor/command/cli.ts'
 import {
+  commandWords,
   CWD_DEFAULT_RAW,
   defaultCwdOperand,
   mergeScopes,
   pathFlagScopes,
+  programTokens,
   routableScopes,
   routedOperands,
-  commandWords,
-  programTokens,
   treePathScopes,
 } from '../executor/command/routing.ts'
-import { reachesService } from '../executor/command/cli.ts'
-import { walk } from '../../commands/cli/walk.ts'
 import { classifyParts } from '../expand/classify/parts.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { specForCommand, specWordBases, specWordKinds } from '../expand/spec_hints.ts'
-import type { Namespace } from '../mount/namespace/namespace.ts'
-import type { MountRegistry } from '../mount/registry.ts'
 import { INTERPRETER_NAMES, WRITING_PROGRAMS } from '../lookup/constants.ts'
 import {
   Consumer,
-  SLASH_KEEPS_LAST,
-  WordPolicy,
   isTool,
   lineFacts,
   lookup,
   runsAs,
+  SLASH_KEEPS_LAST,
+  WordPolicy,
   wordPolicy,
 } from '../lookup/index.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
+import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { wordValue, type Word } from './inner_lines.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * What the command plane prints when a line does not get to run: 126 for

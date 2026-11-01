@@ -12,8 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { conditionVersion } from '../../cache/context.ts'
+import { conditionVersion, stale } from '../../cache/context.ts'
+import type { WriteCondition } from '../../cache/types.ts'
+import { enoent } from '../../errors/fs.ts'
+import type { StaleWriteError } from '../../errors/types.ts'
 import { ByteSpool } from '../../io/spool.ts'
+import type { PathSpec } from '../../types.ts'
+import type { ByteWindow } from '../../utils/ranges.ts'
+import type { BoxTokenManager } from './client.ts'
 import {
   BoxApiError,
   boxDelete,
@@ -26,14 +32,7 @@ import {
   boxUploadMultipart,
   boxUploadSession,
 } from './client.ts'
-import type { BoxTokenManager } from './client.ts'
-import { stale } from '../../cache/context.ts'
-import type { WriteCondition } from '../../cache/types.ts'
-import { enoent } from '../../errors/fs.ts'
-import type { StaleWriteError } from '../../errors/types.ts'
-import type { PathSpec } from '../../types.ts'
 import { GONE_STATUS, LOST_STATUS } from './constants.ts'
-import type { ByteWindow } from '../../utils/ranges.ts'
 
 /**
  * The refusal an `If-Match` request met (412 changed, 404 gone), null for any
@@ -82,13 +81,6 @@ export interface BoxItem {
   parent?: { id: string; type: 'folder' } | null
 }
 
-interface ListItemsResponse {
-  total_count: number
-  entries: BoxItem[]
-  offset: number
-  limit: number
-}
-
 const LIST_FIELDS = 'id,name,type,size,modified_at,etag,sha1,parent'
 const SEARCH_FIELDS = 'id,name,type,path_collection'
 const ITEM_FIELDS = 'type,id,name,size,modified_at,etag,sha1,path_collection,item_status'
@@ -131,7 +123,12 @@ export async function listFolderItems(
       fields: LIST_FIELDS,
       limit: pageSize,
       offset,
-    })) as ListItemsResponse
+    })) as {
+      total_count: number
+      entries: BoxItem[]
+      offset: number
+      limit: number
+    }
     for (const item of data.entries) out.push(item)
     offset += data.entries.length
     named += data.entries.filter((item) => item.type !== 'web_link').length
@@ -268,11 +265,6 @@ export async function* downloadFileStream(
   }
 }
 
-interface SearchResponse {
-  total_count: number
-  entries: BoxSearchItem[]
-}
-
 /**
  * Name+content search scoped to a folder subtree. Pages Box `/search` with
  * `ancestor_folder_ids` scoping and `content_types=name,file_content` so the
@@ -297,7 +289,10 @@ export async function searchContent(
       fields: SEARCH_FIELDS,
       limit: SEARCH_PAGE,
       offset,
-    })) as SearchResponse
+    })) as {
+      total_count: number
+      entries: BoxSearchItem[]
+    }
     for (const item of data.entries) out.push(item)
     offset += data.entries.length
     if (out.length >= MAX_SEARCH_MATCHES) return { items: out, truncated: true }

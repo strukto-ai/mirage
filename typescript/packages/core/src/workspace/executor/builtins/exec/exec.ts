@@ -12,13 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { asyncChain, discardStreams } from '../../../../io/stream.ts'
-import { PipeInput, SharedInput, share } from '../../../../io/async_line_iterator.ts'
-import { callerSignal } from '../../../../context/session_context.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { callerSignal, runAsProgram } from '../../../../context/session_context.ts'
+import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
+import { PipeInput, share, SharedInput } from '../../../../io/async_line_iterator.ts'
 import { PipeClosed } from '../../../../io/errors.ts'
-import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
+import { asyncChain, discardStreams } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
+import { Channel } from '../../../../shell/console/index.ts'
 import {
   FD_BOTH,
   FD_CLOSE,
@@ -29,23 +33,35 @@ import {
   SIGPIPE_STATUS,
 } from '../../../../shell/constants.ts'
 import {
+  badDescriptorLine,
   FileDescription,
   FileInput,
   Inherited,
-  badDescriptorLine,
   unsupportedDescriptor,
 } from '../../../../shell/descriptors.ts'
-import { Channel } from '../../../../shell/console/index.ts'
-import { answerClosed, recordStatus, writerForks, type Written } from '../../statement.ts'
-import { type Redirect, RedirectKind } from '../../../../shell/types.ts'
-import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
-import { PathSpec } from '../../../../types.ts'
+import { ExitSignal } from '../../../../shell/errors.ts'
 import { getRedirects } from '../../../../shell/helpers.ts'
-import { NodeType as NT, type TSNodeLike } from '../../../../shell/types.ts'
+import { shellJoin } from '../../../../shell/join.ts'
+import {
+  NodeType as NT,
+  type Redirect,
+  RedirectKind,
+  type TSNodeLike,
+} from '../../../../shell/types.ts'
+import { PathSpec } from '../../../../types.ts'
+import { concat } from '../../../../utils/bytes.ts'
+import type { ExecuteFn } from '../../../expand/types.ts'
+import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { createFile, writeDescription } from '../../create.ts'
+import { programHead } from '../../find_action_dispatch.ts'
+import { answerClosed, recordStatus, writerForks, type Written } from '../../statement.ts'
+import { clearTraps } from '../../traps.ts'
+import { scanOptions } from '../getopt.ts'
 import { toScope } from '../scope.ts'
+import { builtinError, builtinUsage } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
 import type { EXEC_STREAM_FIELDS } from './constants.ts'
 import {
   CLOSED,
@@ -55,18 +71,6 @@ import {
   TO_STDIN,
   TO_STDOUT,
 } from './constants.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { concat } from '../../../../utils/bytes.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
-import { runAsProgram } from '../../../../context/session_context.ts'
-import { ExitSignal } from '../../../../shell/errors.ts'
-import { shellJoin } from '../../../../shell/join.ts'
-import type { ExecuteFn } from '../../../expand/types.ts'
-import type { MountRegistry } from '../../../mount/registry.ts'
-import { programHead } from '../../find_action_dispatch.ts'
-import { clearTraps } from '../../traps.ts'
-import { builtinError, builtinUsage } from '../shared.ts'
-import { scanOptions } from '../getopt.ts'
 
 /**
  * The `exec` builtin without redirects. Bare `exec` is a no-op that
@@ -87,7 +91,7 @@ export async function handleExecCommand(
   executeFn: ExecuteFn | null = null,
   registry: MountRegistry | null = null,
   stdin: ByteSource | null = null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const scan = scanOptions(args, 'acl')
   const refused = scan.letters.find((f) => f === 'a' || f === 'l')
   if (scan.bad !== null || refused !== undefined) {
@@ -133,7 +137,7 @@ function errorLine(label: string, err: unknown): Uint8Array {
  * null once it was written where the line's own stderr redirect pointed,
  * and `out` carries it when that redirect pointed at the terminal's
  * stdout. */
-function execFailure(line: Uint8Array | null, out: Uint8Array | null = null): Result {
+function execFailure(line: Uint8Array | null, out: Uint8Array | null = null): RedirectResult {
   return [
     out,
     new IOResult({ exitCode: 1, stderr: line }),
@@ -290,7 +294,7 @@ async function rollBack(
   session: SessionState,
   saved: StreamBindings,
   err: Uint8Array,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const partial = session.execStderr
   Object.assign(session, saved)
   const [out, errBytes] = await route(dispatch, session, partial, err, TO_STDERR)
@@ -316,7 +320,7 @@ export async function installExecRedirects(
   redirects: Redirect[],
   stdin: ByteSource | null = null,
   expand?: (redirect: Redirect) => Promise<Redirect>,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const badFd = unsupportedDescriptor(redirects)
   if (badFd !== null) return execFailure(badDescriptorLine(badFd))
   const before = session.openInputs()
@@ -580,7 +584,7 @@ async function append(dispatch: DispatchFn, target: string, data: ByteSource): P
  * are applied; a bare `exec` here has none, and `exec cmd` runs the
  * command and ends the shell.
  */
-export function execBuiltin(call: BuiltinCall): Promise<Result> {
+export function execBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return handleExecCommand(
     [...call.argv.args],
     call.context.session,

@@ -13,21 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ByteSource } from '@struktoai/mirage-core/io/types'
+import type { DirListing, FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { ListingVersion } from '@struktoai/mirage-core/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-
-import type { VFSStateBase } from '@struktoai/mirage-core/vfs/base'
-
+import type { Handed, VFSStateBase } from '@struktoai/mirage-core/vfs/types'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
-
-import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
-import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { readdir as hubReaddir } from '../../core/hf_hub/readdir.ts'
+import { checksum as hubChecksum } from '../../core/hf_hub/checksum.ts'
+import { exists as hubExists } from '../../core/hf_hub/exists.ts'
 import { read as hubRead } from '../../core/hf_hub/read.ts'
+import { readdir as hubReaddir } from '../../core/hf_hub/readdir.ts'
 import { stat as hubStat } from '../../core/hf_hub/stat.ts'
 import { readStream as hubStream } from '../../core/hf_hub/stream.ts'
-import { exists as hubExists } from '../../core/hf_hub/exists.ts'
-import { checksum as hubChecksum } from '../../core/hf_hub/checksum.ts'
 
 /**
  * The shared body of the three Hub *repository* VFS.

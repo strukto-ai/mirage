@@ -12,17 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GlobLimitError } from '../../../errors/types.ts'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runWithMountGate } from '../../../context/session_context.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
-import { FileStat, FileType, MountMode, PathSpec, type FileStatInit } from '../../../types.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
+import { GlobLimitError } from '../../../errors/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
+import { runWithRevisions } from '../../../observe/context.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { BatchedRAM, readers } from '../../../test-utils.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { stripSlash } from '../../../utils/slash.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Files } from '../../../workspace/files.ts'
 import type { MountRow } from '../../../workspace/types.ts'
-import { stripSlash } from '../../../utils/slash.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { Context } from '../../config.ts'
+import { singleChunk } from '../utils/operands.ts'
 import {
   type CommandFiles,
   commandFiles,
@@ -32,11 +37,6 @@ import {
   resolveOrEmpty,
   withReading,
 } from './files.ts'
-import { singleChunk } from '../utils/operands.ts'
-import { runWithRevisions } from '../../../observe/context.ts'
-import { BatchedRAM, readers } from '../../../test-utils.ts'
-import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -47,8 +47,9 @@ afterEach(async () => {
 })
 
 const at = (virtual: string): PathSpec => PathSpec.fromStrPath(virtual)
-const stat = (init: Partial<FileStatInit> = {}): FileStat =>
-  new FileStat({ name: 'f', type: FileType.FILE, ...init })
+const stat = (
+  init: Partial<NonNullable<ConstructorParameters<typeof FileStat>[0]>> = {},
+): FileStat => new FileStat({ name: 'f', type: FileType.FILE, ...init })
 
 // A keyed store: a directory is a name its parent lists, or explicit.
 interface Backend {

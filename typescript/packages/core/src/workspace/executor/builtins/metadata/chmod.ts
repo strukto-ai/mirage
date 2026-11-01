@@ -12,14 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { lsModeString } from '../../../../commands/builtin/utils/formatting.ts'
+import { UsageError } from '../../../../commands/errors.ts'
+import { missingOperandError } from '../../../../commands/spec/usage.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { isRefusal } from '../../../../errors/fs.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import { FileType } from '../../../../types.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../../utils/mode.ts'
-import { lsModeString } from '../../../../commands/builtin/utils/formatting.ts'
-import { missingOperandError } from '../../../../commands/spec/usage.ts'
-import { UsageError } from '../../../../commands/errors.ts'
-import { isRefusal } from '../../../../errors/fs.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -32,11 +34,9 @@ import {
   setattrVia,
   unreadError,
   verbosity,
-  walkStats,
   walkedName,
+  walkStats,
 } from './metadata.ts'
-import type { Result } from '../types.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
 
 // chmod's report for one file, worded as GNU chmod 9.7 prints it. Mirrors
 // Python's mode_line.
@@ -64,7 +64,7 @@ export async function handleChmod(
   dispatch: DispatchFn,
   session: SessionState,
   args: readonly (string | PathSpec)[],
-): Promise<Result> {
+): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('chmod', args, session.cwd)
   if (refused !== null) return refused
   const modeText = parsed.texts[0]

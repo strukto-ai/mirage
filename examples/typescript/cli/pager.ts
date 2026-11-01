@@ -12,26 +12,31 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import {
+Accessor,
+Argument,
+CLI,
+CLIHandler,
+CommandSpec,
+FlagView,
+IOResult,
+RAMVFS,
+Workspace,
+z,
+type CommandFnResult,
+type Context,
+type PathSpec,
+} from '@struktoai/mirage-node'
 import { pathToFileURL } from 'node:url'
 
-import {
-  Accessor,
-  CLI,
-  CLIHandler,
-  CommandSpec,
-  FlagView,
-  type Context,
-  IOResult,
-  type PathSpec,
-  Argument,
-  RAMVFS,
-  Workspace,
-  z,
-  type CommandFnResult,
-} from '@struktoai/mirage-node'
 
-const PagerConfigSchema = z.object({ account: z.enum(['engineering', 'support']) })
-type PagerConfig = z.infer<typeof PagerConfigSchema>
+
+
+
+
+
+const PagerConfig = z.object({ account: z.enum(['engineering', 'support']) })
+type PagerConfig = z.infer<typeof PagerConfig>
 
 interface Incident {
   summary: string
@@ -151,7 +156,7 @@ export const PAGER = new CLI({
     list: new CLIHandler({ fn: listIncidents }),
     ack: new CLIHandler({ fn: acknowledge, write: true }),
   },
-  configModel: PagerConfigSchema,
+  configModel: PagerConfig,
   accessor: (config) => new PagerAccessor(config),
 })
 

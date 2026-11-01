@@ -12,46 +12,41 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CONDITION_SUPPORT } from '../../core/dropbox/constants.ts'
-import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
-import { BaseVFS } from '../base.ts'
 import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { DropboxTokenManager } from '../../core/dropbox/client.ts'
-import { VFSName } from '../../types.ts'
-import { DropboxConfigSchema, type DropboxConfig, type DropboxConfigRedacted } from './config.ts'
-import { buildDeltaHook } from '../../core/dropbox/events.ts'
-import { type DeltaHook } from '../../events/index.ts'
-import type { CapacityResult, DirListing, PathSpec, FileStat } from '../../types.ts'
+import type { ConditionSupport, ReplaceRequest } from '../../cache/types.ts'
 import { capacity as dropboxCapacity } from '../../core/dropbox/capacity.ts'
-import type { Handed } from '../types.ts'
-import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
+import { DropboxTokenManager } from '../../core/dropbox/client.ts'
+import { CONDITION_SUPPORT } from '../../core/dropbox/constants.ts'
+import { copy as dropboxCopy, dirCopy as dropboxDirCopy } from '../../core/dropbox/copy.ts'
+import { create as dropboxCreate } from '../../core/dropbox/create.ts'
+import { buildDeltaHook } from '../../core/dropbox/events.ts'
+import { exists as dropboxExists } from '../../core/dropbox/exists.ts'
+import { mkdir as dropboxMkdir } from '../../core/dropbox/mkdir.ts'
 import {
   read as dropboxRead,
   readByPath as dropboxReadByPath,
   readStream as dropboxStream,
 } from '../../core/dropbox/read.ts'
-import { stat as dropboxStat, tree as dropboxTree } from '../../core/dropbox/stat.ts'
-import { exists as dropboxExists } from '../../core/dropbox/exists.ts'
-import { truncateByRewrite } from '../../core/generic/rewrite.ts'
-import type { ByteSource } from '../../io/types.ts'
-import { write as dropboxWrite, replace as dropboxReplace } from '../../core/dropbox/write.ts'
-import { create as dropboxCreate } from '../../core/dropbox/create.ts'
-import { mkdir as dropboxMkdir } from '../../core/dropbox/mkdir.ts'
-import { unlink as dropboxUnlink } from '../../core/dropbox/unlink.ts'
-import { rmdir as dropboxRmdir } from '../../core/dropbox/rmdir.ts'
-import { rmR as dropboxRmR } from '../../core/dropbox/rm.ts'
+import { readdir as dropboxReaddir } from '../../core/dropbox/readdir.ts'
 import { rename as dropboxRename } from '../../core/dropbox/rename.ts'
-import { copy as dropboxCopy, dirCopy as dropboxDirCopy } from '../../core/dropbox/copy.ts'
+import { rmR as dropboxRmR } from '../../core/dropbox/rm.ts'
+import { rmdir as dropboxRmdir } from '../../core/dropbox/rmdir.ts'
 import { filesContaining as dropboxFilesContaining } from '../../core/dropbox/search.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
+import { stat as dropboxStat, tree as dropboxTree } from '../../core/dropbox/stat.ts'
+import { unlink as dropboxUnlink } from '../../core/dropbox/unlink.ts'
+import { replace as dropboxReplace, write as dropboxWrite } from '../../core/dropbox/write.ts'
+import { truncateByRewrite } from '../../core/generic/rewrite.ts'
+import { type DeltaHook } from '../../events/index.ts'
+import type { ByteSource } from '../../io/types.ts'
+import type { CapacityResult, DirListing, FileStat, PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import type { RedactedSchema } from '../secrets.ts'
+import type { ConfigState, Handed } from '../types.ts'
+import { DropboxConfig } from './config.ts'
 
 const mkdirOp = (accessor: DropboxAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   dropboxMkdir(accessor, path, parents)
-
-export interface DropboxVFSState {
-  type: string
-  config: DropboxConfigRedacted
-}
 
 export class DropboxVFS extends BaseVFS {
   override get conditionSupport(): ConditionSupport {
@@ -203,10 +198,7 @@ export class DropboxVFS extends BaseVFS {
     return buildDeltaHook(this.accessor)
   }
 
-  override getState(): Promise<DropboxVFSState> {
-    return Promise.resolve({
-      type: this.name,
-      config: redactConfigWithSchema(DropboxConfigSchema, this.config) as DropboxConfigRedacted,
-    })
+  override getState(): Promise<ConfigState<RedactedSchema<typeof DropboxConfig>>> {
+    return Promise.resolve(this.configState(DropboxConfig, this.config))
   }
 }

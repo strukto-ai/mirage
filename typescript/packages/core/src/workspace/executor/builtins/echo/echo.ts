@@ -13,11 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ECHO_OPTION } from '../../../../commands/spec/constants.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { ExecutionNode } from '../../../types.ts'
+import type { BuiltinCall } from '../types.ts'
 import { interpretEscapes } from './escapes.ts'
-import type { BuiltinCall, Result } from '../types.ts'
 
 /**
  * Print arguments, honoring GNU echo's option rules.
@@ -28,7 +29,7 @@ import type { BuiltinCall, Result } from '../types.ts'
  * clusters the last of -e/-E wins; -n sticks. Under -e a `\c` ends the
  * output where it stands, newline included.
  */
-export function handleEcho(args: string[]): Result {
+export function handleEcho(args: string[]): RedirectResult {
   let noNewline = false
   let escapes = false
   let idx = 0
@@ -50,6 +51,6 @@ export function handleEcho(args: string[]): Result {
 }
 
 /** The `echo` arm. */
-export function echoBuiltin(call: BuiltinCall): Promise<Result> {
+export function echoBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handleEcho([...call.argv.args]))
 }

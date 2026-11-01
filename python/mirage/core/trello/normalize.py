@@ -14,84 +14,95 @@
 
 from typing import Any
 
+from mirage.utils.records import (
+    as_object,
+    pick_bool_or_none,
+    pick_number_or_none,
+    pick_string,
+    pick_string_array,
+    records,
+    string_of,
+)
+
 
 def normalize_workspace(workspace: dict[str, Any]) -> dict[str, Any]:
     return {
-        "workspace_id": workspace.get("id"),
-        "workspace_name": workspace.get("displayName")
-        or workspace.get("name"),
+        "workspace_id": pick_string(workspace, "id"),
+        "workspace_name": pick_string(workspace, "displayName", "name"),
     }
 
 
 def normalize_board(board: dict[str, Any]) -> dict[str, Any]:
     return {
-        "board_id": board.get("id"),
-        "board_name": board.get("name"),
-        "workspace_id": board.get("idOrganization"),
-        "closed": board.get("closed"),
-        "url": board.get("url"),
+        "board_id": pick_string(board, "id"),
+        "board_name": pick_string(board, "name"),
+        "workspace_id": pick_string(board, "idOrganization"),
+        "closed": pick_bool_or_none(board, "closed"),
+        "url": pick_string(board, "url"),
     }
 
 
 def normalize_list(lst: dict[str, Any]) -> dict[str, Any]:
     return {
-        "list_id": lst.get("id"),
-        "list_name": lst.get("name"),
-        "board_id": lst.get("idBoard"),
-        "closed": lst.get("closed"),
-        "pos": lst.get("pos"),
+        "list_id": pick_string(lst, "id"),
+        "list_name": pick_string(lst, "name"),
+        "board_id": pick_string(lst, "idBoard"),
+        "closed": pick_bool_or_none(lst, "closed"),
+        "pos": pick_number_or_none(lst, "pos"),
     }
 
 
 def normalize_member(member: dict[str, Any]) -> dict[str, Any]:
     return {
-        "member_id": member.get("id"),
-        "username": member.get("username"),
-        "full_name": member.get("fullName"),
+        "member_id": pick_string(member, "id"),
+        "username": pick_string(member, "username"),
+        "full_name": pick_string(member, "fullName"),
     }
 
 
 def normalize_label(label: dict[str, Any]) -> dict[str, Any]:
     return {
-        "label_id": label.get("id"),
-        "label_name": label.get("name"),
-        "color": label.get("color"),
-        "board_id": label.get("idBoard"),
+        "label_id": pick_string(label, "id"),
+        "label_name": pick_string(label, "name"),
+        "color": pick_string(label, "color"),
+        "board_id": pick_string(label, "idBoard"),
     }
 
 
 def normalize_card(card: dict[str, Any]) -> dict[str, Any]:
-    labels = card.get("labels") or []
+    labels = records(card.get("labels"))
     return {
-        "card_id": card.get("id"),
-        "card_name": card.get("name"),
-        "board_id": card.get("idBoard"),
-        "list_id": card.get("idList"),
-        "member_ids": card.get("idMembers") or [],
-        "label_ids": [label.get("id") for label in labels],
-        "due": card.get("due"),
-        "due_complete": card.get("dueComplete"),
-        "closed": card.get("closed"),
-        "desc": card.get("desc") or "",
-        "url": card.get("shortUrl") or card.get("url"),
+        "card_id": pick_string(card, "id"),
+        "card_name": pick_string(card, "name"),
+        "board_id": pick_string(card, "idBoard"),
+        "list_id": pick_string(card, "idList"),
+        "member_ids": pick_string_array(card, "idMembers"),
+        "label_ids": [
+            value
+            for label in labels
+            if (value := pick_string(label, "id")) is not None
+        ],
+        "due": pick_string(card, "due"),
+        "due_complete": pick_bool_or_none(card, "dueComplete"),
+        "closed": pick_bool_or_none(card, "closed"),
+        "desc": string_of(card, "desc"),
+        "url": pick_string(card, "shortUrl", "url"),
     }
 
 
 def normalize_comment(
     comment: dict[str, Any], *, card_id: str
 ) -> dict[str, Any]:
-    member = comment.get("memberCreator") or {}
-    data = comment.get("data") or {}
+    member = as_object(comment.get("memberCreator"))
+    data = as_object(comment.get("data"))
     return {
-        "comment_id": comment.get("id"),
+        "comment_id": pick_string(comment, "id"),
         "card_id": card_id,
-        "member_id": member.get("id"),
-        "member_name": member.get("fullName") or member.get("username"),
-        "text": data.get("text") or "",
-        "created_at": comment.get("date"),
+        "member_id": pick_string(member, "id"),
+        "member_name": pick_string(member, "fullName", "username"),
+        "text": string_of(data, "text"),
+        "created_at": pick_string(comment, "date"),
     }
 
 
-# The fields of a card's JSON Trello's search reads; every other field is
-# checked against the listing instead (``unsearched_text``).
 SEARCHED_FIELDS = ("card_name", "desc")

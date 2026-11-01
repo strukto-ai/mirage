@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { quoteString, type FetchedMessage } from '../../../../core/email/client.ts'
 import { MONTHS } from '@struktoai/mirage-core/commands/builtin/utils/constants'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import type { fetchMessage } from '../../../../core/email/client.ts'
+import { quoteString } from '../../../../core/email/client.ts'
 
 // himalaya's search DSL: 3 operators (and, or, not) and 8 conditions
 // (date, before, after, from, to, subject, body, flag), optionally
@@ -248,12 +249,15 @@ export function parseQuery(source: string): Query {
   return { criteria, sorters }
 }
 
-function sentAt(header: FetchedMessage): number {
+function sentAt(header: Awaited<ReturnType<typeof fetchMessage>>): number {
   const value = Date.parse(header.date)
   return Number.isNaN(value) ? 0 : value
 }
 
-const SORT_KEYS: Record<SortKind, (header: FetchedMessage) => string | number> = {
+const SORT_KEYS: Record<
+  SortKind,
+  (header: Awaited<ReturnType<typeof fetchMessage>>) => string | number
+> = {
   date: sentAt,
   from: (header) => header.from.email,
   to: (header) => header.to[0]?.email ?? '',
@@ -271,9 +275,9 @@ function compare(a: string | number, b: string | number): number {
  * date descending, matching `envelope list`.
  */
 export function sortHeaders(
-  headers: FetchedMessage[],
+  headers: Awaited<ReturnType<typeof fetchMessage>>[],
   sorters: readonly Sorter[],
-): FetchedMessage[] {
+): Awaited<ReturnType<typeof fetchMessage>>[] {
   const ordered = [...headers]
   if (sorters.length === 0) {
     ordered.sort((a, b) => sentAt(b) - sentAt(a))

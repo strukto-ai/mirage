@@ -12,26 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import type { FsErrorCode } from '@deepseek-ai/dsh-fs'
+import { FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
 import { runWithSession } from '@struktoai/mirage-core/context/session_context'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import {
   DiskVFS,
   LocalRuntime,
-  Workspace,
-  parseSessionProfile,
   registerVfs,
+  SessionProfile,
+  Workspace,
 } from '@struktoai/mirage-node'
-import { MirageFileSystem } from './fs.ts'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve, sep } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { MirageFsConfig } from './fs.ts'
+import { MirageFileSystem } from './fs.ts'
 import { MirageService } from './service.ts'
 
 const workspaces: Workspace[] = []
@@ -653,7 +653,7 @@ describe('the session the adapter reads as', () => {
       { '/data': [new RAMVFS(), MountMode.WRITE] },
       {
         profiles: {
-          agent: parseSessionProfile(
+          agent: SessionProfile(
             { paths: { hide: ['/data/vault', '/data/hidden-lk'] } },
             'profile agent',
           ),
@@ -697,7 +697,7 @@ describe('the session the adapter reads as', () => {
       { '/data': [new RAMVFS(), MountMode.WRITE] },
       {
         profiles: {
-          agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }, 'profile agent'),
+          agent: SessionProfile({ paths: { hide: ['/data/vault'] } }, 'profile agent'),
         },
       },
     )
@@ -730,8 +730,8 @@ describe('the session the adapter reads as', () => {
       { '/data': [ram, MountMode.WRITE] },
       {
         profiles: {
-          host: parseSessionProfile({ paths: { hide: ['/data/work'] } }, 'profile host'),
-          agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }, 'profile agent'),
+          host: SessionProfile({ paths: { hide: ['/data/work'] } }, 'profile host'),
+          agent: SessionProfile({ paths: { hide: ['/data/vault'] } }, 'profile agent'),
         },
         profile: 'host',
       },
@@ -765,7 +765,7 @@ describe('the session the adapter reads as', () => {
     await wsA.vfs.symlink('/data/lk', '/data/public.txt')
     await wsA.setSessionProfile(
       wsA.defaultSessionId,
-      parseSessionProfile({ paths: { hide: ['/data/vault'] } }, 'profile default'),
+      SessionProfile({ paths: { hide: ['/data/vault'] } }, 'profile default'),
     )
     await wsA.flushSessions()
 
@@ -792,7 +792,7 @@ describe('a policy refusal at the dispatcher', () => {
       { '/data': [ram, MountMode.WRITE] },
       {
         profiles: {
-          agent: parseSessionProfile(
+          agent: SessionProfile(
             { commands: { deny: [{ reason: 'keep.txt is frozen', paths: ['/data/keep.txt'] }] } },
             'profile agent',
           ),

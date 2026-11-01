@@ -12,14 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { GoogleConfigSchema } from '../../core/google/config.ts'
-import { type ConfigOf, type RedactedConfig } from '../secrets.ts'
+import { GoogleConfig } from '../../core/google/config.ts'
+import type { ConfigOf } from '../secrets.ts'
 
-export const GoogleDriveConfigSchema = GoogleConfigSchema
+export const GoogleDriveConfig = GoogleConfig
 
-export type GoogleDriveConfig = ConfigOf<typeof GoogleDriveConfigSchema>
-
-export type GoogleDriveConfigRedacted = RedactedConfig<
-  GoogleDriveConfig,
-  'accessToken' | 'clientSecret' | 'refreshToken' | 'refreshFn'
->
+export type GoogleDriveConfig = ConfigOf<typeof GoogleDriveConfig>

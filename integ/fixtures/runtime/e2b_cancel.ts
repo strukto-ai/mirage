@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LineExecutor } from '@struktoai/mirage-core/runtime/mixin'
+import type { LineExecutorMixin } from '@struktoai/mirage-core/runtime/mixin'
 import type { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -21,7 +21,7 @@ const dec = new TextDecoder()
 
 /** Run one raw line on a sandbox runtime from /home/user. */
 export function runLine(
-  runtime: LineExecutor<undefined>,
+  runtime: LineExecutorMixin<undefined>,
   line: string,
   stdin: Uint8Array | null = null,
 ) {

@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
+# The nodes a redirected statement may wrap whose last command is the
+# one the redirect binds to. A `!` wraps one command, so it is its own
+# last one: `! cat < f` parses as redirected(negated(cat), < f).
 import asyncio
 import dataclasses
 from collections.abc import Sequence
@@ -61,11 +65,11 @@ from mirage.utils.filetype import get_extension
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import resolve_path
 from mirage.view.types import NamespaceLinks
+from mirage.workspace.executor.builtins.condition.errors import CondRefused
 from mirage.workspace.executor.builtins.condition.operands import (
     TEST_NAMES,
     file_operands,
 )
-from mirage.workspace.executor.builtins.condition.types import CondRefused
 from mirage.workspace.executor.builtins.links.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.command.cli import reaches_service
@@ -109,9 +113,6 @@ from mirage.workspace.node.inner_lines import (
 )
 from mirage.workspace.session import SessionState, env_snapshot
 
-# The nodes a redirected statement may wrap whose last command is the
-# one the redirect binds to. A `!` wraps one command, so it is its own
-# last one: `! cat < f` parses as redirected(negated(cat), < f).
 REDIRECT_CHAIN = frozenset({NT.LIST, NT.PIPELINE, NT.NEGATED_COMMAND})
 
 

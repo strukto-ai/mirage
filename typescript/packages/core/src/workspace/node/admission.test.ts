@@ -13,25 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it } from 'vitest'
-
-import { IOResult, materialize } from '../../io/types.ts'
-import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { Follow, MountMode } from '../../types.ts'
-import { classifyParts } from '../expand/classify/parts.ts'
 import { voicedStderr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
-import { Workspace } from '../workspace/workspace.ts'
-import { lineFacts } from '../lookup/index.ts'
-import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
-import { Admitted, admit, policyScopes } from './admission.ts'
-import { admitLine } from './explain.ts'
-import { PolicyDenied } from '../../policy/index.ts'
-import type { CommandContext, CommandRule, AdmissionRules } from '../../policy/types.ts'
-import type { Action } from '../../policy/index.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { command, type CommandFn } from '../../commands/config.ts'
 import { SPECS } from '../../commands/spec/index.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
+import { IOResult, materialize } from '../../io/types.ts'
+import type { Action } from '../../policy/index.ts'
+import { PolicyDenied } from '../../policy/index.ts'
+import { SessionProfile } from '../../policy/profile.ts'
+import type { AdmissionRules, CommandContext, CommandRule } from '../../policy/types.ts'
 import { parse } from '../../shell/parse/parse.ts'
+import { Follow, MountMode } from '../../types.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { classifyParts } from '../expand/classify/parts.ts'
+import { lineFacts } from '../lookup/index.ts'
+import { Workspace } from '../workspace/workspace.ts'
+import { admit, Admitted, policyScopes } from './admission.ts'
+import { admitLine } from './explain.ts'
 
 const DEC = new TextDecoder()
 
@@ -45,7 +44,7 @@ function gateCtx(tokens: string[]): CommandContext {
   }
 }
 
-const DOC = parseSessionProfile({
+const DOC = SessionProfile({
   commands: {
     allow: [
       'cat',
@@ -116,7 +115,7 @@ describe('admission', () => {
       {
         mode: MountMode.WRITE,
         profiles: {
-          default: parseSessionProfile({
+          default: SessionProfile({
             commands: { deny: [{ reason: 'elsewhere', paths: ['/secret'] }] },
           }),
         },
@@ -348,7 +347,7 @@ describe('admission', () => {
     // bare name under the cwd is the file it names, and once -c or -e
     // names the program no operand is a path.
     const w = ws(
-      parseSessionProfile({
+      SessionProfile({
         commands: { deny: [{ reason: 'sealed', paths: ['/data/secret*'] }] },
       }),
     )
@@ -796,7 +795,7 @@ describe('what the handler a command resolves to declares', () => {
         { '/reader': new RAMVFS(), '/write': new RAMVFS() },
         {
           mode: MountMode.WRITE,
-          profiles: { default: parseSessionProfile({ commands: { [decision]: ['remote send'] } }) },
+          profiles: { default: SessionProfile({ commands: { [decision]: ['remote send'] } }) },
         },
       )
       open.push(w)

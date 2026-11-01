@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { jsonlBytesByCreatedAt } from '../render/json.ts'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import type { JsonObject } from '../../types.ts'
+import { jsonlBytesByCreatedAt } from '../render/json.ts'
 import {
   normalizeBoard,
   normalizeCard,
@@ -22,7 +24,6 @@ import {
   normalizeList,
   normalizeMember,
   normalizeWorkspace,
-  type NormalizedComment,
 } from './normalize.ts'
 
 describe('normalize', () => {
@@ -143,7 +144,7 @@ describe('normalize', () => {
   })
 
   it('jsonlBytesByCreatedAt sorts by created_at and ends with newline', () => {
-    const rows: NormalizedComment[] = [
+    const rows: ReturnType<typeof normalizeComment>[] = [
       {
         comment_id: 'a',
         card_id: 'c',
@@ -170,3 +171,21 @@ describe('normalize', () => {
     expect(text.endsWith('\n')).toBe(true)
   })
 })
+
+const corpus = JSON.parse(
+  readFileSync(
+    new URL('../../../../../../integ/fixtures/normalized_records.json', import.meta.url),
+    'utf8',
+  ),
+) as { cases: { id: string; backend: string; kind: string; value: JsonObject; expect: unknown }[] }
+
+for (const entry of corpus.cases.filter((entry) => entry.backend === 'trello')) {
+  it(entry.id, () => {
+    const normalizers: Record<string, (record: JsonObject) => unknown> = {
+      workspace: normalizeWorkspace,
+      list: normalizeList,
+      card: normalizeCard,
+    }
+    expect(normalizers[entry.kind]?.(entry.value)).toEqual(entry.expect)
+  })
+}

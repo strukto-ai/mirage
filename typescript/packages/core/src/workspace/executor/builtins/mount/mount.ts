@@ -13,15 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { usageHint } from '../../../../commands/spec/usage.ts'
+import type { RedirectResult } from '../../../../context/session_context.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import { MountMode } from '../../../../types.ts'
 import type { PathSpec } from '../../../../types.ts'
+import { MountMode } from '../../../../types.ts'
 import { pathVisible } from '../../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { fail, ok, parseLine } from '../shared.ts'
-import type { Result } from '../types.ts'
 
 // The mount options a mode reads as: the ladder's READ cannot write and only
 // EXEC lets the interpreters run a script, which is what ro, rw and noexec say
@@ -73,7 +73,7 @@ export function handleMount(
   registry: MountRegistry,
   session: SessionState,
   args: readonly (string | PathSpec)[],
-): Result {
+): RedirectResult {
   const [parsed, fl, refused] = parseLine('mount', args, session.cwd)
   if (refused !== null) return refused
   const words = parsed.texts

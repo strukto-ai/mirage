@@ -37,18 +37,6 @@ export interface MountRow {
   readonly workspaceLimits?: Readonly<Record<string, Limit>>
 }
 
-export interface ExecutionNodeInit {
-  command?: string | null
-  op?: string | null
-  stderr?: Uint8Array
-  exitCode?: number
-  children?: ExecutionNode[]
-  records?: OpRecord[]
-  paths?: PathSpec[]
-  refused?: boolean
-  unopened?: boolean
-}
-
 export class ExecutionNode {
   command: string | null
   op: string | null
@@ -70,7 +58,22 @@ export class ExecutionNode {
   // way, which its own commands would have answered otherwise.
   unopened: boolean
 
-  constructor(init: ExecutionNodeInit = {}) {
+  constructor(
+    init: Partial<
+      Pick<
+        ExecutionNode,
+        | 'command'
+        | 'op'
+        | 'stderr'
+        | 'exitCode'
+        | 'children'
+        | 'records'
+        | 'paths'
+        | 'refused'
+        | 'unopened'
+      >
+    > = {},
+  ) {
     this.command = init.command ?? null
     this.op = init.op ?? null
     this.stderr = init.stderr ?? new Uint8Array()

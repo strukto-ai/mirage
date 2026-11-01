@@ -12,27 +12,53 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { EntryGate } from '../../../../policy/types.ts'
+import type { DispatchFn } from '../../../../runtime/types.ts'
+import type { LinkView, SessionView } from '../../../../view/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
-import type { LinkView, SessionView } from '../../../../view/types.ts'
-import type { DispatchFn } from '../../../../runtime/types.ts'
-import type { EntryGate } from '../../../../policy/types.ts'
-import type { Refusal } from '../../../../types.ts'
-import { decodeText } from '../../../../shell/bytes.ts'
 
 interface CondLazy {
   kind: 'lazy'
   expand: () => Promise<CondNode>
 }
 
-export type CondNode =
-  | CondLazy
-  | { kind: 'word'; value: string }
-  | { kind: 'unary'; op: string; operand: string }
-  | { kind: 'binary'; left: string; op: string; right: string }
-  | { kind: 'not'; inner: CondNode }
-  | { kind: 'and'; left: CondNode; right: CondNode }
-  | { kind: 'or'; left: CondNode; right: CondNode }
+export interface CondWord {
+  kind: 'word'
+  value: string
+}
+
+export interface CondUnary {
+  kind: 'unary'
+  op: string
+  operand: string
+}
+
+export interface CondBinary {
+  kind: 'binary'
+  left: string
+  op: string
+  right: string
+}
+
+export interface CondNot {
+  kind: 'not'
+  inner: CondNode
+}
+
+export interface CondAnd {
+  kind: 'and'
+  left: CondNode
+  right: CondNode
+}
+
+export interface CondOr {
+  kind: 'or'
+  left: CondNode
+  right: CondNode
+}
+
+export type CondNode = CondLazy | CondWord | CondUnary | CondBinary | CondNot | CondAnd | CondOr
 
 // test's own reading of a flat argv (`flatShape`): which words each
 // operator takes, each named by its place in the argv, and where a grammar
@@ -90,40 +116,6 @@ export type FlatNode =
   | FlatOr
   | FlatFail
   | null
-
-/** A test/[/[[ usage error: bash prints the message and returns 2. */
-/**
- * A test/[/[[ usage error: bash prints the message and returns 2. A `[[`
- * grammar error is a parse error that kills the line; an arithmetic error
- * inside a numeric operand (`[[ 0 -eq 1/0 ]]`) is not: bash prints it and
- * the test answers 1, the line going on, so it carries its own status and
- * is never fatal.
- */
-export class CondError extends Error {
-  constructor(
-    message: string,
-    readonly exitCode = 2,
-    readonly fatal = true,
-  ) {
-    super(message)
-  }
-}
-
-/**
- * The gate refused a `[ ]` or a `[[ ]]` leaf: it answers that refusal, as
- * `test` refused whole does. `stderr` is the refusal's message,
- * newline-terminated; `exitCode` the status it answers with; `refusal` the
- * record the result carries.
- */
-export class CondRefused extends Error {
-  constructor(
-    readonly stderr: Uint8Array,
-    readonly exitCode: number,
-    readonly refusal: Refusal | null,
-  ) {
-    super(decodeText(stderr))
-  }
-}
 
 /**
  * Admits the words of a test as its own command, returning the gate its own

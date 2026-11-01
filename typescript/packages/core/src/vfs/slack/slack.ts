@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ByteSource } from '../../io/types.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import {
   follow as slackFollow,
@@ -23,6 +22,7 @@ import {
 import { readdir as slackReaddir } from '../../core/slack/readdir.ts'
 import { filesContaining as slackFilesContaining } from '../../core/slack/search.ts'
 import { stat as slackStat } from '../../core/slack/stat.ts'
+import { type ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
@@ -63,7 +63,7 @@ export const VFS_MD = `{prefix}
  * Slack's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
-export class SlackVFSBase extends BaseVFS<SlackAccessor> {
+export class SlackVFS extends BaseVFS<SlackAccessor> {
   override readonly readsRanges: boolean = true
   override readonly wholeWordSearch: boolean = true
   override readonly handed = {

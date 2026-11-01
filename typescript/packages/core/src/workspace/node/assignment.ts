@@ -12,39 +12,38 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from '../expand/types.ts'
-import type { EvaluationContext } from '../evaluation.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
-import type { CallStack } from '../../shell/call_stack.ts'
+import type { RedirectResult } from '../../context/session_context.ts'
+import { PolicyDenied } from '../../policy/errors.ts'
 import {
-  type ShellArray,
   arrayExtent,
   arrayGet,
   arraySet,
   arrayWith,
   buildAssocLiteral,
   buildIndexedLiteral,
+  type ShellArray,
 } from '../../shell/array.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import type { CallStack } from '../../shell/call_stack.ts'
 import { ArithError, DiscardSignal, ReadonlyVariableError } from '../../shell/errors.ts'
 import { getText } from '../../shell/helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { type ShellValue, VarAttr } from '../../shell/variable.ts'
-import { sessionEntry } from '../session/session.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
-import { PolicyDenied } from '../../policy/errors.ts'
-import type { SessionView } from '../../view/types.ts'
 import { wordText } from '../../types.ts'
+import type { SessionView } from '../../view/types.ts'
+import type { EvaluationContext } from '../evaluation.ts'
 import { ok, result } from '../executor/builtins/shared.ts'
-import type { Result } from '../executor/builtins/types.ts'
 import { assignmentStatus } from '../executor/statement.ts'
-import { expandNode } from '../expand/node.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
+import { expandNode } from '../expand/node.ts'
 import { expandAndClassify } from '../expand/parts.ts'
+import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-
+import { sessionEntry } from '../session/session.ts'
 import { appended, conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
-import { encodeText } from '../../shell/bytes.ts'
 
 /** `subscriptIndex` whose failure ends the line, in bash's words. */
 async function fatalIndex(
@@ -199,7 +198,7 @@ export async function executeAssignment(
   registry: MountRegistry,
   namespace: Namespace,
   callStack: CallStack | null,
-): Promise<Result> {
+): Promise<RedirectResult> {
   const session = context.session
   const text = getText(node)
   if (!text.includes('=')) return ok(text)

@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FIELD_NORMALIZERS, secretSchema, secretStr, z } from '../secrets.ts'
-import type { ConfigOf, RedactedConfig } from '../secrets.ts'
 import { timeoutShape } from '../../core/api/config.ts'
+import { FIELD_NORMALIZERS, secretSchema, secretStr, z } from '../secrets.ts'
 
 export interface BoxConfig {
   timeout?: number
@@ -42,7 +41,7 @@ export interface BoxConfig {
   onRefreshTokenRotated?: (newRefreshToken: string) => void | Promise<void>
 }
 
-export const BoxConfigSchema = z
+export const BoxConfig = z
   .object({
     ...timeoutShape,
     endpoint: z
@@ -103,10 +102,3 @@ export const BoxConfigSchema = z
       ),
   })
   .register(FIELD_NORMALIZERS, { rename: { developer_token: 'accessToken' } })
-
-// Only the redacted twin derives; the interface above stays the readable
-// statement of the callback signatures.
-export type BoxConfigRedacted = RedactedConfig<
-  ConfigOf<typeof BoxConfigSchema>,
-  'clientSecret' | 'refreshToken' | 'accessToken' | 'refreshFn' | 'onRefreshTokenRotated'
->

@@ -13,16 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import { Accessor } from './base.ts'
 import {
   MSGRAPH_CONFIG_SHAPE,
   optionalText,
   resolveMsGraphConfig,
   type MsGraphConfig,
-  type MsGraphConfigResolved,
 } from '../core/msgraph/config.ts'
-import { type ConfigOf, type RedactedConfig } from '../vfs/secrets.ts'
 import { stripSlash } from '../utils/slash.ts'
+import { Accessor } from './base.ts'
 
 export interface OneDriveConfig extends MsGraphConfig {
   driveId?: string
@@ -47,7 +45,7 @@ function driveTargetError(named: readonly string[]): string {
   )
 }
 
-export const OneDriveConfigSchema = z
+export const OneDriveConfig = z
   .object({
     ...MSGRAPH_CONFIG_SHAPE,
     driveId: z
@@ -81,20 +79,7 @@ export const OneDriveConfigSchema = z
     if (named.length > 1) ctx.addIssue({ code: 'custom', message: driveTargetError(named) })
   })
 
-export type OneDriveConfigRedacted = RedactedConfig<
-  ConfigOf<typeof OneDriveConfigSchema>,
-  'accessToken'
->
-
-export interface OneDriveConfigResolved extends MsGraphConfigResolved {
-  driveId: string | null
-  siteId: string | null
-  groupId: string | null
-  userId: string | null
-  keyPrefix: string
-}
-
-function resolveOneDriveConfig(config: OneDriveConfig): OneDriveConfigResolved {
+export function resolveOneDriveConfig(config: OneDriveConfig) {
   const graph = resolveMsGraphConfig(config)
   const resolved = {
     ...graph,
@@ -112,7 +97,7 @@ function resolveOneDriveConfig(config: OneDriveConfig): OneDriveConfigResolved {
 }
 
 export class OneDriveAccessor extends Accessor {
-  readonly config: OneDriveConfigResolved
+  readonly config: ReturnType<typeof resolveOneDriveConfig>
   // The drive's Graph `driveType` (personal, business or documentLibrary),
   // asked once and kept: it decides whether the `/delta` feed can start below
   // the drive root.

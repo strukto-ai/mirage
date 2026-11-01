@@ -59,17 +59,8 @@ export function zone(tz: string): Intl.DateTimeFormat {
   return made
 }
 
-interface WallClock {
-  year: number
-  month: number
-  day: number
-  hour: number
-  minute: number
-  second: number
-}
-
 /** The wall-clock reading an instant has in a zone. */
-function wallParts(instant: number, tz: string): WallClock {
+export function wallParts(instant: number, tz: string) {
   const parts = zone(tz).formatToParts(new Date(instant))
   const get = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? '0')
   return {

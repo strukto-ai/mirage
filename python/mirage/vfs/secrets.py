@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, get_args, get_origin
 
 from pydantic import BaseModel, SecretBytes, SecretStr
 
-REDACTED_SECRET = "<REDACTED>"
+from mirage.vfs.constants import REDACTED_SECRET
 
 
 def reveal_secret(value: Any) -> Any:

@@ -12,34 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-type Json = Record<string, unknown>
+import type { JsonObject } from '../../types.ts'
+import {
+  asObject,
+  pickBoolOrNull,
+  pickNumberOrNull,
+  pickString,
+  records,
+} from '../../utils/records.ts'
 
-function pickString(record: Json, ...keys: readonly string[]): string | null {
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'string') return value
-  }
-  return null
-}
-
-function pickBoolOrNull(record: Json, key: string): boolean | null {
-  const value = record[key]
-  return typeof value === 'boolean' ? value : null
-}
-
-function pickNumberOrNull(record: Json, key: string): number | null {
-  const value = record[key]
-  return typeof value === 'number' ? value : null
-}
-
-function asObject(value: unknown): Json {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {}
-}
-
-function nodesOf(value: unknown): Json[] {
-  const obj = asObject(value)
-  const nodes = obj.nodes
-  return Array.isArray(nodes) ? (nodes as Json[]) : []
+function nodesOf(value: unknown): JsonObject[] {
+  return records(asObject(value).nodes)
 }
 
 interface NormalizedTeamState {
@@ -48,18 +31,7 @@ interface NormalizedTeamState {
   type: string | null
 }
 
-export interface NormalizedTeam {
-  team_id: string | null
-  team_key: string | null
-  team_name: string | null
-  name: string | null
-  description: string | null
-  timezone: string | null
-  updated_at: string | null
-  states: NormalizedTeamState[]
-}
-
-export function normalizeTeam(team: Json): NormalizedTeam {
+export function normalizeTeam(team: JsonObject) {
   const states: NormalizedTeamState[] = []
   for (const state of nodesOf(team.states)) {
     states.push({
@@ -80,18 +52,7 @@ export function normalizeTeam(team: Json): NormalizedTeam {
   }
 }
 
-export interface NormalizedUser {
-  user_id: string | null
-  name: string | null
-  display_name: string | null
-  email: string | null
-  is_active: boolean | null
-  is_admin: boolean | null
-  updated_at: string | null
-  url: string | null
-}
-
-export function normalizeUser(user: Json): NormalizedUser {
+export function normalizeUser(user: JsonObject) {
   return {
     user_id: pickString(user, 'id'),
     name: pickString(user, 'name'),
@@ -104,36 +65,7 @@ export function normalizeUser(user: Json): NormalizedUser {
   }
 }
 
-export interface NormalizedIssue {
-  issue_id: string | null
-  issue_key: string | null
-  title: string | null
-  description: string
-  team_id: string | null
-  team_key: string | null
-  team_name: string | null
-  project_id: string | null
-  project_name: string | null
-  cycle_id: string | null
-  cycle_name: string | null
-  cycle_number: number | null
-  state_id: string | null
-  state_name: string | null
-  assignee_id: string | null
-  assignee_email: string | null
-  assignee_name: string | null
-  creator_id: string | null
-  creator_email: string | null
-  creator_name: string | null
-  priority: number | null
-  label_ids: (string | null)[]
-  label_names: (string | null)[]
-  created_at: string | null
-  updated_at: string | null
-  url: string | null
-}
-
-export function normalizeIssue(issue: Json): NormalizedIssue {
+export function normalizeIssue(issue: JsonObject) {
   const team = asObject(issue.team)
   const state = asObject(issue.state)
   const project = asObject(issue.project)
@@ -171,24 +103,7 @@ export function normalizeIssue(issue: Json): NormalizedIssue {
   }
 }
 
-export interface NormalizedComment {
-  comment_id: string | null
-  issue_id: string
-  issue_key: string | null
-  user_id: string | null
-  user_email: string | null
-  user_name: string | null
-  body: string
-  created_at: string | null
-  updated_at: string | null
-  url: string | null
-}
-
-export function normalizeComment(
-  comment: Json,
-  issueId: string,
-  issueKey: string | null,
-): NormalizedComment {
+export function normalizeComment(comment: JsonObject, issueId: string, issueKey: string | null) {
   const user = asObject(comment.user)
   return {
     comment_id: pickString(comment, 'id'),
@@ -204,38 +119,14 @@ export function normalizeComment(
   }
 }
 
-export interface NormalizedProjectIssue {
-  issue_id: string | null
-  issue_key: string | null
-  title: string | null
-  state_id: string | null
-  state_name: string | null
-  url: string | null
-}
-
-export interface NormalizedProject {
-  project_id: string | null
-  team_id: string
-  team_key: string | null
-  team_name: string | null
-  name: string | null
-  description: string | null
-  state: string | null
-  lead_id: string | null
-  updated_at: string | null
-  url: string | null
-  issue_count: number
-  issues: NormalizedProjectIssue[]
-}
-
 export interface NormalizeProjectContext {
   teamId: string
   teamKey: string | null
   teamName: string | null
-  issues: NormalizedProjectIssue[]
+  issues: ReturnType<typeof buildProjectIssue>[]
 }
 
-export function normalizeProject(project: Json, ctx: NormalizeProjectContext): NormalizedProject {
+export function normalizeProject(project: JsonObject, ctx: NormalizeProjectContext) {
   const lead = asObject(project.lead)
   return {
     project_id: pickString(project, 'id'),
@@ -253,18 +144,7 @@ export function normalizeProject(project: Json, ctx: NormalizeProjectContext): N
   }
 }
 
-export interface NormalizedCycle {
-  cycle_id: string | null
-  team_id: string
-  name: string | null
-  number: number | null
-  starts_at: string | null
-  ends_at: string | null
-  updated_at: string | null
-  url: string | null
-}
-
-export function normalizeCycle(cycle: Json, teamId: string): NormalizedCycle {
+export function normalizeCycle(cycle: JsonObject, teamId: string) {
   return {
     cycle_id: pickString(cycle, 'id'),
     team_id: teamId,
@@ -277,13 +157,7 @@ export function normalizeCycle(cycle: Json, teamId: string): NormalizedCycle {
   }
 }
 
-export interface NormalizedLabel {
-  label_id: string | null
-  name: string | null
-  color: string | null
-}
-
-export function normalizeLabel(label: Json): NormalizedLabel {
+export function normalizeLabel(label: JsonObject) {
   return {
     label_id: pickString(label, 'id'),
     name: pickString(label, 'name'),
@@ -291,21 +165,7 @@ export function normalizeLabel(label: Json): NormalizedLabel {
   }
 }
 
-export interface NormalizedDocument {
-  document_id: string | null
-  title: string | null
-  content: string
-  project_id: string | null
-  project_name: string | null
-  creator_id: string | null
-  creator_name: string | null
-  creator_email: string | null
-  created_at: string | null
-  updated_at: string | null
-  url: string | null
-}
-
-export function normalizeDocument(document: Json): NormalizedDocument {
+export function normalizeDocument(document: JsonObject) {
   const project = asObject(document.project)
   const creator = asObject(document.creator)
   return {
@@ -323,7 +183,7 @@ export function normalizeDocument(document: Json): NormalizedDocument {
   }
 }
 
-export function buildProjectIssue(issue: Json): NormalizedProjectIssue {
+export function buildProjectIssue(issue: JsonObject) {
   const state = asObject(issue.state)
   return {
     issue_id: pickString(issue, 'id'),

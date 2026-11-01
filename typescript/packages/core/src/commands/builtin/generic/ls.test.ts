@@ -12,36 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { runWithMountGate } from '../../../context/session_context.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult } from '../../../io/types.ts'
-import { Files } from '../../../workspace/files.ts'
+import { SessionProfile } from '../../../policy/profile.ts'
+import type { DispatchFn } from '../../../runtime/types.ts'
+import { readers } from '../../../test-utils.ts'
+import type { LsIndicator, LsLinkMode } from '../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { mountKey } from '../../../utils/key_prefix.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { Files } from '../../../workspace/files.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { Context } from '../../config.ts'
+import { UsageError } from '../../errors.ts'
+import { specOf } from '../../spec/builtins.ts'
+import { FlagView } from '../../spec/flag_view.ts'
+import { type FlagValue } from '../../spec/types.ts'
 import {
+  exitStatusFor,
+  linkMode,
   LS_FAILURE,
   LS_MINOR_PROBLEM,
   LS_OK,
-  exitStatusFor,
-  linkMode,
   lsGeneric,
   parseFlags,
   sortByVersion,
   typeIndicator,
 } from './ls.ts'
-import { CommandTimeoutError } from '../../../errors/types.ts'
-import { UsageError } from '../../errors.ts'
-import type { LsIndicator, LsLinkMode } from '../../../types.ts'
-import { specOf } from '../../spec/builtins.ts'
-import { FlagView } from '../../spec/flag_view.ts'
-import { type FlagValue } from '../../spec/types.ts'
-import { readers } from '../../../test-utils.ts'
-import { parseSessionProfile } from '../../../policy/profile.ts'
-import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const DEC = new TextDecoder()
 
@@ -629,7 +629,7 @@ describe('typeIndicator', () => {
 })
 
 describe('a directory a rule refuses to list', () => {
-  const SEALED_DOC = parseSessionProfile({
+  const SEALED_DOC = SessionProfile({
     commands: {
       deny: [{ reason: 'sealed', paths: ['/s/d/hdir', '/s/d/hdir/*', '/v/ax/hl'] }],
     },

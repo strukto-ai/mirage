@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type ByteSource } from '../../io/types.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import {
   firstLines as notionFirstLines,
@@ -20,6 +19,7 @@ import {
 } from '../../core/notion/read.ts'
 import { readdir as notionReaddir } from '../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../core/notion/stat.ts'
+import { type ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
@@ -55,7 +55,7 @@ export const VFS_MD = `{prefix}
  * Notion's functions over its accessor, which the node and browser
  * packages build over their own transport.
  */
-export class NotionVFSBase extends BaseVFS<NotionAccessor> {
+export class NotionVFS extends BaseVFS<NotionAccessor> {
   override readonly handed = {
     readdir: ['entry', 'parent'],
     read: ['parent'],

@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '../../types.ts'
 
-export interface FileCache {
+export interface FileCacheMixin {
   get(key: string): Promise<Uint8Array | null>
   /** Read bytes and their token atomically; null when no bytes remain. */
   getVersioned(key: string): Promise<[Uint8Array, string | null] | null>
@@ -86,7 +86,7 @@ export interface FileCache {
  * value keeps larger streams out of the cache and may not exceed the
  * cache's intended capacity. Mirrors Python `drain_budget`.
  */
-export function drainBudget(cache: FileCache): number {
+export function drainBudget(cache: FileCacheMixin): number {
   validateMaxDrainBytes(cache.cacheLimit, cache.maxDrainBytes)
   return cache.maxDrainBytes ?? Math.min(cache.cacheLimit, 8 * 1024 * 1024)
 }

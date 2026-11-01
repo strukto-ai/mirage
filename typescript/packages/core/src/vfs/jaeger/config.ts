@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { z } from '@struktoai/mirage-core/vfs/secrets'
-import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
+import { timeoutShape } from '../../core/api/config.ts'
+import type { ConfigOf } from '../secrets.ts'
+import { z } from '../secrets.ts'
 
-export const JaegerConfigSchema = z.object({
+export const JaegerConfig = z.object({
   host: z.string().optional().meta({
     description: 'Jaeger query service URL.',
     default: 'http://localhost:16686',
@@ -39,7 +39,4 @@ export const JaegerConfigSchema = z.object({
   ...timeoutShape,
 })
 
-export type JaegerConfig = ConfigOf<typeof JaegerConfigSchema>
-
-// Nothing on a Jaeger config is a secret, so the twin is the config.
-export type JaegerConfigRedacted = JaegerConfig
+export type JaegerConfig = ConfigOf<typeof JaegerConfig>

@@ -31,10 +31,6 @@ export interface MontyPoolLike {
 }
 
 /** The policy options a `ClassInstance` wrapper takes. */
-export interface MontyClassInstanceOptions {
-  name?: string
-  eagerAttrs?: readonly string[] | 'all'
-}
 
 /**
  * The three pieces `MontyFs` needs from the engine: the decline
@@ -47,7 +43,13 @@ export interface MontyClassInstanceOptions {
 export interface MontyFsBits {
   NOT_HANDLED: symbol
   MontyFileHandle: new (path: string, mode: string, options?: { position: number }) => unknown
-  ClassInstance: new (instance: object, options?: MontyClassInstanceOptions) => object
+  ClassInstance: new (
+    instance: object,
+    options?: {
+      name?: string
+      eagerAttrs?: readonly string[] | 'all'
+    },
+  ) => object
 }
 
 /** A worker-death error, the one shape run() maps to an exit code. */

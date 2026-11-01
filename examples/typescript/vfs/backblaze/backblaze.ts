@@ -19,8 +19,8 @@ import {
   MountMode,
   BackblazeVFS,
   Workspace,
-  resolvedBackblazeEndpoint,
-  type BackblazeConfig,
+
+  BackblazeConfig,
   type FileStat,
 } from '@struktoai/mirage-node'
 
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const config = configFromEnv()
   const ws = new Workspace({ '/b2/': new BackblazeVFS(config) }, { mode: MountMode.READ })
   try {
-    console.log(`=== Backblaze B2 at ${resolvedBackblazeEndpoint(config)} ===`)
+    console.log(`=== Backblaze B2 at ${BackblazeConfig.resolvedEndpoint(config)} ===`)
 
     let r = await ws.shell('ls /b2/')
     console.log('ls /b2/:\n' + r.stdoutText)

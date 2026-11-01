@@ -12,19 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { underPath } from '@struktoai/mirage-core/utils/key_prefix'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { CacheType } from '@struktoai/mirage-core/cache/file/config'
 import { DEFAULT_KEY_PREFIX } from '@struktoai/mirage-core/cache/file/constants'
 import { Invalidation, withFillGuard } from '@struktoai/mirage-core/cache/file/invalidation'
+import type { FileCacheMixin } from '@struktoai/mirage-core/cache/file/mixin'
 import { validateMaxDrainBytes } from '@struktoai/mirage-core/cache/file/mixin'
-import type { FileCache } from '@struktoai/mirage-core/cache/file/mixin'
 import { globEscape, tokenOrNull } from '@struktoai/mirage-core/cache/file/utils'
-import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import type { PathSpec } from '@struktoai/mirage-core/types'
+import { underPath } from '@struktoai/mirage-core/utils/key_prefix'
+import { parseLimit } from '@struktoai/mirage-core/utils/size'
+import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { registerFileCacheStore } from '@struktoai/mirage-core/workspace/workspace/cache'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import type { RedisClientType } from 'redis'
 import { RedisVFS, type RedisVFSOptions } from '../../vfs/redis/redis.ts'
 
@@ -68,7 +68,7 @@ export interface RedisFileCacheOptions extends RedisVFSOptions {
   maxDrainBytes?: number | null
 }
 
-export class RedisFileCacheStore extends RedisVFS implements FileCache {
+export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
   // Advisory only: unlike the RAM store there is no client-side LRU, so
   // nothing evicts on overflow. Cap memory on the Redis server instead
   // (maxmemory + maxmemory-policy allkeys-lru) to approximate the RAM
@@ -123,7 +123,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     return `${this.metaPrefix}${key}`
   }
 
-  // The cache's own key test, part of `FileCache` and not a driver verb:
+  // The cache's own key test, part of `FileCacheMixin` and not a driver verb:
   // the key is the cache entry's, not a path the mount resolves.
   override async exists(key: string | PathSpec): Promise<boolean> {
     const k = typeof key === 'string' ? key : key.mountPath

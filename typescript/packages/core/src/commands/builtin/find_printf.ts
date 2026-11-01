@@ -12,20 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { PrintfKind } from '../../core/generic/types.ts'
+import { FileStat, FileType } from '../../types.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import {
-  CHAR_MODE,
   ALL_MODE_BITS,
+  CHAR_MODE,
   DIR_MODE,
   FIFO_MODE,
   FILE_MODE,
   LINK_MODE,
 } from '../../utils/stat_view.ts'
-import { FileStat, FileType } from '../../types.ts'
+import type { PrintfPart } from './types.ts'
 import { lsModeString } from './utils/formatting.ts'
 import { groupName, ownerName, type Identity } from './utils/identity.ts'
-import { rstripSlash } from '../../utils/slash.ts'
-import type { PrintfKind } from '../../core/generic/find_eval.ts'
-import type { PrintfPart } from './types.ts'
 
 // One mode per kind, spelled from the same constants every stat
 // translator uses (utils/stat_view.ts); links are 777 the way ls draws

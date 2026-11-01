@@ -19,8 +19,8 @@ import {
   MountMode,
   DigitalOceanVFS,
   Workspace,
-  resolvedDigitalOceanEndpoint,
-  type DigitalOceanConfig,
+
+  DigitalOceanConfig,
   type FileStat,
 } from '@struktoai/mirage-node'
 
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   const config = configFromEnv()
   const ws = new Workspace({ '/do/': new DigitalOceanVFS(config) }, { mode: MountMode.READ })
   try {
-    console.log(`=== DigitalOcean Spaces at ${resolvedDigitalOceanEndpoint(config)} ===`)
+    console.log(`=== DigitalOcean Spaces at ${DigitalOceanConfig.resolvedEndpoint(config)} ===`)
 
     let r = await ws.shell('ls /do/')
     console.log('ls /do/:\n' + r.stdoutText)

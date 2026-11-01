@@ -12,17 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { enotsup } from '../../errors/fs.ts'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { eisdir, enotsup } from '../../errors/fs.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { eisdir } from '../../errors/fs.ts'
-import { liveRow } from './readdir.ts'
 import { NATIVE_RESOURCE_TYPES } from './fingerprint.ts'
+import { liveRow } from './readdir.ts'
 import { eaccesOnDenied } from './resolve.ts'
 import { write } from './write.ts'
 
-async function truncateImpl(
+export const truncate = eaccesOnDenied(async function (
   accessor: GDriveAccessor,
   path: PathSpec,
   length: number,
@@ -46,6 +45,4 @@ async function truncateImpl(
     out.set(data, 0)
   }
   await write(accessor, path, out, { ...handed, entry })
-}
-
-export const truncate = eaccesOnDenied(truncateImpl)
+})

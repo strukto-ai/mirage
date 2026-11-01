@@ -12,8 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { TiDBFilesystemConfigSchema } from '@struktoai/mirage-core/vfs/tidb_filesystem/config'
-export type {
-  TiDBFilesystemConfig,
-  TiDBFilesystemConfigRedacted,
-} from '@struktoai/mirage-core/vfs/tidb_filesystem/config'
+export { TiDBFilesystemConfig } from '@struktoai/mirage-core/vfs/tidb_filesystem/config'

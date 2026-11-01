@@ -13,37 +13,38 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
+import type { CapacityResult, FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { lstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { OPFSAccessor } from '../../accessor/opfs.ts'
-import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
-import type { CapacityResult, PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import {
   type Charge,
   type StorageUsage,
   charge,
   storageUsage,
 } from '@struktoai/mirage-core/vfs/capacity'
+import { LOCAL_WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { readdir as opfsReaddir } from '../../core/opfs/readdir.ts'
+import { type VFSStateBase } from '@struktoai/mirage-core/vfs/types'
+import { OPFSAccessor } from '../../accessor/opfs.ts'
+import { append as opfsAppend } from '../../core/opfs/append.ts'
+import { count as opfsCount, sizeOf as opfsSizeOf } from '../../core/opfs/capacity.ts'
+import { copy as opfsCopy } from '../../core/opfs/copy.ts'
+import { create as opfsCreate } from '../../core/opfs/create.ts'
+import { exists as opfsExists } from '../../core/opfs/exists.ts'
+import { mkdir as opfsMkdir } from '../../core/opfs/mkdir.ts'
 import { read as opfsRead } from '../../core/opfs/read.ts'
+import { readdir as opfsReaddir } from '../../core/opfs/readdir.ts'
+import { rename as opfsRename } from '../../core/opfs/rename.ts'
+import { rmR as opfsRmR } from '../../core/opfs/rm.ts'
+import { rmdir as opfsRmdir } from '../../core/opfs/rmdir.ts'
 import { stat as opfsStat } from '../../core/opfs/stat.ts'
 import { readStream as opfsStream } from '../../core/opfs/stream.ts'
-import { exists as opfsExists } from '../../core/opfs/exists.ts'
-import { write as opfsWrite } from '../../core/opfs/write.ts'
-import { append as opfsAppend } from '../../core/opfs/append.ts'
-import { create as opfsCreate } from '../../core/opfs/create.ts'
-import { mkdir as opfsMkdir } from '../../core/opfs/mkdir.ts'
-import { unlink as opfsUnlink } from '../../core/opfs/unlink.ts'
-import { rmdir as opfsRmdir } from '../../core/opfs/rmdir.ts'
-import { rmR as opfsRmR } from '../../core/opfs/rm.ts'
-import { rename as opfsRename } from '../../core/opfs/rename.ts'
-import { copy as opfsCopy } from '../../core/opfs/copy.ts'
 import { truncate as opfsTruncate } from '../../core/opfs/truncate.ts'
-import { count as opfsCount, sizeOf as opfsSizeOf } from '../../core/opfs/capacity.ts'
-import { LOCAL_WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { unlink as opfsUnlink } from '../../core/opfs/unlink.ts'
+import { iterEntries, toWritableChunk } from '../../core/opfs/utils.ts'
+import { write as opfsWrite } from '../../core/opfs/write.ts'
 
 export interface OPFSVFSOptions {
   root?: string

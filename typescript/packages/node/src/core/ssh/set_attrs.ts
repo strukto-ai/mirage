@@ -12,20 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
-import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
+import type { PathSpec, SetAttrFields } from '@struktoai/mirage-core/types'
+import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { isNoSuchFile, joinRoot } from './utils.ts'
-
-export interface SetAttrsFields {
-  mode?: number
-  uid?: number | string
-  gid?: number | string
-  atime?: string
-  mtime?: string
-}
 
 function sftpStat(sftp: SFTPWrapper, remote: string, p: PathSpec): Promise<Stats> {
   return new Promise((resolveFn, rejectFn) => {
@@ -75,7 +67,7 @@ function sftpUtimes(
 export async function setAttrs(
   accessor: SSHAccessor,
   path: PathSpec,
-  fields: SetAttrsFields,
+  fields: SetAttrFields,
 ): Promise<Record<string, number | string>> {
   const sftp = await accessor.sftp()
   const remote = joinRoot(accessor.config.root ?? '/', rawPathOf(path))

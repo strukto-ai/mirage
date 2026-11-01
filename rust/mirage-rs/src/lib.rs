@@ -9,6 +9,7 @@ mod compress;
 mod cut;
 mod diff;
 mod digest;
+mod document;
 mod du;
 mod expand;
 mod find;
@@ -50,6 +51,7 @@ mod rg_grapheme;
 mod rg_input;
 mod rg_matcher;
 mod rg_options;
+mod sanitize;
 mod scan;
 mod sed;
 mod seq;
@@ -409,6 +411,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "patch" => patch::open(config),
         "policy" => policy::stream::open(config),
         "policy_compose" => policy::composition::open(config),
+        "document" => document::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),
         "rev" => rev::open(config),
@@ -420,6 +423,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "strftime" => strftime::open(config),
         "json_validate" => json_validate::open(config),
         "lance_query" => lance_query::open(config),
+        "sanitize" => sanitize::open(config),
         "sed" => sed::open(config),
         "seq" => seq::open(config),
         "shuf" => shuf::open(config),

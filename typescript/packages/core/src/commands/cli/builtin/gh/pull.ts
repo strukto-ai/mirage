@@ -13,11 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GitHubAccount } from '../../../../accessor/github.ts'
-import { DIFF_HEADER, PR_INVALID_LIMIT } from './constants.ts'
-import { commentsFor, commentsText } from './issue.ts'
-import { FlagView } from '../../../spec/flag_view.ts'
-import type { CommandFnResult, Context } from '../../../config.ts'
-import type { PathSpec } from '../../../../types.ts'
 import type { GitHubTransport } from '../../../../core/github/client.ts'
 import {
   commentPull,
@@ -32,6 +27,9 @@ import {
   pullRequestFields,
 } from '../../../../core/github/pull.ts'
 import type { RepoRef } from '../../../../core/github/repo.ts'
+import type { JsonObject, PathSpec } from '../../../../types.ts'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
 import {
   bodyValue,
   camel,
@@ -44,11 +42,11 @@ import {
   textValue,
   typedOut,
 } from './accessor.ts'
+import { DIFF_HEADER, PR_INVALID_LIMIT } from './constants.ts'
 import {
-  LOGIN,
-  SHARED_FIELDS,
   connection,
   exportedNode,
+  LOGIN,
   nodes,
   nodesOf,
   paged,
@@ -57,10 +55,11 @@ import {
   record,
   references,
   selection,
+  SHARED_FIELDS,
   type Connection,
   type Field,
-  type Node,
 } from './fields.ts'
+import { commentsFor, commentsText } from './issue.ts'
 import { exported, orNull, pointer, struct } from './shape.ts'
 
 const OID = pointer(['oid', 'string'])
@@ -90,12 +89,12 @@ const checks = (after: string): string =>
   'pageInfo{hasNextPage,endCursor}}}}}}'
 
 /** The context connection of the one commit a status rollup reads. */
-function contexts(node: Node): Connection {
+function contexts(node: JsonObject): Connection {
   const commit = nodesOf(node.statusCheckRollup)[0]
   return connection(record(record(record(commit).commit).statusCheckRollup).contexts)
 }
 
-function commitsOf(node: Node): unknown[] {
+function commitsOf(node: JsonObject): unknown[] {
   return nodesOf(node.commits).map((item) => {
     const commit = record(record(item).commit)
     return {
@@ -120,7 +119,7 @@ function commitsOf(node: Node): unknown[] {
 
 // A status rollup with no commit behind it is null; one whose commit carries
 // no rollup is an empty list, since gh builds that list before reading it.
-function checksOf(node: Node): unknown[] | null {
+function checksOf(node: JsonObject): unknown[] | null {
   if (nodesOf(node.statusCheckRollup).length === 0) return null
   return nodesOf(contexts(node)).map((item) => {
     const row = record(item)
@@ -148,7 +147,7 @@ function checksOf(node: Node): unknown[] | null {
 }
 
 // Only users and teams are listed; a team prints as `org/slug`.
-function requestsOf(node: Node): unknown[] {
+function requestsOf(node: JsonObject): unknown[] {
   const requests: unknown[] = []
   for (const item of nodesOf(node.reviewRequests)) {
     const reviewer = record(record(item).requestedReviewer)
@@ -267,7 +266,7 @@ async function viewedPull(
   ref: RepoRef,
   number: number,
   fields: readonly string[],
-): Promise<Node> {
+): Promise<JsonObject> {
   if (fields.every((field) => field === 'number')) return { number }
   const names = [...fields, 'id', 'number']
   const node = await pullRequestFields(

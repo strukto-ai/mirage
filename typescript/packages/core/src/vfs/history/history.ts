@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BaseVFS, type VFSStateBase } from '../base.ts'
 import { HistoryAccessor } from '../../accessor/history.ts'
-import type { Observer } from '../../observe/observer.ts'
-import { VFSName } from '../../types.ts'
-import type { PathSpec, FileStat } from '../../types.ts'
-import { readdir as historyReaddir } from '../../core/history/readdir.ts'
 import { read as historyRead } from '../../core/history/read.ts'
+import { readdir as historyReaddir } from '../../core/history/readdir.ts'
 import { stat as historyStat } from '../../core/history/stat.ts'
+import type { Observer } from '../../observe/observer.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import { VFSName } from '../../types.ts'
+import { BaseVFS } from '../base.ts'
+import { type VFSStateBase } from '../types.ts'
 
 export const HISTORY_PREFIX = '/.bash_history'
 

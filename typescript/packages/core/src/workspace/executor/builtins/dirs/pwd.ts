@@ -12,21 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { RedirectResult } from '../../../../context/session_context.ts'
+import { isProgramInvocation } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { encodeText } from '../../../../shell/bytes.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { logicalCwd } from '../../../session/shell_dirs.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { builtinUsage } from '../shared.ts'
+import type { BuiltinCall } from '../types.ts'
 import { PWD_OPTIONS } from './constants.ts'
 import { type DirArgs, splitModeOptions } from './dirs.ts'
-import type { BuiltinCall, Result } from '../types.ts'
-import { isProgramInvocation } from '../../../../context/session_context.ts'
-import { encodeText } from '../../../../shell/bytes.ts'
-import { builtinUsage } from '../shared.ts'
 
 // Print the working directory, logical by default and physical under -P
 // (or `set -P`). GNU ignores every operand: `pwd extra` still prints the
 // cwd.
-export function handlePwd(operands: DirArgs, session: SessionState): Result {
+export function handlePwd(operands: DirArgs, session: SessionState): RedirectResult {
   const shellPhysical = session.shellOptions.physical === true
   const { bad, physical } = splitModeOptions(operands, PWD_OPTIONS, shellPhysical)
   if (bad !== null) {
@@ -45,6 +46,6 @@ export function handlePwd(operands: DirArgs, session: SessionState): Result {
 }
 
 /** The `pwd` arm. */
-export function pwdBuiltin(call: BuiltinCall): Promise<Result> {
+export function pwdBuiltin(call: BuiltinCall): Promise<RedirectResult> {
   return Promise.resolve(handlePwd([...call.argv.operands], call.context.session))
 }
