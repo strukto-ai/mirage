@@ -19,7 +19,7 @@ from mirage.commands.builtin.generic.crossmount.utils import (
     flat_scopes,
     transfer_primitives,
 )
-from mirage.commands.builtin.generic.zip_cmd import parse_flags, zip_cmd
+from mirage.commands.builtin.generic.zip_cmd import parse_flags, zip_generic
 from mirage.commands.builtin.generic_bind.archive_io import relay_walk_of
 from mirage.commands.builtin.generic_bind.files import dispatched_read_tree
 from mirage.commands.builtin.utils.links import (
@@ -68,7 +68,7 @@ async def run_zip(
             crossing=True,
         )
     )
-    return await zip_cmd(
+    return await zip_generic(
         flat_scopes(scopes),
         stream=normalized_read(prim["read_bytes"]),
         dispatch=dispatch,

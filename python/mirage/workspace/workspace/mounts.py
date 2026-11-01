@@ -290,7 +290,7 @@ def prepare_added_mount(
     )
 
 
-async def unmount(
+async def unmount_prefix(
     registry: MountRegistry,
     prefix: str,
     is_shutting_down: Callable[[], bool],

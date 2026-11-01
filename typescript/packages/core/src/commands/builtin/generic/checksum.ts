@@ -26,7 +26,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { usageExitCode, usageHint } from '../../spec/usage.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { PathSpec, type ReadStreamFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { fsStrerror, isEisdir, isFsError, isMissingPath, isWalkError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
@@ -42,7 +42,6 @@ import { mountRoot } from '../utils/links.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
 
-export type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 // The mount's stored digest of a file for an algorithm, or null to read it.
 export type StoredDigest = (p: PathSpec, algorithm: string) => Promise<string | null>
 
@@ -98,7 +97,7 @@ async function report(io: IOResult, prog: string, path: PathSpec, err: unknown):
  */
 export async function hashOperands(
   paths: readonly PathSpec[],
-  read: Stream,
+  read: ReadStreamFn,
   algorithm: string,
   prog: string,
   render: (digest: string, label: string) => string,
@@ -251,13 +250,13 @@ function countNoun(count: number, singular: string, plural: string): string {
 // checksum list names files anywhere, not on the list's mount. A stdin name
 // (`-`, /dev/stdin) reads the command's input through `stream`, on the
 // cursor the list itself reads from. Mirrors Python's dispatched_reader.
-export function dispatchedReader(dispatch: DispatchFn, stream: Stream): Stream {
+export function dispatchedReader(dispatch: DispatchFn, stream: ReadStreamFn): ReadStreamFn {
   const caller = currentCaller()
   return (path) => (isStdin(path) ? stream(path) : callerStream(dispatch, caller, path))
 }
 
 async function checkFile(
-  stream: Stream,
+  stream: ReadStreamFn,
   p: PathSpec,
   algorithm: string,
   ctx: Context,
@@ -395,7 +394,7 @@ export async function checksumGeneric(
   parsed: ChecksumFlags,
   paths: PathSpec[],
   ctx: Context,
-  read: Stream,
+  read: ReadStreamFn,
   name: string,
   stat?: (p: PathSpec) => Promise<unknown>,
   stored?: StoredDigest,

@@ -536,7 +536,7 @@ def _session_id(caller: Caller) -> str:
     return caller.session.session_id if caller.session is not None else ""
 
 
-def _window(kwargs: dict[str, Any]) -> tuple[int, int | None]:
+def _read_window(kwargs: dict[str, Any]) -> tuple[int, int | None]:
     """The byte window a read asked for, whole file when it asked none.
 
     Args:
@@ -799,7 +799,7 @@ class _Call:
     @property
     def window(self) -> tuple[int, int | None]:
         """The byte window a read asked for, whole file when none."""
-        return _window(self.kwargs)
+        return _read_window(self.kwargs)
 
     def renders_read(self, mount: MountEntry) -> bool:
         """Whether a filetype renderer answers this read on ``mount``.

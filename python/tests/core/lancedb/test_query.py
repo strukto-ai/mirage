@@ -14,7 +14,12 @@
 
 import pytest
 
-from mirage.core.lancedb.query import _predicate, distinct_values
+from mirage.core.lancedb.query import (
+    _predicate,
+    distinct_values,
+    eq_clause,
+    holding_clause,
+)
 
 
 def test_narrows_on_a_name_prefix_with_a_cast():
@@ -66,7 +71,23 @@ def test_is_the_filters_alone_with_no_prefix_and_empty_with_neither():
     ],
 )
 def test_only_an_ascii_integer_compares_unquoted(value, clause):
+    assert eq_clause("n", value) == clause
     assert _predicate("id", {"n": value}, "") == clause
+
+
+def test_keeps_filter_order_and_quotes_identifiers_and_literals():
+    assert eq_clause("a`b", "x'y") == "`a``b` = 'x''y'"
+    assert _predicate("", {"z": "1", "a": "x"}, "") == "`z` = 1 AND `a` = 'x'"
+    assert holding_clause(["a`b"], ["Hello"], True, {"id": "2"}) == (
+        "`id` = 2 AND (lower(`a``b`) LIKE '%hello%')"
+    )
+
+
+def test_a_long_literal_crosses_the_host_transfer_window():
+    value = "😀'" * 30_000
+    assert (
+        eq_clause("id", value) == "`id` = '" + value.replace("'", "''") + "'"
+    )
 
 
 @pytest.mark.asyncio

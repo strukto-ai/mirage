@@ -421,6 +421,46 @@
         "stdout": "",
         "stderr": "ls: invalid argument 'NONE' for '--sort'\nValid arguments are:\n  - 'none'\n  - 'size'\n  - 'time'\n  - 'version'\n  - 'extension'\n  - 'name'\n  - 'width'\nTry 'ls --help' for more information.\n"
       }
+    },
+    {
+      "id": "ls_width_sort_uses_shared_unicode_table",
+      "seq": 16100029,
+      "note": "GNU coreutils 9.7, glibc 2.41, LC_ALL=C.UTF-8 in debian:stable-slim@sha256:13e0a2e78aa0554ad5ff66e4e260c6dbcdff807eb1f39d43b9fb0288aae88b04: Hangul filler U+3164 takes zero columns and circled number U+3248 takes two. The host width helpers use the same pinned Rust table as wc, fold and column.",
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/shared_width; touch /data/shared_width/aa /data/shared_width/b '/data/shared_width/cㅤㅤ' '/data/shared_width/d㉈'; ls -1 --sort=width /data/shared_width",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\ncㅤㅤ\naa\nd㉈\n",
+        "stderr": ""
+      },
+      "flags": [
+        "1",
+        "sort"
+      ]
     }
   ]
 }

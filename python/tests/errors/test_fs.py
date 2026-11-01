@@ -33,7 +33,7 @@ from mirage.errors.fs import (
     enotempty,
     enotsup,
     erofs,
-    error_path,
+    error_virtual_path,
     exdev,
     fs_error,
     fs_strerror,
@@ -256,7 +256,7 @@ def test_dot_walk_error_raises_the_walk_refusal(condition, kind):
     exc = dot_walk_error("a/..", condition)
     assert type(exc) is kind
     assert classify(exc) is condition
-    assert error_path(exc) == "a/.."
+    assert error_virtual_path(exc) == "a/.."
 
 
 @pytest.mark.parametrize(
@@ -284,7 +284,7 @@ def test_walk_refusal_names_the_operand_as_typed(raw, walk_error, cmd, line):
     )
     exc = walk_refusal(spec)
     assert isinstance(exc, FS_ERRORS)
-    assert error_path(exc) == raw
+    assert error_virtual_path(exc) == raw
     assert fs_error_line(cmd, spec, exc) == line
 
 

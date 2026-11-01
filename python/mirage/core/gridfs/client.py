@@ -36,7 +36,7 @@ PRUNE_SORT = [("filename", -1), ("uploadDate", -1), ("_id", -1)]
 _BATCH = 1000
 
 
-def _key(path: str, config: GridFSConfig) -> str:
+def gridfs_key(path: str, config: GridFSConfig) -> str:
     return kp.apply(config.key_prefix or "", path)
 
 

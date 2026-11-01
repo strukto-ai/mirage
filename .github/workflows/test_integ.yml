@@ -80,6 +80,14 @@ jobs:
             # their host adapters, use these whole-host filters on both languages.
             # Git's search and listing commands stay under these whole-host
             # filters, so their disk/RAM CLI corpus runs with either twin.
+            # Git log's shared rs/regex filters and removed utils/posix and
+            # builtin/utils/size_suffix helpers are covered by these globs too.
+            # Rust quote and the host utils/quote adapters use these filters;
+            # utils/ids no longer implements shuf's permutation on either host.
+            # Rust width replaces the generated host width tables; its adapters
+            # and ls width-sort cases stay covered by these whole-host filters.
+            # Rust strftime, JSON validation and Lance SQL use these filters;
+            # unix/date/d.json pins GNU flags, modifiers and early-year dates.
             # LanceDB's shared core/lancedb/types modules select the embedded
             # LanceDB corpus through these same whole-host filters.
             # The io/writer, spool, archive/codec and streamed upload modules

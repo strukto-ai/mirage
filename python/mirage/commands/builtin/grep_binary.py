@@ -7,7 +7,7 @@ from mirage.commands.builtin.utils.constants import GREP_STDIN_LABEL
 
 @dataclass(frozen=True, slots=True)
 class GrepFlags:
-    """Parsed grep flags (TS FlagSet parity); the complete set grep honors."""
+    """Parsed grep flags (TS GrepFlags parity); the complete set grep honors."""
 
     ignore_case: bool
     invert: bool

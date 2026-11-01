@@ -33,6 +33,8 @@ ONE_EAST = datetime(2026, 9, 3, tzinfo=timezone(timedelta(hours=1)))
         ("%N", "123456000"),
         ("%3N", "123"),
         ("%-N", "123456000"),
+        ("%-12N", "123456"),
+        ("%_N", "123456   "),
         ("%_3N", "123"),
         ("%03N", "123"),
         ("%6N", "123456"),
@@ -68,8 +70,8 @@ ONE_EAST = datetime(2026, 9, 3, tzinfo=timezone(timedelta(hours=1)))
 )
 def test_gnu_directives_follow_date(fmt: str, expected: str):
     # Pinned against date 9.7: a width on %N keeps that many leading
-    # digits and pads a wider one with zeros on the right and its flags
-    # change nothing; a width on %q pads on the left, with zeros unless
+    # digits and pads a wider one on the right; '_' spaces trailing zeros
+    # and '-' trims them with an explicit width. %q pads with zeros unless
     # `_` says spaces or `-` says none, the last of the three winning.
     assert gnu_strftime(MOMENT, fmt) == expected
 
@@ -369,3 +371,34 @@ def test_years_put_back_moved_cycles(fmt: str, expected: str):
     # weekday and day number, every directive that prints the year gets
     # the years back, and the two-digit years were already right.
     assert gnu_strftime(SEPTEMBER, fmt, 8000) == expected
+
+
+@pytest.mark.parametrize(
+    "moment,fmt,expected",
+    [
+        (
+            MOMENT,
+            "%^d|%#d|%^C|%#P|%Ea|%EY|%6Q|%6%",
+            "01|01|20|am|%Ea|2026|   %6Q|    %6%",
+        ),
+        (
+            datetime(1, 1, 1, tzinfo=timezone.utc),
+            "%Y|%G|%V|%j|%U|%W|%a|%c",
+            "0001|0001|01|001|00|01|Mon|Mon Jan  1 00:00:00 1",
+        ),
+        (
+            datetime(2021, 1, 1, tzinfo=timezone.utc),
+            "%Y|%G|%g|%V|%j|%U|%W",
+            "2021|2020|20|53|001|00|00",
+        ),
+    ],
+)
+def test_directives_and_calendar_are_independent_of_the_host(
+    moment: datetime, fmt: str, expected: str
+):
+    assert gnu_strftime(moment, fmt) == expected
+
+
+def test_format_preserves_raw_bytes_bom_and_large_input():
+    fmt = "\udcff\ufeff" + "😀%Y" * 30000
+    assert gnu_strftime(MOMENT, fmt) == "\udcff\ufeff" + "😀2026" * 30000

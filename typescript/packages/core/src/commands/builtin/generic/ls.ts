@@ -28,6 +28,8 @@ import {
   type LsSortBy,
   type JsonValue,
   type LsTimeKind,
+  type ReaddirFn,
+  type StatFn,
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import type { ChildMounts, LinkView, MountView, StatPath } from '../../../view/types.ts'
@@ -60,7 +62,7 @@ import { formatRecords } from '../utils/output.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { contentSize } from '../../../utils/stat_view.ts'
 import { escapeName } from '../../../utils/quote.ts'
-import { charWidth } from '../../../utils/width.ts'
+import { textWidth } from '../../../utils/width.ts'
 import { linksOf, mountsOf, owedNames } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 import { WalkBudget } from '../utils/tree.ts'
@@ -69,9 +71,6 @@ import { concat } from '../../../utils/bytes.ts'
 import { scan, scanned } from '../../../rs/scan.ts'
 import { textView } from '../../../shell/bytes.ts'
 import { engineConfig } from './sort.ts'
-
-type Readdir = (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>
-type Stat = (p: PathSpec) => Promise<FileStat>
 
 export const LS_OK = 0
 export const LS_MINOR_PROBLEM = 1
@@ -359,15 +358,6 @@ export async function sortByVersion(names: readonly string[]): Promise<number[]>
   })
 }
 
-// The columns a name occupies, the key --sort=width compares: GNU
-// measures the rendered width, so a wide character counts two and a
-// combining mark none.
-export function nameWidth(name: string): number {
-  let width = 0
-  for (const ch of name) width += charWidth(ch.codePointAt(0) ?? 0)
-  return width
-}
-
 // The key `ls -X` compares first: the name from its last dot, empty for
 // a name without one.
 function extensionOf(name: string): string {
@@ -398,8 +388,8 @@ function compareStats(
     if (byExt !== 0) return byExt
   } else if (sortBy === 'width') {
     const byWidth =
-      nameWidth(escape ? escapeName(a.name) : a.name) -
-      nameWidth(escape ? escapeName(b.name) : b.name)
+      textWidth(escape ? escapeName(a.name) : a.name) -
+      textWidth(escape ? escapeName(b.name) : b.name)
     if (byWidth !== 0) return byWidth
   } else if (sortBy !== 'name' && sortBy !== 'none') {
     const av = primaryValue(a, sortBy, timeKind)
@@ -449,14 +439,14 @@ export async function sortStats(
 // directory still lists as empty. Mirrors Python ls `_file_entry`.
 // The row of an operand that is no directory, null for a directory or a path
 // nothing is at; a stat that fails other than by absence throws.
-async function fileEntry(stat: Stat, path: PathSpec): Promise<FileStat | null> {
+async function fileEntry(stat: StatFn, path: PathSpec): Promise<FileStat | null> {
   const s = await operandStat(stat, path)
   return s !== null && s.type !== FileType.DIRECTORY ? asOperand(s, path) : null
 }
 
 // An operand's stat, null for a path nothing is at; a stat that fails other
 // than by absence throws. Mirrors Python ls `_operand_stat`.
-async function operandStat(stat: Stat, path: PathSpec): Promise<FileStat | null> {
+async function operandStat(stat: StatFn, path: PathSpec): Promise<FileStat | null> {
   try {
     return await stat(path)
   } catch (err) {
@@ -525,8 +515,8 @@ function statFailedRow(entry: string): FileStat {
 // the backend may refuse. `spell` gives an entry's path as the operand
 // spelled it, for a diagnostic. Mirrors Python ls `_stat_entries`.
 async function listDir(
-  readdir: Readdir,
-  stat: Stat,
+  readdir: ReaddirFn<[path: PathSpec, nofollow?: boolean, limit?: number]>,
+  stat: StatFn,
   dir: PathSpec,
   ctx: WalkOpts,
   warnings: LsWarning[],
@@ -559,7 +549,7 @@ async function listDir(
     entries = []
     structureOnly = true
   }
-  const entryStat: Stat = (p: PathSpec) => followedStat(stat, ctx.deref ? links : null, p)
+  const entryStat: StatFn = (p: PathSpec) => followedStat(stat, ctx.deref ? links : null, p)
   const prefix = mountPrefixOf(dir.virtual, dir.vfsPath)
   const stats: FileStat[] = []
   for (const entry of entries) {
@@ -622,7 +612,7 @@ function linkRow(path: PathSpec, links: LinkView | null): FileStat | null {
 // _operand_row.
 async function operandRow(
   path: PathSpec,
-  stat: Stat,
+  stat: StatFn,
   links: LinkView | null,
   childMounts: ChildMounts | null,
 ): Promise<FileStat | LsWarning> {
@@ -648,8 +638,8 @@ async function operandRow(
 // path it resolves to; `spell` gives a path below the operand as the operand
 // spelled it, null at the operand itself.
 async function probeOperand(
-  readdir: Readdir,
-  stat: Stat,
+  readdir: ReaddirFn<[path: PathSpec, nofollow?: boolean, limit?: number]>,
+  stat: StatFn,
   path: PathSpec,
   ctx: WalkOpts,
   warnings: LsWarning[],
@@ -659,7 +649,7 @@ async function probeOperand(
 ): Promise<Operand> {
   const spelled = spell ?? ((virtual: string) => respellOne(virtual, path.virtual, path.rawPath))
   const links = ctx.links
-  const ownStat: Stat = (p: PathSpec) => followedStat(stat, ctx.deref ? links : null, p)
+  const ownStat: StatFn = (p: PathSpec) => followedStat(stat, ctx.deref ? links : null, p)
   if (path.walkError === null && (commandLineArg || !ctx.deref)) {
     // The table's readdir opens what a link leads to, as opendir(3) does,
     // so a link the line left unresolved is asked first: the router
@@ -773,7 +763,7 @@ async function probeOperand(
 }
 
 // Sort row for one operand, named with the operand's own spelling.
-async function operandKey(operand: Operand, sortBy: LsSortBy, stat: Stat): Promise<FileStat> {
+async function operandKey(operand: Operand, sortBy: LsSortBy, stat: StatFn): Promise<FileStat> {
   if (operand.row !== null) return operand.row
   if (sortBy === 'name') {
     return new FileStat({ name: operand.path.rawPath, type: FileType.DIRECTORY })
@@ -792,7 +782,7 @@ async function sortOperands(
   operands: readonly Operand[],
   sortBy: LsSortBy,
   reverse: boolean,
-  stat: Stat,
+  stat: StatFn,
   timeKind: LsTimeKind,
   escape: boolean,
 ): Promise<Operand[]> {
@@ -1093,8 +1083,8 @@ function finish(lines: string[], warnings: readonly LsWarning[]): CommandFnResul
 export async function lsGeneric(
   paths: PathSpec[],
   ctx: Context,
-  readdir: Readdir,
-  stat: Stat,
+  readdir: ReaddirFn<[path: PathSpec, nofollow?: boolean, limit?: number]>,
+  stat: StatFn,
   statPath: StatPath | null = vfsStatPath(ctx.vfs) ?? null,
   flags: LsFlags = parseFlags(new FlagView(ctx.flags, specOf('ls'))),
 ): Promise<CommandFnResult> {

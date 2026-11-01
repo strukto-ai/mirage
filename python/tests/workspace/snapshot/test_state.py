@@ -163,7 +163,7 @@ class FakeConfig(BaseModel):
 
 @pytest.fixture(autouse=True)
 def fresh_custom(monkeypatch):
-    monkeypatch.setattr(registry, "_CUSTOM", {})
+    monkeypatch.setattr(registry, "_REGISTERED", {})
 
 
 @pytest.fixture(autouse=True)

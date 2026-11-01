@@ -25,7 +25,7 @@ import { linkResolver } from '../utils/links.ts'
 import { operandLabel } from '../utils/stream.ts'
 import { decompressInputs } from './decompress.ts'
 import { listingMode, maxCount } from './grep.ts'
-import type { FlagSet } from '../grep_binary.ts'
+import type { GrepFlags } from '../grep_binary.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { openGrep, streamConfig, streamInput } from '../grep_stream.ts'
 import { OutputStream, closeQuietly, ensureStream } from '../../../io/stream.ts'
@@ -34,7 +34,7 @@ import { concat } from '../../../utils/bytes.ts'
 
 const ZGREP_NO_PATTERN = "zgrep: missing pattern; try `zgrep --help' for help"
 
-function parseFlags(fl: FlagView, neverMatch: boolean): FlagSet {
+function parseFlags(fl: FlagView, neverMatch: boolean): GrepFlags {
   const [filesOnly, filesWithoutMatch] = listingMode(fl)
   const count = maxCount(fl)
   return {
@@ -78,7 +78,7 @@ export async function zgrepGeneric(
   if (resolution.pattern === null) {
     return [null, new IOResult({ exitCode: 2, stderr: encodeText(ZGREP_NO_PATTERN + '\n') })]
   }
-  let f: FlagSet
+  let f: GrepFlags
   try {
     f = parseFlags(fl, resolution.neverMatch)
   } catch (err) {

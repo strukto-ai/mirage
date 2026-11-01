@@ -15,7 +15,7 @@
 import type { RegexSyntax } from './types.ts'
 import type { WalkFilters } from './grep_select.ts'
 
-export interface FlagSet {
+export interface GrepFlags {
   filters: WalkFilters
   binaryMode: string
   recursive: boolean
@@ -57,7 +57,7 @@ export const PROBE_BLOCK_BYTES = 96 * 1024
  * 3.11: `grep -A0` prints `--` between two lines that are not neighbours);
  * -c, -l, -L and -q print no lines.
  */
-export function groupLine(f: FlagSet): string {
+export function groupLine(f: GrepFlags): string {
   if (f.countOnly || f.filesOnly || f.filesWithoutMatch || f.quiet) return ''
   const separator = f.groupSeparator === undefined ? '--' : f.groupSeparator
   if (separator === null || (f.afterContext === null && f.beforeContext === null)) return ''
@@ -65,6 +65,6 @@ export function groupLine(f: FlagSet): string {
 }
 
 /** What follows a file name -l or -L prints: NUL under -Z. */
-export function nameEnd(f: FlagSet): string {
+export function nameEnd(f: GrepFlags): string {
   return f.null === true ? '\0' : '\n'
 }

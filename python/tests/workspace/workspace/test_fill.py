@@ -57,7 +57,7 @@ class FakeConfig(BaseModel):
 
 @pytest.fixture(autouse=True)
 def fresh_custom(monkeypatch):
-    monkeypatch.setattr(registry, "_CUSTOM", {})
+    monkeypatch.setattr(registry, "_REGISTERED", {})
 
 
 def counting_source(fields: dict[str, str]) -> tuple[list[str], FetchFn]:

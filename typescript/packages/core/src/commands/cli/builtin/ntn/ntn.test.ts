@@ -391,13 +391,16 @@ describe('ntn verbs', () => {
     expect(REQUESTS[0]?.headers).toBeUndefined()
   })
 
-  it('api refuses malformed --data exactly as upstream does', async () => {
-    // Probed against ntn 0.21.9: exit 1 with this wording, which is neither
-    // the engine's own parse message nor a generic usage error.
-    const [, io] = unwrap(await api(ACCESSOR, [], ['v1/search'], context({ flags: { data: '{' } })))
-    expect(io.exitCode).toBe(1)
-    expect(DEC.decode(io.stderr as Uint8Array)).toBe('error: Invalid JSON from --data\n')
-  })
+  it.each(['{', '"\\udc00"', '"\\ud800\\u0041"'])(
+    'api refuses malformed --data exactly as upstream does: %j',
+    async (data) => {
+      // Probed against ntn 0.21.9: exit 1 with this wording, which is neither
+      // the engine's own parse message nor a generic usage error.
+      const [, io] = unwrap(await api(ACCESSOR, [], ['v1/search'], context({ flags: { data } })))
+      expect(io.exitCode).toBe(1)
+      expect(DEC.decode(io.stderr as Uint8Array)).toBe('error: Invalid JSON from --data\n')
+    },
+  )
 
   it('api builds nested bodies from bracket paths and typed assignments', async () => {
     REQUESTS.length = 0

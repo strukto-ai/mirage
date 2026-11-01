@@ -48,7 +48,6 @@ dependencies = [
     "tenacity>=9.1.4",
     "mcp>=2.3.0,<3",
     "jsonschema>=4.26.0",
-    "regex>=2026.4.4",
     "multidict>=6.0",
     "limits>=5.8.0",
     "opentelemetry-api>=1.45.1",

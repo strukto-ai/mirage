@@ -30,7 +30,7 @@ class SourceEntry(NamedTuple):
     fetch: SecretFetchFn
 
 
-_CUSTOM: dict[str, SourceEntry] = {}
+_REGISTERED: dict[str, SourceEntry] = {}
 
 
 def register_secrets(
@@ -50,12 +50,12 @@ def register_secrets(
         config_model (type[BaseModel]): the source's config model.
         fetch (SecretFetchFn): async ``(config, ref) -> ResolvedSecret``.
     """
-    _CUSTOM[name] = SourceEntry(config_model, fetch)
+    _REGISTERED[name] = SourceEntry(config_model, fetch)
 
 
 def known_sources() -> list[str]:
     """Every name ``source_for`` can resolve, builtin and registered."""
-    return sorted({*BUILTINS, *_CUSTOM})
+    return sorted({*BUILTINS, *_REGISTERED})
 
 
 def source_for(name: str) -> SourceEntry:
@@ -72,7 +72,7 @@ def source_for(name: str) -> SourceEntry:
             the builtin's optional dependency is not installed (each
             builtin's extra is named after the source).
     """
-    entry = _CUSTOM.get(name)
+    entry = _REGISTERED.get(name)
     if entry is not None:
         return entry
     builtin = BUILTINS.get(name)

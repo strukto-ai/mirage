@@ -80,7 +80,7 @@ async def _list_root(accessor: DiscordAccessor, match: ScopeMatch) -> Listed:
     return [guild_entry(g) for g in guilds]
 
 
-async def _list_guild(
+async def _list_guild_containers(
     accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
     guild_id = str(own.extra["guild_id"])
@@ -214,7 +214,7 @@ _listing = make_readdir(
     detect_scope,
     listers={"root": _list_root},
     entry_listers={
-        "guild": _list_guild,
+        "guild": _list_guild_containers,
         "channels_dir": _list_channels_dir,
         "members_dir": _list_members_dir,
         "channel": _list_channel_days,

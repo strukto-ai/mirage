@@ -430,6 +430,114 @@
         "u",
         "d"
       ]
+    },
+    {
+      "id": "date_shared_formatter_flags_and_modifiers",
+      "seq": 15500507,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d @1767225601 '+%^d|%#d|%^C|%#P|%Ea|%EY|%6Q|%6%'",
+      "expect": {
+        "exit": 0,
+        "stdout": "01|01|20|am|%Ea|2026|   %6Q|    %6%\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d"
+      ]
+    },
+    {
+      "id": "date_shared_formatter_nanosecond_padding",
+      "seq": 15500508,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d @1767225601.123 '+%N|%-N|%-12N|%_N|%12N'",
+      "expect": {
+        "exit": 0,
+        "stdout": "123000000|123000000|123|123      |123000000000\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d"
+      ]
+    },
+    {
+      "id": "date_shared_formatter_early_year_calendar",
+      "seq": 15500509,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d @-62135596800 '+%Y|%G|%V|%j|%U|%W|%a|%c'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0001|0001|01|001|00|01|Mon|Mon Jan  1 00:00:00 1\n",
+        "stderr": ""
+      },
+      "flags": [
+        "u",
+        "d"
+      ]
     }
   ]
 }

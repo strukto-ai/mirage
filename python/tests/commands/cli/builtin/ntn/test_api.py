@@ -123,11 +123,12 @@ async def test_no_inline_header_sends_none(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_malformed_data_matches_upstream_exactly():
+@pytest.mark.parametrize("data", ["{", '"\\udc00"', '"\\ud800\\u0041"'])
+async def test_malformed_data_matches_upstream_exactly(data):
     # Probed against ntn 0.21.9: exit 1 with this wording, which is
     # neither python's raw JSONDecodeError nor a generic usage error.
     out, io = await api(
-        NOTION, [], ["v1/search"], Context(flags={"data": "{"})
+        NOTION, [], ["v1/search"], Context(flags={"data": data})
     )
     assert out is None
     assert io.exit_code == 1

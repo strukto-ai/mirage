@@ -1,4 +1,6 @@
 import { expect, it } from 'vitest'
+import { byteView } from '../../../../shell/bytes.ts'
+import { LineRegex } from '../../../../rs/regex.ts'
 import { GIT } from './index.ts'
 import { decorationStyle, parseFlags, type LinePattern } from './history.ts'
 import { Decoration } from './types.ts'
@@ -7,7 +9,10 @@ import { FlagView } from '../../../spec/flag_view.ts'
 
 async function hits(pattern: LinePattern | undefined, text: string): Promise<boolean> {
   if (pattern === undefined) return false
-  return pattern instanceof RegExp ? pattern.test(text) : (await pattern.search(text)) !== null
+  const view = byteView(text, pattern.utf8)
+  return pattern instanceof LineRegex
+    ? pattern.matches(view)
+    : (await pattern.search(view)) !== null
 }
 
 it.each([
@@ -106,3 +111,23 @@ it.each([
 ])('decorationStyle names git styles: %s', (value, style) => {
   expect(decorationStyle(value)).toBe(style)
 })
+
+it.each([
+  ['perl_regexp', String.raw`t\Kwo`, 'two', 'C', true],
+  ['perl_regexp', String.raw`\Qa.b\E`, 'a.b', 'C', true],
+  ['perl_regexp', String.raw`\Qa.b\E`, 'axb', 'C', false],
+  ['fixed_strings', 'a.b', 'a.b', 'C', true],
+  ['fixed_strings', 'a.b', 'axb', 'C', false],
+  ['fixed_strings', 'CAFÉ', 'café', 'C', false],
+  ['fixed_strings', 'CAFÉ', 'café', 'C.UTF-8', true],
+  ['fixed_strings', '\udcff', 'a\udcffb', 'C.UTF-8', true],
+])(
+  'shared %s matcher reads %s as bytes under its locale',
+  async (syntax, pattern, text, locale, expected) => {
+    const flags = parseFlags(
+      new FlagView({ [syntax]: true, regexp_ignore_case: true, grep: [pattern] }),
+      { LC_ALL: locale },
+    )
+    for (let i = 0; i < 2; i++) expect(await hits(flags.greps[0], text)).toBe(expected)
+  },
+)

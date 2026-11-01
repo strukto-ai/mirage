@@ -16,7 +16,15 @@ import { GzipDataError, gunzipStream } from '../../../utils/compress.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import type { MountView } from '../../../view/types.ts'
-import { FileStat, FileType, LineFacts, type PathSpec } from '../../../types.ts'
+import {
+  FileStat,
+  FileType,
+  LineFacts,
+  type PathSpec,
+  type StatFn,
+  type ReaddirFn,
+  type ReadStreamFn,
+} from '../../../types.ts'
 import { enoent, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { WalkLimitError } from '../../../errors/types.ts'
@@ -136,9 +144,6 @@ export interface RgValues {
   readonly field_match_separator: string
   readonly field_context_separator: string
 }
-type Stat = (p: PathSpec) => Promise<FileStat>
-type Readdir = (p: PathSpec) => Promise<string[]>
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 export type { RgFlags } from '../rg_search.ts'
 
@@ -406,10 +411,10 @@ export async function rgGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stat: Stat,
-  readdir: Readdir,
-  stream: Stream,
-  unbounded?: [Readdir, Stat],
+  stat: StatFn,
+  readdir: ReaddirFn,
+  stream: ReadStreamFn,
+  unbounded?: [ReaddirFn, StatFn],
 ): Promise<CommandFnResult> {
   // Every `-` operand reads stdin through one cursor, as grep's do. With no
   // operand typed, the implicit one below is stdin's sole reader, so a search
@@ -593,7 +598,7 @@ async function searchSingle(
   f: RgFlags,
   st: (path: string) => Promise<FileStat>,
   rd: (path: string) => Promise<string[]>,
-  stream: Stream,
+  stream: ReadStreamFn,
   signal?: AbortSignal,
 ): Promise<CommandFnResult | null> {
   if (!isStdin(p)) {
@@ -878,7 +883,7 @@ async function* searchAll(
   paths: readonly PathSpec[],
   pat: RgProgram,
   f: RgFlags,
-  stream: Stream,
+  stream: ReadStreamFn,
   warnings: string[],
   implicit: boolean,
   // The session's working directory, which --pre-glob's globs are rooted at.

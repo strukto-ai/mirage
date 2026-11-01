@@ -27,7 +27,7 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { mountKey, mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { FileType, type FileStat, PathSpec } from '../../../types.ts'
+import { FileType, type FileStat, PathSpec, type ReaddirFn, type StatFn } from '../../../types.ts'
 import { gnuBasename } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { Context } from '../../config.ts'
@@ -53,9 +53,6 @@ import { systemDate } from '../../../utils/clock.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder('utf-8', { fatal: false })
-
-type Readdir = (p: PathSpec) => Promise<string[]>
-type Stat = (p: PathSpec) => Promise<FileStat>
 
 export interface DiffFlags {
   readonly ignoreCase: boolean
@@ -130,8 +127,8 @@ interface Walk {
   readonly computer: DiffComputer
   readonly signal: AbortSignal | undefined
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>
-  readdir: Readdir
-  stat: Stat
+  readdir: ReaddirFn
+  stat: StatFn
   flags: DiffFlags
   excluded: readonly string[]
   switches: string
@@ -441,7 +438,7 @@ async function diffDirs(
   return [parts, differ]
 }
 
-async function missing(stat: Stat, path: PathSpec, allowed: boolean): Promise<boolean> {
+async function missing(stat: StatFn, path: PathSpec, allowed: boolean): Promise<boolean> {
   if (!allowed || isStdin(path)) return false
   try {
     await stat(path)
@@ -469,8 +466,8 @@ export async function diffGeneric(
   paths: PathSpec[],
   ctx: Context,
   read: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  readdir: Readdir,
-  backendStat: Stat,
+  readdir: ReaddirFn,
+  backendStat: StatFn,
 ): Promise<[ByteSource | null, IOResult]> {
   if (paths.length > 2) throw extraOperandError(CommandName.DIFF, paths[2]?.rawPath ?? '')
   if (paths.length < 2)

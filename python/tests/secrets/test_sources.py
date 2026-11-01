@@ -42,7 +42,7 @@ async def fetch_demo(config: DemoConfig, ref: str) -> ResolvedSecret:
 
 @pytest.fixture(autouse=True)
 def fresh_custom(monkeypatch):
-    monkeypatch.setattr(registry, "_CUSTOM", {})
+    monkeypatch.setattr(registry, "_REGISTERED", {})
     register_secrets("demo", DemoConfig, fetch_demo)
 
 

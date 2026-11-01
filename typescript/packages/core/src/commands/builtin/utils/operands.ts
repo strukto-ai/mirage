@@ -15,7 +15,7 @@
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { asyncChain } from '../../../io/stream.ts'
 import type { LinkView, MountView, StatPath } from '../../../view/types.ts'
-import type { FileStat, PathSpec } from '../../../types.ts'
+import type { FileStat, PathSpec, StatFn } from '../../../types.ts'
 import { FileType } from '../../../types.ts'
 import { eisdir, isDotWalkError, isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
@@ -24,8 +24,6 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
-
-type Stat = (p: PathSpec) => Promise<FileStat>
 
 // What a stat row's `name` should say for a path: the basename, or `/`
 // for the workspace root, which is the spelling `namespaceStat` already
@@ -60,7 +58,7 @@ export function operandName(virtual: string): string {
  */
 export async function operandStat(
   path: PathSpec,
-  stat: Stat,
+  stat: StatFn,
   statPath?: StatPath | null,
   mounts?: MountView | null,
   links?: LinkView | null,
@@ -109,7 +107,7 @@ export function mountPoints(mounts: MountView | null | undefined, directory: str
 // keep propagating.
 export async function splitReadable(
   paths: readonly PathSpec[],
-  stat: Stat,
+  stat: StatFn,
   cmdName: string,
 ): Promise<[PathSpec[], string]> {
   const readable: PathSpec[] = []
@@ -142,7 +140,7 @@ export async function splitReadable(
  */
 export async function splitOpened(
   paths: readonly PathSpec[],
-  stat: Stat,
+  stat: StatFn,
   cmdName: string,
 ): Promise<[PathSpec[], ReadonlySet<string>, string]> {
   const opened: PathSpec[] = []

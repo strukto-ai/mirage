@@ -1,6 +1,6 @@
 import logging
 import posixpath
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 
@@ -24,6 +24,7 @@ from mirage.types import (
     LineFacts,
     PathSpec,
     ReaddirFn,
+    StatFn,
 )
 from mirage.utils.fnmatch import fnmatch
 from mirage.view.types import (
@@ -42,9 +43,6 @@ _BRANCH = "|-- "
 _LAST = "`-- "
 _VERTICAL = "|   "
 _INDENT = "    "
-
-Readdir = Callable[..., Awaitable[list[str]]]
-Stat = Callable[[PathSpec], Awaitable[FileStat]]
 
 UNOPENABLE_MARK = "  [error opening dir]"
 
@@ -119,8 +117,8 @@ def _child_mounts(mounts: MountView | None, directory: str) -> list[str]:
 
 async def _walk_tree(
     path: PathSpec,
-    readdir: Readdir,
-    stat: Stat,
+    readdir: ReaddirFn,
+    stat: StatFn,
     *,
     prefix: str,
     depth: int,
@@ -130,8 +128,8 @@ async def _walk_tree(
     dirs_only: bool,
     match_pattern: str | None,
     mounts: MountView | None = None,
-    cross_readdir: Readdir | None = None,
-    cross_stat: Stat | None = None,
+    cross_readdir: ReaddirFn | None = None,
+    cross_stat: StatFn | None = None,
     target_stat: LinkTargetStat | None = None,
     budget: WalkBudget | None = None,
 ) -> tuple[list[str], int, int, int]:
@@ -291,8 +289,8 @@ def _summary(dirs: int, files: int, dirs_only: bool) -> str:
 async def tree(
     paths: list[PathSpec],
     *,
-    readdir: Readdir,
-    stat: Stat,
+    readdir: ReaddirFn,
+    stat: StatFn,
     max_depth: int | None = None,
     show_hidden: bool = False,
     ignore_pattern: str | None = None,
@@ -316,8 +314,8 @@ async def tree(
 
     Args:
         paths (list[PathSpec]): the operands to draw, in order.
-        readdir (Readdir): this mount's directory listing.
-        stat (Stat): this mount's stat.
+        readdir (ReaddirFn): this mount's directory listing.
+        stat (StatFn): this mount's stat.
         max_depth (int | None): -L, deepest level to draw.
         show_hidden (bool): -a.
         ignore_pattern (str | None): -I.
@@ -332,7 +330,7 @@ async def tree(
         links (LinkView | None): the namespace's symlink facts, which say
             what a drawn link leads to.
     """
-    cross_readdir: Readdir | None = (
+    cross_readdir: ReaddirFn | None = (
         partial(_cross_readdir, readdir_path)
         if readdir_path is not None
         else None
@@ -475,8 +473,8 @@ async def tree_generic(
     texts: list[str],
     ctx: Context,
     readdir: ReaddirFn,
-    stat: Stat,
-    unbounded: tuple[ReaddirFn, Stat] | None = None,
+    stat: StatFn,
+    unbounded: tuple[ReaddirFn, StatFn] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run tree over resolved operands.
 
@@ -486,8 +484,8 @@ async def tree_generic(
         texts (list[str]): the raw words.
         ctx (Context): the dispatcher context.
         readdir (ReaddirFn): the walk's readdir.
-        stat (Stat): the walk's stat.
-        unbounded (tuple[ReaddirFn, Stat] | None): the walk to take when
+        stat (StatFn): the walk's stat.
+        unbounded (tuple[ReaddirFn, StatFn] | None): the walk to take when
             no ``-L`` bounds it (one the mount answers whole), else
             ``readdir`` and ``stat``.
     """

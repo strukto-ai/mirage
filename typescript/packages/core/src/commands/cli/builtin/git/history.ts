@@ -15,7 +15,7 @@
 import git from 'isomorphic-git'
 import { RegexError } from '../../../../rs/errors.ts'
 import { byteView, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
-import { posixRegex, type PosixRegex } from '../../../../rs/regex.ts'
+import { LineRegex, posixRegex, type PosixRegex } from '../../../../rs/regex.ts'
 import {
   AmbiguousArgumentError,
   BadRevisionError,
@@ -49,7 +49,6 @@ import { BRANCH_PREFIX, loadRefs, REMOTE_PREFIX, SYMREF_PREFIX, TAG_PREFIX } fro
 import { commitFacts, configBool, repoArgs, type Repo } from './repo.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { sha1Hex } from '../../../../utils/hash.ts'
-import { compilePosixRegex, POSIX_CLASSES } from '../../../../utils/posix.ts'
 import { loadMailmap, mappedIdentity, useMailmap } from './mailmap.ts'
 import { dateClock, parseDateMode } from './dates.ts'
 import { configValues } from './fs.ts'
@@ -93,15 +92,10 @@ const PERL_REGEXP = 'perl_regexp'
 const PATTERN_SYNTAXES = [BASIC_REGEXP, EXTENDED_REGEXP, FIXED_STRINGS, PERL_REGEXP]
 const COMMAND_LINE_ORIGIN = 'command line'
 const HEADER_ORIGIN = 'header'
-// The punctuation a `u` regex still accepts after a backslash.
-const U_SYNTAX = '^$\\.*+?()[]{}|/'
-// PCRE's subject anchors; git matches a line at a time, so `\Z` is `\z`.
-const PERL_ANCHORS: Readonly<Record<string, string>> = { A: '^', z: '$', Z: '$' }
+/** A `--grep`, `--author` or `--committer` pattern, compiled by mirage-rs. */
+export type LinePattern = LineRegex | PosixRegex
 
 /** The parsed shape of a `git log` invocation. */
-/** A `--grep`, `--author` or `--committer` pattern: `-P` in the host's engine, the rest POSIX. */
-export type LinePattern = RegExp | PosixRegex
-
 export interface LogFlags {
   /** `--author` patterns, any of which may match. */
   readonly authors: readonly LinePattern[]
@@ -263,9 +257,9 @@ export function prettyFormat(fl: FlagView): LogFormat {
 /**
  * One `--grep`, `--author` or `--committer` pattern, compiled.
  *
- * A refusal names where the pattern came from and the pattern itself, as
- * git words it; the reason after that is glibc's
- * for a basic expression and the host engine's otherwise.
+ * Every syntax uses mirage-rs. Basic and extended expressions keep regcomp's
+ * dialect; fixed strings and Perl patterns use its line matcher. A refusal
+ * names the pattern's origin as git does.
  */
 function pattern(
   value: string,
@@ -275,94 +269,28 @@ function pattern(
   utf8: boolean,
 ): LinePattern {
   try {
-    if (syntax === PERL_REGEXP) return perlRegex(value, ignoreCase)
-    if (syntax === FIXED_STRINGS) {
-      const fold = ignoreCase ? 'i' : ''
-      return compilePosixRegex(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), fold)
+    if (syntax === PERL_REGEXP || syntax === FIXED_STRINGS) {
+      return new LineRegex(
+        [byteView(value, utf8)],
+        syntax === PERL_REGEXP ? 'perl' : 'fixed',
+        ignoreCase,
+        utf8,
+      )
     }
     return posixRegex(byteView(value, utf8), syntax === EXTENDED_REGEXP, 'posix', ignoreCase, utf8)
   } catch (err) {
-    if (err instanceof RegexError || err instanceof SyntaxError)
-      throw new PatternCompileError(origin, value, err.message)
+    if (err instanceof RegexError) throw new PatternCompileError(origin, value, err.message)
     throw err
   }
 }
 
 /** Whether a `--grep`, `--author` or `--committer` pattern matches `text`. */
 async function hits(pattern: LinePattern, text: string, signal?: AbortSignal): Promise<boolean> {
-  if (pattern instanceof RegExp) return pattern.test(text)
-  return (await pattern.search(byteView(text, pattern.utf8), 0, signal)) !== null
+  const view = byteView(text, pattern.utf8)
+  if (pattern instanceof LineRegex) return pattern.matches(view, signal)
+  return (await pattern.search(view, 0, signal)) !== null
 }
 
-/**
- * A `-P` pattern as a JavaScript `u` regex, which already reads PCRE's
- * `\p{L}`, lookarounds and lazy quantifiers. What `u` lacks or refuses is
- * rewritten to PCRE's meaning: a POSIX class inside a bracket, `\A`, `\z`
- * and `\Z`, a leading `(?i)`, a backslash before punctuation, a `]` first
- * in a bracket and a brace that opens no quantifier are all literals or
- * anchors in PCRE2, the same set Python's `regex` engine reads natively.
- */
-function perlRegex(value: string, ignoreCase: boolean): RegExp {
-  let flags = ignoreCase ? 'iu' : 'u'
-  let source = value
-  const inline = /^\(\?([ims]+)\)/.exec(source)
-  if (inline) {
-    for (const flag of inline[1] ?? '') if (!flags.includes(flag)) flags += flag
-    source = source.slice(inline[0].length)
-  }
-  let out = ''
-  let bracket = -1
-  for (let i = 0; i < source.length; i++) {
-    const ch = source.charAt(i)
-    if (ch === '\\' && i + 1 < source.length) {
-      const next = source.charAt(i + 1)
-      i += 1
-      if (bracket < 0 && PERL_ANCHORS[next] !== undefined) out += PERL_ANCHORS[next]
-      else if ('pP'.includes(next) && source.charAt(i + 1) === '{' && source.includes('}', i)) {
-        const close = source.indexOf('}', i)
-        out += ch + next + source.slice(i + 1, close + 1)
-        i = close
-      } else if (
-        /[A-Za-z0-9]/.test(next) ||
-        U_SYNTAX.includes(next) ||
-        (bracket >= 0 && next === '-')
-      )
-        out += ch + next
-      else out += '\\u{' + (next.codePointAt(0) ?? 0).toString(16) + '}'
-      continue
-    }
-    if (bracket >= 0) {
-      const name = /^\[:([a-z]+):\]/.exec(source.slice(i))
-      if (name) {
-        const members = Object.hasOwn(POSIX_CLASSES, name[1] ?? '')
-          ? POSIX_CLASSES[name[1] ?? '']
-          : undefined
-        if (members === undefined) throw new SyntaxError('unknown POSIX class name')
-        out += members
-        i += name[0].length - 1
-      } else if (ch === ']' && i > bracket) {
-        out += ch
-        bracket = -1
-      } else out += ch === ']' || ch === '[' ? '\\' + ch : ch
-      continue
-    }
-    if (ch === '[') {
-      out += ch
-      if (source.charAt(i + 1) === '^') {
-        out += '^'
-        i += 1
-      }
-      bracket = i + 1
-      continue
-    }
-    if (ch === '{' && !/^\{\d+(?:,\d*)?\}/.test(source.slice(i))) out += '\\{'
-    else if (ch === '}' && !/(?<!\\)\{\d+(?:,\d*)?$/.test(out)) out += '\\}'
-    else out += ch
-  }
-  return new RegExp(out, flags)
-}
-
-/** Read the raw log flag kwargs into a frozen struct. */
 /**
  * A `-G` or `--pickaxe-regex` pattern, compiled as git's diffcore-pickaxe
  * compiles it: POSIX extended whatever -E, -F or -P say, `-i` folding case,

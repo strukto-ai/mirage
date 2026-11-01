@@ -245,8 +245,8 @@ from mirage.workspace.workspace.mounts import (
     kernel_targets,
     normalize_mounts,
     prepare_added_mount,
+    unmount_prefix,
 )
-from mirage.workspace.workspace.mounts import unmount as unmount_prefix
 from mirage.workspace.workspace.types import VFSMount
 from mirage.workspace.workspace.utils import fork_for_call
 

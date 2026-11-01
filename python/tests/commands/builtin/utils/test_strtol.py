@@ -17,51 +17,7 @@ import pytest
 from mirage.commands.builtin.utils.strtol import (
     atoi,
     bounded_decimal,
-    signed_decimal,
-    strtol,
 )
-
-
-@pytest.mark.parametrize(
-    "raw,value",
-    [
-        ("2", (2, "")),
-        ("0x2", (2, "")),
-        ("017", (15, "")),
-        ("2k", (2, "k")),
-        ("x", (0, "x")),
-        ("08", (0, "8")),
-        ("-3", (-3, "")),
-        (" +4", (4, "")),
-        ("99999999999999999999", (2**63 - 1, "")),
-        ("-99999999999999999999", (-(2**63), "")),
-    ],
-)
-def test_strtol_reads_base_zero_and_leaves_the_rest(raw, value):
-    assert strtol(raw) == value
-
-
-@pytest.mark.parametrize(
-    "raw,signed",
-    [
-        ("5", 5),
-        (" \t+5", 5),
-        ("-5", -5),
-        ("5 ", None),
-        ("0x5", None),
-        ("", None),
-        ("+ 5", None),
-        ("99999999999999999999", 99999999999999999999),
-    ],
-)
-def test_signed_decimal_reads_a_whole_decimal_word(raw, signed):
-    assert signed_decimal(raw) == signed
-
-
-def test_scanners_read_a_number_past_the_int_digit_limit():
-    digits = "9" * 5000
-    assert signed_decimal("-" + digits) == -(10**5000 - 1)
-    assert strtol(digits) == (2**63 - 1, "")
 
 
 @pytest.mark.parametrize(
@@ -100,3 +56,9 @@ def test_bounded_decimal_reads_past_the_int_digit_limit():
 )
 def test_atoi_reads_the_leading_decimal_number(raw, value):
     assert atoi(raw) == value
+
+
+def test_atoi_saturates_past_the_int_digit_limit():
+    assert atoi("9" * 5000) == 2**63 - 1
+    assert atoi("-" + "9" * 5000) == -(2**63)
+    assert atoi("0" * 5000 + "42tail") == 42

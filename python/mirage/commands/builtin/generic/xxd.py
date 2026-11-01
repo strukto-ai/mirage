@@ -49,7 +49,7 @@ SEEK_BACK_EXIT = 5
 CANNOT_SEEK = b"xxd: Sorry, cannot seek.\n"
 
 
-def _dump(
+def _dump_stream(
     source: AsyncIterator[bytes],
     cols: int,
     group: int,
@@ -71,7 +71,7 @@ def _dump(
     )
 
 
-def _plain(
+def _plain_stream(
     source: AsyncIterator[bytes], uppercase: bool, cols: int
 ) -> OutputStream:
     return stream_output(
@@ -371,8 +371,8 @@ async def xxd(
     if reverse:
         return _xxd_reverse_stream(source, io, plain), io
     if plain:
-        return _plain(source, uppercase, cols), io
-    return _dump(source, cols, group, uppercase, base), io
+        return _plain_stream(source, uppercase, cols), io
+    return _dump_stream(source, cols, group, uppercase, base), io
 
 
 async def _write_output(
@@ -433,9 +433,9 @@ async def _write_output(
                 raise
         else:
             data = await prime_stream(
-                _plain(source, uppercase, cols)
+                _plain_stream(source, uppercase, cols)
                 if plain
-                else _dump(source, cols, group, uppercase, base),
+                else _dump_stream(source, cols, group, uppercase, base),
                 failed,
             )
     except FS_ERRORS as exc:

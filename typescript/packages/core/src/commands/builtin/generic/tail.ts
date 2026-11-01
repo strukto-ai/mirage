@@ -27,6 +27,7 @@ import {
   type JsonValue,
   type PathSpec,
   type ReadStreamFn,
+  type StatFn,
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { enoent, fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
@@ -43,9 +44,6 @@ import { revisionFor } from '../../../observe/context.ts'
 import { dispatchOf } from '../utils/links.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { refused, scan } from '../../../rs/scan.ts'
-
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-type Stat = (p: PathSpec) => Promise<FileStat>
 
 /**
  * `-n`/`-c` split by the end they count from. A leading `+` counts forward
@@ -167,7 +165,7 @@ async function pause(seconds: number, signal: AbortSignal | undefined): Promise<
 // shorter than `pos` was truncated, which is noted and read from the
 // start.
 async function catchUp(
-  stream: Stream,
+  stream: ReadStreamFn,
   readRange: ReadStreamFn<[PathSpec, number, number]> | null,
   io: IOResult,
   p: PathSpec,
@@ -234,8 +232,8 @@ async function* tailRange(
 
 async function* tailFile(
   path: PathSpec,
-  read: Stream,
-  stat: Stat,
+  read: ReadStreamFn,
+  stat: StatFn,
   readRange: ReadStreamFn<[PathSpec, number, number]> | null,
   lastLines: ((p: PathSpec, n: number) => Promise<Uint8Array | null>) | undefined,
   counts: TailCounts,
@@ -391,7 +389,7 @@ async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<U
 // `tail_multi`.
 async function* tailMulti(
   paths: readonly PathSpec[],
-  read: Stream,
+  read: ReadStreamFn,
   counts: TailCounts,
   showHeaders: boolean,
   unread: ReadonlySet<string>,
@@ -434,7 +432,7 @@ async function* tailMulti(
 }
 
 async function window(
-  stream: Stream,
+  stream: ReadStreamFn,
   readRange: ReadStreamFn<[PathSpec, number, number]> | null,
   p: PathSpec,
   offset: number,
@@ -476,9 +474,9 @@ async function window(
 async function* follow(
   paths: readonly PathSpec[],
   pending: readonly [PathSpec, string][],
-  stream: Stream,
-  pollStream: Stream,
-  stat: Stat,
+  stream: ReadStreamFn,
+  pollStream: ReadStreamFn,
+  stat: StatFn,
   readRange: ReadStreamFn<[PathSpec, number, number]> | null,
   counts: TailCounts,
   showHeaders: boolean,
@@ -661,7 +659,7 @@ async function* follow(
 async function unfollowable(
   paths: readonly PathSpec[],
   opened: ReadonlySet<string>,
-  stat: Stat,
+  stat: StatFn,
   flags: FollowFlags,
   io: IOResult,
 ): Promise<[PathSpec, string][]> {
@@ -766,8 +764,8 @@ export async function tailGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stream: Stream,
-  stat: Stat,
+  stream: ReadStreamFn,
+  stat: StatFn,
   readRange: ReadStreamFn<[PathSpec, number, number]> | null = null,
   lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
   followOp?: (

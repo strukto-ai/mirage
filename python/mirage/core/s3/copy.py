@@ -15,9 +15,9 @@
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.object_store.copy import make_copy, settle_copy
 from mirage.core.s3.client import (
-    _key,
     create_s3_client,
     is_not_found,
+    s3_key,
 )
 from mirage.core.s3.driver import DRIVER
 from mirage.core.s3.exists import exists
@@ -75,10 +75,10 @@ async def copy_from(
     try:
         await client.copy_object(
             Bucket=config.bucket,
-            Key=_key(dst.mount_path, config),
+            Key=s3_key(dst.mount_path, config),
             CopySource={
                 "Bucket": source.config.bucket,
-                "Key": _key(src.mount_path, source.config),
+                "Key": s3_key(src.mount_path, source.config),
             },
         )
     except Exception as exc:

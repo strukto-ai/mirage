@@ -64,7 +64,7 @@ async def config_value(
     """
     seen = fetched.get((ref.provider, ref.ref))
     if seen is not None:
-        return _field(label, ref, seen, sources)
+        return _select_field(label, ref, seen, sources)
     try:
         secret = await fetch_secret(ref.provider, ref.ref, sources)
     except Exception as exc:
@@ -72,10 +72,10 @@ async def config_value(
             f"{label}: cannot fetch from {ref.provider}"
         ) from exc
     fetched[(ref.provider, ref.ref)] = secret
-    return _field(label, ref, secret, sources)
+    return _select_field(label, ref, secret, sources)
 
 
-def _field(
+def _select_field(
     label: str,
     ref: SecretRef,
     secret: ResolvedSecret,

@@ -12,47 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
-import { atoi, boundedDecimal, strtol, signedDecimal } from './strtol.ts'
+import { atoi, boundedDecimal } from './strtol.ts'
 
 // Mirrors python/tests/commands/builtin/utils/test_strtol.py.
-describe('strtol', () => {
-  it.each([
-    ['2', 2n, ''],
-    ['0x2', 2n, ''],
-    ['017', 15n, ''],
-    ['2k', 2n, 'k'],
-    ['x', 0n, 'x'],
-    ['08', 0n, '8'],
-    ['-3', -3n, ''],
-    [' +4', 4n, ''],
-    ['99999999999999999999', 2n ** 63n - 1n, ''],
-    ['-99999999999999999999', -(2n ** 63n), ''],
-  ])('strtol %j', (raw, value, rest) => {
-    expect(strtol(raw)).toEqual([value, rest])
-  })
-
-  it.each([
-    ['5', 5n],
-    [' \t+5', 5n],
-    ['-5', -5n],
-    ['5 ', null],
-    ['0x5', null],
-    ['', null],
-    ['+ 5', null],
-    ['99999999999999999999', 99999999999999999999n],
-  ])('whole decimal word %j', (raw, signed) => {
-    expect(signedDecimal(raw)).toBe(signed)
-  })
-})
-
-describe('a number past any digit limit', () => {
-  it('scans exactly or saturates as the C reader does', () => {
-    const digits = '9'.repeat(5000)
-    expect(signedDecimal(`-${digits}`)).toBe(-(10n ** 5000n - 1n))
-    expect(strtol(digits)).toEqual([2n ** 63n - 1n, ''])
-  })
-})
-
 describe('boundedDecimal', () => {
   it.each([
     ['', 10n, 0n],
@@ -85,4 +47,10 @@ describe('atoi', () => {
   ])('reads the leading decimal number of %j', (raw, value) => {
     expect(atoi(raw)).toBe(value)
   })
+})
+
+it('atoi saturates past any digit limit', () => {
+  expect(atoi('9'.repeat(5000))).toBe(Number(2n ** 63n - 1n))
+  expect(atoi('-' + '9'.repeat(5000))).toBe(Number(-(2n ** 63n)))
+  expect(atoi('0'.repeat(5000) + '42tail')).toBe(42)
 })

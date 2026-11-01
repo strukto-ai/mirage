@@ -24,7 +24,7 @@ import type { PipeWriter } from '@struktoai/mirage-core/runtime/types'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
 import { OPEN, OWNER, PIPE_PACKET_SIZE, SSH2_SFTP_MODULE, STATUS } from './constants.ts'
-import { EACCES, ENOENT, EROFS, SFTPStatusError, classifyErrno } from './errors.ts'
+import { SFTPStatusError, classifyErrno } from './errors.ts'
 
 const S_IFMT = 0o170000
 const S_IFDIR = 0o040000
@@ -96,7 +96,7 @@ async function exists(core: MountCore, path: string): Promise<boolean> {
     await core.getattr(path)
     return true
   } catch (err) {
-    if (classifyErrno(err) === ENOENT) return false
+    if (classifyErrno(err) === osConstants.errno.ENOENT) return false
     throw err
   }
 }
@@ -106,14 +106,14 @@ function modeOf(attrs: Partial<Attributes>): number | null {
   return typeof attrs.mode === 'number' ? attrs.mode : null
 }
 
-const DENIED = new Set([EACCES, EROFS, osConstants.errno.EPERM])
+const DENIED = new Set([osConstants.errno.EACCES, osConstants.errno.EROFS, osConstants.errno.EPERM])
 
 /** The SFTP status and message for a failure, through the shared errno table. */
 function statusOf(err: unknown): [number, string] {
   if (err instanceof SFTPStatusError) return [err.status, err.message]
   const code = classifyErrno(err)
   const message = err instanceof Error ? err.message : String(err)
-  if (code === ENOENT) return [STATUS.NO_SUCH_FILE, message]
+  if (code === osConstants.errno.ENOENT) return [STATUS.NO_SUCH_FILE, message]
   if (DENIED.has(code)) return [STATUS.PERMISSION_DENIED, message]
   return [STATUS.FAILURE, message]
 }

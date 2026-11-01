@@ -12,24 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-# The characters that make a name unsafe to paste back into a shell, so
-# GNU wraps it. Probed byte by byte against coreutils 9.7 on
-# debian:stable-slim; ``:`` is in the set because a diagnostic uses it as
-# the separator, and ``]``/``%``/``+``/``,``/``-``/``.``/``@``/``_`` are
-# deliberately absent because GNU leaves them bare.
-_ALWAYS_SPECIAL = frozenset(" !\"$&'()*:;<=>?[\\^`|")
+from mirage.rs.stream import open_stream
+from mirage.shell.bytes import decode_text, encode_text
 
 # ``#`` starts a comment and ``~`` starts a home-directory expansion, but
 # only as the first character of a word, so GNU quotes them there alone.
 LEADING_SPECIAL = frozenset("#~")
 
-# Brace expansion needs a pair to mean anything, so GNU quotes a lone
-# brace and leaves one inside a longer name bare.
-_SOLO_SPECIAL = frozenset({"{", "}"})
-
 # What rules out the ``"name"`` form for a name holding a single quote.
 # Narrower than the trigger set: a space and a ``:`` are harmless inside
-# double quotes, while the four conditional characters above lose their
+# double quotes, while the conditional characters #, ~, { and } lose their
 # position rule and always rule it out.
 DQ_BLOCKERS = frozenset('!"#$&()*;<=>?[\\^`{|}~')
 
@@ -96,28 +88,10 @@ SHELL_QUOTED_COMMANDS: frozenset[str] = frozenset(
 )
 
 
-def _needs_escape(char: str) -> bool:
-    code = ord(char)
-    if code < 0x20 or code == 0x7F:
-        return True
-    # The C1 controls and the two line/paragraph separators are the only
-    # code points above ASCII that glibc's iswprint refuses in a UTF-8
-    # locale, so they are the only ones GNU escapes there (probed: NBSP,
-    # a soft hyphen, ZWSP, a BOM, a private-use character and an emoji
-    # all print as themselves). Deliberately not covered is the third
-    # class GNU escapes, an unassigned code point: which ones those are
-    # moves with the Unicode version each language happens to ship, and
-    # a python/typescript split is worse than the gap.
-    return 0x80 <= code <= 0x9F or code in (0x2028, 0x2029)
-
-
-def _escape_char(char: str) -> str:
-    named = NAMED_ESCAPES.get(char)
-    if named is not None:
-        return f"\\{named}"
-    # GNU escapes bytes, not code points, so a non-ASCII character costs
-    # one octal group per UTF-8 byte (U+0085 is ``\302\205``).
-    return "".join(f"\\{byte:03o}" for byte in char.encode("utf-8"))
+def _quote(name: str, style: str) -> str:
+    stream = open_stream("quote", {"style": style})
+    stream.feed(encode_text(name))
+    return decode_text(stream.finish())
 
 
 def quotes_operands(cmd_name: str) -> bool:
@@ -138,39 +112,7 @@ def escape_name(name: str) -> str:
     Args:
         name (str): the filename or symlink target to display.
     """
-    return _escaped(name, " \\")
-
-
-def _escaped(name: str, protected: str) -> str:
-    parts: list[str] = []
-    for char in name:
-        if char in protected:
-            parts.append("\\" + char)
-        elif 0xDC80 <= ord(char) <= 0xDCFF:
-            parts.append(f"\\{ord(char) - 0xDC00:03o}")
-        elif _needs_escape(char):
-            parts.append(_escape_char(char))
-        else:
-            parts.append(char)
-    return "".join(parts)
-
-
-def needs_shell_quote(name: str) -> bool:
-    """Whether a name cannot be pasted back into a shell as written.
-
-    Args:
-        name (str): The name as it would be reported bare.
-    """
-    # An empty operand has to be quoted or it disappears from the line
-    # entirely, taking the answer to "which name failed" with it.
-    if not name or name in _SOLO_SPECIAL:
-        return True
-    for index, char in enumerate(name):
-        if char in _ALWAYS_SPECIAL or _needs_escape(char):
-            return True
-        if index == 0 and char in LEADING_SPECIAL:
-            return True
-    return False
+    return _quote(name, "escape")
 
 
 def shell_quote_always(name: str) -> str:
@@ -188,32 +130,7 @@ def shell_quote_always(name: str) -> str:
     Args:
         name (str): The name to wrap.
     """
-    if "'" in name and not any(
-        char in DQ_BLOCKERS or _needs_escape(char) for char in name
-    ):
-        return f'"{name}"'
-    parts = ["'"]
-    in_escape = False
-    for char in name:
-        if _needs_escape(char):
-            if not in_escape:
-                parts.append("'$'")
-                in_escape = True
-            parts.append(_escape_char(char))
-            continue
-        # A quote closes whichever group is open and reopens the plain
-        # one, so it costs the same three characters either way; only a
-        # plain character after an escape run needs a group swap.
-        if char == "'":
-            parts.append("'\\''")
-            in_escape = False
-            continue
-        if in_escape:
-            parts.append("''")
-            in_escape = False
-        parts.append(char)
-    parts.append("'")
-    return "".join(parts)
+    return _quote(name, "shell_always")
 
 
 def shell_quote(name: str) -> str:
@@ -227,9 +144,7 @@ def shell_quote(name: str) -> str:
     Args:
         name (str): The name to report.
     """
-    if not needs_shell_quote(name):
-        return name
-    return shell_quote_always(name)
+    return _quote(name, "shell")
 
 
 def single_quote(text: str) -> str:

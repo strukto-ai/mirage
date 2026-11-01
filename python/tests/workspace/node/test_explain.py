@@ -727,7 +727,7 @@ async def test_a_grant_does_not_outlive_a_line_that_fails_before_it_runs(
     # cannot be fetched, so the line fails between the preflight and the
     # run: no gate runs at all. The sweep covers that stretch too, or
     # the next cat would run on a nod given to a line that never did.
-    monkeypatch.setattr(secrets_registry, "_CUSTOM", {})
+    monkeypatch.setattr(secrets_registry, "_REGISTERED", {})
     register_secrets("fake", _FakeConfig, _dead_fetch)
     asked: list[str] = []
     ws = Workspace(

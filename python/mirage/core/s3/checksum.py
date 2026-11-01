@@ -16,10 +16,10 @@ import re
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.client import (
-    _key,
     create_s3_client,
     is_denied,
     is_not_found,
+    s3_key,
 )
 from mirage.core.s3.read import _fp_rev_from_s3_response
 from mirage.errors.fs import eacces, enoent
@@ -59,7 +59,7 @@ async def checksum(
     config = accessor.config
     kwargs = {
         "Bucket": config.bucket,
-        "Key": _key(path_spec.mount_path, config),
+        "Key": s3_key(path_spec.mount_path, config),
     }
     pinned = revision_for(virtual)
     if pinned is not None:

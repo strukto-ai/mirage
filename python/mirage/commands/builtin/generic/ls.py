@@ -4,7 +4,7 @@ import posixpath
 import string
 import sys
 from collections import deque
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any
 
@@ -48,19 +48,18 @@ from mirage.types import (
     LsSortBy,
     LsTimeKind,
     PathSpec,
+    ReaddirFn,
+    StatFn,
 )
 from mirage.utils.key_prefix import mount_prefix_of, rekey, under_path
 from mirage.utils.path import respell_one
 from mirage.utils.quote import escape_name
 from mirage.utils.stat_view import content_size
-from mirage.utils.width import char_width
+from mirage.utils.width import text_width
 from mirage.view.namespace_view import followed_stat
 from mirage.view.types import ChildMounts, LinkView, MountView, StatPath
 
 logger = logging.getLogger(__name__)
-
-Readdir = Callable[..., Awaitable[list[str]]]
-Stat = Callable[[PathSpec], Awaitable[FileStat]]
 
 LS_OK = 0
 LS_MINOR_PROBLEM = 1
@@ -583,17 +582,6 @@ def sort_by_version(names: Sequence[str]) -> list[int]:
     return [places[raw].popleft() for raw in bytes(out).split(b"\0")[:-1]]
 
 
-def name_width(name: str) -> int:
-    """The columns a name occupies, the key ``--sort=width`` compares:
-    GNU measures the rendered width, so a wide character counts two
-    and a combining mark none.
-
-    Args:
-        name (str): the entry name.
-    """
-    return sum(char_width(ch) for ch in name)
-
-
 def _extension_of(name: str) -> str:
     """The key ``ls -X`` compares first: the name from its last dot,
     empty for a name without one.
@@ -657,7 +645,7 @@ def _order_rows(
             order.sort(key=lambda i: _extension_of(rows[i].name))
         elif sort_by is LsSortBy.WIDTH:
             order.sort(
-                key=lambda i: name_width(
+                key=lambda i: text_width(
                     escape_name(rows[i].name) if escape else rows[i].name
                 )
             )
@@ -698,12 +686,12 @@ def sort_stats(
     ]
 
 
-async def _operand_stat(path: PathSpec, stat: Stat) -> FileStat | None:
+async def _operand_stat(path: PathSpec, stat: StatFn) -> FileStat | None:
     """An operand's stat, None for a path nothing is at.
 
     Args:
         path (PathSpec): the operand.
-        stat (Stat): the stat it is asked through.
+        stat (StatFn): the stat it is asked through.
 
     Raises:
         OSError: when its stat fails other than by absence.
@@ -716,14 +704,14 @@ async def _operand_stat(path: PathSpec, stat: Stat) -> FileStat | None:
 
 async def _file_entry(
     path: PathSpec,
-    stat: Stat,
+    stat: StatFn,
 ) -> FileStat | None:
     """The row of an operand that is no directory, None for a directory
     or a path nothing is at.
 
     Args:
         path (PathSpec): the operand.
-        stat (Stat): the stat it is asked through.
+        stat (StatFn): the stat it is asked through.
 
     Raises:
         OSError: when its stat fails other than by absence.
@@ -826,7 +814,7 @@ async def _stat_entries(
     path: PathSpec,
     names: list[str],
     *,
-    stat: Stat,
+    stat: StatFn,
     all_files: bool,
     links: LinkView | None = None,
     deref: bool = False,
@@ -847,7 +835,7 @@ async def _stat_entries(
     Args:
         path (PathSpec): the directory being listed.
         names (list[str]): entry paths from the backend readdir.
-        stat (Stat): backend stat.
+        stat (StatFn): backend stat.
         all_files (bool): keep dotfiles.
         links (LinkView | None): the namespace's symlink facts. The
             table's readdir names the links among the entries and its stat
@@ -934,8 +922,8 @@ async def _stat_entries(
 async def probe_operand(
     path: PathSpec,
     *,
-    readdir: Readdir,
-    stat: Stat,
+    readdir: ReaddirFn,
+    stat: StatFn,
     all_files: bool = False,
     sort_by: LsSortBy = LsSortBy.NAME,
     reverse: bool = False,
@@ -959,8 +947,8 @@ async def probe_operand(
 
     Args:
         path (PathSpec): the operand to list.
-        readdir (Readdir): backend directory lister.
-        stat (Stat): backend stat.
+        readdir (ReaddirFn): backend directory lister.
+        stat (StatFn): backend stat.
         all_files (bool): keep dotfiles.
         sort_by (LsSortBy): active sort key.
         reverse (bool): reverse the sort.
@@ -1175,7 +1163,7 @@ async def probe_operand(
 
 async def _operand_row(
     path: PathSpec,
-    stat: Stat,
+    stat: StatFn,
     links: LinkView | None,
     child_mounts: ChildMounts | None,
 ) -> FileStat | LsWarning:
@@ -1183,7 +1171,7 @@ async def _operand_row(
 
     Args:
         path (PathSpec): the operand to stat.
-        stat (Stat): backend stat.
+        stat (StatFn): backend stat.
         links (LinkView | None): the namespace's symlink facts.
         child_mounts (ChildMounts | None): session-filtered child-mount
             names, which make a path no backend serves a directory.
@@ -1215,7 +1203,7 @@ async def _operand_key(
     operand: Operand,
     *,
     sort_by: LsSortBy,
-    stat: Stat,
+    stat: StatFn,
 ) -> FileStat:
     """Sort row for one operand, named with the operand's own spelling."""
     if operand.row is not None:
@@ -1236,7 +1224,7 @@ async def _sort_operands(
     *,
     sort_by: LsSortBy,
     reverse: bool,
-    stat: Stat,
+    stat: StatFn,
     time_kind: LsTimeKind = LsTimeKind.MTIME,
     escape: bool = False,
 ) -> list[Operand]:
@@ -1391,8 +1379,8 @@ def _finish(
 async def ls(
     paths: list[PathSpec],
     *,
-    readdir: Readdir,
-    stat: Stat,
+    readdir: ReaddirFn,
+    stat: StatFn,
     long: bool = False,
     all_files: bool = False,
     show_dot_entries: bool = False,
@@ -1613,8 +1601,8 @@ async def ls_generic(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-    readdir: Readdir,
-    stat: Stat,
+    readdir: ReaddirFn,
+    stat: StatFn,
     options: Mapping[str, Any] | None = None,
 ) -> tuple[bytes, IOResult]:
     """Run ls over resolved operands, GNU semantics; mirrors lsGeneric.
@@ -1629,8 +1617,8 @@ async def ls_generic(
         texts (list[str]): Non-path words, unused by ls.
         ctx (Context): Flags and namespace facts from the
             dispatcher.
-        readdir (Readdir): Bound readdir called as ``readdir(p)``.
-        stat (Stat): Bound (overlaid) stat called as ``stat(p)``.
+        readdir (ReaddirFn): Bound readdir called as ``readdir(p)``.
+        stat (StatFn): Bound (overlaid) stat called as ``stat(p)``.
         options (Mapping[str, Any] | None): ``ls_options`` the caller read
             before it resolved the operands; None reads them here.
     """

@@ -21,7 +21,7 @@ import { openStream, type OpenStream } from '../../rs/stream.ts'
 import type { JsonValue } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import { UsageError } from '../errors.ts'
-import { PROBE_BLOCK_BYTES, groupLine, type FlagSet } from './grep_binary.ts'
+import { PROBE_BLOCK_BYTES, groupLine, type GrepFlags } from './grep_binary.ts'
 import { RegexSyntax } from './types.ts'
 
 /** Bytes as the stream reads them: one character per byte. Mirrors Python's latin1. */
@@ -40,7 +40,7 @@ export function latin1(data: Uint8Array): string {
  * Python's stream_config.
  */
 export function streamConfig(
-  f: FlagSet,
+  f: GrepFlags,
   pattern: string | null,
   utf8: boolean,
 ): Record<string, JsonValue> {

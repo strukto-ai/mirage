@@ -26,7 +26,6 @@ import {
   newWorkspaceId,
   randomBelow,
   randomBelowBig,
-  shuffle,
   uuid7,
 } from './ids.ts'
 
@@ -258,14 +257,6 @@ describe('randomBelow', () => {
   })
 })
 
-describe('shuffle', () => {
-  it('replays a permutation', () => {
-    const items = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-    shuffle(new SeededIdSource(3), items)
-    expect(items).toEqual([6, 2, 3, 8, 9, 0, 1, 5, 7, 4])
-  })
-})
-
 function globalOwner(node: ts.Expression): string | undefined {
   if (ts.isIdentifier(node)) return node.text in GLOBAL_DRAWS ? node.text : undefined
   if (
@@ -428,7 +419,7 @@ describe('the IdSource seam', () => {
     'this.ids.uuid7()',
     'ctx.ids.randomU32()',
     "import { type IdSource, SystemIdSource } from '../../utils/ids.ts'",
-    "import { randomBelow, shuffle } from '../../utils/ids.ts'\nshuffle(ids, items)",
+    "import { randomBelow } from '../../utils/ids.ts'\nrandomBelow(ids, 10)",
     "import * as ids from '../../utils/ids.ts'\nids.randomBelow(source, 10)",
     "await crypto.subtle.digest('SHA-256', bytes)",
     'Math.floor(value)',

@@ -196,12 +196,6 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx config/run.ts
 
-      - name: Width table drift
-        run: |
-          ./python/.venv/bin/python scripts/gen_width_table.py
-          git diff --exit-code python/mirage/utils/generated \
-            typescript/packages/core/src/utils/generated integ/fixtures/wc
-
       # Both hosts' rg type tables come from scripts/rg_types.toml.
       # --selftest first: its input checks keep the two hosts' copies equal.
       - name: rg type table drift

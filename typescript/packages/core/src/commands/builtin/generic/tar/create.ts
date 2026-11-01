@@ -31,8 +31,6 @@ import {
 import type { CreateResult, Member } from './types.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
 
-export type { DirProbe, StatFn, WalkFn }
-
 export interface CreateDeps {
   archive: PathSpec
   exclude: string | null

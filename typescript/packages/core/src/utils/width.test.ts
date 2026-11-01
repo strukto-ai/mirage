@@ -12,53 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
-import { charWidth } from './width.ts'
-import { WIDE, ZERO_WIDTH } from './generated/width_data.ts'
+import { expect, it } from 'vitest'
+import { textWidth } from './width.ts'
 
-const FIXTURE = new URL('../../../../../integ/fixtures/wc/width.json', import.meta.url)
-
-describe('width tables', () => {
-  it('match the shared parity fixture range for range', () => {
-    // integ/fixtures/wc/width.json is the contract: the python suite
-    // (tests/utils/test_width.py) asserts the same ranges, so regenerating
-    // one tree without the other fails both.
-    const tables = JSON.parse(readFileSync(FIXTURE, 'utf-8')) as {
-      zero_width: number[][]
-      wide: number[][]
-    }
-    expect(ZERO_WIDTH.map((r) => [...r])).toEqual(tables.zero_width)
-    expect(WIDE.map((r) => [...r])).toEqual(tables.wide)
-  })
-})
-
-describe('charWidth', () => {
-  it.each([
-    ['a', 1],
-    ['中', 2],
-    ['文', 2],
-    ['\u{1F600}', 2],
-    ['\u0301', 0],
-    ['\u1160', 0],
-    ['\u11a8', 0],
-    ['\u200b', 0],
-    ['\ufeff', 0],
-    ['\u061c', 0],
-    ['\x00', 0],
-    ['\b', 0],
-    ['\x1b', 0],
-    ['\v', 0],
-  ])('measures %j as %i columns', (char, expected) => {
-    expect(charWidth(char.codePointAt(0) ?? 0)).toBe(expected)
-  })
-
-  it.each([['\u00ad'], ['\u0600'], ['\u{110BD}']])(
-    'measures the prepended concatenation mark %j as one column',
-    (char) => {
-      // Cf is not uniformly zero: GNU measures U+00AD and the Arabic number
-      // signs as one column. `printf 'a<U+00AD>b' | wc -L` is 3.
-      expect(charWidth(char.codePointAt(0) ?? 0)).toBe(1)
-    },
-  )
+it.each([
+  ['', 0],
+  ['ascii', 5],
+  ['中😀e\u0301', 5],
+  ['a\t\nb\r', 2],
+  ['\udc80\udcff', 2],
+  ['\ud800', 1],
+  ['\u3164\uffa0\ud7b0\u0378', 0],
+  ['\u3248\u{1fae9}', 4],
+  ['😀'.repeat(30_000), 60_000],
+])('measures text width (case %#)', (text, expected) => {
+  expect(textWidth(text)).toBe(expected)
 })

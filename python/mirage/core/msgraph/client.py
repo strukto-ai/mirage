@@ -74,16 +74,16 @@ class GraphError(ApiError):
         self.code = code
 
 
-def _resolve_token(config: MsGraphConfig) -> str:
+def _token_of(config: MsGraphConfig) -> str:
     token = config.access_token
     resolved = token() if callable(token) else token
     revealed: str = reveal_secret(resolved)
     return revealed
 
 
-def headers(config: MsGraphConfig) -> dict[str, str]:
+def graph_headers(config: MsGraphConfig) -> dict[str, str]:
     return {
-        "Authorization": f"Bearer {_resolve_token(config)}",
+        "Authorization": f"Bearer {_token_of(config)}",
         "Content-Type": "application/json",
     }
 
@@ -96,7 +96,7 @@ def _policy(config: MsGraphConfig) -> RetryPolicy:
     )
 
 
-def _error_of(
+def _graph_error_of(
     resp: aiohttp.ClientResponse, text: str, *, method: str, url: str
 ) -> Exception:
     try:
@@ -122,7 +122,7 @@ def _lenient_json(text: str) -> Any:
         return {}
 
 
-async def _request(
+async def _graph_request(
     accessor: OneDriveAccessor | SharePointAccessor,
     method: str,
     url: str,
@@ -138,14 +138,14 @@ async def _request(
     config = accessor.config
     refreshed = False
     while True:
-        hdrs = headers(config) if auth else {}
+        hdrs = graph_headers(config) if auth else {}
         if extra_headers:
             hdrs.update(extra_headers)
         try:
             result = await api_request(
                 method,
                 url,
-                error_of=partial(_error_of, method=method, url=url),
+                error_of=partial(_graph_error_of, method=method, url=url),
                 headers=hdrs,
                 params=params,
                 json_body=json_body,
@@ -177,7 +177,9 @@ async def graph_get(
     url: str,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    data: dict[str, Any] = await _request(accessor, "GET", url, params=params)
+    data: dict[str, Any] = await _graph_request(
+        accessor, "GET", url, params=params
+    )
     return data
 
 
@@ -200,7 +202,9 @@ async def graph_list(
     next_url: str | None = url
     next_params = params
     while next_url:
-        data = await _request(accessor, "GET", next_url, params=next_params)
+        data = await _graph_request(
+            accessor, "GET", next_url, params=next_params
+        )
         items.extend(data.get("value", []))
         if limit is not None and len(items) >= limit:
             break
@@ -215,7 +219,7 @@ async def graph_get_bytes(
     window: ByteWindow | None = None,
     auth: bool = True,
 ) -> bytes:
-    data: bytes = await _request(
+    data: bytes = await _graph_request(
         accessor,
         "GET",
         url,
@@ -239,7 +243,7 @@ async def graph_stream(
     attempt = 0
     refreshed = False
     while True:
-        hdrs = headers(config) if auth else {}
+        hdrs = graph_headers(config) if auth else {}
         async with sess.get(url, headers=hdrs) as resp:
             if resp.status in RETRY_STATUSES and attempt < config.max_retries:
                 await asyncio.sleep(
@@ -256,7 +260,9 @@ async def graph_stream(
                 refreshed = True
                 continue
             if resp.status >= 400:
-                raise _error_of(resp, await resp.text(), method="GET", url=url)
+                raise _graph_error_of(
+                    resp, await resp.text(), method="GET", url=url
+                )
             async for chunk in resp.content.iter_chunked(chunk_size):
                 yield chunk
             return
@@ -267,7 +273,7 @@ async def graph_post(
     url: str,
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    data: dict[str, Any] = await _request(
+    data: dict[str, Any] = await _graph_request(
         accessor, "POST", url, json_body=body or {}
     )
     return data
@@ -295,7 +301,7 @@ async def graph_batch(
         {"id": str(i), "method": "GET", "url": url.removeprefix(root)}
         for i, url in enumerate(urls)
     ]
-    data = await _request(
+    data = await _graph_request(
         accessor, "POST", f"{root}/$batch", json_body={"requests": requests}
     )
     answers: dict[str, tuple[int, dict[str, Any], float]] = {}
@@ -332,7 +338,7 @@ async def graph_post_monitor(
     url: str,
     body: dict[str, Any] | None = None,
 ) -> str:
-    location = await _request(
+    location = await _graph_request(
         accessor,
         "POST",
         url,
@@ -353,7 +359,7 @@ async def graph_patch(
     url: str,
     body: dict[str, Any],
 ) -> dict[str, Any]:
-    data: dict[str, Any] = await _request(
+    data: dict[str, Any] = await _graph_request(
         accessor, "PATCH", url, json_body=body
     )
     return data
@@ -362,7 +368,7 @@ async def graph_patch(
 async def graph_delete(
     accessor: OneDriveAccessor | SharePointAccessor, url: str
 ) -> None:
-    await _request(accessor, "DELETE", url, read="none")
+    await _graph_request(accessor, "DELETE", url, read="none")
 
 
 async def graph_put_bytes(
@@ -371,7 +377,7 @@ async def graph_put_bytes(
     data: bytes,
     content_type: str = "application/octet-stream",
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = await _request(
+    payload: dict[str, Any] = await _graph_request(
         accessor,
         "PUT",
         url,
@@ -433,7 +439,7 @@ async def upload_chunk(
     text = await api_request(
         "PUT",
         upload_url,
-        error_of=partial(_error_of, method="PUT", url=upload_url),
+        error_of=partial(_graph_error_of, method="PUT", url=upload_url),
         headers=hdrs,
         data=data,
         retry=_policy(accessor.config),
@@ -450,7 +456,7 @@ async def cancel_upload(
     await api_request(
         "DELETE",
         upload_url,
-        error_of=partial(_error_of, method="DELETE", url=upload_url),
+        error_of=partial(_graph_error_of, method="DELETE", url=upload_url),
         read="none",
         session=accessor.pool,
     )

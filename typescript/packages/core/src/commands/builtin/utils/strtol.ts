@@ -13,33 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { C_SPACE } from '../constants.ts'
-import { decimalValue, parseBase0 } from './size_suffix.ts'
 
-// A whole decimal word as GNU's count options read one: C blanks, one sign,
-// ASCII digits, and nothing after them, not even a blank.
+// The leading decimal run C's atoi reads, after blanks and one sign.
 const DECIMAL = new RegExp(`^${C_SPACE}([+-]?)([0-9]+)`)
-// C's strto(u)l at base 0: C blanks, one sign, then hex after 0x, octal after
-// a bare 0, decimal otherwise; the text after the digits is left.
-const BASE0 = new RegExp(`^${C_SPACE}([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)`)
 const LONG_MIN = -(2n ** 63n)
 const LONG_MAX = 2n ** 63n - 1n
 export const INT_MAX = 2n ** 31n - 1n
-// What GNU 9.7 appends after a refused number that scanned, measured under
-// LC_ALL=C: ERANGE for a value outside the option's range and
-// EOVERFLOW for one the program words as too large for its type.
-export const ERANGE_REASON = 'Numerical result out of range'
-export const EOVERFLOW_REASON = 'Value too large for defined data type'
-
-/**
- * `text` as a signed decimal operand, as GNU's counts read. Mirrors Python's
- * `signed_decimal`.
- */
-export function signedDecimal(text: string): bigint | null {
-  const match = DECIMAL.exec(text)
-  if (match?.[0].length !== text.length) return null
-  const value = decimalValue(match[2] ?? '0')
-  return match[1] === '-' ? -value : value
-}
 
 /**
  * ASCII decimal `digits` as a number, null when it is `bound` or more. Leading
@@ -62,21 +41,8 @@ export function boundedDecimal(digits: string, bound: bigint): bigint | null {
 export function atoi(text: string): number {
   const match = DECIMAL.exec(text)
   if (match === null) return 0
-  const value = decimalValue(match[2] ?? '0')
-  const signed = match[1] === '-' ? -value : value
-  return Number(signed < LONG_MIN ? LONG_MIN : signed > LONG_MAX ? LONG_MAX : signed)
-}
-
-/**
- * C's `strtol(text, &end, 0)`: the value and the text at `end`. No number is
- * 0 with the whole text left, and a value past the `long` range saturates, as
- * glibc's does. Mirrors Python's `strtol`.
- */
-export function strtol(text: string): [bigint, string] {
-  const match = BASE0.exec(text)
-  if (match === null) return [0n, text]
-  const value = parseBase0(match[2] ?? '0')
-  const signed = match[1] === '-' ? -value : value
-  const clamped = signed < LONG_MIN ? LONG_MIN : signed > LONG_MAX ? LONG_MAX : signed
-  return [clamped, text.slice(match[0].length)]
+  const negative = match[1] === '-'
+  const limit = negative ? -LONG_MIN : LONG_MAX
+  const value = boundedDecimal(match[2] ?? '0', limit + 1n) ?? limit
+  return Number(negative ? -value : value)
 }

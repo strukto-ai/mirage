@@ -201,7 +201,7 @@ async def _run_exec(
     return io.exit_code == 0
 
 
-async def _delete(
+async def _delete_row(
     ps: PathSpec,
     vfs: Files | None,
     dispatch: DispatchFn | None,
@@ -635,7 +635,9 @@ async def _apply_find_actions(
                 # leaves a mount point in place.
                 if _structural(match, registry):
                     continue
-                if not await _delete(match, vfs, dispatch, errors, stat_path):
+                if not await _delete_row(
+                    match, vfs, dispatch, errors, stat_path
+                ):
                     exit_code = 1
                     break
             else:

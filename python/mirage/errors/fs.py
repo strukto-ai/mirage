@@ -465,7 +465,7 @@ def is_aborting(exc: BaseException) -> bool:
     return isinstance(exc, (CommandTimeoutError, MirageAbortError))
 
 
-def error_path(exc: BaseException) -> str:
+def error_virtual_path(exc: BaseException) -> str:
     """The path an fs error is about.
 
     The stamped ``filename``, which every constructor here sets and the

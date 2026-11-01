@@ -18,7 +18,7 @@ import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { IOResult } from '../../../io/types.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { READ_FAILURES } from '../../../errors/constants.ts'
-import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
+import { FileType, Limit, type PathSpec, type StatFn, type ReadStreamFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { asyncChain, closeQuietly } from '../../../io/stream.ts'
@@ -212,11 +212,8 @@ async function* headStream(
   }
 }
 
-type Stat = (p: PathSpec) => Promise<FileStat>
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-
 async function* headMulti(
-  stream: Stream,
+  stream: ReadStreamFn,
   paths: readonly PathSpec[],
   lines: number,
   bytesMode: number | null,
@@ -264,8 +261,8 @@ export async function headGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stat: Stat,
-  stream: Stream,
+  stat: StatFn,
+  stream: ReadStreamFn,
   firstLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
