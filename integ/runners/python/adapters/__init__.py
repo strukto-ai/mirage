@@ -37,6 +37,7 @@ import asyncpg
 import boto3
 import chromadb
 import lancedb
+from bson import Binary, DatetimeMS, DBRef, Decimal128, Int64
 from moto.server import ThreadedMotoServer
 from pymongo import AsyncMongoClient
 from qdrant_client import AsyncQdrantClient, models
@@ -2357,6 +2358,50 @@ MONGODB_AUTHORS = [
     {"_id": 3, "name": "cara", "books": 1},
 ]
 
+MONGODB_BSON_DB = "mirage_integ_bson"
+
+MONGODB_UUID = bytes.fromhex("00112233445566778899aabbccddeeff")
+
+MONGODB_BSON_TYPES = [
+    {
+        "_id": 1,
+        "type": "decimal",
+        "a": Decimal128("1.10"),
+        "b": Decimal128("-0"),
+        "c": Decimal128("NaN"),
+        "d": Decimal128("-Infinity"),
+        "e": Decimal128("1E+400"),
+    },
+    {"_id": 2, "type": "uuid", "v": Binary(MONGODB_UUID, 4)},
+    {"_id": 3, "type": "uuid_legacy", "v": Binary(MONGODB_UUID, 3)},
+    {
+        "_id": 4,
+        "type": "dbref",
+        "a": DBRef("authors", 1),
+        "b": DBRef("authors", 2, "mirage_integ"),
+    },
+    {
+        "_id": 5,
+        "type": "date",
+        "a": DatetimeMS(0),
+        "b": DatetimeMS(1577836800123),
+        "c": DatetimeMS(-1),
+        "d": DatetimeMS(253402300799999),
+        "e": DatetimeMS(253402300800000),
+        "f": DatetimeMS(-62135596800001),
+    },
+    {
+        "_id": 6,
+        "type": "int64",
+        "a": Int64(5),
+        "b": Int64(2**53),
+        "c": Int64(2**53 + 1),
+        "d": Int64(-(2**53) - 1),
+        "e": Int64(2**63 - 1),
+        "f": Int64(-(2**63)),
+    },
+]
+
 
 class MongoDBService:
     def __init__(self, uri: str) -> None:
@@ -2375,6 +2420,10 @@ class MongoDBService:
                 "recent_books",
                 viewOn="books",
                 pipeline=[{"$match": {"year": {"$gte": 2022}}}],
+            )
+            await client.drop_database(MONGODB_BSON_DB)
+            await client[MONGODB_BSON_DB]["types"].insert_many(
+                [dict(d) for d in MONGODB_BSON_TYPES]
             )
         finally:
             await client.close()

@@ -16,6 +16,7 @@ import asyncio
 from collections.abc import Iterable
 from typing import Any
 
+from bson.codec_options import DatetimeConversion
 from pydantic import SecretStr
 from pymongo import AsyncMongoClient
 
@@ -36,11 +37,18 @@ class MongoClientAccessor(Accessor):
         uri (SecretStr): the server's connection string.
         timeout (float): seconds to connect, and to wait on a socket read
             or write.
+        datetime_conversion (DatetimeConversion): how a BSON date decodes.
     """
 
-    def __init__(self, uri: SecretStr, timeout: float) -> None:
+    def __init__(
+        self,
+        uri: SecretStr,
+        timeout: float,
+        datetime_conversion: DatetimeConversion = DatetimeConversion.DATETIME,
+    ) -> None:
         self._uri = uri
         self._timeout_ms = timeout * 1000
+        self._datetime_conversion = datetime_conversion
         self._clients: dict[int, AsyncMongoClient[dict[str, Any]]] = {}
 
     @property
@@ -61,6 +69,7 @@ class MongoClientAccessor(Accessor):
                 reveal_secret(self._uri),
                 connectTimeoutMS=self._timeout_ms,
                 socketTimeoutMS=self._timeout_ms,
+                datetime_conversion=self._datetime_conversion,
             )
             self._clients[key] = client
         return client
@@ -76,7 +85,11 @@ class MongoDBAccessor(MongoClientAccessor):
     def __init__(
         self, config: MongoDBConfig, listing_cache_ttl: float = 5.0
     ) -> None:
-        super().__init__(config.uri, config.timeout)
+        # A date past what datetime holds (before year 1, after 9999)
+        # decodes as DatetimeMS, so its document still renders.
+        super().__init__(
+            config.uri, config.timeout, DatetimeConversion.DATETIME_AUTO
+        )
         self.config = config
         # The database and collection names an existence check reads.
         self.listings = ResponseCache[str, list[str]](listing_cache_ttl)

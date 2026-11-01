@@ -15,7 +15,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from bson import Decimal128, ObjectId
+from bson import DatetimeMS, DBRef, Decimal128, Int64, ObjectId
 
 from mirage.core.mongodb._sampler import sample_field_types
 
@@ -107,3 +107,24 @@ async def test_sample_field_types_whole_valued_double_classified_as_int():
 async def test_sample_field_types_empty_sample_returns_empty_list():
     out = await sample_field_types(_col([]), sample_size=5)
     assert out == []
+
+
+@pytest.mark.asyncio
+async def test_sample_field_types_types_values_as_the_js_driver_does():
+    docs = [
+        {
+            "_id": 1,
+            "small": Int64(2**53),
+            "wide": Int64(2**53 + 1),
+            "far": DatetimeMS(253402300800000),
+            "ref": DBRef("authors", 1),
+        }
+    ]
+    out = await sample_field_types(_col(docs), sample_size=1)
+    by_path = {f["path"]: f["types"] for f in out}
+    assert by_path == {
+        "small": {"int": 1.0},
+        "wide": {"long": 1.0},
+        "far": {"date": 1.0},
+        "ref": {"object": 1.0},
+    }

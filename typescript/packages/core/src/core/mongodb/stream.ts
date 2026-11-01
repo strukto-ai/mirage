@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stripSlash } from '../../utils/slash.ts'
-import { EJSON } from 'bson'
+import { EJSON, type Long } from 'bson'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import {
@@ -75,6 +75,36 @@ export function elisionPaths(
   return new Set(fields)
 }
 
+// An Int64 the driver leaves as a Long is past 2^53, where a JS number
+// would round it; it is written with its exact digits.
+function isLong(value: unknown): value is Long {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { _bsontype?: string })._bsontype === 'Long'
+  )
+}
+
+// Relaxed Extended JSON writes a $date as ISO-8601 for years 1970 through
+// 9999 only; bson's own bound runs five hours into year 10000.
+const ISO_DATE_END = 253402300800000
+
+function relaxedEjson(value: unknown): unknown {
+  if (value instanceof Date) {
+    const ms = value.getTime()
+    if (ms >= 0 && ms < ISO_DATE_END) return EJSON.serialize(value, { relaxed: true })
+    return { $date: { $numberLong: String(ms) } }
+  }
+  if (isLong(value)) return value
+  if (Array.isArray(value)) return value.map(relaxedEjson)
+  if (typeof value === 'object' && value !== null && value.constructor === Object) {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value)) out[k] = relaxedEjson(v)
+    return out
+  }
+  return EJSON.serialize(value, { relaxed: true })
+}
+
 function pyJsonDumps(value: unknown): string {
   if (value === null || value === undefined) return 'null'
   if (typeof value === 'string') return JSON.stringify(value)
@@ -82,6 +112,7 @@ function pyJsonDumps(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   if (Array.isArray(value)) return `[${value.map(pyJsonDumps).join(', ')}]`
   if (typeof value === 'object') {
+    if (isLong(value)) return value.toString()
     const parts: string[] = []
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       parts.push(`${JSON.stringify(k)}: ${pyJsonDumps(v)}`)
@@ -92,7 +123,7 @@ function pyJsonDumps(value: unknown): string {
 }
 
 export function stringifyDoc(doc: Record<string, unknown>): string {
-  return pyJsonDumps(EJSON.serialize(doc, { relaxed: true }))
+  return pyJsonDumps(relaxedEjson(doc))
 }
 
 function encodeLine(doc: Record<string, unknown>): Uint8Array {
