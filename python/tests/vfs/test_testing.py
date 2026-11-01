@@ -27,12 +27,12 @@ from mirage.core.ram.read import read as ram_read
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
 from mirage.core.ram.write import write as ram_write
+from mirage.core.s3.constants import CONDITION_SUPPORT
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
-from mirage.core.s3.constants import CONDITION_SUPPORT
 from mirage.vfs.s3.config import S3Config
 from mirage.vfs.s3.s3 import S3VFS
 from mirage.vfs.testing import (
