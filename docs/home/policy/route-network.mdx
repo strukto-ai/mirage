@@ -27,7 +27,8 @@ A second workspace on the same server can route `localhost:5003` to
 
 - Every connection in the workspace follows it: `curl`, CLIs, mounts, and
   Python or JavaScript code. HTTPS, WebSocket and database connections
-  too.
+  too. Over HTTPS, the service's certificate must still match the address
+  the agent typed.
 - [`allowed_domains`, `denied_domains`](/home/configuration#network) and
   [`pre_network`](/home/policy/policies#pre_network-and-post_network)
   policies check where the route goes, not the address the agent typed.
