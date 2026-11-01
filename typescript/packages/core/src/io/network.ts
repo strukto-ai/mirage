@@ -238,17 +238,12 @@ export function networkLets(host: string, address: string, port?: number): boole
 
 /**
  * Where the workspace a call runs for sends a connection to `host` on
- * `port` instead, null for nowhere else. A browser cannot tell one task's
- * binding from another's, so there every live workspace must route it
- * alike; throws when two do not. Mirrors Python's `network_route`.
+ * `port` instead, null for nowhere else. A browser answers by the newest
+ * live rule; its page hooks ask each live workspace. Mirrors Python's
+ * `network_route`.
  */
 export function networkRoute(host: string, port: number): readonly [string, number] | null {
-  const answers = rule.liveStores().map((live) => live?.route(host, port) ?? null)
-  const first = answers[0] ?? null
-  if (answers.some((answer) => answer?.join(':') !== first?.join(':'))) {
-    throw new Error(`network: live workspaces route ${host}:${String(port)} apart`)
-  }
-  return first
+  return networkBound()?.route(host, port) ?? null
 }
 
 /**

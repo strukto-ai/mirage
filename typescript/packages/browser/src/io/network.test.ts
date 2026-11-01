@@ -12,9 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runWithEgress } from '@struktoai/mirage-core/io/gateway'
 import { networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
+import { Policies } from '@struktoai/mirage-core/policy/policies'
+import type * as AsyncContext from '@struktoai/mirage-core/utils/async_context'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { routed, watchNetwork } from './network.ts'
+
+// A page's storage: every concurrently bound call is live at once.
+vi.mock('@struktoai/mirage-core/utils/async_context', async (importOriginal) => {
+  const actual = await importOriginal<typeof AsyncContext>()
+  return {
+    ...actual,
+    asyncContextIsolatesTasks: false,
+    createAsyncContext: () => new actual.FallbackStorage(),
+  }
+})
+
+// Where a request goes under the bindings live as it is made.
+function urlOf(input: RequestInfo | URL): string {
+  const to = routed(input)
+  return to instanceof Request ? to.url : String(to)
+}
 
 describe('the page network watcher', () => {
   afterAll(() => {
@@ -66,5 +85,34 @@ describe('the page network watcher', () => {
     expect(await under(new Request('ws://localhost:5003/s'))).toBe('ws://127.0.0.1:61001/s')
     expect(await under('http://localhost:5004/')).toBe('http://localhost:5004/')
     expect(routed('http://localhost:5003/')).toBe('http://localhost:5003/')
+  })
+
+  it("routes a file call inside a session's line by the workspace's own rule", async () => {
+    vi.stubGlobal('location', { href: 'https://page.test/' })
+    const base = networkRule({ routes: { 's3.test:443': 's3.test:9000' } })
+    const session = networkRule({ routes: { 's3.test:443': 's3.test:9001' } })
+    const policies = new Policies([])
+    const url = await runWithEgress(session, policies, () =>
+      runWithEgress(base, policies, () => Promise.resolve(urlOf('https://s3.test/b'))),
+    )
+    expect(url).toBe('https://s3.test:9000/b')
+  })
+
+  it('refuses a request two live workspaces route apart', async () => {
+    vi.stubGlobal('location', { href: 'https://page.test/' })
+    const one = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
+    const two = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const first = runWithEgress(one, new Policies([]), () => held)
+    await expect(
+      runWithEgress(two, new Policies([]), () =>
+        Promise.resolve().then(() => urlOf('http://localhost:5003/')),
+      ),
+    ).rejects.toThrow(/route localhost:5003 apart/)
+    release()
+    await first
   })
 })

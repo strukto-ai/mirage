@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { networkBound, networkLets, networkRoute } from '@struktoai/mirage-core/io/network'
+import { type Egress, liveEgress } from '@struktoai/mirage-core/io/gateway'
+import {
+  type NetworkRule,
+  networkBound,
+  networkLets,
+  networkRoute,
+} from '@struktoai/mirage-core/io/network'
+import type { Policies } from '@struktoai/mirage-core/policy/policies'
 
 // The schemes that reach a host; data:, blob: and the like never leave the page.
 export const REACHING = new Set(['http:', 'https:', 'ws:', 'wss:'])
@@ -34,6 +41,25 @@ function lets(url: string | URL): boolean {
 const SECURE = new Set(['https:', 'wss:'])
 
 /**
+ * Where a page's request to `host` on `port` goes instead, null for nowhere
+ * else. A page cannot tell one task's binding from another's, so every live
+ * workspace must route it alike, each by its newest binding (a file call
+ * inside a session's line binds the workspace's own rule over the
+ * session's); throws when two do not.
+ */
+function routeOf(host: string, port: number): readonly [string, number] | null {
+  const newest = new Map<Policies | NetworkRule | null, Egress>()
+  for (const egress of liveEgress()) newest.set(egress.policies ?? egress.rule, egress)
+  if (newest.size === 0) return networkRoute(host, port)
+  const answers = [...newest.values()].map((egress) => egress.rule?.route(host, port) ?? null)
+  const first = answers[0] ?? null
+  if (answers.some((answer) => answer?.join(':') !== first?.join(':'))) {
+    throw new Error(`network: live workspaces route ${host}:${String(port)} apart`)
+  }
+  return first
+}
+
+/**
  * `input` sent where the bound rule routes its host and port instead, and
  * judged there; as it is when it routes nowhere. A page checks TLS against
  * the URL it sends, so a secure route may change the port but not the host.
@@ -42,7 +68,7 @@ const SECURE = new Set(['https:', 'wss:'])
 export function routed(input: RequestInfo | URL): RequestInfo | URL {
   const target = new URL(input instanceof Request ? input.url : input, globalThis.location.href)
   if (!REACHING.has(target.protocol)) return input
-  const route = networkRoute(target.hostname, portOf(target))
+  const route = routeOf(target.hostname, portOf(target))
   if (route === null) return input
   const bare = target.hostname
     .replace(/^\[(.*)\]$/, '$1')
