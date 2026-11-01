@@ -15,7 +15,7 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
 import { constants, hostname } from 'node:os'
 import { once } from 'node:events'
-import { constants as fsConstants, realpathSync, statSync } from 'node:fs'
+import { constants as fsConstants, realpathSync } from 'node:fs'
 import { access, open, stat } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
@@ -54,27 +54,43 @@ export const FAKETIME_LIBRARIES = [
 
 /**
  * What a process on this host needs to read the running workspace's system
- * time: libfaketime preloaded at its offset from the host's clock, with the
- * monotonic clock left alone. Empty when the workspace keeps the host's
- * time; null when this host has no libfaketime. `env` is the process's
- * environment, whose `LD_PRELOAD` libraries load after libfaketime. Mirrors
- * Python's `system_time_env`.
+ * time: libfaketime preloaded at its offset from the host's clock, to the
+ * millisecond, with the monotonic clock left alone. Empty when the workspace
+ * keeps the host's time; null when this host has no libfaketime. `env` is
+ * the process's environment, whose `LD_PRELOAD` libraries load after
+ * libfaketime. Mirrors Python's `system_time_env`.
  */
-export function systemTimeEnv(env: Record<string, string>): Record<string, string> | null {
+export async function systemTimeEnv(
+  env: Record<string, string>,
+): Promise<Record<string, string> | null> {
   if (boundSystemClock() === null) return {}
-  const found =
-    process.platform === 'linux'
-      ? FAKETIME_LIBRARIES.filter((path) => statSync(path, { throwIfNoEntry: false })?.isFile())
-      : []
-  const library = found[0]
-  if (library === undefined) return null
+  const library = process.platform === 'linux' ? await faketimeLibrary() : null
+  if (library === null) return null
   const preload = env.LD_PRELOAD
-  const offset = Math.round(systemNow() - Date.now() / 1000)
+  const offset = systemNow() - Date.now() / 1000
   return {
     LD_PRELOAD: preload === undefined || preload === '' ? library : `${library}:${preload}`,
-    FAKETIME: `${offset >= 0 ? '+' : ''}${String(offset)}s`,
+    FAKETIME: `${offset >= 0 ? '+' : ''}${offset.toFixed(3)}s`,
     FAKETIME_DONT_FAKE_MONOTONIC: '1',
   }
+}
+
+/**
+ * The first libfaketime this host has, null for none. Asynchronous, so a
+ * candidate on this process's own FUSE folder never blocks the loop that
+ * answers it; one that cannot be read is passed over.
+ */
+async function faketimeLibrary(): Promise<string | null> {
+  for (const path of FAKETIME_LIBRARIES) {
+    try {
+      if ((await stat(path)).isFile()) return path
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === undefined) throw err
+      debuglog('mirage')('libfaketime: passing over %s: %s', path, code)
+    }
+  }
+  return null
 }
 
 /**

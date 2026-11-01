@@ -69,12 +69,12 @@ FAKETIME_LIBRARIES = (
 )
 
 
-def system_time_env(env: Mapping[str, str]) -> dict[str, str] | None:
+async def system_time_env(env: Mapping[str, str]) -> dict[str, str] | None:
     """What a process on this host needs to read the running workspace's
     system time: libfaketime preloaded at its offset from the host's
-    clock, with the monotonic clock left alone. Empty when the workspace
-    keeps the host's time; None when this host has no libfaketime.
-    Mirrors TypeScript's ``systemTimeEnv``.
+    clock, to the millisecond, with the monotonic clock left alone. Empty
+    when the workspace keeps the host's time; None when this host has no
+    libfaketime. Mirrors TypeScript's ``systemTimeEnv``.
 
     Args:
         env (Mapping[str, str]): the process's environment, whose
@@ -82,19 +82,25 @@ def system_time_env(env: Mapping[str, str]) -> dict[str, str] | None:
     """
     if bound_system_clock() is None:
         return {}
-    found = (
-        [path for path in FAKETIME_LIBRARIES if os.path.isfile(path)]
-        if sys.platform == "linux"
-        else []
-    )
-    if not found:
+    library = await _faketime_library() if sys.platform == "linux" else None
+    if library is None:
         return None
     preload = env.get("LD_PRELOAD")
     return {
-        "LD_PRELOAD": f"{found[0]}:{preload}" if preload else found[0],
-        "FAKETIME": f"{round(system_now() - time.time()):+d}s",
+        "LD_PRELOAD": f"{library}:{preload}" if preload else library,
+        "FAKETIME": f"{system_now() - time.time():+.3f}s",
         "FAKETIME_DONT_FAKE_MONOTONIC": "1",
     }
+
+
+async def _faketime_library() -> str | None:
+    """The first libfaketime this host has, None for none. Off the loop,
+    so a candidate on a folder this process serves never blocks the loop
+    that answers it; one that cannot be read is passed over."""
+    for path in FAKETIME_LIBRARIES:
+        if await asyncio.to_thread(os.path.isfile, path):
+            return path
+    return None
 
 
 # Host folders a kernel mount in this process serves. A child started in

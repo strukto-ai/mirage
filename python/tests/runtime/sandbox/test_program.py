@@ -15,6 +15,7 @@
 import asyncio
 import errno
 import os
+import re
 import shlex
 import signal
 import socket
@@ -821,22 +822,21 @@ async def test_system_time_env_preloads_libfaketime_at_the_offset(
     library = tmp_path / "libfaketime.so.1"
     library.write_bytes(b"")
     monkeypatch.setattr(
-        "mirage.runtime.sandbox.program.FAKETIME_LIBRARIES", (str(library),)
+        "mirage.runtime.sandbox.program.FAKETIME_LIBRARIES",
+        (str(tmp_path / "none"), str(library)),
     )
     monkeypatch.setattr(sys, "platform", "linux")
-    clock = ShiftedClock.starting(SystemClock(), time.time() - 3600)
+    clock = ShiftedClock.starting(SystemClock(), time.time() - 3600.25)
 
-    async def env(given: dict[str, str]) -> dict[str, str] | None:
-        return system_time_env(given)
-
-    assert await run_with_system_clock(
-        clock, env({"LD_PRELOAD": "/opt/x.so"})
-    ) == {
-        "LD_PRELOAD": f"{library}:/opt/x.so",
-        "FAKETIME": "-3600s",
-        "FAKETIME_DONT_FAKE_MONOTONIC": "1",
-    }
+    env = await run_with_system_clock(
+        clock, system_time_env({"LD_PRELOAD": "/opt/x.so"})
+    )
+    assert env is not None
+    assert env["LD_PRELOAD"] == f"{library}:/opt/x.so"
+    assert env["FAKETIME_DONT_FAKE_MONOTONIC"] == "1"
+    assert re.fullmatch(r"-\d+\.\d{3}s", env["FAKETIME"])
+    assert float(env["FAKETIME"][:-1]) == pytest.approx(-3600.25, abs=0.05)
     library.unlink()
-    assert await run_with_system_clock(clock, env({})) is None
-    assert system_time_env({}) == {}
+    assert await run_with_system_clock(clock, system_time_env({})) is None
+    assert await system_time_env({}) == {}
     assert FAKETIME_LIBRARIES
