@@ -15,6 +15,8 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { mkdir as fsMkdir } from 'node:fs/promises'
 
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { norm } from '@struktoai/mirage-core/utils/path'
 import { mkdirComponentError } from './dest.ts'
@@ -28,6 +30,7 @@ export async function mkdir(
 ): Promise<void> {
   const root = accessor.root
   const full = await resolveInside(root, path)
+  const timer = startOp()
   if (parents) {
     try {
       await fsMkdir(full, { recursive: true })
@@ -40,6 +43,7 @@ export async function mkdir(
           : null
       throw named ?? diskError(err, path)
     }
+    record('mkdir', path.virtual, VFSName.DISK, 0, timer)
     return
   }
   // An existing target is EEXIST, not success: only -p is idempotent (GNU).
@@ -51,4 +55,5 @@ export async function mkdir(
   } catch (err) {
     throw diskError(err, path)
   }
+  record('mkdir', path.virtual, VFSName.DISK, 0, timer)
 }

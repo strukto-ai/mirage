@@ -141,7 +141,8 @@ _SSH = [
     ("append", C),
 ]
 
-# disk records the rows s3 does for cp, mv, rm, rmdir and rm -r.
+# disk records the rows s3 does for cp, mv, rm, rmdir and rm -r, and
+# a mkdir row as dropbox does.
 _DISK = [
     ("write", K),
     ("append", K),
@@ -155,7 +156,9 @@ _DISK = [
     ("rename", NEW),
     ("rename", "/m/m/moved.txt"),
     ("unlink", "/m/m/moved.txt"),
+    ("mkdir", "/m/m/e"),
     ("rmdir", "/m/m/e"),
+    ("mkdir", "/m/m/d"),
     ("write", DF),
     ("rm_r", "/m/m/d"),
     *_GENERIC_OUT,

@@ -26,21 +26,26 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
   const d = await resolveInside(accessor.root, dst)
   const timer = startOp()
   try {
-    await copyFile(s, d)
-  } catch (err) {
-    // copyFile reports ENOENT and EACCES for either operand, so the operand
-    // to blame is only knowable after the failure: probe whether the source
-    // reads to tell them apart.
-    let blame = dst
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT' || code === 'EACCES') {
-      const srcUnreadable = await access(s, constants.R_OK).then(
-        () => false,
-        () => true,
-      )
-      if (srcUnreadable) blame = src
+    try {
+      await copyFile(s, d)
+    } catch (err) {
+      // copyFile reports ENOENT and EACCES for either operand, so the operand
+      // to blame is only knowable after the failure: probe whether the source
+      // reads to tell them apart.
+      let blame = dst
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ENOENT' || code === 'EACCES') {
+        const srcUnreadable = await access(s, constants.R_OK).then(
+          () => false,
+          () => true,
+        )
+        if (srcUnreadable) blame = src
+      }
+      throw diskError(err, blame)
     }
-    throw diskError(err, blame)
+  } finally {
+    // Also when the copy raised: copyFile that fails part-way has already
+    // written the destination, as on the object stores.
+    record('copy', dst.virtual, VFSName.DISK, 0, timer)
   }
-  record('copy', dst.virtual, VFSName.DISK, 0, timer)
 }
