@@ -38,9 +38,9 @@ A second workspace on the same server can route `localhost:5003` to
 
 ## Per session
 
-A [profile](/home/profiles)'s `network` takes `routes` too. A session's
-routes replace the workspace's for the same address, and its lines stay
-held to both lists:
+A [profile](/home/profiles) can set `routes` for its sessions. They replace
+the workspace's routes for the same address, and the workspace's allowed
+and denied lists still apply:
 
 ```yaml
 network:
