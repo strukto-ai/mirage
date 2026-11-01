@@ -18,7 +18,7 @@ from mirage.rs.stream import open_stream
 def text_width(text: str) -> int:
     """The summed terminal columns of text, using Rust's Unicode table.
 
-    Shares GNU's pinned C.UTF-8 widths with wc, fold and column. Controls
+    Shares the pinned C.UTF-8 widths of wc, fold and column. Controls
     and unassigned characters take no column; this does not interpret
     cursor movement. Lone surrogates representing raw filename bytes
     retain one column each.

@@ -26,6 +26,7 @@ import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv } from '../../../utils/timezone.ts'
 import { systemDate } from '../../../utils/clock.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 
 const ENC = new TextEncoder()
 
@@ -148,7 +149,7 @@ function date(
     dt = systemDate()
   }
   const fmt = formats[0] ?? DEFAULT_FORMAT
-  const out = ENC.encode(gnuStrftime(dt, fmt, zone) + '\n')
+  const out = encodeText(gnuStrftime(dt, fmt, zone) + '\n')
   if (setting !== null) return [out, new IOResult({ exitCode: 1, stderr: ENC.encode(CANNOT_SET) })]
   return [out, new IOResult()]
 }

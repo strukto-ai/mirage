@@ -116,16 +116,9 @@ Git log's fixed-string and Perl filters use `rs/regex` on both hosts;
 `cli/git_search.json` covers PCRE constructs and C/UTF-8 case folding,
 pinned against Git 2.47.3 in `debian:stable-slim` at digest
 `sha256:13e0a2e78aa0554ad5ff66e4e260c6dbcdff807eb1f39d43b9fb0288aae88b04`.
-The removed host `utils/posix` and `builtin/utils/size_suffix` helpers and
-these adapters remain covered by the whole-host core and TypeScript filters.
-The shared Rust `quote` stream and both `utils/quote` adapters use those same
-filters, covering diagnostic and `ls -b` quoting. The removed `utils/ids`
-shuffle helpers were superseded by Rust `shuf`, also covered there.
-Terminal widths now use Rust's pinned Unicode table through `utils/width`;
-`unix/ls/sort.json` covers width sorting against GNU coreutils 9.7 in the
-same image. The Rust width stream, host adapters and removed host tables
-stay under the whole-host filters. Rust's Unicode regeneration check
-replaces the former host-table generator and range-parity fixture.
+Terminal widths come from mirage-rs's pinned Unicode table on both hosts;
+`unix/ls/sort.json` covers width sorting against coreutils 9.7 in the same
+image.
 
 ## Cross-mount commands
 
@@ -378,7 +371,7 @@ remain covered by the same whole-host filters on both hosts.
 | generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language                                       | fuse                              |
 | `vfs/capacity`, the `core/ram` writers (`dest`, `write`, `pwrite`, `truncate`, `copy`) and `vfs/ram/ram`, `vfs/ram/store` in either language | fuse                              |
 | Discord accessor/core/VFS modules; dispatcher, policy and runtime handle modules in either language                                          | fuse                              |
-| `rust/`, the shared command streams, GNU date formatter, JSON validation, Lance SQL and jq both hosts run                                      | core, ts, data, database, runtime |
+| `rust/`, the shared command streams, date formatter, JSON validation, Lance SQL and jq both hosts run                                        | core, ts, data, database, runtime |
 | `data/`                                                                                                                                      | core only                         |
 | `test_integ.yml`                                                                                                                             | every filter                      |
 

@@ -375,21 +375,20 @@ function primaryValue(entry: FileStat, sortBy: LsSortBy, timeKind: LsTimeKind): 
 // tie, so the order is total. `-r` negates the whole comparison, tie-break
 // included, which is why callers fold the sign into this comparator instead of
 // reversing the finished array. -X and --sort=width are stable sorts over
-// the name order too; -v goes through sortByVersion instead.
+// the name order too; -v goes through sortByVersion instead. `widths` holds
+// each name's --sort=width key, measured once per sort as Python's key is.
 function compareStats(
   a: FileStat,
   b: FileStat,
   sortBy: LsSortBy,
   timeKind: LsTimeKind,
-  escape = false,
+  widths: ReadonlyMap<string, number>,
 ): number {
   if (sortBy === 'extension') {
     const byExt = compareCodePoints(extensionOf(a.name), extensionOf(b.name))
     if (byExt !== 0) return byExt
   } else if (sortBy === 'width') {
-    const byWidth =
-      textWidth(escape ? escapeName(a.name) : a.name) -
-      textWidth(escape ? escapeName(b.name) : b.name)
+    const byWidth = (widths.get(a.name) ?? 0) - (widths.get(b.name) ?? 0)
     if (byWidth !== 0) return byWidth
   } else if (sortBy !== 'name' && sortBy !== 'none') {
     const av = primaryValue(a, sortBy, timeKind)
@@ -422,7 +421,12 @@ export async function sortStats(
     if (reverse) ordered.reverse()
   } else {
     const sign = reverse ? -1 : 1
-    ordered = [...stats].sort((a, b) => sign * compareStats(a, b, sortBy, timeKind, escape))
+    const widths = new Map(
+      sortBy === 'width'
+        ? stats.map((s) => [s.name, textWidth(escape ? escapeName(s.name) : s.name)] as const)
+        : [],
+    )
+    ordered = [...stats].sort((a, b) => sign * compareStats(a, b, sortBy, timeKind, widths))
   }
   if (groupDirsFirst && sortBy !== 'none') {
     ordered = [
@@ -797,7 +801,14 @@ async function sortOperands(
     return reverse ? ordered.reverse() : ordered
   }
   const sign = reverse ? -1 : 1
-  keyed.sort((a, b) => sign * compareStats(a.key, b.key, sortBy, timeKind, escape))
+  const widths = new Map(
+    sortBy === 'width'
+      ? keyed.map(
+          ({ key }) => [key.name, textWidth(escape ? escapeName(key.name) : key.name)] as const,
+        )
+      : [],
+  )
+  keyed.sort((a, b) => sign * compareStats(a.key, b.key, sortBy, timeKind, widths))
   return keyed.map((k) => k.operand)
 }
 

@@ -28,6 +28,7 @@ from mirage.commands.spec.usage import (
     usage_hint,
 )
 from mirage.io.types import ByteSource, IOResult
+from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.clock import system_date
 from mirage.utils.dates import parse_date_expr, parse_posix_time
@@ -177,7 +178,7 @@ async def date(
     if zone is None:
         dt = dt.astimezone()
     fmt = formats[0] if formats else DEFAULT_FORMAT
-    out = (gnu_strftime(dt, fmt) + "\n").encode()
+    out = encode_text(gnu_strftime(dt, fmt) + "\n")
     if setting is not None:
         return out, IOResult(exit_code=1, stderr=CANNOT_SET)
     return out, IOResult()
