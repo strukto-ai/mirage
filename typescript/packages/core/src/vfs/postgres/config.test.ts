@@ -41,7 +41,7 @@ describe('PostgresConfig', () => {
   })
 })
 
-describe('PostgresConfigSchema parsing', () => {
+describe('PostgresConfig parsing', () => {
   it('translates snake_case YAML keys to camelCase', () => {
     const out = parseConfigWithSchema(PostgresConfig, {
       dsn: 'postgres://h/d',

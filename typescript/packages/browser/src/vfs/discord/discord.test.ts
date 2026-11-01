@@ -76,7 +76,7 @@ describe('DiscordVFS (browser)', () => {
   })
 })
 
-describe('DiscordConfigSchema redaction (browser)', () => {
+describe('DiscordConfig redaction (browser)', () => {
   it('keeps proxyUrl in clear, redacts getHeaders only when present', () => {
     expect(redactConfigWithSchema(DiscordConfig, { proxyUrl: '/p' })).toEqual({
       proxyUrl: '/p',

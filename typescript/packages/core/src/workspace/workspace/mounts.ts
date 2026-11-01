@@ -29,13 +29,6 @@ import { Mount } from '../mount/spec.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 import type { MountSpec } from './types.ts'
 
-/**
- * The `mounts` mapping in resolved form: every accepted spelling
- * (bare VFS, `[VFS, mode]`, `[VFS, mode, commandLimits]`)
- * narrowed to three parallel maps. Mirrors the Python
- * `normalize_mounts` in `workspace/mounts.py`.
- */
-
 /** What the write verdict needs beyond the mounts themselves. */
 export interface WriteDefaults {
   /** The mode a mount takes when it names none. */
@@ -46,6 +39,12 @@ export interface WriteDefaults {
   caching: boolean
 }
 
+/**
+ * The `mounts` mapping in resolved form: every accepted spelling
+ * (bare VFS, `[VFS, mode]`, `[VFS, mode, commandLimits]`)
+ * narrowed to three parallel maps. Mirrors the Python
+ * `normalize_mounts` in `workspace/mounts.py`.
+ */
 export function normalizeMounts(
   mounts: Record<string, MountSpec>,
   defaultRead: ReadSpec,

@@ -15,9 +15,8 @@
 import { z } from 'zod'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
-import { REDACTED_SECRET } from '../constants.ts'
 import type { ConfigOf, RedactedSchema } from '../secrets.ts'
-import { secretStr } from '../secrets.ts'
+import { REDACTED_SECRET, secretStr } from '../secrets.ts'
 
 // `uri` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `MongoDBConfig` declares.

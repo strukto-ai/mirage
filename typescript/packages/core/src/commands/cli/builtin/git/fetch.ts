@@ -76,9 +76,6 @@ const NO_REMOTE =
   'remote name from which new revisions should be fetched.'
 
 /** One remote ref a fetch takes, and where it lands. */
-
-/** One line of git's fetch summary. */
-
 export function wanted(
   remote: string,
   oid: string,
@@ -90,6 +87,7 @@ export function wanted(
   return { remote, oid, local, force, merge, listed }
 }
 
+/** One line of git's fetch summary. */
 export function row(
   code: string,
   summary: string,

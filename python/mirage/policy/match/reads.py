@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from mirage.policy.types import AdmissionRules
 from mirage.rs.document import units
 from mirage.rs.policy import admission_matcher

@@ -24,7 +24,9 @@ function documentWire(value: unknown): util.JSONType {
   if (Array.isArray(value)) return { list: value.map(documentWire) }
   if (isPlainObject(value)) {
     return {
-      map: Object.entries(value).map(([key, item]) => [documentWire(key), documentWire(item)]),
+      map: Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [documentWire(key), documentWire(item)]),
     }
   }
   return 'invalid'
@@ -56,7 +58,7 @@ export function validateDocument(
   const stream = openStreamSync('document', {
     op,
     raw: documentWire(raw),
-    where_: where,
+    where_: units(where),
     dialect: 'ecmascript',
     ...(options.names === undefined ? {} : { names: options.names }),
     root: units(options.root ?? ''),

@@ -48,6 +48,13 @@ export interface Name {
   icase: boolean
 }
 
+/**
+ * `-path` matches the row as `find` prints it: the mount prefix plus the
+ * entry's key, respelled under the operand as typed (`find . -path
+ * ./skip` prints and matches `./skip`), so `bindTree` stamps all three
+ * onto the node before evaluation and entry keys stay mount-relative
+ * (#396). An empty `root` leaves the row as the display path.
+ */
 export interface Path {
   op: 'path'
   pattern: string
@@ -84,12 +91,36 @@ export interface TrueNode {
   op: 'true'
 }
 
+/**
+ * An action the expression reached (-print, -print0, -ls, -delete,
+ * -exec, -printf): true, like GNU's, and it marks the entry as acted on.
+ * A tree that holds one keeps the entries an action reached rather than
+ * the ones the whole expression held for, which is how `-o`
+ * short-circuits past a `-print` (`-path ./skip -prune -o -type f
+ * -print` never reaches the print for `./skip`). The executor still runs
+ * the action itself, once per kept row, so the parser admits one
+ * distinct action to a tree holding any. GNU's `-exec ... ;` alone is
+ * false when its command fails, which the executor learns only after the
+ * walk, so the parser lets it stand only where nothing follows it;
+ * `batch` marks `-exec ... {} +`, true whatever the command exits.
+ */
 export interface Action {
   op: 'action'
   kind: ActionKind
   batch?: boolean
 }
 
+/**
+ * `-prune`: true, and a directory it reaches loses its contents. Every
+ * backend evaluates the tree entry by entry with no say over its own
+ * walk, and a flat listing meets a child before its parent, so the node
+ * keeps the ledger of pruned directory keys (mount-relative) and
+ * `dropPruned` applies it to what the walk returned; `bindTree` hands
+ * every start point a fresh ledger. A prune reached past a time test the
+ * entry could not answer lands in `pending`; until `settlePrunes`
+ * evaluates the directory again with its mtime, it counts as pruned, the
+ * most a walk without times can say.
+ */
 export interface Prune {
   op: 'prune'
   pruned: string[]

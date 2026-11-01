@@ -218,7 +218,7 @@ export function varsFromDict(
  *
  * The declaration side of the env plane: a bare string is the literal
  * short form (exported, like `varsFromEnv`), a mapping is coerced
- * through `EnvVarSchema`, and a managed entry becomes bash's third
+ * through `EnvVar`, and a managed entry becomes bash's third
  * state -- exported, unset -- carrying the pointer as `ManagedRef`.
  * After this translation the session vars are the only truth the fill
  * step reads.

@@ -137,7 +137,7 @@ export const SecretSource = z.strictObject({
           }
           continue
         }
-        // The restriction lives here, not on `SecretRefSchema`: it is
+        // The restriction lives here, not on `SecretRef`: it is
         // this model's reason, not the pointer's. A source that needs
         // config of its own cannot bootstrap another without a
         // dependency graph, while a mount reads from any declared

@@ -521,8 +521,6 @@ export function buildMountArgs(
   }
 }
 
-/** Builds the VFS a saved mount names, or null when it cannot. */
-
 /**
  * The VFS an override places at a saved mount, with its label. A `Mount`
  * names the entry point it came through. A bare VFS of the saved kind

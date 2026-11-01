@@ -18,8 +18,7 @@ import type { IOConfig } from '../../io/config.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
 import type { Limit, WritePolicy } from '../../types.ts'
-import { REDACTED_SECRET } from '../../vfs/constants.ts'
-import { hasRedactedSecret } from '../../vfs/secrets.ts'
+import { hasRedactedSecret, REDACTED_SECRET } from '../../vfs/secrets.ts'
 import type { Mount } from '../mount/spec.ts'
 
 export interface MountArgs {

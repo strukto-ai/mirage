@@ -34,9 +34,6 @@ import { OTHER_FILESYSTEM, scanOperand, type WalkFn } from './archive/walk.ts'
 // prints exactly this too.
 const NOT_MATCHED = 'name not matched: '
 
-// What zip needs from the mount it runs on: a reader for the archive and
-// each member, and the stat and walk that make a directory archivable.
-
 interface ZipFlags {
   readonly recursive: boolean
   readonly junkPaths: boolean
@@ -67,6 +64,8 @@ function parseFlags(bag: Record<string, FlagValue>): ZipFlags {
 export async function zipGeneric(
   paths: PathSpec[],
   ctx: Context,
+  // What zip needs from the mount it runs on: a reader for the archive and
+  // each member, and the stat and walk that make a directory archivable.
   deps: {
     stream: (p: PathSpec) => AsyncIterable<Uint8Array>
     stat: StatFn

@@ -30,8 +30,6 @@ export interface MontyPoolLike {
   close(): Promise<void>
 }
 
-/** The policy options a `ClassInstance` wrapper takes. */
-
 /**
  * The three pieces `MontyFs` needs from the engine: the decline
  * sentinel, the handle class an `open` answer must be an instance of

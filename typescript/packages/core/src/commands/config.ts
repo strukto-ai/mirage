@@ -1,3 +1,17 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import type { Accessor } from '../accessor/base.ts'
 import { IOResult, type ByteSource, type CommandOutput } from '../io/types.ts'
 import type { EntryGate } from '../policy/types.ts'
@@ -15,20 +29,6 @@ import { compileSpec } from './spec/compile.ts'
 import { OWN_OPTION_LOOP } from './spec/constants.ts'
 import { helpPage, versionLine } from './spec/standard.ts'
 import type { CommandSpec, FlagValue } from './spec/types.ts'
-
-// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
  * Everything a handler gets besides its handle and its operands.

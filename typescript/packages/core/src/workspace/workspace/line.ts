@@ -45,11 +45,6 @@ import { isControlFlowError } from './failure.ts'
 import { commandName } from './utils.ts'
 
 /**
- * What a whole line answers: the runtime's own result plus the
- * refusal record when the boundary's post_execute gate refused it.
- */
-
-/**
  * Hand the raw line to one runtime instead of walking its tree.
  * Mirrors the Python `run_whole_line` in `workspace/line.py`.
  *

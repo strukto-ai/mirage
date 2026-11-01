@@ -61,21 +61,6 @@ from mirage.utils.path import norm
 _DOC = ConfigDict(extra="forbid", frozen=True)
 
 
-def _list(value: Any, where: str, expected: str = "a list") -> tuple[Any, ...]:
-    """A document list, refused before a scalar can be iterated.
-
-    Args:
-        value (Any): the field as written, None when absent.
-        where (str): the field's name, for the message.
-        expected (str): the expected shape named in the message.
-    """
-    if value is None:
-        return ()
-    if not isinstance(value, (list, tuple)):
-        raise ValueError(f"{where} must be {expected}")
-    return tuple(value)
-
-
 def _string_list(
     value: Any, where: str, names: str | None = None
 ) -> tuple[str, ...]:
@@ -140,45 +125,37 @@ def _under_mount(entries: tuple[str, ...], root: str, where: str) -> None:
     validate_document("under", entries, where, root=root)
 
 
-def _rule(entry: Any, where: str, default_reason: str) -> list[CommandRule]:
-    """Coerce one ``deny`` or ``ask`` entry to its CommandRules.
+def _rules(v: Any, where: str) -> Any:
+    """Coerce a ``deny`` or ``ask`` list to its CommandRules.
 
     A bare string is one command pattern over the whole line, with the
     verb's default reason. A mapping carries ``reason`` (defaulting) and
     exactly one of: ``commands`` as a list, a whole-line rule on each
     pattern; ``commands`` as a mapping, each command pattern on its own
-    paths (one command to many paths, one rule per command); ``paths``
-    alone, a path rule on every command. A list of commands beside a
-    list of paths is refused, because it does not say which command the
-    paths belong to, and a rule naming neither is refused rather than
-    read as "every command".
+    paths (one rule per command); ``paths`` alone, a path rule on every
+    command. A list of commands beside a list of paths is refused,
+    because it does not say which command the paths belong to, and a
+    rule naming neither is refused rather than read as "every command".
 
     Args:
-        entry (Any): one entry as written in the document.
-        where (str): ``deny rule`` or ``ask rule``, for the messages.
-        default_reason (str): the verb's reason for a rule stating
-            none.
+        v (Any): the list as written, or compiled rules, which the
+            resolver rebuilds blocks from.
+        where (str): ``deny`` or ``ask``.
     """
-    if isinstance(entry, CommandRule):
-        return [entry]
-    return [
+    if isinstance(v, (list, tuple)) and all(
+        isinstance(entry, CommandRule) for entry in v
+    ):
+        return tuple(v)
+    reason = DEFAULT_ASK_REASON if where == "ask" else DEFAULT_DENY_REASON
+    return tuple(
         CommandRule(
             reason=row["reason"],
             commands=tuple(row.get("commands", ())),
             paths=tuple(row.get("paths", ())),
         )
         for row in validate_document(
-            "rule", entry, where, reason=default_reason
+            "rules", v, f"commands.{where}", reason=reason
         )
-    ]
-
-
-def _rules(v: Any, where: str) -> Any:
-    default = DEFAULT_ASK_REASON if where == "ask" else DEFAULT_DENY_REASON
-    return tuple(
-        rule
-        for entry in _list(v, f"commands.{where}", "a list of rules")
-        for rule in _rule(entry, f"{where} rule", default)
     )
 
 
@@ -186,6 +163,52 @@ def _patterns(v: Any) -> Any:
     if v is None:
         return None
     return _string_list(v, "commands.allow", names="a command")
+
+
+def _compiled(block: Mapping[str, Any]) -> bool:
+    """Whether a ``paths:`` block holds compiled entries, not a document.
+
+    Args:
+        block (Mapping[str, Any]): the block as handed to the model.
+    """
+    return any(
+        isinstance(entry, (ShowEntry, HideReason))
+        for key in ("show", "reasons")
+        if isinstance(block.get(key), (list, tuple))
+        for entry in block[key]
+    )
+
+
+def _paths(raw: Any, where: str) -> dict[str, Any]:
+    """A ``paths:`` document's fields, checked by mirage-rs's rule.
+
+    Reason groups are a spelling of ``hide``: their patterns join the
+    flat list and their reasons land in ``reasons``. Every hide entry is
+    absolute or a name pattern, every show entry absolute.
+
+    Args:
+        raw (Any): the block as written.
+        where (str): the block's name, for the messages.
+    """
+    doc = validate_document("paths", raw, where)
+    return {
+        "hide": tuple(doc["hide"]),
+        "show": tuple(
+            ShowEntry(
+                path=entry["path"],
+                mode=None
+                if entry["mode"] is None
+                else MountMode(entry["mode"]),
+            )
+            for entry in doc.get("show", ())
+        ),
+        "reasons": tuple(
+            HideReason(
+                patterns=tuple(group["patterns"]), reason=group["reason"]
+            )
+            for group in doc.get("reasons", ())
+        ),
+    }
 
 
 class PathsBlock(BaseModel):
@@ -225,122 +248,10 @@ class PathsBlock(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _v_groups(cls, data: Any) -> Any:
-        # Reason groups are a spelling of `hide`, so they are split out
-        # before the field validators read a flat list.
-        if not isinstance(data, Mapping):
+    def _v_document(cls, data: Any) -> Any:
+        if not isinstance(data, Mapping) or _compiled(data):
             return data
-        raw = data.get("hide")
-        if not isinstance(raw, (list, tuple)) or not any(
-            isinstance(e, Mapping) for e in raw
-        ):
-            return data
-        flat: list[Any] = []
-        groups: list[Any] = list(data.get("reasons") or ())
-        for entry in raw:
-            if not isinstance(entry, Mapping):
-                flat.append(entry)
-                continue
-            unknown = sorted(set(entry) - {"patterns", "reason"})
-            if unknown:
-                raise ValueError(
-                    "paths.hide group has unknown field(s): "
-                    + ", ".join(str(u) for u in unknown)
-                )
-            patterns = _string_list(
-                entry.get("patterns"),
-                "paths.hide group patterns",
-                names="a path",
-            )
-            if not patterns:
-                raise ValueError(
-                    "paths.hide group must list at least one pattern"
-                )
-            reason = entry.get("reason")
-            if not isinstance(reason, str) or not reason.split():
-                raise ValueError(
-                    "paths.hide group reason must be a non-empty string"
-                )
-            flat.extend(patterns)
-            groups.append(HideReason(patterns=patterns, reason=reason))
-        out = dict(data)
-        out["hide"] = flat
-        out["reasons"] = tuple(groups)
-        return out
-
-    @field_validator("hide", mode="before")
-    @classmethod
-    def _v_hide(cls, v: Any) -> Any:
-        return _string_list(v, "paths.hide", names="a path")
-
-    @field_validator("show", mode="before")
-    @classmethod
-    def _v_show(cls, v: Any) -> Any:
-        if v is None:
-            return ()
-        if isinstance(v, Mapping):
-            pairs = list(v.items())
-        elif isinstance(v, (list, tuple)):
-            pairs = []
-            for entry in v:
-                if isinstance(entry, ShowEntry):
-                    pairs.append((entry.path, entry.mode))
-                elif isinstance(entry, (list, tuple)) and len(entry) == 2:
-                    pairs.append((entry[0], entry[1]))
-                else:
-                    pairs.append((entry, None))
-        else:
-            raise ValueError(
-                "paths.show must be a mapping of path to mode "
-                "or a list of paths"
-            )
-        entries = []
-        for path, mode in pairs:
-            if not isinstance(path, str) or not path.split():
-                raise ValueError("paths.show entries must name a path")
-            if not path.startswith("/"):
-                raise ValueError(
-                    "paths.show entries anchor to a place, so "
-                    f"each is absolute: {path!r} is not"
-                )
-            parsed: MountMode | None = None
-            if mode is not None:
-                if isinstance(mode, MountMode):
-                    parsed = mode
-                elif isinstance(mode, str):
-                    parsed = parse_mount_mode(mode)
-                else:
-                    raise ValueError(
-                        "paths.show modes must be a mode name or alias"
-                    )
-            entries.append(ShowEntry(path=path, mode=parsed))
-        return tuple(entries)
-
-    @field_validator("reasons", mode="before")
-    @classmethod
-    def _v_reasons(cls, v: Any) -> Any:
-        entries = _list(v, "paths.reasons", "a list of groups")
-        out = []
-        for entry in entries:
-            if isinstance(entry, HideReason):
-                out.append(entry)
-                continue
-            if not isinstance(entry, Mapping):
-                raise ValueError(
-                    "paths.reasons entries must be groups of "
-                    "patterns and a reason"
-                )
-            out.append(
-                HideReason(
-                    patterns=_string_list(
-                        entry.get("patterns"),
-                        "paths.reasons patterns",
-                        names="a path",
-                    ),
-                    reason=str(entry.get("reason", "")),
-                )
-            )
-        return tuple(out)
+        return _paths(data, "paths")
 
 
 class VarsBlock(BaseModel):
@@ -710,21 +621,26 @@ class SessionProfile(BaseModel):
         for prefix, entry in v.items():
             if not isinstance(prefix, str):
                 raise ValueError("mounts keys must be strings")
-            entries[norm(prefix)] = (
-                {"mode": entry} if isinstance(entry, str) else entry
-            )
+            root = norm(prefix)
+            if isinstance(entry, str):
+                entry = {"mode": entry}
+            elif isinstance(entry, Mapping) and isinstance(
+                entry.get("paths"), Mapping
+            ):
+                entry = {
+                    **entry,
+                    "paths": _paths(entry["paths"], f"mounts[{root}].paths"),
+                }
+            entries[root] = entry
         return entries
 
     @model_validator(mode="after")
     def _v_absolute(self) -> "SessionProfile":
-        # `commands` checks its own rule paths (CommandsBlock), so only
-        # the hides and the mount sections are left to this one.
-        if self.paths is not None:
-            _absolute_paths(self.paths.hide, "paths.hide")
+        # `commands` checks its own rule paths (CommandsBlock) and `paths`
+        # its own entries, so only the mount boundaries are left to this one.
         for prefix, entry in (self.mounts or {}).items():
             where = f"mounts[{prefix}]"
             if entry.paths is not None:
-                _absolute_paths(entry.paths.hide, f"{where}.paths.hide")
                 _under_mount(entry.paths.hide, prefix, f"{where}.paths.hide")
                 _under_mount(
                     tuple(e.path for e in entry.paths.show),

@@ -28,8 +28,6 @@ import { ScriptSource } from '../../runtime/types.ts'
 import type { SecretRef } from '../../secrets/config.ts'
 import { snakeToCamel } from '../../utils/normalize.ts'
 
-/** A compiled command tier as the session record stores it (the Python spelling). */
-
 export interface RuleJSON {
   reason: string
   commands?: string[]

@@ -34,11 +34,6 @@ import { extractDest } from '../archive/extract.ts'
 import type { DirProbe, WalkFn } from '../archive/walk.ts'
 import { checkDirectories, planCreate } from './create.ts'
 
-// What tar needs from the mount it runs on. `stat` and `walk` are what
-// make a directory operand archivable at all; `isDir` answers on two
-// channels so a prefix-store directory (no object of its own) is not
-// mistaken for an absent one.
-
 function makePathSpec(virtual: string, prefix: string, operand?: PathSpec): PathSpec {
   return new PathSpec({
     virtual,
@@ -117,6 +112,10 @@ export async function tarGeneric(
   paths: PathSpec[],
   texts: readonly string[],
   ctx: Context,
+  // What tar needs from the mount it runs on. `stat` and `walk` are what
+  // make a directory operand archivable at all; `isDir` answers on two
+  // channels so a prefix-store directory (no object of its own) is not
+  // mistaken for an absent one.
   deps: {
     stream: (p: PathSpec) => AsyncIterable<Uint8Array>
     stat: StatFn

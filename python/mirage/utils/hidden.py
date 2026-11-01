@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from collections.abc import Iterable, Mapping, Sequence
 
 from mirage.rs.document import from_units, units

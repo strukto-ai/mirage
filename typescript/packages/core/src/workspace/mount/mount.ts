@@ -758,7 +758,7 @@ export class MountEntry {
     access?: SessionAccess,
   ): void {
     const mark = declared(this.vfs.constructor, name)
-    if (mark === null || !WRITE_EFFECTS.some((writeEffect) => writeEffect === mark.effect)) return
+    if (mark === null || !WRITE_EFFECTS.includes(mark.effect)) return
     const others = values.filter((value): value is PathSpec => value instanceof PathSpec)
     requirePathsWritable(
       mark.effect === Effect.COPY ? others : [path, ...others],

@@ -35,7 +35,7 @@ describe('MongoDBConfig', () => {
   })
 })
 
-describe('MongoDBConfigSchema parsing', () => {
+describe('MongoDBConfig parsing', () => {
   it('translates snake_case YAML keys to camelCase', () => {
     const out = parseConfigWithSchema(MongoDBConfig, {
       uri: 'mongodb://h',

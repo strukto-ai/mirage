@@ -21,7 +21,6 @@ import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { RedactedSchema } from '../secrets.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 
 export const VFS_MD = `{prefix}
@@ -147,10 +146,6 @@ export class SharePointVFS extends BaseVFS {
   }
 
   override getState(): ConfigState<RedactedSchema<typeof SharePointConfig>> {
-    const config: RedactedSchema<typeof SharePointConfig> = redactConfigWithSchema(
-      SharePointConfig,
-      this.config,
-    ) as RedactedSchema<typeof SharePointConfig>
-    return { type: this.name, config }
+    return this.configState(SharePointConfig, this.config)
   }
 }

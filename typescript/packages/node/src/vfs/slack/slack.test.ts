@@ -110,7 +110,7 @@ describe('SlackVFS (node)', () => {
   })
 })
 
-describe('SlackConfigSchema redaction (node)', () => {
+describe('SlackConfig redaction (node)', () => {
   it('redacts only declared fields, drops nothing else', () => {
     expect(redactConfigWithSchema(SlackConfig, { token: 'a' })).toEqual({
       token: '<REDACTED>',
@@ -122,7 +122,7 @@ describe('SlackConfigSchema redaction (node)', () => {
   })
 })
 
-describe('SlackConfigSchema parsing', () => {
+describe('SlackConfig parsing', () => {
   it('renames search_token to searchToken', () => {
     expect(parseConfigWithSchema(SlackConfig, { token: 'a', search_token: 'b' })).toEqual({
       token: 'a',

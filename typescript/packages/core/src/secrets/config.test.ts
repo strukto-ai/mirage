@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { EnvVar, SecretSource } from './config.ts'
 
-describe('EnvVarSchema', () => {
+describe('EnvVar', () => {
   it('parses a literal entry with defaults', () => {
     const entry = EnvVar.parse({ value: 'vi' })
     expect(entry.value).toBe('vi')
@@ -60,7 +60,7 @@ describe('EnvVarSchema', () => {
   })
 })
 
-describe('SecretSourceSchema', () => {
+describe('SecretSource', () => {
   it('keeps a __proto__ config key as an own property', () => {
     // Keyed assignment would run the prototype setter and the key
     // would never reach the source's own model; python's dict passes

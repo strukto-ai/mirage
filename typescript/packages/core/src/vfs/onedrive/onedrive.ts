@@ -23,7 +23,6 @@ import type { CapacityResult, DirListing, FileStat, PathSpec } from '../../types
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { RedactedSchema } from '../secrets.ts'
-import { redactConfigWithSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 
 export class OneDriveVFS extends BaseVFS {
@@ -145,10 +144,6 @@ export class OneDriveVFS extends BaseVFS {
   }
 
   override getState(): ConfigState<RedactedSchema<typeof OneDriveConfig>> {
-    const config: RedactedSchema<typeof OneDriveConfig> = redactConfigWithSchema(
-      OneDriveConfig,
-      this.config,
-    ) as RedactedSchema<typeof OneDriveConfig>
-    return { type: this.name, config }
+    return this.configState(OneDriveConfig, this.config)
   }
 }

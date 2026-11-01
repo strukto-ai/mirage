@@ -129,7 +129,7 @@ describe('TrelloVFS', () => {
   })
 })
 
-describe('TrelloConfigSchema redaction', () => {
+describe('TrelloConfig redaction', () => {
   it('redacts apiKey/apiToken, keeps workspace metadata', () => {
     expect(redactConfigWithSchema(TrelloConfig, { apiKey: 'k', apiToken: 't' })).toEqual({
       apiKey: '<REDACTED>',

@@ -600,7 +600,7 @@ def test_a_show_entry_is_absolute_or_refused(entry):
 def test_a_show_mode_must_be_a_mode_name_or_alias():
     with pytest.raises(ValidationError, match="mode name or alias"):
         SessionProfile.model_validate({"paths": {"show": {"/repo/public": 7}}})
-    with pytest.raises(ValidationError, match="not a valid MountMode"):
+    with pytest.raises(ValidationError, match="invalid mount mode: .admin."):
         SessionProfile.model_validate(
             {"paths": {"show": {"/repo/public": "admin"}}}
         )
@@ -3327,3 +3327,23 @@ def test_the_old_script_and_runtime_keys_are_told_where_they_went():
 def test_explicit_null_reason_is_refused():
     with pytest.raises(ValueError, match="reason must be a string"):
         CommandsBlock(deny=[{"commands": ["rm"], "reason": None}])
+
+
+def test_a_reason_group_needs_its_reason_wherever_it_is_written():
+    for paths in (
+        {"reasons": [{"patterns": ["/a"]}]},
+        {"hide": [{"patterns": ["/a"]}]},
+    ):
+        with pytest.raises(
+            ValidationError, match="reason must be a non-empty"
+        ):
+            SessionProfile.model_validate({"paths": paths})
+
+
+def test_a_mount_section_names_itself_in_a_paths_refusal():
+    with pytest.raises(
+        ValidationError, match=re.escape("mounts[/r].paths.hide[0] must be")
+    ):
+        SessionProfile.model_validate(
+            {"mounts": {"/r": {"paths": {"hide": ["x"]}}}}
+        )

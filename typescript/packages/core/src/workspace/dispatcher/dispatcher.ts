@@ -1960,7 +1960,7 @@ export class Dispatcher {
     // A function the VFS declares a write is judged as one, whatever its
     // name: the POSIX names are known here, a custom one only to the VFS
     // that defines it.
-    call.write = call.write || WRITE_EFFECTS.some((writeEffect) => writeEffect === mark.effect)
+    call.write = call.write || WRITE_EFFECTS.includes(mark.effect)
     const gate = call.ruleGate === null ? {} : { gate: call.ruleGate }
     // A file copy reads its source, whatever the backend does with it, so the
     // source is admitted as the read a policy judges reads by.
@@ -3228,7 +3228,7 @@ export class Dispatcher {
   ): Promise<unknown> {
     const mount = this.namespace.mountFor(spec.virtual)
     const mark = declared(vfs.constructor, name) ?? CALLS.get(name) ?? null
-    const write = mark !== null && WRITE_EFFECTS.some((writeEffect) => writeEffect === mark.effect)
+    const write = mark !== null && WRITE_EFFECTS.includes(mark.effect)
     const boundary = new Boundary(
       this.policies,
       mountPrefix,

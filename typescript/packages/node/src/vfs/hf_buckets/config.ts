@@ -82,7 +82,7 @@ export function redactHfBucketsConfig(
   return redactConfigWithSchema(HfBucketsConfig, {
     ...config,
     endpoint: config.endpoint ?? HF_ENDPOINT,
-  }) as unknown as RedactedSchema<typeof HfBucketsConfig>
+  })
 }
 
 export function normalizeHfBucketsConfig(input: Record<string, unknown>): HfBucketsConfig {
@@ -147,7 +147,7 @@ export function redactHfRepoConfig(config: HfRepoConfig): RedactedSchema<typeof 
   return redactConfigWithSchema(HfRepoConfig, {
     ...config,
     endpoint: config.endpoint ?? HF_ENDPOINT,
-  }) as unknown as RedactedSchema<typeof HfRepoConfig>
+  })
 }
 
 export function normalizeHfRepoConfig(input: Record<string, unknown>): HfRepoConfig {

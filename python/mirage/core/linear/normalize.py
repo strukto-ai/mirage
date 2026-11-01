@@ -200,4 +200,6 @@ def normalize_cycle(cycle: dict[str, Any], *, team_id: str) -> dict[str, Any]:
     }
 
 
+# The fields of an issue's JSON Linear's issue search reads; every other
+# field is checked against the listing instead (``unsearched_text``).
 SEARCHED_FIELDS = ("title", "description")

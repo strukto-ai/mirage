@@ -29,6 +29,9 @@ def team_dirname(team: dict[str, Any]) -> str:
             parts.append(sanitized_name)
     if not parts:
         parts.append("team")
+    # fit_id_name rather than make_id_name: the parts are already
+    # sanitized and joined with the separator, and re-sanitizing would
+    # collapse that `__` to `_`.
     return fit_id_name(SEPARATOR.join(parts), require_id(team))
 
 

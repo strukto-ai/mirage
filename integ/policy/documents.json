@@ -96,15 +96,17 @@
     },
     {
       "id": "null_is_not_a_reason",
-      "op": "rule",
-      "where": "commands.deny[0]",
-      "value": {
-        "commands": [
-          "rm"
-        ],
-        "reason": null
-      },
-      "error": ".reason must be a string"
+      "op": "rules",
+      "where": "commands.deny",
+      "value": [
+        {
+          "commands": [
+            "rm"
+          ],
+          "reason": null
+        }
+      ],
+      "error": "commands.deny[0].reason must be a string"
     },
     {
       "id": "blank_command_is_refused",
@@ -117,17 +119,19 @@
     },
     {
       "id": "ambiguous_command_path_lists_are_refused",
-      "op": "rule",
-      "where": "deny",
-      "value": {
-        "commands": [
-          "rm"
-        ],
-        "paths": [
-          "/x"
-        ]
-      },
-      "error": "map each command to its paths"
+      "op": "rules",
+      "where": "commands.deny",
+      "value": [
+        {
+          "commands": [
+            "rm"
+          ],
+          "paths": [
+            "/x"
+          ]
+        }
+      ],
+      "error": "commands.deny[0] lists commands beside paths"
     },
     {
       "id": "mount_boundary_is_a_component",

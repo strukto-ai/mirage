@@ -14,9 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { countScopeFiles, scopeBlobs, searchSafe, unsearchableKeys } from './pushdown.ts'
-import type { makeTreeEntry } from './tree_entry.ts'
+import type { TreeEntry } from './tree_entry.ts'
 
-const TREE: Record<string, ReturnType<typeof makeTreeEntry>> = {
+const TREE: Record<string, TreeEntry> = {
   docs: { path: 'docs', type: 'tree', sha: 's1', size: null },
   'docs/a.md': { path: 'docs/a.md', type: 'blob', sha: 's2', size: 100 },
   'docs/b.md': { path: 'docs/b.md', type: 'blob', sha: 's3', size: 50 },
@@ -100,13 +100,13 @@ describe('searchSafe', () => {
 describe('unsearchableKeys', () => {
   it('lists what code search never indexes', () => {
     const limit = 384 * 1024
-    const blob = (path: string, size: number | null): ReturnType<typeof makeTreeEntry> => ({
+    const blob = (path: string, size: number | null): TreeEntry => ({
       path,
       type: 'blob',
       sha: path,
       size,
     })
-    const tree: Record<string, ReturnType<typeof makeTreeEntry>> = {
+    const tree: Record<string, TreeEntry> = {
       src: { path: 'src', type: 'tree', sha: 't', size: null },
       'src/big.bin': blob('src/big.bin', limit),
       'src/edge.py': blob('src/edge.py', limit - 1),

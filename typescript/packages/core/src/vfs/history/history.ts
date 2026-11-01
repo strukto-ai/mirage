@@ -29,7 +29,6 @@ export const HISTORY_PREFIX = '/.bash_history'
  * views from the workspace's hidden recorder on every read; holds no
  * storage of its own.
  */
-
 export class HistoryViewVFS extends BaseVFS {
   override readonly name = VFSName.HISTORY
   override readonly cachesReads = false

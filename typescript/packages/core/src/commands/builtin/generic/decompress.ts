@@ -127,8 +127,6 @@ export interface GzipInput {
   link: string | null
 }
 
-/** Takes a failure's line, exit code and whether it is a warning. */
-
 /**
  * Open one operand the way gzip 1.13 opens it.
  *
@@ -144,6 +142,7 @@ export interface GzipInput {
 export async function openGzipInput(
   path: PathSpec,
   source: (p: PathSpec) => AsyncIterable<Uint8Array>,
+  /** Takes a failure's line, exit code and whether it is a warning. */
   report: (line: string, code: number, warning: boolean) => void,
   options: {
     suffix?: string

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import asyncio
 import logging
 import os
@@ -60,13 +59,13 @@ from mirage.utils.clock import ManualClock
 from mirage.utils.loader import SCRIPT_MODULE_NAME, load_backend_class
 from mirage.utils.ranges import slice_window
 from mirage.vfs import registry as vfs_registry
-from mirage.vfs.constants import REDACTED_SECRET
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.errors import VFSConfigError
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs, register_vfs
 from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.secrets import REDACTED_SECRET
 from mirage.vfs.slack import SlackConfig, SlackVFS
 from mirage.workspace.snapshot.keys import (
     CacheKey,

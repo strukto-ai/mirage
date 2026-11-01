@@ -105,4 +105,6 @@ def normalize_comment(
     }
 
 
+# The fields of a card's JSON Trello's search reads; every other field is
+# checked against the listing instead (``unsearched_text``).
 SEARCHED_FIELDS = ("card_name", "desc")

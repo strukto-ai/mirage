@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -24,8 +23,7 @@ from mirage.io.memory import MAX_MEMORY
 from mirage.io.network import NetworkSetting
 from mirage.policy.profile import SessionProfile
 from mirage.types import Limit, WritePolicy
-from mirage.vfs.constants import REDACTED_SECRET
-from mirage.vfs.secrets import has_redacted_secret
+from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
 
 
 @dataclass

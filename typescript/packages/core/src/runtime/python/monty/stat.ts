@@ -24,11 +24,6 @@ const DIR_LINKS = 2
 const FILE_LINKS = 1
 
 /**
- * The fields of the guest's `os.stat_result`, spelled the way CPython
- * spells them because the guest reads them by those names.
- */
-
-/**
  * The row's type bits, the one rule every answer derived from a mode
  * reads.
  *
@@ -70,6 +65,10 @@ export function isDirRow(st: VFSStat): boolean {
  *
  * Args:
  *   st: the mount's row for the path.
+ */
+/**
+ * The fields of the guest's `os.stat_result`, spelled the way CPython
+ * spells them because the guest reads them by those names.
  */
 export function statFields(st: VFSStat) {
   const type = fileType(st)

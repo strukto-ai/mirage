@@ -24,11 +24,6 @@ import { timeoutShape } from '../api/config.ts'
 // Mirrors python's `access_token: SecretStr | Callable[[], str | SecretStr]`.
 export type GoogleAccessTokenProvider = () => string | Promise<string>
 
-// Caller-supplied refresh strategy. When provided, TokenManager delegates
-// token refresh to this callback instead of calling Google's token endpoint
-// directly. Useful when the client_secret must stay on a backend (e.g. a
-// Vercel function proxy).
-
 export const GOOGLE_CREDENTIAL_ERROR =
   'GoogleConfig needs either accessToken (a token or a provider callable) or both clientId and refreshToken'
 
@@ -81,6 +76,10 @@ export const GoogleConfig = z
     // Declared here rather than on a CLI-only extension: parse strips what
     // the schema does not name, and marking it secret is what keeps a
     // callback out of snapshot state.
+    // Caller-supplied refresh strategy. When provided, TokenManager delegates
+    // token refresh to this callback instead of calling Google's token endpoint
+    // directly. Useful when the client_secret must stay on a backend (e.g. a
+    // Vercel function proxy).
     refreshFn: secretSchema(
       z.custom<(refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>>(
         (value) => typeof value === 'function',
