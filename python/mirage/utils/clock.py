@@ -180,8 +180,12 @@ class ShiftedClock:
 
 # An ISO 8601 instant with an offset: `2026-03-02T09:00:00Z`, `+08:00`.
 _INSTANT = re.compile(
-    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:[0-5]\d)"
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:[0-5]\d)",
+    re.ASCII,
 )
+# 2262-01-01T00:00:00Z, the first second a guest's nanosecond clock cannot
+# hold.
+_SYSTEM_TIME_END = 9214646400
 
 
 def parse_system_time(text: str) -> float:
@@ -196,25 +200,23 @@ def parse_system_time(text: str) -> float:
     Raises:
         ValueError: it is not one.
     """
-    if isinstance(text, str) and _INSTANT.fullmatch(text):
-        try:
-            # Milliseconds kept, as TypeScript's Date keeps them.
-            whole, dot, rest = text.partition(".")
-            if dot:
-                digits = len(rest) - len(rest.lstrip("0123456789"))
-                rest = rest[:digits][:3].ljust(3, "0") + rest[digits:]
-            moment = datetime.fromisoformat(
-                (whole + dot + rest).replace("Z", "+00:00")
-            )
-            seconds = moment.astimezone(timezone.utc).timestamp()
-            if 0 <= seconds < 9214646400:
-                return seconds
-        except ValueError:
-            pass
-    raise ValueError(
+    refused = ValueError(
         f"system_time {text!r} is not an ISO 8601 instant with an offset "
         "from 1970 through 2261, as 2026-03-02T09:00:00Z"
     )
+    if not _INSTANT.fullmatch(text):
+        raise refused
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise refused from exc
+    # Milliseconds kept, as TypeScript's Date keeps them.
+    seconds = moment.replace(
+        microsecond=moment.microsecond // 1000 * 1000
+    ).timestamp()
+    if not 0 <= seconds < _SYSTEM_TIME_END:
+        raise refused
+    return seconds
 
 
 # The system clock of the workspace a line or an op runs in: what `date`,

@@ -47,7 +47,7 @@ async def test_system_time_starts_date_file_times_and_jq():
         assert await _out(ws, "TZ=Asia/Shanghai date +%H:%M") == "17:00\n"
         assert await _out(ws, "date -u -d tomorrow +%F") == "2026-03-03\n"
         await ws.shell("touch /data/a")
-        # ls shows the time of a file stamped before now, as GNU's does.
+        # ls shows the time, not the year, of a file stamped before now.
         clock.advance(60)
         assert " Mar  2 09:00 a\n" in await _out(ws, "ls -l /data")
         assert await _out(ws, "find /data -mtime -1") == "/data/a\n"

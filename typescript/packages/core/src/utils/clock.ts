@@ -137,6 +137,9 @@ export class ShiftedClock implements Clock {
 // An ISO 8601 instant with an offset: `2026-03-02T09:00:00Z`, `+08:00`.
 const INSTANT =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|([+-])(\d{2}):([0-5]\d))$/
+// 2262-01-01T00:00:00Z, the first second a guest's nanosecond clock cannot
+// hold.
+const SYSTEM_TIME_END = 9214646400
 
 /**
  * Seconds since the unix epoch a `system_time` names: an ISO 8601 instant
@@ -171,7 +174,7 @@ export function parseSystemTime(text: string): number {
       seconds = (at - offset * 60_000) / 1000
     }
   }
-  if (!(seconds >= 0 && seconds < 9214646400)) {
+  if (!(seconds >= 0 && seconds < SYSTEM_TIME_END)) {
     throw new Error(
       `system_time ${JSON.stringify(text)} is not an ISO 8601 instant with an offset from 1970 through 2261, as 2026-03-02T09:00:00Z`,
     )
