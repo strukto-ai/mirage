@@ -173,7 +173,7 @@ claude-managed-agents = [
 
 # --- sandboxes ---
 daytona     = [
-    "daytona>=0.176.0",
+    "daytona>=0.227.0",
 ]
 
 # --- meta: install everything ---
@@ -232,7 +232,7 @@ mem0 = [
     "mem0ai>=2.0.18",
 ]
 e2b = [
-    "e2b>=2.35.0",
+    "e2b>=2.62.0",
 ]
 
 [tool.uv]
