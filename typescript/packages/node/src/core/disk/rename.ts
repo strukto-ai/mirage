@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { rename as fsRename } from 'node:fs/promises'
+import { rename as fsRename, stat as fsStat } from 'node:fs/promises'
 
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { resolveInside } from './utils.ts'
@@ -22,6 +24,7 @@ import { resolveInside } from './utils.ts'
 export async function rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = await resolveInside(accessor.root, src)
   const d = await resolveInside(accessor.root, dst)
+  const timer = startOp()
   try {
     await fsRename(s, d)
   } catch (err) {
@@ -30,4 +33,13 @@ export async function rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpe
     }
     throw err
   }
+  // Named as the object stores name it: a moved directory took its
+  // subtree, which only "rename_prefix" retracts.
+  const moved = await fsStat(d).then(
+    (st) => st.isDirectory(),
+    () => false,
+  )
+  const op = moved ? 'rename_prefix' : 'rename'
+  record(op, src.virtual, VFSName.DISK, 0, timer)
+  record(op, dst.virtual, VFSName.DISK, 0, timer)
 }

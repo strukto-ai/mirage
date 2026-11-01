@@ -21,6 +21,7 @@ import aiofiles.os
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_error
 from mirage.core.disk.utils import resolve_inside
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -30,6 +31,7 @@ async def copy(
     root = accessor.root
     s = await resolve_inside(root, src_spec)
     d = await resolve_inside(root, dst_spec)
+    timer = start_op()
     try:
         await asyncio.to_thread(shutil.copyfile, s, d)
         await asyncio.to_thread(shutil.copystat, s, d)
@@ -43,3 +45,4 @@ async def copy(
         ) and not await aiofiles.os.access(s, os.R_OK)
         spec = src_spec if blame_src else dst_spec
         raise disk_error(exc, spec.virtual) from exc
+    record("copy", dst_spec.virtual, "disk", 0, timer)

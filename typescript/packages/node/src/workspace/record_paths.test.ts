@@ -137,10 +137,24 @@ describe('record paths name the virtual path (node backends)', () => {
     const root = mkdtempSync(join(tmpdir(), 'mirage-record-paths-'))
     mkdirSync(join(root, 'm'))
     try {
+      // disk records the rows s3 does for cp, mv, rm, rmdir and rm -r.
       expect(await ledger(new DiskVFS({ root }), null)).toEqual([
-        ...NATIVE_APPEND.slice(0, 1),
+        ['write', K],
         ['append', K],
-        ...NATIVE_APPEND.slice(1),
+        ['append', K],
+        ['append', K],
+        ['write', NEW],
+        ['truncate', NEW],
+        ['read', K],
+        ['read', K],
+        ['copy', '/m/m/k2.txt'],
+        ['rename', NEW],
+        ['rename', '/m/m/moved.txt'],
+        ['unlink', '/m/m/moved.txt'],
+        ['rmdir', '/m/m/e'],
+        ['write', '/m/m/d/f'],
+        ['rm_r', '/m/m/d'],
+        ...GENERIC_OUT,
         ['create', C],
         ['append', C],
       ])
