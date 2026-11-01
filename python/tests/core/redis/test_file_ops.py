@@ -288,6 +288,43 @@ async def test_a_directory_made_again_during_a_removal_keeps_its_metadata(
 
 
 @pytest.mark.asyncio
+async def test_a_directory_removed_after_the_final_listing_stays_removed(
+    accessor,
+):
+    # The repair rebuilds only the directories a leftover key needs: one
+    # another client removed after the final listing stays removed.
+    store = accessor.store
+    await store.add_dir("/dir/sub")
+    inner_remove, inner_list = store.remove_dir, store.list_dirs
+    lists = 0
+
+    async def racing_remove(key: str) -> None:
+        await inner_remove(key)
+        if key == "/dir/sub":
+            store.remove_dir = inner_remove
+            await store.add_dir("/dir/sub")
+
+    async def racing_list() -> set[str]:
+        nonlocal lists
+        lists += 1
+        dirs = await inner_list()
+        if lists == 2:
+            store.list_dirs = inner_list
+            await inner_remove("/dir/sub")
+        return dirs
+
+    store.remove_dir = racing_remove
+    store.list_dirs = racing_list
+    with pytest.raises(OSError) as excinfo:
+        await rm_r(
+            accessor,
+            PathSpec(vfs_path="dir", virtual="/dir", directory="/dir"),
+        )
+    assert excinfo.value.errno == errno.ENOTEMPTY
+    assert not await store.has_dir("/dir/sub")
+
+
+@pytest.mark.asyncio
 async def test_rmdir_not_found(mk_store):
     a = await mk_store("test:fops:rd2:")
     with pytest.raises(FileNotFoundError):
