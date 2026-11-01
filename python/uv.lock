@@ -2864,7 +2864,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
     { name = "aiohttp", specifier = ">=3.14.4" },
     { name = "aiosmtplib", marker = "extra == 'email'", specifier = ">=5.1.0" },
-    { name = "anthropic", marker = "extra == 'claude-managed-agents'", specifier = ">=2.3.0" },
+    { name = "anthropic", marker = "extra == 'claude-managed-agents'", specifier = ">=0.122.0" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30.0" },
     { name = "asyncssh", marker = "extra == 'ssh'", specifier = ">=2.23.0" },
     { name = "botocore", marker = "extra == 'aws-sm'", specifier = ">=1.40.61" },
