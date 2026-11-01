@@ -149,6 +149,56 @@ describe('RemoteSandbox', () => {
     }
   })
 
+  it('asks each sandbox once, shares a probe in flight and asks again after a failure', async () => {
+    // Each key is its own sandbox; `answers` is what its probes exit with, in turn.
+    class KeyedBox extends RecordingSandbox {
+      key = 'a'
+      readonly answers: number[] = [1, 0]
+      readonly probes: string[] = []
+
+      constructor() {
+        super({ captures: ['python3'] })
+      }
+
+      protected override sandboxKey(): string {
+        return this.key
+      }
+
+      override async execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        if (line !== faketimeProbe()) return super.execLine(line, stdin, env, cwd)
+        this.probes.push(this.key)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        const exitCode = this.answers.shift() ?? 0
+        return {
+          stdout: ENC.encode('/usr/lib/faketime/libfaketime.so.1\n'),
+          stderr: null,
+          exitCode,
+        }
+      }
+    }
+    const box = new KeyedBox()
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'], systemTime: '2026-03-02T09:00:00Z' },
+    )
+    try {
+      await ws.shell('python3 a')
+      expect(box.execs.at(-1)?.[2]).not.toHaveProperty('FAKETIME')
+      await Promise.all([ws.shell('python3 b'), ws.shell('python3 c')])
+      expect(box.execs.at(-1)?.[2]).toHaveProperty('FAKETIME')
+      box.key = 'b'
+      await ws.shell('python3 d')
+      expect(box.probes).toEqual(['a', 'a', 'b'])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('connects on the first line only', async () => {
     const box = new RecordingSandbox({ captures: ['python3'] })
     const ws = sandboxWorkspace(box)

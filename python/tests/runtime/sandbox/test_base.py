@@ -448,3 +448,52 @@ async def test_a_program_gets_the_system_time_through_the_sandboxs_libfaketime(
             assert "FAKETIME" not in env
     finally:
         await ws.close()
+
+
+class KeyedBox(RecordingSandbox):
+    """Each key is its own sandbox; ``answers`` is what its probes exit
+    with, in turn."""
+
+    def __init__(self) -> None:
+        super().__init__(captures=("python3",))
+        self.key = "a"
+        self.answers = [1, 0]
+        self.probes: list[str] = []
+
+    def _sandbox_key(self) -> str:
+        return self.key
+
+    async def exec_line(
+        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    ) -> RunResult:
+        if line != faketime_probe():
+            return await super().exec_line(line, stdin, env, cwd)
+        self.probes.append(self.key)
+        await asyncio.sleep(0.01)
+        exit_code = self.answers.pop(0) if self.answers else 0
+        return RunResult(
+            stdout=b"/usr/lib/faketime/libfaketime.so.1\n",
+            stderr=None,
+            exit_code=exit_code,
+        )
+
+
+@pytest.mark.asyncio
+async def test_each_sandbox_is_asked_once_and_again_after_a_failed_probe():
+    box = KeyedBox()
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[box, "workspace"],
+        system_time="2026-03-02T09:00:00Z",
+    )
+    try:
+        await ws.shell("python3 a")
+        assert "FAKETIME" not in box.exec_envs[-1]
+        await asyncio.gather(ws.shell("python3 b"), ws.shell("python3 c"))
+        assert "FAKETIME" in box.exec_envs[-1]
+        box.key = "b"
+        await ws.shell("python3 d")
+        assert box.probes == ["a", "a", "b"]
+    finally:
+        await ws.close()

@@ -93,10 +93,12 @@ class RemoteSandbox(
         self._connected = False
         self._connect_lock = asyncio.Lock()
         self._mounts: SandboxMounts | None = None
-        # The libfaketime this sandbox holds, asked once the first program
-        # runs under a system_time: None for none.
-        self._faketime: str | None = None
-        self._faketime_probed = False
+        # The libfaketime each sandbox holds (_sandbox_key), asked once the
+        # first program runs there under a system_time: None for none. The
+        # lock lets concurrent first runs share one probe; a failed probe
+        # is not kept, so a later run asks again.
+        self._faketime: dict[str, str | None] = {}
+        self._faketime_lock = asyncio.Lock()
         check_mount_type(self.name, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -301,20 +303,45 @@ class RemoteSandbox(
         """
         if bound_system_clock() is None:
             return {}
-        if not self._faketime_probed:
-            found = await self.exec_line(
-                faketime_probe(), None, dict(self.config.env), "/"
-            )
-            self._faketime = found.stdout.decode().strip() or None
-            self._faketime_probed = True
-            if self._faketime is None:
-                logger.debug(
-                    "%s: no libfaketime, so programs run on its clock",
-                    self.name,
-                )
-        if self._faketime is None:
-            return {}
-        return faketime_env(self._faketime, env)
+        key = self._sandbox_key()
+        async with self._faketime_lock:
+            if key not in self._faketime:
+                try:
+                    found = await self.exec_line(
+                        faketime_probe(), None, dict(self.config.env), "/"
+                    )
+                except Exception:
+                    found = None
+                    logger.debug(
+                        "%s: libfaketime probe failed",
+                        self.name,
+                        exc_info=True,
+                    )
+                if found is None or found.exit_code != 0:
+                    # Unanswered: this run keeps the sandbox's clock, and
+                    # a later one asks again.
+                    if found is not None:
+                        logger.debug(
+                            "%s: libfaketime probe exited %d",
+                            self.name,
+                            found.exit_code,
+                        )
+                    return {}
+                self._faketime[key] = found.stdout.decode().strip() or None
+                if self._faketime[key] is None:
+                    logger.debug(
+                        "%s: no libfaketime, so programs run on its clock",
+                        self.name,
+                    )
+        library = self._faketime[key]
+        return {} if library is None else faketime_env(library, env)
+
+    def _sandbox_key(self) -> str:
+        """Which sandbox a run of the current session goes to, which the
+        libfaketime probe is kept for: one per runtime unless a provider
+        picks its sandbox per session. Mirrors TypeScript's
+        ``SandboxRuntime.sandboxKey``."""
+        return ""
 
     async def _setup(self, line: str) -> RunResult:
         return await self.exec_line(line, None, dict(self.config.env), "/")
