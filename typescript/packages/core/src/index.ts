@@ -50,6 +50,7 @@ export { AirtableVFS } from './vfs/airtable/airtable.ts'
 export {
   checkMutationContract,
   checkReadContract,
+  runWithVersions,
   type MutationFixture,
   type ReadFixture,
 } from './vfs/testing.ts'

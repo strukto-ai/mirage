@@ -1,30 +1,33 @@
 import inspect
-from collections.abc import Awaitable, Callable
+import logging
+import warnings
+from collections.abc import Awaitable, Callable, Collection, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
 from mirage.cache.types import (
-    ABSENT_WRITE,
     ConditionMode,
-    MatchWrite,
     Measured,
     OwnRead,
-    ReplaceRequest,
-    WriteCondition,
     WriteContext,
+    WriteKind,
 )
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
     reset_caller,
 )
-from mirage.errors.types import OperationNotSupportedError, StaleWriteError
+from mirage.errors.types import StaleWriteError
 from mirage.io.stream import close_quietly
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import get_extension
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.vfs.base import BaseVFS
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,67 +324,67 @@ async def _rejects(
     raise AssertionError(message)
 
 
-class _Pinned:
-    """A write context holding one version per path, as a conditional
-    mount's cache would after the session read it.
+async def run_with_versions(
+    vfs: BaseVFS,
+    versions: Sequence[tuple[PathSpec, str | None]],
+    call: Awaitable[T],
+) -> T:
+    """Await ``call`` under the write context a ``write: conditional``
+    mount of ``vfs`` binds, its cache holding ``versions``.
+
+    Each pair is a path and the version a session read there, None for a
+    path it found no file at. A write, copy or delete of a listed path
+    then carries the condition ``condition_support`` declares for it:
+    ``match`` on the version, ``absent`` on None; an unlisted path goes
+    out unconditioned.
 
     Args:
-        vfs (BaseVFS): the VFS being validated.
+        vfs (BaseVFS): the VFS the call writes through.
+        versions (Sequence[tuple[PathSpec, str | None]]): what the
+            session read at each path.
+        call (Awaitable[T]): the op to run.
     """
+    held: dict[str, Measured] = {
+        path.virtual: OwnRead.ABSENT if version is None else version
+        for path, version in versions
+    }
 
-    def __init__(self, vfs: BaseVFS) -> None:
-        self.vfs = vfs
-        self.versions: dict[str, Measured] = {}
+    async def read_version(path: PathSpec) -> Measured | None:
+        return held.get(path.virtual)
 
-    async def read_version(self, path: PathSpec) -> Measured | None:
-        return self.versions.get(path.virtual)
+    async def read_versions(paths: list[PathSpec]) -> list[Measured | None]:
+        return [held.get(path.virtual) for path in paths]
 
-    async def read_versions(
-        self, paths: list[PathSpec]
-    ) -> list[Measured | None]:
-        return [self.versions.get(path.virtual) for path in paths]
+    async def drop(path: PathSpec) -> None:
+        held.pop(path.virtual, None)
 
-    async def drop(self, path: PathSpec) -> None:
-        self.versions.pop(path.virtual, None)
+    async def keep(path: PathSpec, version: Measured) -> None:
+        held[path.virtual] = version
 
-    async def keep(self, path: PathSpec, version: Measured) -> None:
-        self.versions[path.virtual] = version
-
-    def context(self) -> WriteContext:
-        support = self.vfs.condition_support
-        return WriteContext(
-            vfs=self.vfs.name,
-            conditions=frozenset(
-                kind for kind, modes in support.items() if "match" in modes
-            ),
-            creates=frozenset(
-                kind for kind, modes in support.items() if "absent" in modes
-            ),
-            read_version=self.read_version,
-            read_versions=self.read_versions,
-            drop=self.drop,
-            keep=self.keep,
-        )
-
-    async def run(self, call: Awaitable[Any]) -> None:
-        """Await ``call`` under this write context, as a conditional
-        mount binds it.
-
-        Args:
-            call (Awaitable[Any]): the op to run.
-        """
-        token = bind_caller(
-            current_caller().changed({"write_context": self.context()})
-        )
-        try:
-            await call
-        finally:
-            reset_caller(token)
+    support = vfs.condition_support
+    context = WriteContext(
+        vfs=vfs.name,
+        conditions=frozenset(
+            kind for kind, modes in support.items() if "match" in modes
+        ),
+        creates=frozenset(
+            kind for kind, modes in support.items() if "absent" in modes
+        ),
+        read_version=read_version,
+        read_versions=read_versions,
+        drop=drop,
+        keep=keep,
+    )
+    token = bind_caller(current_caller().changed({"write_context": context}))
+    try:
+        return await call
+    finally:
+        reset_caller(token)
 
 
 class _Checker:
-    """One mutation-contract run: the VFS, its store, and the scratch
-    directory's files.
+    """One mutation-contract run: the VFS, its store, and the files it
+    wrote in the scratch directory.
 
     Args:
         vfs (BaseVFS): the VFS being validated.
@@ -395,9 +398,12 @@ class _Checker:
         self.vfs = vfs
         self.fixture = fixture
         self.store = store
+        self.written: dict[str, PathSpec] = {}
 
     def path(self, name: str) -> PathSpec:
-        return _child(self.fixture.directory, name)
+        path = _child(self.fixture.directory, name)
+        self.written[path.virtual] = path
+        return path
 
     async def put(self, path: PathSpec, data: bytes) -> None:
         await self.vfs.write(
@@ -411,9 +417,7 @@ class _Checker:
 
     async def gone(self, path: PathSpec) -> bool:
         try:
-            await self.vfs.stat(
-                path, **_taken(self.vfs.stat, self.store, None)
-            )
+            await self.vfs.stat(path, **_taken(self.vfs.stat, self.store, None))
         except FileNotFoundError:
             return True
         return False
@@ -430,6 +434,27 @@ class _Checker:
     async def call(self, op: str, *paths: PathSpec) -> None:
         fn: Callable[..., Awaitable[Any]] = getattr(self.vfs, op)
         await fn(*paths, **_taken(fn, self.store, None))
+
+    async def clean(self, failed: bool) -> None:
+        """Unlink every file the run named that is still there.
+
+        A cleanup failure after a failed run is logged, so the run's own
+        failure is the one raised.
+
+        Args:
+            failed (bool): whether the run already failed.
+        """
+        if not self.vfs.supports("unlink"):
+            return
+        for path in self.written.values():
+            try:
+                await self.call("unlink", path)
+            except FileNotFoundError:
+                continue
+            except Exception:
+                if not failed:
+                    raise
+                logger.debug("cleanup of %s failed", path, exc_info=True)
 
     async def check_moved(self, op: str) -> None:
         """Check ``rename`` or ``copy`` of one file: onto a fresh name, onto
@@ -464,43 +489,26 @@ class _Checker:
             f"a refused {op} must leave the destination"
         )
 
-    async def check_put(self, mode: ConditionMode, declared: bool) -> None:
-        """Check a conditional replace: honoured and refused when declared,
-        refused unsupported, writing nothing, when not.
+    async def check_put(self, mode: ConditionMode) -> None:
+        """Check a declared conditional write, honoured and refused.
 
         Args:
             mode (ConditionMode): ``absent`` or ``match``.
-            declared (bool): whether ``condition_support`` declares it.
         """
         content = self.fixture.content
         path = self.path(f"put-{mode}")
-        if mode == "match" or not declared:
+        if mode == "match":
             await self.put(path, _OTHER)
-        held: WriteCondition = (
-            ABSENT_WRITE
-            if mode == "absent"
-            else MatchWrite(await self.version(path) if declared else _LOST)
+        held = None if mode == "absent" else await self.version(path)
+        await run_with_versions(
+            self.vfs, [(path, held)], self.put(path, content)
         )
-        lost: WriteCondition = (
-            ABSENT_WRITE if mode == "absent" else MatchWrite(_LOST)
-        )
-        if not declared:
-            await _rejects(
-                self.vfs._replace(ReplaceRequest(path, content, held)),
-                OperationNotSupportedError,
-                f"an undeclared put ({mode}) must raise "
-                "OperationNotSupportedError",
-            )
-            assert await self.bytes_at(path) == _OTHER, (
-                f"an undeclared put ({mode}) must write nothing"
-            )
-            return
-        await self.vfs._replace(ReplaceRequest(path, content, held))
         assert await self.bytes_at(path) == content, (
             f"a held put ({mode}) must land"
         )
+        lost = None if mode == "absent" else _LOST
         await _rejects(
-            self.vfs._replace(ReplaceRequest(path, _OTHER, lost)),
+            run_with_versions(self.vfs, [(path, lost)], self.put(path, _OTHER)),
             StaleWriteError,
             f"a lost put ({mode}) must raise StaleWriteError",
         )
@@ -519,20 +527,19 @@ class _Checker:
         await self.put(src, content)
         if mode == "match":
             await self.put(dst, _OTHER)
-        pinned = _Pinned(self.vfs)
-        pinned.versions[dst.virtual] = (
-            OwnRead.ABSENT if mode == "absent" else await self.version(dst)
+        held = None if mode == "absent" else await self.version(dst)
+        await run_with_versions(
+            self.vfs, [(dst, held)], self.call("copy", src, dst)
         )
-        await pinned.run(self.call("copy", src, dst))
         assert await self.bytes_at(dst) == content, (
             f"a held copy ({mode}) must land"
         )
         await self.put(src, _OTHER)
-        pinned.versions[dst.virtual] = (
-            OwnRead.ABSENT if mode == "absent" else _LOST
-        )
+        lost = None if mode == "absent" else _LOST
         await _rejects(
-            pinned.run(self.call("copy", src, dst)),
+            run_with_versions(
+                self.vfs, [(dst, lost)], self.call("copy", src, dst)
+            ),
             StaleWriteError,
             f"a lost copy ({mode}) must raise StaleWriteError",
         )
@@ -545,46 +552,88 @@ class _Checker:
         refused."""
         path = self.path("delete-match")
         await self.put(path, self.fixture.content)
-        pinned = _Pinned(self.vfs)
-        pinned.versions[path.virtual] = _LOST
         await _rejects(
-            pinned.run(self.call("unlink", path)),
+            run_with_versions(
+                self.vfs, [(path, _LOST)], self.call("unlink", path)
+            ),
             StaleWriteError,
             "a lost delete (match) must raise StaleWriteError",
         )
         assert await self.bytes_at(path) == self.fixture.content, (
             "a lost delete (match) must keep the file"
         )
-        pinned.versions[path.virtual] = await self.version(path)
-        await pinned.run(self.call("unlink", path))
+        held = await self.version(path)
+        await run_with_versions(
+            self.vfs, [(path, held)], self.call("unlink", path)
+        )
         assert await self.gone(path), "a held delete (match) must remove"
+
+    async def run(
+        self, unenforced: Collection[tuple[WriteKind, ConditionMode]]
+    ) -> None:
+        """Check every declared condition, then ``rename`` and ``copy``.
+
+        Args:
+            unenforced (Collection[tuple[WriteKind, ConditionMode]]): the
+                declared conditions to skip.
+        """
+        support = self.vfs.condition_support
+        for kind, mode in unenforced:
+            assert mode in support.get(kind, frozenset()), (
+                f"unenforced names {kind} ({mode}), which the VFS does not "
+                "declare"
+            )
+            warnings.warn(
+                f"mutation contract: {kind} ({mode}) skipped as unenforced",
+                stacklevel=3,
+            )
+        kinds: tuple[WriteKind, ...] = ("put", "copy", "delete")
+        modes: tuple[ConditionMode, ...] = ("absent", "match")
+        for kind in kinds:
+            for mode in modes:
+                if (kind, mode) in unenforced:
+                    continue
+                if mode not in support.get(kind, frozenset()):
+                    continue
+                if kind == "put":
+                    await self.check_put(mode)
+                elif kind == "copy" and self.vfs.supports("copy"):
+                    await self.check_copy(mode)
+                elif kind == "delete" and mode == "match":
+                    await self.check_delete()
+        for op in ("rename", "copy"):
+            if self.vfs.supports(op):
+                await self.check_moved(op)
 
 
 async def check_mutation_contract(
     vfs: BaseVFS,
     fixture: MutationFixture,
     index: IndexCacheStore | None = None,
+    unenforced: Collection[tuple[WriteKind, ConditionMode]] = frozenset(),
 ) -> None:
     """Verify a VFS's single-file mutations in an empty, caller-owned
-    scratch directory, leaving the files it wrote there.
+    scratch directory, unlinking the files it wrote there, pass or fail.
 
-    ``rename`` and ``copy`` are checked where the VFS defines them: onto a
-    fresh name and over an existing file the destination holds the
-    source's bytes, ``rename`` removes the source and ``copy`` keeps it,
-    and a missing source raises FileNotFoundError and leaves the
-    destination. Write preconditions are checked exactly as
-    ``condition_support`` declares them, under the write context a
-    ``write: conditional`` mount binds: a declared condition lands when it
-    holds and raises StaleWriteError, writing nothing, when it does not.
-    An undeclared put condition must raise OperationNotSupportedError and
-    write nothing; an undeclared copy or delete condition is refused by
-    the mount before the VFS sees it, so it is not probed.
+    Write preconditions are checked exactly as ``condition_support``
+    declares them, each op run through ``run_with_versions`` as a
+    ``write: conditional`` mount runs it: a declared condition lands when
+    it holds and raises StaleWriteError, writing nothing, when it does
+    not. An undeclared condition is refused by the mount before the VFS
+    sees it, so it is not probed. ``rename`` and ``copy`` are checked
+    where the VFS defines them: onto a fresh name and over an existing
+    file the destination holds the source's bytes, ``rename`` removes the
+    source and ``copy`` keeps it, and a missing source raises
+    FileNotFoundError and leaves the destination.
 
     Args:
         vfs (BaseVFS): the VFS being validated.
         fixture (MutationFixture): the scratch directory and seed bytes.
         index (IndexCacheStore | None): the store to hand every function;
             a RAM store at the VFS's ``index_ttl`` by default.
+        unenforced (Collection[tuple[WriteKind, ConditionMode]]): declared
+            conditions the backend under test cannot enforce (a fake), each
+            skipped with a warning; naming an undeclared one fails.
     """
     assert vfs.supports("write"), "the mutation contract seeds through write"
     checker = _Checker(
@@ -592,16 +641,9 @@ async def check_mutation_contract(
         fixture,
         index if index is not None else RAMIndexCacheStore(ttl=vfs.index_ttl),
     )
-    for op in ("rename", "copy"):
-        if vfs.supports(op):
-            await checker.check_moved(op)
-    support = vfs.condition_support
-    for mode in ("absent", "match"):
-        await checker.check_put(mode, mode in support.get("put", frozenset()))
-    if vfs.supports("copy"):
-        for mode in support.get("copy", frozenset()):
-            await checker.check_copy(mode)
-    if vfs.supports("unlink") and "match" in support.get(
-        "delete", frozenset()
-    ):
-        await checker.check_delete()
+    try:
+        await checker.run(unenforced)
+    except BaseException:
+        await checker.clean(failed=True)
+        raise
+    await checker.clean(failed=False)

@@ -110,6 +110,7 @@ if TYPE_CHECKING:
         ReadFixture,
         check_mutation_contract,
         check_read_contract,
+        run_with_versions,
     )
     from mirage.workspace import (
         ExecutionNode,
@@ -198,6 +199,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "ReadFixture",
         "check_mutation_contract",
         "check_read_contract",
+        "run_with_versions",
     ),
     "mirage.vfs.registry": ("build_vfs", "known_vfs_names", "register_vfs"),
     "mirage.runtime.base": ("Runtime",),
@@ -230,6 +232,7 @@ __all__ = [
     "ReadFixture",
     "check_mutation_contract",
     "check_read_contract",
+    "run_with_versions",
     "__version__",
     "Workspace",
     "WorkspaceRunner",
