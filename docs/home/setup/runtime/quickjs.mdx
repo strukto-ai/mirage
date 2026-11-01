@@ -217,6 +217,32 @@ reading fails.
   </Accordion>
 </AccordionGroup>
 
+### `Date`
+
+`Date.now()` and `new Date()` start at the workspace's
+[system time](/home/configuration#system-time) when it sets one, and files
+the program writes are stamped from the same clock. `performance.now()` and
+`os.now()` measure elapsed time.
+
+| API | Support |
+| --- | --- |
+| `Date.now()` | ✓ |
+| `new Date()` | ✓ |
+| `performance.now()`, `os.now()` | ✓ |
+
+<AccordionGroup>
+  <Accordion title="Example: print the current time" id="date-example">
+    ```javascript
+    print(new Date().toISOString());
+    ```
+  </Accordion>
+  <Accordion title="Limitations" id="date-limitations">
+    | API or behavior | Limitation |
+    | --- | --- |
+    | Local times | UTC. |
+  </Accordion>
+</AccordionGroup>
+
 ### `console` and printing
 
 `console.log()` and `print()`.

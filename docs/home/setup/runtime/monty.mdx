@@ -308,6 +308,35 @@ Mirage passes command inputs through the [runtime globals](#runtime-globals).
   </Accordion>
 </AccordionGroup>
 
+### `time` and `datetime`
+
+The clocks start at the workspace's [system time](/home/configuration#system-time)
+when it sets one, and files the program writes are stamped from the same
+clock. `time.monotonic()` and `time.perf_counter()` measure elapsed time.
+
+| API | Support |
+| --- | --- |
+| `time.time()`, `time.time_ns()` | ✓ |
+| `time.localtime()`, `time.gmtime()`, `time.strftime()` | ✓ |
+| `time.monotonic()`, `time.perf_counter()` | ✓ |
+| `datetime.datetime.now()` | ✓ |
+| `datetime.date.today()` | ✓ |
+
+<AccordionGroup>
+  <Accordion title="Example: print today's date" id="time-example">
+    ```python
+    import datetime
+
+    print(datetime.date.today())
+    ```
+  </Accordion>
+  <Accordion title="Limitations" id="time-limitations">
+    | API or behavior | Limitation |
+    | --- | --- |
+    | Local times | UTC. `TZ` does not change them. |
+  </Accordion>
+</AccordionGroup>
+
 ### `json`
 
 JSON parsing and serialization come from Monty; see its

@@ -167,10 +167,14 @@ touch notes.txt         # stamped Mar  2 09:00
 python3 -c 'import datetime; print(datetime.date.today())'   # 2026-03-02
 ```
 
-`date`, file times, `ls -l`, `find -mtime`, `jq`'s `now`, git commits, and
-Python and JavaScript in the workspace all see this time. `TZ` in `env`
-picks the zone it is shown in. Without `system_time`, the workspace uses
-the machine's time.
+`date`, file times, `ls -l`, `find -mtime`, `jq`'s `now` and git commits
+all see this time, and so do the
+[Monty](/home/setup/runtime/monty#time-and-datetime),
+[WASI](/home/setup/runtime/wasi#time-and-datetime),
+[Pyodide](/home/setup/runtime/pyodide#time-and-datetime) and
+[QuickJS](/home/setup/runtime/quickjs#date) runtimes. `TZ` in `env` picks
+the zone `date` shows it in. Without `system_time`, the workspace uses the
+machine's time.
 
 Each workspace keeps its own time, so workspaces on one server can each
 start at a different date. Snapshots keep the setting, and `GET

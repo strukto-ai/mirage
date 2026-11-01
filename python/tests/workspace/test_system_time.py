@@ -89,9 +89,9 @@ async def test_system_time_answers_python():
         line = (
             "python3 -c 'import datetime, time; "
             "print(datetime.datetime.now(datetime.timezone.utc).date(), "
-            "datetime.date.today(), int(time.time()))'"
+            "datetime.date.today(), datetime.datetime.now().hour, int(time.time()))'"
         )
-        assert await _out(ws, line) == "2026-03-02 2026-03-02 1772442000\n"
+        assert await _out(ws, line) == "2026-03-02 2026-03-02 9 1772442000\n"
     finally:
         await ws.close()
 

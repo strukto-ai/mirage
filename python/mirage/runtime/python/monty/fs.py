@@ -17,7 +17,7 @@ import time as _time
 from collections.abc import Iterator
 from concurrent.futures import CancelledError
 from contextlib import contextmanager
-from datetime import date, datetime, tzinfo
+from datetime import date, datetime, timezone, tzinfo
 from pathlib import PurePosixPath
 from stat import S_ISREG
 from typing import Any
@@ -120,10 +120,15 @@ class MontyFs(AbstractOS):
         self.clock = bound_system_clock()
 
     def datetime_now(self, tz: tzinfo | None = None) -> datetime:
+        # A naive now is UTC, as monty's own clock answers.
+        if tz is None:
+            return datetime.fromtimestamp(self._wall(), timezone.utc).replace(
+                tzinfo=None
+            )
         return datetime.fromtimestamp(self._wall(), tz)
 
     def date_today(self) -> date:
-        return datetime.fromtimestamp(self._wall()).date()
+        return self.datetime_now().date()
 
     def time(self, caller: str = "time.time") -> float:
         # The wall clocks read the system clock; monotonic and
