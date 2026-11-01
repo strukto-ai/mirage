@@ -263,7 +263,8 @@
               "home/policy/policies",
               "home/policy/scripts",
               "home/policy/explain",
-              "home/policy/route-runtime"
+              "home/policy/route-runtime",
+              "home/policy/route-network"
             ]
           },
           {
