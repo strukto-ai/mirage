@@ -26,7 +26,8 @@ import { eisdir } from '../../errors/fs.ts'
 
 /**
  * Copy a directory tree file by file, adding the backend path of each
- * source file copied to `copied`, for a move to delete exactly those.
+ * source file and directory copied to `copied`, for a move to delete
+ * exactly those.
  * Mirrors Python's `copy_tree`.
  */
 export async function copyTree(
@@ -41,6 +42,7 @@ export async function copyTree(
     const childDst = `${rstripSlash(remoteDst)}/${name}`
     if (entry.isDirectory) {
       await copyTree(accessor, entry.path, childDst, copied)
+      copied?.add(entry.path)
     } else {
       await upload(accessor, childDst, await download(accessor, entry.path), true)
       copied?.add(entry.path)

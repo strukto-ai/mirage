@@ -44,13 +44,13 @@ async function removeTreeRecurse(
 ): Promise<boolean> {
   let left = false
   for (const entry of await listDirectoryContents(accessor, remoteDir)) {
-    if (entry.isDirectory) {
+    if (copied !== null && !copied.has(entry.path)) {
+      left = true
+    } else if (entry.isDirectory) {
       left = (await removeTreeRecurse(accessor, entry.path, removed, copied)) || left
-    } else if (copied === null || copied.has(entry.path)) {
+    } else {
       await deleteFile(accessor, entry.path)
       removed.push(entry.path)
-    } else {
-      left = true
     }
   }
   if (left) return true
@@ -67,11 +67,11 @@ async function removeTreeRecurse(
 }
 
 /**
- * Remove a directory tree, or only the files a move copied out of it
- * (`copied`, their backend paths; null deletes every file listed). The walk
- * lists each directory once, so a file written under it since, or one the
- * move never copied, stays and keeps its directories: the tree is
- * ENOTEMPTY. Returns the backend paths removed. Mirrors Python's
+ * Remove a directory tree, or only the files and directories a move copied
+ * out of it (`copied`, their backend paths; null deletes every entry
+ * listed). The walk lists each directory once, so a file written under it
+ * since, or an entry the move never copied, stays and keeps its
+ * directories: the tree is ENOTEMPTY. Returns the backend paths removed. Mirrors Python's
  * `remove_tree`.
  */
 export async function removeTree(

@@ -165,16 +165,16 @@ describe('rename', () => {
     expect(err.code).toBe('ENOENT')
   })
 
-  it('keeps a file written after the copy and refuses the move', async () => {
-    // Only what the copy carried is deleted: a file written under the
+  it.each([false, true])('keeps an entry written after the copy (directory: %s)', async (isDir) => {
+    // Only what the copy carried is deleted: an entry written under the
     // source since stays there, and the move is ENOTEMPTY rather than a loss.
-    const listed = [{ path: `${TEST_ROOT}/dir/a.txt` }]
+    const listed: { path: string; is_directory?: boolean }[] = [{ path: `${TEST_ROOT}/dir/a.txt` }]
     const deletes: string[] = []
     const { fetch } = routedFetch((call) => {
       if (call.method === 'HEAD' && call.url.includes('/fs/files/')) return notFoundResponse()
       if (call.method === 'HEAD') return new Response(null, { status: 200 })
       if (call.method === 'PUT' && call.url.includes('/fs/files/')) {
-        listed.push({ path: `${TEST_ROOT}/dir/late.txt` })
+        listed.push({ path: `${TEST_ROOT}/dir/late`, is_directory: isDir })
         return new Response(null, { status: 200 })
       }
       if (call.method === 'DELETE') {

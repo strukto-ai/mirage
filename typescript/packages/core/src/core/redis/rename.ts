@@ -28,8 +28,9 @@ import { checkDestParents, checkRename, keepLeft, lookupError } from './dest.ts'
 // -- the same shape checkDestParents refuses on the way in. The whole new
 // tree is written before any old key is deleted: a full Redis refuses
 // writes but still runs deletes, so a refused write must find the old tree
-// intact.
-async function moveSubtree(store: RedisAccessor['store'], s: string, d: string): Promise<void> {
+// intact. Returns the directories removed, whose metadata the caller drops
+// once it knows which ones a late key keeps.
+async function moveSubtree(store: RedisAccessor['store'], s: string, d: string): Promise<string[]> {
   const prefix = rstripSlash(s) + '/'
   const dPrefix = rstripSlash(d) + '/'
   const dirs = [...(await store.listDirs())]
@@ -61,11 +62,8 @@ async function moveSubtree(store: RedisAccessor['store'], s: string, d: string):
     await store.delModified(key)
     await store.delAttrs(key)
   }
-  for (const key of dirs) {
-    await store.removeDir(key)
-    await store.delModified(key)
-    await store.delAttrs(key)
-  }
+  for (const key of dirs) await store.removeDir(key)
+  return dirs
 }
 
 export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
@@ -97,12 +95,17 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
     await store.addDir(d)
     await store.setModified(d, mod ?? now)
     if (Object.keys(attrs).length > 0) await store.setAttrs(d, attrs)
-    await moveSubtree(store, s, d)
+    const removed = await moveSubtree(store, s, d)
     await store.removeDir(s)
-    await store.delModified(s)
-    await store.delAttrs(s)
-    // A key written under the source while the subtree moved stayed.
-    if (await keepLeft(store, s)) throw enotempty(src)
+    // A key written under the source while the subtree moved stayed, and the
+    // directories that hold it keep their metadata.
+    const kept = await keepLeft(store, s)
+    for (const key of [...removed, s]) {
+      if (kept.has(key)) continue
+      await store.delModified(key)
+      await store.delAttrs(key)
+    }
+    if (kept.size > 0) throw enotempty(src)
     return
   }
   throw await lookupError(store, src, s)

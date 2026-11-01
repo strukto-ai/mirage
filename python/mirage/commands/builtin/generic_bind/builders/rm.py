@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import errno
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.cp import walk
 from mirage.commands.builtin.generic.rm_cmd import (
@@ -174,7 +176,12 @@ async def rm(
             else:
                 await files.unlink(p)
                 entry_lines = [f"removed '{p.raw_path}'"]
-        except FS_ERRORS as exc:
+        except OSError as exc:
+            # ENOTEMPTY has no class FS_ERRORS could name: a directory a
+            # child was written into while it went is one failed operand
+            # all the same.
+            if not isinstance(exc, FS_ERRORS) and exc.errno != errno.ENOTEMPTY:
+                raise
             # GNU rm names the entry below the operand it could not
             # remove (the guard blames a read-only region by its
             # anchor), and the operand as typed for a refusal that names

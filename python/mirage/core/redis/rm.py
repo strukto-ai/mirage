@@ -29,11 +29,19 @@ async def rm_r(accessor: RedisAccessor, path_spec: PathSpec) -> None:
             await store.del_file(key)
             await store.del_modified(key)
             await store.del_attrs(key)
-    for key in list(await store.list_dirs()):
-        if key == p or key.startswith(prefix):
-            await store.remove_dir(key)
+    removed = [
+        key
+        for key in await store.list_dirs()
+        if key == p or key.startswith(prefix)
+    ]
+    for key in removed:
+        await store.remove_dir(key)
+    # The listings ran once, so a key written under the path since stayed,
+    # and the directories that hold it keep their metadata.
+    kept = await keep_left(store, p)
+    for key in removed:
+        if key not in kept:
             await store.del_modified(key)
             await store.del_attrs(key)
-    # The listings ran once, so a key written under the path since stayed.
-    if await keep_left(store, p):
+    if kept:
         raise enotempty(path_spec)

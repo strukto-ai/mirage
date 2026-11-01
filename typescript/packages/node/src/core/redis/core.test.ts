@@ -285,6 +285,7 @@ describe.skipIf(skip)('core/redis ops', () => {
     // stays; the directories above it are recorded again and the op is
     // ENOTEMPTY, never success over an orphan. Mirrors test_file_ops.py.
     await mkdir(acc, spec('/dir'))
+    await store.setAttrs('/dir', { mode: '700' })
     if (op !== 'rmdir') {
       await write(acc, spec('/dir/child'), ENC.encode('child'))
       await mkdir(acc, spec('/dir/sub'))
@@ -304,7 +305,28 @@ describe.skipIf(skip)('core/redis ops', () => {
     for (const up of late.includes('/sub/') ? ['/dir', '/dir/sub'] : ['/dir']) {
       expect(await store.hasDir(up)).toBe(true)
     }
+    expect(await store.getAttrs('/dir')).toEqual({ mode: '700' })
     if (op === 'rename') expect(DEC.decode(await read(acc, spec('/moved/child')))).toBe('child')
+  })
+
+  it('a file that took a removed directory name stays a file', async () => {
+    // A late child still makes the removal ENOTEMPTY, but the name a file
+    // took since is that file's: no directory goes back beside it.
+    await mkdir(acc, spec('/dir'))
+    await write(acc, spec('/dir/child'), ENC.encode('child'))
+    const delFile = store.delFile.bind(store)
+    const removeDir = store.removeDir.bind(store)
+    vi.spyOn(store, 'delFile').mockImplementationOnce(async (key: string) => {
+      await store.setFile('/dir/late', ENC.encode('late'))
+      await delFile(key)
+    })
+    vi.spyOn(store, 'removeDir').mockImplementationOnce(async (key: string) => {
+      await removeDir(key)
+      await store.setFile('/dir', ENC.encode('file'))
+    })
+    await expect(rmR(acc, spec('/dir'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect(DEC.decode((await store.getFile('/dir')) ?? new Uint8Array())).toBe('file')
+    expect(await store.hasDir('/dir')).toBe(false)
   })
 
   it('copy duplicates contents', async () => {

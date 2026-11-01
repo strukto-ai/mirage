@@ -42,5 +42,5 @@ export async function rmdir(accessor: RedisAccessor, path: PathSpec): Promise<vo
   await store.removeDir(p)
   // A child written after the listing keeps the directory: ENOTEMPTY, and
   // its entry goes back.
-  if (await keepLeft(store, p)) throw enotempty(path)
+  if ((await keepLeft(store, p)).size > 0) throw enotempty(path)
 }

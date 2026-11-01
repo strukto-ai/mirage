@@ -150,27 +150,31 @@ export async function checkMkdirTarget(
 }
 
 /**
- * Keep what a directory op left under `p` inside its directories, and say
- * whether it left any. The op lists before it acts, so a key written under
- * `p` meanwhile stays while the op removes the directories above it, and a
- * key under no recorded directory is the orphan `checkDestParents` refuses.
- * Each directory from `p` down to such a key is recorded again, as
- * `mkdir -p` records it. Mirrors Python's `keep_left`.
+ * Keep what a directory op left under `p` inside its directories. The op
+ * lists before it acts, so a key written under `p` meanwhile stays while the
+ * op removes the directories above it, and a key under no recorded directory
+ * is the orphan `checkDestParents` refuses. Each directory from `p` down to
+ * such a key is recorded again, as `mkdir -p` records it, unless a file took
+ * its name since: that file is not hidden behind a directory. The op drops a
+ * removed directory's metadata only after this, so a kept one keeps its time
+ * and attributes. Returns the names whose metadata stays, each directory kept
+ * and any file that took one's name; empty when nothing was left. Mirrors
+ * Python's `keep_left`.
  */
-export async function keepLeft(store: RedisStoreLike, p: string): Promise<boolean> {
+export async function keepLeft(store: RedisStoreLike, p: string): Promise<Set<string>> {
   const prefix = `${rstripSlash(p)}/`
   const keys = [...(await store.listFiles(prefix)), ...(await store.listDirs())]
   const left = keys.filter((k) => k.startsWith(prefix))
-  if (left.length === 0) return false
+  if (left.length === 0) return new Set()
   const held = new Set([p])
   for (const key of left) {
     for (const up of ancestors(key)) if (up.startsWith(prefix)) held.add(up)
   }
   const now = nowIso()
   for (const key of [...held].sort(compareCodePoints)) {
-    if (await store.hasDir(key)) continue
+    if ((await store.hasDir(key)) || (await store.hasFile(key))) continue
     await store.addDir(key)
     if (!(await store.getModified(key))) await store.setModified(key, now)
   }
-  return true
+  return held
 }

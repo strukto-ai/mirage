@@ -51,18 +51,18 @@ async def _remove_tree_recurse(
 ) -> bool:
     left = False
     for entry in await list_directory_contents(accessor, remote_dir):
-        if entry.is_directory:
+        if copied is not None and entry.path not in copied:
+            left = True
+        elif entry.is_directory:
             left = (
                 await _remove_tree_recurse(
                     accessor, entry.path, removed, copied
                 )
                 or left
             )
-        elif copied is None or entry.path in copied:
+        else:
             await delete_file(accessor, entry.path)
             removed.append(entry.path)
-        else:
-            left = True
     if left:
         return True
     try:
@@ -82,17 +82,18 @@ async def remove_tree(
     path: PathSpec,
     copied: set[str] | None = None,
 ) -> list[str]:
-    """Remove a directory tree, or only the files a move copied out of it.
+    """Remove a directory tree, or only what a move copied out of it.
 
     The walk lists each directory once, so a file written under it since,
-    or one the move never copied, stays and keeps its directories: the
-    tree is ENOTEMPTY.
+    or an entry the move never copied, stays and keeps its directories:
+    the tree is ENOTEMPTY.
 
     Args:
         accessor (DatabricksVolumeAccessor): the volume's client.
         path (PathSpec): the tree's root.
-        copied (set[str] | None): the backend paths of the files a move
-            copied, the only ones deleted; None deletes every file listed.
+        copied (set[str] | None): the backend paths of the files and
+            directories a move copied, the only ones deleted; None deletes
+            every entry listed.
 
     Returns:
         list[str]: the backend paths removed.

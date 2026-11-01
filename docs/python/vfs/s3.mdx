@@ -168,7 +168,7 @@ A conditional single-file move attempts rollback when source deletion is refused
 
 An absent destination must remain absent until copying. This guard may add one metadata request; cleanup adds one delete and may require `s3:DeleteObjectVersion`. Directory and cross-mount moves do not use rollback.
 
-A directory `mv`, `rm -r` or `rmdir` lists the directory once. A file written into it while the command runs stays, and the command fails with `Directory not empty`. Under `write: conditional`, a directory `mv` that finds a file changed before it could copy it removes nothing from the source; the copies it made stay at the destination.
+A directory `mv`, `rm -r` or `rmdir` looks at the directory again when it is done: a file written into it that the command never listed stays, and the command fails with `Directory not empty`. Under `write: conditional`, a directory `mv` that finds a file changed before it could copy it removes nothing from the source; the copies it made stay at the destination.
 
 An append or another rewrite that observes a missing file uses create-only
 commit under either write policy. S3 checks `If-None-Match: *` at PUT or final

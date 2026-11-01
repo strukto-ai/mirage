@@ -197,6 +197,7 @@ async def test_a_child_written_during_a_directory_op_keeps_its_directories(
     # stays; the directories above it are recorded again and the op is
     # ENOTEMPTY, never success over an orphan.
     store = accessor.store
+    await store.set_attrs("/dir", {"mode": "700"})
     if op == "rmdir":
         await store.del_file("/dir/child.txt")
     else:
@@ -221,8 +222,41 @@ async def test_a_child_written_during_a_directory_op_keeps_its_directories(
     assert await store.get_file(late) == b"late"
     for up in ("/dir", "/dir/sub") if "/sub/" in late else ("/dir",):
         assert await store.has_dir(up)
+    assert await store.get_attrs("/dir") == {"mode": "700"}
     if op == "rename":
         assert await store.get_file("/moved/child.txt") == b"child"
+
+
+@pytest.mark.asyncio
+async def test_a_file_that_took_a_removed_directory_name_stays_a_file(
+    accessor,
+):
+    # A late child still makes the removal ENOTEMPTY, but the name a file
+    # took since is that file's: no directory goes back beside it.
+    store = accessor.store
+    inner_del, inner_remove = store.del_file, store.remove_dir
+
+    async def racing_del(key: str) -> None:
+        store.del_file = inner_del
+        await store.set_file("/dir/late.txt", b"late")
+        await inner_del(key)
+
+    async def racing_remove(key: str) -> None:
+        await inner_remove(key)
+        if key == "/dir":
+            store.remove_dir = inner_remove
+            await store.set_file("/dir", b"file")
+
+    store.del_file = racing_del
+    store.remove_dir = racing_remove
+    with pytest.raises(OSError) as excinfo:
+        await rm_r(
+            accessor,
+            PathSpec(vfs_path="dir", virtual="/dir", directory="/dir"),
+        )
+    assert excinfo.value.errno == errno.ENOTEMPTY
+    assert await store.get_file("/dir") == b"file"
+    assert not await store.has_dir("/dir")
 
 
 @pytest.mark.asyncio

@@ -31,14 +31,15 @@ export async function rmR(accessor: RedisAccessor, path: PathSpec): Promise<void
       await store.delAttrs(key)
     }
   }
-  const dirs = await store.listDirs()
-  for (const key of dirs) {
-    if (key === p || key.startsWith(prefix)) {
-      await store.removeDir(key)
-      await store.delModified(key)
-      await store.delAttrs(key)
-    }
+  const removed = [...(await store.listDirs())].filter((k) => k === p || k.startsWith(prefix))
+  for (const key of removed) await store.removeDir(key)
+  // The listings ran once, so a key written under the path since stayed, and
+  // the directories that hold it keep their metadata.
+  const kept = await keepLeft(store, p)
+  for (const key of removed) {
+    if (kept.has(key)) continue
+    await store.delModified(key)
+    await store.delAttrs(key)
   }
-  // The listings ran once, so a key written under the path since stayed.
-  if (await keepLeft(store, p)) throw enotempty(path)
+  if (kept.size > 0) throw enotempty(path)
 }
