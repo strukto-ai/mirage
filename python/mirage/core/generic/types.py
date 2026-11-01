@@ -3,6 +3,7 @@ from typing import Literal
 
 from mirage.types import FindType
 
+# find's row actions: -print, -print0, -ls and -delete.
 RowActionKind = Literal["print", "print0", "ls", "delete"]
 
 

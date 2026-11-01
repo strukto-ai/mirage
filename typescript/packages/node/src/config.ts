@@ -59,6 +59,7 @@ import {
   MountMode,
   parseMountMode,
   ReadPolicy,
+  type ReadSpec,
 } from '@struktoai/mirage-core/types'
 import { parseSystemTime } from '@struktoai/mirage-core/utils/clock'
 import { snakeToCamel } from '@struktoai/mirage-core/utils/normalize'
@@ -75,8 +76,12 @@ import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { S3WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/s3'
+import type { WorkspaceOptions } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
+// The config loader is a workspace entry point of its own (the daemon
+// builds from here), so it arms the builtin secrets sources like the
+// node Workspace module does.
 import './secrets/constants.ts'
 import { isModulePath, loadAttr, splitRef } from './utils/loader.ts'
 import { parseYaml } from './utils/yaml.ts'
@@ -84,10 +89,6 @@ import { buildVfs } from './vfs/registry.ts'
 import { S3Config } from './vfs/s3/config.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
 import { RedisWorkspaceStateStore } from './workspace/store/redis.ts'
-
-// The config loader is a workspace entry point of its own (the daemon
-// builds from here), so it arms the builtin secrets sources like the
-// node Workspace module does.
 
 function coerceMountMode(value: string | undefined, fallback: MountMode): MountMode {
   if (value === undefined) return fallback
@@ -395,6 +396,9 @@ function normalizeConfigKeys(raw: Record<string, unknown>): Record<string, unkno
     for (const group of STORE_GROUPS) {
       const block = store[group]
       if (!isPlainObject(block)) continue
+      // An s3 group carries its backend's own spellings (`aws_access_key_id`
+      // is `accessKeyId`), which a plain camelize would hide from the
+      // translation that knows them.
       if (block.type === 's3') continue
       store[group] = camelizeKeys(block)
     }
@@ -920,7 +924,18 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
   return new RAMWorkspaceStateStore(overrides)
 }
 
-export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw) {
+/**
+ * The mounts and the options `new Workspace` takes, minus the two the loader
+ * always resolves. The options are `WorkspaceOptions` itself: spelling the
+ * fields out instead is what once dropped `clis` and the deny rules on the
+ * way to the daemon, a config knob parsed and validated, then discarded by
+ * a list nobody remembered to extend.
+ */
+export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<{
+  mounts: Record<string, Mount>
+  options: WorkspaceOptions & { mode: MountMode; read: ReadSpec }
+  kernelMounts: Record<string, [MountBackend, string | undefined]>
+}> {
   const wsMode = coerceMountMode(cfg.mode, MountMode.WRITE)
   const defaultRead = resolveReadSpec(cfg.read, undefined)
   const defaultWrite = coerceWritePolicy(cfg.write)

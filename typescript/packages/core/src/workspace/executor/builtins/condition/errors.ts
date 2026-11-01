@@ -1,7 +1,6 @@
 import { decodeText } from '../../../../shell/bytes.ts'
 import type { Refusal } from '../../../../types.ts'
 
-/** A test/[/[[ usage error: bash prints the message and returns 2. */
 /**
  * A test/[/[[ usage error: bash prints the message and returns 2. A `[[`
  * grammar error is a parse error that kills the line; an arithmetic error

@@ -118,7 +118,7 @@ describe('DiscordVFS (node)', () => {
   })
 })
 
-describe('DiscordConfigSchema redaction (node)', () => {
+describe('DiscordConfig redaction (node)', () => {
   it('always redacts token', () => {
     expect(redactConfigWithSchema(DiscordConfig, { token: 'a' })).toEqual({
       token: '<REDACTED>',
@@ -126,7 +126,7 @@ describe('DiscordConfigSchema redaction (node)', () => {
   })
 })
 
-describe('DiscordConfigSchema parsing', () => {
+describe('DiscordConfig parsing', () => {
   it('passes token through unchanged', () => {
     expect(parseConfigWithSchema(DiscordConfig, { token: 'a' })).toEqual({ token: 'a' })
   })

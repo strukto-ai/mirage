@@ -14,8 +14,6 @@
 
 import type { Measured } from '../../cache/types.ts'
 
-/** What a refusal carries besides its keys. Mirrors Python's keyword arguments. */
-
 /**
  * A conditional request the store refused: the object changed since the
  * version sent, so the write did not land. Mirrors Python's ConditionLostError.
@@ -32,6 +30,7 @@ export class ConditionLostError extends Error {
   /** @param keys the raw keys whose condition did not hold, in order met */
   constructor(
     readonly keys: readonly string[],
+    /** What a refusal carries besides its keys. Mirrors Python's keyword arguments. */
     options: {
       /** A move's copy landed before its source delete lost; recovered records compensation. */
       readonly landed?: boolean

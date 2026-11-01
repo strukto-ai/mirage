@@ -370,7 +370,7 @@ describe('node VFS registry', () => {
     expect(config).toMatchObject({ username: 'alice', verifySsl: false })
   })
 
-  it('S3ConfigSchema parses standalone', () => {
+  it('S3Config parses standalone', () => {
     expect(
       parseConfigWithSchema(S3Config, {
         bucket: 'b',

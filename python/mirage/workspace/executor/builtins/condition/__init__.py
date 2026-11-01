@@ -12,28 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from typing import TYPE_CHECKING
 
 from mirage.utils.loader import lazy_exports
-from mirage.workspace.executor.builtins.condition.errors import CondError
-from mirage.workspace.executor.builtins.condition.types import (
-    CondAnd,
-    CondBinary,
-    CondContext,
-    CondNode,
-    CondNot,
-    CondOr,
-    CondUnary,
-    CondWord,
-)
 
 if TYPE_CHECKING:
     from mirage.workspace.executor.builtins.condition.condition import (
         handle_test,
     )
+    from mirage.workspace.executor.builtins.condition.errors import CondError
     from mirage.workspace.executor.builtins.condition.flat import eval_flat
     from mirage.workspace.executor.builtins.condition.tree import eval_cond
+    from mirage.workspace.executor.builtins.condition.types import (
+        CondAnd,
+        CondBinary,
+        CondContext,
+        CondNode,
+        CondNot,
+        CondOr,
+        CondUnary,
+        CondWord,
+    )
 
 # Loaded on first use, as the builtins package loads its own: the gate
 # reads test's operands (``operands``) from below the evaluator, which

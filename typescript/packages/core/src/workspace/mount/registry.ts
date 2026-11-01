@@ -1,3 +1,17 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import type { Accessor } from '../../accessor/base.ts'
 import { mutationLock } from '../../cache/file/io.ts'
 import type { FileCacheMixin } from '../../cache/file/mixin.ts'
@@ -61,20 +75,6 @@ import { backendCommands } from './backends.ts'
 import { MountCommandAmbiguous, SharedStorageError } from './errors.ts'
 import { MountEntry, type MountInit } from './mount.ts'
 
-// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
 // What the registry needs from a reconciler. Depending on this local
 // interface (not the concrete Reconciler) keeps the dependency pointing down:
 // `reconcile` imports the mount layer, not the other way round. The Reconciler
@@ -104,8 +104,6 @@ export class MountCommandUnsupported extends Error {
     this.operand = operand
   }
 }
-
-/** What a placement adds to a driver: the store config and the reference it came from. */
 
 /** The placements of the mounts a registry is constructed with, keyed by raw prefix. */
 export interface RegistryPlacements {

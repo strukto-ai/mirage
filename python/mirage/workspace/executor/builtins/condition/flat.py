@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.builtins.condition.errors import CondError
 from mirage.workspace.executor.builtins.condition.operators import (

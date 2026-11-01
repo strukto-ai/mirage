@@ -20,7 +20,6 @@ import { strategyFor } from '../commands/builtin/generic/crossmount/detect.ts'
 import { Strategy } from '../commands/builtin/generic/crossmount/types.ts'
 import { generic, GENERIC_COMMANDS } from '../commands/builtin/generic_bind/factory.ts'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
-import type { Command } from '../commands/config.ts'
 import { type CommandFn, type CommandFnResult, type Context, command } from '../commands/config.ts'
 import { FlagView } from '../commands/spec/flag_view.ts'
 import { Argument, CommandSpec } from '../commands/spec/types.ts'
@@ -29,7 +28,7 @@ import { MountMode, PathSpec } from '../types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
 import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { type VFSOptions } from '../vfs/types.ts'
+import { type VFSOptions } from '../vfs/base.ts'
 import { Dispatcher } from './dispatcher/dispatcher.ts'
 import { Files } from './files.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -57,7 +56,7 @@ class Toy extends BaseVFS<RAMAccessor> {
     }
   }
 
-  constructor(options: Pick<VFSOptions<Command | CLI, RAMAccessor>, 'commands'> = {}) {
+  constructor(options: Pick<VFSOptions<RAMAccessor>, 'commands'> = {}) {
     const ram = new RAMVFS()
     super({ name: 'toy', accessor: ram.accessor, ...options })
     this.ram = ram

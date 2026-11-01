@@ -21,12 +21,10 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import type { GitHubTreeItem } from './client.ts'
 import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { DEFER_STATUSES } from './constants.ts'
-import { makeTreeEntry } from './tree_entry.ts'
+import { makeTreeEntry, type TreeEntry } from './tree_entry.ts'
 
-export function buildTreeMap(
-  tree: GitHubTreeItem[],
-): Record<string, ReturnType<typeof makeTreeEntry>> {
-  const map: Record<string, ReturnType<typeof makeTreeEntry>> = {}
+export function buildTreeMap(tree: GitHubTreeItem[]): Record<string, TreeEntry> {
+  const map: Record<string, TreeEntry> = {}
   for (const item of tree) map[item.path] = makeTreeEntry(item)
   return map
 }
@@ -37,7 +35,7 @@ export function buildTreeMap(
  *
  * Mirrors Python's `row_of`.
  */
-export function rowOf(entry: ReturnType<typeof makeTreeEntry>, name: string): FileStat {
+export function rowOf(entry: TreeEntry, name: string): FileStat {
   if (entry.type === 'tree') {
     return new FileStat({ name, type: FileType.DIRECTORY, extra: { sha: entry.sha } })
   }
@@ -58,9 +56,7 @@ export function rowOf(entry: ReturnType<typeof makeTreeEntry>, name: string): Fi
  *
  * Mirrors Python's `tree_rows`.
  */
-export function treeRows(
-  tree: Record<string, ReturnType<typeof makeTreeEntry>>,
-): Map<string, FileStat[]> {
+export function treeRows(tree: Record<string, TreeEntry>): Map<string, FileStat[]> {
   const folders = new Map<string, FileStat[]>([['', []]])
   for (const [path, entry] of Object.entries(tree)) {
     if (entry.type === 'tree' && !folders.has(path)) folders.set(path, [])
@@ -85,7 +81,7 @@ export function treeRows(
  *   FileNotFoundError: nothing is.
  */
 export function treeListing(
-  tree: Record<string, ReturnType<typeof makeTreeEntry>>,
+  tree: Record<string, TreeEntry>,
   rel: string,
   version: string | null,
   virtual: string,
@@ -109,7 +105,7 @@ export function treeListing(
  */
 export function reseatTree(
   accessor: GitHubAccessor,
-  tree: Record<string, ReturnType<typeof makeTreeEntry>>,
+  tree: Record<string, TreeEntry>,
   truncated: boolean,
 ): void {
   accessor.truncated = truncated
@@ -128,7 +124,7 @@ export function reseatTree(
  *   it, which then names only some paths.
  */
 export async function refreshTree(accessor: GitHubAccessor): Promise<{
-  tree: Record<string, ReturnType<typeof makeTreeEntry>>
+  tree: Record<string, TreeEntry>
   version: string | null
 } | null> {
   const generation = accessor.generation
@@ -169,7 +165,7 @@ export async function refreshTree(accessor: GitHubAccessor): Promise<{
 export async function pointRow(
   accessor: GitHubAccessor,
   rel: string,
-): Promise<{ entry: ReturnType<typeof makeTreeEntry> | null; truncated: boolean } | null> {
+): Promise<{ entry: TreeEntry | null; truncated: boolean } | null> {
   const trimmed = stripSlash(rel)
   const cut = trimmed.lastIndexOf('/')
   const parent = cut < 0 ? '' : trimmed.slice(0, cut)

@@ -60,7 +60,7 @@ describe('normalizeGridFSConfig', () => {
   })
 })
 
-describe('GridFSConfigSchema redaction', () => {
+describe('GridFSConfig redaction', () => {
   it('redacts the uri', () => {
     const redacted = redactConfigWithSchema(GridFSConfig, {
       uri: 'mongodb://user:pass@h',

@@ -63,7 +63,7 @@ def validate_document(
         {
             "op": op,
             "raw": _document_wire(raw),
-            "where_": where,
+            "where_": list(map(ord, where)),
             "dialect": "python",
             "names": names,
             "root": list(map(ord, root)),

@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { REDACTED_SECRET } from '../constants.ts'
-import { parseConfigWithSchema } from '../secrets.ts'
+import { parseConfigWithSchema, REDACTED_SECRET } from '../secrets.ts'
 import { QdrantConfig, redactQdrantConfig, resolveQdrantConfig } from './config.ts'
 
 const embed = (text: string): Promise<number[]> => Promise.resolve([text.length])

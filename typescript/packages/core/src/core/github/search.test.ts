@@ -21,7 +21,7 @@ import type * as ClientModule from './client.ts'
 import * as client from './client.ts'
 import { SCOPE_WARN } from './constants.ts'
 import { filesContaining, narrowPaths, search as restSearch } from './search.ts'
-import type { makeTreeEntry } from './tree_entry.ts'
+import type { TreeEntry } from './tree_entry.ts'
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
@@ -32,11 +32,11 @@ const search = vi.mocked(client.searchCode)
 // GitHub's documented code-search limit; files at or over it are not indexed.
 const SEARCH_LIMIT = 384 * 1024
 
-function blob(path: string, size: number | null): ReturnType<typeof makeTreeEntry> {
+function blob(path: string, size: number | null): TreeEntry {
   return { path, type: 'blob', sha: path, size }
 }
 
-function makeAccessor(tree: Record<string, ReturnType<typeof makeTreeEntry>>): GitHubAccessor {
+function makeAccessor(tree: Record<string, TreeEntry>): GitHubAccessor {
   const transport: client.GitHubTransport = {
     get(): Promise<unknown> {
       throw new Error('search is mocked')

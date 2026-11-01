@@ -87,17 +87,6 @@ function selectField(
 }
 
 /**
- * Whether a value is a plain config mapping rather than an instance.
- *
- * Only an object literal or `Object.create(null)` counts. A class
- * instance is left alone: a config field may hold a live object (a
- * notion `authProvider`, a client someone constructed), and rebuilding
- * one from its own entries drops every prototype method and accessor
- * the VFS then calls. Python needs no such check -- its walk asks
- * `isinstance(value, Mapping)`, which an instance already fails.
- */
-
-/**
  * Whether a raw config value is a `{from, ref, key}` pointer.
  *
  * Strict: a plain mapping only counts when it parses as the pointer

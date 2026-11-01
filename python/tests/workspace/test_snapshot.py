@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import asyncio
 import importlib.metadata
 import io
@@ -32,11 +31,11 @@ from mirage.io import IOResult
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.box import BoxConfig, BoxVFS
-from mirage.vfs.constants import REDACTED_SECRET
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
+from mirage.vfs.secrets import REDACTED_SECRET
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from mirage.workspace.snapshot import to_state_dict

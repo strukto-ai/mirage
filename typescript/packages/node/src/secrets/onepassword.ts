@@ -27,8 +27,6 @@ export const INTEGRATION_NAME = 'mirage'
 // gives it rather than being invisible to a `key`.
 export const NOTES_KEY = 'notesPlain'
 
-/** A 1Password reference split into its parts. */
-
 /**
  * Split a 1Password secret reference into vault, item and field.
  *

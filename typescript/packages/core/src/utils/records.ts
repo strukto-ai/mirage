@@ -5,7 +5,14 @@ export function isRecord(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** A document mapping, excluding instances such as Date and Set. */
+/**
+ * A document mapping, not merely an object: only an object literal or
+ * `Object.create(null)`. A Set, a Date or any class instance has no own
+ * enumerable string keys, so `Object.entries` would read one as an empty
+ * mapping, and a live object a config holds (a client someone built)
+ * would lose its prototype if rebuilt from its entries. Python asks
+ * `isinstance(value, Mapping)`, which an instance already fails.
+ */
 export function isPlainObject(value: unknown): value is JsonObject {
   if (!isRecord(value)) return false
   const proto: unknown = Object.getPrototypeOf(value)

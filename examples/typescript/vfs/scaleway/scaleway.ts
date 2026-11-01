@@ -19,7 +19,6 @@ import {
   MountMode,
   ScalewayVFS,
   Workspace,
-
   ScalewayConfig,
   type FileStat,
 } from '@struktoai/mirage-node'

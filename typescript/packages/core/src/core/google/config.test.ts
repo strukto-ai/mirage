@@ -14,9 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { errorSummary } from '../../secrets/summary.ts'
-import { REDACTED_SECRET } from '../../vfs/constants.ts'
 import { GCalConfig } from '../../vfs/gcal/config.ts'
-import { parseConfigWithSchema, redactConfigWithSchema, z } from '../../vfs/secrets.ts'
+import {
+  parseConfigWithSchema,
+  redactConfigWithSchema,
+  REDACTED_SECRET,
+  z,
+} from '../../vfs/secrets.ts'
 import { GOOGLE_CREDENTIAL_ERROR, GoogleConfig } from './config.ts'
 
 describe('GoogleConfig', () => {

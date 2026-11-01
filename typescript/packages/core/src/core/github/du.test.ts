@@ -22,11 +22,11 @@ import { answeringFiles } from '../../test-utils.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import type { GitHubTransport } from './client.ts'
 import { tree } from './stat.ts'
-import type { makeTreeEntry } from './tree_entry.ts'
+import type { TreeEntry } from './tree_entry.ts'
 
 afterEach(() => vi.restoreAllMocks())
 
-const TREE: Record<string, ReturnType<typeof makeTreeEntry>> = {
+const TREE: Record<string, TreeEntry> = {
   'Banana.md': { path: 'Banana.md', type: 'blob', sha: 's0', size: 2 },
   docs: { path: 'docs', type: 'tree', sha: 's1', size: null },
   'docs/a.md': { path: 'docs/a.md', type: 'blob', sha: 's2', size: 100 },

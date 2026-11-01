@@ -15,9 +15,8 @@
 import { z } from 'zod'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
-import { REDACTED_SECRET } from '../constants.ts'
 import type { ConfigOf, RedactedSchema } from '../secrets.ts'
-import { secretSchema, secretStr } from '../secrets.ts'
+import { REDACTED_SECRET, secretSchema, secretStr } from '../secrets.ts'
 
 // What `search` vectorizes the query with when the caller brings a model:
 // the text in, its embedding out, in the space the collection was built in.

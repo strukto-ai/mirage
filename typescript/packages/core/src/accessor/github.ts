@@ -18,7 +18,7 @@ import {
   type GitHubTransport,
 } from '../core/github/client.ts'
 import type { GhConfig } from '../core/github/config.ts'
-import type { makeTreeEntry } from '../core/github/tree_entry.ts'
+import type { TreeEntry } from '../core/github/tree_entry.ts'
 import { Accessor } from './base.ts'
 
 /**
@@ -86,7 +86,7 @@ export class GitHubAccessor extends Accessor {
   // scope counter and code search read it straight. Reseated by every
   // listing, so it is as fresh as the last one.
   truncated: boolean
-  tree: Record<string, ReturnType<typeof makeTreeEntry>>
+  tree: Record<string, TreeEntry>
   // Bumped by forget, so a tree GitHub answered before the drop is handed
   // back to its caller but not reseated.
   generation = 0
@@ -98,7 +98,7 @@ export class GitHubAccessor extends Accessor {
     ref: string
     defaultBranch: string
     truncated?: boolean
-    tree?: Record<string, ReturnType<typeof makeTreeEntry>>
+    tree?: Record<string, TreeEntry>
   }) {
     super()
     this.account = opts.account

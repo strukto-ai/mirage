@@ -35,7 +35,7 @@ import type { StorageUsage } from './capacity.ts'
 import { WALK_LIMIT } from './constants.ts'
 import type { RedactedSchema } from './secrets.ts'
 import { redactConfigWithSchema } from './secrets.ts'
-import type { VFSOptions, VFSStateBase } from './types.ts'
+import type { VFSStateBase } from './types.ts'
 import { type ConfigState, Effect, type Handed, Target } from './types.ts'
 
 // The accessor a driver that brings none runs over: the default Python's
@@ -49,6 +49,53 @@ const NO_ACCESSOR = new NOOPAccessor()
  * loader's check: the class identity may differ, the brand does not.
  */
 export const VFS_BRAND: unique symbol = Symbol.for('mirage.BaseVFS')
+
+/**
+ * The facts a subclass that does not declare them as members hands the
+ * constructor. Every field is optional, so a class that declares its facts
+ * as members calls `super()` bare. Mirrors the keyword arguments of
+ * Python's `BaseVFS.__init__`.
+ */
+export interface VFSOptions<A extends Accessor = Accessor> {
+  /**
+   * VFS name commands register under, and the `type` key `getState`
+   * writes into a snapshot. Also the registry key when the backend is
+   * exposed through `registerVfs`.
+   */
+  name?: string
+  /** Backend handle the functions use. */
+  accessor?: A
+  /**
+   * This VFS's part of VFS.md: its layout and file formats, `{prefix}`
+   * standing for the mount path.
+   */
+  vfsMd?: string
+  /**
+   * Extra commands, from `command({...})`, or `CLI` trees: bespoke verbs, a
+   * program's verbs as one command tree under its root's name, or
+   * replacements that win over the generic command of the same name.
+   */
+  commands?: readonly (Command | CLI)[]
+  /** Serve repeat reads from the file cache. Read-mostly content only. */
+  cachesReads?: boolean
+  /**
+   * Whether `stat` sizes every regular file without fetching it, which is
+   * also what makes the mount legal on FSKit.
+   */
+  sizesAlwaysKnown?: boolean
+  /**
+   * Whether `stat` fills `FileStat.fingerprint` with a stable per-path
+   * version marker. Setting it without that is not drift detection.
+   */
+  supportsSnapshot?: boolean
+  /**
+   * Whether `stat` and the read record stamp the *same kind* of content
+   * token, so a `read: fresh` mount can compare them. Setting it without
+   * that makes every read verdict stale; a mount declaring `fresh` on a
+   * backend that leaves it false is refused.
+   */
+  readRevalidatable?: boolean
+}
 
 /**
  * A backend: an accessor, the facts about it, and its functions.
@@ -233,7 +280,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * optional, so a class that declares its facts as members calls
    * `super()` bare.
    */
-  constructor(options: VFSOptions<Command | CLI, A> = {}) {
+  constructor(options: VFSOptions<A> = {}) {
     if (options.name !== undefined) {
       if (options.name === '') throw new Error('a VFS needs a non-empty name')
       this.name = options.name

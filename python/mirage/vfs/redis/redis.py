@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from contextlib import AbstractAsyncContextManager
 from functools import partial
 from typing import Any, cast
@@ -44,8 +43,8 @@ from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.capacity import Charge, charge, storage_usage
-from mirage.vfs.constants import REDACTED_SECRET
 from mirage.vfs.redis.store import RedisStore, escape_glob
+from mirage.vfs.secrets import REDACTED_SECRET
 
 try:
     import redis as sync_redis

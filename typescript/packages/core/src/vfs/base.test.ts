@@ -35,7 +35,7 @@ import { RAMStore } from './ram/store.ts'
 import { vfsStateRequiresOverride } from './secrets.ts'
 import { TrelloVFS } from './trello/trello.ts'
 import type { Handed } from './types.ts'
-import { type VFSOptions } from './types.ts'
+import { type VFSOptions } from './base.ts'
 
 const ENC = new TextEncoder()
 
@@ -128,7 +128,7 @@ class WikiVFS extends BaseVFS<WikiAccessor> {
   }
 }
 
-function makeVfs(extra: VFSOptions<Command | CLI, WikiAccessor> = {}): WikiVFS {
+function makeVfs(extra: VFSOptions<WikiAccessor> = {}): WikiVFS {
   return new WikiVFS({ name: 'wiki', accessor: new WikiAccessor(PAGES), ...extra })
 }
 

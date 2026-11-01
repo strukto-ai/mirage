@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from mirage.context import reset_admission, set_admission
 from mirage.rs.errors import RegexError
 from mirage.rs.regex import posix_regex

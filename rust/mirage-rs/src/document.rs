@@ -80,7 +80,7 @@ struct Config {
     op: String,
     raw: Doc,
     #[serde(default)]
-    where_: String,
+    where_: Text,
     #[serde(default)]
     names: Option<String>,
     #[serde(default)]
@@ -560,11 +560,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         reason,
         dialect,
     } = config;
+    let at = Doc::Text(at).shown();
     let result = match op.as_str() {
         "strings" => strings(&raw, &at, names.as_deref(), dialect),
         "absolute" => absolute(&raw, &at).map(|()| Doc::Null),
         "under" => under(&raw, &root, &at).map(|()| Doc::Null),
-        "rule" => rule(&raw, &at, &reason, dialect),
         "rules" => rules(&raw, &at, &reason, dialect),
         "paths" => paths(&raw, &at, dialect),
         "config" => workspace_fields(&raw, names.as_deref().unwrap_or("workspace"), &at),

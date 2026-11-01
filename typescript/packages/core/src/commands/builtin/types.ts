@@ -17,7 +17,6 @@ import type { RowActionKind } from '../../core/generic/types.ts'
 /** One `-exec` action: the words between `-exec` and its terminator, `{}`
  * still in place, and whether it is `{} +` (one run over every match)
  * rather than `;` (one run per match). */
-
 export interface ExecAction {
   readonly kind: 'exec'
   readonly argv: readonly string[]

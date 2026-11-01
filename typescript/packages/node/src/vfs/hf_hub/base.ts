@@ -34,7 +34,6 @@ import { readStream as hubStream } from '../../core/hf_hub/stream.ts'
  * revisions. These three are git repositories, read through the Hub's own
  * tree API and written as commits.
  */
-
 export abstract class HfHubVFS extends BaseVFS {
   abstract override readonly accessor: HfHubAccessor
   // Narrowed back to abstract: all three carry a config and so owe their own

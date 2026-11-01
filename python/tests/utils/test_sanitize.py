@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import pytest
 
 from mirage.utils.sanitize import (
@@ -218,3 +217,11 @@ def test_sanitize_crosses_stream_buffer_boundary():
     assert path_safe_name(text) == "é" * 100_000 + "∕.tail"
     assert sanitize_name(text) == "é" * 100
     assert sanitize_label("abc", fallback="X", max_len=100, max_bytes=-1) == ""
+
+
+def test_lone_surrogates_are_unsafe_in_names_and_kept_in_paths():
+    assert sanitize_name("\ud800abc") == "abc"
+    assert sanitize_label("\udc80", fallback="X", max_len=10) == "X"
+    assert path_safe_name(".x\udc80") == "⁄.x\udc80"
+    assert not is_blank("\udc80")
+    assert byte_length("a\udc80") == 4

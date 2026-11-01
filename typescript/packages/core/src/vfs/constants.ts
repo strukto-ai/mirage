@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const REDACTED_SECRET = '<REDACTED>' as const
+import { Effect } from './types.ts'
 
 export const WALK_LIMIT = 1000
 
@@ -20,4 +20,11 @@ export const LOCAL_WALK_LIMIT = 10000
 
 // Every effect that changes the mount: a read-only mount refuses these and
 // admission judges them as writes.
-export const WRITE_EFFECTS = ['write', 'create', 'remove', 'rename', 'copy', 'attr'] as const
+export const WRITE_EFFECTS: readonly Effect[] = [
+  Effect.WRITE,
+  Effect.CREATE,
+  Effect.REMOVE,
+  Effect.RENAME,
+  Effect.COPY,
+  Effect.ATTR,
+]

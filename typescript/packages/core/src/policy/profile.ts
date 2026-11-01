@@ -271,11 +271,6 @@ const PROFILE_FIELDS = [
 ] as const
 const PROGRAM_FIELDS = ['script', 'runtime', 'env'] as const
 
-// A document mapping, not merely "an object": a Set, a Date or any class
-// instance has no own enumerable string keys, so Object.entries would read
-// one as an empty mapping and a `mounts` Set would compile to a session
-// granting nothing at all. Python refuses the same values loudly.
-
 function rejectUnknownKeys(
   block: Record<string, unknown>,
   allowed: readonly string[],
@@ -333,7 +328,7 @@ function underMount(entries: readonly string[], root: string, where: string): vo
 }
 
 /**
- * Coerce one `deny` or `ask` entry to its rules. A bare string is one
+ * Coerce a `deny` or `ask` list to its rules. A bare string is one
  * command pattern over the whole line, with the arm's default reason. A
  * mapping carries `reason` (defaulting) and exactly one of: `commands`
  * as a list, a whole-line rule on each pattern; `commands` as a mapping,
@@ -343,7 +338,6 @@ function underMount(entries: readonly string[], root: string, where: string): vo
  * which command the paths belong to, and a rule naming neither is
  * refused rather than read as "every command".
  */
-
 function rules(raw: unknown, where: string, arm: 'ask' | 'deny'): readonly CommandRule[] {
   const reason = arm === 'ask' ? DEFAULT_ASK_REASON : DEFAULT_DENY_REASON
   return validateDocument('rules', raw, `${where}.${arm}`, { reason }) as CommandRule[]
@@ -581,6 +575,7 @@ export function compileProgram(program: ProfilePolicySpec, profile: string): Pro
   }
 }
 
+/** Validate one profile (a `profiles.<name>` block, or an inline document). */
 export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile {
   const obj = asObject(raw, where)
   // The keys this was first shipped under, a `script` named for what

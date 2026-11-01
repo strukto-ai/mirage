@@ -14,12 +14,12 @@
 
 import { describe, expect, expectTypeOf, it } from 'vitest'
 import { errorSummary } from '../secrets/summary.ts'
-import { REDACTED_SECRET } from './constants.ts'
 import {
   FIELD_NORMALIZERS,
   hasRedactedSecret,
   normalizeNonEmpty,
   parseConfigWithSchema,
+  REDACTED_SECRET,
   redactConfigWithSchema,
   refuseRepeatedFields,
   refuseUnknownKeys,

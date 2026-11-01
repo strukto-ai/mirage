@@ -16,9 +16,8 @@ import { z } from 'zod'
 import { timeoutShape } from '../../core/api/config.ts'
 import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { REDACTED_SECRET } from '../constants.ts'
 import type { ConfigOf, RedactedSchema } from '../secrets.ts'
-import { normalizeNonEmpty, secretStr } from '../secrets.ts'
+import { normalizeNonEmpty, REDACTED_SECRET, secretStr } from '../secrets.ts'
 
 export const DifyConfig = z.object({
   apiKey: secretStr().describe('Dify Knowledge API key, sent as `Authorization: Bearer`.'),

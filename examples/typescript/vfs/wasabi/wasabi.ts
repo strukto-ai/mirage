@@ -19,7 +19,6 @@ import {
   MountMode,
   WasabiVFS,
   Workspace,
-
   WasabiConfig,
   type FileStat,
 } from '@struktoai/mirage-node'

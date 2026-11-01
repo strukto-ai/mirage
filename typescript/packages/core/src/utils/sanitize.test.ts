@@ -253,3 +253,10 @@ it('crosses the stream buffer boundary', () => {
   expect(sanitizeName(text)).toBe('é'.repeat(100))
   expect(sanitizeLabel('abc', { fallback: 'X', maxLen: 100, maxBytes: -1 })).toBe('')
 })
+
+it('treats a lone surrogate as unsafe in a name and keeps it in a path', () => {
+  expect(sanitizeName('\ud800abc')).toBe('abc')
+  expect(sanitizeLabel('\udc80', { fallback: 'X', maxLen: 10 })).toBe('X')
+  expect(pathSafeName('.x\udc80')).toBe('⁄.x\udc80')
+  expect(isBlank('\udc80')).toBe(false)
+})

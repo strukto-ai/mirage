@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from mirage.commands.builtin.utils.links import link_view
 from mirage.context import program_invocation, reset_admission, set_admission
 from mirage.io import IOResult

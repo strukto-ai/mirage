@@ -68,8 +68,6 @@ function instance(): Exports {
   return exports
 }
 
-/** What a parse says of the line beyond its nodes. */
-
 /** A shell program as mirage's own parser reads it. Mirrors Python's ShellTree. */
 export class ShellTree {
   /** Unique per tree, so node ids differ across trees. */
@@ -332,6 +330,7 @@ export function parseShell(
 }
 
 /** The parse's extras, laid out as `mirage_rs_shell_extras` describes them. */
+/** What a parse says of the line beyond its nodes. */
 export function readExtras(wasm: Exports) {
   const words = new Uint32Array(
     wasm.memory.buffer,

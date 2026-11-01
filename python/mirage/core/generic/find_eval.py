@@ -12,9 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
-# find's row actions: -print, -print0, -ls and -delete.
-
 from collections.abc import Mapping
 from dataclasses import replace
 

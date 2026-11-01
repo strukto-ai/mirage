@@ -118,7 +118,7 @@ describe('SlackVFS (browser)', () => {
   })
 })
 
-describe('SlackConfigSchema redaction (browser)', () => {
+describe('SlackConfig redaction (browser)', () => {
   it('keeps proxyUrl in clear, redacts getHeaders only when present', () => {
     expect(redactConfigWithSchema(SlackConfig, { proxyUrl: '/p' })).toEqual({
       proxyUrl: '/p',

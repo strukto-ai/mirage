@@ -82,9 +82,8 @@ async function resolveNodeIndexURL(): Promise<string | null> {
   }
 }
 
-/** Distribution knobs a deployment can point at its own prebuilt assets. */
-
 export async function loadPyodideRuntime(
+  /** Distribution knobs a deployment can point at its own prebuilt assets. */
   options: {
     home?: string
     // Where wheels are fetched from, which is NOT indexURL: the npm
