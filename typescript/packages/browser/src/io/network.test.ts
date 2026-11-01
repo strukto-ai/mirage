@@ -35,22 +35,25 @@ function urlOf(input: RequestInfo | URL): string {
   return to instanceof Request ? to.url : String(to)
 }
 
-// Where a request to localhost:5003 made under `two` goes while a line
+// A binding: the rule, the workspace's policies, the session it runs for,
+// and whether a file op made it.
+type Binding = readonly [NetworkRule, Policies, string, boolean]
+
+// Where a request to localhost:5003 made under `two` goes while a call
 // under `one` still runs.
-async function apart(
-  one: NetworkRule | null,
-  onePolicies: Policies,
-  two: NetworkRule | null,
-  twoPolicies: Policies,
-): Promise<string> {
+async function apart(one: Binding, two: Binding): Promise<string> {
   let release!: () => void
   const held = new Promise<void>((resolve) => {
     release = resolve
   })
-  const first = runWithEgress(one, onePolicies, () => held)
+  const first = runWithEgress(one[0], one[1], () => held, one[2], one[3])
   try {
-    return await runWithEgress(two, twoPolicies, () =>
-      Promise.resolve().then(() => urlOf('http://localhost:5003/')),
+    return await runWithEgress(
+      two[0],
+      two[1],
+      () => Promise.resolve().then(() => urlOf('http://localhost:5003/')),
+      two[2],
+      two[3],
     )
   } finally {
     release()
@@ -115,8 +118,12 @@ describe('the page network watcher', () => {
     const base = networkRule({ routes: { 's3.test:443': 's3.test:9000' } })
     const session = networkRule({ routes: { 's3.test:443': 's3.test:9001' } })
     const policies = new Policies([])
-    const url = await runWithEgress(session, policies, () =>
-      runWithEgress(base, policies, () => Promise.resolve(urlOf('https://s3.test/b')), true),
+    const url = await runWithEgress(
+      session,
+      policies,
+      () =>
+        runWithEgress(base, policies, () => Promise.resolve(urlOf('https://s3.test/b')), 'a', true),
+      'a',
     )
     expect(url).toBe('https://s3.test:9001/b')
   })
@@ -125,19 +132,8 @@ describe('the page network watcher', () => {
     vi.stubGlobal('location', { href: 'https://page.test/' })
     const one = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
     const two = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
-    await expect(apart(one, new Policies([]), two, new Policies([]))).rejects.toThrow(
-      /route localhost:5003 apart/,
-    )
-  })
-
-  it("refuses a file call another session's line routes apart", async () => {
-    vi.stubGlobal('location', { href: 'https://page.test/' })
-    const base = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
-    const session = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
-    const policies = new Policies([])
-    await expect(apart(session, policies, base, policies)).rejects.toThrow(
-      /route localhost:5003 apart/,
-    )
+    const lines = apart([one, new Policies([]), 'a', false], [two, new Policies([]), 'a', false])
+    await expect(lines).rejects.toThrow(/route localhost:5003 apart/)
   })
 
   it('refuses a request two live sessions of one workspace route apart', async () => {
@@ -145,6 +141,26 @@ describe('the page network watcher', () => {
     const one = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
     const two = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
     const policies = new Policies([])
-    await expect(apart(one, policies, two, policies)).rejects.toThrow(/route localhost:5003 apart/)
+    const lines = apart([one, policies, 'a', false], [two, policies, 'b', false])
+    await expect(lines).rejects.toThrow(/route localhost:5003 apart/)
+  })
+
+  it("refuses a file op another session's line routes apart", async () => {
+    vi.stubGlobal('location', { href: 'https://page.test/' })
+    const base = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
+    const session = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
+    const policies = new Policies([])
+    const op = apart([session, policies, 'b', false], [base, policies, 'a', true])
+    await expect(op).rejects.toThrow(/route localhost:5003 apart/)
+  })
+
+  it("routes a file op beside its own session's line, a glob's read too, as the line goes", async () => {
+    vi.stubGlobal('location', { href: 'https://page.test/' })
+    const base = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
+    const session = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
+    const policies = new Policies([])
+    expect(await apart([session, policies, 'a', false], [base, policies, 'a', true])).toBe(
+      'http://127.0.0.1:2/',
+    )
   })
 })
