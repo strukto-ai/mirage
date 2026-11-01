@@ -250,7 +250,10 @@ describe('LocalRuntime', () => {
       },
     )
     try {
-      const result = await ws.shell("python3 -c 'import datetime; print(datetime.date.today())'")
+      // The UTC date, so the host's zone cannot move it.
+      const result = await ws.shell(
+        "python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).date())'",
+      )
       if (process.platform === 'linux' && FAKETIME_LIBRARIES.some((path) => existsSync(path)))
         expect(DEC.decode(result.stdout)).toBe('2026-03-02\n')
       else
