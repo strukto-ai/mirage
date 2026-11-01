@@ -34,7 +34,7 @@ export function applyElision(
   value: Record<string, unknown>,
   paths: Set<string>,
 ): Record<string, unknown> {
-  const grouped: Record<string, Set<string>> = {}
+  const grouped = new Map<string, Set<string>>()
   const leaves = new Set<string>()
   for (const p of paths) {
     const dot = p.indexOf('.')
@@ -43,21 +43,23 @@ export function applyElision(
     } else {
       const head = p.slice(0, dot)
       const tail = p.slice(dot + 1)
-      grouped[head] ??= new Set()
-      grouped[head].add(tail)
+      const tails = grouped.get(head) ?? new Set<string>()
+      tails.add(tail)
+      grouped.set(head, tails)
     }
   }
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(value)) {
     if (leaves.has(k)) continue
+    const tails = grouped.get(k)
     if (
-      grouped[k] !== undefined &&
+      tails !== undefined &&
       typeof v === 'object' &&
       v !== null &&
       !Array.isArray(v) &&
       Object.getPrototypeOf(v) === Object.prototype
     ) {
-      out[k] = applyElision(v as Record<string, unknown>, grouped[k])
+      out[k] = applyElision(v as Record<string, unknown>, tails)
     } else {
       out[k] = v
     }
@@ -81,6 +83,7 @@ function isLong(value: unknown): value is Long {
   return (
     typeof value === 'object' &&
     value !== null &&
+    Object.getPrototypeOf(value) !== Object.prototype &&
     (value as { _bsontype?: string })._bsontype === 'Long'
   )
 }
@@ -98,6 +101,11 @@ function relaxedEjson(value: unknown): unknown {
   if (isLong(value)) return value
   if (Array.isArray(value)) return value.map(relaxedEjson)
   if (typeof value !== 'object' || value === null) return EJSON.serialize(value, { relaxed: true })
+  if (Object.getPrototypeOf(value) === Object.prototype) {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value)) out[k] = relaxedEjson(v)
+    return out
+  }
   if ((value as { _bsontype?: string })._bsontype === 'DBRef') {
     const ref = value as DBRef
     return relaxedEjson({
@@ -106,11 +114,6 @@ function relaxedEjson(value: unknown): unknown {
       ...(ref.db ? { $db: ref.db } : {}),
       ...ref.fields,
     })
-  }
-  if (Object.getPrototypeOf(value) === Object.prototype) {
-    const out: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value)) out[k] = relaxedEjson(v)
-    return out
   }
   return EJSON.serialize(value, { relaxed: true })
 }
