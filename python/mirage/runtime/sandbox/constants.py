@@ -208,6 +208,10 @@ def reap_line(exec_id: str, signum: int = 15) -> str:
     )
 
 
+# How long a sandbox gets to answer the libfaketime probe, which every run
+# waiting on it shares.
+FAKETIME_PROBE_SECONDS = 30
+
 # Where Linux distributions install libfaketime, which a process reads a
 # workspace's system time through, on this host or in a sandbox.
 FAKETIME_LIBRARIES = (

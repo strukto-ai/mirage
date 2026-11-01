@@ -187,6 +187,10 @@ export function reapLine(execId: string, signum = 15): string {
   )
 }
 
+// How long a sandbox gets to answer the libfaketime probe, which every run
+// waiting on it shares.
+export const FAKETIME_PROBE_SECONDS = 30
+
 // Where Linux distributions install libfaketime, which a process reads a
 // workspace's system time through, on this host or in a sandbox.
 export const FAKETIME_LIBRARIES = [

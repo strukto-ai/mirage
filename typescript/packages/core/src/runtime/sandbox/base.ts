@@ -37,6 +37,7 @@ import {
 } from './config.ts'
 import {
   EXEC_ID,
+  FAKETIME_PROBE_SECONDS,
   faketimeEnv,
   faketimeProbe,
   REAP_ABSENT,
@@ -292,7 +293,9 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     const key = this.sandboxKey()
     let probe = this.faketime.get(key)
     if (probe === undefined) {
-      probe = this.execLine(faketimeProbe(), null, { ...this.config.env }, '/', signal).then(
+      // Its own deadline, not the first caller's: every waiting run shares it.
+      const deadline = AbortSignal.timeout(FAKETIME_PROBE_SECONDS * 1000)
+      probe = this.execLine(faketimeProbe(), null, { ...this.config.env }, '/', deadline).then(
         (found) => {
           if (found.exitCode !== 0)
             throw new Error(`${this.name}: libfaketime probe exited ${String(found.exitCode)}`)
@@ -303,8 +306,10 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     }
     let library: string | null
     try {
-      library = await probe
-    } catch {
+      library = await abortable(probe, signal)
+    } catch (err) {
+      // This run's own deadline: the probe goes on for the others.
+      if (signal?.aborted === true) throw err
       // Unanswered: this run keeps the sandbox's clock, and a later one asks again.
       if (this.faketime.get(key) === probe) this.faketime.delete(key)
       return {}
