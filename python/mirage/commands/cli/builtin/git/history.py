@@ -89,7 +89,7 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.rs.errors import RegexError
+from mirage.rs.errors import RegexError, SearchLimit
 from mirage.rs.regex import LineRegex, PosixRegex, posix_regex
 from mirage.shell.bytes import byte_view, decode_text, utf8_locale
 from mirage.types import PathSpec
@@ -1211,12 +1211,21 @@ def _hits(pattern: LinePattern, text: str) -> bool:
     Args:
         pattern (LinePattern): the compiled pattern.
         text (str): the line or identity.
+
+    Raises:
+        GitError: a -P search gave up at PCRE2's match limit, which git
+            dies on in its own words.
     """
     if isinstance(pattern, PosixRegex):
         return (
             pattern.search_blocking(byte_view(text, pattern.utf8)) is not None
         )
-    return pattern.matches_blocking(byte_view(text, pattern.utf8))
+    try:
+        return pattern.matches_blocking(byte_view(text, pattern.utf8))
+    except SearchLimit as exc:
+        raise GitError(
+            "pcre2_jit_match failed with error code -47: match limit exceeded"
+        ) from exc
 
 
 def _message_matches(message: bytes, greps: tuple[LinePattern, ...]) -> bool:

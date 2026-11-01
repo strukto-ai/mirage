@@ -908,7 +908,10 @@ impl Translator {
             }
             'E' => return Ok(()),
             'K' => return self.keep(),
-            'G' => return Err(self.fail(unsupported("\\G"), Some(start))),
+            'G' => {
+                self.assertion("\\G".to_string());
+                return Ok(());
+            }
             'X' | 'C' => return Err(self.fail(unsupported(&format!("\\{ch}")), Some(start))),
             'R' => {
                 let class = self.class_piece(&CharSet::of(NEWLINE_SEQUENCE));
