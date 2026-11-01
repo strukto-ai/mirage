@@ -46,10 +46,10 @@
     "@struktoai/mirage-core": "workspace:*"
   },
   "peerDependencies": {
-    "@anthropic-ai/sdk": "^0.124.0"
+    "@anthropic-ai/sdk": "^1.3.0"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.124.0",
+    "@anthropic-ai/sdk": "^1.3.0",
     "@struktoai/mirage-node": "workspace:*",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.0",

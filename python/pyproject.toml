@@ -168,7 +168,7 @@ claude-agent-sdk = [
 
 # --- claude-managed-agents ---
 claude-managed-agents = [
-    "anthropic>=0.122.0",
+    "anthropic>=2.3.0",
 ]
 
 # --- sandboxes ---
