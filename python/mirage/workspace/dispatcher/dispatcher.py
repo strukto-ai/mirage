@@ -1000,6 +1000,7 @@ class Dispatcher:
         memory = self._namespace.registry.memory
         network = self._namespace.registry.network
         policies = self._namespace.registry.policies
+        nested = caller is not None
         try:
             if caller is None:
                 caller = current_caller()
@@ -1010,7 +1011,7 @@ class Dispatcher:
                     run_with_memory(
                         memory, self._bound(name, path, caller, report, kwargs)
                     ),
-                    op=True,
+                    nested=nested,
                 )
             async with self._admit_write(caller) as held:
                 return await run_with_egress(
@@ -1019,7 +1020,7 @@ class Dispatcher:
                     run_with_memory(
                         memory, self._bound(name, path, held, report, kwargs)
                     ),
-                    op=True,
+                    nested=nested,
                 )
         finally:
             if name in ("write", "append", "pwrite"):

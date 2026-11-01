@@ -832,7 +832,7 @@ export class Dispatcher {
                 ? this.readRefusingDirs(path, args, kwargs, report)
                 : this.dispatchAdmitted(name, path, args, kwargs, report),
             ),
-          true,
+          this.caller !== null,
         )
       if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()
       return await this.admitWrite(run)
