@@ -25,7 +25,7 @@ export function winningPad(flags: string): string | null {
   return null
 }
 
-/** GNU date's C-locale directives. The host supplies one timezone reading;
+/** date's C-locale directives. The host supplies one timezone reading;
  * Rust owns the calendar, directives and padding. */
 export function gnuStrftime(dt: Date, fmt: string, zone: Zone): string {
   const parts = zone.parts(dt)

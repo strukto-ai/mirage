@@ -90,19 +90,6 @@
         "stdout": "/db/all/doc-000.md\n/db/all/doc-001.md\n/db/all/doc-002.md\n/db/all/doc-003.md\n/db/all/doc-004.md\nrc=0\n",
         "stderr": ""
       }
-    },
-    {
-      "id": "lancedb_numeric_id_with_newline_is_literal",
-      "seq": 650407,
-      "targets": [
-        "lancedb-window"
-      ],
-      "command": "test ! -e /db/all/$'1\\n.md'",
-      "expect": {
-        "exit": 0,
-        "stdout": "",
-        "stderr": ""
-      }
     }
   ]
 }

@@ -211,7 +211,7 @@ fn reserve(out: &mut Vec<u8>, additional: usize) -> Result<(), StreamError> {
 }
 
 impl Strftime {
-    // GNU date's formatter differs from libc's (used by jq): widths replace
+    // date's formatter differs from libc's (used by jq): widths replace
     // numeric defaults, '-' suppresses text padding, and '+' signs years.
     fn render(&self, format: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
         let mut at = 0;
@@ -259,7 +259,7 @@ impl Strftime {
             at += usize::from(modifier.is_some());
             let code = format.get(at).copied();
             at += usize::from(code.is_some());
-            // GNU date 9.7 keeps all nine digits for bare %-N; adding a
+            // date 9.7 keeps all nine digits for bare %-N; adding a
             // width or another flag makes '-' trim the trailing zeros.
             if &format[start..at] == b"%-N" {
                 flags.pad = None;
@@ -512,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    fn directives_and_refused_modifiers_match_gnu_date_9_7() {
+    fn directives_and_refused_modifiers_match_date_9_7() {
         assert_eq!(render(&moment(), "%^d|%#d|%^C|%#P|%Ea|%EY|%Ob|%OC|%6Q|%06Q|%6%|%06%|%::::z|%:%z|%E|%O|%12|%%N".as_bytes()), "01|01|20|am|%Ea|2026|Jan|20|   %6Q|00%06Q|    %6%|000%06%|%::::z|%:+0000|%E|%O|        %12|%N".as_bytes());
     }
 
@@ -594,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    fn nanosecond_padding_and_bare_dash_follow_gnu() {
+    fn nanosecond_padding_and_bare_dash_follow_date() {
         let format = b"%N|%-N|%--N|%_N|%-12N|%_12N|%3N|%12N";
         assert_eq!(
             render(&moment(), format),

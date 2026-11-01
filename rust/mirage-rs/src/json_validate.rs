@@ -22,10 +22,10 @@ impl Stream for Validate {
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        if let Some(raw) = self.0.take()
-            && let Err(error) = serde_json::from_slice::<serde_json::Value>(&raw)
-        {
-            out.extend_from_slice(error.to_string().as_bytes());
+        if let Some(raw) = self.0.take() {
+            if let Err(error) = serde_json::from_slice::<serde_json::Value>(&raw) {
+                out.extend_from_slice(error.to_string().as_bytes());
+            }
         }
         Ok(())
     }

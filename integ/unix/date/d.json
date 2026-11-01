@@ -456,10 +456,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "date -u -d @1767225601 '+%^d|%#d|%^C|%#P|%Ea|%EY|%6Q|%6%'",
+      "command": "date -u -d @1767225601 '+%^d|%#d|%^C|%#P|%Ea|%EY|%6Q|%6%' && date -u -d @0 +$'\\xff%Y' | od -An -tx1",
       "expect": {
         "exit": 0,
-        "stdout": "01|01|20|am|%Ea|2026|   %6Q|    %6%\n",
+        "stdout": "01|01|20|am|%Ea|2026|   %6Q|    %6%\n ff 31 39 37 30 0a\n",
         "stderr": ""
       },
       "flags": [

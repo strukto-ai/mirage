@@ -29,7 +29,7 @@ def winning_pad(flags: str) -> str | None:
 
 
 def gnu_strftime(dt: datetime, fmt: str, years: int = 0) -> str:
-    """Render GNU date's C-locale directives through the shared Rust engine.
+    """Render date's C-locale directives through the shared Rust engine.
 
     The host supplies one timezone reading, including the epoch and offset;
     Rust owns the calendar, directives and padding. A naive moment uses the
