@@ -663,8 +663,10 @@ async def test_runs_on_the_system_time_or_refuses_without_libfaketime():
         system_time="2026-03-02T09:00:00Z",
     )
     try:
+        # The UTC date, so the host's zone cannot move it.
         io = await ws.shell(
-            "python3 -c 'import datetime; print(datetime.date.today())'"
+            "python3 -c 'import datetime; "
+            "print(datetime.datetime.now(datetime.timezone.utc).date())'"
         )
         if sys.platform == "linux" and any(
             os.path.isfile(path) for path in FAKETIME_LIBRARIES
