@@ -20,7 +20,14 @@ import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { RemoteSandbox } from './base.ts'
-import { EXEC_ID, faketimeProbe, REAP_ABSENT, REAP_WAIT_SECONDS, reapLine } from './constants.ts'
+import {
+  EXEC_ID,
+  FAKETIME_PROBE_SECONDS,
+  faketimeProbe,
+  REAP_ABSENT,
+  REAP_WAIT_SECONDS,
+  reapLine,
+} from './constants.ts'
 import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
@@ -195,6 +202,52 @@ describe('RemoteSandbox', () => {
       await ws.shell('python3 d')
       expect(box.probes).toEqual(['a', 'a', 'b'])
     } finally {
+      await ws.close()
+    }
+  })
+
+  it('gives up on a probe its provider does not stop, and asks again', async () => {
+    // The first probe never answers and ignores its signal, as Daytona's lines do.
+    class StalledBox extends RecordingSandbox {
+      probes = 0
+
+      constructor() {
+        super({ captures: ['python3'] })
+      }
+
+      override execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        if (line !== faketimeProbe()) return super.execLine(line, stdin, env, cwd)
+        this.probes += 1
+        if (this.probes === 1) return new Promise(() => undefined)
+        return Promise.resolve({
+          stdout: ENC.encode('/usr/lib/faketime/libfaketime.so.1\n'),
+          stderr: null,
+          exitCode: 0,
+        })
+      }
+    }
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    const spy = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms) => timeout(ms === FAKETIME_PROBE_SECONDS * 1000 ? 20 : ms))
+    const box = new StalledBox()
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'], systemTime: '2026-03-02T09:00:00Z' },
+    )
+    try {
+      await ws.shell('python3 a')
+      expect(box.execs.at(-1)?.[2]).not.toHaveProperty('FAKETIME')
+      await ws.shell('python3 b')
+      expect(box.execs.at(-1)?.[2]).toHaveProperty('FAKETIME')
+      expect(box.probes).toBe(2)
+    } finally {
+      spy.mockRestore()
       await ws.close()
     }
   })
