@@ -205,7 +205,8 @@ export const FAKETIME_LIBRARIES = [
  * What has a process read the running workspace's system time through the
  * libfaketime at `library`: the time now, in epoch seconds to the
  * millisecond, which its clock and its children's run on from, whatever
- * the machine's own clock or zone; the monotonic clock left alone. `env`'s
+ * the machine's own clock or zone; the monotonic clock and file dates, which
+ * the workspace already gives, left alone. `env`'s
  * `LD_PRELOAD` libraries load after it. Empty when the workspace keeps the
  * host's time. Mirrors Python's `faketime_env`.
  */
@@ -218,6 +219,7 @@ export function faketimeEnv(library: string, env: Record<string, string>): Recor
     FAKETIME_FMT: '%s',
     FAKETIME_DONT_RESET: '1',
     FAKETIME_DONT_FAKE_MONOTONIC: '1',
+    NO_FAKE_STAT: '1',
   }
 }
 
