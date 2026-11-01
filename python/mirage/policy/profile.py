@@ -142,21 +142,28 @@ def _rules(v: Any, where: str) -> Any:
             resolver rebuilds blocks from.
         where (str): ``deny`` or ``ask``.
     """
-    if isinstance(v, (list, tuple)) and all(
-        isinstance(entry, CommandRule) for entry in v
-    ):
-        return tuple(v)
+    at = f"commands.{where}"
+    if v is None:
+        return ()
+    if not isinstance(v, (list, tuple)):
+        raise ValueError(f"{at} must be a list of rules")
     reason = DEFAULT_ASK_REASON if where == "ask" else DEFAULT_DENY_REASON
-    return tuple(
-        CommandRule(
-            reason=row["reason"],
-            commands=tuple(row.get("commands", ())),
-            paths=tuple(row.get("paths", ())),
+    rules: list[CommandRule] = []
+    for i, entry in enumerate(v):
+        if isinstance(entry, CommandRule):
+            rules.append(entry)
+            continue
+        rules.extend(
+            CommandRule(
+                reason=row["reason"],
+                commands=tuple(row.get("commands", ())),
+                paths=tuple(row.get("paths", ())),
+            )
+            for row in validate_document(
+                "rule", entry, f"{at}[{i}]", reason=reason
+            )
         )
-        for row in validate_document(
-            "rules", v, f"commands.{where}", reason=reason
-        )
-    )
+    return tuple(rules)
 
 
 def _patterns(v: Any) -> Any:
@@ -165,48 +172,59 @@ def _patterns(v: Any) -> Any:
     return _string_list(v, "commands.allow", names="a command")
 
 
-def _compiled(block: Mapping[str, Any]) -> bool:
-    """Whether a ``paths:`` block holds compiled entries, not a document.
-
-    Args:
-        block (Mapping[str, Any]): the block as handed to the model.
-    """
-    return any(
-        isinstance(entry, (ShowEntry, HideReason))
-        for key in ("show", "reasons")
-        if isinstance(block.get(key), (list, tuple))
-        for entry in block[key]
-    )
-
-
 def _paths(raw: Any, where: str) -> dict[str, Any]:
-    """A ``paths:`` document's fields, checked by mirage-rs's rule.
+    """A ``paths:`` block's fields, checked by mirage-rs's rule.
 
     Reason groups are a spelling of ``hide``: their patterns join the
     flat list and their reasons land in ``reasons``. Every hide entry is
-    absolute or a name pattern, every show entry absolute.
+    absolute or a name pattern, every show entry absolute. A typed
+    caller's compiled entries (``ShowEntry``, ``HideReason``) are checked
+    as the document spells them and kept as given.
 
     Args:
         raw (Any): the block as written.
         where (str): the block's name, for the messages.
     """
-    doc = validate_document("paths", raw, where)
+    show: Any = raw.get("show") if isinstance(raw, Mapping) else None
+    typed = isinstance(show, (list, tuple)) and any(
+        isinstance(entry, ShowEntry) for entry in show
+    )
+    doc = raw
+    if isinstance(raw, Mapping):
+        doc = dict(raw)
+        if typed:
+            doc["show"] = [
+                entry.path if isinstance(entry, ShowEntry) else entry
+                for entry in show
+            ]
+        if isinstance(raw.get("reasons"), (list, tuple)):
+            doc["reasons"] = [
+                {"patterns": list(group.patterns), "reason": group.reason}
+                if isinstance(group, HideReason)
+                else group
+                for group in raw["reasons"]
+            ]
+    parsed = validate_document("paths", doc, where)
+    shown = [
+        ShowEntry(
+            path=entry["path"],
+            mode=None if entry["mode"] is None else MountMode(entry["mode"]),
+        )
+        for entry in parsed.get("show", ())
+    ]
+    if typed:
+        shown = [
+            given if isinstance(given, ShowEntry) else entry
+            for given, entry in zip(show, shown, strict=True)
+        ]
     return {
-        "hide": tuple(doc["hide"]),
-        "show": tuple(
-            ShowEntry(
-                path=entry["path"],
-                mode=None
-                if entry["mode"] is None
-                else MountMode(entry["mode"]),
-            )
-            for entry in doc.get("show", ())
-        ),
+        "hide": tuple(parsed["hide"]),
+        "show": tuple(shown),
         "reasons": tuple(
             HideReason(
                 patterns=tuple(group["patterns"]), reason=group["reason"]
             )
-            for group in doc.get("reasons", ())
+            for group in parsed.get("reasons", ())
         ),
     }
 
@@ -249,7 +267,7 @@ class PathsBlock(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _v_document(cls, data: Any) -> Any:
-        if not isinstance(data, Mapping) or _compiled(data):
+        if not isinstance(data, Mapping):
             return data
         return _paths(data, "paths")
 
