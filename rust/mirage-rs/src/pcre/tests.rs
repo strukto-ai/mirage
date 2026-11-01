@@ -53,6 +53,8 @@ fn matches_as_pcre2() {
         (r"\d+", "abc 123 x45", &["123", "45"], false),
         (r"(?<=id=)\d+", "id=42 name=x", &["42"], false),
         (r"name=\K\w+", "id=42 name=x", &["x"], false),
+        (r"\Gfoo", "foofoo xfoo", &["foo", "foo"], false),
+        (r"\Gfoo", "xfoo", &[], false),
         (r"\x{00a0}", "a\u{a0}b", &["\u{a0}"], false),
         (r"\t", "a\tb", &["\t"], false),
         (r"\h", "a b", &[" "], false),
@@ -268,7 +270,6 @@ fn refusals_in_pcre2s_words() {
 #[test]
 fn what_mirage_cannot_express_is_refused() {
     for pattern in [
-        r"\Gab",
         r"\X",
         "(ab)(?1)",
         "(?R)?a",

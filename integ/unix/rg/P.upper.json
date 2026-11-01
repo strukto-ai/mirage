@@ -164,10 +164,10 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "printf 'abc\\n' | rg -obP 'a\\Kbc'; printf 'abc\\n' | rg --column -P 'a\\Kbc'; printf 'abc\\n' | rg -P -r X 'a\\Kb'",
+      "command": "printf 'abc\\n' | rg -obP 'a\\Kbc'; printf 'abc\\n' | rg --column -P 'a\\Kbc'; printf 'abc\\n' | rg -P -r X 'a\\Kb'; printf 'foofoo xfoo\\nxfoo\\n' | rg -oP '\\Gfoo'",
       "expect": {
         "exit": 0,
-        "stdout": "1:bc\n1:2:abc\naXc\n",
+        "stdout": "1:bc\n1:2:abc\naXc\nfoo\nfoo\n",
         "stderr": ""
       },
       "flags": [

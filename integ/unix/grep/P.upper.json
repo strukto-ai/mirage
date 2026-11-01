@@ -262,10 +262,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'foo=1 foo=2\\naaa\\n' | grep -oP 'foo=\\K\\d|a\\Ka'",
+      "command": "printf 'foo=1 foo=2\\naaa\\n' | grep -oP 'foo=\\K\\d|a\\Ka'; printf 'foofoo xfoo\\nxfoo\\n' | grep -oP '\\Gfoo'",
       "expect": {
         "exit": 0,
-        "stdout": "1\n2\na\n",
+        "stdout": "1\n2\na\nfoo\nfoo\n",
         "stderr": ""
       },
       "flags": [

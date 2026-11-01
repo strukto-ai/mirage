@@ -179,11 +179,11 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "git -C /repo/search-case log --format=%s -P --grep='t\\Kwo' && git -C /repo/search-case log --format=%s -P --grep='\\Qthree\\E' && git -C /repo/search-case log --format=%s -P --author='Se\\Karch'",
+      "command": "git -C /repo/search-case log --format=%s -P --grep='t\\Kwo' && git -C /repo/search-case log --format=%s -P --grep='\\Qthree\\E' && git -C /repo/search-case log --format=%s -P --author='Se\\Karch' && git -C /repo/search-case log --format=%s -P --grep='\\Gth' && git -C /repo/search-case log --format=%s -P --grep='\\Ghree' && git -C /repo/search-case log --format=%s -P --author='(.|.)+\\1$'",
       "expect": {
-        "exit": 0,
-        "stdout": "two\nthree\nwords\nthree\ntwo\none\n",
-        "stderr": ""
+        "exit": 128,
+        "stdout": "two\nthree\nwords\nthree\ntwo\none\nthree\n",
+        "stderr": "fatal: pcre2_jit_match failed with error code -47: match limit exceeded\n"
       }
     },
     {

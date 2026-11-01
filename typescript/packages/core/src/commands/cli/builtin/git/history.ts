@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git from 'isomorphic-git'
-import { RegexError } from '../../../../rs/errors.ts'
+import { RegexError, SearchLimit } from '../../../../rs/errors.ts'
 import { byteView, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
 import { LineRegex, posixRegex, type PosixRegex } from '../../../../rs/regex.ts'
 import {
@@ -284,11 +284,20 @@ function pattern(
   }
 }
 
-/** Whether a `--grep`, `--author` or `--committer` pattern matches `text`. */
+/**
+ * Whether a `--grep`, `--author` or `--committer` pattern matches `text`. A -P
+ * search that gives up at PCRE2's match limit is git's fatal, in its words.
+ */
 async function hits(pattern: LinePattern, text: string, signal?: AbortSignal): Promise<boolean> {
   const view = byteView(text, pattern.utf8)
-  if (pattern instanceof LineRegex) return pattern.matches(view, signal)
-  return (await pattern.search(view, 0, signal)) !== null
+  if (!(pattern instanceof LineRegex)) return (await pattern.search(view, 0, signal)) !== null
+  try {
+    return await pattern.matches(view, signal)
+  } catch (err) {
+    if (err instanceof SearchLimit)
+      throw new GitError('pcre2_jit_match failed with error code -47: match limit exceeded')
+    throw err
+  }
 }
 
 /**
