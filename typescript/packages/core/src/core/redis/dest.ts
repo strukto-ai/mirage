@@ -167,15 +167,17 @@ export async function keepLeft(store: RedisStoreLike, p: string): Promise<Set<st
   const files = (await store.listFiles(prefix)).filter((k) => k.startsWith(prefix))
   const left = [...files, ...dirs]
   if (left.length === 0) return new Set()
-  const held = new Set([p, ...dirs])
+  const needed = new Set([p])
   for (const key of left) {
-    for (const up of ancestors(key)) if (up.startsWith(prefix)) held.add(up)
+    for (const up of ancestors(key)) if (up.startsWith(prefix)) needed.add(up)
   }
   const now = nowIso()
-  for (const key of [...held].sort(compareCodePoints)) {
+  for (const key of [...needed].sort(compareCodePoints)) {
     if ((await store.hasDir(key)) || (await store.hasFile(key))) continue
     await store.addDir(key)
     if (!(await store.getModified(key))) await store.setModified(key, now)
   }
-  return held
+  // A standing directory keeps its metadata but is never made again: one
+  // another client removed since the listing stays removed.
+  return new Set([...needed, ...dirs])
 }

@@ -347,6 +347,32 @@ describe.skipIf(skip)('core/redis ops', () => {
     expect(await store.getAttrs('/dir/sub')).toEqual({ mode: '750' })
   })
 
+  it('a directory removed after the final listing stays removed', async () => {
+    // The repair rebuilds only the directories a leftover key needs: one
+    // another client removed after the final listing stays removed.
+    await mkdir(acc, spec('/dir'))
+    await mkdir(acc, spec('/dir/sub'))
+    const removeDir = store.removeDir.bind(store)
+    const listDirs = store.listDirs.bind(store)
+    let recreated = false
+    vi.spyOn(store, 'removeDir').mockImplementation(async (key: string) => {
+      await removeDir(key)
+      if (key !== '/dir/sub' || recreated) return
+      recreated = true
+      await store.addDir('/dir/sub')
+    })
+    let lists = 0
+    vi.spyOn(store, 'listDirs').mockImplementation(async () => {
+      const dirs = await listDirs()
+      lists += 1
+      if (lists === 2) await removeDir('/dir/sub')
+      return dirs
+    })
+    await expect(rmR(acc, spec('/dir'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    vi.restoreAllMocks()
+    expect(await store.hasDir('/dir/sub')).toBe(false)
+  })
+
   it('copy duplicates contents', async () => {
     await write(acc, spec('/s'), ENC.encode('hi'))
     await copy(acc, spec('/s'), spec('/t'))

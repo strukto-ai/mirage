@@ -245,14 +245,16 @@ async def keep_left(store: RedisStore, p: str) -> set[str]:
     left = [*files, *dirs]
     if not left:
         return set()
-    held = {p, *dirs}
+    needed = {p}
     for key in left:
-        held.update(up for up in ancestors(key) if up.startswith(prefix))
+        needed.update(up for up in ancestors(key) if up.startswith(prefix))
     now = now_iso()
-    for key in sorted(held):
+    for key in sorted(needed):
         if await store.has_dir(key) or await store.has_file(key):
             continue
         await store.add_dir(key)
         if not await store.get_modified(key):
             await store.set_modified(key, now)
-    return held
+    # A standing directory keeps its metadata but is never made again:
+    # one another client removed since the listing stays removed.
+    return needed | dirs
