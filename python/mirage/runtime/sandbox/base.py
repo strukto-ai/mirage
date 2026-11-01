@@ -27,6 +27,7 @@ from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
+    FAKETIME_PROBE_SECONDS,
     REAP_ABSENT,
     REAP_WAIT_SECONDS,
     faketime_env,
@@ -94,11 +95,12 @@ class RemoteSandbox(
         self._connect_lock = asyncio.Lock()
         self._mounts: SandboxMounts | None = None
         # The libfaketime each sandbox holds (_sandbox_key), asked once the
-        # first program runs there under a system_time: None for none. The
-        # lock lets concurrent first runs share one probe; a failed probe
-        # is not kept, so a later run asks again.
+        # first program runs there under a system_time: None for none. A
+        # lock per sandbox lets its concurrent first runs share one probe
+        # without holding up another sandbox's; a failed probe is not kept,
+        # so a later run asks again.
         self._faketime: dict[str, str | None] = {}
-        self._faketime_lock = asyncio.Lock()
+        self._faketime_locks: dict[str, asyncio.Lock] = {}
         check_mount_type(self.name, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -304,12 +306,24 @@ class RemoteSandbox(
         if bound_system_clock() is None:
             return {}
         key = self._sandbox_key()
-        async with self._faketime_lock:
+        if key not in self._faketime:
+            await self._probe_faketime(key)
+        library = self._faketime.get(key)
+        return {} if library is None else faketime_env(library, env)
+
+    async def _probe_faketime(self, key: str) -> None:
+        """Ask the sandbox ``key`` names for its libfaketime, once.
+
+        Args:
+            key (str): the sandbox (``_sandbox_key``).
+        """
+        async with self._faketime_locks.setdefault(key, asyncio.Lock()):
             if key not in self._faketime:
                 try:
-                    found = await self.exec_line(
-                        faketime_probe(), None, dict(self.config.env), "/"
-                    )
+                    async with asyncio.timeout(FAKETIME_PROBE_SECONDS):
+                        found = await self.exec_line(
+                            faketime_probe(), None, dict(self.config.env), "/"
+                        )
                 except Exception:
                     found = None
                     logger.debug(
@@ -326,15 +340,13 @@ class RemoteSandbox(
                             self.name,
                             found.exit_code,
                         )
-                    return {}
+                    return
                 self._faketime[key] = found.stdout.decode().strip() or None
                 if self._faketime[key] is None:
                     logger.debug(
                         "%s: no libfaketime, so programs run on its clock",
                         self.name,
                     )
-        library = self._faketime[key]
-        return {} if library is None else faketime_env(library, env)
 
     def _sandbox_key(self) -> str:
         """Which sandbox a run of the current session goes to, which the
