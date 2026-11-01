@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runWithEgress } from '@struktoai/mirage-core/io/gateway'
-import { networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
+import { type NetworkRule, networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
 import { Policies } from '@struktoai/mirage-core/policy/policies'
 import type * as AsyncContext from '@struktoai/mirage-core/utils/async_context'
 import { afterAll, describe, expect, it, vi } from 'vitest'
@@ -33,6 +33,29 @@ vi.mock('@struktoai/mirage-core/utils/async_context', async (importOriginal) => 
 function urlOf(input: RequestInfo | URL): string {
   const to = routed(input)
   return to instanceof Request ? to.url : String(to)
+}
+
+// Where a request to localhost:5003 made under `two` goes while a line
+// under `one` still runs.
+async function apart(
+  one: NetworkRule | null,
+  onePolicies: Policies,
+  two: NetworkRule | null,
+  twoPolicies: Policies,
+): Promise<string> {
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const first = runWithEgress(one, onePolicies, () => held)
+  try {
+    return await runWithEgress(two, twoPolicies, () =>
+      Promise.resolve().then(() => urlOf('http://localhost:5003/')),
+    )
+  } finally {
+    release()
+    await first
+  }
 }
 
 describe('the page network watcher', () => {
@@ -87,32 +110,31 @@ describe('the page network watcher', () => {
     expect(routed('http://localhost:5003/')).toBe('http://localhost:5003/')
   })
 
-  it("routes a file call inside a session's line by the workspace's own rule", async () => {
+  it("routes a file call inside a session's line as the line goes", async () => {
     vi.stubGlobal('location', { href: 'https://page.test/' })
     const base = networkRule({ routes: { 's3.test:443': 's3.test:9000' } })
     const session = networkRule({ routes: { 's3.test:443': 's3.test:9001' } })
     const policies = new Policies([])
     const url = await runWithEgress(session, policies, () =>
-      runWithEgress(base, policies, () => Promise.resolve(urlOf('https://s3.test/b'))),
+      runWithEgress(base, policies, () => Promise.resolve(urlOf('https://s3.test/b')), true),
     )
-    expect(url).toBe('https://s3.test:9000/b')
+    expect(url).toBe('https://s3.test:9001/b')
   })
 
   it('refuses a request two live workspaces route apart', async () => {
     vi.stubGlobal('location', { href: 'https://page.test/' })
     const one = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
     const two = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
-    let release!: () => void
-    const held = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    const first = runWithEgress(one, new Policies([]), () => held)
-    await expect(
-      runWithEgress(two, new Policies([]), () =>
-        Promise.resolve().then(() => urlOf('http://localhost:5003/')),
-      ),
-    ).rejects.toThrow(/route localhost:5003 apart/)
-    release()
-    await first
+    await expect(apart(one, new Policies([]), two, new Policies([]))).rejects.toThrow(
+      /route localhost:5003 apart/,
+    )
+  })
+
+  it('refuses a request two live sessions of one workspace route apart', async () => {
+    vi.stubGlobal('location', { href: 'https://page.test/' })
+    const one = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
+    const two = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
+    const policies = new Policies([])
+    await expect(apart(one, policies, two, policies)).rejects.toThrow(/route localhost:5003 apart/)
   })
 })

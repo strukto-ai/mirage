@@ -820,15 +820,19 @@ export class Dispatcher {
       // Under the workspace's max_memory and network, which FUSE and ws.vfs
       // calls reach only here.
       const run = (): ReturnType<DispatchFn> =>
-        runWithEgress(this.namespace.network, this.policies, () =>
-          runWithMemory(this.namespace.memory, () =>
-            name === 'read' &&
-            kwargs?.warm !== true &&
-            kwargs?.admit_only !== true &&
-            !('retained' in (kwargs ?? {}))
-              ? this.readRefusingDirs(path, args, kwargs, report)
-              : this.dispatchAdmitted(name, path, args, kwargs, report),
-          ),
+        runWithEgress(
+          this.namespace.network,
+          this.policies,
+          () =>
+            runWithMemory(this.namespace.memory, () =>
+              name === 'read' &&
+              kwargs?.warm !== true &&
+              kwargs?.admit_only !== true &&
+              !('retained' in (kwargs ?? {}))
+                ? this.readRefusingDirs(path, args, kwargs, report)
+                : this.dispatchAdmitted(name, path, args, kwargs, report),
+            ),
+          true,
         )
       if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()
       return await this.admitWrite(run)
