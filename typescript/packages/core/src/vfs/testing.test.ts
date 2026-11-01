@@ -314,6 +314,49 @@ class RenameMissingQuietly extends RAMVFS {
   }
 }
 
+/** Finds a file only through the row the mount hands it, as Box does. */
+class NeedsRows extends RAMVFS {
+  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+    if (handed?.entry == null) return Promise.reject(enoent(path.virtual))
+    return super.stat(path)
+  }
+
+  override unlink(path: PathSpec, handed?: Handed): Promise<void> {
+    if (handed?.entry == null) return Promise.reject(enoent(path.virtual))
+    return super.unlink(path)
+  }
+
+  override rename(src: PathSpec, dst: PathSpec, handed?: Handed): Promise<void> {
+    if (handed?.entry == null) return Promise.reject(enoent(src.virtual))
+    return super.rename(src, dst)
+  }
+
+  override copy(
+    src: PathSpec,
+    dst: PathSpec,
+    signal?: AbortSignal,
+    handed?: Handed,
+  ): Promise<void> {
+    if (handed?.entry == null) return Promise.reject(enoent(src.virtual))
+    return super.copy(src, dst, signal)
+  }
+}
+
+/** Refuses to unlink the rename destination. */
+class KeepsRenameDst extends RAMVFS {
+  override unlink(path: PathSpec): Promise<void> {
+    if (path.virtual.endsWith('/rename-dst')) return Promise.reject(eacces(path.virtual))
+    return super.unlink(path)
+  }
+}
+
+/** Writes and never unlinks. */
+class NoUnlink extends Minimal {
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    await ramWrite(this.accessor, path, data)
+  }
+}
+
 /** Declares conditional puts and writes through them unconditioned. */
 class ClaimsPutConditions extends RAMVFS {
   override get conditionSupport(): ConditionSupport {
@@ -348,6 +391,34 @@ describe('checkMutationContract', () => {
     const vfs = new RenameKeepsSource()
     await expect(checkMutationContract(vfs, SCRATCH)).rejects.toThrow()
     expect(await names(vfs)).toEqual([])
+  })
+
+  it('hands each op its rows', async () => {
+    const vfs = new NeedsRows()
+    await checkMutationContract(vfs, SCRATCH)
+    expect(await names(vfs)).toEqual([])
+  })
+
+  it('tries every file in cleanup, then throws', async () => {
+    const vfs = new KeepsRenameDst()
+    await expect(checkMutationContract(vfs, SCRATCH)).rejects.toThrow('rename-dst')
+    expect(await names(vfs)).toEqual(['rename-dst'])
+  })
+
+  it('needs unlink to clean up', async () => {
+    await expect(
+      checkMutationContract(
+        new NoUnlink({ name: 'custom', accessor: new RAMAccessor(new RAMStore()) }),
+        SCRATCH,
+      ),
+    ).rejects.toThrow('cleans up through unlink')
+  })
+
+  it('catches a refused overwrite whatever the content', async () => {
+    const fixture = { directory: DIRECTORY, content: new TextEncoder().encode('replaced\n') }
+    await expect(checkMutationContract(new CopyKeepsDestination(), fixture)).rejects.toThrow(
+      'over an existing file',
+    )
   })
 
   it('skips an unenforced condition with a warning', async () => {

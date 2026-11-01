@@ -14,14 +14,15 @@
 
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { checkMutationContract } from '@struktoai/mirage-core/vfs/testing'
-import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { MinIOVFS } from '../minio/minio.ts'
 import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 import { s3Vfs } from '../../../tests/test-utils.ts'
 
 const DIRECTORY = new PathSpec({ virtual: '/s3/scratch', directory: '/s3', vfsPath: 'scratch' })
 
-// Expected to fail while a copy of a missing source rejects NoSuchKey, not ENOENT.
+// Every case passes up to a copy of a missing source: S3 rejects NoSuchKey
+// there, not ENOENT. Fixing that fails these tests.
 describe('the mutation contract on S3', () => {
   let mock: S3Mock
 
@@ -35,17 +36,21 @@ describe('the mutation contract on S3', () => {
     for (const bucket of mock.store.allBuckets()) mock.store.objects(bucket).clear()
   })
 
-  it.fails('holds on AWS, every condition declared', async () => {
-    await checkMutationContract(s3Vfs(), { directory: DIRECTORY })
+  it('on AWS, every condition declared, fails only at NoSuchKey', async () => {
+    await expect(checkMutationContract(s3Vfs(), { directory: DIRECTORY })).rejects.toMatchObject({
+      name: 'NoSuchKey',
+    })
   })
 
-  it.fails('holds on a custom endpoint, puts declared only', async () => {
+  it('on a custom endpoint, puts declared only, fails only at NoSuchKey', async () => {
     const vfs = new MinIOVFS({
       bucket: 'b',
       endpoint: 'http://127.0.0.1:9000',
       accessKeyId: 'k',
       secretAccessKey: 's',
     })
-    await checkMutationContract(vfs, { directory: DIRECTORY })
+    await expect(checkMutationContract(vfs, { directory: DIRECTORY })).rejects.toMatchObject({
+      name: 'NoSuchKey',
+    })
   })
 })
