@@ -28,7 +28,9 @@ A second workspace on the same server can route `localhost:5003` to
 - Every connection the workspace opens follows it: a line's `curl`, a
   CLI's API call, `requests` or `fetch` in a runtime, a mount's reads. It
   maps an address, not a URL, so HTTPS, WebSocket and database connections
-  follow it too.
+  follow it too. A runtime that starts a process on this machine (`local`,
+  Sandlock) refuses to run in a routed workspace, and a sandbox runtime
+  connects from its own machine, which no route reaches.
 - It applies before the name is looked up, so a routed name need not
   resolve.
 - [`allowed_domains` and `denied_domains`](/home/configuration#network)
