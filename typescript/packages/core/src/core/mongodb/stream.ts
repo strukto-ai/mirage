@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { stripSlash } from '../../utils/slash.ts'
-import { EJSON, type Long } from 'bson'
+import { type DBRef, EJSON, type Long } from 'bson'
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { PathSpec } from '../../types.ts'
 import {
@@ -55,7 +55,7 @@ export function applyElision(
       typeof v === 'object' &&
       v !== null &&
       !Array.isArray(v) &&
-      v.constructor === Object
+      Object.getPrototypeOf(v) === Object.prototype
     ) {
       out[k] = applyElision(v as Record<string, unknown>, grouped[k])
     } else {
@@ -97,7 +97,17 @@ function relaxedEjson(value: unknown): unknown {
   }
   if (isLong(value)) return value
   if (Array.isArray(value)) return value.map(relaxedEjson)
-  if (typeof value === 'object' && value !== null && value.constructor === Object) {
+  if (typeof value !== 'object' || value === null) return EJSON.serialize(value, { relaxed: true })
+  if ((value as { _bsontype?: string })._bsontype === 'DBRef') {
+    const ref = value as DBRef
+    return relaxedEjson({
+      $ref: ref.collection,
+      $id: ref.oid,
+      ...(ref.db ? { $db: ref.db } : {}),
+      ...ref.fields,
+    })
+  }
+  if (Object.getPrototypeOf(value) === Object.prototype) {
     const out: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(value)) out[k] = relaxedEjson(v)
     return out

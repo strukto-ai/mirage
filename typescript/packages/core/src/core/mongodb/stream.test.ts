@@ -18,7 +18,7 @@ import { PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
-import { Long } from 'bson'
+import { DBRef, Long } from 'bson'
 import { follow, lastLines, lineCount, readStream, stringifyDoc } from './stream.ts'
 
 function docs(database: string, kind = 'collections', name = 'users'): PathSpec {
@@ -262,6 +262,19 @@ describe('mongodb document rendering', () => {
   it('writes an Int64 past 2^53 with its exact digits', () => {
     expect(stringifyDoc({ a: Long.fromString('9007199254740993'), b: Long.MIN_VALUE })).toBe(
       '{"a": 9007199254740993, "b": -9223372036854775808}',
+    )
+  })
+
+  it('writes the exact digits inside a DBRef and a document with a constructor field', () => {
+    const id = Long.fromString('9007199254740993')
+    expect(
+      stringifyDoc({
+        ref: new DBRef('authors', id as never, 'db', { note: id }),
+        doc: { constructor: 'part', n: id },
+      }),
+    ).toBe(
+      '{"ref": {"$ref": "authors", "$id": 9007199254740993, "$db": "db", "note": 9007199254740993}, ' +
+        '"doc": {"constructor": "part", "n": 9007199254740993}}',
     )
   })
 

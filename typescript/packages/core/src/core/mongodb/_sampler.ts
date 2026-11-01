@@ -32,7 +32,12 @@ function bump(counts: Map<string, Map<string, number>>, path: string, tag: strin
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) && v.constructor === Object
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    !Array.isArray(v) &&
+    Object.getPrototypeOf(v) === Object.prototype
+  )
 }
 
 function isObjectIdLike(v: unknown): boolean {
