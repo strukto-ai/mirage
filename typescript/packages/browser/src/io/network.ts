@@ -12,14 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type Egress, liveEgress } from '@struktoai/mirage-core/io/gateway'
-import {
-  type NetworkRule,
-  networkBound,
-  networkLets,
-  networkRoute,
-} from '@struktoai/mirage-core/io/network'
-import type { Policies } from '@struktoai/mirage-core/policy/policies'
+import { liveEgress } from '@struktoai/mirage-core/io/gateway'
+import { networkBound, networkLets, networkRoute } from '@struktoai/mirage-core/io/network'
 
 // The schemes that reach a host; data:, blob: and the like never leave the page.
 export const REACHING = new Set(['http:', 'https:', 'ws:', 'wss:'])
@@ -43,22 +37,20 @@ const SECURE = new Set(['https:', 'wss:'])
 /**
  * Where a page's request to `host` on `port` goes instead, null for nowhere
  * else. A page cannot tell one task's binding from another's, so every live
- * line must route it alike, and a file op of a workspace with a live line
- * goes as its lines do (a file call inside a line binds the workspace's own
- * rule over the session's); throws when two do not.
+ * line and file op must route it alike, but for a file op inside a line,
+ * which goes as its line does (it binds the workspace's own rule over the
+ * session's); throws when two do not.
  */
 function routeOf(host: string, port: number): readonly [string, number] | null {
   const live = liveEgress()
   if (live.length === 0) return networkRoute(host, port)
-  // The workspace a binding belongs to.
-  const owner = (egress: Egress): Policies | NetworkRule | null => egress.policies ?? egress.rule
-  const lined = new Set(live.filter((egress) => !egress.op).map(owner))
-  const answers = live
-    .filter((egress) => !egress.op || !lined.has(owner(egress)))
-    .map((egress) => egress.rule?.route(host, port) ?? null)
+  const own = live.filter((egress) => !egress.nested)
+  const answers = (own.length === 0 ? live : own).map(
+    (egress) => egress.rule?.route(host, port) ?? null,
+  )
   const first = answers[0] ?? null
   if (answers.some((answer) => answer?.join(':') !== first?.join(':'))) {
-    throw new Error(`network: live lines route ${host}:${String(port)} apart`)
+    throw new Error(`network: live calls route ${host}:${String(port)} apart`)
   }
   return first
 }

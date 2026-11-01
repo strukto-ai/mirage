@@ -130,6 +130,16 @@ describe('the page network watcher', () => {
     )
   })
 
+  it("refuses a file call another session's line routes apart", async () => {
+    vi.stubGlobal('location', { href: 'https://page.test/' })
+    const base = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
+    const session = networkRule({ routes: { 'localhost:5003': '127.0.0.1:2' } })
+    const policies = new Policies([])
+    await expect(apart(session, policies, base, policies)).rejects.toThrow(
+      /route localhost:5003 apart/,
+    )
+  })
+
   it('refuses a request two live sessions of one workspace route apart', async () => {
     vi.stubGlobal('location', { href: 'https://page.test/' })
     const one = networkRule({ routes: { 'localhost:5003': '127.0.0.1:1' } })
