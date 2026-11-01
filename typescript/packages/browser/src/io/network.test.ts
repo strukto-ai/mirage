@@ -48,15 +48,21 @@ describe('the page network watcher', () => {
   it('sends a request where the bound rule routes its host and port', async () => {
     vi.stubGlobal('location', { href: 'https://page.test/' })
     const rule = networkRule({
-      routes: { 'localhost:5003': '127.0.0.1:61001', 'api.test:443': '[::1]:8443' },
+      routes: {
+        'localhost:5003': '127.0.0.1:61001',
+        'api.test:443': 'api.test:8443',
+        'other.test:443': '[::1]:8443',
+      },
     })
     const under = (input: RequestInfo | URL): Promise<string> =>
-      runWithNetwork(rule, () => {
+      runWithNetwork(rule, async () => {
+        await Promise.resolve()
         const to = routed(input)
-        return Promise.resolve(to instanceof Request ? to.url : String(to))
+        return to instanceof Request ? to.url : String(to)
       })
     expect(await under('http://localhost:5003/a?b=1')).toBe('http://127.0.0.1:61001/a?b=1')
-    expect(await under('https://api.test/x')).toBe('https://[::1]:8443/x')
+    expect(await under('https://api.test/x')).toBe('https://api.test:8443/x')
+    await expect(under('https://other.test/x')).rejects.toThrow(/cannot route other.test/)
     expect(await under(new Request('ws://localhost:5003/s'))).toBe('ws://127.0.0.1:61001/s')
     expect(await under('http://localhost:5004/')).toBe('http://localhost:5004/')
     expect(routed('http://localhost:5003/')).toBe('http://localhost:5003/')

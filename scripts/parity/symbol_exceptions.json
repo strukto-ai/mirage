@@ -63,6 +63,7 @@
     "Lookup": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
     "LookupDone": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
     "REACHING": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
+    "SECURE": "A page checks TLS against the URL it sends, so it may route a secure URL to another port but not another host; Node and Python connect the routed address under the name the program asked for.",
     "key": "A route is keyed by host and port in one Map, which takes a string key; Python keys its dict by the (host, port) tuple.",
     "lets": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
     "poolOwner": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",

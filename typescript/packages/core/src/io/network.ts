@@ -84,8 +84,15 @@ export class NetworkRule {
       if (error instanceof StreamRefusal) throw new Error(error.message)
       throw error
     }
+    const sources = new Map<string, string>()
     for (const [from, to] of Object.entries(routes)) {
-      this.targets.set(key(...endpoint(from)), endpoint(to))
+      const source = key(...endpoint(from))
+      const named = sources.get(source)
+      if (named !== undefined) {
+        throw new Error(`network: routes ${named} and ${from} name the same end`)
+      }
+      sources.set(source, from)
+      this.targets.set(source, endpoint(to))
     }
     for (const [from, to] of Object.entries(routes)) {
       if (this.targets.has(key(...endpoint(to)))) {
@@ -157,6 +164,20 @@ export function networkRoutes(setting: NetworkSetting): Readonly<Record<string, 
 }
 
 /**
+ * `base`'s routes with `over`'s in place of any naming the same end, as a
+ * session's profile routes over its workspace's. Mirrors Python's
+ * `merge_routes`.
+ */
+export function mergeRoutes(
+  base: Readonly<Record<string, string>>,
+  over: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const named = new Set(Object.keys(over).map((from) => key(...endpoint(from))))
+  const kept = Object.entries(base).filter(([from]) => !named.has(key(...endpoint(from))))
+  return { ...Object.fromEntries(kept), ...over }
+}
+
+/**
  * Whether two settings hold the same rule: their allowed and denied lists
  * name the same entries as written, in any order, `false` being an empty
  * allowed list and an empty denied list none at all, since it refuses
@@ -217,11 +238,17 @@ export function networkLets(host: string, address: string, port?: number): boole
 
 /**
  * Where the workspace a call runs for sends a connection to `host` on
- * `port` instead, null for nowhere else. A browser answers by the newest
- * live rule. Mirrors Python's `network_route`.
+ * `port` instead, null for nowhere else. A browser cannot tell one task's
+ * binding from another's, so there every live workspace must route it
+ * alike; throws when two do not. Mirrors Python's `network_route`.
  */
 export function networkRoute(host: string, port: number): readonly [string, number] | null {
-  return networkBound()?.route(host, port) ?? null
+  const answers = rule.liveStores().map((live) => live?.route(host, port) ?? null)
+  const first = answers[0] ?? null
+  if (answers.some((answer) => answer?.join(':') !== first?.join(':'))) {
+    throw new Error(`network: live workspaces route ${host}:${String(port)} apart`)
+  }
+  return first
 }
 
 /**
