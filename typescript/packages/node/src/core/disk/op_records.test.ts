@@ -17,10 +17,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { DiskVFS } from '../vfs/disk/disk.ts'
-import { Workspace } from '../workspace.ts'
+import { DiskVFS } from '../../vfs/disk/disk.ts'
+import { Workspace } from '../../workspace.ts'
 
-const MUTATIONS = new Set(['copy', 'rename', 'rename_prefix', 'unlink', 'rmdir', 'rm_r'])
+const MUTATIONS = new Set(['copy', 'rename', 'rename_prefix', 'unlink', 'mkdir', 'rmdir', 'rm_r'])
 
 let root: string
 
@@ -55,7 +55,13 @@ async function rows(line: string): Promise<[string, string, number][]> {
 describe('disk mutations record the object-store rows', () => {
   it.each<[string, [string, string, number][]]>([
     ['cp /m/a.txt /m/c.txt', [['copy', '/m/c.txt', 0]]],
-    ['cp -r /m/d /m/d2', [['copy', '/m/d2/f.txt', 0]]],
+    [
+      'cp -r /m/d /m/d2',
+      [
+        ['mkdir', '/m/d2', 0],
+        ['copy', '/m/d2/f.txt', 0],
+      ],
+    ],
     [
       'mv /m/a.txt /m/b.txt',
       [
@@ -71,7 +77,8 @@ describe('disk mutations record the object-store rows', () => {
       ],
     ],
     ['rm /m/a.txt', [['unlink', '/m/a.txt', 0]]],
-    ['mkdir /m/x', []],
+    ['mkdir /m/x', [['mkdir', '/m/x', 0]]],
+    ['mkdir -p /m/y/z', [['mkdir', '/m/y/z', 0]]],
     ['rmdir /m/e', [['rmdir', '/m/e', 0]]],
     ['rm -r /m/d', [['rm_r', '/m/d', 0]]],
   ])('%s', async (line, expected) => {

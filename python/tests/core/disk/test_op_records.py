@@ -21,7 +21,7 @@ from mirage import MountMode, Workspace
 from mirage.vfs.disk import DiskVFS
 
 MUTATIONS = frozenset(
-    {"copy", "rename", "rename_prefix", "unlink", "rmdir", "rm_r"}
+    {"copy", "rename", "rename_prefix", "unlink", "mkdir", "rmdir", "rm_r"}
 )
 
 
@@ -47,7 +47,10 @@ async def _rows(root: Path, line: str) -> list[tuple[str, str, int]]:
     ("line", "expected"),
     [
         ("cp /m/a.txt /m/c.txt", [("copy", "/m/c.txt", 0)]),
-        ("cp -r /m/d /m/d2", [("copy", "/m/d2/f.txt", 0)]),
+        (
+            "cp -r /m/d /m/d2",
+            [("mkdir", "/m/d2", 0), ("copy", "/m/d2/f.txt", 0)],
+        ),
         (
             "mv /m/a.txt /m/b.txt",
             [("rename", "/m/a.txt", 0), ("rename", "/m/b.txt", 0)],
@@ -57,7 +60,8 @@ async def _rows(root: Path, line: str) -> list[tuple[str, str, int]]:
             [("rename_prefix", "/m/d", 0), ("rename_prefix", "/m/d2", 0)],
         ),
         ("rm /m/a.txt", [("unlink", "/m/a.txt", 0)]),
-        ("mkdir /m/x", []),
+        ("mkdir /m/x", [("mkdir", "/m/x", 0)]),
+        ("mkdir -p /m/y/z", [("mkdir", "/m/y/z", 0)]),
         ("rmdir /m/e", [("rmdir", "/m/e", 0)]),
         ("rm -r /m/d", [("rm_r", "/m/d", 0)]),
     ],
