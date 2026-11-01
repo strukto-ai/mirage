@@ -17,7 +17,6 @@ import pytest
 from mirage.utils.quote import (
     SHELL_QUOTED_COMMANDS,
     escape_name,
-    needs_shell_quote,
     quotes_operands,
     shell_quote,
     shell_quote_always,
@@ -33,13 +32,11 @@ BARE = "%+,-./0123456789@ABCXYZ]_abcxyz"
 
 @pytest.mark.parametrize("char", list(TRIGGERS))
 def test_special_character_forces_quoting(char):
-    assert needs_shell_quote(f"a{char}b")
     assert shell_quote(f"a{char}b") != f"a{char}b"
 
 
 @pytest.mark.parametrize("char", list(BARE))
 def test_ordinary_character_stays_bare(char):
-    assert not needs_shell_quote(f"a{char}b")
     assert shell_quote(f"a{char}b") == f"a{char}b"
 
 
@@ -96,7 +93,6 @@ def test_quote_after_escape_group_reopens_once():
 def test_empty_name_is_reported_as_empty_quotes():
     # Unquoted it would vanish from the line, taking the answer to "which
     # name failed" with it, so GNU quotes it under both policies.
-    assert needs_shell_quote("")
     assert shell_quote("") == "''"
     assert shell_quote_always("") == "''"
 
@@ -200,3 +196,16 @@ def test_never_quoting_commands_stay_out_of_the_table():
 )
 def test_ls_escape_names(name, expected):
     assert escape_name(name) == expected
+
+
+def test_quoting_preserves_raw_bytes_and_a_leading_bom():
+    for name in ("\udcff", "\ufeffname"):
+        assert shell_quote(name) == name
+        assert shell_quote_always(name) == f"'{name}'"
+
+
+def test_quoting_a_word_larger_than_the_wasm_input_window():
+    prefix = "a" * (96 * 1024 - 1)
+    name = prefix + "\x85\udcff"
+    assert shell_quote(name) == f"'{prefix}'$'\\302\\205''\udcff'"
+    assert escape_name(name) == prefix + "\\302\\205\\377"

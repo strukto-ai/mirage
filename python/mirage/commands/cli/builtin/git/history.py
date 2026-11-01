@@ -18,12 +18,10 @@ import heapq
 import itertools
 import logging
 import math
-import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence, Set
 from dataclasses import dataclass, field, replace
 from typing import Literal, TypeAlias
 
-import regex
 from dulwich.objects import Commit, ObjectID, Tag
 from dulwich.refs import (
     HEADREF,
@@ -92,14 +90,13 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.rs.errors import RegexError
-from mirage.rs.regex import PosixRegex, posix_regex
+from mirage.rs.regex import LineRegex, PosixRegex, posix_regex
 from mirage.shell.bytes import byte_view, decode_text, utf8_locale
 from mirage.types import PathSpec
 from mirage.utils.dates import iso_timestamp
-from mirage.utils.posix import compile_posix_regex
 from mirage.workspace.files import Files
 
-LinePattern: TypeAlias = re.Pattern[str] | PosixRegex
+LinePattern: TypeAlias = LineRegex | PosixRegex
 
 logger = logging.getLogger(__name__)
 
@@ -322,12 +319,9 @@ def _pattern(
 ) -> LinePattern:
     """One ``--grep``, ``--author`` or ``--committer`` pattern, compiled.
 
-    ``-P`` goes to the ``regex`` engine, whose syntax is PCRE's where
-    Python's ``re`` is not (``\\p{L}``, ``[[:alpha:]]``, ``\\K``), with
-    ASCII escapes as PCRE2 reads them without UCP. A refusal names where
-    the pattern came from and the pattern itself, as git words it;
-    the reason after that is glibc's
-    for a basic expression and the host engine's otherwise.
+    Every syntax uses mirage-rs. Basic and extended expressions keep
+    regcomp's dialect; fixed strings and Perl patterns use its line
+    matcher. A refusal names the pattern's origin as git does.
 
     Args:
         value (str): the pattern as typed.
@@ -338,14 +332,13 @@ def _pattern(
             folded by Unicode.
     """
     try:
-        if syntax == PERL_REGEXP:
-            perl: re.Pattern[str] = regex.compile(
-                value, regex.ASCII | (regex.IGNORECASE if ignore_case else 0)
+        if syntax in (PERL_REGEXP, FIXED_STRINGS):
+            return LineRegex(
+                [byte_view(value, utf8)],
+                "perl" if syntax == PERL_REGEXP else "fixed",
+                ignore_case,
+                utf8,
             )
-            return perl
-        if syntax == FIXED_STRINGS:
-            fold = re.IGNORECASE if ignore_case else 0
-            return compile_posix_regex(re.escape(value), fold)
         return posix_regex(
             byte_view(value, utf8),
             syntax == EXTENDED_REGEXP,
@@ -355,8 +348,6 @@ def _pattern(
         )
     except RegexError as exc:
         raise PatternCompileError(origin, value, exc.message) from exc
-    except (re.error, regex.error) as exc:
-        raise PatternCompileError(origin, value, str(exc)) from exc
 
 
 def _pickaxe_pattern(value: str, ignore_case: bool, utf8: bool) -> PosixRegex:
@@ -1225,7 +1216,7 @@ def _hits(pattern: LinePattern, text: str) -> bool:
         return (
             pattern.search_blocking(byte_view(text, pattern.utf8)) is not None
         )
-    return pattern.search(text) is not None
+    return pattern.matches_blocking(byte_view(text, pattern.utf8))
 
 
 def _message_matches(message: bytes, greps: tuple[LinePattern, ...]) -> bool:

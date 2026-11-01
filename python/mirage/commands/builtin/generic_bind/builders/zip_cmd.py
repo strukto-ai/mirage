@@ -17,7 +17,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.zip_cmd import (
     facts,
     parse_flags,
-    zip_cmd,
+    zip_generic,
 )
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.archive_io import walk_of
@@ -33,7 +33,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def zip_builder(
+async def zip_cmd(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -42,7 +42,7 @@ async def zip_builder(
     files = command_files(ctx, paths)
     if not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
-    return await zip_cmd(
+    return await zip_generic(
         await files.resolve_glob(paths),
         stream=normalized_read(files.read),
         dispatch=dispatch_of(ctx),
@@ -55,4 +55,4 @@ async def zip_builder(
     )
 
 
-BUILDER = GenericCommand("zip", zip_builder, write=True, facts=facts)
+BUILDER = GenericCommand("zip", zip_cmd, write=True, facts=facts)

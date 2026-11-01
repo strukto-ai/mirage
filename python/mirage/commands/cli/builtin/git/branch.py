@@ -479,7 +479,7 @@ def _merged(repo: BaseRepo, sha: bytes, head: bytes | None) -> bool:
     )
 
 
-async def _delete(
+async def _remove(
     repo: Repo,
     head: HeadRef,
     name: str,
@@ -1093,7 +1093,7 @@ async def branch(
         if not operands:
             raise BranchNameRequiredError()
         deleted = b"".join(
-            [await _delete(repo, head, name, force) for name in operands]
+            [await _remove(repo, head, name, force) for name in operands]
         )
         if fl.as_bool("quiet"):
             return None, IOResult()

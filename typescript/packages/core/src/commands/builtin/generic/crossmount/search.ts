@@ -30,7 +30,7 @@ import {
   runsParallel,
   sortHaystacks,
 } from '../rg.ts'
-import type { FlagSet } from '../../grep_binary.ts'
+import type { GrepFlags } from '../../grep_binary.ts'
 import { patternArg, compilePattern } from '../../grep_pattern.ts'
 import type { LineRegex } from '../../../../rs/regex.ts'
 import { dirAdmitted, fileAdmitted } from '../../grep_select.ts'
@@ -54,7 +54,7 @@ import { fsErrorLine } from '../../../../errors/render.ts'
 import { byteView, encodeText } from '../../../../shell/bytes.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
-function admitGrep(flags: FlagSet, path: PathSpec, stat: FileStat): boolean {
+function admitGrep(flags: GrepFlags, path: PathSpec, stat: FileStat): boolean {
   if (stat.type === FileType.DIRECTORY) return dirAdmitted(path.virtual, flags.filters)
   return (
     stat.type === FileType.FILE &&

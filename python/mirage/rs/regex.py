@@ -369,7 +369,7 @@ class LineRegex:
         word: bool = False,
         line: bool = False,
     ) -> None:
-        self._utf8 = utf8
+        self.utf8 = utf8
         self.ignore_case = ignore_case
         self.unicode_folds = ignore_case and utf8
         self._streams = _StreamPool(
@@ -403,9 +403,24 @@ class LineRegex:
         Raises:
             SearchLimit: a -P search gave up at PCRE2's match limit.
         """
-        data = from_byte_view(line, self._utf8)
+        data = from_byte_view(line, self.utf8)
         try:
             return await self._streams.ask({"op": "test"}, data) == b"\x01"
+        except StreamRefusal as exc:
+            raise SearchLimit(exc.message, []) from exc
+
+    def matches_blocking(self, line: str) -> bool:
+        """Match a line in a git walk already running off the event loop.
+
+        Args:
+            line (str): the line as a byte view, without its terminator.
+
+        Raises:
+            SearchLimit: a -P search gave up at PCRE2's match limit.
+        """
+        data = from_byte_view(line, self.utf8)
+        try:
+            return self._streams.ask_blocking({"op": "test"}, data) == b"\x01"
         except StreamRefusal as exc:
             raise SearchLimit(exc.message, []) from exc
 
@@ -419,7 +434,7 @@ class LineRegex:
             SearchLimit: a -P search gave up at PCRE2's match limit, after
                 the matches it carries.
         """
-        subject = _Subject(line, self._utf8)
+        subject = _Subject(line, self.utf8)
         try:
             found = await self._streams.ask({"op": "extents"}, subject.data)
             return _spans(subject, found)

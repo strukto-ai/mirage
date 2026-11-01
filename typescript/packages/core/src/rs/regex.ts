@@ -316,7 +316,7 @@ export class LineRegex {
     patterns: readonly string[],
     syntax: LineSyntax,
     readonly ignoreCase = false,
-    private readonly utf8 = false,
+    readonly utf8 = false,
     word = false,
     line = false,
   ) {

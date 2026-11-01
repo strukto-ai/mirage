@@ -17,56 +17,43 @@ import { constants as osConstants } from 'node:os'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { unnamedFsError } from '@struktoai/mirage-core/errors/fs'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  classifyErrno,
-  classifyError,
-  EACCES,
-  EEXIST,
-  EINVAL,
-  EIO,
-  EISDIR,
-  ENOENT,
-  ENOTDIR,
-  ENOTEMPTY,
-  EROFS,
-  EXDEV,
-} from './errors.ts'
+import { classifyErrno, classifyError } from './errors.ts'
 
 describe('classifyErrno', () => {
   it.each([
-    ['ENOTEMPTY', ENOTEMPTY],
-    ['ENOTDIR', ENOTDIR],
-    ['EACCES', EACCES],
-    ['EEXIST', EEXIST],
-    ['ENOENT', ENOENT],
-    ['EINVAL', EINVAL],
-    ['EROFS', EROFS],
+    ['ENOTEMPTY', osConstants.errno.ENOTEMPTY],
+    ['ENOTDIR', osConstants.errno.ENOTDIR],
+    ['EACCES', osConstants.errno.EACCES],
+    ['EEXIST', osConstants.errno.EEXIST],
+    ['ENOENT', osConstants.errno.ENOENT],
+    ['EINVAL', osConstants.errno.EINVAL],
+    ['EROFS', osConstants.errno.EROFS],
     // A cross-mount rename refusal: the kernel reads EXDEV as "not one
     // filesystem" and mv falls back to copy+unlink, so this may not
     // degrade to EIO on the way out of the mount.
-    ['EXDEV', EXDEV],
+    ['EXDEV', osConstants.errno.EXDEV],
     ['EDQUOT', osConstants.errno.EDQUOT],
   ] as const)('maps the %s code property', (code, expected) => {
     expect(classifyErrno(unnamedFsError(code, 'boom'))).toBe(expected)
   })
 
   it.each([
-    ['directory not empty: /d', ENOTEMPTY],
-    ['not a directory', ENOTDIR],
-    ['is a directory', EISDIR],
-    ['permission denied', EACCES],
-    ['file exists', EEXIST],
-    ['no such file or directory', ENOENT],
+    ['directory not empty: /d', osConstants.errno.ENOTEMPTY],
+    ['not a directory', osConstants.errno.ENOTDIR],
+    ['is a directory', osConstants.errno.EISDIR],
+    ['permission denied', osConstants.errno.EACCES],
+    ['file exists', osConstants.errno.EEXIST],
+    ['no such file or directory', osConstants.errno.ENOENT],
   ])('falls back to the message for %s', (message, expected) => {
     expect(classifyErrno(new Error(message))).toBe(expected)
   })
 
   it('is case insensitive on messages', () => {
-    expect(classifyErrno(new Error('Permission Denied'))).toBe(EACCES)
+    expect(classifyErrno(new Error('Permission Denied'))).toBe(osConstants.errno.EACCES)
   })
 
   it('returns EIO for anything unrecognised', () => {
-    expect(classifyErrno(new Error('something else entirely'))).toBe(EIO)
+    expect(classifyErrno(new Error('something else entirely'))).toBe(osConstants.errno.EIO)
   })
 
   it('logs only an error nothing names', () => {
@@ -74,8 +61,10 @@ describe('classifyErrno', () => {
     // with a code of its own is an I/O error already.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
-      expect(classifyErrno(new Error('boom'))).toBe(EIO)
-      expect(classifyErrno(Object.assign(new Error('bare'), { code: 'EWHATEVER' }))).toBe(EIO)
+      expect(classifyErrno(new Error('boom'))).toBe(osConstants.errno.EIO)
+      expect(classifyErrno(Object.assign(new Error('bare'), { code: 'EWHATEVER' }))).toBe(
+        osConstants.errno.EIO,
+      )
       expect(warn.mock.calls).toEqual([['unclassified mount error: Error: boom']])
     } finally {
       warn.mockRestore()
@@ -84,14 +73,14 @@ describe('classifyErrno', () => {
 
   it('prefers the code property over the message', () => {
     const err = unnamedFsError('ENOTEMPTY', 'no such file or directory')
-    expect(classifyErrno(err)).toBe(ENOTEMPTY)
+    expect(classifyErrno(err)).toBe(osConstants.errno.ENOTEMPTY)
   })
 })
 
 describe('classifyError', () => {
   it('negates the errno for fuse-native callbacks', () => {
-    expect(classifyError(new Error('no such file'))).toBe(-ENOENT)
-    expect(classifyError(new Error('directory not empty'))).toBe(-ENOTEMPTY)
+    expect(classifyError(new Error('no such file'))).toBe(-osConstants.errno.ENOENT)
+    expect(classifyError(new Error('directory not empty'))).toBe(-osConstants.errno.ENOTEMPTY)
   })
 
   it('stays in sync with classifyErrno', () => {
@@ -119,7 +108,7 @@ describe('the shared vocabulary', () => {
     const cross = Object.assign(new Error('cross-mount rename: /a/x -> /b/x'), {
       code: 'EXDEV',
     })
-    expect(classifyErrno(cross)).toBe(EXDEV)
+    expect(classifyErrno(cross)).toBe(osConstants.errno.EXDEV)
   })
 
   it('passes a stamped code outside the vocabulary through', () => {
@@ -138,7 +127,7 @@ describe('the shared vocabulary', () => {
         policy: 'RulePolicy',
         askId: null,
       })
-      expect(classifyErrno(refused)).toBe(EACCES)
+      expect(classifyErrno(refused)).toBe(osConstants.errno.EACCES)
       expect(info).toHaveBeenCalledWith('policy RulePolicy refused /data/x: sealed')
     } finally {
       info.mockRestore()

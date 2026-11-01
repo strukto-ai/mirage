@@ -33,7 +33,6 @@ from mirage.utils.ids import (
     new_session_id,
     new_workspace_id,
     random_below,
-    shuffle,
     uuid7,
 )
 
@@ -342,12 +341,6 @@ def test_random_below_refuses_an_empty_range(limit):
         random_below(SeededIdSource(0), limit)
 
 
-def test_shuffle_replays_a_permutation():
-    items = list(range(10))
-    shuffle(SeededIdSource(3), items)
-    assert items == [6, 2, 3, 8, 9, 0, 1, 5, 7, 4]
-
-
 def _bindings(tree: ast.Module, package: str) -> dict[str, str]:
     """Each name an import binds, mapped to the dotted name it stands for.
 
@@ -499,8 +492,7 @@ def test_the_detector_catches_a_planted_draw(source, expected):
         "self._ids.uuid7()",
         "ctx.ids.random_u32()",
         "from mirage.utils.ids import IdSource, SystemIdSource",
-        "from mirage.utils.ids import random_below, shuffle\n"
-        "shuffle(ids, items)",
+        "from mirage.utils.ids import random_below\nrandom_below(ids, 10)",
         "from ...utils.ids import random_below\nrandom_below(ids, 10)",
         "import uuid\nuuid.UUID(text)",
         "import uuid\nuuid.uuid5(uuid.NAMESPACE_URL, name)",

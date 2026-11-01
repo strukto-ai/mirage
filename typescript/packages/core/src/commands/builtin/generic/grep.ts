@@ -26,12 +26,20 @@ import { stripSlash } from '../../../utils/slash.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { FileType, LineFacts, PathSpec, type FileStat } from '../../../types.ts'
+import {
+  FileType,
+  LineFacts,
+  PathSpec,
+  type FileStat,
+  type StatFn,
+  type ReaddirFn,
+  type ReadStreamFn,
+} from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { matcherSyntax, patternWarnings, resolvePattern } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
-import { nameEnd, type FlagSet } from '../grep_binary.ts'
+import { nameEnd, type GrepFlags } from '../grep_binary.ts'
 import { openGrep, streamConfig, streamInput } from '../grep_stream.ts'
 import { OutputStream } from '../../../io/stream.ts'
 import type { OpenStream } from '../../../rs/stream.ts'
@@ -72,9 +80,6 @@ const SCANNED = [
   'directories',
   'devices',
 ]
-type Stat = (p: PathSpec) => Promise<FileStat>
-type Readdir = (p: PathSpec) => Promise<string[]>
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 /**
  * What grep's scan reads: the binary-files mode, the context lengths (-C
@@ -184,7 +189,7 @@ function reason(error: unknown): string {
   return fsStrerror(error) ?? (error instanceof Error ? error.message : String(error))
 }
 
-export function parseFlags(fl: FlagView): FlagSet {
+export function parseFlags(fl: FlagView): GrepFlags {
   const values = scanValues(fl)
   const mode = values.binary_mode
   const filename = filenameMode(fl)
@@ -237,9 +242,9 @@ export async function grepGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stat: Stat,
-  readdir: Readdir,
-  stream: Stream,
+  stat: StatFn,
+  readdir: ReaddirFn,
+  stream: ReadStreamFn,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   const operandStream = stdinStream(stream, ctx.stdin)
@@ -247,7 +252,7 @@ export async function grepGeneric(
   const fl = new FlagView(ctx.flags, specOf('grep'))
   // GNU refuses a bad option value in its option loop, before it looks for a
   // pattern.
-  let f: FlagSet
+  let f: GrepFlags
   try {
     f = parseFlags(fl)
   } catch (error) {

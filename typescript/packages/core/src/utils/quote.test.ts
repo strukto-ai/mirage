@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   escapeName,
-  needsShellQuote,
   quotesOperands,
   SHELL_QUOTED_COMMANDS,
   shellQuote,
@@ -32,14 +31,12 @@ const BARE = '%+,-./0123456789@ABCXYZ]_abcxyz'
 describe('shellQuote', () => {
   it('quotes a name holding any shell metacharacter', () => {
     for (const char of TRIGGERS) {
-      expect(needsShellQuote(`a${char}b`), char).toBe(true)
       expect(shellQuote(`a${char}b`), char).not.toBe(`a${char}b`)
     }
   })
 
   it('leaves a name of ordinary characters bare', () => {
     for (const char of BARE) {
-      expect(needsShellQuote(`a${char}b`), char).toBe(false)
       expect(shellQuote(`a${char}b`), char).toBe(`a${char}b`)
     }
   })
@@ -99,7 +96,6 @@ describe('shellQuote', () => {
   it('reports an empty name as empty quotes', () => {
     // Unquoted it would vanish from the line, taking the answer to "which
     // name failed" with it, so GNU quotes it under both policies.
-    expect(needsShellQuote('')).toBe(true)
     expect(shellQuote('')).toBe("''")
     expect(shellQuoteAlways('')).toBe("''")
   })
@@ -180,4 +176,18 @@ it.each([
   ['\udcff', '\\377'],
 ])('GNU ls escape names: %s', (name, expected) => {
   expect(escapeName(name)).toBe(expected)
+})
+
+it('preserves raw bytes and a leading BOM', () => {
+  for (const name of ['\udcff', '\ufeffname']) {
+    expect(shellQuote(name)).toBe(name)
+    expect(shellQuoteAlways(name)).toBe(`'${name}'`)
+  }
+})
+
+it('quotes a word larger than the wasm input window', () => {
+  const prefix = 'a'.repeat(96 * 1024 - 1)
+  const name = prefix + '\u0085\udcff'
+  expect(shellQuote(name)).toBe(`'${prefix}'$'\\302\\205''\udcff'`)
+  expect(escapeName(name)).toBe(prefix + '\\302\\205\\377')
 })

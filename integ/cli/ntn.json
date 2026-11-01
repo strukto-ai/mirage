@@ -152,7 +152,7 @@
       "command": "ntn datasources query d5000000-2222-3333-4444-555566667777",
       "expect": {
         "exit": 0,
-        "stdout": "ffff1111-2222-3333-4444-555566667777\t\u2713\t2026-02-01\thttps://example.com/spec\tWrite spec\tneeds review\t2\tReview\tinfra, docs\nffff2222-3333-4444-5555-666677778888\t\t\t\tShip beta\t\t1\t\t\n",
+        "stdout": "ffff1111-2222-3333-4444-555566667777\t✓\t2026-02-01\thttps://example.com/spec\tWrite spec\tneeds review\t2\tReview\tinfra, docs\nffff2222-3333-4444-5555-666677778888\t\t\t\tShip beta\t\t1\t\t\n",
         "stderr": ""
       }
     },
@@ -400,7 +400,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "\u2714 Page trashed\n"
+        "stderr": "✔ Page trashed\n"
       }
     },
     {
@@ -1077,6 +1077,32 @@
         "exit": 5,
         "stdout": "",
         "stderr": "error: Invalid HTTP method ``.\n  hint: Use a standard method such as GET, POST, PATCH, PUT, or DELETE.\n"
+      }
+    },
+    {
+      "id": "ntn_api_lone_low_surrogate",
+      "seq": 9940123,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d '\"\\udc00\"'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: Invalid JSON from --data\n"
+      }
+    },
+    {
+      "id": "ntn_api_invalid_surrogate_pair",
+      "seq": 9940124,
+      "targets": [
+        "cli-ntn"
+      ],
+      "command": "ntn api v1/search -d '\"\\ud800\\u0041\"'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "error: Invalid JSON from --data\n"
       }
     }
   ]

@@ -20,12 +20,14 @@ const MOMENT = new Date(Date.UTC(2026, 0, 1, 0, 0, 1, 123))
 
 describe('strftime GNU directives', () => {
   // Pinned against date 9.7: a width on %N keeps that many leading
-  // digits and pads a wider one with zeros on the right, a width on %q
-  // zero-pads on the left, and the flags change nothing on either.
+  // digits and pads a wider one on the right; '_' spaces trailing zeros
+  // and '-' trims them with an explicit width. %q zero-pads on the left.
   it.each([
     ['%N', '123000000'],
     ['%3N', '123'],
     ['%-N', '123000000'],
+    ['%-12N', '123'],
+    ['%_N', '123      '],
     ['%_3N', '123'],
     ['%03N', '123'],
     ['%6N', '123000'],
@@ -165,4 +167,25 @@ describe('strftime GNU directives', () => {
       else process.env.TZ = prior
     }
   })
+})
+
+it.each([
+  [
+    '2026-01-01T00:00:01Z',
+    '%^d|%#d|%^C|%#P|%Ea|%EY|%6Q|%6%',
+    '01|01|20|am|%Ea|2026|   %6Q|    %6%',
+  ],
+  [
+    '0001-01-01T00:00:00Z',
+    '%Y|%G|%V|%j|%U|%W|%a|%c',
+    '0001|0001|01|001|00|01|Mon|Mon Jan  1 00:00:00 1',
+  ],
+  ['2021-01-01T00:00:00Z', '%Y|%G|%g|%V|%j|%U|%W', '2021|2020|20|53|001|00|00'],
+])('renders %s independently of the host date library', (moment, fmt, expected) => {
+  expect(gnuStrftime(new Date(moment), fmt, UTC_ZONE)).toBe(expected)
+})
+
+it('preserves raw bytes, a BOM and input across the WASM window', () => {
+  const fmt = '\udcff\ufeff' + '😀%Y'.repeat(30000)
+  expect(gnuStrftime(MOMENT, fmt, UTC_ZONE)).toBe('\udcff\ufeff' + '😀2026'.repeat(30000))
 })

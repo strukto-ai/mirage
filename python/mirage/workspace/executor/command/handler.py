@@ -25,7 +25,7 @@ from mirage.commands.config import CommandFnResult, Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.concurrency.limiter import run_blocking
-from mirage.errors.fs import error_path, fs_strerror
+from mirage.errors.fs import error_virtual_path, fs_strerror
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import CommandTimeoutError, GlobLimitError
 from mirage.io.cooperative import chunks
@@ -80,7 +80,7 @@ def _leaf_message(exc: BaseException) -> str:
     strerror = fs_strerror(exc)
     if strerror is None or not isinstance(getattr(exc, "filename", None), str):
         return str(exc)
-    return f"{error_path(exc)}: {strerror}"
+    return f"{error_virtual_path(exc)}: {strerror}"
 
 
 def argument_list_too_long(command: str, reason: str) -> bytes:

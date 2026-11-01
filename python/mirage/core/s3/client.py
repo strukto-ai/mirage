@@ -90,7 +90,7 @@ def is_condition_lost(exc: Exception) -> bool:
     return False
 
 
-def _key(path: str, config: S3Config) -> str:
+def s3_key(path: str, config: S3Config) -> str:
     return kp.apply(config.key_prefix or "", path)
 
 

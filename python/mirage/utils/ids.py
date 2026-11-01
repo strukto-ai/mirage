@@ -15,8 +15,8 @@ import random
 import secrets
 import threading
 import uuid
-from collections.abc import Callable, MutableSequence
-from typing import Protocol, TypeVar
+from collections.abc import Callable
+from typing import Protocol
 
 from mirage.utils.clock import Clock, ManualClock, SystemClock
 
@@ -42,8 +42,6 @@ SPLITMIX_GAMMA = 0x9E3779B97F4A7C15
 SPLITMIX_MUL1 = 0xBF58476D1CE4E5B9
 SPLITMIX_MUL2 = 0x94D049BB133111EB
 UINT64_MASK = (1 << 64) - 1
-
-T = TypeVar("T")
 
 
 def _stamp(
@@ -374,15 +372,3 @@ def random_below(ids: IdSource, limit: int) -> int:
         value = drawn >> shift
         if value < limit:
             return value
-
-
-def shuffle(ids: IdSource, items: MutableSequence[T]) -> None:
-    """Permute ``items`` in place, uniformly, with draws from ``ids``.
-
-    Args:
-        ids (IdSource): the source to draw from.
-        items (MutableSequence[T]): what to permute.
-    """
-    for i in range(len(items) - 1, 0, -1):
-        j = random_below(ids, i + 1)
-        items[i], items[j] = items[j], items[i]

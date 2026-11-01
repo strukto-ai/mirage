@@ -14,9 +14,32 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { predicate } from './query.ts'
+import { eqClause, holdingClause, predicate } from './query.ts'
 
 describe('lancedb where clause', () => {
+  it('quotes a long literal across the host transfer window', () => {
+    const value = "😀'".repeat(30_000)
+    expect(eqClause('id', value)).toBe("`id` = '" + value.replaceAll("'", "''") + "'")
+  })
+  it.each([
+    ['42', '`n` = 42'],
+    ['-5', '`n` = -5'],
+    ['--5', "`n` = '--5'"],
+    ['٣', "`n` = '٣'"],
+    ['4\n', "`n` = '4\n'"],
+  ])('only compares a complete ASCII integer unquoted: %j', (value, clause) => {
+    expect(eqClause('n', value)).toBe(clause)
+    expect(predicate('id', { n: value }, '')).toBe(clause)
+  })
+
+  it('keeps filter order and quotes identifiers and literals', () => {
+    expect(eqClause('a`b', "x'y")).toBe("`a``b` = 'x''y'")
+    expect(predicate('', { z: '1', a: 'x' }, '')).toBe("`z` = 1 AND `a` = 'x'")
+    expect(holdingClause(['a`b'], ['Hello'], true, { id: '2' })).toBe(
+      "`id` = 2 AND (lower(`a``b`) LIKE '%hello%')",
+    )
+  })
+
   it('narrows on a name prefix, cast so a numeric id column takes one', () => {
     expect(predicate('id', {}, 'doc-1')).toBe("CAST(`id` AS STRING) LIKE 'doc-1%' ESCAPE '\\'")
   })

@@ -17,7 +17,7 @@ import { isStdin } from '../utils/stream.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { PathSpec, ReadStreamFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { AWK_USAGE } from '../constants.ts'
 import { type AwkFlags } from './awk_types.ts'
@@ -31,8 +31,6 @@ import { mountsOf, mountRoot } from '../utils/links.ts'
 const ENC = new TextEncoder()
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
-
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 function parseFlags(ctx: Context): AwkFlags {
   const fl = new FlagView(ctx.flags, specOf('awk'))
@@ -96,7 +94,7 @@ export async function awkGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stream: Stream,
+  stream: ReadStreamFn,
 ): Promise<CommandFnResult> {
   const f = parseFlags(ctx)
   const host = new StreamHost(paths, stream, ctx, true, '', (path) => servedHere(ctx, path))

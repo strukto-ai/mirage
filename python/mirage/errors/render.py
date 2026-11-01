@@ -13,7 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.errors.constants import OPERAND_CONDITIONS, READ_FAILURES
-from mirage.errors.fs import error_path, fs_error, fs_strerror, virtual_of
+from mirage.errors.fs import (
+    error_virtual_path,
+    fs_error,
+    fs_strerror,
+    virtual_of,
+)
 from mirage.errors.posix import posix_phrase
 from mirage.types import PathSpec
 from mirage.utils.path import drop_trailing_segments, respell_one
@@ -248,7 +253,7 @@ def format_fs_error(
         if not message.startswith(f"{cmd_name}: "):
             message = f"{cmd_name}: {message}"
         return f"{message}\n".encode("utf-8", "surrogateescape")
-    path = error_path(exc)
+    path = error_virtual_path(exc)
     if paths:
         for p in paths:
             if p.virtual == path:

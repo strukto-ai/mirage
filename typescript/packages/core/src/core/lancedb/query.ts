@@ -14,74 +14,56 @@
 
 import type { LanceDBAccessor } from '../../accessor/lancedb.ts'
 
+import { openStreamSync } from '../../rs/stream.ts'
+
 import type { LanceRow } from './types.ts'
 
-/**
- * A configured column name, spelled so the parser reads a column.
- *
- * Backticks, not double quotes: lance reads a double-quoted word as a string
- * literal, so `"id" = 'x'` compares the text `id` and matches nothing rather
- * than failing. Quoting is what lets a name with a space or a reserved word
- * through, and a bare name means the same thing quoted.
- */
-function columnRef(name: string): string {
-  return `\`${name.split('`').join('``')}\``
-}
+const DECODER = new TextDecoder()
 
+/** Render an equality with Rust's shared Lance SQL quoting. */
 export function eqClause(column: string, value: string): string {
-  if (/^-?\d+$/.test(value)) return `${columnRef(column)} = ${value}`
-  return `${columnRef(column)} = '${value.replace(/'/g, "''")}'`
+  const stream = openStreamSync('lance_query', { op: 'equal', column, value })
+  try {
+    return DECODER.decode(stream.finish())
+  } finally {
+    stream.close()
+  }
 }
 
-function whereClause(filters: Record<string, string>): string {
-  return Object.entries(filters)
-    .map(([col, val]) => eqClause(col, val))
-    .join(' AND ')
-}
-
-function likeClause(column: string, prefix: string): string {
-  let escaped = prefix
-  for (const ch of ['\\', '%', '_']) escaped = escaped.split(ch).join(`\\${ch}`)
-  return `CAST(${columnRef(column)} AS STRING) LIKE '${escaped.replace(/'/g, "''")}%' ESCAPE '\\'`
-}
-
-/**
- * The where clause for a group's filters plus a name prefix.
- *
- * The prefix is what a glob narrows the query to: the cap on rows is a window
- * over the table, so filtering the head of it would hide every match past the
- * cap, while a prefix match moves the window onto what the line asked for.
- * LIKE has its own metacharacters, so `%` and `_` in the prefix are escaped
- * rather than left to widen the match, and the cast is what lets a numeric id
- * column take one.
- */
+/** Render group filters and a literal name prefix in Lance SQL. */
 export function predicate(column: string, filters: Record<string, string>, prefix: string): string {
-  const parts: string[] = []
-  if (Object.keys(filters).length > 0) parts.push(whereClause(filters))
-  if (prefix !== '' && column !== '') parts.push(likeClause(column, prefix))
-  return parts.join(' AND ')
+  const stream = openStreamSync('lance_query', {
+    op: 'predicate',
+    column,
+    filters: Object.entries(filters),
+    prefix,
+  })
+  try {
+    return DECODER.decode(stream.finish())
+  } finally {
+    stream.close()
+  }
 }
 
-/**
- * The where clause for rows whose string columns hold one of `texts`, within a
- * group's filters. The texts are ASCII letters and spaces, so no LIKE wildcard
- * or quote needs escaping. Mirrors Python's `holding_clause`.
- */
+/** Render the filter for string columns holding one of the ASCII text needles. */
 export function holdingClause(
   columns: readonly string[],
   texts: readonly string[],
   ignoreCase: boolean,
   filters: Record<string, string>,
 ): string {
-  const tests = columns.flatMap((c) =>
-    texts.map((t) =>
-      ignoreCase
-        ? `lower(${columnRef(c)}) LIKE '%${t.toLowerCase()}%'`
-        : `${columnRef(c)} LIKE '%${t}%'`,
-    ),
-  )
-  const clause = `(${tests.join(' OR ')})`
-  return Object.keys(filters).length > 0 ? `${whereClause(filters)} AND ${clause}` : clause
+  const stream = openStreamSync('lance_query', {
+    op: 'holding',
+    columns: [...columns],
+    texts: [...texts],
+    ignore_case: ignoreCase,
+    filters: Object.entries(filters),
+  })
+  try {
+    return DECODER.decode(stream.finish())
+  } finally {
+    stream.close()
+  }
 }
 
 /**

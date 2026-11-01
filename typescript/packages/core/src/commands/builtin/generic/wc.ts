@@ -15,7 +15,7 @@
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { guardInput } from '../utils/limit.ts'
 import { IOResult, type ByteSource, type PathRecord } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import type { PathSpec, ReadStreamFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEisdir, isFsError } from '../../../errors/fs.ts'
@@ -32,8 +32,6 @@ import { byteView, decodeText, encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
 
 const decoder = new TextDecoder()
-
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 export interface WcRow {
   values: number[]
@@ -206,7 +204,7 @@ export async function wcGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stream: Stream,
+  stream: ReadStreamFn,
   lineCount?: (p: PathSpec) => Promise<number | null>,
   sizeOf?: (p: PathSpec) => Promise<number | null>,
 ): Promise<CommandFnResult> {

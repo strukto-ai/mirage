@@ -98,6 +98,20 @@ const VALID = [
 ]
 
 describe('serde messages', () => {
+  it('rejects a lone low surrogate', () => {
+    expect(serdeMessage('"\\udc00"')).toBe(
+      'lone leading surrogate in hex escape at line 1 column 7',
+    )
+  })
+
+  it('validates a document larger than the host transfer window', () => {
+    const text = JSON.stringify({ text: '😀'.repeat(30_000) })
+    expect(serdeMessage(text)).toBeNull()
+    expect(serdeMessage(text + 'x')).toBe(
+      `trailing characters at line 1 column ${String(new TextEncoder().encode(text).length + 1)}`,
+    )
+  })
+
   it.each(PROBED)('reports serde’s own words for %j', (text, message) => {
     expect(serdeMessage(text)).toBe(message)
   })

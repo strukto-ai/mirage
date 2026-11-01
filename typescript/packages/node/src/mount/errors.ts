@@ -18,44 +18,24 @@ import { classify } from '@struktoai/mirage-core/errors/index'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import type { FsCondition } from '@struktoai/mirage-core/errors/index'
 
-// Positive POSIX errno values in the host's numbering, which is what the
-// kernel reads: fuse-native passes the number through, so a macOS value on
-// Linux names a different error. FUSE callbacks want them negated; other
-// kernel interfaces (FSKit) want them positive, so the classification is
-// kept protocol-neutral here and adapters apply their own sign.
-export const ENOENT = osConstants.errno.ENOENT
-export const EIO = osConstants.errno.EIO
-export const EACCES = osConstants.errno.EACCES
-export const EEXIST = osConstants.errno.EEXIST
-export const EINVAL = osConstants.errno.EINVAL
-export const ENOTDIR = osConstants.errno.ENOTDIR
-export const EISDIR = osConstants.errno.EISDIR
-export const EROFS = osConstants.errno.EROFS
-export const ENOTEMPTY = osConstants.errno.ENOTEMPTY
-// A rename across mounts. The kernel reads this as "not one filesystem"
-// and `mv` falls back to copy+unlink, so it must survive the trip out.
-export const EXDEV = osConstants.errno.EXDEV
-
-// This kernel boundary's own numbering for the shared vocabulary: the
-// naming lives in core's `classify`, and the numbers here are the
-// host's (node:os supplies the platform-variant ones, mirroring how
-// python's adapter reads its errno module).
+// The kernel reads host errno numbers. Only this boundary needs the
+// platform-specific mapping; FUSE callbacks negate its positive result.
 const CONDITION_ERRNO: Record<FsCondition, number> = {
   EBADF: osConstants.errno.EBADF,
-  ENOENT,
-  ENOTDIR,
-  EISDIR,
-  EEXIST,
-  EACCES,
+  ENOENT: osConstants.errno.ENOENT,
+  ENOTDIR: osConstants.errno.ENOTDIR,
+  EISDIR: osConstants.errno.EISDIR,
+  EEXIST: osConstants.errno.EEXIST,
+  EACCES: osConstants.errno.EACCES,
   EPERM: osConstants.errno.EPERM,
-  ENOTEMPTY,
-  EXDEV,
+  ENOTEMPTY: osConstants.errno.ENOTEMPTY,
+  EXDEV: osConstants.errno.EXDEV,
   ENOTSUP: osConstants.errno.ENOTSUP,
   ELOOP: osConstants.errno.ELOOP,
-  EINVAL,
-  EIO,
+  EINVAL: osConstants.errno.EINVAL,
+  EIO: osConstants.errno.EIO,
   EBUSY: osConstants.errno.EBUSY,
-  EROFS,
+  EROFS: osConstants.errno.EROFS,
   EFBIG: osConstants.errno.EFBIG,
   EDQUOT: osConstants.errno.EDQUOT,
   EPIPE: osConstants.errno.EPIPE,
@@ -70,12 +50,12 @@ const CONDITION_ERRNO: Record<FsCondition, number> = {
 // here: those arrive typed and `classify` names them. Mirrors python's
 // `_MESSAGE_CODES`.
 const MESSAGE_ERRNO: [string[], number][] = [
-  [['not empty', 'enotempty'], ENOTEMPTY],
-  [['not a directory', 'enotdir'], ENOTDIR],
-  [['is a directory', 'eisdir'], EISDIR],
-  [['permission', 'eacces'], EACCES],
-  [['file exists', 'eexist'], EEXIST],
-  [['not found', 'no such', 'enoent'], ENOENT],
+  [['not empty', 'enotempty'], osConstants.errno.ENOTEMPTY],
+  [['not a directory', 'enotdir'], osConstants.errno.ENOTDIR],
+  [['is a directory', 'eisdir'], osConstants.errno.EISDIR],
+  [['permission', 'eacces'], osConstants.errno.EACCES],
+  [['file exists', 'eexist'], osConstants.errno.EEXIST],
+  [['not found', 'no such', 'enoent'], osConstants.errno.ENOENT],
 ]
 
 /**
@@ -110,7 +90,7 @@ export function classifyErrno(err: unknown): number {
   }
   // A bug in the core would otherwise read only as "I/O error".
   if (code === undefined) console.warn(`unclassified mount error: ${String(err)}`)
-  return EIO
+  return osConstants.errno.EIO
 }
 
 /** Same classification, negated for `@zkochan/fuse-native` callbacks. */

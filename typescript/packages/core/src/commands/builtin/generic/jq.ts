@@ -36,7 +36,7 @@ import { ByteSpool } from '../../../io/spool.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { PathSpec, type JsonValue } from '../../../types.ts'
+import { PathSpec, type JsonValue, type ReadStreamFn } from '../../../types.ts'
 import { fsStrerror, isEisdir, isFsError } from '../../../errors/fs.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import { parent } from '../../../utils/path.ts'
@@ -46,8 +46,6 @@ import type { FlagValue } from '../../spec/types.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { programFileRefusal, readProgramFile } from './program.ts'
 import { systemNow } from '../../../utils/clock.ts'
-
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 // Text jq writes as it is, a leading byte order mark included.
 const DEC = new TextDecoder('utf-8', { ignoreBOM: true })
@@ -354,7 +352,7 @@ export async function jqGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stream: Stream,
+  stream: ReadStreamFn,
 ): Promise<CommandFnResult> {
   const readInput = stdinStream(stream, ctx.stdin)
   const fl = new FlagView(ctx.flags, specOf('jq'))

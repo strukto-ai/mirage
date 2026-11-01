@@ -8,10 +8,8 @@ force-exclude = true
 extend-exclude = ["integ/fixtures"]
 
 [format]
-# Generated tables are laid out by their generator, which packs ranges
-# several to a line so 349 of them stay reviewable. Reformatting them here
-# would fight scripts/gen_width_table.py on every run, the same way
-# typescript/.oxfmtrc.json exempts `**/generated/**`.
+# Generated rg types and Google vocabulary keep their generators' layout,
+# as typescript/.oxfmtrc.json exempts `**/generated/**`.
 exclude = ["python/mirage/utils/generated/*"]
 
 [lint]

@@ -23,7 +23,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { revisionFor } from '../../../observe/context.ts'
-import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
+import { FileType, type FileStat, type PathSpec, type ReadStreamFn } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { WalkLimitError } from '../../../errors/types.ts'
 import type { LinkView, MountView } from '../../../view/types.ts'
@@ -31,7 +31,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 
 import { parseFlags as parseGrepFlags } from '../generic/grep.ts'
-import type { FlagSet } from '../grep_binary.ts'
+import type { GrepFlags } from '../grep_binary.ts'
 import { UsageError } from '../../errors.ts'
 import { parseFlags as parseRgFlags, type RgFlags } from '../generic/rg.ts'
 import { searchTerms } from '../grep_pushdown.ts'
@@ -42,8 +42,6 @@ import type { SearchTerms } from '../types.ts'
 import { linksOf, mountRoot, mountsOf } from '../utils/links.ts'
 import type { CommandFiles } from './files.ts'
 
-type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
-
 /**
  * What a grep line asks the mount's search; null when it must read every
  * file: -v, -f, or no plain text of three characters every match holds (under
@@ -53,7 +51,7 @@ type Reads = (p: PathSpec) => AsyncIterable<Uint8Array>
  * `grep_terms`.
  */
 export function grepTerms(
-  f: FlagSet,
+  f: GrepFlags,
   fl: FlagView,
   texts: string[],
   utf8: boolean,
@@ -193,9 +191,9 @@ export async function rgTerms(
  * Mirrors Python's `candidate_reads`.
  */
 export function candidateReads(
-  stream: Reads,
+  stream: ReadStreamFn,
   narrowed: (p: PathSpec) => Promise<ByteSource | null>,
-): Reads {
+): ReadStreamFn {
   return async function* (p: PathSpec): AsyncIterable<Uint8Array> {
     const data = await narrowed(p)
     for await (const chunk of data === null ? stream(p) : ensureStream(data)) {
@@ -293,10 +291,10 @@ function linked(links: LinkView | undefined, virtual: string): boolean {
  * Mirrors Python's `capped_reads`.
  */
 export function cappedReads(
-  stream: Reads,
+  stream: ReadStreamFn,
   operands: readonly PathSpec[],
   mounts: MountView | undefined,
-): [Reads, (p: PathSpec) => void] {
+): [ReadStreamFn, (p: PathSpec) => void] {
   const limits = new Map<string, number>()
   for (const d of operands) limits.set(d.virtual, mounts?.walkLimit?.(d.virtual) ?? -1)
   const capped = operands
@@ -353,13 +351,13 @@ export async function searchReads(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-): Promise<Reads> {
+): Promise<ReadStreamFn> {
   const fl = new FlagView(ctx.flags, specOf(name))
   const [first] = paths
   if (first === undefined || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
     return files.read
   }
-  let grep: FlagSet | null = null
+  let grep: GrepFlags | null = null
   if (name === 'grep') {
     try {
       grep = parseGrepFlags(fl)

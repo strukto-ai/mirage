@@ -173,8 +173,36 @@
       }
     },
     {
-      "id": "git_search_cleanup",
+      "id": "git_log_shared_perl_matcher",
       "seq": 569512,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "git -C /repo/search-case log --format=%s -P --grep='t\\Kwo' && git -C /repo/search-case log --format=%s -P --grep='\\Qthree\\E' && git -C /repo/search-case log --format=%s -P --author='Se\\Karch'",
+      "expect": {
+        "exit": 0,
+        "stdout": "two\nthree\nwords\nthree\ntwo\none\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_log_shared_fixed_matcher",
+      "seq": 569513,
+      "targets": [
+        "git-disk",
+        "git-ram"
+      ],
+      "command": "GIT_AUTHOR_NAME=Search GIT_AUTHOR_EMAIL=search@example.com GIT_COMMITTER_NAME=Search GIT_COMMITTER_EMAIL=search@example.com git -C /repo/search-case commit --allow-empty -qm 'café a.b' && LC_ALL=C git -C /repo/search-case log --format=%s -F --grep='a.b' && LC_ALL=C git -C /repo/search-case log --format=%s -F --grep='a.*' && LC_ALL=C git -C /repo/search-case log --format=%s -F -i --grep='CAFÉ' && LC_ALL=C.UTF-8 git -C /repo/search-case log --format=%s -F -i --grep='CAFÉ'",
+      "expect": {
+        "exit": 0,
+        "stdout": "café a.b\ncafé a.b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "git_search_cleanup",
+      "seq": 569514,
       "targets": [
         "git-disk",
         "git-ram"

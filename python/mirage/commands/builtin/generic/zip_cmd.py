@@ -56,7 +56,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> ZipFlags:
     )
 
 
-async def zip_cmd(
+async def zip_generic(
     paths: list[PathSpec],
     *,
     stream: ReadStreamFn,
@@ -173,4 +173,4 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     return LineFacts(follows=Follow.NONE, reads_subtree=fl.as_bool("r"))
 
 
-__all__ = ["facts", "zip_cmd"]
+__all__ = ["facts", "zip_generic"]

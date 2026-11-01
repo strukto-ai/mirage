@@ -12,19 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { constants as osConstants } from 'node:os'
 import { constants as fsConstants } from 'node:fs'
 import type { Action, VfsResultContext, Policy } from '@struktoai/mirage-core/policy/index'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { ContentType, FileStat, FileType, MountMode } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { EEXIST, ENOTEMPTY as POSITIVE_ENOTEMPTY } from '../mount/errors.ts'
+
 import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
 import { MirageFS } from './fs.ts'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 
 const ENOENT = -2
-const ENOTEMPTY = -POSITIVE_ENOTEMPTY
+const ENOTEMPTY = -osConstants.errno.ENOTEMPTY
 const EACCES = -13
 const EROFS = -30
 
@@ -548,7 +549,7 @@ describe('MirageFS — xattr', () => {
     const set = (name: string, flags: number) =>
       callOp<[number]>(mfs, 'setxattr', '/data/greeting.txt', name, Buffer.from('1'), 0, flags)
     expect((await set('user.once', XATTR_CREATE))[0]).toBe(0)
-    expect((await set('user.once', XATTR_CREATE))[0]).toBe(-EEXIST)
+    expect((await set('user.once', XATTR_CREATE))[0]).toBe(-osConstants.errno.EEXIST)
     expect((await set('user.none', XATTR_REPLACE))[0]).toBeLessThan(0)
   })
 })

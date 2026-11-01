@@ -45,7 +45,7 @@ async def fetch_override(config: VaultConfig, ref: str) -> ResolvedSecret:
 
 @pytest.fixture(autouse=True)
 def fresh_custom(monkeypatch):
-    monkeypatch.setattr(registry, "_CUSTOM", {})
+    monkeypatch.setattr(registry, "_REGISTERED", {})
 
 
 def test_custom_registration_resolves():

@@ -15,38 +15,12 @@
 import re
 
 from mirage.commands.builtin.constants import C_SPACE
-from mirage.commands.builtin.utils.size_suffix import (
-    decimal_value,
-    parse_base0,
-)
 
-# A whole decimal word as GNU's count options read one: C blanks, one
-# sign, ASCII digits, and nothing after them, not even a blank.
+# The leading decimal run C's atoi reads, after blanks and one sign.
 DECIMAL = re.compile(rf"{C_SPACE}([+-]?)([0-9]+)")
-# C's strto(u)l at base 0: C blanks, one sign, then hex after 0x, octal
-# after a bare 0, decimal otherwise; the text after the digits is left.
-BASE0 = re.compile(rf"{C_SPACE}([+-]?)(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)")
 LONG_MIN = -(2**63)
 LONG_MAX = 2**63 - 1
 INT_MAX = 2**31 - 1
-# What GNU 9.7 appends after a refused number that scanned, measured under
-# LC_ALL=C: ERANGE for a value outside the option's range and
-# EOVERFLOW for one the program words as too large for its type.
-ERANGE_REASON = "Numerical result out of range"
-EOVERFLOW_REASON = "Value too large for defined data type"
-
-
-def signed_decimal(text: str) -> int | None:
-    """``text`` as a signed decimal operand, as GNU's counts read.
-
-    Args:
-        text (str): the operand as typed.
-    """
-    match = DECIMAL.fullmatch(text)
-    if match is None:
-        return None
-    value = decimal_value(match.group(2))
-    return -value if match.group(1) == "-" else value
 
 
 def atoi(text: str) -> int:
@@ -60,26 +34,11 @@ def atoi(text: str) -> int:
     match = DECIMAL.match(text)
     if match is None:
         return 0
-    value = decimal_value(match.group(2))
-    signed = -value if match.group(1) == "-" else value
-    return max(LONG_MIN, min(LONG_MAX, signed))
-
-
-def strtol(text: str) -> tuple[int, str]:
-    """C's ``strtol(text, &end, 0)``: the value and the text at ``end``.
-
-    No number is 0 with the whole text left, and a value past the
-    ``long`` range saturates, as glibc's does.
-
-    Args:
-        text (str): the operand as typed.
-    """
-    match = BASE0.match(text)
-    if match is None:
-        return 0, text
-    value = parse_base0(match.group(2))
-    signed = -value if match.group(1) == "-" else value
-    return max(LONG_MIN, min(LONG_MAX, signed)), text[match.end() :]
+    negative = match.group(1) == "-"
+    limit = -LONG_MIN if negative else LONG_MAX
+    value = bounded_decimal(match.group(2), limit + 1)
+    magnitude = limit if value is None else value
+    return -magnitude if negative else magnitude
 
 
 def bounded_decimal(digits: str, bound: int) -> int | None:
@@ -101,11 +60,4 @@ def bounded_decimal(digits: str, bound: int) -> int | None:
     return value if value < bound else None
 
 
-__all__ = [
-    "EOVERFLOW_REASON",
-    "ERANGE_REASON",
-    "INT_MAX",
-    "bounded_decimal",
-    "signed_decimal",
-    "strtol",
-]
+__all__ = ["INT_MAX", "atoi", "bounded_decimal"]

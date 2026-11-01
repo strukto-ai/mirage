@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.errors.fs import error_path, fs_strerror
+from mirage.errors.fs import error_virtual_path, fs_strerror
 from mirage.io.types import IOResult
 from mirage.policy import PolicyDenied, describe_refusal
 from mirage.types import Refusal
@@ -83,7 +83,7 @@ def error_text(exc: Exception) -> str:
     if strerror is None:
         words = str(exc)
     elif isinstance(getattr(exc, "filename", None), str):
-        words = f"{error_path(exc)}: {strerror}"
+        words = f"{error_virtual_path(exc)}: {strerror}"
     elif str(exc) in ("", strerror) or (
         isinstance(exc, OSError) and exc.errno
     ):

@@ -20,6 +20,7 @@ from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.errors import BadDateError, GitError
 from mirage.commands.cli.builtin.git.format import subject
 from mirage.commands.cli.builtin.git.history import (
+    _hits,
     _Simplifier,
     decoration_style,
     parse_flags,
@@ -276,7 +277,7 @@ def test_a_refused_pattern_names_where_it_came_from(argv, message):
 )
 def test_perl_punctuation_escapes_are_literal(pattern, line):
     flags = parse_flags(FlagView({"perl_regexp": True, "grep": [pattern]}))
-    assert flags.greps[0].search(line)
+    assert _hits(flags.greps[0], line)
 
 
 @pytest.mark.parametrize(
@@ -309,3 +310,29 @@ def test_a_long_untouched_stretch_reaches_the_next_shown_commit():
     simplify.followed[ids[-1]] = ()
     simplify.shown[ids[-1]] = True
     assert simplify._shown_below(ids[1]) == (ids[-1],)
+
+
+@pytest.mark.parametrize(
+    "syntax,pattern,text,locale,expected",
+    [
+        ("perl_regexp", r"t\Kwo", "two", "C", True),
+        ("perl_regexp", r"\Qa.b\E", "a.b", "C", True),
+        ("perl_regexp", r"\Qa.b\E", "axb", "C", False),
+        ("fixed_strings", "a.b", "a.b", "C", True),
+        ("fixed_strings", "a.b", "axb", "C", False),
+        ("fixed_strings", "CAFÉ", "café", "C", False),
+        ("fixed_strings", "CAFÉ", "café", "C.UTF-8", True),
+        ("fixed_strings", "\udcff", "a\udcffb", "C.UTF-8", True),
+    ],
+)
+def test_shared_line_matcher_reads_the_pattern_bytes(
+    syntax, pattern, text, locale, expected
+):
+    flags = parse_flags(
+        FlagView(
+            {syntax: True, "regexp_ignore_case": True, "grep": [pattern]}
+        ),
+        {"LC_ALL": locale},
+    )
+    for _ in range(2):
+        assert _hits(flags.greps[0], text) is expected

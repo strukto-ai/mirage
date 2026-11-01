@@ -45,8 +45,8 @@ def test_condition_keeps_a_spelling_no_value_renders_as_a_string():
 
 
 def test_filter_is_none_when_nothing_narrows():
-    assert query._filter({}) is None
-    assert len(query._filter({"a": "x", "b": "2"}).must) == 2
+    assert query.build_filter({}) is None
+    assert len(query.build_filter({"a": "x", "b": "2"}).must) == 2
 
 
 def test_candidate_ids_by_type():

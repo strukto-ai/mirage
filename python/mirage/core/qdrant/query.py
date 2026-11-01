@@ -86,7 +86,7 @@ def _condition(
     return models.Filter(should=[as_text, typed])
 
 
-def _filter(filters: dict[str, str]) -> models.Filter | None:
+def build_filter(filters: dict[str, str]) -> models.Filter | None:
     if not filters:
         return None
     return models.Filter(
@@ -233,7 +233,7 @@ async def _scroll_all(
     client = await accessor.client()
     if not filters:
         return await _scroll_raw(client, collection, None, limit, keep)
-    flt = _filter(filters)
+    flt = build_filter(filters)
     try:
         return await _scroll_raw(client, collection, flt, limit, keep)
     except UnexpectedResponse as exc:

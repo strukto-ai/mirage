@@ -15,7 +15,14 @@
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { asyncChain, ensureStream } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
-import { FileType, Limit, type FileStat, type PathSpec } from '../../../types.ts'
+import {
+  FileType,
+  Limit,
+  type FileStat,
+  type PathSpec,
+  type StatFn,
+  type ReadStreamFn,
+} from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { reportedStream, splitReadable } from '../utils/operands.ts'
 import { resolveSource, streamOutput } from '../utils/stream.ts'
@@ -26,9 +33,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { truncateStream } from '../utils/limit.ts'
 import { encodeText } from '../../../shell/bytes.ts'
-
-type Stat = (p: PathSpec) => Promise<FileStat>
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
 
 interface CatFlags {
   readonly numberLines: boolean
@@ -75,8 +79,8 @@ export async function catGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stat: Stat,
-  stream: Stream,
+  stat: StatFn,
+  stream: ReadStreamFn,
 ): Promise<CommandFnResult> {
   stat = stdinStat(stat)
   stream = stdinStream(stream, ctx.stdin)

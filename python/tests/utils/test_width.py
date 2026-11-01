@@ -12,53 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-from pathlib import Path
-
 import pytest
 
-from mirage.utils.generated.width_data import WIDE, ZERO_WIDTH
-from mirage.utils.width import char_width
-
-_FIXTURE = (
-    Path(__file__).parents[3] / "integ" / "fixtures" / "wc" / "width.json"
-)
-
-
-def test_shared_parity_fixture_pins_every_range():
-    # integ/fixtures/wc/width.json is the contract: the TypeScript suite
-    # (packages/core/src/utils/width.test.ts) asserts the same ranges, so
-    # regenerating one tree without the other fails both.
-    tables = json.loads(_FIXTURE.read_text())
-    assert [list(pair) for pair in ZERO_WIDTH] == tables["zero_width"]
-    assert [list(pair) for pair in WIDE] == tables["wide"]
+from mirage.utils.width import text_width
 
 
 @pytest.mark.parametrize(
-    ("char", "expected"),
+    "text,expected",
     [
-        ("a", 1),
-        ("\u4e2d", 2),
-        ("\u6587", 2),
-        ("\U0001f600", 2),
-        ("\u0301", 0),
-        ("\u1160", 0),
-        ("\u11a8", 0),
-        ("\u200b", 0),
-        ("\ufeff", 0),
-        ("\u061c", 0),
-        ("\x00", 0),
-        ("\x08", 0),
-        ("\x1b", 0),
-        ("\x0b", 0),
+        ("", 0),
+        ("ascii", 5),
+        ("中😀e\u0301", 5),
+        ("a\t\nb\r", 2),
+        ("\udc80\udcff", 2),
+        ("\ud800", 1),
+        ("\u3164\uffa0\ud7b0\u0378", 0),
+        ("\u3248\U0001fae9", 4),
+        ("😀" * 30_000, 60_000),
     ],
 )
-def test_char_width(char: str, expected: int) -> None:
-    assert char_width(char) == expected
-
-
-@pytest.mark.parametrize("char", ["\u00ad", "\u0600", "\U000110bd"])
-def test_prepended_concatenation_marks_are_one_column(char: str) -> None:
-    # Cf is not uniformly zero: GNU measures U+00AD and the Arabic number
-    # signs as one column. `printf 'aU+00ADb' | wc -L` is 3.
-    assert char_width(char) == 1
+def test_text_width(text: str, expected: int) -> None:
+    assert text_width(text) == expected

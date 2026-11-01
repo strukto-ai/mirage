@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { constants as osConstants } from 'node:os'
 import { FileType, MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
-import { classifyError, EACCES, EIO, ENOENT } from '../mount/errors.ts'
+import { classifyError } from '../mount/errors.ts'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 import { DiscordVFS } from '../vfs/discord/discord.ts'
 import { Workspace } from '../workspace.ts'
@@ -208,9 +209,9 @@ describe.each(['core', 'fuse'] as const)('Discord through %s', (kind) => {
   )
 
   it.each([
-    [401, 1, -EACCES],
-    [403, 1, -EACCES],
-    [429, 3, -EIO],
+    [401, 1, -osConstants.errno.EACCES],
+    [403, 1, -osConstants.errno.EACCES],
+    [429, 3, -osConstants.errno.EIO],
   ] as const)(
     'refuses a day Discord answers %i for and caches no empty answer',
     async (status, attempts, code) => {
@@ -245,11 +246,12 @@ describe.each(['core', 'fuse'] as const)('Discord through %s', (kind) => {
             ? { paths: { hide: [FILE] } }
             : { commands: { deny: [{ reason: 'sealed', paths: [FILE] }] } },
         )
-        const expected = restriction === 'hide' ? -ENOENT : -EACCES
+        const expected =
+          restriction === 'hide' ? -osConstants.errno.ENOENT : -osConstants.errno.EACCES
         expect((await driver.read(fd)).code).toBe(expected)
         if (restriction === 'hide') {
-          expect((await driver.getattr(fd)).code).toBe(-ENOENT)
-          expect((await driver.getattr()).code).toBe(-ENOENT)
+          expect((await driver.getattr(fd)).code).toBe(-osConstants.errno.ENOENT)
+          expect((await driver.getattr()).code).toBe(-osConstants.errno.ENOENT)
         }
         expect(http.fetch.mock.calls).toHaveLength(calls)
         await ws.setSessionProfile('reader', {})

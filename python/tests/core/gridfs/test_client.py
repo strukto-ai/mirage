@@ -15,7 +15,7 @@
 import re
 
 from mirage.core.gridfs.client import (
-    _key,
+    gridfs_key,
     prefix_query,
     trashed,
 )
@@ -32,13 +32,13 @@ def _config(key_prefix: str | None = None) -> GridFSConfig:
 
 
 def test_key_without_prefix():
-    assert _key("/a.txt", _config()) == "a.txt"
-    assert _key("/sub/b.csv", _config()) == "sub/b.csv"
+    assert gridfs_key("/a.txt", _config()) == "a.txt"
+    assert gridfs_key("/sub/b.csv", _config()) == "sub/b.csv"
 
 
 def test_key_with_prefix():
     config = _config("team/reports")
-    assert _key("/a.txt", config) == "team/reports/a.txt"
+    assert gridfs_key("/a.txt", config) == "team/reports/a.txt"
 
 
 def test_prefix_query_empty_matches_everything_but_the_trash():

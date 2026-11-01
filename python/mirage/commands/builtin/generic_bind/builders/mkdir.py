@@ -37,7 +37,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.context import DEFAULT_UMASK, get_walk_probe, session_umask
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import error_path, fs_strerror
+from mirage.errors.fs import error_virtual_path, fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import operand_spelling
 from mirage.errors.types import FsCondition
@@ -230,7 +230,7 @@ async def make_directory(
     try:
         await mkdir(path, parents=parents)
     except FS_ERRORS as exc:
-        named = operand_spelling(error_path(exc), path)
+        named = operand_spelling(error_virtual_path(exc), path)
         return f"mkdir: cannot create directory '{named}': {fs_strerror(exc)}"
     return None
 

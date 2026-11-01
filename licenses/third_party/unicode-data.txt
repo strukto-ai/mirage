@@ -4,11 +4,7 @@ rust/mirage-rs/src/generated/unicode_case_fold.rs and
 rust/mirage-rs/src/generated/unicode_blocks.rs are generated from the
 Unicode 16.0.0 Character Database (https://www.unicode.org/Public/16.0.0/ucd/)
 by scripts/gen_unicode_width.py, scripts/gen_unicode_classes.py,
-scripts/gen_unicode_case_fold.py and scripts/gen_unicode_blocks.py, and
-python/mirage/utils/generated/width_data.py and
-typescript/packages/core/src/utils/generated/width_data.ts from the Unicode
-15.0.0 Character Database (https://www.unicode.org/Public/15.0.0/ucd/), as
-Python 3.12's unicodedata module carries it, by scripts/gen_width_table.py.
+scripts/gen_unicode_case_fold.py and scripts/gen_unicode_blocks.py.
 All are under this license:
 
 UNICODE LICENSE V3

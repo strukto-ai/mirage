@@ -16,7 +16,7 @@ from bson import ObjectId
 from gridfs.errors import NoFile
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.core.gridfs.client import _key, bucket, latest_file
+from mirage.core.gridfs.client import bucket, gridfs_key, latest_file
 from mirage.errors.fs import enoent
 from mirage.observe.context import record, revision_for, start_op
 from mirage.types import PathSpec
@@ -39,7 +39,7 @@ async def read(
     virtual = path_spec.virtual
     path = path_spec.mount_path
     config = accessor.config
-    key = _key(path, config)
+    key = gridfs_key(path, config)
     timer = start_op()
     pinned_revision = revision_for(virtual)
     if pinned_revision is not None:

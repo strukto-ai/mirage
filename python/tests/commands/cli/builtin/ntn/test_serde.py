@@ -157,3 +157,17 @@ def test_the_recursion_limit_is_serdes_own_128():
     assert serde_message("[" * 400 + "]" * 400) == (
         "recursion limit exceeded at line 1 column 128"
     )
+
+
+def test_rejects_a_lone_low_surrogate():
+    assert serde_message('"\\udc00"') == (
+        "lone leading surrogate in hex escape at line 1 column 7"
+    )
+
+
+def test_validates_a_document_larger_than_the_host_transfer_window():
+    text = json.dumps({"text": "😀" * 30_000}, ensure_ascii=False)
+    assert serde_message(text) is None
+    assert serde_message(text + "x") == (
+        f"trailing characters at line 1 column {len(text.encode()) + 1}"
+    )

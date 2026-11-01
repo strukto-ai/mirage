@@ -10,9 +10,9 @@ from mirage.core.msgraph.client import (
     graph_batch,
     graph_get,
     graph_get_bytes,
+    graph_headers,
     graph_list,
     graph_post_monitor,
-    headers,
     id_segment,
 )
 from mirage.core.msgraph.config import MsGraphConfig
@@ -78,9 +78,9 @@ def test_encoded_path_escapes_each_segment_like_typescript(path, expected):
     ],
 )
 def test_headers_carry_the_bearer_token(token, expected):
-    assert headers(MsGraphConfig(access_token=token))["Authorization"] == (
-        expected
-    )
+    assert graph_headers(MsGraphConfig(access_token=token))[
+        "Authorization"
+    ] == (expected)
 
 
 @pytest.mark.asyncio

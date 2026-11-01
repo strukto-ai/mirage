@@ -17,10 +17,10 @@ from typing import Any, cast
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import publish_read
 from mirage.core.s3.client import (
-    _key,
     closing_body,
     create_s3_client,
     is_denied,
+    s3_key,
 )
 from mirage.errors.fs import eacces, enoent
 from mirage.observe.context import record, revision_for, start_op
@@ -66,7 +66,7 @@ async def read(
     virtual = path_spec.virtual
     path = path_spec.mount_path
     config = accessor.config
-    key = _key(path, config)
+    key = s3_key(path, config)
     kwargs = {"Bucket": config.bucket, "Key": key}
     pinned_revision = revision_for(virtual)
     if pinned_revision is not None:

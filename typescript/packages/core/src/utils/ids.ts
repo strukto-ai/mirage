@@ -295,13 +295,3 @@ export function randomBelow(ids: IdSource, limit: number): number {
     if (value < limit) return value
   }
 }
-
-/** Permute `items` in place, uniformly, with draws from `ids`. */
-export function shuffle(ids: IdSource, items: unknown[]): void {
-  for (let i = items.length - 1; i > 0; i--) {
-    const j = randomBelow(ids, i + 1)
-    const picked = items[j]
-    items[j] = items[i]
-    items[i] = picked
-  }
-}

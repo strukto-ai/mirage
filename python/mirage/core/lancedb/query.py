@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 from typing import cast
 
 import pyarrow as pa
@@ -21,69 +20,46 @@ from lancedb.query import AsyncQuery
 from mirage.accessor.lancedb import LanceDBAccessor
 from mirage.core.lancedb.render import cell_text
 from mirage.core.lancedb.types import LanceRow, ValueTest
-
-_INTEGER = re.compile(r"-?[0-9]+")
-
-
-def _quote(value: str) -> str:
-    return value.replace("'", "''")
+from mirage.rs.stream import open_stream
 
 
-def _column(name: str) -> str:
-    """A configured column name, spelled so the parser reads a column.
-
-    Backticks, not double quotes: lance reads a double-quoted word as a
-    string literal, so ``"id" = 'x'`` compares the text ``id`` and
-    matches nothing rather than failing. Quoting is what lets a name
-    with a space or a reserved word through, and a bare name means the
-    same thing quoted.
+def eq_clause(column: str, value: str) -> str:
+    """Render an equality with Rust's shared Lance SQL quoting.
 
     Args:
-        name (str): the column name as configured.
+        column (str): the configured column name.
+        value (str): the literal value to match.
     """
-    return "`" + name.replace("`", "``") + "`"
-
-
-def _eq(column: str, value: str) -> str:
-    text = str(value)
-    if _INTEGER.fullmatch(text):
-        return f"{_column(column)} = {text}"
-    return f"{_column(column)} = '{_quote(text)}'"
-
-
-def _where(filters: dict[str, str]) -> str:
-    return " AND ".join(_eq(col, val) for col, val in filters.items())
-
-
-def _like(column: str, prefix: str) -> str:
-    escaped = prefix
-    for ch in ("\\", "%", "_"):
-        escaped = escaped.replace(ch, "\\" + ch)
     return (
-        f"CAST({_column(column)} AS STRING) LIKE '{_quote(escaped)}%' "
-        "ESCAPE '\\'"
+        open_stream(
+            "lance_query", {"op": "equal", "column": column, "value": value}
+        )
+        .finish()
+        .decode()
     )
 
 
 def _predicate(column: str, filters: dict[str, str], prefix: str) -> str:
-    """The where clause for a group's filters plus a name prefix.
-
-    The prefix is what a glob narrows the query to: the cap on rows is a
-    window over the table, so filtering the head of it would hide every
-    match past the cap, while a prefix match moves the window onto what
-    the line asked for. LIKE has its own metacharacters, so ``%`` and
-    ``_`` in the prefix are escaped rather than left to widen the match,
-    and the cast is what lets a numeric id column take one.
+    """Render group filters and a literal name prefix in Lance SQL.
 
     Args:
         column (str): the column the prefix applies to.
-        filters (dict[str, str]): the group filters, if any.
-        prefix (str): the literal name prefix, empty for no prefix.
+        filters (dict[str, str]): parent group equality filters.
+        prefix (str): the literal name prefix, empty for none.
     """
-    parts = [_where(filters)] if filters else []
-    if prefix and column:
-        parts.append(_like(column, prefix))
-    return " AND ".join(parts)
+    return (
+        open_stream(
+            "lance_query",
+            {
+                "op": "predicate",
+                "column": column,
+                "filters": [[key, value] for key, value in filters.items()],
+                "prefix": prefix,
+            },
+        )
+        .finish()
+        .decode()
+    )
 
 
 async def list_tables(accessor: LanceDBAccessor) -> list[str]:
@@ -201,7 +177,12 @@ async def row_record(
     accessor: LanceDBAccessor, table: str, id_column: str, row_id: str
 ) -> LanceRow | None:
     tbl = await accessor.table(table)
-    rows = await tbl.query().where(_eq(id_column, row_id)).limit(1).to_list()
+    rows = (
+        await tbl.query()
+        .where(eq_clause(id_column, row_id))
+        .limit(1)
+        .to_list()
+    )
     return rows[0] if rows else None
 
 
@@ -268,15 +249,20 @@ def holding_clause(
         ignore_case (bool): fold ASCII case.
         filters (dict[str, str]): the group's equality filters.
     """
-    tests = [
-        f"lower({_column(c)}) LIKE '%{t.lower()}%'"
-        if ignore_case
-        else f"{_column(c)} LIKE '%{t}%'"
-        for c in columns
-        for t in texts
-    ]
-    clause = "(" + " OR ".join(tests) + ")"
-    return f"{_where(filters)} AND {clause}" if filters else clause
+    return (
+        open_stream(
+            "lance_query",
+            {
+                "op": "holding",
+                "columns": list(columns),
+                "texts": list(texts),
+                "ignore_case": ignore_case,
+                "filters": [[key, value] for key, value in filters.items()],
+            },
+        )
+        .finish()
+        .decode()
+    )
 
 
 async def rows_where(

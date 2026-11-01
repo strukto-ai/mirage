@@ -36,7 +36,7 @@ from mirage.utils.key_prefix import under_path
 logger = logging.getLogger(__name__)
 
 
-def _ref(item: dict[str, Any]) -> str:
+def _ref_of(item: dict[str, Any]) -> str:
     """The key an item is remembered by: its type and its Box id.
 
     Files and folders are addressed through separate endpoints, and
@@ -334,7 +334,7 @@ class BoxEventHook:
             ):
                 return (event_at(root, "", FileChangeKind.UNKNOWN),)
             return ()
-        ref = _ref(source)
+        ref = _ref_of(source)
         old = self._paths.get(ref)
         if event_type in TRASH_EVENTS:
             return self._leave(root, ref, old, is_dir)

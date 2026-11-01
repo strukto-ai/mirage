@@ -1,5 +1,5 @@
 {
- "baseline": 2613,
+ "baseline": 2497,
  "modules": {
   "server/app": {
    "python_only": {
@@ -955,13 +955,6 @@
     "daylightName": "Whether ICU counts an instant as daylight saving time, read off the zone's long name; Python reads tzinfo's dst()."
    }
   },
-  "commands/builtin/utils/strftime": {
-   "python_only": {
-    "YEAR_TEXT": "A Python datetime holds no year past 9999, so git's dates past it render whole 400-year cycles earlier and the directives that print a year add the years back; a JavaScript Date holds those years itself.",
-    "year_text": "Renders %F, %c and the year directives with the years a datetime past 9999 was moved back; a JavaScript Date needs no such step.",
-    "year_value": "The number a year directive shows once those years are added back; a JavaScript Date reads it from the date."
-   }
-  },
   "commands/builtin/utils/links": {
    "typescript_only": {
     "servingMount": "Reads the mount a command's files were said to run in (Files.servedBy) before the async context, which the browser's fallback storage does not isolate between tasks; Python's task context always isolates, so crosses_mounts and mount_root read it directly."
@@ -1163,11 +1156,6 @@
   "vfs/registry": {
    "typescript_only": {
     "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords."
-   }
-  },
-  "utils/posix": {
-   "typescript_only": {
-    "POSIX_CLASSES": "git's -P patterns name POSIX classes ([[:alpha:]]); JavaScript's RegExp has none, so git/history expands them from this table, where Python hands -P to the regex module, which reads them itself."
    }
   },
   "io/gateway": {

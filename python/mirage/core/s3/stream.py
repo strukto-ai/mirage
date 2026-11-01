@@ -18,10 +18,10 @@ from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.client import (
-    _key,
     create_s3_client,
     is_denied,
     is_not_found,
+    s3_key,
 )
 from mirage.core.s3.read import _fp_rev_from_s3_response
 from mirage.errors.fs import eacces, enoent
@@ -54,7 +54,7 @@ async def read_stream(
     client = await accessor.cached_client(lambda: create_s3_client(config))
     kwargs: dict[str, Any] = {
         "Bucket": config.bucket,
-        "Key": _key(path, config),
+        "Key": s3_key(path, config),
     }
     if pinned_revision is not None:
         kwargs["VersionId"] = pinned_revision

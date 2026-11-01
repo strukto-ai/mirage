@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { foldAscii } from '../../../../utils/posix.ts'
 import { byteView, decodeText } from '../../../../shell/bytes.ts'
 
 import { getOpcodes } from '../../../builtin/diff_format.ts'
@@ -21,6 +20,11 @@ import { blobData, byteLines } from './patch.ts'
 import type { Repo } from './repo.ts'
 import { BINARY_SNIFF } from './summary.ts'
 import type { TreeEntry } from './tree.ts'
+
+/** Fold only ASCII letters, as Python's bytes.lower does for a -S string. */
+function foldAscii(text: string): string {
+  return text.replace(/[A-Z]+/g, (run) => run.toLowerCase())
+}
 
 /**
  * A `-S` or `-G` search, which git runs on every file pair a diff compares, once

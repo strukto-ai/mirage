@@ -113,7 +113,7 @@ async def _count_lines(
     return found, end
 
 
-async def head(
+async def head_stream(
     src: bytes | AsyncIterator[bytes],
     *,
     n: int | None = None,
@@ -272,7 +272,9 @@ async def head_multi(
             source = read(p)
             if inspect.isawaitable(source):
                 source = await source
-            body = head(source, n=n, c=c, zero_terminated=zero_terminated)
+            body = head_stream(
+                source, n=n, c=c, zero_terminated=zero_terminated
+            )
             first = await anext(body, None)
         try:
             if show_headers and p.virtual not in refused:
@@ -392,7 +394,7 @@ async def head_generic(
             refused=refused,
         ), io
     source = resolve_source(ctx.stdin)
-    body = head(
+    body = head_stream(
         source,
         n=parsed.lines,
         c=parsed.bytes_,
