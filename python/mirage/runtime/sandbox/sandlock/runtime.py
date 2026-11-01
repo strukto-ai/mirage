@@ -124,16 +124,16 @@ class SandlockRuntime(
         found = await asyncio.to_thread(shutil.which, "sandlock")
         if found is None:
             raise RuntimeError(SANDLOCK_HINT)
-        # A run still finding `sandlock` when the runtime closed starts
-        # nothing, so no child outlives the close.
-        if self._closed:
-            raise RuntimeError(f"{self.name}: the runtime is closed")
         given = {**self.config.env, **(ctx.env or {})}
-        clock = system_time_env(given)
+        clock = await system_time_env(given)
         if clock is None:
             return refused_run(
                 self.name, "runtime cannot keep this workspace's system_time"
             )
+        # A run still finding `sandlock` or libfaketime when the runtime
+        # closed starts nothing, so no child outlives the close.
+        if self._closed:
+            raise RuntimeError(f"{self.name}: the runtime is closed")
         wrapper = ["run", *self.policy_argv(), "--clean-env"]
         for key, value in {**given, **clock}.items():
             wrapper += ["--env", f"{key}={value}"]

@@ -225,16 +225,16 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> RunResult:
-        # A run still finding its program when the runtime closed starts
-        # nothing, so no child outlives the close.
-        if self._closed:
-            raise RuntimeError(f"{self.name}: the runtime is closed")
         given = {**self.config.env, **env}
-        clock = system_time_env(given)
+        clock = await system_time_env(given)
         if clock is None:
             return refused_run(
                 self.name, "runtime cannot keep this workspace's system_time"
             )
+        # A run still finding its program or libfaketime when the runtime
+        # closed starts nothing, so no child outlives the close.
+        if self._closed:
+            raise RuntimeError(f"{self.name}: the runtime is closed")
         return await run_program(
             program,
             None,

@@ -102,13 +102,13 @@ export class SandlockRuntime
     // find a `sandlock` the session wrote.
     const executable = await onHostPath('sandlock')
     if (!isAbsolute(executable)) throw new Error(SANDLOCK_HINT)
-    // A run still finding `sandlock` when the runtime closed starts
-    // nothing, so no child outlives the close.
-    if (this.closed) throw new Error(`${this.name}: the runtime is closed`)
     const given = { ...this.config.env, ...ctx.env }
-    const clock = systemTimeEnv(given)
+    const clock = await systemTimeEnv(given)
     if (clock === null)
       return refusedRun(this.name, "runtime cannot keep this workspace's system_time")
+    // A run still finding `sandlock` or libfaketime when the runtime closed
+    // starts nothing, so no child outlives the close.
+    if (this.closed) throw new Error(`${this.name}: the runtime is closed`)
     const wrapper = ['run', ...this.policyArgv(), '--clean-env']
     for (const [key, value] of Object.entries({ ...given, ...clock }))
       wrapper.push('--env', `${key}=${value}`)

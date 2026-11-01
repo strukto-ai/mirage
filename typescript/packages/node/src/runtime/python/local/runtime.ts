@@ -227,7 +227,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     return found
   }
 
-  private spawnProgram(
+  private async spawnProgram(
     program: string,
     argv: string[],
     env: Record<string, string>,
@@ -237,15 +237,13 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     output?: OutputFn,
     errors?: OutputFn,
   ): Promise<RunResult> {
-    // A run still finding its program when the runtime closed starts
-    // nothing, so no child outlives the close.
-    if (this.closed) return Promise.reject(new Error(`${this.name}: the runtime is closed`))
     const given = { ...(this.config as LocalConfig).env, ...env }
-    const clock = systemTimeEnv(given)
+    const clock = await systemTimeEnv(given)
     if (clock === null)
-      return Promise.resolve(
-        refusedRun(this.name, "runtime cannot keep this workspace's system_time"),
-      )
+      return refusedRun(this.name, "runtime cannot keep this workspace's system_time")
+    // A run still finding its program or libfaketime when the runtime
+    // closed starts nothing, so no child outlives the close.
+    if (this.closed) throw new Error(`${this.name}: the runtime is closed`)
     return runProgram(program, null, argv, stdin, {
       env: { ...given, ...clock },
       children: this.children,

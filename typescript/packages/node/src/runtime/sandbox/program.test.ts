@@ -20,6 +20,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -797,27 +798,33 @@ describe('host runs', () => {
 
 describe('systemTimeEnv', () => {
   it('preloads libfaketime at the workspace offset, before the env preload', async () => {
-    const library = join(mkdtempSync(join(tmpdir(), 'faketime-')), 'libfaketime.so.1')
+    const dir = mkdtempSync(join(tmpdir(), 'faketime-'))
+    const library = join(dir, 'libfaketime.so.1')
     writeFileSync(library, '')
-    const saved = FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, library)
+    const saved = FAKETIME_LIBRARIES.splice(
+      0,
+      FAKETIME_LIBRARIES.length,
+      join(dir, 'none'),
+      library,
+    )
     const platform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { value: 'linux' })
     try {
-      const clock = ShiftedClock.starting(new SystemClock(), Date.now() / 1000 - 3600)
-      const env = await runWithSystemClock(clock, () =>
-        Promise.resolve(systemTimeEnv({ LD_PRELOAD: '/opt/x.so' })),
-      )
-      expect(env).toEqual({
+      const clock = ShiftedClock.starting(new SystemClock(), Date.now() / 1000 - 3600.25)
+      const env = await runWithSystemClock(clock, () => systemTimeEnv({ LD_PRELOAD: '/opt/x.so' }))
+      expect(env).toMatchObject({
         LD_PRELOAD: `${library}:/opt/x.so`,
-        FAKETIME: '-3600s',
         FAKETIME_DONT_FAKE_MONOTONIC: '1',
       })
-      FAKETIME_LIBRARIES.splice(0, 1, join(tmpdir(), 'no-such-libfaketime.so.1'))
-      expect(await runWithSystemClock(clock, () => Promise.resolve(systemTimeEnv({})))).toBeNull()
-      expect(systemTimeEnv({})).toEqual({})
+      expect(env?.FAKETIME).toMatch(/^-\d+\.\d{3}s$/)
+      expect(Number.parseFloat(env?.FAKETIME ?? '')).toBeCloseTo(-3600.25, 1)
+      rmSync(library)
+      expect(await runWithSystemClock(clock, () => systemTimeEnv({}))).toBeNull()
+      expect(await systemTimeEnv({})).toEqual({})
     } finally {
       FAKETIME_LIBRARIES.splice(0, FAKETIME_LIBRARIES.length, ...saved)
       if (platform !== undefined) Object.defineProperty(process, 'platform', platform)
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })
