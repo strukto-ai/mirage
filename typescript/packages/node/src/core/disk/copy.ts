@@ -15,6 +15,8 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { access, constants, copyFile } from 'node:fs/promises'
 
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
@@ -22,6 +24,7 @@ import { resolveInside } from './utils.ts'
 export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = await resolveInside(accessor.root, src)
   const d = await resolveInside(accessor.root, dst)
+  const timer = startOp()
   try {
     await copyFile(s, d)
   } catch (err) {
@@ -39,4 +42,5 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
     }
     throw diskError(err, blame)
   }
+  record('copy', dst.virtual, VFSName.DISK, 0, timer)
 }

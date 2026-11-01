@@ -82,7 +82,7 @@ _GENERIC_OUT = [
 # predicted as the operand's virtual path, never copied from the measurement.
 # echo's `>` is opened by its output write: one write. RAM and Redis skip
 # recording an empty append; disk and SSH record it.
-# ram, disk and redis record nothing for same-mount cp/mv/rm/rmdir/rm -r.
+# ram and redis record nothing for same-mount cp/mv/rm/rmdir/rm -r.
 # A caching mount serves each read of what the line just wrote from the
 # bytes the write kept, so only the writes reach the backend.
 _WARM_OUT = [op for op in _GENERIC_OUT[1:] if op[0] == "write"]
@@ -141,9 +141,31 @@ _SSH = [
     ("append", C),
 ]
 
+# disk records the rows s3 does for cp, mv, rm, rmdir and rm -r.
+_DISK = [
+    ("write", K),
+    ("append", K),
+    ("append", K),
+    ("append", K),
+    ("write", NEW),
+    ("truncate", NEW),
+    ("read", K),
+    ("read", K),
+    ("copy", "/m/m/k2.txt"),
+    ("rename", NEW),
+    ("rename", "/m/m/moved.txt"),
+    ("unlink", "/m/m/moved.txt"),
+    ("rmdir", "/m/m/e"),
+    ("write", DF),
+    ("rm_r", "/m/m/d"),
+    *_GENERIC_OUT,
+    ("create", C),
+    ("append", C),
+]
+
 EXPECTED = {
     "ram": _NATIVE_APPEND,
-    "disk": [*_NATIVE_APPEND[:1], ("append", K), *_NATIVE_APPEND[1:]],
+    "disk": _DISK,
     "redis": _NATIVE_APPEND,
     "s3": _S3,
     "ssh": _SSH,
