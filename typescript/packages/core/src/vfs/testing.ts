@@ -12,7 +12,7 @@ import type { BaseVFS } from './base.ts'
 import type { Handed } from './types.ts'
 import type { ByteSource } from '../io/types.ts'
 import { concat } from '../utils/bytes.ts'
-import { rstripSlash } from '../utils/slash.ts'
+import { lstripSlash, rstripSlash, stripSlash } from '../utils/slash.ts'
 
 /** A known file, its parent and absent sibling, and an optional chunk bound. */
 export interface ReadFixture {
@@ -201,7 +201,7 @@ const LOST = '0'.repeat(32)
 // The file `name` in `directory`, keyed below the same mount. Mirrors
 // Python's `_child`.
 function child(directory: PathSpec, name: string): PathSpec {
-  const key = `${directory.vfsPath.replace(/^\/+|\/+$/g, '')}/${name}`.replace(/^\/+/, '')
+  const key = lstripSlash(`${stripSlash(directory.vfsPath)}/${name}`)
   return new PathSpec({
     virtual: `${rstripSlash(directory.virtual)}/${name}`,
     directory: directory.virtual,
@@ -358,7 +358,10 @@ class Checker {
       isEnoent,
       `${op} of a missing source must raise ENOENT`,
     )
-    check(sameBytes(await this.bytesAt(dst), this.content), `a refused ${op} must leave the destination`)
+    check(
+      sameBytes(await this.bytesAt(dst), this.content),
+      `a refused ${op} must leave the destination`,
+    )
   }
 
   // Check a declared conditional write, honoured and refused.
@@ -374,7 +377,10 @@ class Checker {
       isStaleWrite,
       `a lost put (${mode}) must raise a stale write`,
     )
-    check(sameBytes(await this.bytesAt(path), this.content), `a lost put (${mode}) must write nothing`)
+    check(
+      sameBytes(await this.bytesAt(path), this.content),
+      `a lost put (${mode}) must write nothing`,
+    )
   }
 
   // Check a declared conditional copy, honoured and refused.
@@ -393,7 +399,10 @@ class Checker {
       isStaleWrite,
       `a lost copy (${mode}) must raise a stale write`,
     )
-    check(sameBytes(await this.bytesAt(dst), this.content), `a lost copy (${mode}) must write nothing`)
+    check(
+      sameBytes(await this.bytesAt(dst), this.content),
+      `a lost copy (${mode}) must write nothing`,
+    )
   }
 
   // Check a declared conditional delete (match), honoured and refused.
@@ -405,7 +414,10 @@ class Checker {
       isStaleWrite,
       'a lost delete (match) must raise a stale write',
     )
-    check(sameBytes(await this.bytesAt(path), this.content), 'a lost delete (match) must keep the file')
+    check(
+      sameBytes(await this.bytesAt(path), this.content),
+      'a lost delete (match) must keep the file',
+    )
     const held = await this.version(path)
     await runWithVersions(this.vfs, [[path, held]], () => this.call('unlink', path))
     check(await this.gone(path), 'a held delete (match) must remove')
