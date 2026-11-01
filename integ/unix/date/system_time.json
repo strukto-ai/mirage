@@ -84,10 +84,10 @@
       "targets": [
         "ram-system-time"
       ],
-      "command": "python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).date(), datetime.date.today())'",
+      "command": "python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).date(), datetime.date.today(), datetime.datetime.now().hour)'",
       "expect": {
         "exit": 0,
-        "stdout": "2026-03-02 2026-03-02\n",
+        "stdout": "2026-03-02 2026-03-02 9\n",
         "stderr": ""
       }
     }

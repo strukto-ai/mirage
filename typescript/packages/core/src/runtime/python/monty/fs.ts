@@ -80,27 +80,13 @@ function timeZoneArg(value: unknown): TimeZoneMarker | null {
 
 /**
  * `seconds` since the epoch as monty's DateTime marker, which the engine
- * turns into a real guest `datetime`. No timezone argument means python's
- * naive local now; a TimeZone marker means an aware now in that
- * offset — both exactly what the python engine's default
- * `datetime_now(tz)` answers.
+ * turns into a real guest `datetime`. No timezone argument means a naive
+ * now in UTC, as monty's own clock answers; a TimeZone marker means an
+ * aware now in that offset.
  */
 function dateTimeMarker(seconds: number, tz: TimeZoneMarker | null): Record<string, unknown> {
-  if (tz === null) {
-    const now = new Date(seconds * 1000)
-    return {
-      __monty_type__: 'DateTime',
-      year: now.getFullYear(),
-      month: now.getMonth() + 1,
-      day: now.getDate(),
-      hour: now.getHours(),
-      minute: now.getMinutes(),
-      second: now.getSeconds(),
-      microsecond: now.getMilliseconds() * 1000,
-    }
-  }
-  const shifted = new Date((seconds + tz.offsetSeconds) * 1000)
-  return {
+  const shifted = new Date((seconds + (tz?.offsetSeconds ?? 0)) * 1000)
+  const fields = {
     __monty_type__: 'DateTime',
     year: shifted.getUTCFullYear(),
     month: shifted.getUTCMonth() + 1,
@@ -109,6 +95,10 @@ function dateTimeMarker(seconds: number, tz: TimeZoneMarker | null): Record<stri
     minute: shifted.getUTCMinutes(),
     second: shifted.getUTCSeconds(),
     microsecond: shifted.getUTCMilliseconds() * 1000,
+  }
+  if (tz === null) return fields
+  return {
+    ...fields,
     offsetSeconds: tz.offsetSeconds,
     ...(tz.name !== undefined ? { timezoneName: tz.name } : {}),
   }
@@ -118,9 +108,9 @@ function dateMarker(seconds: number): Record<string, unknown> {
   const now = new Date(seconds * 1000)
   return {
     __monty_type__: 'Date',
-    year: now.getFullYear(),
-    month: now.getMonth() + 1,
-    day: now.getDate(),
+    year: now.getUTCFullYear(),
+    month: now.getUTCMonth() + 1,
+    day: now.getUTCDate(),
   }
 }
 
