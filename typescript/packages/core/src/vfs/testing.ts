@@ -268,6 +268,7 @@ export function runWithVersions<T>(
 // the scratch directory. Mirrors Python's `_Checker`.
 class Checker {
   readonly content: Uint8Array
+  readonly other: Uint8Array
   readonly written = new Map<string, PathSpec>()
 
   constructor(
@@ -276,6 +277,7 @@ class Checker {
     private readonly store: IndexCacheStore,
   ) {
     this.content = fixture.content ?? new TextEncoder().encode('mutation contract\n')
+    this.other = concat([this.content, OTHER])
   }
 
   path(name: string): PathSpec {
@@ -284,21 +286,27 @@ class Checker {
     return path
   }
 
-  get handed(): Handed {
-    return taken(this.store, null)
+  // What an op is handed for its path, and a destination for a two-path op,
+  // each row read fresh.
+  async handed(path: PathSpec, dst?: PathSpec): Promise<Handed> {
+    const [entry, parent] = await rowsAt(this.vfs, path)
+    if (dst === undefined) return taken(this.store, entry, parent)
+    const [dstEntry, dstParent] = await rowsAt(this.vfs, dst)
+    return { ...taken(this.store, entry, parent), dstEntry, dstParent }
   }
 
   async put(path: PathSpec, data: Uint8Array): Promise<void> {
-    await this.vfs.write(path, data, undefined, this.handed)
+    await this.vfs.write(path, data, undefined, await this.handed(path))
   }
 
-  bytesAt(path: PathSpec): Promise<Uint8Array> {
-    return bytesOf(this.vfs.read(path, this.handed))
+  async bytesAt(path: PathSpec): Promise<Uint8Array> {
+    return bytesOf(this.vfs.read(path, await this.handed(path)))
   }
 
   async gone(path: PathSpec): Promise<boolean> {
+    const handed = await this.handed(path)
     try {
-      await this.vfs.stat(path, this.handed)
+      await this.vfs.stat(path, handed)
     } catch (error) {
       if (isEnoent(error)) return true
       throw error
@@ -307,7 +315,7 @@ class Checker {
   }
 
   async version(path: PathSpec): Promise<string> {
-    const info = await this.vfs.stat(path, this.handed)
+    const info = await this.vfs.stat(path, await this.handed(path))
     check(
       info.fingerprint !== null && info.fingerprint !== '',
       'a VFS that declares a match condition must stat a fingerprint',
@@ -315,26 +323,29 @@ class Checker {
     return info.fingerprint
   }
 
-  call(op: 'rename' | 'copy' | 'unlink', ...paths: PathSpec[]): Promise<unknown> {
-    const [first, second] = paths as [PathSpec, PathSpec]
-    if (op === 'rename') return this.vfs.rename(first, second, this.handed)
-    if (op === 'copy') return this.vfs.copy(first, second, undefined, this.handed)
-    return this.vfs.unlink(first, this.handed)
+  async call(op: 'rename' | 'copy' | 'unlink', path: PathSpec, dst?: PathSpec): Promise<unknown> {
+    const handed = await this.handed(path, dst)
+    if (op === 'unlink') return this.vfs.unlink(path, handed)
+    check(dst !== undefined, `${op} needs a destination`)
+    if (op === 'rename') return this.vfs.rename(path, dst, handed)
+    return this.vfs.copy(path, dst, undefined, handed)
   }
 
-  // Unlink every file the run named that is still there. A cleanup failure
-  // after a failed run is logged, so the run's own failure is the one thrown.
+  // Unlink every file the run named that is still there, trying each. A
+  // cleanup failure after a failed run is logged, so the run's own failure is
+  // the one thrown; after a passed run the first is thrown once all are tried.
   async clean(failed: boolean): Promise<void> {
-    if (!this.vfs.supports('unlink')) return
+    let first: { error: unknown } | null = null
     for (const path of this.written.values()) {
       try {
         await this.call('unlink', path)
       } catch (error) {
         if (isEnoent(error)) continue
-        if (!failed) throw error
         console.debug(`cleanup of ${path.virtual} failed: ${String(error)}`)
+        first ??= { error }
       }
     }
+    if (first !== null && !failed) throw first.error
   }
 
   // Check `rename` or `copy` of one file: onto a fresh name, onto an
@@ -344,7 +355,7 @@ class Checker {
     const dst = this.path(`${op}-dst`)
     for (const existing of [false, true]) {
       await this.put(src, this.content)
-      if (existing) await this.put(dst, OTHER)
+      if (existing) await this.put(dst, this.other)
       await this.call(op, src, dst)
       check(
         sameBytes(await this.bytesAt(dst), this.content),
@@ -367,13 +378,13 @@ class Checker {
   // Check a declared conditional write, honoured and refused.
   async checkPut(mode: ConditionMode): Promise<void> {
     const path = this.path(`put-${mode}`)
-    if (mode === 'match') await this.put(path, OTHER)
+    if (mode === 'match') await this.put(path, this.other)
     const held = mode === 'absent' ? null : await this.version(path)
     await runWithVersions(this.vfs, [[path, held]], () => this.put(path, this.content))
     check(sameBytes(await this.bytesAt(path), this.content), `a held put (${mode}) must land`)
     const lost = mode === 'absent' ? null : LOST
     await rejects(
-      () => runWithVersions(this.vfs, [[path, lost]], () => this.put(path, OTHER)),
+      () => runWithVersions(this.vfs, [[path, lost]], () => this.put(path, this.other)),
       isStaleWrite,
       `a lost put (${mode}) must raise a stale write`,
     )
@@ -388,11 +399,11 @@ class Checker {
     const src = this.path(`copy-${mode}-src`)
     const dst = this.path(`copy-${mode}`)
     await this.put(src, this.content)
-    if (mode === 'match') await this.put(dst, OTHER)
+    if (mode === 'match') await this.put(dst, this.other)
     const held = mode === 'absent' ? null : await this.version(dst)
     await runWithVersions(this.vfs, [[dst, held]], () => this.call('copy', src, dst))
     check(sameBytes(await this.bytesAt(dst), this.content), `a held copy (${mode}) must land`)
-    await this.put(src, OTHER)
+    await this.put(src, this.other)
     const lost = mode === 'absent' ? null : LOST
     await rejects(
       () => runWithVersions(this.vfs, [[dst, lost]], () => this.call('copy', src, dst)),
@@ -453,19 +464,20 @@ class Checker {
  * Verify a VFS's single-file mutations in an empty, caller-owned scratch
  * directory, unlinking the files it wrote there, pass or fail.
  *
- * Write preconditions are checked exactly as `conditionSupport` declares
- * them, each op run through `runWithVersions` as a `write: conditional` mount
- * runs it: a declared condition lands when it holds and rejects as a stale
- * write, writing nothing, when it does not. An undeclared condition is
- * refused by the mount before the VFS sees it, so it is not probed. `rename`
- * and `copy` are checked where the VFS defines them: onto a fresh name and
- * over an existing file the destination holds the source's bytes, `rename`
- * removes the source and `copy` keeps it, and a missing source rejects ENOENT
- * and leaves the destination. `index` is the store every function is handed,
- * a RAM store at the VFS's `indexTtl` by default. `unenforced` names declared
- * conditions the backend under test cannot enforce (a fake), each skipped
- * with a warning; naming an undeclared one fails. Mirrors Python's
- * `check_mutation_contract`.
+ * Each op is handed the rows a mount reads for it, fresh, as
+ * `checkReadContract` hands them. Write preconditions are checked exactly as
+ * `conditionSupport` declares them, each op run through `runWithVersions` as
+ * a `write: conditional` mount runs it: a declared condition lands when it
+ * holds and rejects as a stale write, writing nothing, when it does not. An
+ * undeclared condition is refused by the mount before the VFS sees it, so it
+ * is not probed. `rename` and `copy` are checked where the VFS defines them:
+ * onto a fresh name and over an existing file the destination holds the
+ * source's bytes, `rename` removes the source and `copy` keeps it, and a
+ * missing source rejects ENOENT and leaves the destination. `index` is the
+ * store every function is handed, a RAM store at the VFS's `indexTtl` by
+ * default. `unenforced` names declared conditions the backend under test
+ * cannot enforce (a fake), each skipped with a warning; naming an undeclared
+ * one fails. Mirrors Python's `check_mutation_contract`.
  */
 export async function checkMutationContract(
   vfs: BaseVFS,
@@ -474,6 +486,7 @@ export async function checkMutationContract(
   unenforced: readonly (readonly [WriteKind, ConditionMode])[] = [],
 ): Promise<void> {
   check(vfs.supports('write'), 'the mutation contract seeds through write')
+  check(vfs.supports('unlink'), 'the mutation contract cleans up through unlink')
   const checker = new Checker(vfs, fixture, index ?? new RAMIndexCacheStore({ ttl: vfs.indexTtl }))
   try {
     await checker.run(unenforced)

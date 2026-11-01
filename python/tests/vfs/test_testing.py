@@ -325,6 +325,51 @@ class RenameMissingQuietly(RAMVFS):
             await super().rename(src, dst)
 
 
+class NeedsRows(RAMVFS):
+    """Finds a file only through the row the mount hands it, as Box does."""
+
+    async def stat(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> FileStat:
+        if entry is None:
+            raise FileNotFoundError(path.virtual)
+        return await super().stat(path)
+
+    async def unlink(
+        self, path: PathSpec, entry: FileStat | None = None
+    ) -> None:
+        if entry is None:
+            raise FileNotFoundError(path.virtual)
+        await super().unlink(path)
+
+    async def rename(
+        self, src: PathSpec, dst: PathSpec, entry: FileStat | None = None
+    ) -> None:
+        if entry is None:
+            raise FileNotFoundError(src.virtual)
+        await super().rename(src, dst)
+
+    async def copy(
+        self, src: PathSpec, dst: PathSpec, entry: FileStat | None = None
+    ) -> None:
+        if entry is None:
+            raise FileNotFoundError(src.virtual)
+        await super().copy(src, dst)
+
+
+class KeepsRenameDst(RAMVFS):
+    """Refuses to unlink the rename destination."""
+
+    async def unlink(self, path: PathSpec) -> None:
+        if path.virtual.endswith("/rename-dst"):
+            raise PermissionError(path.virtual)
+        await super().unlink(path)
+
+
+class NoUnlink(RAMVFS):
+    unlink = BaseVFS.unlink
+
+
 class ClaimsPutConditions(RAMVFS):
     """Declares conditional puts and writes through them unconditioned."""
 
@@ -373,6 +418,34 @@ async def test_a_failed_check_still_cleans_up():
 
 
 @pytest.mark.asyncio
+async def test_each_op_is_handed_its_rows():
+    vfs = NeedsRows()
+    await check_mutation_contract(vfs, SCRATCH)
+    assert await _names(vfs) == []
+
+
+@pytest.mark.asyncio
+async def test_cleanup_tries_every_file_then_raises():
+    vfs = KeepsRenameDst()
+    with pytest.raises(PermissionError, match="rename-dst"):
+        await check_mutation_contract(vfs, SCRATCH)
+    assert await _names(vfs) == ["rename-dst"]
+
+
+@pytest.mark.asyncio
+async def test_the_check_needs_unlink_to_clean_up():
+    with pytest.raises(AssertionError, match="cleans up through unlink"):
+        await check_mutation_contract(NoUnlink(), SCRATCH)
+
+
+@pytest.mark.asyncio
+async def test_an_overwrite_is_caught_whatever_the_content():
+    fixture = MutationFixture(DIRECTORY, b"replaced\n")
+    with pytest.raises(AssertionError, match="over an existing file"):
+        await check_mutation_contract(CopyKeepsDestination(), fixture)
+
+
+@pytest.mark.asyncio
 async def test_an_unenforced_condition_is_skipped_with_a_warning():
     with pytest.warns(UserWarning, match=r"copy \(absent\) skipped"):
         await check_mutation_contract(
@@ -407,15 +480,14 @@ def moto_bucket() -> Iterator[tuple[str, str]]:
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    raises=ClientError,
-    reason="s3 copy of a missing source raises NoSuchKey, not ENOENT",
-)
 @pytest.mark.parametrize(
     ("cls", "unenforced"), [(S3VFS, frozenset()), (AwsS3, UNENFORCED_COPY)]
 )
-async def test_s3_meets_the_mutation_contract(cls, unenforced, moto_bucket):
+async def test_s3_fails_the_mutation_contract_only_at_no_such_key(
+    cls, unenforced, moto_bucket
+):
+    """Every case passes up to a copy of a missing source: s3 raises
+    NoSuchKey there, not FileNotFoundError. Fixing that fails this test."""
     endpoint, bucket = moto_bucket
     vfs = cls(
         S3Config(
@@ -427,9 +499,11 @@ async def test_s3_meets_the_mutation_contract(cls, unenforced, moto_bucket):
         )
     )
     try:
-        await check_mutation_contract(vfs, SCRATCH, unenforced=unenforced)
+        with pytest.raises(ClientError) as raised:
+            await check_mutation_contract(vfs, SCRATCH, unenforced=unenforced)
     finally:
         await vfs.close()
+    assert raised.value.response["Error"]["Code"] == "NoSuchKey"
 
 
 @pytest.mark.asyncio
