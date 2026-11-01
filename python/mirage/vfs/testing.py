@@ -418,16 +418,23 @@ class _Checker:
     async def handed(
         self, fn: Callable[..., Any], *paths: PathSpec
     ) -> dict[str, Any]:
-        """What ``fn`` is handed for ``paths``, each row read fresh.
+        """What ``fn`` is handed for ``paths``: only the rows its
+        parameters take, each read fresh, as the mount hands them.
 
         Args:
             fn (Callable[..., Any]): the VFS function.
             *paths (PathSpec): its path, then a destination for a
                 two-path op.
         """
-        rows = [
-            row for path in paths for row in await _rows_at(self.vfs, path)
-        ]
+        params = inspect.signature(fn).parameters
+        rows: list[FileStat | None] = []
+        for path, names in zip(
+            paths, (("entry", "parent"), ("dst_entry", "dst_parent"))
+        ):
+            if any(name in params for name in names):
+                rows += await _rows_at(self.vfs, path)
+            else:
+                rows += [None, None]
         return _taken(fn, self.store, *rows)
 
     async def put(self, path: PathSpec, data: bytes) -> None:

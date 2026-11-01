@@ -316,6 +316,13 @@ class RenameMissingQuietly extends RAMVFS {
 
 /** Finds a file only through the row the mount hands it, as Box does. */
 class NeedsRows extends RAMVFS {
+  override readonly handed = {
+    stat: ['entry'],
+    unlink: ['entry'],
+    rename: ['entry'],
+    copy: ['entry'],
+  } as const
+
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     if (handed?.entry == null) return Promise.reject(enoent(path.virtual))
     return super.stat(path)
@@ -339,6 +346,16 @@ class NeedsRows extends RAMVFS {
   ): Promise<void> {
     if (handed?.entry == null) return Promise.reject(enoent(src.virtual))
     return super.copy(src, dst, signal)
+  }
+}
+
+/** Takes no rows and counts the listings it serves. */
+class CountsListings extends RAMVFS {
+  listings = 0
+
+  override readdir(path: PathSpec): Promise<FileStat[]> {
+    this.listings += 1
+    return super.readdir(path)
   }
 }
 
@@ -397,6 +414,12 @@ describe('checkMutationContract', () => {
     const vfs = new NeedsRows()
     await checkMutationContract(vfs, SCRATCH)
     expect(await names(vfs)).toEqual([])
+  })
+
+  it('lists nothing for ops that take no rows', async () => {
+    const vfs = new CountsListings()
+    await checkMutationContract(vfs, SCRATCH)
+    expect(vfs.listings).toBe(0)
   })
 
   it('tries every file in cleanup, then throws', async () => {
