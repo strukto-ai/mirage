@@ -37,7 +37,7 @@ function urlOf(input: RequestInfo | URL): string {
 
 // A binding: the rule, the workspace's policies, the session it runs for,
 // and whether a file op made it.
-type Binding = readonly [NetworkRule, Policies, string, boolean]
+type Binding = readonly [NetworkRule | null, Policies, string, boolean]
 
 // Where a request to localhost:5003 made under `two` goes while a call
 // under `one` still runs.
