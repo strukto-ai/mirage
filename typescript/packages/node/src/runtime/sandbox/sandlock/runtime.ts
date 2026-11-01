@@ -31,7 +31,6 @@ import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
 import { SANDLOCK_HINT, SYSTEM_READABLE } from './constants.ts'
 import { closeChildren, cwdRefusal, onHostPath, runProgram, systemTimeEnv } from '../program.ts'
-import { refusedRun } from '@struktoai/mirage-core/runtime/binding'
 
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
 export class SandlockRuntime
@@ -104,8 +103,6 @@ export class SandlockRuntime
     if (!isAbsolute(executable)) throw new Error(SANDLOCK_HINT)
     const given = { ...this.config.env, ...ctx.env }
     const clock = await systemTimeEnv(given)
-    if (clock === null)
-      return refusedRun(this.name, "runtime cannot keep this workspace's system_time")
     // A run still finding `sandlock` or libfaketime when the runtime closed
     // starts nothing, so no child outlives the close.
     if (this.closed) throw new Error(`${this.name}: the runtime is closed`)

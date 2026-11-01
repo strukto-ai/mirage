@@ -240,7 +240,7 @@ describe('LocalRuntime', () => {
     }
   })
 
-  it("runs on the workspace's system_time, or refuses where libfaketime is missing", async () => {
+  it("runs on the workspace's system_time, or the host's clock without libfaketime", async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
@@ -257,9 +257,9 @@ describe('LocalRuntime', () => {
       if (process.platform === 'linux' && FAKETIME_LIBRARIES.some((path) => existsSync(path)))
         expect(DEC.decode(result.stdout)).toBe('2026-03-02\n')
       else
-        expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
-          126,
-          'local: Permission denied\n',
+        expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([
+          0,
+          expect.stringMatching(/^\d{4}-\d\d-\d\d\n$/),
         ])
     } finally {
       await ws.close()

@@ -69,12 +69,13 @@ FAKETIME_LIBRARIES = (
 )
 
 
-async def system_time_env(env: Mapping[str, str]) -> dict[str, str] | None:
+async def system_time_env(env: Mapping[str, str]) -> dict[str, str]:
     """What a process on this host needs to read the running workspace's
     system time: libfaketime preloaded at its offset from the host's
     clock, to the millisecond, with the monotonic clock left alone. Empty
-    when the workspace keeps the host's time; None when this host has no
-    libfaketime. Mirrors TypeScript's ``systemTimeEnv``.
+    when the workspace keeps the host's time, and when this host has no
+    libfaketime, where the process runs on the host's clock. Mirrors
+    TypeScript's ``systemTimeEnv``.
 
     Args:
         env (Mapping[str, str]): the process's environment, whose
@@ -84,7 +85,10 @@ async def system_time_env(env: Mapping[str, str]) -> dict[str, str] | None:
         return {}
     library = await _faketime_library() if sys.platform == "linux" else None
     if library is None:
-        return None
+        logger.debug(
+            "libfaketime: none found, so the process runs on the host clock"
+        )
+        return {}
     preload = env.get("LD_PRELOAD")
     return {
         "LD_PRELOAD": f"{library}:{preload}" if preload else library,

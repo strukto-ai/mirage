@@ -208,7 +208,7 @@ async def test_a_session_restriction_refuses_every_line(cli, profile):
 
 
 @pytest.mark.asyncio
-async def test_the_system_time_reaches_the_child_or_refuses(
+async def test_the_system_time_reaches_the_child_or_the_host_clock(
     cli, tmp_path, monkeypatch
 ):
     library = tmp_path / "libfaketime.so.1"
@@ -227,8 +227,9 @@ async def test_the_system_time_reaches_the_child_or_refuses(
         assert f"LD_PRELOAD={library}" in args
         assert "FAKETIME_DONT_FAKE_MONOTONIC=1" in args
         library.unlink()
-        refused = await ws.shell("node")
-        assert refused.exit_code == 126
-        assert await refused.stderr_str() == "sandlock: Permission denied\n"
+        host = await ws.shell("node")
+        assert host.exit_code == 0
+        args = json.loads(await host.stdout_str())["argv"]
+        assert not any("FAKETIME" in arg for arg in args)
     finally:
         await ws.close()
