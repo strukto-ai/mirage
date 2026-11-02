@@ -40,7 +40,42 @@ export function gmailSizeEstimate(msg: GmailMessage): number {
   )
 }
 
-export function fmtGmailMessage(msg: GmailMessage): JsonObj {
+// The message as RFC 822 that parseRfc822 reads back to the same headers,
+// body and attachments, so a raw read can be edited and saved again.
+export function gmailRaw(msg: GmailMessage): Buffer {
+  const head = msg.headers.map((h) => `${h.name}: ${h.value}\r\n`).join('')
+  if (msg.attachments.length === 0) return Buffer.from(`${head}\r\n${msg.bodyText}\r\n`)
+  const boundary = `part-${msg.id}`
+  const parts = [
+    `--${boundary}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${msg.bodyText}\r\n`,
+  ]
+  for (const att of msg.attachments) {
+    parts.push(
+      `--${boundary}\r\nContent-Type: ${att.mimeType}\r\n` +
+        `Content-Disposition: attachment; filename="${att.filename}"\r\n` +
+        `Content-Transfer-Encoding: base64\r\n\r\n${att.data.toString('base64')}\r\n`,
+    )
+  }
+  return Buffer.from(
+    `${head}MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n` +
+      `${parts.join('')}--${boundary}--\r\n`,
+  )
+}
+
+// messages.get's `format`: `raw` gives the whole email in place of the parsed
+// payload; any other format is served as `full`.
+export function fmtGmailMessage(msg: GmailMessage, format: string | null = null): JsonObj {
+  if (format === 'raw') {
+    return {
+      id: msg.id,
+      threadId: msg.threadId,
+      labelIds: [...msg.labelIds],
+      snippet: gmailSnippet(msg.bodyText),
+      internalDate: String(msg.internalDate),
+      sizeEstimate: gmailSizeEstimate(msg),
+      raw: b64url(gmailRaw(msg)),
+    }
+  }
   const headers: JsonValue[] = msg.headers.map((h) => ({ name: h.name, value: h.value }))
   const bodyData = Buffer.from(msg.bodyText, 'utf-8')
   let payload: JsonObj

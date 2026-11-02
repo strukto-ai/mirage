@@ -50,8 +50,9 @@ export function listGmailMessages(st: GwsState, query: URLSearchParams): Reply {
   return ok(out)
 }
 
-// drafts.list: each draft with its message's ids, newest message first, and
-// `q` matched against the message as messages.list matches it.
+// drafts.list: each draft with its message's ids, newest message first,
+// `q` matched against the message as messages.list matches it, paged on an
+// offset token as events.list is.
 export function listGmailDrafts(st: GwsState, query: URLSearchParams): Reply {
   const q = query.get('q')
   const maxResults = parseInt(query.get('maxResults') ?? String(DEFAULT_MAX_RESULTS), 10)
@@ -64,13 +65,16 @@ export function listGmailDrafts(st: GwsState, query: URLSearchParams): Reply {
   if (q !== null && q.trim() !== '') {
     items = items.filter((msg) => matchGmailQuery(st, msg, q))
   }
-  items = items.sort(newestFirst).slice(0, maxResults)
+  items.sort(newestFirst)
+  const start = Number(query.get('pageToken') ?? '0')
+  const page = items.slice(start, start + maxResults)
   const out: JsonObj = { resultSizeEstimate: items.length }
-  if (items.length > 0) {
-    out.drafts = items.map((msg): JsonValue => ({
+  if (page.length > 0) {
+    out.drafts = page.map((msg): JsonValue => ({
       id: held.get(msg.id) ?? '',
       message: { id: msg.id, threadId: msg.threadId },
     }))
   }
+  if (start + maxResults < items.length) out.nextPageToken = String(start + maxResults)
   return ok(out)
 }

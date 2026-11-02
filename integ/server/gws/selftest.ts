@@ -885,15 +885,25 @@ async function driveMoveHttp(at: string): Promise<void> {
   ])
 }
 
+function message(subject: string): JsonValue {
+  return {
+    raw: Buffer.from(`To: dana@example.com\r\nSubject: ${subject}\r\n\r\nhello\r\n`).toString(
+      'base64url',
+    ),
+  }
+}
+
+function subjectOf(msg: Obj): JsonValue[] {
+  return arr(obj(msg.payload).headers)
+    .map(obj)
+    .filter((h) => h.name === 'Subject')
+    .map((h) => h.value ?? null)
+}
+
 async function draftsHttp(at: string): Promise<void> {
   const base = `${at}/_run/drafts`
   const gmail = `${base}/gmail/v1/users/me`
   check('drafts world seeds', (await reset(base, { tenants: ['t1'], epoch: EPOCH })) === 200)
-  const message = (subject: string): JsonValue => ({
-    raw: Buffer.from(`To: dana@example.com\r\nSubject: ${subject}\r\n\r\nhello\r\n`).toString(
-      'base64url',
-    ),
-  })
   const put = (id: string, body: JsonValue): ReturnType<typeof api> =>
     api(`${gmail}/drafts/${id}`, 't1', { method: 'PUT', body: JSON.stringify(body) })
   const made = obj((await post(`${gmail}/drafts`, 't1', { message: message('Plan') })).body)
@@ -918,19 +928,57 @@ async function draftsHttp(at: string): Promise<void> {
     404,
   )
   const held = obj(obj((await api(`${gmail}/drafts/${id}`, 't1')).body).message)
+  eq('drafts: drafts.get gives the message in full', subjectOf(held), ['Plan v2'])
+  const raw = obj(obj((await api(`${gmail}/drafts/${id}?format=raw`, 't1')).body).message)
   eq(
-    'drafts: drafts.get gives the message in full',
-    arr(obj(held.payload).headers)
-      .map(obj)
-      .filter((h) => h.name === 'Subject')
-      .map((h) => h.value ?? null),
+    'drafts: format=raw gives the email in place of the payload',
+    [raw.payload ?? null, Buffer.from(String(raw.raw), 'base64url').toString()],
+    [null, 'To: dana@example.com\r\nSubject: Plan v2\r\n\r\nhello\r\n'],
+  )
+  eq(
+    'drafts: and the raw email saves back',
+    (await put(id, { message: { raw: String(raw.raw) } })).status,
+    200,
+  )
+  eq(
+    'drafts: the draft saved from it reads the same',
+    subjectOf(obj(obj((await api(`${gmail}/drafts/${id}`, 't1')).body).message)),
     ['Plan v2'],
   )
+  const added = obj((await post(`${gmail}/drafts`, 't1', { message: message('Extra') })).body)
+  const extra = String(added.id)
+  const page = obj((await api(`${gmail}/drafts?maxResults=1`, 't1')).body)
+  const rest = obj(
+    (await api(`${gmail}/drafts?maxResults=1&pageToken=${String(page.nextPageToken)}`, 't1')).body,
+  )
+  eq(
+    'drafts: drafts.list pages on maxResults',
+    [field(page.drafts, 'id'), field(rest.drafts, 'id'), rest.nextPageToken ?? null],
+    [[extra], [id], null],
+  )
+  const replaced = obj(
+    (await post(`${gmail}/drafts/send`, 't1', { id: extra, message: message('Extra v2') })).body,
+  )
+  const resent = obj((await api(`${gmail}/messages/${String(replaced.id)}`, 't1')).body)
+  eq(
+    'drafts: drafts.send with a message sends that message',
+    [subjectOf(resent), resent.labelIds ?? null],
+    [['Extra v2'], ['SENT']],
+  )
+  eq(
+    'drafts: and the message and draft it replaced are gone',
+    [
+      (await api(`${gmail}/messages/${String(obj(added.message).id)}`, 't1')).status,
+      (await api(`${gmail}/drafts/${extra}`, 't1')).status,
+    ],
+    [404, 404],
+  )
+  const current = String(obj(obj((await api(`${gmail}/drafts/${id}`, 't1')).body).message).id)
   const sent = obj((await post(`${gmail}/drafts/send`, 't1', { id })).body)
   eq(
     'drafts: drafts.send sends the message it holds',
     [sent.id ?? null, sent.labelIds ?? null],
-    [second, ['SENT']],
+    [current, ['SENT']],
   )
   eq('drafts: and the draft is gone', (await api(`${gmail}/drafts/${id}`, 't1')).status, 404)
   eq('drafts: drafts.list is then empty', (await api(`${gmail}/drafts`, 't1')).body, {
