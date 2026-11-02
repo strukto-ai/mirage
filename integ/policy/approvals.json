@@ -1,0 +1,280 @@
+{
+  "baseline": "95659c4b7cbf9939e776a327e1321af5275e3277",
+  "stored_session": {"session_id": "s", "cwd": "/repo", "generation": 7, "decisions": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": []}, "outcome": "allow", "scope": "session", "note": ""}]},
+  "cases": [
+    {
+      "name": "pending retries reuse one record",
+      "steps": [
+        {"op": "resolve"},
+        {"op": "resolve"},
+        {"op": "held"}
+      ],
+      "expected": [
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0}
+      ]
+    },
+    {
+      "name": "once answer is spent by one unbound command",
+      "steps": [
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "allow"},
+        {"op": "held"},
+        {"op": "held"},
+        {"op": "resolve"},
+        {"op": "resolve"}
+      ],
+      "expected": [
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 4, "prompts": 0}
+      ]
+    },
+    {
+      "name": "session grant follows its rule across argv and cwd",
+      "steps": [
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "allow", "scope": "session"},
+        {"op": "resolve"},
+        {"op": "resolve", "argv": ["push", "--force"], "cwd": "/elsewhere"},
+        {"op": "held"}
+      ],
+      "expected": [
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}], "flushes": 2, "prompts": 0}
+      ]
+    },
+    {
+      "name": "deny refuses one retry and then asks again",
+      "steps": [
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "deny"},
+        {"op": "resolve"},
+        {"op": "resolve"}
+      ],
+      "expected": [
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "deny", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "deny", "reason": "first"}, "records": [], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 4, "prompts": 0}
+      ]
+    },
+    {
+      "name": "session deny remains inert and allows a new pending record",
+      "steps": [
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "deny", "scope": "session"},
+        {"op": "resolve"},
+        {"op": "resolve"}
+      ],
+      "expected": [
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "deny", "scope": "session", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "deny", "scope": "session", "note": ""}, {"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "deny", "scope": "session", "note": ""}, {"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 3, "prompts": 0}
+      ]
+    },
+    {
+      "name": "two rules share a public id and answer first pending in order",
+      "rules": ["first", "second"],
+      "steps": [
+        {"op": "resolve", "rules": [0, 1]},
+        {"op": "answer", "outcome": "allow"},
+        {"op": "resolve", "rules": [0, 1]},
+        {"op": "answer", "outcome": "allow", "record": 1},
+        {"op": "resolve", "rules": [0, 1]},
+        {"op": "resolve", "rules": [0, 1]}
+      ],
+      "expected": [
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "second"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}, {"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "second", "rule": {"reason": "second", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}, {"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "second", "rule": {"reason": "second", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 4, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [], "flushes": 5, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 6, "prompts": 0}
+      ]
+    },
+    {
+      "name": "inline once answers prompt once per command",
+      "answers": [{"outcome": "allow"}, {"outcome": "allow"}],
+      "steps": [
+        {"op": "resolve"},
+        {"op": "resolve"}
+      ],
+      "expected": [
+        {"result": {"kind": "allow"}, "records": [], "flushes": 3, "prompts": 1},
+        {"result": {"kind": "allow"}, "records": [], "flushes": 6, "prompts": 2}
+      ]
+    },
+    {
+      "name": "inline session answer prompts once and saves only its changes",
+      "answers": [{"outcome": "allow", "scope": "session"}],
+      "steps": [
+        {"op": "resolve"},
+        {"op": "resolve"},
+        {"op": "held"}
+      ],
+      "expected": [
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}], "flushes": 2, "prompts": 1},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}], "flushes": 2, "prompts": 1},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}], "flushes": 2, "prompts": 1}
+      ]
+    },
+    {
+      "name": "held is observational with a pending or once answer",
+      "steps": [
+        {"op": "held"},
+        {"op": "held"},
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "allow"},
+        {"op": "held"},
+        {"op": "held"},
+        {"op": "resolve"}
+      ],
+      "expected": [
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [], "flushes": 3, "prompts": 0}
+      ]
+    },
+    {
+      "name": "one holder sees its grant and another holder cannot borrow it",
+      "occurrences": {"left": {"start": 0, "end": 1}, "right": {"start": 2, "end": 3}, "whole": {"start": 0, "end": 10}, "nested": {"parent": "left", "source": "inner", "start": 0, "end": 1}},
+      "steps": [
+        {"op": "holder", "holder": "one"},
+        {"op": "holder", "holder": "two"},
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "allow"},
+        {"op": "resolve", "reader": {"holder": "one", "at": "left"}},
+        {"op": "held", "reader": {"holder": "one", "at": "left"}},
+        {"op": "held", "reader": {"holder": "two", "at": "left"}},
+        {"op": "held", "reader": {"holder": "one", "at": "right"}},
+        {"op": "revoke", "holder": "one"},
+        {"op": "held", "reader": {"holder": "two", "at": "left"}}
+      ],
+      "expected": [
+        {"result": {"kind": "ok"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [], "flushes": 3, "prompts": 0}
+      ]
+    },
+    {
+      "name": "release returns an unspent grant to a retry",
+      "occurrences": {"left": {"start": 0, "end": 1}, "right": {"start": 2, "end": 3}, "whole": {"start": 0, "end": 10}, "nested": {"parent": "left", "source": "inner", "start": 0, "end": 1}},
+      "steps": [
+        {"op": "holder", "holder": "one"},
+        {"op": "holder", "holder": "two"},
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "allow"},
+        {"op": "resolve", "reader": {"holder": "one", "at": "left"}},
+        {"op": "release", "holder": "one"},
+        {"op": "resolve", "reader": {"holder": "two", "at": "left"}},
+        {"op": "revoke", "holder": "two"},
+        {"op": "resolve"}
+      ],
+      "expected": [
+        {"result": {"kind": "ok"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 4, "prompts": 0}
+      ]
+    },
+    {
+      "name": "split job keeps the grant until the last holder ends",
+      "occurrences": {"left": {"start": 0, "end": 1}, "right": {"start": 2, "end": 3}, "whole": {"start": 0, "end": 10}, "nested": {"parent": "left", "source": "inner", "start": 0, "end": 1}},
+      "steps": [
+        {"op": "holder", "holder": "one"},
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "allow"},
+        {"op": "resolve", "reader": {"holder": "one", "at": "left"}},
+        {"op": "split", "holder": "one", "target": "job", "at": "whole"},
+        {"op": "revoke", "holder": "one"},
+        {"op": "held", "reader": {"holder": "job", "at": "left"}},
+        {"op": "held"},
+        {"op": "revoke", "holder": "job"},
+        {"op": "held"}
+      ],
+      "expected": [
+        {"result": {"kind": "ok"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [], "flushes": 3, "prompts": 0}
+      ]
+    },
+    {
+      "name": "nested claims hand up and remain bound to their occurrence",
+      "occurrences": {"left": {"start": 0, "end": 1}, "right": {"start": 2, "end": 3}, "whole": {"start": 0, "end": 10}, "nested": {"parent": "left", "source": "inner", "start": 0, "end": 1}},
+      "steps": [
+        {"op": "holder", "holder": "outer"},
+        {"op": "holder", "holder": "inner", "parent": "outer", "origin": "left"},
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "allow"},
+        {"op": "resolve", "reader": {"holder": "inner", "at": "nested"}},
+        {"op": "hand_up", "holder": "inner"},
+        {"op": "held", "reader": {"holder": "outer", "at": "nested"}},
+        {"op": "held", "reader": {"holder": "outer", "at": "right"}},
+        {"op": "revoke", "holder": "outer"},
+        {"op": "held"}
+      ],
+      "expected": [
+        {"result": {"kind": "ok"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [], "flushes": 0, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "once", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [], "flushes": 3, "prompts": 0}
+      ]
+    },
+    {
+      "name": "a changed rule does not reuse an old session answer",
+      "rules": ["first", "changed"],
+      "steps": [
+        {"op": "resolve"},
+        {"op": "answer", "outcome": "allow", "scope": "session"},
+        {"op": "resolve", "rules": [1]},
+        {"op": "held", "rules": [0]},
+        {"op": "held", "rules": [1]}
+      ],
+      "expected": [
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "first"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 1, "prompts": 0},
+        {"result": {"kind": "ok"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}], "flushes": 2, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "changed"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}, {"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "changed", "rule": {"reason": "changed", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "allow"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}, {"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "changed", "rule": {"reason": "changed", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 3, "prompts": 0},
+        {"result": {"kind": "pending", "id": "22ce9edec956", "reason": "changed"}, "records": [{"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "first", "rule": {"reason": "first", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": "allow", "scope": "session", "note": ""}, {"id": "22ce9edec956", "session_id": "s", "command": "git", "argv": ["push"], "cwd": "/repo", "paths": [], "reason": "changed", "rule": {"reason": "changed", "commands": ["git push"], "paths": [], "mount": ""}, "outcome": null, "scope": "once", "note": ""}], "flushes": 3, "prompts": 0}
+      ]
+    }
+  ]
+}
