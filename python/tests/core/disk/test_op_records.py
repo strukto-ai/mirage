@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -25,13 +26,16 @@ MUTATIONS = frozenset(
 )
 
 
-async def _rows(
-    root: Path, line: str, exit_code: int = 0
-) -> list[tuple[str, str, int]]:
+def _seed(root: Path) -> None:
     (root / "a.txt").write_bytes(b"hello\n")
     (root / "e").mkdir()
     (root / "d").mkdir()
     (root / "d" / "f.txt").write_bytes(b"f\n")
+
+
+async def _rows(
+    root: Path, line: str, exit_code: int = 0
+) -> list[tuple[str, str, int]]:
     ws = Workspace({"/m/": DiskVFS(root=root)}, mode=MountMode.WRITE)
     start = len(ws.vfs.records)
     io = await ws.shell(line)
@@ -69,6 +73,7 @@ async def _rows(
     ],
 )
 def test_disk_mutation_records_object_store_rows(tmp_path, line, expected):
+    _seed(tmp_path)
     assert asyncio.run(_rows(tmp_path, line)) == expected
 
 
@@ -85,4 +90,33 @@ def test_disk_mutation_records_object_store_rows(tmp_path, line, expected):
 def test_failed_disk_mutation_records_only_what_it_may_have_changed(
     tmp_path, line, expected
 ):
+    _seed(tmp_path)
     assert asyncio.run(_rows(tmp_path, line, 1)) == expected
+
+
+async def _partial_rows(root: Path, line: str) -> list[tuple[str, str, int]]:
+    _seed(root)
+    (root / "ro").mkdir()
+    (root / "d" / "s").mkdir()
+    (root / "d" / "s" / "g.txt").write_bytes(b"g\n")
+    os.chmod(root / "ro", 0o500)
+    os.chmod(root / "d" / "s", 0o500)
+    try:
+        return await _rows(root, line, 1)
+    finally:
+        os.chmod(root / "ro", 0o700)
+        os.chmod(root / "d" / "s", 0o700)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("cp /m/a.txt /m/ro/c.txt", [("copy", "/m/ro/c.txt", 0)]),
+        ("rm -r /m/d", [("rm_r", "/m/d", 0)]),
+    ],
+)
+def test_partly_failed_disk_mutation_still_records(tmp_path, line, expected):
+    assert asyncio.run(_partial_rows(tmp_path, line)) == expected
+    if line.startswith("rm"):
+        assert not (tmp_path / "d" / "f.txt").exists()
