@@ -516,10 +516,6 @@ async def plan_links(
     return [_into(op, resolved, word_text(last)) for op in operands[:-1]], None
 
 
-async def _readdir(dispatch: DispatchFn, path: PathSpec) -> list[str]:
-    return await path_readdir(dispatch, path.virtual)
-
-
 async def _source_bytes(
     links: NamespaceReader,
     dispatch: DispatchFn,
@@ -804,7 +800,7 @@ async def _attempt_link(
         occupied = found is not None or links.is_link(plan.link_abs)
     if occupied and backs:
         backup = await backup_target(
-            partial(_readdir, dispatch),
+            lambda p: path_readdir(dispatch, p.virtual),
             link_spec,
             flags.backup or "existing",
             flags.suffix,

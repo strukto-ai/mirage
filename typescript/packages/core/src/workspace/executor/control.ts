@@ -131,13 +131,13 @@ export async function executeBody(
     } catch (sig) {
       if (!isUnwinding(sig)) throw sig
       if (sig instanceof LoopSignal) recordStatus(session, sig.io.exitCode)
-      throw await carried(sig, chainNonNull(allStdout), mergedIo)
+      throw await carried(sig, chainStreams(allStdout), mergedIo)
     }
   }
-  return [chainNonNull(allStdout), mergedIo, lastExec]
+  return [chainStreams(allStdout), mergedIo, lastExec]
 }
 
-function chainNonNull(sources: readonly (ByteSource | null)[]): ByteSource | null {
+function chainStreams(sources: readonly (ByteSource | null)[]): ByteSource | null {
   const nonNull = sources.filter(
     (s): s is ByteSource => s !== null && !(s instanceof Uint8Array && s.byteLength === 0),
   )
@@ -163,12 +163,12 @@ export async function carried(
   io: IOResult,
 ): Promise<Unwinding> {
   if (sig instanceof LoopSignal) {
-    sig.stdout = chainNonNull([stdout, sig.stdout])
+    sig.stdout = chainStreams([stdout, sig.stdout])
     sig.io = await io.merge(sig.io)
     return sig
   }
   sig.stderr = concat([await materialize(io.stderr), sig.stderr])
-  if (sig instanceof ReturnSignal) sig.stdout = chainNonNull([stdout, sig.stdout])
+  if (sig instanceof ReturnSignal) sig.stdout = chainStreams([stdout, sig.stdout])
   else sig.stdout = concat([await materialize(stdout), sig.stdout ?? new Uint8Array()])
   return sig
 }
@@ -185,12 +185,12 @@ export async function trailed(
 ): Promise<void> {
   if (stdout.byteLength === 0 && stderr.byteLength === 0) return
   if (sig instanceof LoopSignal) {
-    sig.stdout = chainNonNull([sig.stdout, stdout])
+    sig.stdout = chainStreams([sig.stdout, stdout])
     if (stderr.byteLength > 0) sig.io.stderr = concat([await materialize(sig.io.stderr), stderr])
     return
   }
   sig.stderr = concat([sig.stderr, stderr])
-  if (sig instanceof ReturnSignal) sig.stdout = chainNonNull([sig.stdout, stdout])
+  if (sig instanceof ReturnSignal) sig.stdout = chainStreams([sig.stdout, stdout])
   else sig.stdout = concat([sig.stdout ?? new Uint8Array(), stdout])
 }
 
@@ -230,7 +230,7 @@ export async function returning(
       }),
     ]
   }
-  return [chainNonNull(outputs), io]
+  return [chainStreams(outputs), io]
 }
 
 /**
@@ -297,7 +297,7 @@ async function absorbed(
   allStdout.push(sig.stdout)
   const merged = await mergedIo.merge(sig.io)
   if (sig.levels > 1) {
-    sig.stdout = chainNonNull(allStdout)
+    sig.stdout = chainStreams(allStdout)
     sig.io = merged
     sig.levels -= 1
     throw sig
@@ -311,7 +311,7 @@ function collectLoopResult(
   label: string,
 ): RedirectResult {
   const execNode = new ExecutionNode({ command: label, exitCode: mergedIo.exitCode })
-  const combined = chainNonNull(allStdout)
+  const combined = chainStreams(allStdout)
   return [combined, mergedIo, execNode]
 }
 
@@ -340,10 +340,10 @@ export async function handleIf(
       }
     }
     const [stdout, io, lastExec] = await run(chosen, bound)
-    return [chainNonNull([...leadStdout, stdout]), await lead.merge(io), lastExec]
+    return [chainStreams([...leadStdout, stdout]), await lead.merge(io), lastExec]
   } catch (sig) {
     if (!isUnwinding(sig)) throw sig
-    throw await carried(sig, chainNonNull(leadStdout), lead)
+    throw await carried(sig, chainStreams(leadStdout), lead)
   }
 }
 
@@ -434,7 +434,7 @@ export async function handleWhile(
       mergedIo = await mergedIo.merge(io)
     } catch (sig) {
       if (!(sig instanceof LoopSignal)) {
-        if (isUnwinding(sig)) throw await carried(sig, chainNonNull(allStdout), mergedIo)
+        if (isUnwinding(sig)) throw await carried(sig, chainStreams(allStdout), mergedIo)
         throw sig
       }
       mergedIo = await absorbed(sig, allStdout, mergedIo)
@@ -510,7 +510,7 @@ export async function handleCfor(
       throw err
     }
     if (err instanceof ArithError && err.inSubscript) {
-      throw await carried(err.signal(), chainNonNull(allStdout), mergedIo)
+      throw await carried(err.signal(), chainStreams(allStdout), mergedIo)
     }
     const prefix = err instanceof ArithError ? 'bash: ((: ' : 'bash: '
     const errBytes = encodeText(`${prefix}${err.message}\n`)
@@ -559,12 +559,12 @@ export async function handleCase(
       lastExec = execNode
     } catch (sig) {
       if (!isUnwinding(sig)) throw sig
-      throw await carried(sig, chainNonNull(allStdout), mergedIo)
+      throw await carried(sig, chainStreams(allStdout), mergedIo)
     }
     fallthrough = terminator === ';&'
     if (session.errexitExiting || (terminator !== ';&' && terminator !== ';;&')) break
   }
-  return [chainNonNull(allStdout), mergedIo, lastExec]
+  return [chainStreams(allStdout), mergedIo, lastExec]
 }
 
 /**

@@ -25,10 +25,6 @@ export function signal() {
   return { promise, wake }
 }
 
-function replacement(init: NonNullable<ConstructorParameters<typeof FileEvent>[0]>): FileEvent {
-  return new FileEvent(init)
-}
-
 export class RAMEventQueue implements EventQueue {
   private readonly roots: readonly PathSpec[]
   private readonly label: string
@@ -57,7 +53,7 @@ export class RAMEventQueue implements EventQueue {
     if (old.kind === FileChangeKind.UNKNOWN) return old
     if (old.kind === FileChangeKind.CREATE) {
       if (change.kind === FileChangeKind.DELETE) return null
-      return replacement({
+      return new FileEvent({
         kind: FileChangeKind.CREATE,
         path: change.path,
         timestamp: change.timestamp,
@@ -66,7 +62,7 @@ export class RAMEventQueue implements EventQueue {
       })
     }
     if (old.kind === FileChangeKind.MOVE && change.kind !== FileChangeKind.DELETE) {
-      return replacement({
+      return new FileEvent({
         kind: FileChangeKind.MOVE,
         path: change.path,
         timestamp: change.timestamp,
@@ -75,7 +71,7 @@ export class RAMEventQueue implements EventQueue {
       })
     }
     if (old.kind === FileChangeKind.DELETE && change.kind === FileChangeKind.CREATE) {
-      return replacement({
+      return new FileEvent({
         kind: FileChangeKind.UPDATE,
         path: change.path,
         timestamp: change.timestamp,
@@ -92,7 +88,7 @@ export class RAMEventQueue implements EventQueue {
     if (source === undefined || source.kind === FileChangeKind.UNKNOWN) return change
     this.changes.delete(change.previousPath.virtual)
     if (source.kind === FileChangeKind.CREATE) {
-      return replacement({
+      return new FileEvent({
         kind: FileChangeKind.CREATE,
         path: change.path,
         timestamp: change.timestamp,
@@ -100,7 +96,7 @@ export class RAMEventQueue implements EventQueue {
       })
     }
     if (source.kind === FileChangeKind.MOVE && source.previousPath !== null) {
-      return replacement({
+      return new FileEvent({
         kind: FileChangeKind.MOVE,
         path: change.path,
         timestamp: change.timestamp,
@@ -126,7 +122,7 @@ export class RAMEventQueue implements EventQueue {
       if (!this.changes.has(source)) {
         this.changes.set(
           source,
-          replacement({
+          new FileEvent({
             kind: FileChangeKind.DELETE,
             path: old.previousPath,
             timestamp: event.timestamp,

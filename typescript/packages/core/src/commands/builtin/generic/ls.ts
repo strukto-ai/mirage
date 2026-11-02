@@ -269,24 +269,32 @@ interface RenderOpts {
   columns: LsColumns
 }
 
-function appendListing(
+// The name column with escapes and hyperlinks, null when undecorated.
+function decoratedNames(
+  stats: readonly FileStat[],
+  hrefs: readonly string[] | null,
+  long: boolean,
+  escape: boolean,
+): string[] | null {
+  if (hrefs === null && !escape) return null
+  return stats.map((s, i) => {
+    let name = escape ? escapeName(s.name) : s.name
+    if (hrefs !== null) name = hyperlinked(name, hrefs[i] ?? '')
+    const target = s.extra[LINK_TARGET_KEY]
+    if (long && s.type === FileType.SYMLINK && typeof target === 'string')
+      name += ' -> ' + (escape ? escapeName(target) : target)
+    return name
+  })
+}
+
+function renderGroup(
   stats: readonly FileStat[],
   render: RenderOpts,
   lines: string[],
   hrefs: readonly string[] | null = null,
   targets: readonly (FileStat | null)[] = [],
 ): void {
-  const names =
-    hrefs === null && !render.escape
-      ? null
-      : stats.map((s, i) => {
-          let name = render.escape ? escapeName(s.name) : s.name
-          if (hrefs !== null) name = hyperlinked(name, hrefs[i] ?? '')
-          const target = s.extra[LINK_TARGET_KEY]
-          if (render.long && s.type === FileType.SYMLINK && typeof target === 'string')
-            name += ' -> ' + (render.escape ? escapeName(target) : target)
-          return name
-        })
+  const names = decoratedNames(stats, hrefs, render.long, render.escape)
   if (render.long) {
     const marked = longNames(stats, names, render.indicator, targets)
     const ctx = {
@@ -518,7 +526,7 @@ function statFailedRow(entry: string): FileStat {
 // backend request, and firing a whole directory's worth together is a burst
 // the backend may refuse. `spell` gives an entry's path as the operand
 // spelled it, for a diagnostic. Mirrors Python ls `_stat_entries`.
-async function listDir(
+async function statEntries(
   readdir: ReaddirFn<[path: PathSpec, nofollow?: boolean, limit?: number]>,
   stat: StatFn,
   dir: PathSpec,
@@ -664,7 +672,7 @@ async function probeOperand(
   let stats: FileStat[]
   let structureOnly = false
   try {
-    const listed = await listDir(readdir, stat, path, ctx, warnings, spelled)
+    const listed = await statEntries(readdir, stat, path, ctx, warnings, spelled)
     stats = listed.stats
     structureOnly = listed.structureOnly
   } catch (err) {
@@ -1161,7 +1169,7 @@ export async function lsGeneric(
           )
         : collected.map((c) => c.row)
     const rowPaths = rows.map((r) => byRow.get(r) ?? '')
-    appendListing(
+    renderGroup(
       rows,
       render,
       lines,
@@ -1207,7 +1215,7 @@ export async function lsGeneric(
   const rowed = operands.filter((o) => o.row !== null)
   const rows = rowed.flatMap((o) => (o.row !== null ? [o.row] : []))
   const rowPaths = rowed.map((o) => o.path.virtual)
-  appendListing(
+  renderGroup(
     rows,
     render,
     lines,
@@ -1259,7 +1267,7 @@ export async function lsGeneric(
       // GNU 9.7 prints allocated blocks; VFS has no allocation metadata.
       if (long) lines.push(entries.length > 0 ? 'total ?' : 'total 0')
       const entryPaths = entries.map((e) => `${rstripSlash(dirSpec.virtual)}/${e.name}`)
-      appendListing(
+      renderGroup(
         entries,
         render,
         lines,

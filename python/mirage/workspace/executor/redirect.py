@@ -700,10 +700,13 @@ async def _handle_redirect(
         r = await expand(raw) if expand is not None else raw
         expanded.append(r)
         if r.kind == RedirectKind.AMBIGUOUS:
+            word = (
+                r.target.raw_path
+                if isinstance(r.target, PathSpec)
+                else str(r.target)
+            )
             return await failed(
-                _shell_failure(
-                    encode_text(f"{_redirect_word(r)}: ambiguous redirect\n")
-                )
+                _shell_failure(encode_text(f"{word}: ambiguous redirect\n"))
             )
         if r.kind == RedirectKind.UNEXPANDED and isinstance(
             r.target, ExitSignal
@@ -1335,17 +1338,6 @@ def _closed_write_line(
         words = get_text(command).split()
         name = words[0] if words else "redirect"
     return encode_text(f"{name}: write error: Bad file descriptor\n")
-
-
-def _redirect_word(r: Redirect) -> str:
-    """The redirect's target as typed, for a refusal that names it.
-
-    Args:
-        r (Redirect): the redirect, its target expanded or not.
-    """
-    return (
-        r.target.raw_path if isinstance(r.target, PathSpec) else str(r.target)
-    )
 
 
 def _redirect_failure(

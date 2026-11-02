@@ -16,7 +16,6 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 import { FileType, type PathSpec } from '../../types.ts'
 
 import { deleteFile, deleteDirectory, listDirectoryContents } from './client.ts'
-import { ensurePathSpec } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath, virtualPath } from './path.ts'
 import { stat } from './stat.ts'
@@ -108,12 +107,11 @@ export async function rmRecursive(
   accessor: DatabricksVolumeAccessor,
   path: PathSpec,
 ): Promise<string[]> {
-  const p = ensurePathSpec(path)
-  const fileStat = await stat(accessor, p)
+  const fileStat = await stat(accessor, path)
   if (fileStat.type !== FileType.DIRECTORY) {
-    await unlink(accessor, p)
-    return [p.mountPath]
+    await unlink(accessor, path)
+    return [path.mountPath]
   }
-  const removed = await removeTree(accessor, p)
+  const removed = await removeTree(accessor, path)
   return removed.map((backend) => virtualPath(accessor.config, backend, ''))
 }

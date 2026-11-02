@@ -20,7 +20,7 @@ import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { buildCollectionSchemaJson, buildDatabaseJson } from './_schema_json.ts'
 import { databaseGuard, entityGuard } from './readdir.ts'
 import { detectScope } from './scope.ts'
-import { readStream, stringifyDoc } from './stream.ts'
+import { readStream, renderDoc } from './stream.ts'
 
 export async function* streamAny(
   accessor: MongoDBAccessor,
@@ -53,9 +53,7 @@ async function readSchemaJson(
     match.slots.database ?? '',
     match.slots.name ?? '',
   )
-  return new TextEncoder().encode(
-    stringifyDoc(payload as unknown as Record<string, unknown>) + '\n',
-  )
+  return new TextEncoder().encode(renderDoc(payload as unknown as Record<string, unknown>) + '\n')
 }
 
 async function readDatabaseJson(
@@ -65,9 +63,7 @@ async function readDatabaseJson(
 ): Promise<Uint8Array> {
   await databaseGuard(accessor, match, path.virtual)
   const payload = await buildDatabaseJson(accessor, match.slots.database ?? '')
-  return new TextEncoder().encode(
-    stringifyDoc(payload as unknown as Record<string, unknown>) + '\n',
-  )
+  return new TextEncoder().encode(renderDoc(payload as unknown as Record<string, unknown>) + '\n')
 }
 
 export const read = makeRead<MongoDBAccessor>(detectScope, {

@@ -51,6 +51,30 @@ def _admit(scope: Scope, account: str | None) -> None:
     scope.setdefault("state", {})["account"] = account
 
 
+def _extract_bearer(scope: Scope) -> str | None:
+    headers = dict(scope.get("headers") or [])
+    raw = headers.get(b"authorization", b"").decode("latin-1")
+    if not raw.startswith(BEARER_PREFIX):
+        return None
+    value = raw[len(BEARER_PREFIX) :].strip()
+    return value or None
+
+
+async def _unauthorized(
+    scope: Scope, receive: Receive, send: Send, reason: str
+) -> None:
+    client = scope.get("client") or ("?", 0)
+    logger.warning(
+        "rejecting request from %s:%s: %s", client[0], client[1], reason
+    )
+    response = PlainTextResponse(
+        "Unauthorized",
+        status_code=401,
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    await response(scope, receive, send)
+
+
 class AuthMiddleware:
     """ASGI middleware enforcing the daemon's auth mode.
 
@@ -85,21 +109,19 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        token = self._extract_bearer(scope)
+        token = _extract_bearer(scope)
         if token is None:
-            await self._unauthorized(
-                scope, receive, send, "missing bearer token"
-            )
+            await _unauthorized(scope, receive, send, "missing bearer token")
             return
 
         if self.config.mode == AuthMode.JWT:
             if self.config.jwt is None:
-                await self._unauthorized(
+                await _unauthorized(
                     scope, receive, send, "JWT auth is not configured"
                 )
                 return
             if not _JWT_SHAPE.match(token):
-                await self._unauthorized(
+                await _unauthorized(
                     scope, receive, send, "token shape is not a JWT"
                 )
                 return
@@ -108,7 +130,7 @@ class AuthMiddleware:
                 claims = verify_jwt(token, self.config.jwt, key)
             except JWTVerificationError as e:
                 logger.debug("JWT rejected: %s", e)
-                await self._unauthorized(scope, receive, send, str(e))
+                await _unauthorized(scope, receive, send, str(e))
                 return
             _admit(scope, claims["sub"])
             await self.app(scope, receive, send)
@@ -120,7 +142,7 @@ class AuthMiddleware:
             else self.config.bearer_token
         )
         if expected is None or not hmac.compare_digest(token, expected):
-            await self._unauthorized(scope, receive, send, "bearer mismatch")
+            await _unauthorized(scope, receive, send, "bearer mismatch")
             return
         _admit(scope, None)
         await self.app(scope, receive, send)
@@ -148,26 +170,3 @@ class AuthMiddleware:
         except (pyjwt.PyJWTError, ValueError) as e:
             raise JWTVerificationError(f"JWT key lookup failed: {e}") from e
         return found.key
-
-    @staticmethod
-    def _extract_bearer(scope: Scope) -> str | None:
-        headers = dict(scope.get("headers") or [])
-        raw = headers.get(b"authorization", b"").decode("latin-1")
-        if not raw.startswith(BEARER_PREFIX):
-            return None
-        value = raw[len(BEARER_PREFIX) :].strip()
-        return value or None
-
-    async def _unauthorized(
-        self, scope: Scope, receive: Receive, send: Send, reason: str
-    ) -> None:
-        client = scope.get("client") or ("?", 0)
-        logger.warning(
-            "rejecting request from %s:%s: %s", client[0], client[1], reason
-        )
-        response = PlainTextResponse(
-            "Unauthorized",
-            status_code=401,
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-        await response(scope, receive, send)

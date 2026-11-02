@@ -21,6 +21,7 @@ import { isEacces, isStaleWrite } from '../../errors/fs.ts'
 import { TooManyMatches } from '../../shell/errors.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { gnuDirname } from '../../utils/path.ts'
+import { singleQuote } from '../../utils/quote.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { runs } from '../../policy/match/allow.ts'
 import type { MountEntry } from '../mount/mount.ts'
@@ -60,6 +61,18 @@ export interface MirageToolOperationsOptions {
   sessionId?: string
 }
 
+/**
+ * Render a slice of a file the way the read tool reports it: split on
+ * newlines only, each line kept with its terminator. Mirrors Python's
+ * number_lines.
+ */
+function numberLines(text: string, offset: number, limit: number): string {
+  const raw = text.length === 0 ? [] : text.split(/(?<=\n)/)
+  const lines = raw.length > 0 && raw[raw.length - 1] === '' ? raw.slice(0, -1) : raw
+  const sliced = lines.slice(offset, offset + limit)
+  return sliced.map((line, i) => `${String(i + offset + 1).padStart(6)}\t${line}`).join('')
+}
+
 function textResult(text: string): ToolResult {
   return { content: [{ type: 'text', text }] }
 }
@@ -72,10 +85,6 @@ function ioResult(io: ExecuteResult): ToolResult {
   const result = textResult(ioToStr(io))
   if (io.exitCode !== 0) result.isError = true
   return result
-}
-
-function shQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`
 }
 
 export async function ensureParents(vfs: Files, path: string): Promise<void> {
@@ -112,6 +121,8 @@ async function missing(vfs: Files, path: string): Promise<boolean> {
     return false
   }
 }
+
+const DEFAULT_READ_LIMIT = 2000
 
 /** Every tool, in the order the entry points list them. */
 export const TOOL_NAMES = ['shell', 'read', 'write', 'edit', 'ls', 'grep', 'glob'] as const
@@ -241,7 +252,7 @@ export class MirageToolOperations {
   }
 
   /** Read a file as line-numbered text; a relative path is taken under the session's cwd, spelled as given. */
-  read(given: string, offset = 0, limit = 2000): Promise<ToolResult> {
+  read(given: string, offset = 0, limit = DEFAULT_READ_LIMIT): Promise<ToolResult> {
     return oneCall(this.session, async (vfs) => {
       const versions = (await this.versions()).through(vfs)
       const path = given.startsWith('/') ? given : `${rstripSlash(this.session.state.cwd)}/${given}`
@@ -264,7 +275,7 @@ export class MirageToolOperations {
   async readMedia(
     given: string,
     offset = 0,
-    limit = 2000,
+    limit = DEFAULT_READ_LIMIT,
   ): Promise<ToolResult | WorkspaceMediaRead> {
     const versions = await this.versions()
     const path = given.startsWith('/') ? given : `${rstripSlash(this.session.state.cwd)}/${given}`
@@ -299,12 +310,9 @@ export class MirageToolOperations {
     limit: number,
   ): ToolResult {
     const text = decode(data)
-    const raw = text.length === 0 ? [] : text.split(/(?<=\n)/)
-    const lines = raw.length > 0 && raw[raw.length - 1] === '' ? raw.slice(0, -1) : raw
-    if (offset <= 0 && offset + limit >= lines.length) versions.markSeen(path)
-    const sliced = lines.slice(offset, offset + limit)
-    const numbered = sliced.map((line, i) => `${String(i + offset + 1).padStart(6)}\t${line}`)
-    return textResult(numbered.join(''))
+    const lines = (text.match(/\n/g)?.length ?? 0) + (text !== '' && !text.endsWith('\n') ? 1 : 0)
+    if (offset <= 0 && offset + limit >= lines) versions.markSeen(path)
+    return textResult(numberLines(text, offset, limit))
   }
 
   /**
@@ -376,7 +384,7 @@ export class MirageToolOperations {
   }
 
   async ls(path: string, signal?: AbortSignal): Promise<ToolResult> {
-    return ioResult(await this.session.shell(`ls ${shQuote(path)}`, this.lineOptions(signal)))
+    return ioResult(await this.session.shell(`ls ${singleQuote(path)}`, this.lineOptions(signal)))
   }
 
   /**
@@ -408,8 +416,8 @@ export class MirageToolOperations {
     if (options.count === true) words.push('-c')
     if (options.maxCount !== undefined) words.push('-m', String(options.maxCount))
     if (options.context !== undefined) words.push('-C', String(options.context))
-    if (options.include !== undefined) words.push(shQuote(`--include=${options.include}`))
-    words.push('-e', shQuote(pattern), shQuote(path))
+    if (options.include !== undefined) words.push(singleQuote(`--include=${options.include}`))
+    words.push('-e', singleQuote(pattern), singleQuote(path))
     const io = await this.session.shell(words.join(' '), this.lineOptions(signal))
     const result = textResult(ioToStr(io))
     if (io.exitCode > 1) result.isError = true
@@ -479,7 +487,7 @@ export class MirageToolOperations {
         return this.read(
           args.path as string,
           (args.offset as number | undefined) ?? 0,
-          (args.limit as number | undefined) ?? 2000,
+          (args.limit as number | undefined) ?? DEFAULT_READ_LIMIT,
         )
       case 'write':
         return this.write(args.path as string, args.content as string)

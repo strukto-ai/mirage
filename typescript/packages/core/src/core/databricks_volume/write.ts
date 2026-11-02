@@ -18,7 +18,7 @@ import { VFSName, type PathSpec } from '../../types.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { getDirectoryMetadata, getMetadata, MAX_UPLOAD_SIZE, upload } from './client.ts'
-import { ensurePathSpec, parentPath } from './_helpers.ts'
+import { parentPath } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { efbig, enoent, enotdir } from '../../errors/fs.ts'
@@ -52,22 +52,21 @@ export async function write(
   path: PathSpec,
   data: ByteSource,
 ): Promise<void> {
-  const p = ensurePathSpec(path)
-  const remoteParent = backendPath(accessor.config, parentPath(p))
-  const remotePath = backendPath(accessor.config, p)
+  const remoteParent = backendPath(accessor.config, parentPath(path))
+  const remotePath = backendPath(accessor.config, path)
   const spool = new ByteSpool()
   try {
     await spool.fill(data)
-    if (spool.size > MAX_UPLOAD_SIZE) throw efbig(p.virtual)
+    if (spool.size > MAX_UPLOAD_SIZE) throw efbig(path.virtual)
     const timer = startOp()
-    await ensureParentDirectory(accessor, remoteParent, p.virtual)
+    await ensureParentDirectory(accessor, remoteParent, path.virtual)
     try {
       await upload(accessor, remotePath, spool, true)
     } catch (exc) {
-      if (isNotFound(exc)) throw enoent(p.virtual)
+      if (isNotFound(exc)) throw enoent(path.virtual)
       throw exc
     }
-    record('write', p.virtual, VFSName.DATABRICKS_VOLUME, spool.size, timer)
+    record('write', path.virtual, VFSName.DATABRICKS_VOLUME, spool.size, timer)
   } finally {
     await spool.close()
   }

@@ -105,6 +105,10 @@ def _definition_of(body: FunctionBody) -> TSNodeLike:
     return parent if parent is not None else node
 
 
+def _strip_continuations(text: str) -> str:
+    return _CONTINUATION.sub("", text)
+
+
 class _Printer:
     """One rendering: inside a function body or a substitution's own
     top level, which prints its ``;`` and newline separators as typed.
@@ -171,7 +175,7 @@ class _Printer:
             if child.type == "&" and parts:
                 background.add(len(parts) - 1)
             elif child.is_named and child.type != NT.COMMENT:
-                if parts and self._newline_between(parts[-1], child):
+                if parts and _newline_between(parts[-1], child):
                     newline_after.add(len(parts) - 1)
                 parts.append(child)
         out = ""
@@ -197,18 +201,6 @@ class _Printer:
             elif trailing:
                 out += ";"
         return out
-
-    @staticmethod
-    def _newline_between(left: TSNodeLike, right: TSNodeLike) -> bool:
-        parent = left.parent
-        if parent is None:
-            return False
-        source = parent.text or b""
-        between = source[
-            left.end_byte - parent.start_byte : right.start_byte
-            - parent.start_byte
-        ]
-        return b"\n" in between and b";" not in between
 
     def command(self, node: TSNodeLike, indent: str) -> str:
         """One statement, its compound bodies indented under ``indent``.
@@ -263,7 +255,7 @@ class _Printer:
             return "[[ " + self.condition(node.named_children[0]) + " ]]"
         if kind == NT.COMPOUND_STATEMENT:
             if node.children and node.children[0].type == "((":
-                return _CONTINUATION.sub("", get_text(node))
+                return _strip_continuations(get_text(node))
             inner = indent + _INDENT
             return (
                 "{ \n"
@@ -662,15 +654,27 @@ class _Printer:
             printer = _Printer(False)
             return "$(" + printer.statements(inner, "", False) + ")"
         if not node.children:
-            return _CONTINUATION.sub("", get_text(node))
+            return _strip_continuations(get_text(node))
         out = ""
         for part in _parts(node):
             out += (
-                _CONTINUATION.sub("", part)
+                _strip_continuations(part)
                 if isinstance(part, str)
                 else self.word(part)
             )
         return out
+
+
+def _newline_between(left: TSNodeLike, right: TSNodeLike) -> bool:
+    parent = left.parent
+    if parent is None:
+        return False
+    source = parent.text or b""
+    between = source[
+        left.end_byte - parent.start_byte : right.start_byte
+        - parent.start_byte
+    ]
+    return b"\n" in between and b";" not in between
 
 
 def _terminator(case: TSNodeLike, item: TSNodeLike) -> str:

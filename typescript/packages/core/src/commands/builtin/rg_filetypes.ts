@@ -14,6 +14,7 @@
 
 import { UsageError } from '../errors.ts'
 import { DEFAULT_TYPES } from '../../utils/generated/rg_types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { Verdict, compileGlob } from './rg_glob.ts'
 
 export { DEFAULT_TYPES } from '../../utils/generated/rg_types.ts'
@@ -117,14 +118,9 @@ export class FileTypes {
   }
 }
 
-// Code-point order, which is Python's `sorted` on str.
-function byCodePoint(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
 /** --type-list: every type and its globs, both sorted, one per line. */
 export function typeListing(defs: ReadonlyMap<string, readonly string[]>): string[] {
   return [...defs.keys()]
-    .sort(byCodePoint)
-    .map((name) => `${name}: ${[...(defs.get(name) ?? [])].sort(byCodePoint).join(', ')}`)
+    .sort(compareCodePoints)
+    .map((name) => `${name}: ${[...(defs.get(name) ?? [])].sort(compareCodePoints).join(', ')}`)
 }

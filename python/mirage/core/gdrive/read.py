@@ -17,9 +17,11 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
 from mirage.core.gdrive.api import DriveApi
-from mirage.core.gdrive.fingerprint import drive_fingerprint
+from mirage.core.gdrive.fingerprint import (
+    NATIVE_RESOURCE_TYPES,
+    drive_fingerprint,
+)
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import (
     active_recorder,

@@ -15,7 +15,7 @@
 from mirage.errors import FsCondition
 from mirage.runtime.constants import sdk_install_hint
 
-MISSING_EXTRA_HINT = sdk_install_hint(
+MISSING_PACKAGE_HINT = sdk_install_hint(
     "monty", "the 'monty' extra", "select the 'local' runtime"
 )
 

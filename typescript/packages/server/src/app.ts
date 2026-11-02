@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import Fastify from 'fastify'
 import { DiskRecordClient } from '@struktoai/mirage-node'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
@@ -118,6 +120,19 @@ export interface BuildAppOptions {
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
+
+export async function writePidFile(p: string): Promise<void> {
+  await mkdir(dirname(p), { recursive: true })
+  await writeFile(p, String(process.pid))
+}
+
+export async function removePidFile(p: string): Promise<void> {
+  try {
+    await rm(p, { force: true })
+  } catch (err) {
+    console.debug(`could not remove pid file ${p}`, err)
+  }
+}
 
 function noop(): void {
   /* intentional no-op for onIdleExit default */

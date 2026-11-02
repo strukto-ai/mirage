@@ -227,7 +227,7 @@ describe('closeWorkspace', () => {
   })
 
   // A JS promise cannot be cancelled, so such a runner gets the grace a
-  // cancelled line gets (`joinOrAbort`) and is then left stopping: close
+  // cancelled line gets (`runCancellable`) and is then left stopping: close
   // does not wait on it forever.
   it('returns while a runner that ignores its abort is still stopping', async () => {
     const ws = buildWs()

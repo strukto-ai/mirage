@@ -18,7 +18,7 @@ import { recordQueries } from '../../utils/record_search.ts'
 import { iterDocuments } from './client.ts'
 import { entityGuard } from './readdir.ts'
 import { detectScope } from './scope.ts'
-import { applyElision, elisionPaths, stringifyDoc } from './stream.ts'
+import { applyElision, elisionPaths, renderDoc } from './stream.ts'
 import { PRIMARY_KEY } from './types.ts'
 
 // The words a document's line holds whatever its keys and strings say:
@@ -183,6 +183,6 @@ async function* matching(
     batchSize: 100,
   })) {
     const final = elide.size > 0 ? applyElision(doc, elide) : doc
-    yield encoder.encode(`${stringifyDoc(final)}\n`)
+    yield encoder.encode(`${renderDoc(final)}\n`)
   }
 }

@@ -140,6 +140,12 @@ async def handle_unalias(
     return finish("unalias", errors)
 
 
+def _aliases_on(session: SessionState) -> bool:
+    return bool(
+        session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
+    )
+
+
 def _changing(session: SessionState, name: str, mark: AliasMark) -> None:
     """Keep the value ``name`` had as the read at ``mark`` began, the
     first time that read changes it, for the commands it read
@@ -166,9 +172,7 @@ def _expanding(session: SessionState, mark: AliasMark) -> bool:
     began = session._expand_aliases_marks.get(mark)
     if began is not None:
         return began
-    return bool(
-        session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
-    )
+    return _aliases_on(session)
 
 
 def note_expanding(session: SessionState, mark: AliasMark) -> None:
@@ -247,9 +251,7 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     view = session._alias_view
     if view is not None:
         return frozenset(view) - blocked
-    if not session.shopts.get(
-        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
-    ):
+    if not _aliases_on(session):
         return frozenset()
     return frozenset(session.aliases) - blocked
 
@@ -281,9 +283,7 @@ def body_alias_values(session: SessionState, name: str) -> dict[str, str]:
         and site.aliases is not None
     ):
         return dict(site.aliases)
-    if not session.shopts.get(
-        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
-    ):
+    if not _aliases_on(session):
         return {}
     return dict(session.aliases)
 

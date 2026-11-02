@@ -21,6 +21,7 @@ import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { ACCOUNT_OPTION, PROFILE_OPTION } from './constants.ts'
 import { ChannelInput, ChannelOutput, Mark, channelStdin, deliver } from './stream.ts'
 import { INTERRUPTED_STATUS } from '@struktoai/mirage-core/shell/constants'
+import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 
 const FALLBACK_PROMPT = 'mirage$ '
 const LOGIN_HOME = '/'
@@ -86,10 +87,6 @@ export function loginEnv(request: ChannelRequest): Record<string, string> {
   }
   if (request.term !== null && request.term !== '') env.TERM = request.term
   return env
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`
 }
 
 /**
@@ -174,7 +171,7 @@ export async function openSession(
   try {
     const missing = Object.entries(env).filter(([name]) => !(name in session.env))
     if (missing.length === 0) return
-    const line = `export ${missing.map(([k, v]) => `${k}=${shellQuote(v)}`).join(' ')}`
+    const line = `export ${missing.map(([k, v]) => `${k}=${singleQuote(v)}`).join(' ')}`
     await ws.shell(line, { sessionId, record: false })
   } catch (err) {
     await ws.closeSession(sessionId)

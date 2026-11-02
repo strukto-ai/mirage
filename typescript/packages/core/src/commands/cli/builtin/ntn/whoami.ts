@@ -17,7 +17,8 @@ import { getSelf } from '../../../../core/notion/pages.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { asObject, notionTransport, prettyJson, strOf, type NtnAccessor } from './util.ts'
+import { asObject, stringOf } from '../../../../utils/records.ts'
+import { notionTransport, prettyJson, type NtnAccessor } from './util.ts'
 
 const ENC = new TextEncoder()
 
@@ -30,20 +31,22 @@ export function whoamiRow(me: Record<string, unknown>): ByteSource {
   const bot = asObject(me.bot)
   const owner = asObject(bot.owner)
   const user = asObject(owner.user)
-  const workspaceId = strOf(bot, 'workspace_id')
-  const workspaceName = strOf(bot, 'workspace_name')
+  const workspaceId = stringOf(bot, 'workspace_id')
+  const workspaceName = stringOf(bot, 'workspace_name')
   const hasBot = Object.keys(bot).length > 0
   const byUser = owner.type === 'user'
-  const email = byUser ? strOf(asObject(user.person), 'email') : strOf(asObject(me.person), 'email')
-  const ownerId = byUser ? strOf(user, 'id') : workspaceId
-  const ownerName = byUser ? strOf(user, 'name') : workspaceName
+  const email = byUser
+    ? stringOf(asObject(user.person), 'email')
+    : stringOf(asObject(me.person), 'email')
+  const ownerId = byUser ? stringOf(user, 'id') : workspaceId
+  const ownerName = byUser ? stringOf(user, 'name') : workspaceName
   // The last column is the owner's own kind, so a user owner reports what
   // that user is (`person`), not the `user` discriminator on the envelope.
-  const ownerType = byUser ? strOf(user, 'type') : strOf(owner, 'type')
+  const ownerType = byUser ? stringOf(user, 'type') : stringOf(owner, 'type')
   const columns = [
-    strOf(me, 'id'),
-    strOf(me, 'name'),
-    strOf(me, 'type'),
+    stringOf(me, 'id'),
+    stringOf(me, 'name'),
+    stringOf(me, 'type'),
     email,
     workspaceId,
     workspaceName,

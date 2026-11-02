@@ -27,7 +27,7 @@ import { IOResult, type ByteSource, type CommandOutput } from '../../../io/types
 import { encodeText } from '../../../shell/bytes.ts'
 import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
 import type { PathSpec, Producer } from '../../../types.ts'
-import { ABORT_JOIN_MS, joinOrAbort, stopSignal } from '../../../utils/abort.ts'
+import { ABORT_JOIN_MS, runCancellable, stopSignal } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { readerOf, type Files } from '../../files.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
@@ -221,7 +221,7 @@ export async function runHandler(
   const grace = (): number =>
     (runner?.signal ?? stopSignal(opts.signal)) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
   try {
-    out = await joinOrAbort(answer, opts.signal, grace)
+    out = await runCancellable(answer, opts.signal, grace)
   } catch (err) {
     abandon(answer, err, name)
     const drop = opts.drop

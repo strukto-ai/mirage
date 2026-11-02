@@ -15,19 +15,8 @@
 import type { JsonObject } from '../../types.ts'
 import { asObject } from '../../utils/records.ts'
 import { cursorItems, cursorPages } from '../api/paginate.ts'
-import { NotionAPIError, type NotionTransport } from './client.ts'
+import { completePage, type NotionTransport } from './client.ts'
 import { MAX_PAGE_SIZE } from './constants.ts'
-
-/** Refuse a list response Notion marked incomplete. */
-function completePage(page: JsonObject): JsonObject {
-  const status = asObject(page.request_status)
-  if (status.type === 'incomplete') {
-    const reason =
-      typeof status.incomplete_reason === 'string' ? status.incomplete_reason : 'unknown'
-    throw new NotionAPIError(`Notion query incomplete: ${reason}`, null, reason)
-  }
-  return page
-}
 
 async function paginateTool(
   transport: NotionTransport,

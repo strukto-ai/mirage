@@ -30,7 +30,6 @@ import {
   listTeams,
 } from './client.ts'
 import {
-  buildProjectIssue,
   normalizeComment,
   normalizeCycle,
   normalizeDocument,
@@ -38,6 +37,7 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
+  projectIssueRows,
   SEARCHED_FIELDS,
 } from './normalize.ts'
 import {
@@ -202,16 +202,7 @@ async function listProjects(
   )
   const rows = projects.map((project) => {
     const projectId = pickString(project, 'id')
-    const projectIssues: ReturnType<typeof buildProjectIssue>[] = []
-    for (const issue of teamIssues) {
-      const projField = issue.project
-      const projObj =
-        projField !== null && typeof projField === 'object'
-          ? (projField as Record<string, unknown>)
-          : {}
-      if (projObj.id !== projectId) continue
-      projectIssues.push(buildProjectIssue(issue))
-    }
+    const projectIssues = projectIssueRows(teamIssues, projectId)
     const rendered = jsonBytes(
       normalizeProject(project, {
         teamId,

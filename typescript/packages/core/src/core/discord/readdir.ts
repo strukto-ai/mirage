@@ -64,14 +64,6 @@ export function dateRangeDescending(
   return dates
 }
 
-function todayUtc(): string {
-  const now = new Date()
-  const yyyy = now.getUTCFullYear().toString().padStart(4, '0')
-  const mm = (now.getUTCMonth() + 1).toString().padStart(2, '0')
-  const dd = now.getUTCDate().toString().padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
 function containerEntry(name: string, guildId: string): FileStat {
   return new FileStat({ name, type: FileType.DIRECTORY, extra: { guild_id: guildId } })
 }
@@ -114,7 +106,8 @@ function listChannelDays(
 ): Promise<Listed> {
   const channelId = String(own.extra.channel_id)
   const lastMsgId = typeof own.extra.last_message_id === 'string' ? own.extra.last_message_id : ''
-  const endDate = lastMsgId !== '' ? snowflakeToDate(lastMsgId) : todayUtc()
+  const endDate =
+    lastMsgId !== '' ? snowflakeToDate(lastMsgId) : new Date().toISOString().slice(0, 10)
   const span = globSpan(match.pattern)
   const dates = accessor.timeRange.bounded
     ? accessor.timeRange.listingDays(snowflakeToDate(channelId), endDate, span)

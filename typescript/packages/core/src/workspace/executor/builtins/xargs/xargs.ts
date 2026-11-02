@@ -239,7 +239,7 @@ function ttyAbort(name: Uint8Array): string {
   return (
     "xargs: '/dev/tty': No such device or address\n" +
     "xargs: xargs.c:1648: wait_for_proc_all: Assertion `getpid () == parent' failed.\n" +
-    `xargs: ${decode(name)}: terminated by signal 6\n`
+    `xargs: ${decodeText(name)}: terminated by signal 6\n`
   )
 }
 
@@ -902,12 +902,8 @@ function assemble(
   return [sink, new QuotedReader(sink, endWord, plan.template !== null)]
 }
 
-function decode(word: Uint8Array): string {
-  return decodeText(word)
-}
-
 function trace(line: readonly Uint8Array[]): string {
-  return `${line.map((word) => shellQuote(decode(word))).join(' ')}\n`
+  return `${line.map((word) => shellQuote(decodeText(word))).join(' ')}\n`
 }
 
 /** GNU's report of a command xargs finds nothing to run for. */

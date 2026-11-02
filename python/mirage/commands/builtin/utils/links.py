@@ -31,8 +31,6 @@ from mirage.workspace.files import Files, operands_of, reader_of
 
 logger = logging.getLogger(__name__)
 
-_MISSES = (FileNotFoundError, NotADirectoryError)
-
 
 def link_location(links: LinkView, virtual: str) -> str:
     """Where a name stands as lstat reaches it: every link above its final
@@ -296,7 +294,7 @@ def link_view(files: Files | None) -> LinkView | None:
             return None
         try:
             return await files.stat(posixpath.normpath(reader.follow(path)))
-        except (CycleError, *_MISSES) as exc:
+        except (CycleError, FileNotFoundError, NotADirectoryError) as exc:
             logger.debug("link target of %s has no row: %s", path, exc)
             return None
 

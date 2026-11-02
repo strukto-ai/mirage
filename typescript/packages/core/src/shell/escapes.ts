@@ -35,7 +35,6 @@ const SIMPLE: Record<string, string> = {
 }
 const HEX = /[0-9a-fA-F]/
 const OCTAL = /[0-7]/
-const UNICODE_MAX = 0x10ffff
 
 function scanHex(content: string, start: number, limit: number): string {
   let end = start
@@ -97,7 +96,7 @@ function u32Utf8(value: number): number[] {
  * `\UFFFFFFFF` is empty.
  */
 export function codePointText(value: number): string {
-  if (value <= 0x7f || (value <= UNICODE_MAX && !(value >= 0xd800 && value <= 0xdfff))) {
+  if (value <= 0x7f || (value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff))) {
     return String.fromCodePoint(value)
   }
   return u32Utf8(value).map(byteChar).join('')

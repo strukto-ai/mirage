@@ -16,12 +16,13 @@ import asyncio
 import inspect
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
+from typing import Any, Literal
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, TypeAdapter
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
-from mirage.core.api.client import NO_RETRY, api_request, api_stream
+from mirage.core.api.client import NO_RETRY, ReadMode, api_request, api_stream
 from mirage.core.databricks_volume.errors import (
     DatabricksVolumeCredentialError,
     error_of,
@@ -45,6 +46,8 @@ class _DirectoryPage(BaseModel):
     next_page_token: str | None = None
 
 
+Endpoint = Literal["files", "directories"]
+
 _LENGTH = TypeAdapter(int)
 _BYTES = TypeAdapter(bytes)
 # The Files API takes a file in one PUT of at most 5 GiB.
@@ -52,7 +55,7 @@ MAX_UPLOAD_SIZE = 5 * 1024**3
 
 
 def _url(
-    accessor: DatabricksVolumeAccessor, endpoint: str, remote_path: str
+    accessor: DatabricksVolumeAccessor, endpoint: Endpoint, remote_path: str
 ) -> str:
     return f"{accessor.config.host}/api/2.0/fs/{endpoint}{quote(remote_path, safe='/')}"
 
@@ -85,17 +88,34 @@ async def _headers(accessor: DatabricksVolumeAccessor) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+async def _request(
+    accessor: DatabricksVolumeAccessor,
+    method: str,
+    endpoint: Endpoint,
+    remote_path: str,
+    *,
+    read: ReadMode = "json",
+    params: dict[str, str] | None = None,
+    window: ByteWindow | None = None,
+) -> Any:
+    return await api_request(
+        method,
+        _url(accessor, endpoint, remote_path),
+        error_of=error_of,
+        headers=await _headers(accessor),
+        params=params,
+        session=accessor.pool,
+        retry=NO_RETRY,
+        read=read,
+        window=window,
+    )
+
+
 async def get_metadata(
     accessor: DatabricksVolumeAccessor, remote_path: str
 ) -> FileMetadata:
-    response = await api_request(
-        "HEAD",
-        _url(accessor, "files", remote_path),
-        error_of=error_of,
-        headers=await _headers(accessor),
-        session=accessor.pool,
-        retry=NO_RETRY,
-        read="response",
+    response = await _request(
+        accessor, "HEAD", "files", remote_path, read="response"
     )
     length = response.headers.get("content-length")
     return FileMetadata(
@@ -107,15 +127,7 @@ async def get_metadata(
 async def get_directory_metadata(
     accessor: DatabricksVolumeAccessor, remote_path: str
 ) -> None:
-    await api_request(
-        "HEAD",
-        _url(accessor, "directories", remote_path),
-        error_of=error_of,
-        headers=await _headers(accessor),
-        session=accessor.pool,
-        retry=NO_RETRY,
-        read="none",
-    )
+    await _request(accessor, "HEAD", "directories", remote_path, read="none")
 
 
 async def list_directory_contents(
@@ -134,14 +146,12 @@ async def list_directory_contents(
     entries: list[DirectoryEntry] = []
     page_token: str | None = None
     while True:
-        raw = await api_request(
+        raw = await _request(
+            accessor,
             "GET",
-            _url(accessor, "directories", remote_path),
-            error_of=error_of,
-            headers=await _headers(accessor),
+            "directories",
+            remote_path,
             params={} if page_token is None else {"page_token": page_token},
-            session=accessor.pool,
-            retry=NO_RETRY,
         )
         page = _DirectoryPage.model_validate(raw)
         entries.extend(
@@ -166,15 +176,8 @@ async def download(
     *,
     window: ByteWindow | None = None,
 ) -> bytes:
-    response = await api_request(
-        "GET",
-        _url(accessor, "files", remote_path),
-        error_of=error_of,
-        headers=await _headers(accessor),
-        session=accessor.pool,
-        retry=NO_RETRY,
-        read="bytes",
-        window=window,
+    response = await _request(
+        accessor, "GET", "files", remote_path, read="bytes", window=window
     )
     return _BYTES.validate_python(response, strict=True)
 
@@ -235,40 +238,16 @@ async def upload(
 async def create_directory(
     accessor: DatabricksVolumeAccessor, remote_path: str
 ) -> None:
-    await api_request(
-        "PUT",
-        _url(accessor, "directories", remote_path),
-        error_of=error_of,
-        headers=await _headers(accessor),
-        session=accessor.pool,
-        retry=NO_RETRY,
-        read="none",
-    )
+    await _request(accessor, "PUT", "directories", remote_path, read="none")
 
 
 async def delete_file(
     accessor: DatabricksVolumeAccessor, remote_path: str
 ) -> None:
-    await api_request(
-        "DELETE",
-        _url(accessor, "files", remote_path),
-        error_of=error_of,
-        headers=await _headers(accessor),
-        session=accessor.pool,
-        retry=NO_RETRY,
-        read="none",
-    )
+    await _request(accessor, "DELETE", "files", remote_path, read="none")
 
 
 async def delete_directory(
     accessor: DatabricksVolumeAccessor, remote_path: str
 ) -> None:
-    await api_request(
-        "DELETE",
-        _url(accessor, "directories", remote_path),
-        error_of=error_of,
-        headers=await _headers(accessor),
-        session=accessor.pool,
-        retry=NO_RETRY,
-        read="none",
-    )
+    await _request(accessor, "DELETE", "directories", remote_path, read="none")

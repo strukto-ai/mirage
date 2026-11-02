@@ -44,6 +44,22 @@ MAX_PAGES = 50
 PAGE_LIMIT = "gcal: listing exceeded 50 pages; narrow the date range"
 
 
+def _rows(data: JsonValue) -> list[dict[str, JsonValue]]:
+    if not isinstance(data, dict):
+        return []
+    items = data.get("items")
+    if not isinstance(items, list):
+        return []
+    return [r for r in items if isinstance(r, dict)]
+
+
+def _next_token(data: JsonValue) -> str | None:
+    if not isinstance(data, dict):
+        return None
+    nxt = data.get("nextPageToken")
+    return nxt if isinstance(nxt, str) and nxt else None
+
+
 async def list_calendars(
     token_manager: TokenManager, min_access_role: str | None = None
 ) -> list[dict[str, JsonValue]]:
@@ -71,15 +87,10 @@ async def list_calendars(
         if token:
             page["pageToken"] = token
         data = await google_get(token_manager, url, params=page)
-        if not isinstance(data, dict):
+        items.extend(_rows(data))
+        token = _next_token(data)
+        if token is None:
             break
-        rows = data.get("items")
-        if isinstance(rows, list):
-            items.extend(r for r in rows if isinstance(r, dict))
-        nxt = data.get("nextPageToken")
-        if not isinstance(nxt, str) or not nxt:
-            break
-        token = nxt
     else:
         raise RuntimeError(PAGE_LIMIT)
     return items
@@ -156,15 +167,10 @@ async def list_events(
         if token:
             page["pageToken"] = token
         data = await google_get(token_manager, url, params=page)
-        if not isinstance(data, dict):
+        items.extend(_rows(data))
+        token = _next_token(data)
+        if token is None:
             break
-        rows = data.get("items")
-        if isinstance(rows, list):
-            items.extend(r for r in rows if isinstance(r, dict))
-        nxt = data.get("nextPageToken")
-        if not isinstance(nxt, str) or not nxt:
-            break
-        token = nxt
     else:
         raise RuntimeError(PAGE_LIMIT)
     if scope.bounded:
@@ -228,14 +234,11 @@ async def sync_events(
         if token:
             page["pageToken"] = token
         data = await google_get(token_manager, url, params=page)
-        rows = data.get("items")
-        if isinstance(rows, list):
-            items.extend(r for r in rows if isinstance(r, dict))
-        nxt = data.get("nextPageToken")
-        if not isinstance(nxt, str) or not nxt:
+        items.extend(_rows(data))
+        token = _next_token(data)
+        if token is None:
             done = data.get("nextSyncToken")
             return items, done if isinstance(done, str) else None
-        token = nxt
     raise RuntimeError(PAGE_LIMIT)
 
 

@@ -79,6 +79,7 @@ function epoch(iso: string | null): string {
 
 const STR_DIRECTIVES = new Set(['n', 'N', 'F'])
 const FORMAT_FLAGS = new Set(["'", '-', '+', ' ', '#', '0', 'I'])
+const ASCII_DIGITS = new Set('0123456789')
 
 // The directives GNU knows (coreutils 9.7). It prints any other as a bare
 // '?', which no width pads; one it knows that a VFS cannot answer is padded
@@ -340,10 +341,6 @@ function renderFsDirective(
   )
 }
 
-function isAsciiDigit(char: string | undefined): boolean {
-  return char !== undefined && char >= '0' && char <= '9'
-}
-
 // Scan one directive starting at a `%`. Any character converts, and one GNU
 // does not know prints '?'; `halves` are the conversions an H or L prefix
 // takes.
@@ -356,7 +353,7 @@ function parseFormatDirective(fmt: string, start: number, halves: string): Forma
   }
 
   let width = ''
-  while (isAsciiDigit(fmt[cursor])) {
+  while (cursor < fmt.length && ASCII_DIGITS.has(fmt[cursor] ?? '')) {
     width += fmt.charAt(cursor)
     cursor += 1
   }
@@ -365,7 +362,7 @@ function parseFormatDirective(fmt: string, start: number, halves: string): Forma
   if (fmt[cursor] === '.') {
     cursor += 1
     precision = ''
-    while (isAsciiDigit(fmt[cursor])) {
+    while (cursor < fmt.length && ASCII_DIGITS.has(fmt[cursor] ?? '')) {
       precision += fmt.charAt(cursor)
       cursor += 1
     }

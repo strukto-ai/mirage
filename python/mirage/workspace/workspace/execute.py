@@ -460,6 +460,19 @@ async def drain_to_sink(sink: JobConsole, result: IOResult) -> None:
     result.stdout = result.stderr = None
 
 
+async def _preflight(ws: ExecuteEnv) -> None:
+    """The state a line runs against, loaded before it is parsed.
+
+    Args:
+        ws (ExecuteEnv): the workspace the line runs in.
+    """
+    await ws.namespace.ensure_loaded()
+    await ws.meta.ensure()
+    await ws.sessions.ensure_loaded()
+    if ws.drift.pending:
+        await ws.drift.drain(ws.registry.try_mount_for)
+
+
 async def execute_line(
     ws: ExecuteEnv,
     command: str,
@@ -505,11 +518,7 @@ async def execute_line(
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
-    await ws.namespace.ensure_loaded()
-    await ws.meta.ensure()
-    await ws.sessions.ensure_loaded()
-    if ws.drift.pending:
-        await ws.drift.drain(ws.registry.try_mount_for)
+    await _preflight(ws)
 
     # A re-entrant execute (the evaluator's $(), eval, source, xargs, or
     # an embedder callback fired mid-line) continues in the live ambient

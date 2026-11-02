@@ -54,6 +54,9 @@ TS_DECL = re.compile(
 TS_EXPORT_LIST = re.compile(
     r"^export\s+(?:type\s+)?\{([^}]*)\}(?!\s*from)", re.M
 )
+# A re-export that renames (`export { GoogleConfig as GDocsConfig } from`)
+# declares the new name in this module; a plain re-export only passes one on.
+TS_REEXPORT = re.compile(r"^export\s+(?:type\s+)?\{([^}]*)\}\s*from\b", re.M)
 TS_DESTRUCTURE = re.compile(
     r"^(?:export\s+)?(?:const|let|var)\s*[{\[]([^}\]]*)[}\]]\s*=", re.M
 )
@@ -67,6 +70,16 @@ TS_REGISTRATION = re.compile(
     r"^export\s+const\s+([A-Z][A-Z0-9_]*)\b[^=\n]*=\s*command\b", re.M
 )
 TS_REGISTERED_NAME = re.compile(r"\bname:\s*(['\"])(.+?)\1")
+
+# A TypeScript options bag: the interface a function or class takes its
+# optional arguments in, where Python writes them as keyword arguments of
+# the signature itself. A bag whose owner both twins declare is part of
+# that owner's signature, so it has no name of its own to mirror.
+TS_OPTIONS_BAG = re.compile(
+    r"^(?:export\s+)?(?:declare\s+)?(?:interface|type)\s+"
+    r"([A-Za-z_$][\w$]*?)(?:Options|Opts|Init|Deps)\b",
+    re.M,
+)
 
 ALL_CAPS = re.compile(r"[A-Z0-9_]+")
 
@@ -157,6 +170,10 @@ def typescript_names(paths: list[Path]) -> dict[str, str]:
                 part = re.sub(r"^type\s+", "", part.strip())
                 if part:
                     found.add(part.split(" as ")[-1].strip())
+        for body in TS_REEXPORT.findall(text):
+            for part in body.split(","):
+                if " as " in part:
+                    found.add(part.split(" as ")[-1].strip())
         for body in TS_DESTRUCTURE.findall(text):
             for part in body.split(","):
                 name = part.split(":")[-1].split("=")[0].strip(" .\n")
@@ -229,6 +246,20 @@ def typescript_registrations(paths: list[Path]) -> dict[str, str | None]:
     return found
 
 
+def typescript_options_bags(paths: list[Path]) -> dict[str, str]:
+    """Each options-bag type of a module's twins and the name it serves.
+
+    Args:
+        paths (list[Path]): the core, node and browser files for one module.
+    """
+    found: dict[str, str] = {}
+    for path in paths:
+        for match in TS_OPTIONS_BAG.finditer(path.read_text()):
+            bag = match.group(0).split()[-1]
+            found[bag] = match.group(1)
+    return found
+
+
 def modules() -> dict[str, tuple[Path, list[Path]]]:
     """Every module both languages have, keyed by its folded path.
 
@@ -276,6 +307,9 @@ def divergences() -> dict[str, dict[str, list[str]]]:
                 holder = registered[command]
                 if holder is not None:
                     py.pop(fold(holder), None)
+        for bag, owner in typescript_options_bags(ts_paths).items():
+            if fold(owner) in py and fold(owner) in ts and fold(bag) not in py:
+                ts.pop(fold(bag), None)
         sides = {
             "python_only": sorted(py[k] for k in py.keys() - ts.keys()),
             "typescript_only": sorted(ts[k] for k in ts.keys() - py.keys()),

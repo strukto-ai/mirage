@@ -232,12 +232,6 @@ def _format_value(key: str, value: str) -> str:
     return f'"{escaped}"'
 
 
-def _config_lines(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-    return path.read_text().splitlines()
-
-
 def list_config(path: Path | None = None) -> dict[str, Any]:
     """Return the ``[daemon]`` table as written in the config file.
 
@@ -289,7 +283,7 @@ def set_config(key: str, value: str, path: Path | None = None) -> None:
     """
     _check_key(key)
     use_path = path or config_path()
-    lines = _config_lines(use_path)
+    lines = use_path.read_text().splitlines() if use_path.exists() else []
     rendered = f"{key} = {_format_value(key, value)}"
     header_idx = None
     for i, line in enumerate(lines):
@@ -334,7 +328,7 @@ def unset_config(key: str, path: Path | None = None) -> None:
     use_path = path or config_path()
     if not use_path.exists():
         return
-    lines = _config_lines(use_path)
+    lines = use_path.read_text().splitlines()
     kept = []
     in_daemon = False
     for line in lines:

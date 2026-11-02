@@ -29,34 +29,25 @@ from mirage.core.databricks_volume.types import FileMetadata
 from mirage.errors.fs import listing_error
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
-from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
 
 logger = logging.getLogger(__name__)
 SCOPE_ERROR = 10_000
 
 
 async def _exists(
-    config: DatabricksVolumeConfig,
-    probe: Callable[[str], Awaitable[FileMetadata | None]],
+    accessor: DatabricksVolumeAccessor,
+    probe: Callable[
+        [DatabricksVolumeAccessor, str], Awaitable[FileMetadata | None]
+    ],
     key: str,
 ) -> bool:
     try:
-        await probe(backend_path(config, key))
+        await probe(accessor, backend_path(accessor.config, key))
     except Exception as exc:
         if is_not_found(exc):
             return False
         raise
     return True
-
-
-async def _is_file(accessor: DatabricksVolumeAccessor, key: str) -> bool:
-    return await _exists(accessor.config, partial(get_metadata, accessor), key)
-
-
-async def _is_dir(accessor: DatabricksVolumeAccessor, key: str) -> bool:
-    return await _exists(
-        accessor.config, partial(get_directory_metadata, accessor), key
-    )
 
 
 async def readdir(
@@ -92,8 +83,8 @@ async def readdir(
             raise await listing_error(
                 list_path,
                 list_path.mount_path,
-                partial(_is_file, accessor),
-                partial(_is_dir, accessor),
+                partial(_exists, accessor, get_metadata),
+                partial(_exists, accessor, get_directory_metadata),
             ) from exc
         raise
     if len(entries) > SCOPE_ERROR:

@@ -16,7 +16,7 @@ function propertyTag(field: Property): string {
   return `<${field.prefix}:${field.name}/>`
 }
 
-function property(field: Property): string {
+function propertyElement(field: Property): string {
   return `<d:prop>${propertyTag(field)}</d:prop>`
 }
 
@@ -27,7 +27,7 @@ function everyEntry(): string {
 }
 
 function order(field: Property): string {
-  return `<d:order>${property(field)}<d:ascending/></d:order>`
+  return `<d:order>${propertyElement(field)}<d:ascending/></d:order>`
 }
 
 /** One page of every file and folder under `path`. */

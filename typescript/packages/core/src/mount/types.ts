@@ -16,6 +16,8 @@ import type { ByteSlice, ByteSpool } from '../io/spool.ts'
 import type { ChunkedHandle, OpenMode } from '../runtime/handles/index.ts'
 import type { FileStat } from '../types.ts'
 
+export type WriteBuf = [number, Uint8Array | ByteSlice][]
+
 /**
  * One entry's POSIX attributes, as every adapter over the core needs them:
  * the libfuse adapter hands them to fuse-native, SFTP and codex-exec read
@@ -47,7 +49,7 @@ export interface Handle {
    */
   mode: OpenMode
   data?: Uint8Array
-  writeBuf?: [number, Uint8Array | ByteSlice][]
+  writeBuf?: WriteBuf
   /** Where its writes wait past what memory holds, and the bytes handed it. */
   spool?: ByteSpool
   spooled?: number

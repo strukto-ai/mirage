@@ -335,6 +335,10 @@ export async function graphPutBytes(
   })) as Record<string, unknown>
 }
 
+function monitorError(url: string, response: Response): GraphError {
+  return new GraphError(response.status, 'monitorError', `GET ${url}`)
+}
+
 export async function pollMonitor(
   url: string,
   timeout: number,
@@ -343,7 +347,7 @@ export async function pollMonitor(
   let waited = 0
   for (;;) {
     const raw = await apiRequest('GET', url, {
-      errorOf: (response) => new GraphError(response.status, 'monitorError', `GET ${url}`),
+      errorOf: (response) => monitorError(url, response),
     })
     const payload = (raw ?? {}) as Record<string, unknown>
     if (typeof payload.status !== 'string' || payload.status === '') {

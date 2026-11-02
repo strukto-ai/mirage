@@ -55,10 +55,10 @@ def resolve_config(path: Path) -> dict[str, Any]:
         load_config(path)
     except ValueError as e:
         fail(str(e), exit_code=2)
-    return _resolve_config_arg(path)
+    return _load_config_argument(path)
 
 
-def _resolve_config_arg(path: Path) -> dict[str, Any]:
+def _load_config_argument(path: Path) -> dict[str, Any]:
     """Read a workspace YAML/JSON config and interpolate ``${VAR}`` from
     the CLI's env, then rebase its relative script paths and code refs
     onto the file's directory, exactly as ``create`` does: a
@@ -467,7 +467,7 @@ def load_cmd(
     if new_id:
         body["id"] = new_id
     if config_path:
-        body["override"] = _resolve_config_arg(config_path)
+        body["override"] = _load_config_argument(config_path)
     with make_client() as client:
         client.ensure_running()
         if tar_path is None:

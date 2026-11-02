@@ -12,8 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
 from mirage.types import JsonValue
+
+# Docs, Sheets and Slides: rendered to JSON rather than downloaded, and
+# carrying no content hash.
+NATIVE_RESOURCE_TYPES = frozenset(
+    {
+        "gdrive/gdoc",
+        "gdrive/gsheet",
+        "gdrive/gslide",
+    }
+)
 
 
 def _token(value: JsonValue) -> str | None:

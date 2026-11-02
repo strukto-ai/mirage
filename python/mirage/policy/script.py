@@ -465,7 +465,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
             try:
                 answer = await self._run(entry, method, payload, cwd)
             except ValueError as exc:
-                answer = self._failed(entry, _clause(exc))
+                answer = _failed(entry, _clause(exc))
             if answer is not None:
                 answers.append(answer)
             if isinstance(answer, Deny):
@@ -681,17 +681,18 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         finally:
             reset_caller(token)
 
-    def _failed(self, entry: ProfileScript, detail: str) -> Deny:
-        """The fail-closed refusal: one wording, logged.
 
-        Args:
-            entry (ProfileScript): the program that failed.
-            detail (str): what went wrong, as the clause after
-                "policy".
-        """
-        reason = f"profile {entry.profile!r} policy {detail}"
-        logger.error("%s", reason)
-        return Deny(reason)
+def _failed(entry: ProfileScript, detail: str) -> Deny:
+    """The fail-closed refusal: one wording, logged.
+
+    Args:
+        entry (ProfileScript): the program that failed.
+        detail (str): what went wrong, as the clause after
+            "policy".
+    """
+    reason = f"profile {entry.profile!r} policy {detail}"
+    logger.error("%s", reason)
+    return Deny(reason)
 
 
 def _clause(exc: Exception) -> str:

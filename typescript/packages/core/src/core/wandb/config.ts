@@ -3,17 +3,17 @@ import type { ConfigOf } from '../../vfs/secrets.ts'
 import { secretStr } from '../../vfs/secrets.ts'
 import { timeoutShape } from '../api/config.ts'
 
+const Name = z
+  .string()
+  .min(1)
+  .regex(/^[^/\\\0]+$/)
+  .refine((value) => !['.', '..'].includes(value))
+
 export const WandbConfig = z
   .object({
     ...timeoutShape,
     entities: z
-      .array(
-        z
-          .string()
-          .min(1)
-          .regex(/^[^/\\\0]+$/)
-          .refine((value) => !['.', '..'].includes(value)),
-      )
+      .array(Name)
       .min(1)
       .describe(
         'W&B entities (users or teams) the mount shows as top-level directories; no other entity is reachable.',

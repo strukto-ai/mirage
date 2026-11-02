@@ -22,4 +22,4 @@ export interface SearchTarget {
   vfsScope: string
 }
 
-export type XmlRecord = Record<string, unknown>
+export type XmlElement = Record<string, unknown>

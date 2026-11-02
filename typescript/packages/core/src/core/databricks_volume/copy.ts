@@ -17,7 +17,6 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 import { FileType, type PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { download, upload, createDirectory, listDirectoryContents } from './client.ts'
-import { ensurePathSpec } from './_helpers.ts'
 import { backendPath } from './path.ts'
 import { read } from './read.ts'
 import { stat } from './stat.ts'
@@ -55,22 +54,20 @@ export async function copy(
   dst: PathSpec,
   recursive = false,
 ): Promise<void> {
-  const s = ensurePathSpec(src)
-  const d = ensurePathSpec(dst)
-  const srcStat = await stat(accessor, s)
+  const srcStat = await stat(accessor, src)
   // Same-path guard runs after stat (and the non-recursive directory check)
   // so a missing source or `cp` of a directory still raises.
-  const samePath = backendPath(accessor.config, s) === backendPath(accessor.config, d)
+  const samePath = backendPath(accessor.config, src) === backendPath(accessor.config, dst)
   if (srcStat.type === FileType.DIRECTORY) {
-    if (!recursive) throw eisdir(s.virtual)
+    if (!recursive) throw eisdir(src.virtual)
     if (samePath) return
-    const remoteSrc = backendPath(accessor.config, s)
-    const remoteDst = backendPath(accessor.config, d)
+    const remoteSrc = backendPath(accessor.config, src)
+    const remoteDst = backendPath(accessor.config, dst)
     if (remoteDst.startsWith(remoteSrc + '/')) {
       // Copying a directory into its own subtree creates the destination
       // inside the source, so the walk would descend into the fresh copy
       // forever. Refuse before any create_directory/upload.
-      throw new Error(`cannot copy a directory, '${s.virtual}', into itself, '${d.virtual}'`)
+      throw new Error(`cannot copy a directory, '${src.virtual}', into itself, '${dst.virtual}'`)
     }
     await copyTree(accessor, remoteSrc, remoteDst)
     return
@@ -79,6 +76,6 @@ export async function copy(
     // Copying a file onto itself would re-upload it; skip.
     return
   }
-  const data = await read(accessor, s)
-  await write(accessor, d, data)
+  const data = await read(accessor, src)
+  await write(accessor, dst, data)
 }

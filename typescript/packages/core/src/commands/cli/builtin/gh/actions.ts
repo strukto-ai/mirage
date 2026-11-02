@@ -47,6 +47,7 @@ import {
   typedOut,
 } from './accessor.ts'
 import { concat } from '../../../../utils/bytes.ts'
+import { records } from '../../../../utils/records.ts'
 import type { util } from 'zod'
 
 const RUN_FIELDS = [
@@ -181,14 +182,6 @@ export async function runViewCmd(
     out[1].exitCode = 1
   }
   return out
-}
-
-function records(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value)
-    ? value.filter(
-        (item): item is Record<string, unknown> => item !== null && typeof item === 'object',
-      )
-    : []
 }
 
 /**

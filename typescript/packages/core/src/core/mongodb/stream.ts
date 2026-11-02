@@ -135,12 +135,8 @@ function pyJsonDumps(value: unknown): string {
   return 'null'
 }
 
-export function stringifyDoc(doc: Record<string, unknown>): string {
+export function renderDoc(doc: Record<string, unknown>): string {
   return pyJsonDumps(relaxedEjson(doc))
-}
-
-function encodeLine(doc: Record<string, unknown>): Uint8Array {
-  return new TextEncoder().encode(`${stringifyDoc(doc)}\n`)
 }
 
 export async function* readStream(
@@ -173,7 +169,7 @@ export async function* readStream(
     },
   )) {
     const final = elide.size > 0 ? applyElision(doc, elide) : doc
-    yield encodeLine(final)
+    yield new TextEncoder().encode(`${renderDoc(final)}\n`)
   }
 }
 
@@ -226,9 +222,7 @@ function renderLines(
   docs: Record<string, unknown>[],
 ): Uint8Array {
   const elide = elisionPaths(accessor, database, name)
-  const lines = docs.map(
-    (doc) => `${stringifyDoc(elide.size > 0 ? applyElision(doc, elide) : doc)}\n`,
-  )
+  const lines = docs.map((doc) => `${renderDoc(elide.size > 0 ? applyElision(doc, elide) : doc)}\n`)
   return new TextEncoder().encode(lines.join(''))
 }
 

@@ -20,6 +20,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 import type { CommandFnResult } from '../../../config.ts'
+import { asObject, stringOf } from '../../../../utils/records.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -132,12 +133,6 @@ export async function contentOrStdin(
   return new TextDecoder().decode(joined)
 }
 
-export function asObject(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
 export function plainTextOf(fragments: unknown): string {
   if (!Array.isArray(fragments)) return ''
   let out = ''
@@ -148,14 +143,9 @@ export function plainTextOf(fragments: unknown): string {
   return out
 }
 
-export function strOf(record: Record<string, unknown>, key: string): string {
-  const value = record[key]
-  return typeof value === 'string' ? value : ''
-}
-
 function namesOf(value: unknown): string {
   if (!Array.isArray(value)) return ''
-  return value.map((one) => strOf(asObject(one), 'name')).join(', ')
+  return value.map((one) => stringOf(asObject(one), 'name')).join(', ')
 }
 
 // The formats are pinned against the real binary: a checked box is a check
@@ -170,10 +160,10 @@ export function propertyCell(prop: unknown): string {
   if (kind === 'checkbox') return value === true ? CHECKED : ''
   if (kind === 'number') return typeof value === 'number' ? String(value) : ''
   if (kind === 'select' || kind === 'status') {
-    return value === null ? '' : strOf(asObject(value), 'name')
+    return value === null ? '' : stringOf(asObject(value), 'name')
   }
   if (kind === 'multi_select' || kind === 'people') return namesOf(value)
-  if (kind === 'date') return value === null ? '' : strOf(asObject(value), 'start')
+  if (kind === 'date') return value === null ? '' : stringOf(asObject(value), 'start')
   if (typeof value === 'string') return value
   if (typeof value === 'number') return String(value)
   return ''

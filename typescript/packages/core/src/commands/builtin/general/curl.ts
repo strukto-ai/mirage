@@ -236,8 +236,7 @@ async function saveCookies(
     await ctx.vfs.dispatch('write', resolveTarget(target, ctx.cwd.virtual), [text])
   } catch (err) {
     if (!isWalkError(err)) throw err
-    const shown = target instanceof PathSpec ? target.virtual : target
-    logger.debug?.(`curl: cookie jar ${shown} not written: ${String(err)}`)
+    logger.debug?.(`curl: cookie jar ${pathStr(target)} not written: ${String(err)}`)
   }
   return new Uint8Array()
 }
@@ -362,6 +361,10 @@ function writeFailure(shown: string, err: unknown): string {
   return `curl: (${String(EXIT_WRITE)}) ${shown}: ${detail}\n`
 }
 
+function pathStr(value: PathSpec | string): string {
+  return value instanceof PathSpec ? value.virtual : value
+}
+
 /** A message curl or wget prints, nothing when the line silenced it. */
 export function said(quiet: boolean, text: string): Uint8Array {
   return quiet ? new Uint8Array() : ENC.encode(text)
@@ -396,7 +399,7 @@ async function writeNamed(
     await ctx.vfs.dispatch('write', resolveTarget(target, ctx.cwd.virtual), [data])
   } catch (err) {
     if (!isWalkError(err)) throw err
-    return said(quiet, writeFailure(target instanceof PathSpec ? target.virtual : target, err))
+    return said(quiet, writeFailure(pathStr(target), err))
   }
   return null
 }

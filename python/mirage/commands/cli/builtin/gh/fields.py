@@ -75,6 +75,9 @@ class Field:
     pages: Pages | None = None
 
 
+FieldTable = Mapping[str, Field]
+
+
 def record(value: Any) -> Node:
     return value if isinstance(value, dict) else {}
 
@@ -295,14 +298,12 @@ SHARED_FIELDS: tuple[tuple[str, Field], ...] = (
 )
 
 
-def selection(
-    table: Mapping[str, Field], names: Iterable[str], for_view: bool
-) -> str:
+def selection(table: FieldTable, names: Iterable[str], for_view: bool) -> str:
     """The GraphQL selection for the fields named, in their order, each
     once. A view leaves out the fields it reads some other way.
 
     Args:
-        table (Mapping[str, Field]): the command's fields.
+        table (FieldTable): the command's fields.
         names (Iterable[str]): the fields to ask for.
         for_view (bool): whether the selection serves a view.
     """
@@ -314,13 +315,11 @@ def selection(
     )
 
 
-def exported_node(
-    table: Mapping[str, Field], node: Node, fields: list[str]
-) -> Node:
+def exported_node(table: FieldTable, node: Node, fields: list[str]) -> Node:
     """One answer as gh exports the fields asked for.
 
     Args:
-        table (Mapping[str, Field]): the command's fields.
+        table (FieldTable): the command's fields.
         node (Node): the GraphQL answer.
         fields (list[str]): the ``--json`` fields.
     """
@@ -368,14 +367,14 @@ async def _project_items_apart(fetch: Fetch, pages: Pages) -> Node:
 
 
 async def read_rest(
-    table: Mapping[str, Field], node: Node, fields: list[str], fetch: Fetch
+    table: FieldTable, node: Node, fields: list[str], fetch: Fetch
 ) -> Node:
     """Finish reading a view's answer: every connection gh follows read to
     its end, and the fields it reads apart read that way, through
     ``fetch``.
 
     Args:
-        table (Mapping[str, Field]): the command's fields.
+        table (FieldTable): the command's fields.
         node (Node): the view's main answer.
         fields (list[str]): the ``--json`` fields.
         fetch (Fetch): reads a selection of the issue or pull request.

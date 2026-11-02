@@ -46,6 +46,10 @@ export function msgFilename(subject: string, msgId: string): string {
   return `${sanitize(subject, NAME_MAX_BYTES - fixed)}__${msgId}${MSG_SUFFIX}`
 }
 
+export function attachDirName(subject: string, msgId: string): string {
+  return msgFilename(subject, msgId).slice(0, -MSG_SUFFIX.length)
+}
+
 export function dateFromInternal(internalDate: string | undefined): string {
   if (internalDate === undefined) return '1970-01-01'
   const ts = Number.parseInt(internalDate, 10)
@@ -108,7 +112,7 @@ function dateChildren(
     )
     const attEntries = attachmentEntries(raw)
     if (attEntries.length > 0) {
-      const attDirName = filename.replace('.gmail.json', '')
+      const attDirName = attachDirName(subject, mid)
       children.push(
         new FileStat({ name: attDirName, type: FileType.DIRECTORY, extra: { message_id: mid } }),
       )

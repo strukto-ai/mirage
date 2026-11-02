@@ -72,7 +72,7 @@ function nextHop(location: string, current: string): { url: string; sameOrigin: 
   }
 }
 
-function hopOf(resp: Response, url: string, method: string, body: ByteSource): HttpResponse {
+function hop(resp: Response, url: string, method: string, body: ByteSource): HttpResponse {
   return {
     status: resp.status,
     reason: resp.statusText,
@@ -86,6 +86,15 @@ function hopOf(resp: Response, url: string, method: string, body: ByteSource): H
 
 export function isHttpError(resp: HttpResponse): boolean {
   return resp.status >= 400
+}
+
+function withDefaultUa(headers: Record<string, string> | undefined): Record<string, string> {
+  // Header names are case-insensitive, so a `user-agent` the caller set
+  // replaces the default rather than riding beside it.
+  const given = headers ?? {}
+  return Object.keys(given).some((name) => name.toLowerCase() === 'user-agent')
+    ? { ...given }
+    : { 'User-Agent': DEFAULT_USER_AGENT, ...given }
 }
 
 function endpoint(url: string): { host: string; port: number } {
@@ -200,14 +209,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
   // A streamed body takes the deadline with it.
   let handed = false
   try {
-    // Header names are case-insensitive, so a `user-agent` the caller set
-    // replaces the default rather than riding beside it.
-    const given = options.headers ?? {}
-    let headers: Record<string, string> = Object.keys(given).some(
-      (name) => name.toLowerCase() === 'user-agent',
-    )
-      ? { ...given }
-      : { 'User-Agent': DEFAULT_USER_AGENT, ...given }
+    let headers = withDefaultUa(options.headers)
     const follow = options.followRedirects !== false
     // Redirects are followed by hand so every hop stays observable, the way
     // httpx keeps `response.history` for the python twin; one deadline
@@ -267,7 +269,7 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       if (next === null && options.stream === true) {
         const body = await primeStream(streamed(resp, current, caller, started, timer))
         handed = true
-        return { ...hopOf(resp, current, method, body), history }
+        return { ...hop(resp, current, method, body), history }
       }
       let buf: ArrayBuffer
       try {
@@ -278,15 +280,15 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
       } catch (err) {
         throw failure(err, caller, current, started)
       }
-      const hop = hopOf(resp, current, method, new Uint8Array(buf))
+      const answer = hop(resp, current, method, new Uint8Array(buf))
       if (next === null) {
-        return { ...hop, history }
+        return { ...answer, history }
       }
       if (history.length >= MAX_REDIRECTS) {
         const { host, port } = endpoint(current)
         throw new HttpConnectError(host, port)
       }
-      history.push(hop)
+      history.push(answer)
       if (!next.sameOrigin) {
         // Credentials stay with the host they were typed for, as the native
         // follow and curl (without --location-trusted) both keep them: the

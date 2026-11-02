@@ -139,10 +139,19 @@ def file_patch(
     )
     if body:
         head += [
-            f"--- {source}" + ("\t" if " " in source else ""),
-            f"+++ {target}" + ("\t" if " " in target else ""),
+            f"--- {source}{_label_tab(source)}",
+            f"+++ {target}{_label_tab(target)}",
         ]
     return encode_text("".join(line + "\n" for line in head)) + body
+
+
+def _label_tab(label: str) -> str:
+    """The tab git puts after a ``---``/``+++`` label holding a space.
+
+    Args:
+        label (str): the file's label.
+    """
+    return "\t" if " " in label else ""
 
 
 def byte_lines(data: bytes) -> list[bytes]:

@@ -31,7 +31,7 @@ import { scopePath, toScope } from '../scope.ts'
 import { builtinUsage } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { CD_OPTIONS } from './constants.ts'
-import { joinPath, resolveTarget, splitModeOptions, typedPath } from './dirs.ts'
+import { joinRaw, resolveTarget, splitModeOptions, typedPath } from './dirs.ts'
 
 function cdpathSearchable(target: string): boolean {
   if (target.startsWith('/') || target.startsWith('./') || target.startsWith('../')) {
@@ -51,7 +51,7 @@ function cdCandidates(
   cwd: string,
 ): [string, boolean, string | null][] {
   const fallback: [string, boolean, string | null] = [
-    joinPath(raw, cwd),
+    joinRaw(raw, cwd),
     false,
     dottedSpelling(raw, cwd),
   ]
@@ -62,7 +62,7 @@ function cdCandidates(
   const out: [string, boolean, string | null][] = []
   for (const entry of cdpath.split(':')) {
     const base = entry ? resolvePath(entry, cwd) : cwd
-    out.push([joinPath(cdpathTarget, base), entry !== '', dottedSpelling(cdpathTarget, base)])
+    out.push([joinRaw(cdpathTarget, base), entry !== '', dottedSpelling(cdpathTarget, base)])
   }
   out.push(fallback)
   return out

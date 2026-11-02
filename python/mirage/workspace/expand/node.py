@@ -445,13 +445,12 @@ async def _node_chunks(
 
     if ntype == NT.EXPANSION:
         prefix = _folded_whitespace(ts_node)
-        expand_child = partial(
-            _expand_child,
-            context=context,
-            execute_fn=execute_fn,
-            call_stack=call_stack,
-            view=view,
-        )
+
+        async def expand_child(c: TSNodeLike, in_quotes: bool) -> list[Chunk]:
+            return await expand_chunks(
+                c, context, execute_fn, call_stack, view=view, quoted=in_quotes
+            )
+
         braces = await expand_braces(
             ts_node,
             session,
@@ -531,30 +530,6 @@ async def _node_chunks(
 
     text = await _literal_node(ts_node, context, execute_fn, call_stack, view)
     return [Piece(mark_globs(text) if quoted else text)]
-
-
-async def _expand_child(
-    node: TSNodeLike,
-    quoted: bool,
-    *,
-    context: EvaluationContext,
-    execute_fn: ExecuteFn,
-    call_stack: CallStack | None,
-    view: SessionView | None,
-) -> list[Chunk]:
-    """``expand_chunks`` in the shape ``expand_braces`` calls back.
-
-    Args:
-        node (TSNodeLike): the nested node.
-        quoted (bool): whether it sits inside double quotes.
-        context (EvaluationContext): the evaluation's session and frame.
-        execute_fn (Callable): evaluator for command substitutions.
-        call_stack (CallStack | None): shell call stack.
-        view (SessionView | None): the gated session view.
-    """
-    return await expand_chunks(
-        node, context, execute_fn, call_stack, view=view, quoted=quoted
-    )
 
 
 async def _string_chunks(

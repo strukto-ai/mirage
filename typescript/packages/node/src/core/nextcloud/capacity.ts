@@ -4,13 +4,13 @@ import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { QUOTA_PROPFIND, SPACE_UNLIMITED } from './constants.ts'
 import { answered, davRequest } from './dav.ts'
 import { parser } from './search/response.ts'
-import type { XmlRecord } from './search/types.ts'
+import type { XmlElement } from './search/types.ts'
 
 /**
  * A quota property's byte count, null when the server answered no whole
  * number for it. Mirrors Python's `quota_value`.
  */
-function quotaValue(tree: XmlRecord, name: string): number | null {
+function quotaValue(tree: XmlElement, name: string): number | null {
   const text = answered(tree, name) ?? ''
   return /^-?\d+$/.test(text) ? Number(text) : null
 }
@@ -32,7 +32,7 @@ export async function capacity(accessor: NextcloudAccessor): Promise<CapacityRes
     if (!response.ok) throw new Error(`Nextcloud PROPFIND returned HTTP ${String(response.status)}`)
     return { state: CapacityState.UNKNOWN }
   }
-  const tree = parser.parse(await response.text()) as XmlRecord
+  const tree = parser.parse(await response.text()) as XmlElement
   const available = quotaValue(tree, 'quota-available-bytes')
   const used = quotaValue(tree, 'quota-used-bytes')
   if (available === SPACE_UNLIMITED) return { state: CapacityState.ELASTIC }

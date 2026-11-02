@@ -19,7 +19,8 @@ import { enoent } from '@struktoai/mirage-core/errors/fs'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { bucket, gridfsKey } from './client.ts'
-import { isNoFileError, resolveFileId } from './read.ts'
+import { isNotFound } from './driver.ts'
+import { resolveFileId } from './read.ts'
 
 const DEFAULT_CHUNK_SIZE = 8192
 
@@ -56,7 +57,7 @@ export async function* readStream(
       }
     }
   } catch (err) {
-    if (isNoFileError(err)) throw enoent(path)
+    if (isNotFound(err)) throw enoent(path)
     throw err
   }
   if (pending.byteLength > 0) {

@@ -187,7 +187,7 @@ const OBJECT_HEADER = 'object '
  * read off each tag's `object` line; null when one names an object the
  * repository lacks.
  */
-async function peeledObject(repo: Repo, obj: RefObject): Promise<RefObject | null> {
+async function peeled(repo: Repo, obj: RefObject): Promise<RefObject | null> {
   let shown = obj
   const seen = new Set([obj.oid])
   while (shown.type === 'tag') {
@@ -253,7 +253,7 @@ export async function listedRefs(
       item = {
         ...item,
         obj,
-        peeled: deref && obj.type === 'tag' ? await peeledObject(repo, obj) : null,
+        peeled: deref && obj.type === 'tag' ? await peeled(repo, obj) : null,
       }
     }
     items.push(item)

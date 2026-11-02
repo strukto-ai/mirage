@@ -17,8 +17,6 @@ All files are plain text assembled from Dify document segments, regardless of
 their original extension. You can use cat, head, tail, grep, find, ls, and wc
 on these files."""
 
-_readdir = DIFY_TREE.readdir
-
 
 class DifyVFS(BaseVFS):
     accessor: DifyAccessor
@@ -37,7 +35,7 @@ class DifyVFS(BaseVFS):
     async def readdir(
         self, path: PathSpec, entry: FileStat | None = None
     ) -> DirListing:
-        return await _readdir(self.accessor, path, entry)
+        return await DIFY_TREE.readdir(self.accessor, path, entry)
 
     async def read(
         self,

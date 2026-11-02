@@ -14,7 +14,7 @@
 
 import { enoent } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
-import { asObject } from '../../utils/records.ts'
+import { asArray, asObject } from '../../utils/records.ts'
 import type { LangfuseConfig } from '../../vfs/langfuse/config.ts'
 import { apiRequest, buildUrl } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
@@ -111,16 +111,10 @@ export class HttpLangfuseTransport implements LangfuseTransport {
   }
 }
 
-function asArray(value: unknown): Record<string, unknown>[] {
-  if (value === null || value === undefined) return []
-  if (Array.isArray(value)) return value as Record<string, unknown>[]
-  return []
-}
-
 function getData(body: unknown): Record<string, unknown>[] {
   if (body === null || typeof body !== 'object') return []
   const data = (body as Record<string, unknown>).data
-  return asArray(data)
+  return asArray(data) as Record<string, unknown>[]
 }
 
 // A root observation stands for its trace: v4 keeps no trace entity, and the

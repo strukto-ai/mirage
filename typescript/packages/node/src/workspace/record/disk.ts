@@ -39,6 +39,94 @@ function isMissing(e: unknown): boolean {
   return (e as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
+// O_CREAT|O_EXCL ('wx'): filesystem-atomic mutex, the git protocol.
+// Local filesystems only (O_EXCL is unreliable on ancient NFS, the
+// same caveat git ships with).
+async function acquireLock(lockPath: string): Promise<FileHandle | null> {
+  let fh: FileHandle
+  try {
+    fh = await open(lockPath, 'wx')
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') return null
+    throw e
+  }
+  try {
+    await fh.write(String(process.pid))
+    return fh
+  } catch (error) {
+    await releaseLock(fh, lockPath)
+    throw error
+  }
+}
+
+/**
+ * True when the lock is gone or was stale and removed; false when a
+ * live writer still holds it or another waiter is reclaiming it.
+ *
+ * Reclaimers serialize on a `.reclaim` guard, a lock of its own and
+ * reclaimed the same way, and re-check the age under it: no waiter
+ * creates a lock while the stale one exists, so the lock found stale
+ * is the one removed, unless a live holder outlived the stale window.
+ */
+export async function reclaimStaleLock(lockPath: string): Promise<boolean> {
+  const age = async (): Promise<number | null> => {
+    try {
+      return (Date.now() - (await stat(lockPath)).mtimeMs) / 1000
+    } catch (e) {
+      if (isMissing(e)) return null
+      throw e
+    }
+  }
+  let seen = await age()
+  if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
+  const guard = `${lockPath}.reclaim`
+  let fh = await acquireLock(guard)
+  if (fh === null) {
+    if (!(await reclaimStaleLock(guard))) return false
+    fh = await acquireLock(guard)
+    if (fh === null) return false
+  }
+  try {
+    seen = await age()
+    if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
+    console.warn(`mirage: reclaiming stale lock ${lockPath} (age ${seen.toFixed(1)}s)`)
+    try {
+      await unlink(lockPath)
+    } catch (e) {
+      // The holder released it between the stat and the unlink; the
+      // lock is gone either way, which is all this function promises.
+      if (!isMissing(e)) throw e
+    }
+    return true
+  } finally {
+    await releaseLock(fh, guard)
+  }
+}
+
+// Unlink only after closing: on Windows an open, unlinked lock can block the next one.
+async function releaseLock(fh: FileHandle, lockPath: string): Promise<void> {
+  let owned = false
+  try {
+    const held = await fh.stat({ bigint: true })
+    const current = await stat(lockPath, { bigint: true })
+    owned = held.dev === current.dev && held.ino === current.ino
+  } catch (e) {
+    if (!isMissing(e)) throw e
+  } finally {
+    await fh.close()
+  }
+  if (owned) {
+    try {
+      await unlink(lockPath)
+      return
+    } catch (e) {
+      if (!isMissing(e)) throw e
+    }
+  }
+  // The lock vanished or changed hands before release; nothing to undo.
+  console.warn(`mirage: lock ${lockPath} was gone or taken before release`)
+}
+
 /**
  * One JSON-record-per-file client with lockfile CAS.
  *
@@ -94,10 +182,10 @@ export class DiskRecordClient {
     await mkdir(this.dir, { recursive: true })
     const target = this.path(name)
     const lockPath = `${target}.lock`
-    let fh = await this.acquireLock(lockPath)
+    let fh = await acquireLock(lockPath)
     if (fh === null) {
-      if (!(await this.reclaimStaleLock(lockPath))) return false
-      fh = await this.acquireLock(lockPath)
+      if (!(await reclaimStaleLock(lockPath))) return false
+      fh = await acquireLock(lockPath)
       if (fh === null) return false
     }
     try {
@@ -106,7 +194,7 @@ export class DiskRecordClient {
       await this.writeRecord(target, fields)
       return true
     } finally {
-      await this.releaseLock(fh, lockPath)
+      await releaseLock(fh, lockPath)
     }
   }
 
@@ -154,104 +242,16 @@ export class DiskRecordClient {
     await mkdir(this.dir, { recursive: true })
     const lockPath = `${this.path(name)}.lock`
     for (let i = 0; i < LOCK_RETRY_LIMIT; i++) {
-      const fh = await this.acquireLock(lockPath)
+      const fh = await acquireLock(lockPath)
       if (fh !== null) return fh
-      if (await this.reclaimStaleLock(lockPath)) continue
+      if (await reclaimStaleLock(lockPath)) continue
       await new Promise((r) => setTimeout(r, LOCK_RETRY_SLEEP_MS))
     }
     throw new Error(`could not acquire lock ${lockPath}`)
   }
 
   async unlock(name: string, fh: FileHandle): Promise<void> {
-    await this.releaseLock(fh, `${this.path(name)}.lock`)
-  }
-
-  // O_CREAT|O_EXCL ('wx'): filesystem-atomic mutex, the git protocol.
-  // Local filesystems only (O_EXCL is unreliable on ancient NFS, the
-  // same caveat git ships with).
-  private async acquireLock(lockPath: string): Promise<FileHandle | null> {
-    let fh: FileHandle
-    try {
-      fh = await open(lockPath, 'wx')
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'EEXIST') return null
-      throw e
-    }
-    try {
-      await fh.write(String(process.pid))
-      return fh
-    } catch (error) {
-      await this.releaseLock(fh, lockPath)
-      throw error
-    }
-  }
-
-  /**
-   * True when the lock is gone or was stale and removed; false when a
-   * live writer still holds it or another waiter is reclaiming it.
-   *
-   * Reclaimers serialize on a `.reclaim` guard, a lock of its own and
-   * reclaimed the same way, and re-check the age under it: no waiter
-   * creates a lock while the stale one exists, so the lock found stale
-   * is the one removed, unless a live holder outlived the stale window.
-   */
-  private async reclaimStaleLock(lockPath: string): Promise<boolean> {
-    const age = async (): Promise<number | null> => {
-      try {
-        return (Date.now() - (await stat(lockPath)).mtimeMs) / 1000
-      } catch (e) {
-        if (isMissing(e)) return null
-        throw e
-      }
-    }
-    let seen = await age()
-    if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
-    const guard = `${lockPath}.reclaim`
-    let fh = await this.acquireLock(guard)
-    if (fh === null) {
-      if (!(await this.reclaimStaleLock(guard))) return false
-      fh = await this.acquireLock(guard)
-      if (fh === null) return false
-    }
-    try {
-      seen = await age()
-      if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
-      console.warn(`mirage: reclaiming stale lock ${lockPath} (age ${seen.toFixed(1)}s)`)
-      try {
-        await unlink(lockPath)
-      } catch (e) {
-        // The holder released it between the stat and the unlink; the
-        // lock is gone either way, which is all this method promises.
-        if (!isMissing(e)) throw e
-      }
-      return true
-    } finally {
-      await this.releaseLock(fh, guard)
-    }
-  }
-
-  // Unlink only after closing: on Windows an open, unlinked lock can block the next one.
-  private async releaseLock(fh: FileHandle, lockPath: string): Promise<void> {
-    let owned = false
-    try {
-      const held = await fh.stat({ bigint: true })
-      const current = await stat(lockPath, { bigint: true })
-      owned = held.dev === current.dev && held.ino === current.ino
-    } catch (e) {
-      if (!isMissing(e)) throw e
-    } finally {
-      await fh.close()
-    }
-    if (owned) {
-      try {
-        await unlink(lockPath)
-        return
-      } catch (e) {
-        if (!isMissing(e)) throw e
-      }
-    }
-    // The lock vanished or changed hands before release; nothing to undo.
-    console.warn(`mirage: lock ${lockPath} was gone or taken before release`)
+    await releaseLock(fh, `${this.path(name)}.lock`)
   }
 
   private async writeRecord(target: string, fields: Record<string, unknown>): Promise<void> {

@@ -49,10 +49,18 @@ import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
 
-/** Whether a failure is the mount saying the path is not there. */
-function isAbsent(err: unknown): boolean {
-  const condition = classify(err)
-  return condition !== null && ABSENT_PATH.has(condition)
+/**
+ * One listing row before any stat: its slash mark and its link mark.
+ *
+ * The link mark is compared by final segment: backends disagree on entry
+ * shape (bare names, trailing-slash names, full paths) and the name is the
+ * part they agree on, the normalization mergeReaddir uses.
+ */
+function listed(raw: string, links: ReadonlySet<string>): VFSEntry {
+  // Backends that mark directories with a trailing slash skip the
+  // stat; unmarked entries (e.g. RAM) need one to learn dir-ness.
+  const mark = links.has(entryName(raw)) ? { isLink: true } : {}
+  return { path: raw, size: 0, isDir: raw.endsWith('/'), ...mark }
 }
 
 /**
@@ -596,7 +604,8 @@ export class RuntimeFiles {
     try {
       return await this.readdir(normDir(path), false)
     } catch (err) {
-      if (isAbsent(err)) return null
+      const condition = classify(err)
+      if (condition !== null && ABSENT_PATH.has(condition)) return null
       throw err
     }
   }
@@ -655,10 +664,7 @@ export class RuntimeFiles {
       if (typeof raw !== 'string') {
         throw new TypeError(`runtime files: readdir ${path} bad entry shape`)
       }
-      // Backends that mark directories with a trailing slash skip the
-      // stat; unmarked entries (e.g. RAM) need one to learn dir-ness.
-      const mark = links.has(entryName(raw)) ? { isLink: true } : {}
-      return { path: raw, size: 0, isDir: raw.endsWith('/'), ...mark }
+      return listed(raw, links)
     })
     if (!classify) return rows
     // A fixed set of workers, not a promise per entry, so a wide directory

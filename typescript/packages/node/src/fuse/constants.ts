@@ -16,9 +16,7 @@
 // XATTR_CREATE 1 and XATTR_REPLACE 2, macOS 2 and 4 (its 1 is
 // XATTR_NOFOLLOW, which the kernel has already applied). Mirrors the
 // python adapter.
-const DARWIN = process.platform === 'darwin'
-export const XATTR_CREATE = DARWIN ? 0x2 : 0x1
-export const XATTR_REPLACE = DARWIN ? 0x4 : 0x2
+export const [XATTR_CREATE, XATTR_REPLACE] = process.platform === 'darwin' ? [0x2, 0x4] : [0x1, 0x2]
 
 // A lazy unmount leaves the mount table at once, so unmountWithFusermount
 // reads the table this often beside the helper's exit, and gives up on a

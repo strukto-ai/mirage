@@ -273,7 +273,8 @@ export class IOResult {
   }
 
   async stdoutStr(errors: 'replace' | 'strict' = 'replace'): Promise<string> {
-    return decodeBytes(await this.materializeStdout(), errors)
+    const bytes = await this.materializeStdout()
+    return new TextDecoder('utf-8', { fatal: errors === 'strict' }).decode(bytes)
   }
 
   async materializeStderr(): Promise<Uint8Array> {
@@ -284,7 +285,8 @@ export class IOResult {
   }
 
   async stderrStr(errors: 'replace' | 'strict' = 'replace'): Promise<string> {
-    return decodeBytes(await this.materializeStderr(), errors)
+    const bytes = await this.materializeStderr()
+    return new TextDecoder('utf-8', { fatal: errors === 'strict' }).decode(bytes)
   }
 
   async merge(other: IOResult): Promise<IOResult> {
@@ -310,8 +312,4 @@ export class IOResult {
     result.streamSource = other
     return result
   }
-}
-
-function decodeBytes(bytes: Uint8Array, errors: 'replace' | 'strict'): string {
-  return new TextDecoder('utf-8', { fatal: errors === 'strict' }).decode(bytes)
 }

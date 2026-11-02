@@ -83,6 +83,16 @@ def _process_alive(pid: int) -> bool:
     return True
 
 
+def _wait_for_unreachable(timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with make_client() as client:
+            if not client.is_reachable(timeout=0.3):
+                return True
+        time.sleep(0.2)
+    return False
+
+
 @app.command("status")
 def status_cmd() -> None:
     """Show daemon health, PID, uptime, workspace count."""
@@ -126,13 +136,9 @@ def stop_cmd(
         if r.status_code >= 400:
             fail(f"shutdown failed: {r.text}", exit_code=2)
 
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        with make_client() as client:
-            if not client.is_reachable(timeout=0.3):
-                emit({"stopped": True, "via": "graceful"}, human=_format_stop)
-                return
-        time.sleep(0.2)
+    if _wait_for_unreachable(timeout):
+        emit({"stopped": True, "via": "graceful"}, human=_format_stop)
+        return
 
     pid = _read_pid()
     if pid and _process_alive(pid):
@@ -174,13 +180,7 @@ def restart_cmd(
         except httpx.RequestError:
             # daemon not listening: fall through to the signal-based stop
             pass
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        with make_client() as client:
-            if not client.is_reachable(timeout=0.3):
-                break
-        time.sleep(0.2)
-    else:
+    if not _wait_for_unreachable(timeout):
         pid = _read_pid()
         if pid and _process_alive(pid):
             try:

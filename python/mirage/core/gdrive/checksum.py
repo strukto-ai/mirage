@@ -13,8 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
-from mirage.core.gdrive.fingerprint import drive_fingerprint
+from mirage.core.gdrive.fingerprint import (
+    NATIVE_RESOURCE_TYPES,
+    drive_fingerprint,
+)
 from mirage.core.gdrive.read import file_entry
 from mirage.observe.context import record, revision_for, start_op
 from mirage.types import FileStat, PathSpec
