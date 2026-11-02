@@ -27,6 +27,15 @@ async def rmdir(
 ) -> None:
     p = await resolve_inside(accessor.root, path_spec)
     timer = start_op()
-    with disk_errors(path_spec.virtual):
-        await aiofiles.os.rmdir(p)
-    record("rmdir", path_spec.virtual, "disk", 0, timer)
+    done = True
+    try:
+        with disk_errors(path_spec.virtual):
+            await aiofiles.os.rmdir(p)
+    except OSError:
+        done = False
+        raise
+    finally:
+        # A refused rmdir(2) removed nothing; a cancelled wait may not have
+        # stopped the worker's.
+        if done:
+            record("rmdir", path_spec.virtual, "disk", 0, timer)

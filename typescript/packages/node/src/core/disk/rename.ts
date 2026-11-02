@@ -21,9 +21,22 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { resolveInside } from './utils.ts'
 
+export const logger: { debug?: (message: string) => void } = {}
+
 export async function rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = await resolveInside(accessor.root, src)
   const d = await resolveInside(accessor.root, dst)
+  // Named as the object stores name it: a moved directory took its subtree,
+  // which only "rename_prefix" retracts. Asked before the move, so the
+  // records follow the move with nothing in between.
+  const isDir = await fsStat(s).then(
+    (st) => st.isDirectory(),
+    (err: unknown) => {
+      logger.debug?.(`rename source not probed ${src.virtual}: ${String(err)}`)
+      return false
+    },
+  )
+  const op = isDir ? 'rename_prefix' : 'rename'
   const timer = startOp()
   try {
     await fsRename(s, d)
@@ -33,13 +46,6 @@ export async function rename(accessor: DiskAccessor, src: PathSpec, dst: PathSpe
     }
     throw err
   }
-  // Named as the object stores name it: a moved directory took its
-  // subtree, which only "rename_prefix" retracts.
-  const moved = await fsStat(d).then(
-    (st) => st.isDirectory(),
-    () => false,
-  )
-  const op = moved ? 'rename_prefix' : 'rename'
   record(op, src.virtual, VFSName.DISK, 0, timer)
   record(op, dst.virtual, VFSName.DISK, 0, timer)
 }

@@ -25,7 +25,9 @@ MUTATIONS = frozenset(
 )
 
 
-async def _rows(root: Path, line: str) -> list[tuple[str, str, int]]:
+async def _rows(
+    root: Path, line: str, exit_code: int = 0
+) -> list[tuple[str, str, int]]:
     (root / "a.txt").write_bytes(b"hello\n")
     (root / "e").mkdir()
     (root / "d").mkdir()
@@ -33,7 +35,7 @@ async def _rows(root: Path, line: str) -> list[tuple[str, str, int]]:
     ws = Workspace({"/m/": DiskVFS(root=root)}, mode=MountMode.WRITE)
     start = len(ws.vfs.records)
     io = await ws.shell(line)
-    assert io.exit_code == 0, await io.stderr_str()
+    assert io.exit_code == exit_code, await io.stderr_str()
     rows = ws.vfs.records[start:]
     assert all(r.execution_id for r in rows)
     return [
@@ -68,3 +70,19 @@ async def _rows(root: Path, line: str) -> list[tuple[str, str, int]]:
 )
 def test_disk_mutation_records_object_store_rows(tmp_path, line, expected):
     assert asyncio.run(_rows(tmp_path, line)) == expected
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        ("rm /m/missing", []),
+        ("mv /m/missing /m/x", []),
+        ("mkdir /m/e", []),
+        ("rmdir /m/d", []),
+        ("mkdir -p /m/a.txt/z", [("mkdir", "/m/a.txt/z", 0)]),
+    ],
+)
+def test_failed_disk_mutation_records_only_what_it_may_have_changed(
+    tmp_path, line, expected
+):
+    assert asyncio.run(_rows(tmp_path, line, 1)) == expected
