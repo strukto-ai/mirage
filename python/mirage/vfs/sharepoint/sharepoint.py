@@ -26,15 +26,22 @@ from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 
 VFS_MD = """\
+```text
 {prefix}
-  SharePoint Enterprise document libraries. Multi-site, multi-drive discovery.
-  Unscoped mounts use: /{site_name}/{library_name}/{path_to_file}
-  Unscoped level 0 (ls /): lists all accessible SharePoint sites.
-  Unscoped level 1 (ls /site/): lists document libraries (drives) in that site.
-  Unscoped level 2+ (ls /site/lib/...): lists files and folders in the drive.
-  IMPORTANT: This is a remote mount. Prefer targeted reads (grep, head) \
-over full scans. Avoid cat on large files without piping to head/tail.
-  File versions are retained, snapshots pin and read prior versions."""
+  <site>/             # every SharePoint site you can reach
+    <library>/        # its document libraries (drives)
+      <path>          # the drive's files and folders
+```
+
+- SharePoint document libraries, discovered across sites and drives. An
+  unscoped mount reads `/{site_name}/{library_name}/{path_to_file}`:
+  `ls /` lists the sites, `ls /site/` a site's libraries, and
+  `ls /site/lib/...` a drive's files and folders.
+- This is a remote mount: prefer targeted reads (`grep`, `head`) over
+  full scans, and pipe a large file to `head` or `tail` rather than
+  `cat` it whole.
+- File versions are retained; a snapshot pins and reads prior
+  versions."""
 
 
 class SharePointVFS(BaseVFS):

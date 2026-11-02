@@ -61,7 +61,9 @@ async def test_the_dispatcher_reads_calendar_json_cold():
 async def test_vfs_md_shows_the_mount_s_own_tree(size):
     vfs = GCalVFS(gcal_config(bucket_days=size))
     text = await Workspace({"/cal": vfs}).vfs_md()
-    example = re.search(r"/primary/([^/]+)/<eventId>__(\S+)", text)
+    example = re.search(
+        r"primary/\s+calendar\.json\s+(\S+)/\s+<eventId>__(\S+)", text
+    )
     assert example is not None
     assert parse_bucket(example[1], size) is not None
     assert example[2].startswith("2026-08-11_") is (size > 1)

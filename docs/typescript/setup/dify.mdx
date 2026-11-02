@@ -59,15 +59,15 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | `dify`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
 
-    ```text
-    This is a Dify Knowledge Base mounted as a read-only filesystem.
+    ##### `/<path>`
 
-    All files are plain text assembled from Dify document segments, regardless of
-    their original extension. You can use cat, head, tail, grep, find, ls, and wc
-    on these files.
-    ```
+    - A Dify knowledge base, mounted read only.
+    - Every file is plain text assembled from the document's Dify segments,
+      whatever its original extension.
+    - `cat`, `head`, `tail`, `grep`, `find`, `ls` and `wc` work on these
+      files.
 
     #### Supported Unix Commands for VFS
 
@@ -88,7 +88,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
     Run `man <cmd>` or `<cmd> --help` for one command's usage.
   </Tab>
   <Tab title="Raw">
-    ````markdown
+    ```markdown
     ---
     name: workspace-filesystem
     description: The virtual filesystem layout of this workspace.
@@ -100,15 +100,15 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
     | --- | --- |
     | `/<path>` | `dify`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
 
-    ```text
-    This is a Dify Knowledge Base mounted as a read-only filesystem.
+    ### `/<path>`
 
-    All files are plain text assembled from Dify document segments, regardless of
-    their original extension. You can use cat, head, tail, grep, find, ls, and wc
-    on these files.
-    ```
+    - A Dify knowledge base, mounted read only.
+    - Every file is plain text assembled from the document's Dify segments,
+      whatever its original extension.
+    - `cat`, `head`, `tail`, `grep`, `find`, `ls` and `wc` work on these
+      files.
 
     ## Supported Unix Commands for VFS
 
@@ -127,7 +127,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
     | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man <cmd>` or `<cmd> --help` for one command's usage.
-    ````
+    ```
   </Tab>
 </Tabs>
 {/* generated: vfs-md dify end */}

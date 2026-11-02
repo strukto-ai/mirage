@@ -63,9 +63,9 @@ def test_vfs_md_cross_references_per_service_shapes():
     assert ".gdoc.json" in rendered
     assert ".gsheet.json" in rendered
     assert ".gslide.json" in rendered
-    assert "/gdocs layout" in rendered
-    assert "/gsheets layout" in rendered
-    assert "/gslides layout" in rendered
+    assert "the gdocs gdoc.json shape" in rendered
+    assert "the gsheets gsheet.json shape" in rendered
+    assert "the gslides gslide.json shape" in rendered
     assert "remote mount" in rendered
-    assert "modifiedTime range" in rendered
-    assert "No owned/ vs shared/" in rendered
+    assert "`modifiedTime` range" in rendered
+    assert "no `owned/` and `shared/` split" in rendered

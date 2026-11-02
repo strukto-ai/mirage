@@ -11,11 +11,12 @@ from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dify.config import DifyConfig
 
-VFS_MD = """This is a Dify Knowledge Base mounted as a read-only filesystem.
-
-All files are plain text assembled from Dify document segments, regardless of
-their original extension. You can use cat, head, tail, grep, find, ls, and wc
-on these files."""
+VFS_MD = """\
+- A Dify knowledge base, mounted read only.
+- Every file is plain text assembled from the document's Dify segments,
+  whatever its original extension.
+- `cat`, `head`, `tail`, `grep`, `find`, `ls` and `wc` work on these
+  files."""
 
 _readdir = DIFY_TREE.readdir
 

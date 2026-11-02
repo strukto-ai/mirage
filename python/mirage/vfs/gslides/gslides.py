@@ -35,70 +35,83 @@ from mirage.vfs.gslides.config import GSlidesConfig
 from mirage.vfs.gslides.slide_entry import make_filename
 
 VFS_MD = """\
+```text
 {prefix}
-  owned/
-    <date>_<title>__<presentation-id>.gslide.json
-  shared/
-    <date>_<title>__<presentation-id>.gslide.json
+  owned/     # presentations you created
+    <YYYY-MM-DD>_<title>__<presentation-id>.gslide.json
+  shared/    # presentations others shared with you
+    <YYYY-MM-DD>_<title>__<presentation-id>.gslide.json
+```
 
-  Filename: <YYYY-MM-DD>_<title>__<presentation-id>.gslide.json
-    <YYYY-MM-DD>       modifiedTime, used for date-glob (e.g. 2026-05-*)
-    <title>            sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
-    <presentation-id>  Google Slides presentation ID
+- `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
+  `2026-05-*` narrows by it.
+- `<title>` is sanitized: spaces and any character outside
+  `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
+- `<presentation-id>` is the Google Slides presentation id.
+- `shared/` holds presentations shared with you by others; ones you own
+  and shared with others are still in `owned/`.
 
-  Buckets:
-    owned/   presentations you created
-    shared/  presentations shared with you by others
-             - does NOT include presentations you own and shared with others;
-               those are still in owned/.
+A `.gslide.json` matches the Google Slides API `presentations.get`
+response:
 
-  gslide.json structure (matches the Google Slides API presentations.get response):
-    {
-      "presentationId": "...",
-      "title": "...",
-      "pageSize": { "width": {...}, "height": {...} },
-      "slides": [
-        {                                      # one element per slide
+```jsonc
+{
+  "presentationId": "...",
+  "title": "...",
+  "pageSize": { "width": {...}, "height": {...} },
+  "slides": [
+    {                                      // one element per slide
+      "objectId": "...",
+      "pageElements": [
+        {
           "objectId": "...",
-          "pageElements": [
-            {
-              "objectId": "...",
-              "shape": {
-                "shapeType": "TEXT_BOX",
-                "text": {
-                  "textElements": [
-                    { "textRun": { "content": "the actual text\\n",
-                                   "style": {...} } }
-                  ]
-                }
-              }
-            },
-            { "image": {...} },
-            { "table": {...} }
-          ]
-        }
-      ],
-      "masters": [...],
-      "layouts": [...]
+          "shape": {
+            "shapeType": "TEXT_BOX",
+            "text": {
+              "textElements": [
+                { "textRun": { "content": "the actual text\\n",
+                               "style": {...} } }
+              ]
+            }
+          }
+        },
+        { "image": {...} },
+        { "table": {...} }
+      ]
     }
+  ],
+  "masters": [...],
+  "layouts": [...]
+}
+```
 
-  Useful jq paths:
-    .title
-    .slides | length                                                    # slide count
-    .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
-    .slides[0].objectId
+Useful `jq` paths:
 
-  Delete, on a `write` path:
-    rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive
-    rm -f <path>                             # ignore if missing
-    Only operates on .gslide.json files; owned/ and shared/ themselves
-    cannot be removed.
+```jq
+.title
+.slides | length                                                    # slide count
+.slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
+.slides[0].objectId
+```
 
-  Rename to a new title, on a `write` path:
-    mv {prefix}/owned/<date>_<old>__<id>.gslide.json \\
-       {prefix}/owned/<date>_<new>__<id>.gslide.json
-    Keep the folder, the date and the id, and spell the title the way
-    the listing does (spaces->_); any other name is refused."""
+Delete, on a `write` path:
+
+```sh
+rm {prefix}/owned/<file>.gslide.json   # deletes it from Drive for good
+rm -f <path>                       # ignores a missing file
+```
+
+Only `.gslide.json` files can be removed; `owned/` and `shared/` cannot.
+
+Rename to a new title, on a `write` path:
+
+```sh
+mv {prefix}/owned/<date>_<old>__<id>.gslide.json \\
+   {prefix}/owned/<date>_<new>__<id>.gslide.json
+```
+
+Keep the folder, the date and the id, and spell the title the way the
+listing does (spaces become `_`); any other name is refused."""
 
 
 class GSlidesVFS(BaseVFS):

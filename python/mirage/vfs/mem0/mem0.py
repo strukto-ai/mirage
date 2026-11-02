@@ -25,8 +25,10 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.mem0.config import Mem0Config
 
 VFS_MD = """\
+```text
 {prefix}
-  <memory-id>.json"""
+  <memory-id>.json
+```"""
 
 
 class Mem0VFS(BaseVFS):

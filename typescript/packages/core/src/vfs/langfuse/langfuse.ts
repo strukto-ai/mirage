@@ -24,7 +24,8 @@ import type { RedactedSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { LangfuseConfig } from './config.ts'
 
-export const VFS_MD = `{prefix}
+export const VFS_MD = `\`\`\`text
+{prefix}
   traces/
     <trace-id>.json
   sessions/
@@ -37,7 +38,8 @@ export const VFS_MD = `{prefix}
     <dataset-name>/
       items.jsonl
       runs/
-        <run-name>.jsonl`
+        <run-name>.jsonl
+\`\`\``
 
 export class LangfuseVFS extends BaseVFS {
   override readonly handed = {

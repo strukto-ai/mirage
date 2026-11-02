@@ -24,18 +24,19 @@ import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { filesContaining as emailFilesContaining } from '../../core/email/search.ts'
 import { stat as emailStat } from '../../core/email/stat.ts'
 
-export const VFS_MD = `{prefix}
-  <folder>/
+export const VFS_MD = `\`\`\`text
+{prefix}
+  <folder>/                         # INBOX, Sent, Drafts, ...
     <yyyy-mm-dd>/
-      <subject>__<uid>.email.json
-      <subject>__<uid>/           # if attachments exist
+      <subject>__<uid>.email.json   # the message as JSON
+      <subject>__<uid>/             # its attachments, if any
         <attachment-filename>
-  Folders include: INBOX, Sent, Drafts, etc. cat shows email as JSON.
+\`\`\`
 
-  <subject> is sanitized (don't construct it; ls the date dir).
-
-  To act on mail (list/search/read/compose/reply/forward), use the
-  himalaya CLI if installed: himalaya --help`
+- \`<subject>\` is sanitized: \`ls\` the date directory rather than
+  construct it.
+- To list, search, read, compose, reply or forward, use the \`himalaya\`
+  CLI if installed (\`himalaya --help\`).`
 
 export class EmailVFS extends BaseVFS {
   override readonly name: string = VFSName.EMAIL

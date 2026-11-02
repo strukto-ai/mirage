@@ -24,11 +24,11 @@ import { BaseVFS } from '../base.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { redactDifyConfig, resolveDifyConfig, type DifyConfig } from './config.ts'
 
-export const VFS_MD = `This is a Dify Knowledge Base mounted as a read-only filesystem.
-
-All files are plain text assembled from Dify document segments, regardless of
-their original extension. You can use cat, head, tail, grep, find, ls, and wc
-on these files.`
+export const VFS_MD = `- A Dify knowledge base, mounted read only.
+- Every file is plain text assembled from the document's Dify segments,
+  whatever its original extension.
+- \`cat\`, \`head\`, \`tail\`, \`grep\`, \`find\`, \`ls\` and \`wc\` work on these
+  files.`
 
 export interface DifyVFSOptions {
   config: DifyConfig

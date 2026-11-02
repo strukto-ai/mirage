@@ -112,7 +112,7 @@ describe('VFS_MD', () => {
     for (const name of ['base.json', 'table.json', 'records.jsonl', 'views/']) {
       expect(rendered).toContain(name)
     }
-    expect(rendered).toContain('record_id, created_time, and fields')
+    expect(rendered).toContain('`created_time` and `fields`')
     expect(rendered).toContain('max_read_records')
     expect(rendered).toContain('head -n 20 /airtable/bases/')
     expect(rendered).not.toMatch(/[{}]/)
@@ -122,7 +122,7 @@ describe('VFS_MD', () => {
 describe('VFS_MD and the CLI', () => {
   it('points at the CLI for what a file cannot do', () => {
     const rendered = VFS_MD.replace(/\{prefix\}/g, '/airtable')
-    expect(rendered).toContain('airtable record list --formula or --view')
+    expect(rendered).toContain('`airtable record list --formula` or `--view`')
     expect(rendered).toContain('airtable record get')
     expect(rendered).toContain('airtable comment list')
   })

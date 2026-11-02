@@ -48,7 +48,8 @@ describe('gcal VFS', () => {
   it.each([1, 7, 30])('shows the mount its own tree (%i)', async (size) => {
     const vfs = new GCalVFS(gcalConfig({ bucket_days: size }))
     const text = await new Workspace({ '/cal': vfs }).vfsMd()
-    const [, bucket = '', name = ''] = /\/primary\/([^/]+)\/<eventId>__(\S+)/.exec(text) ?? []
+    const [, bucket = '', name = ''] =
+      /primary\/\s+calendar\.json\s+(\S+)\/\s+<eventId>__(\S+)/.exec(text) ?? []
     expect(parseBucket(bucket, size)).not.toBeNull()
     expect(name.startsWith('2026-08-11_')).toBe(size > 1)
   })
@@ -57,7 +58,7 @@ describe('gcal VFS', () => {
     const vfs = new GCalVFS({ accessToken: 't' })
     expect(vfs.config.bucketDays).toBe(1)
     const text = await new Workspace({ '/cal': vfs }).vfsMd()
-    expect(text).toContain('/primary/2026-08-11/<eventId>__0900-1030_Team_Standup.gcal.json')
+    expect(text).toContain('    2026-08-11/\n      <eventId>__0900-1030_Team_Standup.gcal.json')
     expect(text).toContain('A bucket is one local day')
   })
 })

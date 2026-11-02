@@ -20,8 +20,8 @@ def test_vfs_md_includes_buckets_and_structure():
     assert "owned/" in rendered
     assert "shared/" in rendered
     assert "shared with you by others" in rendered
-    assert "still in owned/" in rendered
-    assert "gsheet.json structure" in rendered
+    assert "still in `owned/`" in rendered
+    assert "`spreadsheets.get`" in rendered
     assert ".sheets[].properties.title" in rendered
 
 

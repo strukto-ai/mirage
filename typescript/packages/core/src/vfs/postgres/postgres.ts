@@ -28,24 +28,28 @@ import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
-export const VFS_MD = `{prefix}
-  database.json                  cross-schema graph + sizes
-  <schema>/                      Postgres schema (namespace)
+export const VFS_MD = `\`\`\`text
+{prefix}
+  database.json          # cross-schema graph and sizes
+  <schema>/              # a Postgres schema (namespace)
     tables/<table>/
-      schema.json                column types, PK/FK, indexes
-      semantic.json              descriptions, roles, sample values
-      rows.jsonl                 data (size-guarded)
+      schema.json        # column types, PK/FK, indexes
+      semantic.json      # descriptions, roles, sample values
+      rows.jsonl         # data (size-guarded)
     views/<view>/
       schema.json
       semantic.json
       rows.jsonl
-  Read semantic.json to learn what a table means: it splits columns into
-  dimensions (group by), time_dimensions and facts (aggregate), and
+\`\`\`
+
+- Read \`database.json\` first to plan joins.
+- Read \`semantic.json\` to learn what a table means: it splits columns
+  into dimensions (group by), time_dimensions and facts (aggregate), and
   carries COMMENTs, enum domains and example values.
-  Read database.json first to plan joins. Reading rows.jsonl is refused
-  for tables above the configured row/byte threshold; use head, tail or
-  wc, which ask SQL for only what they need, or grep, which fetches only
-  the matching rows when SQL can find every match.`
+- Reading \`rows.jsonl\` is refused for a table above the configured row
+  or byte threshold. Use \`head\`, \`tail\` or \`wc\`, which ask SQL for only
+  what they need, or \`grep\`, which fetches only the matching rows when
+  SQL can find every match.`
 
 /**
  * Postgres's functions over its accessor, which the node and browser

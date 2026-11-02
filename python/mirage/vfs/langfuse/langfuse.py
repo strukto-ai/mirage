@@ -23,6 +23,7 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.langfuse.config import LangfuseConfig
 
 VFS_MD = """\
+```text
 {prefix}
   traces/
     <trace-id>.json
@@ -36,7 +37,8 @@ VFS_MD = """\
     <dataset-name>/
       items.jsonl
       runs/
-        <run-name>.jsonl"""
+        <run-name>.jsonl
+```"""
 
 
 class LangfuseVFS(BaseVFS):

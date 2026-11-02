@@ -34,67 +34,80 @@ import type { ConfigState, Handed } from '../types.ts'
 import { GSheetsConfig } from './config.ts'
 import { makeFilename } from './sheet_entry.ts'
 
-export const VFS_MD = `{prefix}
-  owned/
-    <date>_<title>__<spreadsheet-id>.gsheet.json
-  shared/
-    <date>_<title>__<spreadsheet-id>.gsheet.json
+export const VFS_MD = `\`\`\`text
+{prefix}
+  owned/     # sheets you created
+    <YYYY-MM-DD>_<title>__<spreadsheet-id>.gsheet.json
+  shared/    # sheets others shared with you
+    <YYYY-MM-DD>_<title>__<spreadsheet-id>.gsheet.json
+\`\`\`
 
-  Filename: <YYYY-MM-DD>_<title>__<spreadsheet-id>.gsheet.json
-    <YYYY-MM-DD>      modifiedTime, used for date-glob (e.g. 2026-05-*)
-    <title>           sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
-    <spreadsheet-id>  Google Sheets spreadsheet ID
+- \`<YYYY-MM-DD>\` is the file's \`modifiedTime\`, so a date glob such as
+  \`2026-05-*\` narrows by it.
+- \`<title>\` is sanitized: spaces and any character outside
+  \`[A-Za-z0-9_.-]\` become \`_\`, at most 100 characters.
+- \`<spreadsheet-id>\` is the Google Sheets spreadsheet id.
+- \`shared/\` holds sheets shared with you by others; ones you own
+  and shared with others are still in \`owned/\`.
 
-  Buckets:
-    owned/   sheets you created
-    shared/  sheets shared with you by others
-             - does NOT include sheets you own and shared with others;
-               those are still in owned/.
+A \`.gsheet.json\` matches the Google Sheets API \`spreadsheets.get\`
+response:
 
-  gsheet.json structure (matches the Google Sheets API spreadsheets.get response):
-    {
-      "spreadsheetId": "...",
-      "spreadsheetUrl": "...",
-      "properties": { "title": "...", "locale": "...", "timeZone": "..." },
-      "sheets": [
-        {                                      # one element per tab
-          "properties": {
-            "sheetId": 0, "title": "...", "index": 0,
-            "gridProperties": { "rowCount": 1000, "columnCount": 26 }
-          },
-          "data": [
-            {
-              "rowData": [
-                { "values": [
-                    { "formattedValue": "...",
-                      "userEnteredValue": {...},
-                      "effectiveValue": {...} }
-                ]}    # an empty cell is {}, a trailing one absent
-              ]
-            }
+\`\`\`jsonc
+{
+  "spreadsheetId": "...",
+  "spreadsheetUrl": "...",
+  "properties": { "title": "...", "locale": "...", "timeZone": "..." },
+  "sheets": [
+    {                                      // one element per tab
+      "properties": {
+        "sheetId": 0, "title": "...", "index": 0,
+        "gridProperties": { "rowCount": 1000, "columnCount": 26 }
+      },
+      "data": [
+        {
+          "rowData": [
+            { "values": [
+                { "formattedValue": "...",
+                  "userEnteredValue": {...},
+                  "effectiveValue": {...} }
+            ]}    // an empty cell is {}, a trailing one absent
           ]
         }
-      ],
-      "namedRanges": [...]
+      ]
     }
+  ],
+  "namedRanges": [...]
+}
+\`\`\`
 
-  Useful jq paths:
-    .properties.title
-    .sheets[].properties.title                              # tab names
-    .sheets[0].data[0].rowData[].values[].formattedValue    # cell strings
-    .namedRanges[]
+Useful \`jq\` paths:
 
-  Delete, on a \`write\` path:
-    rm {prefix}/owned/<file>.gsheet.json     # permanent delete from Drive
-    rm -f <path>                             # ignore if missing
-    Only operates on .gsheet.json files; owned/ and shared/ themselves
-    cannot be removed.
+\`\`\`jq
+.properties.title
+.sheets[].properties.title                              # tab names
+.sheets[0].data[0].rowData[].values[].formattedValue    # cell strings
+.namedRanges[]
+\`\`\`
 
-  Rename to a new title, on a \`write\` path:
-    mv {prefix}/owned/<date>_<old>__<id>.gsheet.json \\
-       {prefix}/owned/<date>_<new>__<id>.gsheet.json
-    Keep the folder, the date and the id, and spell the title the way
-    the listing does (spaces->_); any other name is refused.`
+Delete, on a \`write\` path:
+
+\`\`\`sh
+rm {prefix}/owned/<file>.gsheet.json   # deletes it from Drive for good
+rm -f <path>                       # ignores a missing file
+\`\`\`
+
+Only \`.gsheet.json\` files can be removed; \`owned/\` and \`shared/\` cannot.
+
+Rename to a new title, on a \`write\` path:
+
+\`\`\`sh
+mv {prefix}/owned/<date>_<old>__<id>.gsheet.json \\
+   {prefix}/owned/<date>_<new>__<id>.gsheet.json
+\`\`\`
+
+Keep the folder, the date and the id, and spell the title the way the
+listing does (spaces become \`_\`); any other name is refused.`
 
 export class GSheetsVFS extends BaseVFS {
   override readonly name: string = VFSName.GSHEETS
