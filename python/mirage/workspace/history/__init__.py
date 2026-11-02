@@ -11,31 +11,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-
-
-from typing import TYPE_CHECKING
-
-from mirage.utils.loader import lazy_exports
-
-if TYPE_CHECKING:
-    from mirage.workspace.history.constants import OPENERS, WORDS
-    from mirage.workspace.history.entries import history_entries
-    from mirage.workspace.history.line import LineHistory
-    from mirage.workspace.history.types import HistoryEntry
-
-_EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.workspace.history.constants": ("OPENERS", "WORDS"),
-    "mirage.workspace.history.entries": ("history_entries",),
-    "mirage.workspace.history.line": ("LineHistory",),
-    "mirage.workspace.history.types": ("HistoryEntry",),
-}
-
-__all__ = [
-    "OPENERS",
-    "WORDS",
-    "HistoryEntry",
-    "LineHistory",
-    "history_entries",
-]
-
-__getattr__ = lazy_exports(__name__, _EXPORTS)
