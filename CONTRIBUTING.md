@@ -167,6 +167,22 @@ builds and checks them; publishing is by hand. Both carry the Rust in `rust/`: e
    tarballs, `core` before the packages that depend on it. A pre-release
    goes out under npm's `alpha`, `beta` or `rc` dist-tag, a release under
    `latest`.
+1. From a checkout of the tag, push the sandbox image to the GitHub
+   container registry under the version and `latest`:
+
+   ```sh
+   docker buildx build -f docker/sandbox/Dockerfile --target fuse \
+     --platform linux/amd64,linux/arm64 \
+     --label org.opencontainers.image.source=https://github.com/strukto-ai/mirage \
+     -t ghcr.io/strukto-ai/mirage-sandbox:0.0.8 \
+     -t ghcr.io/strukto-ai/mirage-sandbox:latest \
+     --push .
+   ```
+
+   The `source` label links the image to this repository. Pushing needs a
+   token with `write:packages`: `gh auth refresh -s write:packages`, then
+   `gh auth token | docker login ghcr.io -u <user> --password-stdin`. A new
+   package starts private; make it public once, from its package settings.
 
 ## Getting Help
 
