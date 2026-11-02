@@ -578,7 +578,9 @@ async def test_reopen_leaves_an_open_pull_request_alone(monkeypatch):
 async def test_reopen_refuses_a_merged_pull_request(monkeypatch):
     calls = _reopen_calls(monkeypatch, {"state": "closed", "merged": True})
 
-    _, io = await reopen_cmd(*_args(texts=["5"], flags={"repo": "o/r"}))
+    _, io = await reopen_cmd(
+        *_args(texts=["5"], flags={"repo": "o/r", "comment": "back"})
+    )
 
     assert io.exit_code == 1
     assert io.stderr == (

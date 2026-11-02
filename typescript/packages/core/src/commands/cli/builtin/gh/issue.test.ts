@@ -176,14 +176,14 @@ describe('gh issue list --json', () => {
   })
 })
 
+function decode(bytes: unknown): string {
+  return new TextDecoder().decode(bytes as Uint8Array)
+}
+
 describe('gh issue reopen', () => {
   beforeEach(() => {
     CALLS.length = 0
   })
-
-  function decode(bytes: unknown): string {
-    return new TextDecoder().decode(bytes as Uint8Array)
-  }
 
   it('comments before it reopens', async () => {
     REOPEN_ROW = { state: 'closed', merged: false }

@@ -402,14 +402,14 @@ describe('gh pr diff --name-only', () => {
   })
 })
 
+function decode(bytes: unknown): string {
+  return new TextDecoder().decode(bytes as Uint8Array)
+}
+
 describe('gh pr reopen', () => {
   beforeEach(() => {
     CALLS.length = 0
   })
-
-  function decode(bytes: unknown): string {
-    return new TextDecoder().decode(bytes as Uint8Array)
-  }
 
   it('comments before it reopens', async () => {
     REOPEN_ROW = { state: 'closed', merged: false }
@@ -435,7 +435,7 @@ describe('gh pr reopen', () => {
 
   it('refuses a merged pull request', async () => {
     REOPEN_ROW = { state: 'closed', merged: true }
-    const result = await reopenCmd(...args())
+    const result = await reopenCmd(...args({ comment: 'back' }))
     if (result === null) throw new Error('expected a result tuple')
     expect(result[1].exitCode).toBe(1)
     expect(decode(result[1].stderr)).toBe(
