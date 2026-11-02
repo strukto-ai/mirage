@@ -885,6 +885,134 @@ async function driveMoveHttp(at: string): Promise<void> {
   ])
 }
 
+function message(subject: string): JsonValue {
+  return {
+    raw: Buffer.from(`To: dana@example.com\r\nSubject: ${subject}\r\n\r\nhello\r\n`).toString(
+      'base64url',
+    ),
+  }
+}
+
+function subjectOf(msg: Obj): JsonValue[] {
+  return arr(obj(msg.payload).headers)
+    .map(obj)
+    .filter((h) => h.name === 'Subject')
+    .map((h) => h.value ?? null)
+}
+
+async function draftsHttp(at: string): Promise<void> {
+  const base = `${at}/_run/drafts`
+  const gmail = `${base}/gmail/v1/users/me`
+  check('drafts world seeds', (await reset(base, { tenants: ['t1'], epoch: EPOCH })) === 200)
+  const put = (id: string, body: JsonValue): ReturnType<typeof api> =>
+    api(`${gmail}/drafts/${id}`, 't1', { method: 'PUT', body: JSON.stringify(body) })
+  const made = obj((await post(`${gmail}/drafts`, 't1', { message: message('Plan') })).body)
+  const id = String(made.id)
+  const first = String(obj(made.message).id)
+  eq('drafts: a new draft holds a DRAFT message', obj(made.message).labelIds ?? null, ['DRAFT'])
+  eq(
+    'drafts: drafts.list lists it',
+    field(obj((await api(`${gmail}/drafts`, 't1')).body).drafts, 'id'),
+    [id],
+  )
+  eq(
+    'drafts: messages.list has its message under DRAFT',
+    field(obj((await api(`${gmail}/messages?labelIds=DRAFT`, 't1')).body).messages, 'id'),
+    [first],
+  )
+  const second = String(obj(obj((await put(id, { message: message('Plan v2') })).body).message).id)
+  check('drafts: drafts.update swaps in a new message', second !== first, second)
+  eq(
+    'drafts: and the one it held is gone',
+    (await api(`${gmail}/messages/${first}`, 't1')).status,
+    404,
+  )
+  const held = obj(obj((await api(`${gmail}/drafts/${id}`, 't1')).body).message)
+  eq('drafts: drafts.get gives the message in full', subjectOf(held), ['Plan v2'])
+  const raw = obj(obj((await api(`${gmail}/drafts/${id}?format=raw`, 't1')).body).message)
+  eq(
+    'drafts: format=raw gives the email in place of the payload',
+    [raw.payload ?? null, Buffer.from(String(raw.raw), 'base64url').toString()],
+    [null, 'To: dana@example.com\r\nSubject: Plan v2\r\n\r\nhello\r\n'],
+  )
+  eq(
+    'drafts: and the raw email saves back',
+    (await put(id, { message: { raw: String(raw.raw) } })).status,
+    200,
+  )
+  eq(
+    'drafts: the draft saved from it reads the same',
+    subjectOf(obj(obj((await api(`${gmail}/drafts/${id}`, 't1')).body).message)),
+    ['Plan v2'],
+  )
+  const added = obj((await post(`${gmail}/drafts`, 't1', { message: message('Extra') })).body)
+  const extra = String(added.id)
+  const page = obj((await api(`${gmail}/drafts?maxResults=1`, 't1')).body)
+  const rest = obj(
+    (await api(`${gmail}/drafts?maxResults=1&pageToken=${String(page.nextPageToken)}`, 't1')).body,
+  )
+  eq(
+    'drafts: drafts.list pages on maxResults',
+    [field(page.drafts, 'id'), field(rest.drafts, 'id'), rest.nextPageToken ?? null],
+    [[extra], [id], null],
+  )
+  for (const size of [0, -1]) {
+    const all = obj((await api(`${gmail}/drafts?maxResults=${size}`, 't1')).body)
+    eq(
+      `drafts: maxResults=${size} lists every draft on one page`,
+      [field(all.drafts, 'id'), all.nextPageToken ?? null],
+      [[extra, id], null],
+    )
+  }
+  eq(
+    'drafts: a page token that is not an offset is a 400',
+    (await api(`${gmail}/drafts?pageToken=nope`, 't1')).status,
+    400,
+  )
+  const replaced = obj(
+    (await post(`${gmail}/drafts/send`, 't1', { id: extra, message: message('Extra v2') })).body,
+  )
+  const resent = obj((await api(`${gmail}/messages/${String(replaced.id)}`, 't1')).body)
+  eq(
+    'drafts: drafts.send with a message sends that message',
+    [subjectOf(resent), resent.labelIds ?? null],
+    [['Extra v2'], ['SENT']],
+  )
+  eq(
+    'drafts: and the message and draft it replaced are gone',
+    [
+      (await api(`${gmail}/messages/${String(obj(added.message).id)}`, 't1')).status,
+      (await api(`${gmail}/drafts/${extra}`, 't1')).status,
+    ],
+    [404, 404],
+  )
+  const current = String(obj(obj((await api(`${gmail}/drafts/${id}`, 't1')).body).message).id)
+  const sent = obj((await post(`${gmail}/drafts/send`, 't1', { id })).body)
+  eq(
+    'drafts: drafts.send sends the message it holds',
+    [sent.id ?? null, sent.labelIds ?? null],
+    [current, ['SENT']],
+  )
+  eq('drafts: and the draft is gone', (await api(`${gmail}/drafts/${id}`, 't1')).status, 404)
+  eq('drafts: drafts.list is then empty', (await api(`${gmail}/drafts`, 't1')).body, {
+    resultSizeEstimate: 0,
+  })
+  const scrap = String(
+    obj((await post(`${gmail}/drafts`, 't1', { message: message('Scrap') })).body).id,
+  )
+  eq(
+    'drafts: drafts.delete answers 204',
+    (await api(`${gmail}/drafts/${scrap}`, 't1', { method: 'DELETE' })).status,
+    204,
+  )
+  eq(
+    'drafts: a deleted draft cannot be sent',
+    (await post(`${gmail}/drafts/send`, 't1', { id: scrap })).status,
+    404,
+  )
+  eq('drafts: a draft needs a raw message', (await post(`${gmail}/drafts`, 't1', {})).status, 400)
+}
+
 async function formulasHttp(at: string): Promise<void> {
   const tenant = 'formulas'
   await reset(at, { tenants: [tenant], epoch: EPOCH })
@@ -1154,12 +1282,14 @@ async function main(): Promise<void> {
     await compatibilityHttp(at)
     await gridRangesHttp(at)
     await driveMoveHttp(at)
+    await draftsHttp(at)
     // ---- the base world is fixture rows, not constructor state
     check('a bare /reset seeds', (await reset(at, { tenants: ['t1'], epoch: EPOCH })) === 200)
     const labels = await api(`${at}/gmail/v1/users/me/labels`, 't1')
-    eq('the four system labels are fixture rows', field(obj(labels.body).labels, 'id'), [
+    eq('the five system labels are fixture rows', field(obj(labels.body).labels, 'id'), [
       'INBOX',
       'SENT',
+      'DRAFT',
       'UNREAD',
       'TRASH',
     ])

@@ -36,7 +36,7 @@ export interface GwsMethod {
   service: GwsService
   resource: string
   method: string
-  http: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  http: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   path: string
   needsBody?: boolean
   rawBytes?: boolean
@@ -189,6 +189,51 @@ export const GWS_METHODS: readonly GwsMethod[] = [
     method: 'delete',
     http: 'DELETE',
     path: '/files/{fileId}/permissions/{permissionId}',
+  },
+  {
+    service: 'gmail',
+    resource: 'users drafts',
+    method: 'create',
+    http: 'POST',
+    path: '/users/{userId}/drafts',
+    needsBody: true,
+  },
+  {
+    service: 'gmail',
+    resource: 'users drafts',
+    method: 'delete',
+    http: 'DELETE',
+    path: '/users/{userId}/drafts/{id}',
+  },
+  {
+    service: 'gmail',
+    resource: 'users drafts',
+    method: 'get',
+    http: 'GET',
+    path: '/users/{userId}/drafts/{id}',
+  },
+  {
+    service: 'gmail',
+    resource: 'users drafts',
+    method: 'list',
+    http: 'GET',
+    path: '/users/{userId}/drafts',
+  },
+  {
+    service: 'gmail',
+    resource: 'users drafts',
+    method: 'send',
+    http: 'POST',
+    path: '/users/{userId}/drafts/send',
+    needsBody: true,
+  },
+  {
+    service: 'gmail',
+    resource: 'users drafts',
+    method: 'update',
+    http: 'PUT',
+    path: '/users/{userId}/drafts/{id}',
+    needsBody: true,
   },
   {
     service: 'gmail',

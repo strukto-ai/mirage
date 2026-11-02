@@ -20,13 +20,14 @@ import type {
   DriveEntry,
   DriveItem,
   FormDoc,
+  GmailDraft,
   GmailLabel,
   GmailMessage,
   Presentation,
   Spreadsheet,
 } from './types.ts'
 
-export const SYSTEM_LABELS = ['INBOX', 'SENT', 'UNREAD', 'TRASH']
+export const SYSTEM_LABELS = ['INBOX', 'SENT', 'DRAFT', 'UNREAD', 'TRASH']
 
 // Non-UTC on purpose: a UTC default would hide exactly the day-bucketing
 // bugs this mock exists to catch. /reset can pin a different one.
@@ -66,6 +67,7 @@ export class GwsState {
   presentations = new Map<string, Presentation>()
   messages = new Map<string, GmailMessage>()
   labels = new Map<string, GmailLabel>()
+  drafts = new Map<string, GmailDraft>()
   calendars = new Map<string, CalendarEntry>()
   events = new Map<string, Map<string, CalendarEvent>>()
   forms = new Map<string, FormDoc>()

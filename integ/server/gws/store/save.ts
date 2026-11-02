@@ -120,6 +120,7 @@ export const TABLES: readonly (readonly [keyof Rows, string])[] = [
   ['headers', 'MessageHeader'],
   ['messageLabels', 'MessageLabel'],
   ['attachments', 'Attachment'],
+  ['drafts', 'Draft'],
   ['calendars', 'Calendar'],
   ['events', 'Event'],
   ['forms', 'Form'],
@@ -376,6 +377,7 @@ export interface Rows {
     data: Uint8Array<ArrayBuffer>
     seq: number
   }[]
+  drafts: { tenant: string; id: string; messageId: string; seq: number }[]
   calendars: {
     tenant: string
     id: string
@@ -463,6 +465,7 @@ export function buildRows(tenant: string, st: GwsState): Rows {
     headers: [],
     messageLabels: [],
     attachments: [],
+    drafts: [],
     calendars: [],
     events: [],
     forms: [],
@@ -647,6 +650,11 @@ export function buildRows(tenant: string, st: GwsState): Rows {
         seq: (attachmentSeq += 1),
       })
     }
+  }
+
+  seq = 0
+  for (const draft of st.drafts.values()) {
+    rows.drafts.push({ tenant, id: draft.id, messageId: draft.messageId, seq: (seq += 1) })
   }
 
   seq = 0
