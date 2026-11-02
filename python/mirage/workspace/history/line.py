@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 
 from mirage.io import IOResult
 from mirage.observe.observer import Observer
@@ -25,20 +25,13 @@ from mirage.workspace.history.types import HistoryEntry
 from mirage.workspace.session.session import SessionState
 
 
-class LineHistory:
-    """A typed line's history, recorded as bash's line reader adds it: an
-    entry per command the line reads, each with what it wrote to the
-    terminal and the status it left, where a line of one command is
-    recorded whole. The line's root program reaches each command as it
-    runs it (``reach``), and the line's end ends the last (``end``). A line
-    answered before its tree runs, or run whole on a runtime (``typed``),
-    is recorded once, as typed. Input the root reads again (``read_on``)
-    goes on with the root it is read as. Mirrors TypeScript's LineHistory.
+class _Recording:
+    """What a line's history has recorded so far, whichever root reads
+    the line.
 
     Args:
         observer (Observer): the workspace's observer.
         command (str): the line as typed.
-        root (TSNodeLike): the parsed line.
         entries (list[HistoryEntry]): the line's entries.
         session_id (str): the session the line is recorded under.
         session (SessionState): the session the line runs on, whose cwd
@@ -51,30 +44,92 @@ class LineHistory:
         self,
         observer: Observer,
         command: str,
-        root: TSNodeLike,
         entries: list[HistoryEntry],
         session_id: str,
         session: SessionState,
         line_id: str | None,
         terminal: Terminal,
     ) -> None:
-        self._root = root
-        self._shift = 0
-        self._next: int | None = None
+        self.command = command
+        self.entries = entries
         self._observer = observer
-        self._command = command
-        self._entries = entries
         self._session_id = session_id
         self._session = session
         self._id = line_id
         self._terminal = terminal
-        self._current = -1
-        self._opened = 0
-        self._line: str | None = None
-        self._ops = 0
-        self._whole = False
-        self._through = False
-        self._done = False
+        self.current = -1
+        self.opened = 0
+        self.line: str | None = None
+        self.ops = 0
+        self.whole = False
+        self.through = False
+        self.done = False
+
+    async def begin(self, text: str) -> None:
+        """Start an entry.
+
+        Args:
+            text (str): the entry.
+        """
+        self.line = (
+            self._id
+            if self.opened == 0 or self._id is None
+            else f"{self._id}.{self.opened}"
+        )
+        self.opened += 1
+        await self._observer.log_command(
+            text, self._session_id, self._session.cwd, self.line
+        )
+
+    async def close(self, io: IOResult, records: Sequence[OpRecord]) -> None:
+        """End the entry open, with what reached the terminal since the
+        one before and what ``io`` answered with besides.
+
+        Args:
+            io (IOResult): the entry's status, and output besides.
+            records (Sequence[OpRecord]): the line's op records so far.
+        """
+        if self.opened == 0:
+            return
+        stdout, stderr = self._terminal.entry()
+        await self._observer.log_result(
+            IOResult(
+                stdout=stdout + await io.materialize_stdout(),
+                stderr=stderr + await io.materialize_stderr(),
+                exit_code=io.exit_code,
+            ),
+            list(records[self.ops :]),
+            self._session_id,
+            self._session.cwd,
+            self.line,
+        )
+        self.ops = len(records)
+
+
+class LineHistory:
+    """A typed line's history, recorded as bash's line reader adds it: an
+    entry per command the line reads, each with what it wrote to the
+    terminal and the status it left, where a line of one command is
+    recorded whole. The line's root program reaches each command as it
+    runs it (``reach``), and the line's end ends the last (``end``). A line
+    answered before its tree runs, or run whole on a runtime (``typed``),
+    is recorded once, as typed. Input the root reads again goes on with
+    the root it is read as, which the history ``read_on`` gives it
+    records. Mirrors TypeScript's LineHistory.
+
+    Args:
+        recording (_Recording): what the line recorded so far.
+        root (TSNodeLike | None): the root that reads the line; None until
+            the first to run takes it.
+        shift (int): where the root's input starts in the line as typed.
+    """
+
+    def __init__(
+        self, recording: _Recording, root: TSNodeLike | None, shift: int
+    ) -> None:
+        self._recording = recording
+        self._root = root
+        self._shift = shift
 
     @classmethod
     def open(
@@ -105,51 +160,34 @@ class LineHistory:
         entries = history_entries(root)
         if len(entries) < 2:
             return None
-        return cls(
-            observer,
-            command,
-            root,
-            entries,
-            session_id,
-            session,
-            line_id,
-            sink,
+        recording = _Recording(
+            observer, command, entries, session_id, session, line_id, sink
         )
+        return cls(recording, root, 0)
 
     def reads(self, node: TSNodeLike) -> bool:
-        """Whether ``node``'s program reads the line: the line's root, or
-        the first root to run once its input is read again (``read_on``),
-        which takes over.
+        """Whether ``node``'s program reads the line: this history's root,
+        or, for the history of input read again (``read_on``), the first
+        root to run.
 
         Args:
             node (TSNodeLike): a program about to run its statements.
         """
-        if node is self._root:
-            return True
-        if self._next is None or node.parent is not None:
-            return False
-        self._root = node
-        self._shift = self._next
-        self._next = None
-        return True
+        if self._root is None and node.parent is None:
+            self._root = node
+        return node is self._root
 
-    async def read_on(
-        self, at: int, run: Callable[[], Awaitable[IOResult]]
-    ) -> IOResult:
-        """Read the root's input again from a statement on, as a root of
-        its own that ``run`` parses and runs.
+    def read_on(self, at: int) -> "LineHistory":
+        """The history of the root's input read again from a statement on,
+        as a root of its own: bound to the call that reads it, whose first
+        root takes the line over.
 
         Args:
             at (int): where, in the root's input, the input read again
                 starts: the statement's index less the blank rows put
                 ahead of it.
-            run (Callable[[], Awaitable[IOResult]]): reads it.
         """
-        self._next = self._shift + at
-        try:
-            return await run()
-        finally:
-            self._next = None
+        return LineHistory(self._recording, None, self._shift + at)
 
     async def reach(
         self,
@@ -168,40 +206,42 @@ class LineHistory:
                 which the entry before's are those since the one before it
                 ended.
         """
-        if self._whole or self._done:
+        line = self._recording
+        if line.whole or line.done:
             return
         offsets = getattr(self._root, "offsets", None) or ()
         start = child.start_byte
         at = self._shift + (offsets[start] if start < len(offsets) else start)
-        reached = self._current
-        for j in range(self._current + 1, len(self._entries)):
-            entry_at = self._entries[j].at
+        reached = line.current
+        for j in range(line.current + 1, len(line.entries)):
+            entry_at = line.entries[j].at
             if entry_at is not None and entry_at > at:
                 break
             if entry_at is not None:
                 reached = j
-        if reached <= self._current:
+        if reached <= line.current:
             return
         status = IOResult(exit_code=session.last_exit_code)
-        await self._close(status, records)
-        for j in range(self._current + 1, reached):
-            await self._begin(self._entries[j].text)
-            await self._close(status, records)
-        self._current = reached
-        await self._begin(self._entries[reached].text)
+        await line.close(status, records)
+        for j in range(line.current + 1, reached):
+            await line.begin(line.entries[j].text)
+            await line.close(status, records)
+        line.current = reached
+        await line.begin(line.entries[reached].text)
 
     def read(self) -> None:
         """The root program read the input to its end, so the entries
         after its last command are read too."""
-        self._through = True
+        self._recording.through = True
 
     async def typed(self) -> None:
         """Record the line once, as typed, before it runs whole on a
         runtime."""
-        if self._current >= 0 or self._whole:
+        line = self._recording
+        if line.current >= 0 or line.whole:
             return
-        self._whole = True
-        await self._begin(self._command)
+        line.whole = True
+        await line.begin(line.command)
 
     async def end(self, io: IOResult, records: Sequence[OpRecord]) -> None:
         """End the line: its last entry, with what the line wrote since and
@@ -213,43 +253,16 @@ class LineHistory:
             records (Sequence[OpRecord]): the line's op records, of which
                 the last entry's are those since the entry before ended.
         """
-        if self._done:
+        line = self._recording
+        if line.done:
             return
-        if self._current < 0 and not self._through:
+        if line.current < 0 and not line.through:
             await self.typed()
-        await self._close(io, records)
-        self._done = True
-        if not self._through or self._whole:
+        await line.close(io, records)
+        line.done = True
+        if not line.through or line.whole:
             return
         status = IOResult(exit_code=io.exit_code)
-        for j in range(self._current + 1, len(self._entries)):
-            await self._begin(self._entries[j].text)
-            await self._close(status, records)
-
-    async def _begin(self, text: str) -> None:
-        self._line = (
-            self._id
-            if self._opened == 0 or self._id is None
-            else f"{self._id}.{self._opened}"
-        )
-        self._opened += 1
-        await self._observer.log_command(
-            text, self._session_id, self._session.cwd, self._line
-        )
-
-    async def _close(self, io: IOResult, records: Sequence[OpRecord]) -> None:
-        if self._opened == 0:
-            return
-        stdout, stderr = self._terminal.entry()
-        await self._observer.log_result(
-            IOResult(
-                stdout=stdout + await io.materialize_stdout(),
-                stderr=stderr + await io.materialize_stderr(),
-                exit_code=io.exit_code,
-            ),
-            list(records[self._ops :]),
-            self._session_id,
-            self._session.cwd,
-            self._line,
-        )
-        self._ops = len(records)
+        for j in range(line.current + 1, len(line.entries)):
+            await line.begin(line.entries[j].text)
+            await line.close(status, records)

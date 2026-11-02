@@ -15,7 +15,11 @@
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from mirage.context.session_context import current_caller
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
@@ -656,7 +660,18 @@ async def _read_on(
         )
         return io
 
-    io = await (run() if reading is None else reading.read_on(at - rows, run))
+    if reading is None:
+        io = await run()
+    else:
+        # The root the rest is read as takes the line's history over
+        # through this call alone, never a job's root that runs meanwhile.
+        token = bind_caller(
+            current_caller().changed({"history": reading.read_on(at - rows)})
+        )
+        try:
+            io = await run()
+        finally:
+            reset_caller(token)
     return (
         io.stdout,
         io,

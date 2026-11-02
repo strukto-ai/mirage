@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { currentCaller, type RedirectResult } from '../../context/session_context.ts'
+import { currentCaller, type RedirectResult, runWithCaller } from '../../context/session_context.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -565,6 +565,11 @@ async function readOn(
       ...(sink === null ? {} : { sink }),
       ...(callStack === null ? {} : { callStack }),
     })
-  const io = reading === null ? await run() : await reading.readOn(at - rows, run)
+  // The root the rest is read as takes the line's history over through
+  // this call alone, never a job's root that runs meanwhile.
+  const io =
+    reading === null
+      ? await run()
+      : await runWithCaller({ ...currentCaller(), history: reading.readOn(at - rows) }, run)
   return [io.stdout, io, new ExecutionNode({ command: rest, exitCode: io.exitCode })]
 }
