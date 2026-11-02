@@ -77,6 +77,7 @@ from mirage.workspace.executor.statement import (
     snapshot_status,
 )
 from mirage.workspace.executor.traps import finish_shell, inherit_traps
+from mirage.workspace.history.line import LineHistory
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.explain import (
@@ -94,7 +95,6 @@ from mirage.workspace.node.occurrence import (
 )
 from mirage.workspace.node.program import refused_row
 from mirage.workspace.node.run_tree import run_command_tree
-from mirage.workspace.history.line import LineHistory
 from mirage.workspace.session import (
     SessionState,
     get_current_session_for,
