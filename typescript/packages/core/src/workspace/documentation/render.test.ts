@@ -278,6 +278,13 @@ describe('vfsMd', () => {
     expect(markdown).toContain('.gdoc.json\n````\n')
   })
 
+  it('keeps a code span whole past a backtick prefix', async () => {
+    const docs = gdocs()
+    docs.vfsMd = 'Run `ls {prefix}/x` or `ls`.'
+    const ws = new Workspace({ '/mail`archive': [docs, MountMode.READ] })
+    expect(await ws.vfsMd()).toContain('Run `` ls /mail`archive/x `` or `ls`.')
+  })
+
   it('names each search command the profile allows', async () => {
     const ws = new Workspace(
       { '/docs': [gdocs(), MountMode.WRITE] },

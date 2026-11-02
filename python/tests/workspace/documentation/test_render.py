@@ -196,6 +196,15 @@ async def test_vfs_md_keeps_a_layout_fenced_past_a_backtick_prefix():
 
 
 @pytest.mark.asyncio
+async def test_vfs_md_keeps_a_code_span_whole_past_a_backtick_prefix():
+    slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
+    slack.vfs_md = "Run `ls {prefix}/x` or `ls`."
+    ws = Workspace({"/mail`archive": (slack, MountMode.READ)})
+    markdown = await ws.vfs_md()
+    assert "Run `` ls /mail`archive/x `` or `ls`." in markdown
+
+
+@pytest.mark.asyncio
 async def test_vfs_md_substitutes_prefix():
     cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
     gdocs = GDocsVFS(config=cfg)

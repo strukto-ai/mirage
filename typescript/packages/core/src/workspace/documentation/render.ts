@@ -228,23 +228,35 @@ function fenced(text: string, info: string): string {
 }
 
 /**
- * `template` with each fence line lengthened past every backtick run in
- * `prefix`, so a prefix put into a block cannot close it.
+ * `template` with each code fence, and each code span holding `{prefix}`,
+ * delimited past every backtick run in `prefix`, so a prefix put into one
+ * cannot close it.
  */
 function widened(template: string, prefix: string): string {
   const run = Math.max(0, ...(prefix.match(/`+/g) ?? []).map((r) => r.length))
-  if (run < 3) return template
-  return template
-    .split('\n')
-    .map((line) => {
-      const bare = line.replace(/^ +/, '')
-      const ticks = bare.length - bare.replace(/^`+/, '').length
-      const indent = line.length - bare.length
-      return ticks >= 3 && indent <= 3 && !bare.slice(ticks).includes('`')
-        ? line.slice(0, indent) + '`'.repeat(run - 2) + bare
-        : line
-    })
-    .join('\n')
+  if (run === 0) return template
+  const lines: string[] = []
+  let inside = false
+  for (let line of template.split('\n')) {
+    const bare = line.replace(/^ +/, '')
+    const ticks = bare.length - bare.replace(/^`+/, '').length
+    const indent = line.length - bare.length
+    if (ticks >= 3 && indent <= 3 && !bare.slice(ticks).includes('`')) {
+      inside = !inside
+      if (run >= 3) line = line.slice(0, indent) + '`'.repeat(run - 2) + bare
+    } else if (!inside && line.split('`').length % 2 === 1) {
+      const parts = line.split('`')
+      for (let i = 1; i < parts.length; i += 2) {
+        const span = '`'.repeat(run + 1)
+        parts[i] = parts[i]?.includes('{prefix}')
+          ? `${span} ${parts[i] ?? ''} ${span}`
+          : `\`${parts[i] ?? ''}\``
+      }
+      line = parts.join('')
+    }
+    lines.push(line)
+  }
+  return lines.join('\n')
 }
 
 function table(

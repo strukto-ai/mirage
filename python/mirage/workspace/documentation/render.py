@@ -280,8 +280,9 @@ def fenced(text: str, info: str) -> str:
 
 
 def widened(template: str, prefix: str) -> str:
-    """``template`` with each fence line lengthened past every backtick
-    run in ``prefix``, so a prefix put into a block cannot close it.
+    """``template`` with each code fence, and each code span holding
+    ``{prefix}``, delimited past every backtick run in ``prefix``, so a
+    prefix put into one cannot close it.
 
     Args:
         template (str): a VFS's layout, ``{prefix}`` not yet replaced.
@@ -290,15 +291,27 @@ def widened(template: str, prefix: str) -> str:
     run = max(
         (len(list(g)) for c, g in groupby(prefix) if c == "`"), default=0
     )
-    if run < 3:
+    if run == 0:
         return template
     lines: list[str] = []
+    inside = False
     for line in template.split("\n"):
         bare = line.lstrip(" ")
         ticks = len(bare) - len(bare.lstrip("`"))
         indent = len(line) - len(bare)
         if ticks >= 3 and indent <= 3 and "`" not in bare[ticks:]:
-            line = line[:indent] + "`" * (run - 2) + bare
+            inside = not inside
+            if run >= 3:
+                line = line[:indent] + "`" * (run - 2) + bare
+        elif not inside and line.count("`") % 2 == 0:
+            parts = line.split("`")
+            for i in range(1, len(parts), 2):
+                if "{prefix}" in parts[i]:
+                    span = "`" * (run + 1)
+                    parts[i] = f"{span} {parts[i]} {span}"
+                else:
+                    parts[i] = f"`{parts[i]}`"
+            line = "".join(parts)
         lines.append(line)
     return "\n".join(lines)
 
