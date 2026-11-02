@@ -88,7 +88,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 // builds from here), so it arms the builtin secrets sources like the
 // node Workspace module does.
 import './secrets/constants.ts'
-import { watchNetwork } from './io/network.ts'
+import { releaseNetwork, watchNetwork } from './io/network.ts'
 import { isModulePath, loadAttr, splitRef } from './utils/loader.ts'
 import { parseYaml } from './utils/yaml.ts'
 import { buildVfs } from './vfs/registry.ts'
@@ -981,12 +981,18 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<{
     clis !== null &&
     Object.values(clis).some((block) => isPlainObject(block) && block.cli === MCP_CLI)
   // An MCP entry is listed at load, under the config's network and any rule already bound.
-  const rule = mcp ? narrowed(networkBound(), cfg.network ?? true) : networkBound()
+  const bound = networkBound()
+  const rule = mcp ? narrowed(bound, cfg.network ?? true) : bound
   if (rule !== null) watchNetwork()
-  const cliEntries =
-    clis !== undefined && clis !== null
-      ? await runWithNetwork(rule, () => buildCliEntries(clis, sources))
-      : undefined
+  let cliEntries: Awaited<ReturnType<typeof buildCliEntries>> | undefined
+  try {
+    cliEntries =
+      clis !== undefined && clis !== null
+        ? await runWithNetwork(rule, () => buildCliEntries(clis, sources))
+        : undefined
+  } finally {
+    if (rule !== null && rule !== bound) await releaseNetwork(rule)
+  }
   const runtimeEntries =
     cfg.runtimes !== undefined && cfg.runtimes !== null
       ? await buildRuntimeEntries(cfg.runtimes)
