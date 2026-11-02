@@ -42,6 +42,7 @@ export class Terminal extends JobConsole {
   private prefixSize = 0
   private errPrefix = new Uint8Array()
   private errPrefixSize = 0
+  private marked: [number, number] = [0, 0]
 
   /** A bounded prefix of stdout handed to the current line's reader. */
   get stdoutPrefix(): Uint8Array {
@@ -106,6 +107,7 @@ export class Terminal extends JobConsole {
     this.prefixSize = 0
     this.errPrefix = reader === null ? new Uint8Array() : new Uint8Array(CHUNK_SIZE)
     this.errPrefixSize = 0
+    this.marked = [0, 0]
     if (reader === null) {
       this.reader = null
       return
@@ -165,6 +167,26 @@ export class Terminal extends JobConsole {
     return [out, err]
   }
 
+  /**
+   * What reached the terminal for one history entry of the line, since the
+   * entry before it: a line bash's reader reads as several commands
+   * records each with what it wrote. With a reader attached, what it was
+   * handed, its prefix starting again for the next.
+   */
+  entry(): [Uint8Array, Uint8Array] {
+    if (this.reader !== null) {
+      const shown: [Uint8Array, Uint8Array] = [this.stdoutPrefix.slice(), this.stderrPrefix.slice()]
+      this.prefixSize = 0
+      this.errPrefixSize = 0
+      return shown
+    }
+    const [out, err] = this.drain()
+    this.putBack(out, err)
+    const [from, fromErr] = this.marked
+    this.marked = [out.byteLength, err.byteLength]
+    return [out.slice(from), err.slice(fromErr)]
+  }
+
   /** Return drained output ahead of whatever arrived meanwhile. */
   putBack(out: Uint8Array, err: Uint8Array): void {
     const returned: [Channel, Uint8Array, boolean][] = []
@@ -194,6 +216,7 @@ export class Terminal extends JobConsole {
     this.prefixSize = 0
     this.errPrefix = new Uint8Array()
     this.errPrefixSize = 0
+    this.marked = [0, 0]
     this.ended += 1
     this.attaching = null
     this.attached()

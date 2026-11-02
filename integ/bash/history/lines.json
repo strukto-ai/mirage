@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "history_reads_each_command",
+      "seq": 310060,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "echo a\nfor i in 1 2\ndo echo $i\ndone\n# done",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n1\n2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_has_each_command_read",
+      "seq": 310061,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -v '^#[0-9]' /.bash_history | tail -n 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "echo a\nfor i in 1 2; do echo $i; done\n# done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_reads_no_further_than_exit",
+      "seq": 310062,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "echo b\nexit 3\necho c",
+      "expect": {
+        "exit": 3,
+        "stdout": "b\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_ends_at_exit",
+      "seq": 310063,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -v '^#[0-9]' /.bash_history | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "echo b\nexit 3\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -115,6 +115,7 @@ from mirage.workspace.workspace.fill import (
     guest_bound,
     line_nodes,
 )
+from mirage.workspace.workspace.history import LineHistory
 from mirage.workspace.workspace.line import run_whole_line
 from mirage.workspace.workspace.meta import WorkspaceMeta
 from mirage.workspace.workspace.routing import Router
@@ -762,15 +763,8 @@ async def run_prepared_line(
     # before its newline): a blank line is skipped, while a
     # whitespace-only or comment-only line is kept.
     recorded = is_line and bool(command.strip("\n"))
+    history: LineHistory | None = None
     try:
-        # The line is recorded as it starts; how it ended follows it.
-        if recorded:
-            await ws.observer.log_command(
-                command,
-                session_id,
-                session_cwd(ws.sessions, session_id),
-                execution_scope.id,
-            )
         aliases = expanding_aliases(effective_session)
         ast = (
             parse_scope.parse(
@@ -781,6 +775,26 @@ async def run_prepared_line(
             if argv is None
             else literal_tree(argv)
         )
+        # A line bash's reader reads as several commands records each as
+        # it reaches it; any other is recorded as it starts, how it ended
+        # following it.
+        if recorded and argv is None:
+            history = LineHistory.open(
+                ws.observer,
+                command,
+                ast,
+                session_id,
+                effective_session,
+                execution_scope.id,
+                sink,
+            )
+        if recorded and history is None:
+            await ws.observer.log_command(
+                command,
+                session_id,
+                session_cwd(ws.sessions, session_id),
+                execution_scope.id,
+            )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
         # consulted about it. A refusal on a later line leaves the lines
@@ -842,6 +856,7 @@ async def run_prepared_line(
                         handed,
                         effective_session.session_id,
                     ),
+                    "history": history,
                 }
             )
         )
@@ -957,6 +972,10 @@ async def run_prepared_line(
                                 await ws.secret_sources(),
                             ),
                         )
+                # A line a runtime runs whole is one command to it,
+                # recorded as typed.
+                if history is not None:
+                    await history.typed()
                 io = await run_with_system_clock(
                     ws.registry.system_clock,
                     run_with_egress(
@@ -1239,7 +1258,9 @@ async def run_prepared_line(
         reset_current_session(session_token)
         await ws.sessions.flush(session.session_id)
         ws.records.extend(scope.records)
-        if recorded:
+        if history is not None:
+            await history.end(io, scope.records)
+        elif recorded:
             await ws.observer.log_result(
                 await _shown(io, sink),
                 scope.records,

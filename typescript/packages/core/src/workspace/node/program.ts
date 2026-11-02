@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RedirectResult } from '../../context/session_context.ts'
+import { currentCaller, type RedirectResult } from '../../context/session_context.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { asyncChain } from '../../io/stream.ts'
@@ -185,6 +185,10 @@ async function runProgram(
   const reader = (node.parent ?? null) === null ? executeFn : null
   const refused = reader !== null ? refusedRow(node) : null
   const parsed = reader !== null ? parseState(session) : null
+  // A typed line bash's reader reads as several commands is recorded a
+  // command at a time, as its root reaches each.
+  const history = currentCaller().history
+  const reading = history?.root === node ? history : null
   let lastRow = -1
 
   let i = 0
@@ -207,6 +211,7 @@ async function runProgram(
       continue
     }
     if (session.shellOptions.noexec === true) break
+    if (reading !== null) await reading.reach(child, session)
     if (!reread && startRow > echoedRow) {
       const first = echoedRow + 1
       const last = child.endPosition?.row ?? startRow
@@ -384,6 +389,7 @@ async function runProgram(
     }
     if (reread) break
   }
+  if (reading !== null && i >= children.length) reading.read()
 
   // Statements run in turn are one `;` node, so the line's tree keeps every
   // command's result; what a caller reads of the program's own node (its

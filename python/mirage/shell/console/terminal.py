@@ -47,6 +47,7 @@ class Terminal(JobConsole):
         self.attaching: asyncio.Event | None = None
         self._prefix = bytearray()
         self._err_prefix = bytearray()
+        self._marked = (0, 0)
         self._draining: asyncio.Task[None] | None = None
 
     @property
@@ -116,6 +117,7 @@ class Terminal(JobConsole):
         """
         self._prefix.clear()
         self._err_prefix.clear()
+        self._marked = (0, 0)
         if reader is None:
             self.reader = None
             return
@@ -169,6 +171,22 @@ class Terminal(JobConsole):
             b"".join(d for c, d, _ in chunks if c == Channel.STDERR),
         )
 
+    def entry(self) -> tuple[bytes, bytes]:
+        """What reached the terminal for one history entry of the line,
+        since the entry before it: a line bash's reader reads as several
+        commands records each with what it wrote. With a reader attached,
+        what it was handed, its prefix starting again for the next."""
+        if self.reader is not None:
+            shown = (bytes(self._prefix), bytes(self._err_prefix))
+            self._prefix.clear()
+            self._err_prefix.clear()
+            return shown
+        out, err = self.drain()
+        self.put_back(out, err)
+        start, start_err = self._marked
+        self._marked = (len(out), len(err))
+        return out[start:], err[start_err:]
+
     def put_back(self, out: bytes, err: bytes) -> None:
         """Return drained output ahead of whatever arrived meanwhile.
 
@@ -201,6 +219,7 @@ class Terminal(JobConsole):
         self.reader = None
         self._prefix.clear()
         self._err_prefix.clear()
+        self._marked = (0, 0)
         self.ended += 1
         if self.attaching is not None:
             self.attaching.set()
