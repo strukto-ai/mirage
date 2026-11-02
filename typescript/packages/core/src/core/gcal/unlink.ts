@@ -20,8 +20,6 @@ import { makeUnlink } from '../hierarchy/unlink.ts'
 import { calendarIndex } from './readdir.ts'
 import { detectScope } from './scope.ts'
 
-const WRITABLE_ROLES = new Set(['owner', 'writer'])
-
 /**
  * Delete the event the row names, on the slotted calendar.
  *
@@ -34,7 +32,7 @@ async function del(accessor: GCalAccessor, match: ScopeMatch, entry: FileStat): 
   const calendar = calendars.get(match.slots.calendar ?? '')
   if (calendar === undefined) throw enoent(match.vfsPath)
   const role = calendar.accessRole
-  if (typeof role !== 'string' || !WRITABLE_ROLES.has(role)) throw eacces(match.vfsPath)
+  if (role !== 'owner' && role !== 'writer') throw eacces(match.vfsPath)
   const calId = calendar.id
   if (typeof calId !== 'string') throw enoent(match.vfsPath)
   await accessor.calendar.deleteEvent(calId, String(entry.extra.event_id))

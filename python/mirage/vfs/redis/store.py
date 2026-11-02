@@ -29,8 +29,6 @@ except ModuleNotFoundError as _err:
         "Install with: pip install mirage-ai[redis]"
     ) from _err
 
-_GLOB_META = frozenset("*?[]\\")
-
 
 def escape_glob(literal: str) -> str:
     """Quote a literal for a redis MATCH pattern.
@@ -42,11 +40,7 @@ def escape_glob(literal: str) -> str:
     Returns:
         str: The pattern with every glob metacharacter backslash-escaped.
     """
-    return "".join(f"\\{ch}" if ch in _GLOB_META else ch for ch in literal)
-
-
-def _purge_client(clients_dict: dict[int, Redis], loop_id: int) -> None:
-    clients_dict.pop(loop_id, None)
+    return "".join(f"\\{ch}" if ch in "*?[]\\" else ch for ch in literal)
 
 
 class RedisStore:
@@ -76,7 +70,7 @@ class RedisStore:
         client = Redis.from_url(self._url)
         self._clients[loop_id] = client
         if loop is not None:
-            weakref.finalize(loop, _purge_client, self._clients, loop_id)
+            weakref.finalize(loop, self._clients.pop, loop_id, None)
         return client
 
     @property

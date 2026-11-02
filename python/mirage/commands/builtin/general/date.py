@@ -86,6 +86,10 @@ def option_formats(fl: FlagView) -> list[str]:
     return formats
 
 
+def _multiple_formats() -> tuple[ByteSource | None, IOResult]:
+    return None, IOResult(exit_code=1, stderr=MULTIPLE_FORMATS)
+
+
 def invalid_date(text: str) -> tuple[ByteSource | None, IOResult]:
     """GNU's refusal of a date it cannot read, exit 1.
 
@@ -142,13 +146,13 @@ async def date(
     d = fl.as_str("date")
     formats = option_formats(fl)
     if len(formats) > 1:
-        return None, IOResult(exit_code=1, stderr=MULTIPLE_FORMATS)
+        return _multiple_formats()
     if len(texts) > 1:
         raise extra_operand_error(CommandName.DATE, texts[1])
     setting = texts[0] if texts else None
     if setting is not None and setting.startswith("+"):
         if formats:
-            return None, IOResult(exit_code=1, stderr=MULTIPLE_FORMATS)
+            return _multiple_formats()
         formats.append(setting[1:])
         setting = None
     elif setting is not None and d is not None:

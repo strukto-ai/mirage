@@ -24,6 +24,7 @@ from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 
 VFS_MD = """\
+```text
 {prefix}
   workspaces/
     <workspace-name>__<workspace-id>/
@@ -42,11 +43,12 @@ VFS_MD = """\
                 <card-name>__<card-id>/
                   card.json
                   comments.jsonl
-  Always ls directories first to discover exact names.
+```
 
-  To act on boards and cards (list boards, members, lists, labels,
-  cards and comments; create, update, move, assign, label and comment
-  on cards), use the trello CLI if installed: trello --help"""
+- `ls` directories first to discover exact names.
+- To act on boards and cards (list boards, members, lists, labels, cards
+  and comments; create, update, move, assign, label and comment on
+  cards), use the `trello` CLI if installed (`trello --help`)."""
 
 
 class TrelloVFS(BaseVFS):

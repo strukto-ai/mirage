@@ -17,12 +17,11 @@ import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { perAccessor } from '../hierarchy/bind.ts'
+import type { ReadFn } from '../hierarchy/read.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { makeStat as hierarchyStat, type StatHook } from '../hierarchy/stat.ts'
 import { tableOf } from './scope.ts'
 import type { VectorTree } from './types.ts'
-
-type ReadFn<A> = (accessor: A, path: PathSpec) => Promise<Uint8Array>
 
 function nameOf(spec: PathSpec): string {
   const last = rstripSlash(spec.virtual).split('/').pop()

@@ -14,9 +14,6 @@
 
 import { MODE_BASES, MODE_CHARS } from './constants.ts'
 
-// Inside a character class every mode letter (and +) is literal.
-const INVALID_CHAR = new RegExp(`[^${MODE_CHARS}]`)
-
 /**
  * What an fopen-style mode string says about a handle.
  *
@@ -99,7 +96,9 @@ export function parseMode(mode: string): OpenMode {
   for (const char of 'rwax') if (mode.includes(char)) bases += char
   let duplicated = false
   for (const char of MODE_CHARS) if (count(char) > 1) duplicated = true
-  if (INVALID_CHAR.test(mode) || duplicated) throw new Error(`invalid mode: '${mode}'`)
+  let invalid = false
+  for (const char of mode) if (!MODE_CHARS.includes(char)) invalid = true
+  if (invalid || duplicated) throw new Error(`invalid mode: '${mode}'`)
   if (mode.includes('b') && mode.includes('t'))
     throw new Error("can't have text and binary mode at once")
   if (!bases)

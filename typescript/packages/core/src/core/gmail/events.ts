@@ -21,7 +21,7 @@ import { changesBetween, changesUnder, lostAt } from '../../events/delta.ts'
 import type { GmailApi } from './api.ts'
 import type { GmailLabel } from './labels.ts'
 import { extractAttachments, extractHeader, type GmailMessageRaw } from './messages.ts'
-import { dateFromInternal, MSG_SUFFIX, msgFilename } from './readdir.ts'
+import { attachDirName, dateFromInternal, MSG_SUFFIX, msgFilename } from './readdir.ts'
 
 /**
  * The paths a message is under `labelIds`: its file in each label's day
@@ -45,7 +45,7 @@ export function messagePaths(
     if (label === undefined) continue
     const name = label.type === 'system' ? labelId : (label.name ?? labelId)
     paths.push(`${prefix}/${name}/${day}/${file}`)
-    if (attached) paths.push(`${prefix}/${name}/${day}/${file.slice(0, -MSG_SUFFIX.length)}`)
+    if (attached) paths.push(`${prefix}/${name}/${day}/${attachDirName(subject, mid)}`)
   }
   return paths
 }

@@ -23,7 +23,7 @@ import {
   OpRecord,
   RecordIndex,
   STAMP_FINGERPRINT_OPS,
-  type RecordingState,
+  type Recorder,
   type RevisionsState,
 } from './record.ts'
 import type { PathSpec } from '../types.ts'
@@ -36,7 +36,7 @@ const SYSTEM_CLOCK = new SystemClock()
 // live, so the caller's module imports no observe module.
 declare module '../context/session_context.ts' {
   interface Caller {
-    readonly recording: RecordingState | null
+    readonly recording: Recorder | null
     readonly revisions: RevisionsState | null
   }
 }
@@ -139,7 +139,7 @@ export async function runWithRecording<T>(
   ledger: OpRecord[] | null = null,
   clock: Clock = SYSTEM_CLOCK,
 ): Promise<[T, OpRecord[]]> {
-  const state: RecordingState = { records: [], mountId: null, ledger, clock }
+  const state: Recorder = { records: [], mountId: null, ledger, clock }
   const value = await runWithCaller({ ...currentCaller(), recording: state }, fn)
   return [value, state.records]
 }

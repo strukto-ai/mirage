@@ -106,4 +106,15 @@ describe('typeListing', () => {
     expect(listing).toContain('py: *.py, *.pyi, *.zz')
     expect(listing[0]).toBe('ada: *.adb, *.ads')
   })
+
+  it('sorts by code point, an astral glob after a private-use one', () => {
+    const types = new FileTypes(
+      [
+        ['add', 'zz:*.\u{1F600}'],
+        ['add', 'zz:*.\uE000'],
+      ],
+      [],
+    )
+    expect(typeListing(types.definitions)).toContain('zz: *.\uE000, *.\u{1F600}')
+  })
 })

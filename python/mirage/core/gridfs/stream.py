@@ -14,13 +14,13 @@
 
 from collections.abc import AsyncIterator, Callable
 
-from bson import ObjectId
 from gridfs.errors import NoFile
 
 from mirage.accessor.gridfs import GridFSAccessor
-from mirage.core.gridfs.client import bucket, gridfs_key, latest_file
+from mirage.core.gridfs.client import bucket, gridfs_key
+from mirage.core.gridfs.read import resolve_file_id
 from mirage.errors.fs import enoent
-from mirage.observe.context import record_stream, revision_for
+from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 
 
@@ -43,14 +43,7 @@ async def read_stream(
     path = path_spec.mount_path
     config = accessor.config
     key = gridfs_key(path, config)
-    pinned_revision = revision_for(virtual)
-    if pinned_revision is not None:
-        file_id = ObjectId(pinned_revision)
-    else:
-        doc = await latest_file(accessor, key)
-        if doc is None:
-            raise enoent(virtual)
-        file_id = doc["_id"]
+    file_id = await resolve_file_id(accessor, path_spec, key)
     try:
         out = await bucket(accessor).open_download_stream(file_id)
     except NoFile as exc:

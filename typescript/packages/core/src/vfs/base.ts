@@ -66,8 +66,8 @@ export interface VFSOptions<A extends Accessor = Accessor> {
   /** Backend handle the functions use. */
   accessor?: A
   /**
-   * This VFS's part of VFS.md: its layout and file formats, `{prefix}`
-   * standing for the mount path.
+   * This VFS's part of VFS.md, in Markdown: its layout and file formats,
+   * `{prefix}` standing for the mount path.
    */
   vfsMd?: string
   /**

@@ -78,15 +78,13 @@ export async function stat(accessor: NextcloudAccessor, path: PathSpec): Promise
     if (isNotFound(error)) throw enoent(path)
     throw error
   }
-  if (!metadata.isDirectory()) return fileStat(key, raw, metadata)
-  return new FileStat({
-    name: key.split('/').pop() ?? '/',
-    type: FileType.DIRECTORY,
-    modified: metadata.lastModified,
-  })
-}
-
-function fileStat(key: string, raw: string, metadata: Metadata): FileStat {
+  if (metadata.isDirectory()) {
+    return new FileStat({
+      name: key.split('/').pop() ?? '/',
+      type: FileType.DIRECTORY,
+      modified: metadata.lastModified,
+    })
+  }
   const etag = metadata.etag
   return new FileStat({
     name: key.split('/').pop() ?? key,

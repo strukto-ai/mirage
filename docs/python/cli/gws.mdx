@@ -1,7 +1,7 @@
 ---
 title: GWS
 description: "Supported Google Workspace API methods and helpers for seven services."
-icon: google
+icon: /images/google-logo.svg
 ---
 
 Use Google Drive, Sheets, Docs, Slides, Calendar, Forms and Gmail through one command tree. Mirage implements a subset of the [Google Workspace CLI (`gws`)](https://github.com/googleworkspace/cli), with selected API methods and helpers for mail, spreadsheet ranges and document text.
@@ -67,6 +67,12 @@ This list is generated from Mirage's registered command tree.
 | `gws forms forms batchUpdate` | POST /forms/&#123;formId&#125;:batchUpdate (Google forms API passthrough) |
 | `gws forms forms responses list` | GET /forms/&#123;formId&#125;/responses (Google forms API passthrough) |
 | `gws forms forms responses get` | GET /forms/&#123;formId&#125;/responses/&#123;responseId&#125; (Google forms API passthrough) |
+| `gws gmail users drafts create` | POST /users/&#123;userId&#125;/drafts (Google gmail API passthrough) |
+| `gws gmail users drafts delete` | DELETE /users/&#123;userId&#125;/drafts/&#123;id&#125; (Google gmail API passthrough) |
+| `gws gmail users drafts get` | GET /users/&#123;userId&#125;/drafts/&#123;id&#125; (Google gmail API passthrough) |
+| `gws gmail users drafts list` | GET /users/&#123;userId&#125;/drafts (Google gmail API passthrough) |
+| `gws gmail users drafts send` | POST /users/&#123;userId&#125;/drafts/send (Google gmail API passthrough) |
+| `gws gmail users drafts update` | PUT /users/&#123;userId&#125;/drafts/&#123;id&#125; (Google gmail API passthrough) |
 | `gws gmail users labels list` | GET /users/&#123;userId&#125;/labels (Google gmail API passthrough) |
 | `gws gmail users messages list` | GET /users/&#123;userId&#125;/messages (Google gmail API passthrough) |
 | `gws gmail users messages get` | GET /users/&#123;userId&#125;/messages/&#123;id&#125; (Google gmail API passthrough) |

@@ -82,7 +82,7 @@ export function resolveTarget(
 // under -L and the target's parent under -P. Collapsing the `..` first makes
 // the two modes identical. resolveTarget normalizes for both modes, so
 // nothing downstream sees the raw form.
-export function joinPath(path: string, cwd: string): string {
+export function joinRaw(path: string, cwd: string): string {
   if (path.startsWith('/')) return path
   let end = cwd.length
   while (end > 0 && cwd[end - 1] === '/') end -= 1

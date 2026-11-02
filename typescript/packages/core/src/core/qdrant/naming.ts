@@ -21,7 +21,7 @@ import { valueText } from '../render/json.ts'
 import { fieldValue } from './payload.ts'
 import type { QdrantRow } from './types.ts'
 
-const UTF8 = new TextEncoder()
+const ENC = new TextEncoder()
 
 /**
  * Render one payload value as a VFS directory segment.
@@ -46,7 +46,7 @@ export function groupName(value: unknown, basename = false): string {
   const leaf = parts[parts.length - 1] ?? ''
   const segment = PATH_SAFE.encode(leaf === '' ? name : leaf)
   if (byteLength(segment) <= NAME_MAX_BYTES) return segment
-  return fitIdName(segment, md5Hex(UTF8.encode(segment)))
+  return fitIdName(segment, md5Hex(ENC.encode(segment)))
 }
 
 /** Return the stable, human-readable stem for a point's files. */

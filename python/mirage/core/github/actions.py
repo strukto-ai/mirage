@@ -24,7 +24,6 @@ from mirage.core.github.paginate import github_pages
 from mirage.core.github.repo import RepoRef
 from mirage.types import JsonValue
 
-WORKFLOW_FILES = (".yml", ".yaml")
 WORKFLOW_LOOKUP = 100
 # gh reads every page of a run's jobs, however many there are.
 ALL_JOBS = sys.maxsize
@@ -37,7 +36,7 @@ def _actions(ref: RepoRef, tail: str) -> str:
 async def resolve_workflow(
     account: GitHubAccount, ref: RepoRef, workflow: str
 ) -> str:
-    if workflow.isdigit() or workflow.endswith(WORKFLOW_FILES):
+    if workflow.isdigit() or workflow.endswith((".yml", ".yaml")):
         return workflow
     rows = await list_workflows(account, ref, WORKFLOW_LOOKUP)
     wanted = workflow.casefold()

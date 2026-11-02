@@ -10,7 +10,7 @@
       "command": "ls /mail",
       "expect": {
         "exit": 0,
-        "stdout": "INBOX\nSENT\nTRASH\nUNREAD\nexpenses\n",
+        "stdout": "DRAFT\nINBOX\nSENT\nTRASH\nUNREAD\nexpenses\n",
         "stderr": ""
       }
     },
@@ -731,6 +731,33 @@
       "expect": {
         "exit": 0,
         "stdout": "grepw=1\nrgw=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gm_send_subject_ending_in_the_suffix",
+      "seq": 530212,
+      "targets": [
+        "gmail"
+      ],
+      "command": "R=$(printf 'To: lila@example.com\\r\\nSubject: report.gmail.json\\r\\nMIME-Version: 1.0\\r\\nContent-Type: multipart/mixed; boundary=b\\r\\n\\r\\n--b\\r\\nContent-Type: text/plain\\r\\n\\r\\nrows attached\\r\\n--b\\r\\nContent-Type: text/plain\\r\\nContent-Disposition: attachment; filename=\"rows.txt\"\\r\\n\\r\\nalpha\\r\\n--b--\\r\\n' | base64 | tr -d '\\n=' | tr '/+' '_-') && gws gmail users messages send --params '{\"userId\": \"me\"}' --json \"{\\\"raw\\\": \\\"$R\\\"}\" | jq -r '.labelIds[0]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "SENT\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gm_attachment_dir_keeps_the_suffix_in_a_subject",
+      "seq": 530213,
+      "targets": [
+        "gmail"
+      ],
+      "clear_cache": true,
+      "command": "ls /mail/SENT/2026-02-01 | grep '^report' | sed 's/msg[0-9]*/ID/'; cat /mail/SENT/2026-02-01/report.gmail.json__msg*/rows.txt; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "report.gmail.json__ID\nreport.gmail.json__ID.gmail.json\nalpha\n",
         "stderr": ""
       }
     }

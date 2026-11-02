@@ -58,7 +58,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Langfuse mounted at `/<path
     | --- | --- |
     | `/<path>` | `langfuse`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
+
+    ##### `/<path>`
 
     ```text
     /<path>
@@ -108,7 +110,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Langfuse mounted at `/<path
     | --- | --- |
     | `/<path>` | `langfuse`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
+
+    ### `/<path>`
 
     ```text
     /<path>
@@ -148,51 +152,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Langfuse mounted at `/<path
   </Tab>
 </Tabs>
 {/* generated: vfs-md langfuse end */}
-
-```text
-/langfuse/
-  traces/
-    <trace-id>.json
-    ...
-  sessions/
-    <session-id>/
-      <trace-id>.json
-      ...
-  prompts/
-    <prompt-name>/
-      <version>.json
-      ...
-  datasets/
-    <dataset-name>/
-      items.jsonl
-      runs/
-        <run-name>.jsonl
-        ...
-```
-
-Example:
-
-```text
-/langfuse/
-  traces/
-    abc123.json
-    def456.json
-  sessions/
-    chat-session-1/
-      abc123.json
-      ghi789.json
-  prompts/
-    summarize/
-      1.json
-      2.json
-    classify/
-      1.json
-  datasets/
-    eval-v1/
-      items.jsonl
-      runs/
-        run-2026-04-01.jsonl
-```
 
 ### Traces
 

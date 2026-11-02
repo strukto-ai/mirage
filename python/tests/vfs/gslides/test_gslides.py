@@ -20,8 +20,8 @@ def test_vfs_md_includes_buckets_and_structure():
     assert "owned/" in rendered
     assert "shared/" in rendered
     assert "shared with you by others" in rendered
-    assert "still in owned/" in rendered
-    assert "gslide.json structure" in rendered
+    assert "still in `owned/`" in rendered
+    assert "`presentations.get`" in rendered
     text_path = (
         ".slides[].pageElements[].shape.text.textElements[].textRun.content"
     )

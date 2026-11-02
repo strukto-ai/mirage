@@ -41,6 +41,7 @@ from mirage.core.linear.normalize import (
     normalize_project,
     normalize_team,
     normalize_user,
+    project_issue_rows,
 )
 from mirage.core.render.json import json_bytes
 from mirage.io.types import ByteSource, IOResult
@@ -52,30 +53,6 @@ def _require_team(fl: FlagView) -> str:
     if not team:
         raise ValueError("--team is required")
     return team
-
-
-async def _project_issue_rows(
-    accessor: LinearAccessor, team_id: str, project_id: str
-) -> list[dict[str, JsonValue]]:
-    team_issues = await list_team_issues(
-        accessor, team_id, projects=[project_id]
-    )
-    rows: list[dict[str, JsonValue]] = []
-    for issue in team_issues:
-        if (issue.get("project") or {}).get("id") != project_id:
-            continue
-        state = issue.get("state") or {}
-        rows.append(
-            {
-                "issue_id": issue.get("id"),
-                "issue_key": issue.get("identifier"),
-                "title": issue.get("title"),
-                "state_id": state.get("id"),
-                "state_name": state.get("name"),
-                "url": issue.get("url"),
-            }
-        )
-    return rows
 
 
 async def _team_list(
@@ -126,7 +103,12 @@ async def _project_list(
     projects = await list_team_projects(accessor, team["id"])
     payload = []
     for project in projects:
-        rows = await _project_issue_rows(accessor, team["id"], project["id"])
+        rows = project_issue_rows(
+            await list_team_issues(
+                accessor, team["id"], projects=[project["id"]]
+            ),
+            project["id"],
+        )
         payload.append(
             normalize_project(
                 project,
@@ -147,7 +129,12 @@ async def _project_get(
     projects = await list_team_projects(accessor, team["id"])
     for project in projects:
         if project.get("id") == project_id:
-            rows = await _project_issue_rows(accessor, team["id"], project_id)
+            rows = project_issue_rows(
+                await list_team_issues(
+                    accessor, team["id"], projects=[project_id]
+                ),
+                project_id,
+            )
             return json_bytes(
                 normalize_project(
                     project,

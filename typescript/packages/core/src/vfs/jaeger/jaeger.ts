@@ -20,12 +20,14 @@ import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
-export const VFS_MD = `{prefix}
+export const VFS_MD = `\`\`\`text
+{prefix}
   services/
     <service-name>/
       operations.json
       traces/
-        <trace-id>.json`
+        <trace-id>.json
+\`\`\``
 
 /**
  * Jaeger's functions over its accessor, which a host package builds

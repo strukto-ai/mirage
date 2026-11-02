@@ -301,10 +301,6 @@ async function rollBack(
   return execFailure(await materialize(errBytes), await materialize(out))
 }
 
-function scopeOf(target: unknown): PathSpec {
-  return typeof target === 'string' ? toScope(target) : (target as PathSpec)
-}
-
 /**
  * Point the shell's own streams at files for the rest of the shell. `exec
  * > file` diverts later stdout, `2> file` stderr, `< file` stdin, `>>`
@@ -398,7 +394,7 @@ async function installDescriptor(
     bind(session, fd, id, append, readEnd(session, target, stdin), original?.file ?? null, stream)
     return null
   }
-  const scope = scopeOf(target)
+  const scope = typeof target === 'string' ? toScope(target) : (target as PathSpec)
   try {
     if (redirect.kind === RedirectKind.STDIN || redirect.kind === RedirectKind.READWRITE) {
       let data: ByteSource

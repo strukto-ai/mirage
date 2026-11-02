@@ -16,15 +16,9 @@ import { mountKey, mountPrefixOf } from '../../utils/key_prefix.ts'
 import { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
-export function ensurePathSpec(path: PathSpec | string): PathSpec {
-  if (path instanceof PathSpec) return path
-  return PathSpec.fromStrPath(path)
-}
-
-export function parentPath(path: PathSpec | string): PathSpec {
-  const p = ensurePathSpec(path)
-  const prefix = mountPrefixOf(p.virtual, p.vfsPath)
-  const stripped = rstripSlash(p.mountPath)
+export function parentPath(path: PathSpec): PathSpec {
+  const prefix = mountPrefixOf(path.virtual, path.vfsPath)
+  const stripped = rstripSlash(path.mountPath)
   let parentRelative = stripped.includes('/') ? stripped.slice(0, stripped.lastIndexOf('/')) : '/'
   if (!parentRelative.startsWith('/')) parentRelative = '/' + parentRelative
   let virtual: string

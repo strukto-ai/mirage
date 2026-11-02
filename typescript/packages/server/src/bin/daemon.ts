@@ -13,10 +13,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
 import { isMainThread, parentPort } from 'node:worker_threads'
-import { buildApp, type BuildAppOptions, type MirageApp } from '../app.ts'
+import {
+  buildApp,
+  removePidFile,
+  writePidFile,
+  type BuildAppOptions,
+  type MirageApp,
+} from '../app.ts'
 import { DaemonConfigError, readDaemonTable } from '../daemon_config.ts'
 import { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS, ENV_WORKER_SOCKET } from '../env.ts'
 import { resolveAllowedHosts, resolveForwardedAllowIps } from '../host_validation.ts'
@@ -40,19 +44,6 @@ export function buildDaemonOpts(env: Record<string, string | undefined>): Daemon
   const idleGraceSeconds = Number(env[ENV_IDLE_GRACE_SECONDS] ?? '30')
   const opts: Omit<BuildAppOptions, 'onIdleExit'> = { idleGraceSeconds }
   return { port, opts }
-}
-
-async function writePidFile(p: string): Promise<void> {
-  await mkdir(dirname(p), { recursive: true })
-  await writeFile(p, String(process.pid))
-}
-
-async function removePidFile(p: string): Promise<void> {
-  try {
-    await rm(p, { force: true })
-  } catch (err) {
-    console.debug(`could not remove pid file ${p}`, err)
-  }
 }
 
 /**

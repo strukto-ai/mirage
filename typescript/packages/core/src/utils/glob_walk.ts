@@ -338,13 +338,6 @@ export function spellMatch(
   return [...head.map(unmarkGlobs), ...tail].join('/')
 }
 
-// bash skips a directory it cannot open, so a pattern under one matches
-// nothing there and the word stays as typed.
-function isUnlistableDir(err: unknown): boolean {
-  const code = (err as { code?: string }).code
-  return code === 'ENOENT' || code === 'ENOTDIR' || code === 'EACCES'
-}
-
 // Shared resolve_glob loop: resolved specs pass through, pattern specs
 // expand segment-by-segment (mid-path aware, spelled as typed), an
 // unmatched glob word stays the literal (bash nullglob off: the command
@@ -559,11 +552,14 @@ export async function expandPattern<A, I>(
           vfsPath: rekey(path.virtual, path.vfsPath, parent),
           pattern: hasGlob(seg, access) ? seg : null,
         })
+        // bash skips a directory it cannot open, so a pattern under one
+        // matches nothing there and the word stays as typed.
         let entries: string[]
         try {
           entries = await readdir(accessor, spec, index)
         } catch (err) {
-          if (!isUnlistableDir(err)) throw err
+          const code = (err as { code?: string }).code
+          if (code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'EACCES') throw err
           logger.debug?.(`glob: ${parent} lists nothing: ${String(err)}`)
           entries = []
         }

@@ -25,18 +25,19 @@ from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 
 VFS_MD = """\
+```text
 {prefix}
-  <folder>/
+  <folder>/                         # INBOX, Sent, Drafts, ...
     <yyyy-mm-dd>/
-      <subject>__<uid>.email.json
-      <subject>__<uid>/           # if attachments exist
+      <subject>__<uid>.email.json   # the message as JSON
+      <subject>__<uid>/             # its attachments, if any
         <attachment-filename>
-  Folders include: INBOX, Sent, Drafts, etc. cat shows email as JSON.
+```
 
-  <subject> is sanitized (don't construct it; ls the date dir).
-
-  To act on mail (list/search/read/compose/reply/forward), use the
-  himalaya CLI if installed: himalaya --help"""
+- `<subject>` is sanitized: `ls` the date directory rather than
+  construct it.
+- To list, search, read, compose, reply or forward, use the `himalaya`
+  CLI if installed (`himalaya --help`)."""
 
 
 class EmailVFS(BaseVFS):

@@ -18,7 +18,7 @@ from mirage.core.hf_hub.lookup import refusals_denied
 from mirage.core.object_store.stat import make_stat
 from mirage.types import FileStat, PathSpec
 
-_stat = make_stat(DRIVER)
+_kit_stat = make_stat(DRIVER)
 
 
 async def stat(
@@ -40,4 +40,4 @@ async def stat(
         FileStat: the entry, fingerprinted with the file's xet hash.
     """
     with refusals_denied(path_spec):
-        return await _stat(accessor, path_spec)
+        return await _kit_stat(accessor, path_spec)

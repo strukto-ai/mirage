@@ -408,6 +408,10 @@ class Operand:
     groups: list[tuple[PathSpec, list[FileStat]]]
 
 
+def _err_text(exc: BaseException) -> str:
+    return fs_strerror(exc) or str(exc)
+
+
 def exit_status_for(warnings: list[LsWarning]) -> int:
     """Collapse diagnostics into a GNU ls exit status.
 
@@ -1031,7 +1035,7 @@ async def probe_operand(
         try:
             found = await _operand_stat(path, own_stat)
         except OSError as stat_exc:
-            refused = fs_strerror(stat_exc) or str(stat_exc)
+            refused = _err_text(stat_exc)
         if found is not None and found.type != FileType.DIRECTORY:
             return Operand(path, _as_operand(found, path), []), warnings
         if (
@@ -1045,9 +1049,7 @@ async def probe_operand(
             # GNU 9.7 stats an operand before it opens one: a stat that
             # fails is what it names, and a directory it may not read is
             # worded apart, the entry being there.
-            reason = (
-                fs_strerror(exc) or str(exc) if refused is None else refused
-            )
+            reason = _err_text(exc) if refused is None else refused
             verb = (
                 "cannot open directory"
                 if found is not None and isinstance(exc, PermissionError)
@@ -1191,9 +1193,8 @@ async def _operand_row(
             # children, so the dispatcher stats it as a directory and -d
             # must print the same row.
             return FileStat(name=path.raw_path, type=FileType.DIRECTORY)
-        detail = fs_strerror(exc) or exc
         return LsWarning(
-            f"ls: cannot access '{path.raw_path}': {detail}", True
+            f"ls: cannot access '{path.raw_path}': {_err_text(exc)}", True
         )
     # GNU ls -d prints the operand as given.
     return listed.model_copy(update={"name": path.raw_path})
@@ -1549,7 +1550,7 @@ async def ls(
                             warnings.append(
                                 LsWarning(
                                     f"ls: cannot access '{name}': "
-                                    f"{fs_strerror(exc) or exc}",
+                                    f"{_err_text(exc)}",
                                     False,
                                 )
                             )

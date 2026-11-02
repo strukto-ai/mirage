@@ -165,10 +165,6 @@ export function lsModeString(s: FileStat): string {
   )
 }
 
-function padLeft(s: string, width: number): string {
-  return s.length >= width ? s : ' '.repeat(width - s.length) + s
-}
-
 // The time column: `Mon DD HH:MM` for a recent time, `Mon DD  YYYY` for an
 // old or future one, as GNU prints it. `findRule` uses findutils' window
 // (old past 180 days, future past an hour) rather than ls's (the last
@@ -192,7 +188,7 @@ function lsTimeString(modified: string | null | undefined, findRule = false): st
   const d = parseWhen(modified)
   if (d === null) return EPOCH_LS_TIME
   const month = MONTHS[d.getUTCMonth()] ?? 'Jan'
-  const day = padLeft(String(d.getUTCDate()), 2)
+  const day = String(d.getUTCDate()).padStart(2)
   if (!isRecent(d.getTime() / 1000, findRule))
     return `${month} ${day}  ${String(d.getUTCFullYear())}`
   const hh = String(d.getUTCHours()).padStart(2, '0')
@@ -339,8 +335,8 @@ export function formatLsLong(
     if (columns.group) fields.push(failed ? UNKNOWN_STAT_FIELD : groupName(s.gid, identity))
     if (columns.context) fields.push(UNKNOWN_STAT_FIELD)
     fields.push(
-      padLeft(rawSize, width),
-      failed ? padLeft(time, timeWidth) : time,
+      rawSize.padStart(width),
+      failed ? time.padStart(timeWidth) : time,
       opts.names?.[i] ?? lsName(s),
     )
     const lead = columns.inode ? `${UNKNOWN_STAT_FIELD} ` : ''
@@ -399,8 +395,8 @@ export function formatFindLs(s: FileStat, identity: Identity | null): string {
   const who = ownerName(s.uid, identity)
   const grp = groupName(s.gid, identity)
   return (
-    `${padLeft(UNKNOWN_STAT_FIELD, 9)} ${padLeft(UNKNOWN_STAT_FIELD, 6)} ` +
-    `${lsModeString(s)} ${padLeft('1', 3)} ${who.padEnd(8)} ${grp.padEnd(8)} ` +
-    `${padLeft(size, 8)} ${time} ${findLsName(s)}`
+    `${UNKNOWN_STAT_FIELD.padStart(9)} ${UNKNOWN_STAT_FIELD.padStart(6)} ` +
+    `${lsModeString(s)} ${'1'.padStart(3)} ${who.padEnd(8)} ${grp.padEnd(8)} ` +
+    `${size.padStart(8)} ${time} ${findLsName(s)}`
   )
 }

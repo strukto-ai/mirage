@@ -85,6 +85,18 @@ export interface PullListFilter {
   readonly head?: string | undefined
 }
 
+const PULL_LIST =
+  '    query PullRequestList(\n      $owner: String!,\n      $repo: String!,\n' +
+  '      $limit: Int!,\n      $endCursor: String,\n      $baseBranch: String,\n' +
+  '      $headBranch: String,\n      $state: [PullRequestState!] = OPEN\n    ) {\n' +
+  '      repository(owner: $owner, name: $repo) {\n        pullRequests(\n' +
+  '          states: $state,\n          baseRefName: $baseBranch,\n' +
+  '          headRefName: $headBranch,\n          first: $limit,\n' +
+  '          after: $endCursor,\n          orderBy: {field: CREATED_AT, direction: DESC}\n' +
+  '        ) {\n          totalCount\n          nodes {\n            ...pr\n' +
+  '          }\n          pageInfo {\n            hasNextPage\n            endCursor\n' +
+  '          }\n        }\n      }\n    }'
+
 /**
  * The selected fields of a repository's pull requests, over GraphQL, as
  * gh's PullRequestList asks for them for `pr list --json`: newest first, a
@@ -106,18 +118,7 @@ export async function listPullRequestFields(
   limit: number,
   selection: string,
 ): Promise<Record<string, unknown>[]> {
-  const query =
-    `fragment pr on PullRequest{${selection}}\n` +
-    '    query PullRequestList(\n      $owner: String!,\n      $repo: String!,\n' +
-    '      $limit: Int!,\n      $endCursor: String,\n      $baseBranch: String,\n' +
-    '      $headBranch: String,\n      $state: [PullRequestState!] = OPEN\n    ) {\n' +
-    '      repository(owner: $owner, name: $repo) {\n        pullRequests(\n' +
-    '          states: $state,\n          baseRefName: $baseBranch,\n' +
-    '          headRefName: $headBranch,\n          first: $limit,\n' +
-    '          after: $endCursor,\n          orderBy: {field: CREATED_AT, direction: DESC}\n' +
-    '        ) {\n          totalCount\n          nodes {\n            ...pr\n' +
-    '          }\n          pageInfo {\n            hasNextPage\n            endCursor\n' +
-    '          }\n        }\n      }\n    }'
+  const query = `fragment pr on PullRequest{${selection}}\n${PULL_LIST}`
   const rows: Record<string, unknown>[] = []
   const seen = new Set<number>()
   let cursor: string | null = null

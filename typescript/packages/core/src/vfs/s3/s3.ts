@@ -41,6 +41,17 @@ import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
+function awsEndpoint(endpoint: string): boolean {
+  let host: string
+  try {
+    host = new URL(endpoint).hostname
+  } catch (error) {
+    console.debug(`endpoint not parsed: ${endpoint}: ${String(error)}`)
+    return false
+  }
+  return AWS_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))
+}
+
 /**
  * S3's functions over its accessor, which the node and browser
  * packages build over their own transport.
@@ -50,17 +61,8 @@ export class S3VFS extends BaseVFS<S3Accessor> {
     if (this.presigned) return {}
     if (this.name === 'minio') return CUSTOM_CONDITION_SUPPORT
     const endpoint = this.resolvedEndpoint
-    if (this.name === 's3' && endpoint !== undefined && endpoint !== '') {
-      let host: string
-      try {
-        host = new URL(endpoint).hostname
-      } catch (error) {
-        console.debug(`endpoint not parsed: ${endpoint}: ${String(error)}`)
-        return CUSTOM_CONDITION_SUPPORT
-      }
-      if (!AWS_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`)))
-        return CUSTOM_CONDITION_SUPPORT
-    }
+    if (this.name === 's3' && endpoint !== undefined && endpoint !== '' && !awsEndpoint(endpoint))
+      return CUSTOM_CONDITION_SUPPORT
     return CONDITION_SUPPORT
   }
 

@@ -25,7 +25,7 @@ import {
   bindTree,
   dropPruned,
   keep,
-  optionsTree,
+  argsToTree,
   printfKind,
   prunedKeys,
   settlePrunes,
@@ -153,7 +153,7 @@ async function isEmptyEntry(deps: WalkFindDeps, path: string, isDir: boolean): P
   return st !== null && st.type === FileType.FILE && st.size === 0
 }
 
-async function walk(
+async function walkCollect(
   deps: WalkFindDeps,
   spec: PathSpec,
   maxDepth: number | null,
@@ -206,7 +206,7 @@ async function walk(
       resolved: false,
       vfsPath: stripSlash(trimmed),
     })
-    await walk(deps, childSpec, maxDepth, depth + 1, out, below)
+    await walkCollect(deps, childSpec, maxDepth, depth + 1, out, below)
   }
 }
 
@@ -225,7 +225,7 @@ export async function walkFind(
   // root), so `-maxdepth 0` prints just the root and `-name` can match
   // the root's own basename.
   const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
-  const pruneTree = bindTree(optionsTree(options), '', path.virtual, path.rawPath)
+  const pruneTree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
   const prunes = treeHasPrune(pruneTree)
   const needEmpty = treeHasEmpty(pruneTree)
   const acts = treeHasAction(pruneTree)
@@ -274,7 +274,7 @@ export async function walkFind(
   // is either an error the walk would have to swallow (Box answers
   // ENOTDIR) or a wasted round trip everywhere else.
   if (rootStat === null || rootStat.type === FileType.DIRECTORY) {
-    await walk(
+    await walkCollect(
       { ...deps, readdir: readDirectory },
       path,
       options.maxDepth ?? null,
@@ -284,7 +284,7 @@ export async function walkFind(
     )
   }
   const results: string[] = []
-  const tree = bindTree(optionsTree(options), '', path.virtual, path.rawPath)
+  const tree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
   const needSize = options.minSize != null || options.maxSize != null
   const needMtime = options.mtimeMin != null || options.mtimeMax != null
   const learned = new Map<string, number | null>()

@@ -39,7 +39,7 @@ BUCKET = Codec(validate=valid_bucket)
 EVENT_NAME = Codec(validate=is_event_name)
 
 _CAL = (Slot("calendar"),)
-_BUCKET = _CAL + (Slot("bucket", BUCKET),)
+_BUCKET_SEGS = _CAL + (Slot("bucket", BUCKET),)
 
 # One description of the tree: readdir, stat, read and unlink all
 # classify through it, so the file surface and the write surface cannot
@@ -54,10 +54,10 @@ SCOPES = (
         leaf=True,
         filetype=ContentType.JSON,
     ),
-    Scope(kind="bucket", segments=_BUCKET),
+    Scope(kind="bucket", segments=_BUCKET_SEGS),
     Scope(
         kind="event",
-        segments=_BUCKET + (Slot("event", EVENT_NAME),),
+        segments=_BUCKET_SEGS + (Slot("event", EVENT_NAME),),
         leaf=True,
         filetype=ContentType.JSON,
     ),

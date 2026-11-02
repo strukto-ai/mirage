@@ -25,7 +25,8 @@ import { BaseVFS } from '../base.ts'
 import type { RedactedSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 
-export const VFS_MD = `{prefix}
+export const VFS_MD = `\`\`\`text
+{prefix}
   workspaces/
     <workspace-name>__<workspace-id>/
       workspace.json
@@ -43,11 +44,12 @@ export const VFS_MD = `{prefix}
                 <card-name>__<card-id>/
                   card.json
                   comments.jsonl
-  Always ls directories first to discover exact names.
+\`\`\`
 
-  To act on boards and cards (list boards, members, lists, labels,
-  cards and comments; create, update, move, assign, label and comment
-  on cards), use the trello CLI if installed: trello --help`
+- \`ls\` directories first to discover exact names.
+- To act on boards and cards (list boards, members, lists, labels, cards
+  and comments; create, update, move, assign, label and comment on
+  cards), use the \`trello\` CLI if installed (\`trello --help\`).`
 
 export class TrelloVFS extends BaseVFS {
   override readonly handed = {

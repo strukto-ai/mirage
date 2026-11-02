@@ -291,7 +291,7 @@ const UNREAD_RULE: TransitionRule = { kind: 'D', month: 0, week: 0, weekday: 0, 
 const DAY_BEFORE_YEAR: TransitionRule = { ...UNREAD_RULE, kind: 'J' }
 
 // Days in `month` (1 for January) of `year`: day 0 of the next month.
-function daysInMonth(year: number, month: number): number {
+export function daysInMonth(year: number, month: number): number {
   return utcFromWall({ year, month, day: 0, hour: 0, minute: 0, second: 0, ms: 0 }).getUTCDate()
 }
 

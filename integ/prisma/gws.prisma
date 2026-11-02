@@ -343,6 +343,7 @@ model Message {
   headers     MessageHeader[]
   labels      MessageLabel[]
   attachments Attachment[]
+  drafts      Draft[]
 
   @@id([tenant, id])
   @@index([tenant, threadId])
@@ -391,6 +392,20 @@ model Attachment {
   message Message @relation(fields: [tenant, messageId], references: [tenant, id])
 
   @@id([tenant, attachmentId])
+  @@index([tenant, messageId])
+}
+
+// A draft holds one DRAFT-labelled message; drafts.update swaps in a new one,
+// as Gmail does, and drafts.send keeps the message and drops the draft.
+model Draft {
+  tenant    String
+  id        String
+  messageId String
+  seq       Int    @default(0)
+
+  message Message @relation(fields: [tenant, messageId], references: [tenant, id])
+
+  @@id([tenant, id])
   @@index([tenant, messageId])
 }
 

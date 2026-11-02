@@ -40,6 +40,16 @@ export interface CloseDeps {
 }
 
 /**
+ * Delete the workspace's state: its own planes, then its store scope. A
+ * plane store passed in directly is not the state store's, so the store's
+ * drop alone would leave it holding the workspace.
+ */
+async function dropState(deps: CloseDeps): Promise<void> {
+  for (const plane of deps.planes) await plane.clear()
+  await deps.stateStore.drop(deps.workspaceId)
+}
+
+/**
  * Release everything the workspace owns, exactly once (the caller
  * guards re-entry). Mirrors the Python `close_async` in
  * `workspace/lifecycle.py`.
@@ -96,14 +106,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   // Nothing writes the state any more, so it can go before its store
   // closes. A failed drop must not skip the rest of teardown; it is raised
   // with the other failures once everything is released.
-  if (deps.dropState) {
-    await settle([
-      async () => {
-        for (const plane of deps.planes) await plane.clear()
-        await deps.stateStore.drop(deps.workspaceId)
-      },
-    ])
-  }
+  if (deps.dropState) await settle([() => dropState(deps)])
   if (deps.ownsStateStore) await settle([() => deps.stateStore.close()])
   await settle([() => deps.cache.clear()])
   await settle([() => deps.cache.close()])

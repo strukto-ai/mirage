@@ -37,6 +37,7 @@ from mirage.workspace.executor.builtins.alias.alias import body_alias_values
 from mirage.workspace.executor.builtins.declare.constants import (
     ANSI_C_ESCAPES,
     BARE_KEY_RE,
+    CONTROL_RE,
     EXPORT_FLAGS,
     LISTED_ATTRIBUTES,
     READONLY_FLAGS,
@@ -537,7 +538,7 @@ def bash_declare_quote(value: str) -> str:
         str: the quoted value, ready to follow ``declare -x NAME=``.
     """
     parts: list[str] = []
-    if any(is_control(ch) for ch in value):
+    if CONTROL_RE.search(value):
         for ch in value:
             escape = ANSI_C_ESCAPES.get(ch)
             if escape is not None:

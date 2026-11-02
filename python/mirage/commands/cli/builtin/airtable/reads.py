@@ -16,7 +16,6 @@ import functools
 
 from mirage.accessor.airtable import AirtableAccessor
 from mirage.commands.cli.builtin.airtable.util import (
-    Outcome,
     find_table,
     no_operands,
     one_operand,
@@ -41,7 +40,7 @@ from mirage.core.airtable.normalize import (
     records_jsonl,
 )
 from mirage.core.render.json import json_bytes
-from mirage.io.types import IOResult
+from mirage.io.types import CommandOutput, IOResult
 
 
 async def _base_list_body(
@@ -49,7 +48,7 @@ async def _base_list_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     no_operands(texts)
     bases = await list_bases(accessor)
     payload = [normalize_base_summary(base) for base in bases]
@@ -61,7 +60,7 @@ async def _base_get_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     base_id = scoped_base(accessor.config, one_operand(texts, "BASE"))
     for base in await list_bases(accessor):
         if base.get("id") == base_id:
@@ -76,7 +75,7 @@ async def _table_get_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     ref = one_operand(texts, "TABLE")
     base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     table = find_table(await list_tables(accessor, base_id), ref)
@@ -90,7 +89,7 @@ async def _record_list_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     no_operands(texts)
     asked = fl.as_int("max_records")
     if asked is not None and asked < 1:
@@ -119,7 +118,7 @@ async def _record_get_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     record_id = one_operand(texts, "RECORD")
     base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     record = await get_record(
@@ -133,7 +132,7 @@ async def _comment_list_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     record_id = one_operand(texts, "RECORD")
     base_id = scoped_base(accessor.config, fl.as_str("base") or "")
     comments = await list_comments(

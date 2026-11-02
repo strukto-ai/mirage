@@ -166,7 +166,7 @@ def _rules(v: Any, where: str) -> Any:
     return tuple(rules)
 
 
-def _patterns(v: Any) -> Any:
+def _parse_allow(v: Any) -> Any:
     if v is None:
         return None
     return _string_list(v, "commands.allow", names="a command")
@@ -313,7 +313,7 @@ class CommandsBlock(BaseModel):
     @field_validator("allow", mode="before")
     @classmethod
     def _v_allow(cls, v: Any) -> Any:
-        return _patterns(v)
+        return _parse_allow(v)
 
     @field_validator("ask", mode="before")
     @classmethod

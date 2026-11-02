@@ -46,7 +46,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `linear`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
+
+    ##### `/<path>`
 
     ```text
     /<path>
@@ -65,102 +67,128 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
             <name>__<cycle-id>.json
           documents/
             <title>__<document-id>.json
-      Always ls directories first to discover exact names.
-
-      Folder/file name anatomy: every entity-named segment is
-        <sanitized-human-readable>__<id>
-      The human-readable part is sanitized — don't construct it; ls the
-      parent dir to discover exact entry names.
-      IDs are the LAST "__"-separated segment. To extract:
-        /<path>/teams/STR__Strukto-ai__<team-id>/             -> <team-id>
-        /<path>/teams/.../issues/STR-42__<issue-id>/          -> <issue-id>
-        /<path>/teams/.../members/Alice__<user-id>.json       -> <user-id>
-
-      All cat output is mirage-normalized (snake_case keys), NOT the raw
-      Linear GraphQL response. Shapes:
-
-      team.json:
-        {
-          "team_id": "...", "team_key": "STR", "team_name": "Strukto",
-          "name": "...", "description": "...", "timezone": "...",
-          "updated_at": "...",
-          "states": [
-            { "state_id": "...", "state_name": "Todo", "type": "unstarted" },
-            ...                              # one element per workflow state
-          ]
-        }
-
-      issue.json:
-        {
-          "issue_id": "...", "issue_key": "STR-42",
-          "title": "...", "description": "...",
-          "team_id": "...", "team_key": "...", "team_name": "...",
-          "project_id": "...",   "project_name": "...",
-          "cycle_id": "...",     "cycle_name": "...",   "cycle_number": 7,
-          "state_id": "...",     "state_name": "In Progress",
-          "assignee_id": "...",  "assignee_email": "...", "assignee_name": "...",
-          "creator_id":  "...",  "creator_email":  "...", "creator_name":  "...",
-          "priority": 2,         # 0=none 1=urgent 2=high 3=medium 4=low
-          "label_ids":   ["..."],
-          "label_names": ["bug", "frontend"],
-          "created_at": "...", "updated_at": "...", "url": "..."
-        }
-
-      comments.jsonl:                      # one normalized comment per line
-        { "comment_id": "...", "issue_id": "...", "issue_key": "STR-42",
-          "user_id": "...", "user_email": "...", "user_name": "...",
-          "body": "...", "created_at": "...", "updated_at": "...",
-          "url": "..." }
-
-      project.json:
-        {
-          "project_id": "...", "team_id": "...",
-          "name": "...", "description": "...", "state": "started",
-          "lead_id": "...", "updated_at": "...", "url": "...",
-          "issue_count": 12,
-          "issues": [
-            { "issue_id": "...", "issue_key": "STR-42", "title": "...",
-              "state_id": "...", "state_name": "In Progress", "url": "..." }
-          ]
-        }
-
-      cycle.json:
-        {
-          "cycle_id": "...", "team_id": "...",
-          "name": "...", "number": 7,
-          "starts_at": "...", "ends_at": "...",
-          "updated_at": "...", "url": "..."
-        }
-
-      user.json:
-        {
-          "user_id": "...", "name": "...", "display_name": "...",
-          "email": "...", "is_active": true, "is_admin": false,
-          "updated_at": "...", "url": "..."
-        }
-
-      Useful jq paths:
-        .issue_key                              # issue.json
-        .state_name                             # issue.json
-        .assignee_email                         # issue.json
-        .label_names[]                          # issue.json
-        .issues[] | select(.state_name == "In Progress")   # project.json
-        .states[].state_name                    # team.json
-        [inputs] | length                       # comments.jsonl: count
-        [inputs | select(.user_email == "x")] | length     # comments.jsonl
-
-      document.json:
-        {
-          "document_id": "...", "title": "...", "content": "...",
-          "project_id": "...", "project_name": "...",
-          "creator_id": "...", "creator_name": "...", "creator_email": "...",
-          "created_at": "...", "updated_at": "...", "url": "..."
-        }
-
-      To act on issues (list/get/create/update/assign/transition,
-      comments, projects, cycles, labels, users, documents, search), use
-      the linear CLI if installed: linear --help
     ```
+
+    - `ls` directories first to discover exact names.
+    - Every entity-named segment is `<sanitized-human-readable>__<id>`. The
+      human-readable part is sanitized, so don't construct it; `ls` the
+      parent directory instead.
+    - The id is the last `__`-separated segment:
+
+    ```text
+    /<path>/teams/STR__Strukto-ai__<team-id>/         -> <team-id>
+    /<path>/teams/.../issues/STR-42__<issue-id>/      -> <issue-id>
+    /<path>/teams/.../members/Alice__<user-id>.json   -> <user-id>
+    ```
+
+    All `cat` output is normalized by Mirage (snake_case keys), not the raw
+    Linear GraphQL response. The shapes:
+
+    `team.json`:
+
+    ```jsonc
+    {
+      "team_id": "...", "team_key": "STR", "team_name": "Strukto",
+      "name": "...", "description": "...", "timezone": "...",
+      "updated_at": "...",
+      "states": [
+        { "state_id": "...", "state_name": "Todo", "type": "unstarted" },
+        ...                              // one element per workflow state
+      ]
+    }
+    ```
+
+    `issue.json`:
+
+    ```jsonc
+    {
+      "issue_id": "...", "issue_key": "STR-42",
+      "title": "...", "description": "...",
+      "team_id": "...", "team_key": "...", "team_name": "...",
+      "project_id": "...",   "project_name": "...",
+      "cycle_id": "...",     "cycle_name": "...",   "cycle_number": 7,
+      "state_id": "...",     "state_name": "In Progress",
+      "assignee_id": "...",  "assignee_email": "...", "assignee_name": "...",
+      "creator_id":  "...",  "creator_email":  "...", "creator_name":  "...",
+      "priority": 2,         // 0=none 1=urgent 2=high 3=medium 4=low
+      "label_ids":   ["..."],
+      "label_names": ["bug", "frontend"],
+      "created_at": "...", "updated_at": "...", "url": "..."
+    }
+    ```
+
+    `comments.jsonl`, one normalized comment per line:
+
+    ```jsonc
+    { "comment_id": "...", "issue_id": "...", "issue_key": "STR-42",
+      "user_id": "...", "user_email": "...", "user_name": "...",
+      "body": "...", "created_at": "...", "updated_at": "...",
+      "url": "..." }
+    ```
+
+    A project (`projects/<name>__<project-id>.json`):
+
+    ```jsonc
+    {
+      "project_id": "...", "team_id": "...",
+      "name": "...", "description": "...", "state": "started",
+      "lead_id": "...", "updated_at": "...", "url": "...",
+      "issue_count": 12,
+      "issues": [
+        { "issue_id": "...", "issue_key": "STR-42", "title": "...",
+          "state_id": "...", "state_name": "In Progress", "url": "..." }
+      ]
+    }
+    ```
+
+    A cycle (`cycles/<name>__<cycle-id>.json`):
+
+    ```jsonc
+    {
+      "cycle_id": "...", "team_id": "...",
+      "name": "...", "number": 7,
+      "starts_at": "...", "ends_at": "...",
+      "updated_at": "...", "url": "..."
+    }
+    ```
+
+    A member (`members/<display-name>__<user-id>.json`):
+
+    ```jsonc
+    {
+      "user_id": "...", "name": "...", "display_name": "...",
+      "email": "...", "is_active": true, "is_admin": false,
+      "updated_at": "...", "url": "..."
+    }
+    ```
+
+    A document (`documents/<title>__<document-id>.json`):
+
+    ```jsonc
+    {
+      "document_id": "...", "title": "...", "content": "...",
+      "project_id": "...", "project_name": "...",
+      "creator_id": "...", "creator_name": "...", "creator_email": "...",
+      "created_at": "...", "updated_at": "...", "url": "..."
+    }
+    ```
+
+    Useful `jq` paths:
+
+    ```jq
+    .issue_key                                          # issue.json
+    .state_name                                         # issue.json
+    .assignee_email                                     # issue.json
+    .label_names[]                                      # issue.json
+    .issues[] | select(.state_name == "In Progress")    # a project
+    .states[].state_name                                # team.json
+    [inputs] | length                                   # comments.jsonl: count
+    [inputs | select(.user_email == "x")] | length      # comments.jsonl
+    ```
+
+    To act on issues (list, get, create, update, assign, transition,
+    comments, projects, cycles, labels, users, documents, search), use the
+    `linear` CLI if installed (`linear --help`).
 
     #### Supported Unix Commands for VFS
 
@@ -193,7 +221,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `linear`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
+
+    ### `/<path>`
 
     ```text
     /<path>
@@ -212,102 +242,128 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
             <name>__<cycle-id>.json
           documents/
             <title>__<document-id>.json
-      Always ls directories first to discover exact names.
-
-      Folder/file name anatomy: every entity-named segment is
-        <sanitized-human-readable>__<id>
-      The human-readable part is sanitized — don't construct it; ls the
-      parent dir to discover exact entry names.
-      IDs are the LAST "__"-separated segment. To extract:
-        /<path>/teams/STR__Strukto-ai__<team-id>/             -> <team-id>
-        /<path>/teams/.../issues/STR-42__<issue-id>/          -> <issue-id>
-        /<path>/teams/.../members/Alice__<user-id>.json       -> <user-id>
-
-      All cat output is mirage-normalized (snake_case keys), NOT the raw
-      Linear GraphQL response. Shapes:
-
-      team.json:
-        {
-          "team_id": "...", "team_key": "STR", "team_name": "Strukto",
-          "name": "...", "description": "...", "timezone": "...",
-          "updated_at": "...",
-          "states": [
-            { "state_id": "...", "state_name": "Todo", "type": "unstarted" },
-            ...                              # one element per workflow state
-          ]
-        }
-
-      issue.json:
-        {
-          "issue_id": "...", "issue_key": "STR-42",
-          "title": "...", "description": "...",
-          "team_id": "...", "team_key": "...", "team_name": "...",
-          "project_id": "...",   "project_name": "...",
-          "cycle_id": "...",     "cycle_name": "...",   "cycle_number": 7,
-          "state_id": "...",     "state_name": "In Progress",
-          "assignee_id": "...",  "assignee_email": "...", "assignee_name": "...",
-          "creator_id":  "...",  "creator_email":  "...", "creator_name":  "...",
-          "priority": 2,         # 0=none 1=urgent 2=high 3=medium 4=low
-          "label_ids":   ["..."],
-          "label_names": ["bug", "frontend"],
-          "created_at": "...", "updated_at": "...", "url": "..."
-        }
-
-      comments.jsonl:                      # one normalized comment per line
-        { "comment_id": "...", "issue_id": "...", "issue_key": "STR-42",
-          "user_id": "...", "user_email": "...", "user_name": "...",
-          "body": "...", "created_at": "...", "updated_at": "...",
-          "url": "..." }
-
-      project.json:
-        {
-          "project_id": "...", "team_id": "...",
-          "name": "...", "description": "...", "state": "started",
-          "lead_id": "...", "updated_at": "...", "url": "...",
-          "issue_count": 12,
-          "issues": [
-            { "issue_id": "...", "issue_key": "STR-42", "title": "...",
-              "state_id": "...", "state_name": "In Progress", "url": "..." }
-          ]
-        }
-
-      cycle.json:
-        {
-          "cycle_id": "...", "team_id": "...",
-          "name": "...", "number": 7,
-          "starts_at": "...", "ends_at": "...",
-          "updated_at": "...", "url": "..."
-        }
-
-      user.json:
-        {
-          "user_id": "...", "name": "...", "display_name": "...",
-          "email": "...", "is_active": true, "is_admin": false,
-          "updated_at": "...", "url": "..."
-        }
-
-      Useful jq paths:
-        .issue_key                              # issue.json
-        .state_name                             # issue.json
-        .assignee_email                         # issue.json
-        .label_names[]                          # issue.json
-        .issues[] | select(.state_name == "In Progress")   # project.json
-        .states[].state_name                    # team.json
-        [inputs] | length                       # comments.jsonl: count
-        [inputs | select(.user_email == "x")] | length     # comments.jsonl
-
-      document.json:
-        {
-          "document_id": "...", "title": "...", "content": "...",
-          "project_id": "...", "project_name": "...",
-          "creator_id": "...", "creator_name": "...", "creator_email": "...",
-          "created_at": "...", "updated_at": "...", "url": "..."
-        }
-
-      To act on issues (list/get/create/update/assign/transition,
-      comments, projects, cycles, labels, users, documents, search), use
-      the linear CLI if installed: linear --help
     ```
+
+    - `ls` directories first to discover exact names.
+    - Every entity-named segment is `<sanitized-human-readable>__<id>`. The
+      human-readable part is sanitized, so don't construct it; `ls` the
+      parent directory instead.
+    - The id is the last `__`-separated segment:
+
+    ```text
+    /<path>/teams/STR__Strukto-ai__<team-id>/         -> <team-id>
+    /<path>/teams/.../issues/STR-42__<issue-id>/      -> <issue-id>
+    /<path>/teams/.../members/Alice__<user-id>.json   -> <user-id>
+    ```
+
+    All `cat` output is normalized by Mirage (snake_case keys), not the raw
+    Linear GraphQL response. The shapes:
+
+    `team.json`:
+
+    ```jsonc
+    {
+      "team_id": "...", "team_key": "STR", "team_name": "Strukto",
+      "name": "...", "description": "...", "timezone": "...",
+      "updated_at": "...",
+      "states": [
+        { "state_id": "...", "state_name": "Todo", "type": "unstarted" },
+        ...                              // one element per workflow state
+      ]
+    }
+    ```
+
+    `issue.json`:
+
+    ```jsonc
+    {
+      "issue_id": "...", "issue_key": "STR-42",
+      "title": "...", "description": "...",
+      "team_id": "...", "team_key": "...", "team_name": "...",
+      "project_id": "...",   "project_name": "...",
+      "cycle_id": "...",     "cycle_name": "...",   "cycle_number": 7,
+      "state_id": "...",     "state_name": "In Progress",
+      "assignee_id": "...",  "assignee_email": "...", "assignee_name": "...",
+      "creator_id":  "...",  "creator_email":  "...", "creator_name":  "...",
+      "priority": 2,         // 0=none 1=urgent 2=high 3=medium 4=low
+      "label_ids":   ["..."],
+      "label_names": ["bug", "frontend"],
+      "created_at": "...", "updated_at": "...", "url": "..."
+    }
+    ```
+
+    `comments.jsonl`, one normalized comment per line:
+
+    ```jsonc
+    { "comment_id": "...", "issue_id": "...", "issue_key": "STR-42",
+      "user_id": "...", "user_email": "...", "user_name": "...",
+      "body": "...", "created_at": "...", "updated_at": "...",
+      "url": "..." }
+    ```
+
+    A project (`projects/<name>__<project-id>.json`):
+
+    ```jsonc
+    {
+      "project_id": "...", "team_id": "...",
+      "name": "...", "description": "...", "state": "started",
+      "lead_id": "...", "updated_at": "...", "url": "...",
+      "issue_count": 12,
+      "issues": [
+        { "issue_id": "...", "issue_key": "STR-42", "title": "...",
+          "state_id": "...", "state_name": "In Progress", "url": "..." }
+      ]
+    }
+    ```
+
+    A cycle (`cycles/<name>__<cycle-id>.json`):
+
+    ```jsonc
+    {
+      "cycle_id": "...", "team_id": "...",
+      "name": "...", "number": 7,
+      "starts_at": "...", "ends_at": "...",
+      "updated_at": "...", "url": "..."
+    }
+    ```
+
+    A member (`members/<display-name>__<user-id>.json`):
+
+    ```jsonc
+    {
+      "user_id": "...", "name": "...", "display_name": "...",
+      "email": "...", "is_active": true, "is_admin": false,
+      "updated_at": "...", "url": "..."
+    }
+    ```
+
+    A document (`documents/<title>__<document-id>.json`):
+
+    ```jsonc
+    {
+      "document_id": "...", "title": "...", "content": "...",
+      "project_id": "...", "project_name": "...",
+      "creator_id": "...", "creator_name": "...", "creator_email": "...",
+      "created_at": "...", "updated_at": "...", "url": "..."
+    }
+    ```
+
+    Useful `jq` paths:
+
+    ```jq
+    .issue_key                                          # issue.json
+    .state_name                                         # issue.json
+    .assignee_email                                     # issue.json
+    .label_names[]                                      # issue.json
+    .issues[] | select(.state_name == "In Progress")    # a project
+    .states[].state_name                                # team.json
+    [inputs] | length                                   # comments.jsonl: count
+    [inputs | select(.user_email == "x")] | length      # comments.jsonl
+    ```
+
+    To act on issues (list, get, create, update, assign, transition,
+    comments, projects, cycles, labels, users, documents, search), use the
+    `linear` CLI if installed (`linear --help`).
 
     ## Supported Unix Commands for VFS
 
@@ -330,55 +386,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
   </Tab>
 </Tabs>
 {/* generated: vfs-md linear end */}
-
-```text
-/linear/
-  teams/
-    <team-key>__<team-name>__<team-id>/
-      team.json
-      members/
-        <display-name>__<user-id>.json
-        ...
-      issues/
-        <issue-key>__<issue-id>/
-          issue.json
-          comments.jsonl
-        ...
-      projects/
-        <name>__<project-id>.json
-        ...
-      cycles/
-        <name>__<cycle-id>.json
-        ...
-      documents/
-        <title>__<document-id>.json
-        ...
-```
-
-Example:
-
-```text
-/linear/
-  teams/
-    ENG__Engineering__abc123def/
-      team.json
-      members/
-        alice__usr_001.json
-        bob__usr_002.json
-      issues/
-        ENG-123__iss_001/
-          issue.json
-          comments.jsonl
-        ENG-124__iss_002/
-          issue.json
-          comments.jsonl
-      projects/
-        Mirage__proj_001.json
-      cycles/
-        Sprint-12__cyc_001.json
-      documents/
-        Search-Architecture__doc_001.json
-```
 
 Directory and file names embed the Linear ID after `__` so that
 VFS-specific commands can reference the correct VFS without

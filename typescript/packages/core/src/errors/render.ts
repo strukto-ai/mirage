@@ -39,10 +39,13 @@ export function operandSpelling(
   if (path.startsWith(base + '/')) return respellOne(path, virtual, raw)
   const trimmed = rstripSlash(path)
   if (base.startsWith(trimmed + '/')) {
-    const segments = (p: string): number => p.split('/').filter((s) => s !== '').length
-    return dropTrailingSegments(raw, segments(base) - segments(trimmed))
+    return dropTrailingSegments(raw, segments(base).length - segments(trimmed).length)
   }
   return path
+}
+
+function segments(path: string): string[] {
+  return path.split('/').filter((part) => part !== '')
 }
 
 const CANNOT_OPEN = 'cannot open {quoted} for reading: {strerror}'

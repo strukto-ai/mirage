@@ -35,93 +35,105 @@ from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.gdocs.doc_entry import make_filename
 
 VFS_MD = """\
+```text
 {prefix}
-  owned/
-    <date>_<title>__<doc-id>.gdoc.json
-  shared/
-    <date>_<title>__<doc-id>.gdoc.json
+  owned/     # docs you created
+    <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+  shared/    # docs others shared with you
+    <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+```
 
-  Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
-    <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
-    <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
-    <doc-id>      Google Docs document ID
+- `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
+  `2026-05-*` narrows by it.
+- `<title>` is sanitized: spaces and any character outside
+  `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
+- `<doc-id>` is the Google Docs document id.
+- `shared/` holds docs shared with you by others; ones you own
+  and shared with others are still in `owned/`.
 
-  Buckets:
-    owned/   docs you created
-    shared/  docs shared with you by others
-             - does NOT include docs you own and shared with others;
-               those are still in owned/.
+A `.gdoc.json` holds the Google Docs API `documents.get` response, read
+with `includeTabsContent=true` so every tab is present:
 
-  gdoc.json structure (the Google Docs API documents.get response, read
-  with includeTabsContent=true so every tab is present):
+```jsonc
+{
+  "documentId": "...",
+  "title": "...",
+  "tabs": [                            // one entry per top-level tab
     {
-      "documentId": "...",
-      "title": "...",
-      "tabs": [                          # one entry per top-level tab
-        {
-          "tabProperties": {
-            "tabId": "t.0",              # names a tab for gws docs write
-            "title": "Tab 1",
-            "index": 0
-          },
-          "documentTab": {
-            "body": {
-              "content": [
-                {                          # one element per block
-                  "paragraph": {
-                    "elements": [
-                      { "textRun": { "content": "the actual text\\n",
-                                     "textStyle": {...} } }
-                    ],
-                    "paragraphStyle": {...}
-                  }
-                },
-                { "table": {...} },
-                { "sectionBreak": {...} }
-              ]
+      "tabProperties": {
+        "tabId": "t.0",                // names a tab for gws docs write
+        "title": "Tab 1",
+        "index": 0
+      },
+      "documentTab": {
+        "body": {
+          "content": [
+            {                          // one element per block
+              "paragraph": {
+                "elements": [
+                  { "textRun": { "content": "the actual text\\n",
+                                 "textStyle": {...} } }
+                ],
+                "paragraphStyle": {...}
+              }
             },
-            "documentStyle": {...},
-            "namedStyles": {...}
-          },
-          "childTabs": [ { ...same shape, nested to any depth... } ]
-                                       # a NESTED tab additionally carries
-                                       # parentTabId and nestingLevel; a
-                                       # root tab carries neither
-        }
-      ],
-      "revisionId": "..."
+            { "table": {...} },
+            { "sectionBreak": {...} }
+          ]
+        },
+        "documentStyle": {...},
+        "namedStyles": {...}
+      },
+      "childTabs": [ { ...same shape, nested to any depth... } ]
+                                       // a nested tab also carries
+                                       // parentTabId and nestingLevel;
+                                       // a root tab carries neither
     }
+  ],
+  "revisionId": "..."
+}
+```
 
-  There is no top-level .body. A tab-aware response leaves the singleton
-  fields (.body, .documentStyle, .namedStyles) empty and hangs every
-  tab's content off .tabs[].documentTab instead. Tabs also nest, so text
-  can sit at any depth under .childTabs; the recursive recipes below read
-  a one-tab and a fifty-tab document alike.
+There is no top-level .body. A tab-aware response leaves the singleton
+fields (`.body`, `.documentStyle`, `.namedStyles`) empty and hangs every
+tab's content off `.tabs[].documentTab` instead. Tabs also nest, so text
+can sit at any depth under `.childTabs`; the recursive recipes below read
+a one-tab and a fifty-tab document alike.
 
-  Useful jq paths:
-    .title
-    [.. | .tabProperties? // empty | .title]             # every tab name
-    [.. | .textRun? // empty | .content] | add           # all text, any depth
-    [.. | .tabProperties? // empty] | length             # tab count
-    [.tabs[0].documentTab.body.content[]
+Useful `jq` paths:
+
+```jq
+.title
+[.. | .tabProperties? // empty | .title]             # every tab name
+[.. | .textRun? // empty | .content] | add           # all text, any depth
+[.. | .tabProperties? // empty] | length             # tab count
+[.tabs[0].documentTab.body.content[]
       | .paragraph?.elements[]?.textRun.content] | add   # first tab only
-    .revisionId
+.revisionId
+```
 
-  The first block of a body is always a sectionBreak, which carries no
-  .paragraph, so a path through .paragraph needs the `?` or it fails with
-  "Cannot iterate over null".
+The first block of a body is always a `sectionBreak`, which carries no
+`.paragraph`, so a path through `.paragraph` needs the `?` or it fails
+with `Cannot iterate over null`.
 
-  Delete, on a `write` path:
-    rm {prefix}/owned/<file>.gdoc.json      # permanent delete from Drive
-    rm -f <path>                            # ignore if missing
-    Only operates on .gdoc.json files; owned/ and shared/ themselves
-    cannot be removed.
+Delete, on a `write` path:
 
-  Rename to a new title, on a `write` path:
-    mv {prefix}/owned/<date>_<old>__<id>.gdoc.json \\
-       {prefix}/owned/<date>_<new>__<id>.gdoc.json
-    Keep the folder, the date and the id, and spell the title the way
-    the listing does (spaces->_); any other name is refused."""
+```sh
+rm {prefix}/owned/<file>.gdoc.json   # deletes it from Drive for good
+rm -f <path>                       # ignores a missing file
+```
+
+Only `.gdoc.json` files can be removed; `owned/` and `shared/` cannot.
+
+Rename to a new title, on a `write` path:
+
+```sh
+mv {prefix}/owned/<date>_<old>__<id>.gdoc.json \\
+   {prefix}/owned/<date>_<new>__<id>.gdoc.json
+```
+
+Keep the folder, the date and the id, and spell the title the way the
+listing does (spaces become `_`); any other name is refused."""
 
 
 class GDocsVFS(BaseVFS):

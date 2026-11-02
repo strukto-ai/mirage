@@ -194,11 +194,6 @@ function validateIndexValues(value: unknown, what: string): void {
   }
 }
 
-/** A raw block's `config`, or an empty mapping when it is absent or not one. */
-function asConfig(value: unknown): Readonly<Record<string, unknown>> {
-  return isPlainObject(value) ? value : {}
-}
-
 /**
  * Refuse a mount block whose read policy and bound disagree.
  *
@@ -283,7 +278,10 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
       // snapshot captures it verbatim, and a pointer resolved into it
       // would be written out as the value it fetched. Refused here, on
       // the block, so every entry point that reads a config inherits the rule.
-      if (typeof block.script === 'string' && configHoldsPointer(asConfig(block.config))) {
+      if (
+        typeof block.script === 'string' &&
+        configHoldsPointer(isPlainObject(block.config) ? block.config : {})
+      ) {
         throw new Error(
           `clis entry '${name}': a script's config is opaque and a pointer in it would be ` +
             'written into every snapshot; read the credential from a managed env var instead',
@@ -576,6 +574,8 @@ interface RedisIndexBlock {
   keyPrefix?: string
 }
 
+type IndexBlock = RamIndexBlock | RedisIndexBlock
+
 interface RamStoreBlock {
   type?: 'ram'
 }
@@ -673,7 +673,7 @@ export interface WorkspaceConfigRaw {
    * leave a redis client with no owner once the workspace shut down.
    */
   cache?: CacheConfig | null
-  index?: RamIndexBlock | RedisIndexBlock | null
+  index?: IndexBlock | null
   store?: StoreBlock | null
   /**
    * The environment plane: one map, name -> entry. A bare string is
@@ -857,9 +857,7 @@ export function loadWorkspaceConfigFile(
   return normalizeConfigKeys(checkWorkspaceConfigFile(path, env)) as unknown as WorkspaceConfigRaw
 }
 
-function buildIndexConfig(
-  block: RamIndexBlock | RedisIndexBlock | null | undefined,
-): IndexConfig | undefined {
+function buildIndexConfig(block: IndexBlock | null | undefined): IndexConfig | undefined {
   if (block === null || block === undefined) return undefined
   if (block.type === 'redis') {
     const cfg: RedisIndexConfig = { type: 'redis' }

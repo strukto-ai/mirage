@@ -64,16 +64,14 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `chroma`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
 
-    ```text
-    Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
-    collection.
+    ##### `/<path>`
 
-    Use cat, head, tail, ls, find, tree, and grep to inspect indexed documents.
-    Paths are document slugs from the collection path tree. Writes are not
-    supported.
-    ```
+    - One ChromaDB collection, mounted read only.
+    - Paths are document slugs from the collection's path tree.
+    - Inspect documents with `cat`, `head`, `tail`, `ls`, `find`, `tree` and
+      `grep`. Writes are not supported.
 
     #### Supported Unix Commands for VFS
 
@@ -94,7 +92,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     Run `man <cmd>` or `<cmd> --help` for one command's usage.
   </Tab>
   <Tab title="Raw">
-    ````markdown
+    ```markdown
     ---
     name: workspace-filesystem
     description: The virtual filesystem layout of this workspace.
@@ -106,16 +104,14 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `chroma`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
 
-    ```text
-    Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
-    collection.
+    ### `/<path>`
 
-    Use cat, head, tail, ls, find, tree, and grep to inspect indexed documents.
-    Paths are document slugs from the collection path tree. Writes are not
-    supported.
-    ```
+    - One ChromaDB collection, mounted read only.
+    - Paths are document slugs from the collection's path tree.
+    - Inspect documents with `cat`, `head`, `tail`, `ls`, `find`, `tree` and
+      `grep`. Writes are not supported.
 
     ## Supported Unix Commands for VFS
 
@@ -134,7 +130,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man <cmd>` or `<cmd> --help` for one command's usage.
-    ````
+    ```
   </Tab>
 </Tabs>
 {/* generated: vfs-md chroma end */}

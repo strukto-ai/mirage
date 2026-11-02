@@ -46,7 +46,6 @@ import {
   trashed,
 } from './client.ts'
 import { SCOPE_ERROR, TRASH_PREFIX } from './constants.ts'
-import { isNoFileError } from './read.ts'
 
 /** Match the file at `stem` plus everything beneath it. */
 function subtreeQuery(stem: string): Record<string, unknown> {
@@ -263,6 +262,12 @@ async function probePrefix(conn: GridFSAccessor, pfx: string): Promise<boolean> 
   return doc !== null
 }
 
+export function isNotFound(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false
+  const message = (err as { message?: string }).message ?? ''
+  return message.includes('FileNotFound')
+}
+
 export const DRIVER: ObjectStoreDriver<GridFSAccessor, GridFSAccessor> = {
   vfs: VFSName.GRIDFS,
   scopeError: SCOPE_ERROR,
@@ -281,5 +286,5 @@ export const DRIVER: ObjectStoreDriver<GridFSAccessor, GridFSAccessor> = {
   movePrefix,
   copyFile,
   probePrefix,
-  isNotFound: isNoFileError,
+  isNotFound,
 }

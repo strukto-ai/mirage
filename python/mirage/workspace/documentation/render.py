@@ -470,9 +470,11 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
                 .strip("\n")
                 .rstrip()
             )
-            layouts.append(
-                f"## {code(prefix)} layout\n\n{fenced(layout, 'text')}"
-            )
+            # A backtick or line break in the prefix could close a code
+            # span or fence it is put in, so such a layout stays text.
+            if {"`", "\n", "\r"} & set(prefix):
+                layout = fenced(layout, "text")
+            layouts.append(f"### {code(prefix)}\n\n{layout}")
         if vis.shown is not None:
             for entry in vis.shown.entries:
                 if (
@@ -516,7 +518,9 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
         parts.append("No paths are visible.")
     else:
         parts.append(table(("Path", "Description"), paths))
-        parts.extend(layouts)
+        if layouts:
+            parts.append("## VFS Layout")
+            parts.extend(layouts)
         parts.extend(
             [
                 "## Supported Unix Commands for VFS",

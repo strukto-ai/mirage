@@ -21,10 +21,6 @@ from mirage.core.discord.paginate import after_id_pages
 from mirage.core.hierarchy.readdir import held_pages
 
 
-def _member_user_id(m: dict[str, Any]) -> str:
-    return cast(str, m.get("user", {}).get("id", ""))
-
-
 def list_members_stream(
     accessor: DiscordAccessor, guild_id: str, page_size: int = 1000
 ) -> AsyncIterator[list[dict[str, Any]]]:
@@ -45,7 +41,7 @@ def list_members_stream(
         accessor,
         f"/guilds/{guild_id}/members",
         base_params={},
-        last_id_fn=_member_user_id,
+        last_id_fn=lambda m: cast(str, m.get("user", {}).get("id", "")),
         page_size=page_size,
     )
 

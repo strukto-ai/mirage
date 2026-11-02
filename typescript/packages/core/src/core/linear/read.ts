@@ -30,7 +30,6 @@ import {
   listTeams,
 } from './client.ts'
 import {
-  buildProjectIssue,
   normalizeComment,
   normalizeCycle,
   normalizeDocument,
@@ -38,6 +37,7 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
+  projectIssueRows,
 } from './normalize.ts'
 import { filteredTeams } from './readdir.ts'
 import { detectScope } from './scope.ts'
@@ -94,16 +94,7 @@ async function readProject(
   const teamIssues = await listTeamIssues(accessor.transport, teamId, undefined, [projectId])
   for (const project of projects) {
     if (project.id !== projectId) continue
-    const projectIssues: ReturnType<typeof buildProjectIssue>[] = []
-    for (const issue of teamIssues) {
-      const projField = issue.project
-      const projObj =
-        projField !== null && typeof projField === 'object'
-          ? (projField as Record<string, unknown>)
-          : {}
-      if (projObj.id !== projectId) continue
-      projectIssues.push(buildProjectIssue(issue))
-    }
+    const projectIssues = projectIssueRows(teamIssues, projectId)
     return jsonBytes(
       normalizeProject(project, {
         teamId,

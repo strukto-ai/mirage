@@ -4,7 +4,7 @@ import { eacces, eexist, enoent, fsError } from '@struktoai/mirage-core/errors/f
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { davRequest, davUrl } from './dav.ts'
 import { parser, records } from './search/response.ts'
-import type { XmlRecord } from './search/types.ts'
+import type { XmlElement } from './search/types.ts'
 import { isNotFound, nextcloudKey } from './util.ts'
 
 export async function copy(
@@ -26,7 +26,7 @@ export async function copy(
  * 500 when it names none. Mirrors Python's `failed_status`.
  */
 function failedStatus(text: string): number {
-  const tree = parser.parse(text) as XmlRecord
+  const tree = parser.parse(text) as XmlElement
   const statuses = records(tree.multistatus)
     .flatMap((multistatus) => records(multistatus.response))
     .flatMap((answer) => [answer.status, ...records(answer.propstat).map((group) => group.status)])

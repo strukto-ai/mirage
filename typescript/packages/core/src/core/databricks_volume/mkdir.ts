@@ -15,7 +15,7 @@
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { FileType, type PathSpec } from '../../types.ts'
 import { createDirectory as createRemoteDirectory } from './client.ts'
-import { ensurePathSpec, parentPath } from './_helpers.ts'
+import { parentPath } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { stat } from './stat.ts'
@@ -39,21 +39,20 @@ export async function mkdir(
   path: PathSpec,
   parents = false,
 ): Promise<void> {
-  const p = ensurePathSpec(path)
-  const remotePath = backendPath(accessor.config, p)
+  const remotePath = backendPath(accessor.config, path)
   if (parents) {
-    await createDirectory(accessor, remotePath, p.virtual)
+    await createDirectory(accessor, remotePath, path.virtual)
     return
   }
   let parentStat
   try {
-    parentStat = await stat(accessor, parentPath(p))
+    parentStat = await stat(accessor, parentPath(path))
   } catch (exc) {
-    if ((exc as { code?: string }).code === 'ENOENT') throw enoent(p.virtual)
+    if ((exc as { code?: string }).code === 'ENOENT') throw enoent(path.virtual)
     throw exc
   }
   if (parentStat.type !== FileType.DIRECTORY) {
-    throw enotdir(p.virtual)
+    throw enotdir(path.virtual)
   }
-  await createDirectory(accessor, remotePath, p.virtual)
+  await createDirectory(accessor, remotePath, path.virtual)
 }

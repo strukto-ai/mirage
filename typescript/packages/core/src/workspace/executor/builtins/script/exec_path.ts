@@ -22,6 +22,7 @@ import type { CallStack } from '../../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../../../../shell/constants.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
+import { shellJoin } from '../../../../shell/join.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
 import { BinViewVFS } from '../../../../vfs/bin/bin.ts'
@@ -77,12 +78,6 @@ function shebangWords(script: string): string[] {
     words[0] = lead.slice(lead.lastIndexOf('/') + 1)
   }
   return words
-}
-
-/** Quote one word for re-dispatch as a shell line. */
-function quoteWord(word: string): string {
-  if (/^[A-Za-z0-9_\-./]+$/.test(word)) return word
-  return `'${word.replaceAll("'", `'\\''`)}'`
 }
 
 /**
@@ -166,7 +161,7 @@ export async function handleExecPath(
       callStack,
     )
   }
-  const line = [...words, path, ...args].map(quoteWord).join(' ')
+  const line = shellJoin([...words, path, ...args])
   const io = await executeFn(line, {
     sessionId: session.sessionId,
     stdin,

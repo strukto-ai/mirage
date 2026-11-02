@@ -23,12 +23,14 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.jaeger.config import JaegerConfig
 
 VFS_MD = """\
+```text
 {prefix}
   services/
     <service-name>/
       operations.json
       traces/
-        <trace-id>.json"""
+        <trace-id>.json
+```"""
 
 
 class JaegerVFS(BaseVFS):

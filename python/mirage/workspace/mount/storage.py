@@ -38,8 +38,8 @@ def vfs_storage_location(vfs: BaseVFS) -> str:
     return location if location is not None else f"{vfs.name}:{id(vfs):x}"
 
 
-def storage_key(registry: MountRegistry, path: PathSpec) -> str:
-    """Identify the bytes an operand addresses, across mounts.
+def make_storage_key(registry: MountRegistry) -> Callable[[PathSpec], str]:
+    """Build the transfer generics' identity function for a mount set.
 
     ``cp`` and ``mv`` compare two operands to decide whether they name
     the same file. Within one mount the mount-relative path answers
@@ -60,26 +60,20 @@ def storage_key(registry: MountRegistry, path: PathSpec) -> str:
     as an ancestor of its children, and only within one storage.
 
     Args:
-        registry (MountRegistry): Mount set the operand is addressed in.
-        path (PathSpec): The operand.
-    """
-    entry = registry.try_mount_for(path.virtual)
-    if entry is None:
-        # Outside every mount there is no storage to name, so fall back
-        # to the path itself; such an operand fails on its own when the
-        # command tries to read it.
-        return path.virtual.rstrip("/")
-    rel = strip_mount(path.virtual, entry.prefix.rstrip("/")).rstrip("/")
-    return vfs_storage_location(entry.vfs) + rel
-
-
-def make_storage_key(registry: MountRegistry) -> Callable[[PathSpec], str]:
-    """Bind ``storage_key`` to one mount set for the transfer generics.
-
-    Args:
         registry (MountRegistry): Mount set the operands are addressed in.
     """
-    return functools.partial(storage_key, registry)
+
+    def storage_key(path: PathSpec) -> str:
+        entry = registry.try_mount_for(path.virtual)
+        if entry is None:
+            # Outside every mount there is no storage to name, so fall
+            # back to the path itself; such an operand fails on its own
+            # when the command tries to read it.
+            return path.virtual.rstrip("/")
+        rel = strip_mount(path.virtual, entry.prefix.rstrip("/")).rstrip("/")
+        return vfs_storage_location(entry.vfs) + rel
+
+    return storage_key
 
 
 def check_unlink(registry: MountRegistry, path: PathSpec) -> None:

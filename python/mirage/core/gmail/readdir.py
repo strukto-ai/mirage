@@ -41,8 +41,9 @@ MAX_MESSAGES = 50
 _sanitize = partial(sanitize_label, fallback="No_Subject", max_len=TITLE_MAX)
 
 
-def _subject(subject: str, msg_id: str) -> str:
-    """Sanitize a subject to fit what the id and suffix leave of NAME_MAX.
+def _msg_filename(subject: str, msg_id: str) -> str:
+    """Name a message file, its subject cut to what the id and suffix
+    leave of NAME_MAX.
 
     80 characters is 240 bytes of CJK, which overflows the 255-byte
     NAME_MAX once the id and `.gmail.json` are added; the filesystem
@@ -56,18 +57,15 @@ def _subject(subject: str, msg_id: str) -> str:
         msg_id (str): the Gmail message id the name embeds.
 
     Returns:
-        str: the sanitized subject segment.
+        str: the message file's name.
     """
     fixed = len("__") + byte_length(msg_id) + len(MSG_SUFFIX)
-    return _sanitize(subject, max_bytes=NAME_MAX_BYTES - fixed)
-
-
-def _msg_filename(subject: str, msg_id: str) -> str:
-    return f"{_subject(subject, msg_id)}__{msg_id}{MSG_SUFFIX}"
+    trimmed = _sanitize(subject, max_bytes=NAME_MAX_BYTES - fixed)
+    return f"{trimmed}__{msg_id}{MSG_SUFFIX}"
 
 
 def _attach_dir_name(subject: str, msg_id: str) -> str:
-    return f"{_subject(subject, msg_id)}__{msg_id}"
+    return _msg_filename(subject, msg_id).removesuffix(MSG_SUFFIX)
 
 
 def _date_from_internal(internal_date: str) -> str:

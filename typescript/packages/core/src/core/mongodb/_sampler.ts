@@ -14,6 +14,7 @@
 
 import type { MongoDBAccessor } from '../../accessor/mongodb.ts'
 import { BsonTypeTag, PRIMARY_KEY } from './types.ts'
+import { isPlainObject } from '../../utils/records.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 export interface SampledField {
@@ -29,15 +30,6 @@ function bump(counts: Map<string, Map<string, number>>, path: string, tag: strin
     counts.set(path, inner)
   }
   inner.set(tag, (inner.get(tag) ?? 0) + 1)
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return (
-    typeof v === 'object' &&
-    v !== null &&
-    !Array.isArray(v) &&
-    Object.getPrototypeOf(v) === Object.prototype
-  )
 }
 
 function isObjectIdLike(v: unknown): boolean {

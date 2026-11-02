@@ -15,6 +15,8 @@
 // Marshals as gh 2.85.0's types do under Go 1.25.5's encoding/json
 // (MIT and BSD-3-Clause; see licenses/third_party/gh.txt and go.txt).
 
+type Primitive = 'string' | 'int' | 'bool' | 'time' | 'raw' | 'author' | 'reactions' | 'owner'
+
 /**
  * The Go type gh decodes a field into, which is what decides how it prints.
  *
@@ -35,14 +37,7 @@
  * whose id and name are `omitempty`. `orNull` is a pointer to any of them.
  */
 export type Shape =
-  | 'string'
-  | 'int'
-  | 'bool'
-  | 'time'
-  | 'raw'
-  | 'author'
-  | 'reactions'
-  | 'owner'
+  | Primitive
   | {
       readonly fields: readonly (readonly [string, Shape, string?])[]
       readonly nullable: boolean
@@ -60,7 +55,7 @@ export function pointer(...fields: (readonly [string, Shape, string?])[]): Shape
   return { fields, nullable: true }
 }
 
-export function list(shape: Shape): Shape {
+export function listOf(shape: Shape): Shape {
   return { list: shape }
 }
 

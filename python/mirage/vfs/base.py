@@ -223,9 +223,10 @@ class BaseVFS:
                 ``register_vfs`` or a ``mirage.vfs`` entry point. None
                 keeps the class attribute.
             accessor (Accessor | None): backend handle the functions use.
-            vfs_md (str | None): this VFS's part of VFS.md: its layout
-                and file formats, ``{prefix}`` standing for the mount
-                path. None keeps the class attribute.
+            vfs_md (str | None): this VFS's part of VFS.md, in
+                Markdown: its layout and file formats, ``{prefix}``
+                standing for the mount path. None keeps the class
+                attribute.
             commands (list[Any] | None): extra ``@command`` functions,
                 ``Command`` values or ``CLI`` trees: bespoke verbs, a
                 program's verbs as one command tree under its root's

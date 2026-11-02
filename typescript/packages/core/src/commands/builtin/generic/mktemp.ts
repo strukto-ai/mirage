@@ -26,15 +26,15 @@ import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { type IdSource, SystemIdSource, randomBelow } from '../../../utils/ids.ts'
 
 const ENC = new TextEncoder()
+const ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 const DEFAULT_TEMPLATE = 'tmp.XXXXXXXXXX'
 // How many names a create draws before it gives up with EEXIST.
 const ATTEMPTS = 100
 
 function randomSuffix(ids: IdSource, length: number): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let out = ''
   for (let i = 0; i < length; i++) {
-    out += chars[randomBelow(ids, chars.length)] ?? ''
+    out += ALPHABET[randomBelow(ids, ALPHABET.length)] ?? ''
   }
   return out
 }

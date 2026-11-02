@@ -18,7 +18,7 @@ import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { cpGeneric, parseFlags } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { flatten, readdirOp, relayCopy, statOp } from '../utils.ts'
+import { flatScopes, readdirOp, relayCopy, relayWrite, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { LinkView, MountView } from '../../../../../view/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
@@ -74,7 +74,7 @@ export async function runCp(
   // Where -i reads its answers.
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
-  const flat = flatten(scopes)
+  const flat = flatScopes(scopes)
   const stat = statOp(dispatch)
   const fl = new FlagView(flagKwargs, specOf('cp'))
   const mounts = fl.asBool('one_file_system') ? mountView(vfs) : undefined
@@ -87,9 +87,7 @@ export async function runCp(
     mounts === undefined || nsLinks === undefined
       ? nsLinks
       : { ...nsLinks, subtree: (d) => ownLinks(nsLinks, mounts, starts, d) }
-  const write = async (p: PathSpec, data: ByteSource): Promise<void> => {
-    await dispatch('write', p, [data])
-  }
+  const write = (p: PathSpec, data: ByteSource): Promise<void> => relayWrite(dispatch, p, data)
   const mkdir = async (p: PathSpec): Promise<void> => {
     await dispatch('mkdir', p)
   }

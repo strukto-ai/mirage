@@ -14,7 +14,7 @@
 
 import { type ByteSource, IOResult, OpReport } from '../io/types.ts'
 import { closeQuietly, ensureStream } from '../io/stream.ts'
-import type { OpRecord, RecordingState } from '../observe/record.ts'
+import type { OpRecord, Recorder } from '../observe/record.ts'
 import { finishRecord, OpTimer, record } from '../observe/context.ts'
 import { SystemClock, type Clock } from '../utils/clock.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
@@ -70,7 +70,7 @@ let callerFilesOf: (files: Files, changes: Partial<Caller>) => Files
 
 // The op's byte count for recording: the result first, else the input
 // (write payloads travel as the first positional argument). Mirrors
-// Python's Files._payload_bytes.
+// Python's _payload_bytes.
 function payloadBytes(result: unknown, args: readonly unknown[]): number {
   if (result instanceof Uint8Array) return result.byteLength
   for (const arg of args) {
@@ -386,7 +386,7 @@ export class Files {
     const isolated = asyncContextIsolatesTasks
     // Only a line this workspace runs is joined: another workspace's line
     // would take this workspace's records.
-    const own: RecordingState | null =
+    const own: Recorder | null =
       !isolated || outer.recording?.ledger === this.recorded
         ? null
         : { records: [], mountId: null, ledger: null, clock: this.clock }

@@ -28,16 +28,8 @@ import {
 import { scanOptions } from '../getopt.ts'
 import { builtinUsage, fail, finish, ok, result } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
-import { BAD_NAME_CHARS } from './constants.ts'
+import { BAD_NAME_RE } from './constants.ts'
 import type { AliasMark } from './types.ts'
-
-/** Whether a name holds a character bash refuses in an alias name. */
-function hasBadChar(name: string): boolean {
-  for (let i = 0; i < name.length; i++) {
-    if (BAD_NAME_CHARS.includes(name.charAt(i))) return true
-  }
-  return false
-}
 
 /** Define or print aliases. `mark` is the read the definition sits in:
  * bash expands aliases as it reads, so the commands of that read still see
@@ -62,7 +54,7 @@ export function handleAlias(
     const eq = word.indexOf('=')
     if (eq >= 0) {
       const name = word.slice(0, eq)
-      if (name === '' || hasBadChar(name)) {
+      if (name === '' || BAD_NAME_RE.test(name)) {
         errors.push(
           name === ''
             ? `bash: alias: ${word}: not found`
@@ -74,7 +66,7 @@ export function handleAlias(
       setSessionEntry(session.aliases, name, word.slice(eq + 1))
       continue
     }
-    if (hasBadChar(word)) {
+    if (BAD_NAME_RE.test(word)) {
       errors.push(`bash: alias: \`${word}': invalid alias name`)
       continue
     }

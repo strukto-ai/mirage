@@ -448,31 +448,27 @@ async def wc_generic(
         return body, io
     source = resolve_source(ctx.stdin)
     counts = await wc(source, flags=parsed)
-    return format_stdin(counts, parsed), IOResult()
-
-
-def format_stdin(counts: WCCounts, flags: WCFlags) -> bytes:
-    if flags.total == "only":
+    if parsed.total == "only":
         values = _selected_values(
             counts,
-            lines=flags.lines,
-            words=flags.words,
-            bytes_=flags.bytes_,
-            chars=flags.chars,
-            max_line_length=flags.max_line_length,
+            lines=parsed.lines,
+            words=parsed.words,
+            bytes_=parsed.bytes_,
+            chars=parsed.chars,
+            max_line_length=parsed.max_line_length,
         )
-        return encode_text(" ".join(str(value) for value in values) + "\n")
+        line = " ".join(str(value) for value in values) + "\n"
+        return encode_text(line), IOResult()
     rows: list[tuple[WCCounts, str | None]] = [(counts, None)]
-    if flags.total == "always":
+    if parsed.total == "always":
         rows.append((counts, "total"))
-    return format_records(
-        format_wc_lines(
-            rows,
-            lines=flags.lines,
-            words=flags.words,
-            bytes_=flags.bytes_,
-            chars=flags.chars,
-            max_line_length=flags.max_line_length,
-            width=number_width([None], 1, shown_counts(flags)),
-        )
+    rendered = format_wc_lines(
+        rows,
+        lines=parsed.lines,
+        words=parsed.words,
+        bytes_=parsed.bytes_,
+        chars=parsed.chars,
+        max_line_length=parsed.max_line_length,
+        width=number_width([None], 1, shown_counts(parsed)),
     )
+    return format_records(rendered), IOResult()

@@ -335,6 +335,10 @@ export const OnExceed = Object.freeze({
 
 export type OnExceed = (typeof OnExceed)[keyof typeof OnExceed]
 
+function preferError(values: readonly OnExceed[]): OnExceed {
+  return values.some((v) => v === OnExceed.ERROR) ? OnExceed.ERROR : OnExceed.TRUNCATE
+}
+
 function minBound(values: (number | null)[]): number | null {
   const bounds = values.filter((v): v is number => v !== null)
   return bounds.length > 0 ? Math.min(...bounds) : null
@@ -479,8 +483,7 @@ const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[
   maxLines: (present) => minBound(present.map((s) => s.maxLines)),
   timeoutSeconds: (present) => minPositive(present.map((s) => s.timeoutSeconds)),
   walkLimit: (present) => tightestWalk(present.map((s) => s.walkLimit)),
-  onExceed: (present) =>
-    present.some((s) => s.onExceed === OnExceed.ERROR) ? OnExceed.ERROR : OnExceed.TRUNCATE,
+  onExceed: (present) => preferError(present.map((s) => s.onExceed)),
 }
 
 /**

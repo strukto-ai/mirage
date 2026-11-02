@@ -23,11 +23,6 @@ import { FlagView } from '../../../../spec/flag_view.ts'
 import { requireCard } from '../scope.ts'
 import { fileOperand, requiredFlag, resolveTextInput } from '../util.ts'
 
-function parseBool(value: string): boolean {
-  const v = value.toLowerCase()
-  return v === 'true' || v === '1' || v === 'yes'
-}
-
 export async function update(
   accessor: TrelloAccessor,
   _paths: PathSpec[],
@@ -50,7 +45,8 @@ export async function update(
     })
   }
   const closedFlag = fl.asStr('closed')
-  const closed = closedFlag === undefined ? null : parseBool(closedFlag)
+  const closed =
+    closedFlag === undefined ? null : ['true', '1', 'yes'].includes(closedFlag.toLowerCase())
   const due = fl.asStr('due') ?? null
   await requireCard(accessor, cardId)
   const card = await cardUpdate(accessor.transport, {

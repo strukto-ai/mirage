@@ -118,7 +118,6 @@ import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
-import { vfsStateRequiresOverride } from '../../vfs/secrets.ts'
 import type { OpKwargs } from '../../view/types.ts'
 import { newStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { CLIInstall } from '../cli/types.ts'
@@ -155,6 +154,8 @@ import {
   applyStateDict,
   buildMountArgs,
   type CLIOverrides,
+  reusableClis,
+  reusableMounts,
   toStateDict,
   withRebuiltMounts,
 } from '../snapshot/state.ts'
@@ -2360,14 +2361,7 @@ export class Workspace {
       ...(options.profiles != null ? { profiles: options.profiles, profile: null } : {}),
       ...(options.profile != null ? { profile: options.profile } : {}),
     }
-    const overrides: Record<string, Mount> = {}
-    for (const mount of this.registry.allMounts()) {
-      for (const snap of state.mounts) {
-        if (snap.prefix === mount.prefix && vfsStateRequiresOverride(snap.vfs_state)) {
-          overrides[mount.prefix] = new Mount(mount.vfs, { read: mount.read, vfsRef: mount.vfsRef })
-        }
-      }
-    }
+    const overrides = reusableMounts(this.registry.allMounts(), state)
     // A shared mount keeps the client it connected under this workspace's
     // network, so a copy held to another rule cannot share it.
     const shared = Object.keys(overrides)
@@ -2381,14 +2375,7 @@ export class Workspace {
           'a copy under another network cannot share them',
       )
     }
-    // A same-process copy reinstalls every CLI from its live install
-    // (spec + validated config), the way remote mounts share their live
-    // mounts: a directly installed spec and a redacted secret both
-    // survive without a registry lookup.
-    const cliOverrides: CLIOverrides = {}
-    for (const [name, install] of this.registry.clis.items()) {
-      cliOverrides[name] = [install.cli, install.config as Record<string, unknown> | null]
-    }
+    const cliOverrides = reusableClis(this)
     const Ctor = this.constructor as typeof Workspace
     return (await Ctor._fromState(
       state,

@@ -37,7 +37,7 @@ import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
 import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import { abortable, atDeadline, joinOrAbort, SignalStop } from '../../../../utils/abort.ts'
+import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../utils/abort.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
@@ -372,7 +372,7 @@ export async function handleTimeout(
   const close = async (): Promise<void> => {
     sink.closeReader()
     abort.abort()
-    await joinOrAbort(watch, abort.signal, STOP_WAIT_SECONDS * 1000).catch((err: unknown) => {
+    await runCancellable(watch, abort.signal, STOP_WAIT_SECONDS * 1000).catch((err: unknown) => {
       console.debug(`timeout: the run ended: ${String(err)}`)
     })
     state.finish()
@@ -438,7 +438,7 @@ async function supervise(
   const stop = async (said: readonly string[], exitCode: number): Promise<RedirectResult> => {
     sink.mute()
     try {
-      await joinOrAbort(run, abort.signal, STOP_WAIT_SECONDS * 1000)
+      await runCancellable(run, abort.signal, STOP_WAIT_SECONDS * 1000)
     } catch (err) {
       console.debug(`timeout: the stopped run ended: ${String(err)}`)
     }

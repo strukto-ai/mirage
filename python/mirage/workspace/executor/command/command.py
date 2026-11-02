@@ -80,7 +80,7 @@ from mirage.workspace.executor.command.routing import (
 from mirage.workspace.executor.command.run import (
     exec_node,
     find_start_points,
-    run_nested_line,
+    nested_shell,
     run_on_mount,
     scalar_find_flags,
 )
@@ -419,9 +419,7 @@ async def handle_command(
             stdin,
             CLIContext(
                 shell=(
-                    functools.partial(
-                        run_nested_line, execute_fn, session.session_id
-                    )
+                    nested_shell(execute_fn, session.session_id)
                     if execute_fn is not None
                     else None
                 ),
@@ -480,9 +478,7 @@ async def handle_command(
             stdin,
             CLIContext(
                 shell=(
-                    functools.partial(
-                        run_nested_line, execute_fn, session.session_id
-                    )
+                    nested_shell(execute_fn, session.session_id)
                     if execute_fn is not None
                     else None
                 ),

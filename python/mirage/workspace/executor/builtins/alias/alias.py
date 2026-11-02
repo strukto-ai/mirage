@@ -19,9 +19,7 @@ from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.helpers import alias_rewrite
 from mirage.shell.types import TSNodeLike
 from mirage.utils.quote import single_quote
-from mirage.workspace.executor.builtins.alias.constants import (
-    BAD_NAME_CHARS,
-)
+from mirage.workspace.executor.builtins.alias.constants import BAD_NAME_RE
 from mirage.workspace.executor.builtins.alias.types import AliasMark
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import (
@@ -73,7 +71,7 @@ async def handle_alias(
     for word in operands:
         name, eq, value = word.partition("=")
         if eq:
-            if not name or any(c in BAD_NAME_CHARS for c in name):
+            if not name or BAD_NAME_RE.search(name):
                 # bash quotes the whole word for an empty name (`alias
                 # =x` is `=x: not found`, oddly) and the name otherwise.
                 if not name:
@@ -84,7 +82,7 @@ async def handle_alias(
             _changing(session, name, mark)
             session.aliases[name] = value
             continue
-        if any(c in BAD_NAME_CHARS for c in name):
+        if BAD_NAME_RE.search(name):
             errors.append(f"bash: alias: `{name}': invalid alias name")
             continue
         if name in session.aliases:
@@ -140,6 +138,12 @@ async def handle_unalias(
     return finish("unalias", errors)
 
 
+def _aliases_on(session: SessionState) -> bool:
+    return bool(
+        session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
+    )
+
+
 def _changing(session: SessionState, name: str, mark: AliasMark) -> None:
     """Keep the value ``name`` had as the read at ``mark`` began, the
     first time that read changes it, for the commands it read
@@ -166,9 +170,7 @@ def _expanding(session: SessionState, mark: AliasMark) -> bool:
     began = session._expand_aliases_marks.get(mark)
     if began is not None:
         return began
-    return bool(
-        session.shopts.get("expand_aliases", SHOPT_DEFAULTS["expand_aliases"])
-    )
+    return _aliases_on(session)
 
 
 def note_expanding(session: SessionState, mark: AliasMark) -> None:
@@ -247,9 +249,7 @@ def expanding_aliases(session: SessionState) -> frozenset[str]:
     view = session._alias_view
     if view is not None:
         return frozenset(view) - blocked
-    if not session.shopts.get(
-        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
-    ):
+    if not _aliases_on(session):
         return frozenset()
     return frozenset(session.aliases) - blocked
 
@@ -281,9 +281,7 @@ def body_alias_values(session: SessionState, name: str) -> dict[str, str]:
         and site.aliases is not None
     ):
         return dict(site.aliases)
-    if not session.shopts.get(
-        "expand_aliases", SHOPT_DEFAULTS["expand_aliases"]
-    ):
+    if not _aliases_on(session):
         return {}
     return dict(session.aliases)
 

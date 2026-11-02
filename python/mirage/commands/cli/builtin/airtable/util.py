@@ -21,13 +21,11 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.airtable.config import AirtableConfig
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, CommandOutput, materialize
 from mirage.types import PathSpec
 
-Outcome = tuple[ByteSource | None, IOResult]
-
 Verb = Callable[
-    [AirtableAccessor, list[str], Context, FlagView], Awaitable[Outcome]
+    [AirtableAccessor, list[str], Context, FlagView], Awaitable[CommandOutput]
 ]
 
 
@@ -146,7 +144,7 @@ async def run(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-) -> Outcome:
+) -> CommandOutput:
     """Run one verb on the install's accessor.
 
     The accessor outlives the line: the workspace closes it with the

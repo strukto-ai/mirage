@@ -54,14 +54,7 @@ export interface GmailAttachmentInfo {
   filename: string
   attachmentId: string
   size: number
-}
-
-interface GmailProcessedAttachment {
-  id: string
-  filename: string
-  path: string
-  mime_type: string
-  size: number
+  mimeType: string
 }
 
 export interface ListMessagesOptions {
@@ -177,36 +170,11 @@ export function extractAttachments(payload: GmailPayload | undefined): GmailAtta
     const body = part.body ?? {}
     const attachmentId = body.attachmentId ?? ''
     if (filename !== '' && attachmentId !== '') {
-      attachments.push({ filename, attachmentId, size: body.size ?? 0 })
-    }
-    for (const sub of part.parts ?? []) {
-      const fn = sub.filename ?? ''
-      const bd = sub.body ?? {}
-      const aid = bd.attachmentId ?? ''
-      if (fn !== '' && aid !== '') {
-        attachments.push({ filename: fn, attachmentId: aid, size: bd.size ?? 0 })
-      }
-    }
-  }
-  return attachments
-}
-
-function extractProcessedAttachments(
-  payload: GmailPayload | undefined,
-): GmailProcessedAttachment[] {
-  if (payload === undefined) return []
-  const result: GmailProcessedAttachment[] = []
-  for (const part of payload.parts ?? []) {
-    const filename = part.filename ?? ''
-    const body = part.body ?? {}
-    const attachmentId = body.attachmentId ?? ''
-    if (filename !== '' && attachmentId !== '') {
-      result.push({
-        id: attachmentId,
+      attachments.push({
         filename,
-        path: `attachments/${attachmentId}_${filename}`,
-        mime_type: part.mimeType ?? '',
+        attachmentId,
         size: body.size ?? 0,
+        mimeType: part.mimeType ?? '',
       })
     }
     for (const sub of part.parts ?? []) {
@@ -214,17 +182,16 @@ function extractProcessedAttachments(
       const bd = sub.body ?? {}
       const aid = bd.attachmentId ?? ''
       if (fn !== '' && aid !== '') {
-        result.push({
-          id: aid,
+        attachments.push({
           filename: fn,
-          path: `attachments/${aid}_${fn}`,
-          mime_type: sub.mimeType ?? '',
+          attachmentId: aid,
           size: bd.size ?? 0,
+          mimeType: sub.mimeType ?? '',
         })
       }
     }
   }
-  return result
+  return attachments
 }
 
 export async function getMessageProcessed(tokenManager: TokenManager, messageId: string) {
@@ -246,7 +213,13 @@ export function processMessage(raw: GmailMessageRaw) {
     body_text: bodyText,
     snippet: raw.snippet ?? '',
     labels: raw.labelIds ?? [],
-    attachments: extractProcessedAttachments(raw.payload),
+    attachments: extractAttachments(raw.payload).map((a) => ({
+      id: a.attachmentId,
+      filename: a.filename,
+      path: `attachments/${a.attachmentId}_${a.filename}`,
+      mime_type: a.mimeType,
+      size: a.size,
+    })),
   }
 }
 

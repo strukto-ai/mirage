@@ -1,7 +1,7 @@
 ---
 title: Google Docs
 description: Mount Google Docs as JSON-backed files so Python agents can read document structure and content through Mirage.
-icon: file-lines
+icon: /images/gdocs-logo.svg
 ---
 The Google Docs VFS exposes Docs documents as a virtual filesystem
 mounted at some prefix such as `/gdocs/`.
@@ -51,97 +51,109 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
     | --- | --- |
     | `/<path>` | `gdocs`, write |
 
-    #### `/<path>` layout
+    #### VFS Layout
+
+    ##### `/<path>`
 
     ```text
     /<path>
-      owned/
-        <date>_<title>__<doc-id>.gdoc.json
-      shared/
-        <date>_<title>__<doc-id>.gdoc.json
-
-      Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
-        <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
-        <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
-        <doc-id>      Google Docs document ID
-
-      Buckets:
-        owned/   docs you created
-        shared/  docs shared with you by others
-                 - does NOT include docs you own and shared with others;
-                   those are still in owned/.
-
-      gdoc.json structure (the Google Docs API documents.get response, read
-      with includeTabsContent=true so every tab is present):
-        {
-          "documentId": "...",
-          "title": "...",
-          "tabs": [                          # one entry per top-level tab
-            {
-              "tabProperties": {
-                "tabId": "t.0",              # names a tab for gws docs write
-                "title": "Tab 1",
-                "index": 0
-              },
-              "documentTab": {
-                "body": {
-                  "content": [
-                    {                          # one element per block
-                      "paragraph": {
-                        "elements": [
-                          { "textRun": { "content": "the actual text\n",
-                                         "textStyle": {...} } }
-                        ],
-                        "paragraphStyle": {...}
-                      }
-                    },
-                    { "table": {...} },
-                    { "sectionBreak": {...} }
-                  ]
-                },
-                "documentStyle": {...},
-                "namedStyles": {...}
-              },
-              "childTabs": [ { ...same shape, nested to any depth... } ]
-                                           # a NESTED tab additionally carries
-                                           # parentTabId and nestingLevel; a
-                                           # root tab carries neither
-            }
-          ],
-          "revisionId": "..."
-        }
-
-      There is no top-level .body. A tab-aware response leaves the singleton
-      fields (.body, .documentStyle, .namedStyles) empty and hangs every
-      tab's content off .tabs[].documentTab instead. Tabs also nest, so text
-      can sit at any depth under .childTabs; the recursive recipes below read
-      a one-tab and a fifty-tab document alike.
-
-      Useful jq paths:
-        .title
-        [.. | .tabProperties? // empty | .title]             # every tab name
-        [.. | .textRun? // empty | .content] | add           # all text, any depth
-        [.. | .tabProperties? // empty] | length             # tab count
-        [.tabs[0].documentTab.body.content[]
-          | .paragraph?.elements[]?.textRun.content] | add   # first tab only
-        .revisionId
-
-      The first block of a body is always a sectionBreak, which carries no
-      .paragraph, so a path through .paragraph needs the `?` or it fails with
-      "Cannot iterate over null".
-
-      Delete, on a `write` path:
-        rm /<path>/owned/<file>.gdoc.json      # permanent delete from Drive
-        rm -f <path>                            # ignore if missing
-        Only operates on .gdoc.json files; owned/ and shared/ themselves
-        cannot be removed.
-
-      Rename to a new title, on a `write` path:
-        mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
-           /<path>/owned/<date>_<new>__<id>.gdoc.json
-        Keep the folder, the date and the id, and spell the title the way
-        the listing does (spaces->_); any other name is refused.
+      owned/     # docs you created
+        <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+      shared/    # docs others shared with you
+        <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
     ```
+
+    - `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
+      `2026-05-*` narrows by it.
+    - `<title>` is sanitized: spaces and any character outside
+      `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
+    - `<doc-id>` is the Google Docs document id.
+    - `shared/` holds docs shared with you by others; ones you own
+      and shared with others are still in `owned/`.
+
+    A `.gdoc.json` holds the Google Docs API `documents.get` response, read
+    with `includeTabsContent=true` so every tab is present:
+
+    ```jsonc
+    {
+      "documentId": "...",
+      "title": "...",
+      "tabs": [                            // one entry per top-level tab
+        {
+          "tabProperties": {
+            "tabId": "t.0",                // names a tab for gws docs write
+            "title": "Tab 1",
+            "index": 0
+          },
+          "documentTab": {
+            "body": {
+              "content": [
+                {                          // one element per block
+                  "paragraph": {
+                    "elements": [
+                      { "textRun": { "content": "the actual text\n",
+                                     "textStyle": {...} } }
+                    ],
+                    "paragraphStyle": {...}
+                  }
+                },
+                { "table": {...} },
+                { "sectionBreak": {...} }
+              ]
+            },
+            "documentStyle": {...},
+            "namedStyles": {...}
+          },
+          "childTabs": [ { ...same shape, nested to any depth... } ]
+                                           // a nested tab also carries
+                                           // parentTabId and nestingLevel;
+                                           // a root tab carries neither
+        }
+      ],
+      "revisionId": "..."
+    }
+    ```
+
+    There is no top-level .body. A tab-aware response leaves the singleton
+    fields (`.body`, `.documentStyle`, `.namedStyles`) empty and hangs every
+    tab's content off `.tabs[].documentTab` instead. Tabs also nest, so text
+    can sit at any depth under `.childTabs`; the recursive recipes below read
+    a one-tab and a fifty-tab document alike.
+
+    Useful `jq` paths:
+
+    ```jq
+    .title
+    [.. | .tabProperties? // empty | .title]             # every tab name
+    [.. | .textRun? // empty | .content] | add           # all text, any depth
+    [.. | .tabProperties? // empty] | length             # tab count
+    [.tabs[0].documentTab.body.content[]
+          | .paragraph?.elements[]?.textRun.content] | add   # first tab only
+    .revisionId
+    ```
+
+    The first block of a body is always a `sectionBreak`, which carries no
+    `.paragraph`, so a path through `.paragraph` needs the `?` or it fails
+    with `Cannot iterate over null`.
+
+    Delete, on a `write` path:
+
+    ```sh
+    rm /<path>/owned/<file>.gdoc.json   # deletes it from Drive for good
+    rm -f <path>                       # ignores a missing file
+    ```
+
+    Only `.gdoc.json` files can be removed; `owned/` and `shared/` cannot.
+
+    Rename to a new title, on a `write` path:
+
+    ```sh
+    mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
+       /<path>/owned/<date>_<new>__<id>.gdoc.json
+    ```
+
+    Keep the folder, the date and the id, and spell the title the way the
+    listing does (spaces become `_`); any other name is refused.
 
     #### Supported Unix Commands for VFS
 
@@ -174,97 +186,109 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
     | --- | --- |
     | `/<path>` | `gdocs`, write |
 
-    ## `/<path>` layout
+    ## VFS Layout
+
+    ### `/<path>`
 
     ```text
     /<path>
-      owned/
-        <date>_<title>__<doc-id>.gdoc.json
-      shared/
-        <date>_<title>__<doc-id>.gdoc.json
-
-      Filename: <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
-        <YYYY-MM-DD>  modifiedTime, used for date-glob (e.g. 2026-05-*)
-        <title>       sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
-        <doc-id>      Google Docs document ID
-
-      Buckets:
-        owned/   docs you created
-        shared/  docs shared with you by others
-                 - does NOT include docs you own and shared with others;
-                   those are still in owned/.
-
-      gdoc.json structure (the Google Docs API documents.get response, read
-      with includeTabsContent=true so every tab is present):
-        {
-          "documentId": "...",
-          "title": "...",
-          "tabs": [                          # one entry per top-level tab
-            {
-              "tabProperties": {
-                "tabId": "t.0",              # names a tab for gws docs write
-                "title": "Tab 1",
-                "index": 0
-              },
-              "documentTab": {
-                "body": {
-                  "content": [
-                    {                          # one element per block
-                      "paragraph": {
-                        "elements": [
-                          { "textRun": { "content": "the actual text\n",
-                                         "textStyle": {...} } }
-                        ],
-                        "paragraphStyle": {...}
-                      }
-                    },
-                    { "table": {...} },
-                    { "sectionBreak": {...} }
-                  ]
-                },
-                "documentStyle": {...},
-                "namedStyles": {...}
-              },
-              "childTabs": [ { ...same shape, nested to any depth... } ]
-                                           # a NESTED tab additionally carries
-                                           # parentTabId and nestingLevel; a
-                                           # root tab carries neither
-            }
-          ],
-          "revisionId": "..."
-        }
-
-      There is no top-level .body. A tab-aware response leaves the singleton
-      fields (.body, .documentStyle, .namedStyles) empty and hangs every
-      tab's content off .tabs[].documentTab instead. Tabs also nest, so text
-      can sit at any depth under .childTabs; the recursive recipes below read
-      a one-tab and a fifty-tab document alike.
-
-      Useful jq paths:
-        .title
-        [.. | .tabProperties? // empty | .title]             # every tab name
-        [.. | .textRun? // empty | .content] | add           # all text, any depth
-        [.. | .tabProperties? // empty] | length             # tab count
-        [.tabs[0].documentTab.body.content[]
-          | .paragraph?.elements[]?.textRun.content] | add   # first tab only
-        .revisionId
-
-      The first block of a body is always a sectionBreak, which carries no
-      .paragraph, so a path through .paragraph needs the `?` or it fails with
-      "Cannot iterate over null".
-
-      Delete, on a `write` path:
-        rm /<path>/owned/<file>.gdoc.json      # permanent delete from Drive
-        rm -f <path>                            # ignore if missing
-        Only operates on .gdoc.json files; owned/ and shared/ themselves
-        cannot be removed.
-
-      Rename to a new title, on a `write` path:
-        mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
-           /<path>/owned/<date>_<new>__<id>.gdoc.json
-        Keep the folder, the date and the id, and spell the title the way
-        the listing does (spaces->_); any other name is refused.
+      owned/     # docs you created
+        <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
+      shared/    # docs others shared with you
+        <YYYY-MM-DD>_<title>__<doc-id>.gdoc.json
     ```
+
+    - `<YYYY-MM-DD>` is the file's `modifiedTime`, so a date glob such as
+      `2026-05-*` narrows by it.
+    - `<title>` is sanitized: spaces and any character outside
+      `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
+    - `<doc-id>` is the Google Docs document id.
+    - `shared/` holds docs shared with you by others; ones you own
+      and shared with others are still in `owned/`.
+
+    A `.gdoc.json` holds the Google Docs API `documents.get` response, read
+    with `includeTabsContent=true` so every tab is present:
+
+    ```jsonc
+    {
+      "documentId": "...",
+      "title": "...",
+      "tabs": [                            // one entry per top-level tab
+        {
+          "tabProperties": {
+            "tabId": "t.0",                // names a tab for gws docs write
+            "title": "Tab 1",
+            "index": 0
+          },
+          "documentTab": {
+            "body": {
+              "content": [
+                {                          // one element per block
+                  "paragraph": {
+                    "elements": [
+                      { "textRun": { "content": "the actual text\n",
+                                     "textStyle": {...} } }
+                    ],
+                    "paragraphStyle": {...}
+                  }
+                },
+                { "table": {...} },
+                { "sectionBreak": {...} }
+              ]
+            },
+            "documentStyle": {...},
+            "namedStyles": {...}
+          },
+          "childTabs": [ { ...same shape, nested to any depth... } ]
+                                           // a nested tab also carries
+                                           // parentTabId and nestingLevel;
+                                           // a root tab carries neither
+        }
+      ],
+      "revisionId": "..."
+    }
+    ```
+
+    There is no top-level .body. A tab-aware response leaves the singleton
+    fields (`.body`, `.documentStyle`, `.namedStyles`) empty and hangs every
+    tab's content off `.tabs[].documentTab` instead. Tabs also nest, so text
+    can sit at any depth under `.childTabs`; the recursive recipes below read
+    a one-tab and a fifty-tab document alike.
+
+    Useful `jq` paths:
+
+    ```jq
+    .title
+    [.. | .tabProperties? // empty | .title]             # every tab name
+    [.. | .textRun? // empty | .content] | add           # all text, any depth
+    [.. | .tabProperties? // empty] | length             # tab count
+    [.tabs[0].documentTab.body.content[]
+          | .paragraph?.elements[]?.textRun.content] | add   # first tab only
+    .revisionId
+    ```
+
+    The first block of a body is always a `sectionBreak`, which carries no
+    `.paragraph`, so a path through `.paragraph` needs the `?` or it fails
+    with `Cannot iterate over null`.
+
+    Delete, on a `write` path:
+
+    ```sh
+    rm /<path>/owned/<file>.gdoc.json   # deletes it from Drive for good
+    rm -f <path>                       # ignores a missing file
+    ```
+
+    Only `.gdoc.json` files can be removed; `owned/` and `shared/` cannot.
+
+    Rename to a new title, on a `write` path:
+
+    ```sh
+    mv /<path>/owned/<date>_<old>__<id>.gdoc.json \
+       /<path>/owned/<date>_<new>__<id>.gdoc.json
+    ```
+
+    Keep the folder, the date and the id, and spell the title the way the
+    listing does (spaces become `_`); any other name is refused.
 
     ## Supported Unix Commands for VFS
 
@@ -287,27 +311,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
   </Tab>
 </Tabs>
 {/* generated: vfs-md gdocs end */}
-
-```text
-/gdocs/
-  owned/
-    <YYYY-MM-DD>_<sanitized-title>__<doc-id>.gdoc.json
-    ...
-  shared/
-    <YYYY-MM-DD>_<sanitized-title>__<doc-id>.gdoc.json
-    ...
-```
-
-Example:
-
-```text
-/gdocs/
-  owned/
-    2026-04-04_Project_Plan__1AbCdEf.gdoc.json
-    2026-04-10_Meeting_Notes__2BcDeFg.gdoc.json
-  shared/
-    2026-04-03_Design_Notes__9XyZ.gdoc.json
-```
 
 Documents are split into `owned` (documents you created) and `shared`
 (documents shared with you). The filename shape is:

@@ -21,7 +21,7 @@ from mirage.commands.quote import quote_word
 from mirage.commands.spec import SPECS
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import RegexError
-from mirage.rs.regex import posix_regex
+from mirage.rs.regex import PosixRegex, posix_regex
 from mirage.shell.bytes import byte_view, from_byte_view, utf8_locale
 from mirage.types import PathSpec
 
@@ -360,6 +360,19 @@ def compare(left: str, op: str, right: str) -> str:
     return "1" if held else "0"
 
 
+def _compile_or_refuse(pattern: str, utf8: bool) -> PosixRegex:
+    """Compile a BRE, re-wording glibc's refusal under expr's own prefix.
+
+    Args:
+        pattern (str): the BRE, as a byte view.
+        utf8 (bool): the pattern is text, under a UTF-8 locale.
+    """
+    try:
+        return posix_regex(pattern, utf8=utf8)
+    except RegexError as exc:
+        raise UsageError(f"expr: {exc.message}") from exc
+
+
 async def colon_match(subject: str, pattern: str, utf8: bool = False) -> str:
     """The `:` operator, which `match` is the prefix spelling of.
 
@@ -388,10 +401,7 @@ async def colon_match(subject: str, pattern: str, utf8: bool = False) -> str:
         UsageError: glibc's wording for a pattern it refuses, under
             expr's own prefix.
     """
-    try:
-        regex = posix_regex(pattern, utf8=utf8)
-    except RegexError as exc:
-        raise UsageError(f"expr: {exc.message}") from exc
+    regex = _compile_or_refuse(pattern, utf8)
     found = await regex.search(subject)
     # The leftmost match is the one at the start, when there is one.
     if found is not None and found[0] is not None and found[0][0] != 0:

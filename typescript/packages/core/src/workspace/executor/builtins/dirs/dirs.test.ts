@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../../../../types.ts'
 import { CycleError, resolveSymlinks } from '../../../../utils/path.ts'
-import { joinPath, resolveTarget, splitModeOptions, typedPath } from './dirs.ts'
+import { joinRaw, resolveTarget, splitModeOptions, typedPath } from './dirs.ts'
 
 // A follow over a fixed link table, as the session's link view resolves.
 function through(links: ReadonlyMap<string, string>): (path: string) => string {
@@ -52,9 +52,9 @@ describe('splitModeOptions', () => {
 })
 
 describe('the cd path helpers', () => {
-  it('joinPath keeps .. intact', () => {
-    expect(joinPath('x/..', '/data')).toBe('/data/x/..')
-    expect(joinPath('/abs', '/data')).toBe('/abs')
+  it('joinRaw keeps .. intact', () => {
+    expect(joinRaw('x/..', '/data')).toBe('/data/x/..')
+    expect(joinRaw('/abs', '/data')).toBe('/abs')
   })
 
   it('typedPath keeps the spelling', () => {

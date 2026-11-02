@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { CODE_ARMS } from './constants.ts'
+import { ERRNO_ARMS } from './constants.ts'
 import { CommandTimeoutError, type FsCondition } from './types.ts'
 
 /**
@@ -32,7 +32,7 @@ export function classify(err: unknown): FsCondition | null {
   if ((err as { noMount?: unknown }).noMount === true) return 'ENOENT'
   const code = (err as { code?: unknown }).code
   if (typeof code !== 'string') return null
-  return CODE_ARMS[code] ?? null
+  return ERRNO_ARMS[code] ?? null
 }
 
 // What a listing reports against the one entry whose stat failed, and walks

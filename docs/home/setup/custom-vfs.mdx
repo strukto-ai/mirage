@@ -136,7 +136,7 @@ instead of reading files. Each links to its guide.
 | Attribute | Does |
 | --- | --- |
 | `name` | Names the VFS. |
-| `vfs_md` | The mount's layout and file formats in its VFS.md; leave it empty for plain files. `{prefix}` becomes the mount's folder. |
+| `vfs_md` | The mount's layout and file formats in its VFS.md, in Markdown: a `text` tree, then notes. Leave it empty for plain files. `{prefix}` becomes the mount's folder. |
 | `whole_word_search` | `files_containing` answers only a whole-word search (`grep -w`, `rg -w`); VFS.md tells the agent so. |
 
 Set them as class attributes. `name` and `vfs_md` can also be passed to

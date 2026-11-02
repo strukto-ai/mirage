@@ -39,6 +39,14 @@ from mirage.utils.dates import utc_date_folder
 
 logger = logging.getLogger(__name__)
 
+_KNOWN_EVENTS = (
+    EVENT_COMMAND,
+    EVENT_CLEAR,
+    EVENT_DELETE,
+    EVENT_RESULT,
+    EVENT_VFS,
+)
+
 _NAME_LIMIT = 200
 _NS_PER_MS = 1_000_000
 
@@ -507,21 +515,16 @@ class Observer:
             events (list[dict]): LogEntry dicts from StateKey.HISTORY.
         """
         await self._store.clear()
-        known = (
-            EVENT_COMMAND,
-            EVENT_CLEAR,
-            EVENT_DELETE,
-            EVENT_RESULT,
-            EVENT_VFS,
+        newest = _newest_stamp(
+            [e for e in events if e.get("type") in _KNOWN_EVENTS]
         )
-        newest = _newest_stamp([e for e in events if e.get("type") in known])
         written = (
             self._now_ms() if newest is None else max(self._now_ms(), newest)
         )
         day = utc_date_folder(written / 1000)
         by_session: dict[str, list[str]] = {}
         for e in events:
-            if e.get("type") not in known:
+            if e.get("type") not in _KNOWN_EVENTS:
                 continue
             session = e.get("session", "default")
             by_session.setdefault(session, []).append(

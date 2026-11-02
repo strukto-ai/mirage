@@ -57,7 +57,7 @@ import { GIT } from '../git/index.ts'
 import { clone as gitClone } from '../git/clone.ts'
 import { splitMarked } from '../git/util.ts'
 import { flagKwargName } from '../../../spec/constants.ts'
-import { exported, list, pointer, struct, type Shape } from './shape.ts'
+import { exported, listOf, pointer, struct, type Shape } from './shape.ts'
 
 const OWNER = struct(['id', 'string'], ['login', 'string'])
 const USER = struct(
@@ -97,7 +97,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'assignableUsers',
     {
       select: 'assignableUsers(first:100){nodes{id,login,name}}',
-      shape: list(USER),
+      shape: listOf(USER),
       unwrap: 'nodes',
     },
   ],
@@ -112,7 +112,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'contactLinks',
     {
       select: 'contactLinks{about,name,url}',
-      shape: list(struct(['about', 'string'], ['name', 'string'], ['url', 'string'])),
+      shape: listOf(struct(['about', 'string'], ['name', 'string'], ['url', 'string'])),
     },
   ],
   plain('createdAt', 'time'),
@@ -125,7 +125,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'fundingLinks',
     {
       select: 'fundingLinks{platform,url}',
-      shape: list(struct(['platform', 'string'], ['url', 'string'])),
+      shape: listOf(struct(['platform', 'string'], ['url', 'string'])),
     },
   ],
   plain('hasDiscussionsEnabled', 'bool'),
@@ -148,7 +148,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'issueTemplates',
     {
       select: 'issueTemplates{name,title,body,about}',
-      shape: list(
+      shape: listOf(
         struct(['name', 'string'], ['title', 'string'], ['body', 'string'], ['about', 'string']),
       ),
     },
@@ -158,7 +158,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'labels',
     {
       select: 'labels(first:100){nodes{id,color,name,description}}',
-      shape: list(
+      shape: listOf(
         struct(
           ['id', 'string'],
           ['name', 'string'],
@@ -173,7 +173,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'languages',
     {
       select: 'languages(first:100){edges{size,node{name}}}',
-      shape: list(struct(['size', 'int'], ['node', struct(['name', 'string'])])),
+      shape: listOf(struct(['size', 'int'], ['node', struct(['name', 'string'])])),
       unwrap: 'edges',
     },
   ],
@@ -200,7 +200,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'mentionableUsers',
     {
       select: 'mentionableUsers(first:100){nodes{id,login,name}}',
-      shape: list(USER),
+      shape: listOf(USER),
       unwrap: 'nodes',
     },
   ],
@@ -209,7 +209,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'milestones',
     {
       select: 'milestones(first:100,states:OPEN){nodes{number,title,description,dueOn}}',
-      shape: list(
+      shape: listOf(
         struct(['number', 'int'], ['title', 'string'], ['description', 'string'], ['dueOn', 'raw']),
       ),
       unwrap: 'nodes',
@@ -226,7 +226,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'projects',
     {
       select: 'projects(first:100,states:OPEN){nodes{id,name,number,body,resourcePath}}',
-      shape: list(
+      shape: listOf(
         struct(['id', 'string'], ['name', 'string'], ['number', 'int'], ['resourcePath', 'string']),
       ),
       unwrap: 'nodes',
@@ -241,7 +241,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
         'projectsV2(first:100,query:"is:open"){nodes{id,number,title,resourcePath,closed,url}}',
       shape: struct([
         'Nodes',
-        list(
+        listOf(
           struct(
             ['id', 'string'],
             ['title', 'string'],
@@ -259,7 +259,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'pullRequestTemplates',
     {
       select: 'pullRequestTemplates{body,filename}',
-      shape: list(struct(['filename', 'string'], ['body', 'string'])),
+      shape: listOf(struct(['filename', 'string'], ['body', 'string'])),
     },
   ],
   ['pullRequests', { select: 'pullRequests(states:OPEN){totalCount}', shape: COUNT }],
@@ -269,7 +269,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
     'repositoryTopics',
     {
       select: 'repositoryTopics(first:100){nodes{topic{name}}}',
-      shape: list(struct(['name', 'string'])),
+      shape: listOf(struct(['name', 'string'])),
       unwrap: 'topics',
     },
   ],
@@ -286,7 +286,7 @@ const REPO_FIELD_TABLE: ReadonlyMap<string, RepoField> = new Map<string, RepoFie
   plain('viewerDefaultMergeMethod', 'string'),
   plain('viewerHasStarred', 'bool'),
   plain('viewerPermission', 'string'),
-  plain('viewerPossibleCommitEmails', list('string')),
+  plain('viewerPossibleCommitEmails', listOf('string')),
   plain('viewerSubscription', 'string'),
   plain('visibility', 'string'),
   ['watchers', { select: 'watchers{totalCount}', shape: COUNT }],

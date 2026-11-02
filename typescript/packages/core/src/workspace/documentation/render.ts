@@ -384,7 +384,11 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
         .replaceAll('{prefix}', prefix)
         .replace(/^\n+|\n+$/g, '')
         .trimEnd()
-      layouts.push(`## ${code(prefix)} layout\n\n${fenced(layout, 'text')}`)
+      // A backtick or line break in the prefix could close a code span or
+      // fence it is put in, so such a layout stays text.
+      layouts.push(
+        `### ${code(prefix)}\n\n${/[`\n\r]/.test(prefix) ? fenced(layout, 'text') : layout}`,
+      )
     }
     for (const entry of vis.shown?.entries ?? []) {
       if (entry.mode === null || isGlob(entry.path) || !pathVisible(vis, entry.path)) continue
@@ -412,7 +416,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
   } else {
     parts.push(
       table(['Path', 'Description'], paths),
-      ...layouts,
+      ...(layouts.length > 0 ? ['## VFS Layout', ...layouts] : []),
       '## Supported Unix Commands for VFS',
       'Unix commands work on each path as on a local filesystem, as far as the path supports them:',
       table(['Path', 'Supported'], commands),

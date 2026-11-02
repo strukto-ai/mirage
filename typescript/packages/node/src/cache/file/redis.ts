@@ -59,10 +59,6 @@ export const KEY_BATCH = 1000
 // Seconds a version kept without its bytes lives (raise-only over bytes).
 export const VERSION_TTL = 86_400
 
-function toBuffer(data: Uint8Array): Buffer {
-  return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
-}
-
 export interface RedisFileCacheOptions extends RedisVFSOptions {
   cacheLimit?: string | number
   maxDrainBytes?: number | null
@@ -178,7 +174,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
       const dk = this.dataKey(key)
       const mk = this.metaKey(key)
       const pipe = c.multi()
-      pipe.set(dk, toBuffer(data))
+      pipe.set(dk, Buffer.from(data.buffer, data.byteOffset, data.byteLength))
       // Deleted, not left alone: redis expires the two keys independently
       // and a re-set of an entry that carried a token would otherwise
       // leave the old meta key describing the new bytes, which isFresh

@@ -48,7 +48,7 @@ export interface UniqFlags {
 const ALL_REPEATED_ARGS = ['none', 'prepend', 'separate'] as const
 const GROUP_ARGS = ['prepend', 'append', 'separate', 'both'] as const
 
-function optionalMethod(
+function methodWord(
   value: ParsedFlagValue | undefined,
   defaultValue: string,
   allowed: readonly string[],
@@ -76,13 +76,13 @@ function parseFlags(bag: Record<string, FlagValue>, operands: readonly string[])
   const count = fl.asBool('count')
   const duplicatesOnly = fl.asBool('repeated')
   const uniqueOnly = fl.asBool('unique')
-  const allRepeated = optionalMethod(
+  const allRepeated = methodWord(
     fl.asBool('D') ? true : (fl.raw('all_repeated') as ParsedFlagValue | undefined),
     'none',
     ALL_REPEATED_ARGS,
     'all-repeated',
   ) as UniqFlags['allRepeated']
-  const group = optionalMethod(
+  const group = methodWord(
     fl.raw('group') as ParsedFlagValue | undefined,
     'separate',
     GROUP_ARGS,

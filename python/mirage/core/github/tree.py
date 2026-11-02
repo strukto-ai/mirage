@@ -35,32 +35,6 @@ def _head_of(data: dict[str, Any]) -> str | None:
     return head if isinstance(head, str) and head else None
 
 
-def _parse_tree_response(
-    data: dict[str, Any],
-    owner: str,
-    repo: str,
-    ref: str,
-) -> tuple[dict[str, TreeEntry], bool, str | None]:
-    truncated = bool(data.get("truncated"))
-    if truncated:
-        log.warning(
-            "GitHub tree response truncated for %s/%s@%s", owner, repo, ref
-        )
-    result: dict[str, TreeEntry] = {}
-    for item in data.get("tree", []):
-        # Submodule gitlinks (type "commit") have no size and no blob to
-        # read; exclude them from the tree entirely.
-        if item["type"] == "commit":
-            continue
-        result[item["path"]] = TreeEntry(
-            path=item["path"],
-            type=item["type"],
-            sha=item["sha"],
-            size=item.get("size"),
-        )
-    return result, truncated, _head_of(data)
-
-
 async def fetch_tree(
     account: GitHubAccount,
     owner: str,
@@ -92,7 +66,24 @@ async def fetch_tree(
         repo=repo,
         ref=quote(ref, safe=""),
     )
-    return _parse_tree_response(data, owner, repo, ref)
+    truncated = bool(data.get("truncated"))
+    if truncated:
+        log.warning(
+            "GitHub tree response truncated for %s/%s@%s", owner, repo, ref
+        )
+    result: dict[str, TreeEntry] = {}
+    for item in data.get("tree", []):
+        # Submodule gitlinks (type "commit") have no size and no blob to
+        # read; exclude them from the tree entirely.
+        if item["type"] == "commit":
+            continue
+        result[item["path"]] = TreeEntry(
+            path=item["path"],
+            type=item["type"],
+            sha=item["sha"],
+            size=item.get("size"),
+        )
+    return result, truncated, _head_of(data)
 
 
 async def fetch_head(

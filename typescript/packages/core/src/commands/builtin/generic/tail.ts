@@ -19,7 +19,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
-import { abortable } from '../../../utils/abort.ts'
+import { abortable, hasAborted } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import {
   FileType,
@@ -120,15 +120,9 @@ function note(io: IOResult, message: string): void {
   io.stderr = concat([prior, encodeText(message)])
 }
 
-// Whether the caller's signal has fired; a call rather than a read so a
-// loop re-asks after every await instead of trusting a narrowed value.
-function aborted(signal: AbortSignal | undefined): boolean {
-  return signal?.aborted === true
-}
-
 // Sleep for the poll interval, or until the caller's signal fires.
 async function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> {
-  if (aborted(signal)) return
+  if (hasAborted(signal)) return
   await new Promise<void>((resolve) => {
     // An infinite interval waits on the abort signal alone, never on a
     // timer. `setTimeout` holds a 32-bit signed delay, so Node warns
@@ -556,7 +550,7 @@ async function* follow(
           yield next.value
         }
       } catch (err) {
-        if (aborted(signal)) return
+        if (hasAborted(signal)) return
         throw err
       }
       note(io, 'tail: no files remaining\n')
@@ -571,9 +565,9 @@ async function* follow(
   }
   for (const entry of active.filter(([, p]) => isStdin(p))) active.splice(active.indexOf(entry), 1)
   if (onlyStdin) return
-  while ((active.length > 0 || waiting.length > 0) && !aborted(signal)) {
+  while ((active.length > 0 || waiting.length > 0) && !hasAborted(signal)) {
     await pause(flags.interval, signal)
-    if (aborted(signal)) return
+    if (hasAborted(signal)) return
     for (const entry of [...waiting]) {
       const [slot, p, how] = entry
       let found: FileStat
@@ -645,7 +639,7 @@ async function* follow(
       positions.set(slot, pos)
     }
   }
-  if (aborted(signal)) return
+  if (hasAborted(signal)) return
   note(io, 'tail: no files remaining\n')
   io.exitCode = 1
 }

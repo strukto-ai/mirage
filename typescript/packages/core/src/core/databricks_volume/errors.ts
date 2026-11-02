@@ -33,13 +33,12 @@ export class DatabricksVolumeApiError extends ApiError {
   }
 }
 
-const NOT_FOUND_CODES = new Set(['RESOURCE_DOES_NOT_EXIST', 'NOT_FOUND'])
-
 export function isNotFound(exc: unknown): boolean {
   return (
     exc instanceof DatabricksVolumeApiError &&
     (exc.status === 404 ||
-      (exc.status === 400 && exc.errorCode !== null && NOT_FOUND_CODES.has(exc.errorCode)))
+      (exc.status === 400 &&
+        (exc.errorCode === 'RESOURCE_DOES_NOT_EXIST' || exc.errorCode === 'NOT_FOUND')))
   )
 }
 

@@ -21,24 +21,11 @@ import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { lastOf, scanOptions } from '../getopt.ts'
-import { builtinUsage } from '../shared.ts'
+import { builtinUsage, result } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { describe, locations, programFile } from './classify.ts'
 import { TYPE_OPTIONS, WHICH_OPTIONS, WHICH_USAGE } from './constants.ts'
 import { NameKind } from './types.ts'
-
-/**
- * The refusal shape both builtins use for an unknown option; `voice` is
- * `bash: ` for `type`, a builtin, and empty for `which`, a program.
- */
-function optionError(cmd: string, bad: string, usage: string, voice = ''): RedirectResult {
-  const err = encodeText(`${voice}${cmd}: ${bad}: invalid option\n${usage}`)
-  return [
-    null,
-    new IOResult({ exitCode: 2, stderr: err }),
-    new ExecutionNode({ command: cmd, exitCode: 2, stderr: err }),
-  ]
-}
 
 /**
  * Run the `type` builtin (`type [-afptP] name [name ...]`).
@@ -61,7 +48,12 @@ export function handleType(
   parser?: ParseScope,
 ): RedirectResult {
   const scan = scanOptions(args, TYPE_OPTIONS)
-  if (scan.bad !== null) return optionError('type', scan.bad, builtinUsage('type'), 'bash: ')
+  if (scan.bad !== null) {
+    return result('type', {
+      exitCode: 2,
+      stderr: `bash: type: ${scan.bad}: invalid option\n${builtinUsage('type')}`,
+    })
+  }
   const mode = lastOf(scan.letters, 'tpP')
   const allMode = scan.letters.includes('a')
   const hidden = scan.letters.includes('f') ? NameKind.FUNCTION : null
@@ -116,7 +108,12 @@ export function handleWhich(
   registry: MountRegistry,
 ): RedirectResult {
   const scan = scanOptions(args, WHICH_OPTIONS)
-  if (scan.bad !== null) return optionError('which', scan.bad, WHICH_USAGE)
+  if (scan.bad !== null) {
+    return result('which', {
+      exitCode: 2,
+      stderr: `which: ${scan.bad}: invalid option\n${WHICH_USAGE}`,
+    })
+  }
   const silent = scan.letters.includes('s')
   const outLines: string[] = []
   let allFound = true

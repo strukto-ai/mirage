@@ -23,17 +23,16 @@ import type { QueueFactory } from './queue/base.ts'
 import { RAMEventQueue } from './queue/ram.ts'
 import type { Subscriber } from './source.ts'
 
-function defaultQueueFactory(roots: readonly PathSpec[]): RAMEventQueue {
-  return new RAMEventQueue(roots)
-}
-
 export class EventHub implements EventRuntime {
   private readonly registry: EventRegistry
   private readonly queueFactory: QueueFactory
   private readonly subscribers: Subscriber[] = []
   private closed = false
 
-  constructor(registry: EventRegistry, queueFactory: QueueFactory = defaultQueueFactory) {
+  constructor(
+    registry: EventRegistry,
+    queueFactory: QueueFactory = (roots) => new RAMEventQueue(roots),
+  ) {
     this.registry = registry
     this.queueFactory = queueFactory
   }

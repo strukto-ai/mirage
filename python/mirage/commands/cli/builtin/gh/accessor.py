@@ -373,15 +373,27 @@ def _go_encoded(value: JsonValue, quote: Callable[[str], str]) -> str:
     return _go_number(value)
 
 
-def jq_line(value: Any) -> str:
-    """One `--jq` output as go-gh prints it: a string raw, null as an empty
-    line, a boolean as its word, a number in fixed notation, with no
-    decimals when it is whole and two otherwise (rounded half to even, as
-    strconv rounds), and anything else as Go's json.Marshal writes it.
+def _fixed_number(number: int | float) -> str:
+    """A number as go-gh prints a float64 on its own line: in fixed
+    notation, with no decimals when it is whole and two otherwise
+    (rounded half to even, as strconv rounds).
 
     Every number is the double jq holds, and a whole one prints as the
     int of its exact value, which is what Go's fixed notation prints for
     it, but for negative zero, which prints as 0.
+
+    Args:
+        number (int | float): the number.
+    """
+    if isinstance(number, int):
+        return str(number)
+    return str(int(number)) if number.is_integer() else f"{number:.2f}"
+
+
+def jq_line(value: Any) -> str:
+    """One `--jq` output as go-gh prints it: a string raw, null as an empty
+    line, a boolean as its word, a number in fixed notation (see
+    _fixed_number), and anything else as Go's json.Marshal writes it.
 
     Args:
         value (Any): one output of the program.
@@ -392,10 +404,8 @@ def jq_line(value: Any) -> str:
         return value
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        return str(int(value)) if value.is_integer() else f"{value:.2f}"
+    if isinstance(value, (int, float)):
+        return _fixed_number(value)
     return _go_encoded(value, _marshal_string)
 
 

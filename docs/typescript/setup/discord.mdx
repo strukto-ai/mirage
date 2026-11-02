@@ -1,6 +1,6 @@
 ---
 title: Discord
-icon: discord
+icon: /images/discord-logo.svg
 description: Mount Discord guilds, channels, and members as a virtual filesystem from Node or the browser.
 ---
 
@@ -159,7 +159,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
     | --- | --- |
     | `/<path>` | `discord`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
+
+    ##### `/<path>`
 
     ```text
     /<path>
@@ -167,30 +169,30 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
         channels/
           <channel-name>__<channel-id>/
             <yyyy-mm-dd>/
-              chat.jsonl              # messages for that date
-              files/                  # attachments shared that day (may be empty)
-                <name>__<att-id>.<ext>  # cat to download bytes from Discord CDN
+              chat.jsonl                # messages for that date
+              files/                    # attachments shared that day
+                <name>__<att-id>.<ext>  # cat downloads it from Discord's CDN
         members/
-          <username>__<user-id>.json  # member profile
-      Naming: guild, channel, member, attachment names are `<display-name>__<id>`.
-      The display name keeps the original spelling from Discord (spaces,
-      apostrophes, emoji); only `/` is replaced with `∕` (U+2215) so paths
-      don't break. Quote names containing spaces in shell commands. Always
-      ls the parent dir first to discover exact entry names (they include
-      IDs).
-      Without time bounds, bare channel listings show the latest 30 days
-      ending at the newest message. Date globs can discover earlier days.
-      With start_time/end_time, listings cover that scope; messages and their
-      attachments outside it are absent, including through direct paths.
-      Users and channel metadata remain available as context.
-      grep and rg read the files they reach, so grep needs -r to search a
-      directory; under a channel that reads every listed day, attachments
-      included (downloaded from the CDN; binary ones such as JPG or PDF
-      produce noise).
-      Messages are JSONL; use jq to extract fields like .content, .author.username,
-      .attachments.
-      Time scope: start_time=unbounded (inclusive), end_time=unbounded (exclusive). Explicit paths and globs cannot escape this scope.
+          <username>__<user-id>.json    # member profile
     ```
+
+    - A guild, channel, member or attachment name is `<display-name>__<id>`.
+      The display name keeps Discord's spelling (spaces, apostrophes, emoji);
+      only `/` becomes `∕` (U+2215). `ls` the parent first to find exact
+      names, and quote a name that has spaces.
+    - Messages are JSONL; use `jq` for fields such as `.content`,
+      `.author.username` and `.attachments`. A day's `files/` may be empty.
+    - Without `start_time`/`end_time`, a channel lists the latest 30 days up
+      to its newest message; a date glob finds earlier days.
+    - With `start_time`/`end_time`, listings cover that scope; messages and
+      attachments outside it are absent, direct paths included. Users and
+      channel metadata stay available as context.
+    - `grep` and `rg` read the files they reach, so `grep` needs `-r` for a
+      directory. Under a channel that reads every listed day, attachments
+      included: they download from the CDN, and binary ones such as JPG or
+      PDF produce noise.
+
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
 
     #### Supported Unix Commands for VFS
 
@@ -223,7 +225,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
     | --- | --- |
     | `/<path>` | `discord`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
+
+    ### `/<path>`
 
     ```text
     /<path>
@@ -231,30 +235,30 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
         channels/
           <channel-name>__<channel-id>/
             <yyyy-mm-dd>/
-              chat.jsonl              # messages for that date
-              files/                  # attachments shared that day (may be empty)
-                <name>__<att-id>.<ext>  # cat to download bytes from Discord CDN
+              chat.jsonl                # messages for that date
+              files/                    # attachments shared that day
+                <name>__<att-id>.<ext>  # cat downloads it from Discord's CDN
         members/
-          <username>__<user-id>.json  # member profile
-      Naming: guild, channel, member, attachment names are `<display-name>__<id>`.
-      The display name keeps the original spelling from Discord (spaces,
-      apostrophes, emoji); only `/` is replaced with `∕` (U+2215) so paths
-      don't break. Quote names containing spaces in shell commands. Always
-      ls the parent dir first to discover exact entry names (they include
-      IDs).
-      Without time bounds, bare channel listings show the latest 30 days
-      ending at the newest message. Date globs can discover earlier days.
-      With start_time/end_time, listings cover that scope; messages and their
-      attachments outside it are absent, including through direct paths.
-      Users and channel metadata remain available as context.
-      grep and rg read the files they reach, so grep needs -r to search a
-      directory; under a channel that reads every listed day, attachments
-      included (downloaded from the CDN; binary ones such as JPG or PDF
-      produce noise).
-      Messages are JSONL; use jq to extract fields like .content, .author.username,
-      .attachments.
-      Time scope: start_time=unbounded (inclusive), end_time=unbounded (exclusive). Explicit paths and globs cannot escape this scope.
+          <username>__<user-id>.json    # member profile
     ```
+
+    - A guild, channel, member or attachment name is `<display-name>__<id>`.
+      The display name keeps Discord's spelling (spaces, apostrophes, emoji);
+      only `/` becomes `∕` (U+2215). `ls` the parent first to find exact
+      names, and quote a name that has spaces.
+    - Messages are JSONL; use `jq` for fields such as `.content`,
+      `.author.username` and `.attachments`. A day's `files/` may be empty.
+    - Without `start_time`/`end_time`, a channel lists the latest 30 days up
+      to its newest message; a date glob finds earlier days.
+    - With `start_time`/`end_time`, listings cover that scope; messages and
+      attachments outside it are absent, direct paths included. Users and
+      channel metadata stay available as context.
+    - `grep` and `rg` read the files they reach, so `grep` needs `-r` for a
+      directory. Under a channel that reads every listed day, attachments
+      included: they download from the CDN, and binary ones such as JPG or
+      PDF produce noise.
+
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
 
     ## Supported Unix Commands for VFS
 
@@ -277,22 +281,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
   </Tab>
 </Tabs>
 {/* generated: vfs-md discord end */}
-
-```text
-/discord/
-  <guild-name>__<guild-id>/
-    channels/
-      <channel-name>__<channel-id>/
-        <yyyy-mm-dd>/
-          chat.jsonl
-          files/
-            <stem>__<attachment-id>.<ext>
-            ...
-        ...
-    members/
-      <username>__<user-id>.json
-      ...
-```
 
 The root lists one directory per guild the bot has access to. Each guild contains a `channels/` directory with text channels (types 0, 5, 15) and a `members/` directory with one `.json` file per member. Each channel directory contains day-partitioned **directories** for the 30 days leading up to the channel's last message, inactive channels show dates around their last activity, not today. Each day directory holds `chat.jsonl` (one JSON object per message) and a `files/` directory with that day's attachments, `cat`'ing a blob downloads it from the Discord CDN. Soft errors (403 missing permissions, 404 unknown channel, 429 rate limit) on a single day are swallowed so listings, `find`, and `grep` keep working across the rest of the tree.
 

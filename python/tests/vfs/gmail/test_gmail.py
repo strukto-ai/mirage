@@ -52,8 +52,8 @@ def test_vfs_md_includes_path_anatomy_and_processed_shape():
     rendered = VFS_MD.replace("{prefix}", "/gmail")
     assert "<label>" in rendered
     assert "INBOX" in rendered
-    assert "after:/before:" in rendered
-    assert "mirage-processed" in rendered
+    assert "`after:`/`before:`" in rendered
+    assert "processed by Mirage" in rendered
     assert ".body_text" in rendered
     assert "gws gmail --help" in rendered
 
@@ -62,7 +62,7 @@ def test_vfs_md_documents_file_per_message_layout():
     rendered = VFS_MD.replace("{prefix}", "/gmail")
     assert "<subject>__<message-id>.gmail.json" in rendered
     assert "<subject>__<message-id>/" in rendered
-    assert "attachments dir" in rendered
+    assert "holds attachments only" in rendered
     assert ".attachments[]" in rendered
 
 

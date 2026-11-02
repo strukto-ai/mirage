@@ -126,19 +126,21 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `qdrant`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
 
-    ```text
-    This mount is a Qdrant vector database exposed as a filesystem.
+    ##### `/<path>`
 
-    At the root each directory is a collection (unless a single collection is pinned
-    in config). Inside a collection, directories are the configured group-by payload
-    fields; descending narrows a filter. Each matching point appears as files named
-    by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
-    when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
-    field is configured, where <id> is the Qdrant point id. The embedding vector is
-    never shown. Use ls/cd/cat/tree/find/wc/grep/rg as usual.
-    ```
+    - A Qdrant vector database, exposed as a filesystem.
+    - At the root each directory is a collection, unless config pins a
+      single collection.
+    - Inside a collection, directories are the configured group-by payload
+      fields; descending one narrows a filter.
+    - Each matching point appears as files named by its Qdrant point id:
+      `<id>.json` (the full payload), `<id>.txt` (the embedded source text)
+      when a text field is configured, and `<id>.<ext>` (raw blob bytes)
+      when a blob field is configured. The embedding vector is never shown.
+    - `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
+      usual.
 
     #### Supported Unix Commands for VFS
 
@@ -159,7 +161,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     Run `man <cmd>` or `<cmd> --help` for one command's usage.
   </Tab>
   <Tab title="Raw">
-    ````markdown
+    ```markdown
     ---
     name: workspace-filesystem
     description: The virtual filesystem layout of this workspace.
@@ -171,19 +173,21 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `qdrant`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
 
-    ```text
-    This mount is a Qdrant vector database exposed as a filesystem.
+    ### `/<path>`
 
-    At the root each directory is a collection (unless a single collection is pinned
-    in config). Inside a collection, directories are the configured group-by payload
-    fields; descending narrows a filter. Each matching point appears as files named
-    by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
-    when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
-    field is configured, where <id> is the Qdrant point id. The embedding vector is
-    never shown. Use ls/cd/cat/tree/find/wc/grep/rg as usual.
-    ```
+    - A Qdrant vector database, exposed as a filesystem.
+    - At the root each directory is a collection, unless config pins a
+      single collection.
+    - Inside a collection, directories are the configured group-by payload
+      fields; descending one narrows a filter.
+    - Each matching point appears as files named by its Qdrant point id:
+      `<id>.json` (the full payload), `<id>.txt` (the embedded source text)
+      when a text field is configured, and `<id>.<ext>` (raw blob bytes)
+      when a blob field is configured. The embedding vector is never shown.
+    - `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
+      usual.
 
     ## Supported Unix Commands for VFS
 
@@ -202,7 +206,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man <cmd>` or `<cmd> --help` for one command's usage.
-    ````
+    ```
   </Tab>
 </Tabs>
 {/* generated: vfs-md qdrant end */}

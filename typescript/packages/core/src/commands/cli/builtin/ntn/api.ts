@@ -59,10 +59,6 @@ class InlineRefusal extends Error {}
 
 type Container = Record<string, unknown> | unknown[]
 
-function isDigits(text: string): boolean {
-  return text !== '' && /^\d+$/.test(text)
-}
-
 // Walk one level into a body being built, creating the container the next
 // key implies (an array for an index or an append, an object otherwise).
 function descend(cursor: Container, key: string, blank: Container): Container {
@@ -95,7 +91,7 @@ function assign(body: Record<string, unknown>, path: string, value: unknown): vo
   let cursor: Container = body
   for (let index = 0; index < keys.length - 1; index += 1) {
     const step = keys[index + 1] ?? ''
-    const blank: Container = step === '' || isDigits(step) ? [] : {}
+    const blank: Container = step === '' || /^\d+$/.test(step) ? [] : {}
     cursor = descend(cursor, keys[index] ?? '', blank)
   }
   place(cursor, keys[keys.length - 1] ?? '', value)

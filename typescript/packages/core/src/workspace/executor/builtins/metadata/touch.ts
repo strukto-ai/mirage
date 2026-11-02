@@ -32,11 +32,17 @@ import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import type { FileStat, SetAttrFields } from '../../../../types.ts'
 import { PathSpec } from '../../../../types.ts'
-import { CycleError } from '../../../../utils/path.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, fail, finish, parseLine } from '../shared.ts'
-import { nowIso, parseTouchStamp, permissionError, setattrLink, setattrVia } from './metadata.ts'
+import {
+  followOperand,
+  nowIso,
+  parseTouchStamp,
+  permissionError,
+  setattrLink,
+  setattrVia,
+} from './metadata.ts'
 
 // GNU touch's --time words, aliases of one value together. Mirrors
 // Python's TIME_GROUPS.
@@ -166,18 +172,14 @@ export async function handleTouch(
       errors.push(`touch: ${action} '${target.rawPath}': ${strerrorOf(unwalked)}\n`)
       continue
     }
-    let virtual: string
-    try {
-      virtual = links.follow(target.virtual)
-    } catch (err) {
-      if (err instanceof CycleError) {
-        const action = noCreate ? 'setting times of' : 'cannot touch'
-        errors.push(`touch: ${action} '${target.rawPath}': Too many levels of symbolic links\n`)
-        continue
-      }
-      throw err
-    }
-    const resolved = PathSpec.fromStrPath(virtual)
+    const resolved = followOperand(
+      links,
+      'touch',
+      noCreate ? 'setting times of' : 'cannot touch',
+      target,
+      errors,
+    )
+    if (resolved === null) continue
     if (slashed) {
       try {
         await dispatch('stat', resolved)

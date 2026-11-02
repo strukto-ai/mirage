@@ -25,7 +25,7 @@ from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.flags import unhonored_notice
 from mirage.runtime.python.monty.config import MontyConfig
-from mirage.runtime.python.monty.constants import MISSING_EXTRA_HINT
+from mirage.runtime.python.monty.constants import MISSING_PACKAGE_HINT
 from mirage.runtime.python.monty.execution import MontyExecution
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
@@ -90,7 +90,7 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         config: MontyConfig | dict[str, Any] | None = None,
     ) -> None:
         if pydantic_monty is None:
-            raise ImportError(MISSING_EXTRA_HINT)
+            raise ImportError(MISSING_PACKAGE_HINT)
         super().__init__(captures, config)
         self._max_memory = memory_limit(self.config.max_memory)
         self.external_lookup: Mapping[str, Callable[..., Any]] = {}

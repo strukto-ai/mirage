@@ -22,15 +22,17 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.qdrant.config import QdrantConfig
 
 VFS_MD = """\
-This mount is a Qdrant vector database exposed as a filesystem.
-
-At the root each directory is a collection (unless a single collection is pinned
-in config). Inside a collection, directories are the configured group-by payload
-fields; descending narrows a filter. Each matching point appears as files named
-by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
-when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
-field is configured, where <id> is the Qdrant point id. The embedding vector is
-never shown. Use ls/cd/cat/tree/find/wc/grep/rg as usual."""
+- A Qdrant vector database, exposed as a filesystem.
+- At the root each directory is a collection, unless config pins a
+  single collection.
+- Inside a collection, directories are the configured group-by payload
+  fields; descending one narrows a filter.
+- Each matching point appears as files named by its Qdrant point id:
+  `<id>.json` (the full payload), `<id>.txt` (the embedded source text)
+  when a text field is configured, and `<id>.<ext>` (raw blob bytes)
+  when a blob field is configured. The embedding vector is never shown.
+- `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
+  usual."""
 
 
 class QdrantVFS(BaseVFS):

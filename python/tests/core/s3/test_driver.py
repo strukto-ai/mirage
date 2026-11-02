@@ -70,26 +70,44 @@ async def test_a_matched_write_loses_only_on_its_key(case):
         await DRIVER.put_if(conn, "k", b"x", MatchWrite("v1"))
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "code, status",
-    [("AccessDenied", 403), ("404", 404)],
-    ids=["probe-fails", "source-gone"],
-)
-async def test_a_copy_keeps_its_own_error_whatever_the_source_probe_finds(
-    code, status
-):
-    # The probe only decides which side a 404 names; it never stands in for it.
-    missing = client_error("NoSuchKey", 404, "CopyObject")
+def _copy_missing_with_probe(code: str, status: int) -> S3Conn:
     client = Mock()
-    client.copy_object = AsyncMock(side_effect=missing)
+    client.copy_object = AsyncMock(
+        side_effect=client_error("NoSuchKey", 404, "CopyObject")
+    )
     client.head_object = AsyncMock(
         side_effect=client_error(code, status, "HeadObject")
     )
-    conn = S3Conn(client, S3Config(bucket="b"))
+    return S3Conn(client, S3Config(bucket="b"))
+
+
+@pytest.mark.asyncio
+async def test_a_copy_keeps_its_own_error_when_the_source_probe_fails():
+    # The probe only decides which side a 404 names; it never stands in for it.
+    conn = _copy_missing_with_probe("AccessDenied", 403)
     with pytest.raises(ClientError) as raised:
         await DRIVER.copy_if(conn, "src", "dst", MatchWrite("v1"))
-    assert raised.value is missing
+    assert raised.value.response["Error"]["Code"] == "NoSuchKey"
+
+
+@pytest.mark.asyncio
+async def test_a_copy_whose_source_is_gone_copies_nothing():
+    conn = _copy_missing_with_probe("404", 404)
+    assert not await DRIVER.copy_if(conn, "src", "dst", MatchWrite("v1"))
+
+
+@pytest.mark.asyncio
+async def test_a_move_whose_source_vanishes_before_its_copy_is_enoent():
+    client = Mock()
+    client.head_object = AsyncMock(return_value={})
+    client.copy_object = AsyncMock(
+        side_effect=client_error("NoSuchKey", 404, "CopyObject")
+    )
+    client.delete_object = AsyncMock()
+    conn = S3Conn(client, S3Config(bucket="b"))
+    with pytest.raises(FileNotFoundError):
+        await DRIVER.move_file(conn, "src", "dst")
+    client.delete_object.assert_not_called()
 
 
 @pytest.mark.asyncio

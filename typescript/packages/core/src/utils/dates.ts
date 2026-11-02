@@ -14,7 +14,7 @@
 
 import {
   LOCAL_ZONE,
-  UTC_ZONE,
+  daysInMonth,
   posixTransitions,
   resolveTz,
   type WallParts,
@@ -63,18 +63,6 @@ export function isoTimestamp(value: string | null | undefined): number | null {
   return Number.isNaN(ms) ? null : ms / 1000
 }
 
-function daysInMonth(year: number, month: number): number {
-  return UTC_ZONE.fromWall({
-    year,
-    month: month + 1,
-    day: 0,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    ms: 0,
-  }).getUTCDate()
-}
-
 /**
  * The instant `zone` shows `p` at, or null when it shows none: no instant
  * reads the hour skipped when DST starts, and GNU date answers a clock
@@ -82,7 +70,7 @@ function daysInMonth(year: number, month: number): number {
  * checked, since the Python twin reads a host-local moment naively and
  * cannot refuse there.
  */
-function placeWall(zone: Zone, p: WallParts): Date | null {
+function localize(zone: Zone, p: WallParts): Date | null {
   const placed = zone.fromWall(p)
   if (zone === LOCAL_ZONE) return placed
   const shown = zone.parts(placed)
@@ -1219,14 +1207,14 @@ export function parsePosixTime(text: string, zone: Zone, now?: Date): Date | nul
     month < 0 ||
     month > 11 ||
     day < 1 ||
-    day > daysInMonth(year, month) ||
+    day > daysInMonth(year, month + 1) ||
     hour > 23 ||
     minute > 59 ||
     second > 60
   )
     return null
   const leap = second === 60
-  const placed = placeWall(zone, {
+  const placed = localize(zone, {
     year,
     month,
     day,

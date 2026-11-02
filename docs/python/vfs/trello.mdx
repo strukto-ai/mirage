@@ -1,7 +1,7 @@
 ---
 title: Trello
 description: Mount Trello workspaces, boards, lists, cards, members, and labels as a Mirage filesystem for Python agents.
-icon: table-columns
+icon: /images/trello-logo.svg
 ---
 The Trello VFS exposes workspaces, boards, lists, cards, members, and
 labels as a virtual filesystem mounted at some prefix such as `/trello/`.
@@ -50,7 +50,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `trello`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
+
+    ##### `/<path>`
 
     ```text
     /<path>
@@ -71,12 +73,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
                     <card-name>__<card-id>/
                       card.json
                       comments.jsonl
-      Always ls directories first to discover exact names.
-
-      To act on boards and cards (list boards, members, lists, labels,
-      cards and comments; create, update, move, assign, label and comment
-      on cards), use the trello CLI if installed: trello --help
     ```
+
+    - `ls` directories first to discover exact names.
+    - To act on boards and cards (list boards, members, lists, labels, cards
+      and comments; create, update, move, assign, label and comment on
+      cards), use the `trello` CLI if installed (`trello --help`).
 
     #### Supported Unix Commands for VFS
 
@@ -109,7 +111,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `trello`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
+
+    ### `/<path>`
 
     ```text
     /<path>
@@ -130,12 +134,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
                     <card-name>__<card-id>/
                       card.json
                       comments.jsonl
-      Always ls directories first to discover exact names.
-
-      To act on boards and cards (list boards, members, lists, labels,
-      cards and comments; create, update, move, assign, label and comment
-      on cards), use the trello CLI if installed: trello --help
     ```
+
+    - `ls` directories first to discover exact names.
+    - To act on boards and cards (list boards, members, lists, labels, cards
+      and comments; create, update, move, assign, label and comment on
+      cards), use the `trello` CLI if installed (`trello --help`).
 
     ## Supported Unix Commands for VFS
 
@@ -158,63 +162,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
   </Tab>
 </Tabs>
 {/* generated: vfs-md trello end */}
-
-```text
-/trello/
-  workspaces/
-    <workspace-name>__<workspace-id>/
-      workspace.json
-      boards/
-        <board-name>__<board-id>/
-          board.json
-          members/
-            <full-name>__<member-id>.json
-            ...
-          labels/
-            <label-name>__<label-id>.json
-            ...
-          lists/
-            <list-name>__<list-id>/
-              list.json
-              cards/
-                <card-name>__<card-id>/
-                  card.json
-                  comments.jsonl
-                ...
-            ...
-```
-
-Example:
-
-```text
-/trello/
-  workspaces/
-    engineering__abc123def/
-      workspace.json
-      boards/
-        product-roadmap__brd_001/
-          board.json
-          members/
-            alice__mem_001.json
-            bob__mem_002.json
-          labels/
-            bug__lbl_001.json
-            feature__lbl_002.json
-          lists/
-            backlog__lst_001/
-              list.json
-              cards/
-                fix-login__crd_001/
-                  card.json
-                  comments.jsonl
-                add-search__crd_002/
-                  card.json
-                  comments.jsonl
-            in-progress__lst_002/
-              list.json
-              cards/
-                ...
-```
 
 Directory and file names embed the Trello ID after `__` so that
 [trello CLI](/python/cli/trello) commands can take an ID without extra
