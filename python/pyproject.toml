@@ -142,12 +142,12 @@ chroma   = ["chromadb-client>=1.0.0"]
 qdrant   = ["qdrant-client>=1.18.0"]
 
 # --- openai ---
-openai      = ["openai>=3.37.0", "openai-agents>=0.24.0"]
+openai      = ["openai>=3.42.1", "openai-agents>=0.24.0"]
 
 # --- pydantic-ai ---
 pydantic-ai = [
-    "pydantic-ai-slim>=2.61.0",
-    "pydantic-ai-backend[console]>=0.2.37",
+    "pydantic-ai-slim>=2.64.0",
+    "pydantic-ai-backend[console]>=0.2.39",
 ]
 
 # --- deepagents ---
@@ -157,12 +157,12 @@ deepagents  = [
 
 # --- agno ---
 agno        = [
-    "agno>=3.1.10",
+    "agno>=3.1.12",
 ]
 
 # --- claude-agent-sdk ---
 claude-agent-sdk = [
-    "claude-agent-sdk>=0.2.174",
+    "claude-agent-sdk>=0.2.176",
 ]
 
 # --- claude-managed-agents ---
