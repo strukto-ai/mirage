@@ -124,6 +124,14 @@
         "LANGFUSE_URL"
       ]
     },
+    "mcp": {
+      "python": [
+        "MCP_URL"
+      ],
+      "typescript": [
+        "MCP_URL"
+      ]
+    },
     "linear": {
       "python": [
         "LINEAR_URL"
@@ -2543,6 +2551,62 @@
           "path": "/issues",
           "vfs": "linear"
         },
+        {
+          "path": "/scratch",
+          "vfs": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
+      "id": "cli-mcp",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "mcp",
+      "facet": "cli",
+      "clis": [
+        "items"
+      ],
+      "mounts": [
+        {
+          "path": "/scratch",
+          "vfs": "ram",
+          "backend": "memory"
+        }
+      ],
+      "profiles": {
+        "guarded": {
+          "commands": {
+            "deny": [
+              {
+                "reason": "adding is off",
+                "commands": [
+                  "items add-item"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "sessions": {
+        "guarded": "guarded"
+      }
+    },
+    {
+      "id": "cli-mcp-yaml",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "mcp",
+      "facet": "cli",
+      "cli_door": "yaml",
+      "clis": [
+        "items"
+      ],
+      "mounts": [
         {
           "path": "/scratch",
           "vfs": "ram",
