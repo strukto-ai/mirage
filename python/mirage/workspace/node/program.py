@@ -15,6 +15,7 @@
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
+from mirage.context.session_context import current_caller
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
@@ -191,6 +192,10 @@ async def _run_program(
     reader = execute_fn if node.parent is None else None
     refused = refused_row(node) if reader is not None else None
     parsed = _parse_state(session) if reader is not None else None
+    # A typed line bash's reader reads as several commands is recorded a
+    # command at a time, as its root reaches each.
+    history = current_caller().history
+    reading = history if history is not None and history.root is node else None
     last_row = -1
 
     i = 0
@@ -215,6 +220,8 @@ async def _run_program(
             continue
         if session.shell_options.get("noexec"):
             break
+        if reading is not None:
+            await reading.reach(child, session)
         if not reread and child.start_point[0] > echoed_row:
             first = echoed_row + 1
             last = child.end_point[0]
@@ -399,6 +406,8 @@ async def _run_program(
             break
         if reread:
             break
+    if reading is not None and i >= len(children):
+        reading.read()
 
     # Statements run in turn are one ``;`` node, so the line's tree keeps
     # every command's result; what a caller reads of the program's own

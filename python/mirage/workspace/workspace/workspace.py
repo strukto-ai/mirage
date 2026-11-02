@@ -698,9 +698,9 @@ class Workspace:
         vfs: bool = False,
     ) -> list[dict[str, Any]]:
         """What the hidden recorder holds, oldest first: a ``command``
-        entry when a line starts and a ``result`` entry when it ends,
-        naming the line as its ``parent``, and with ``vfs`` a ``vfs``
-        entry for every call a line made to a mount.
+        entry when a command a line reads starts and a ``result`` entry
+        when it ends, naming it as its ``parent``, and with ``vfs`` a
+        ``vfs`` entry for every call it made to a mount.
 
         Args:
             session_id (str | None): only this session's entries.
