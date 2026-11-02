@@ -432,15 +432,19 @@ async function copyIf(
   } catch (err) {
     // A 404 is lost only while the source is still there.
     let lost = isConditionLost(err)
+    let probed = true
     if (!lost && cond.kind === 'match' && isNotFound(err) && !isMissingBucket(err)) {
       try {
         lost = (await head(conn, srcKey)) !== null
       } catch (probeErr) {
+        probed = false
         console.debug(`source probe failed for ${srcKey}: ${String(probeErr)}`)
       }
     }
     if (lost) throw new ConditionLostError([dstKey], { gone: !isConditionLost(err) })
-    throw err
+    if (!probed || !isNotFound(err) || isMissingBucket(err)) throw err
+    console.debug(`copy source ${srcKey} is missing: ${String(err)}`)
+    return false
   }
   return true
 }
@@ -864,6 +868,7 @@ async function copyFile(conn: S3Conn, srcKey: string, dstKey: string): Promise<b
     await copyObject(conn, srcKey, dstKey)
   } catch (err) {
     if (!isNotFound(err) || isMissingBucket(err)) throw err
+    console.debug(`copy source ${srcKey} is missing: ${String(err)}`)
     return false
   }
   return true
@@ -884,7 +889,7 @@ async function moveFile(conn: S3Conn, srcKey: string, dstKey: string): Promise<b
     if (!isNotFound(err)) throw err
     return false
   }
-  if (!(await copyFile(conn, srcKey, dstKey))) return false
+  if (!(await copyFile(conn, srcKey, dstKey))) throw enoent(srcKey)
   await conn.send(new conn.mod.DeleteObjectCommand({ Bucket: conn.config.bucket, Key: srcKey }))
   return true
 }

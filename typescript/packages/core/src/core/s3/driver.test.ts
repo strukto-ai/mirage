@@ -111,18 +111,34 @@ describe('a missing bucket', () => {
 })
 
 describe('a conditioned copy', () => {
-  it.each([
-    ['the source probe fails', 'AccessDenied', 403],
-    ['the source is gone', 'NotFound', 404],
-  ] as const)('keeps its own error when %s', async (_name, code, status) => {
-    // The probe only decides which side a 404 names; it never stands in for it.
-    const missing = sdkError('NoSuchKey', 404)
-    const conn = failing((cmd) =>
+  const missing = sdkError('NoSuchKey', 404)
+  const probing = (code: string, status: number): S3Conn =>
+    failing((cmd) =>
       Promise.reject(cmd.input.CopySource !== undefined ? missing : sdkError(code, status)),
     )
+
+  it('keeps its own error when the source probe fails', async () => {
+    // The probe only decides which side a 404 names; it never stands in for it.
     await expect(
-      DRIVER.copyIf?.(conn, 'src', 'dst', { kind: 'match', version: 'v1' }),
+      DRIVER.copyIf?.(probing('AccessDenied', 403), 'src', 'dst', { kind: 'match', version: 'v1' }),
     ).rejects.toBe(missing)
+  })
+
+  it('copies nothing when the source is gone', async () => {
+    await expect(
+      DRIVER.copyIf?.(probing('NotFound', 404), 'src', 'dst', { kind: 'match', version: 'v1' }),
+    ).resolves.toBe(false)
+  })
+})
+
+describe('a move', () => {
+  it('is ENOENT when its source vanishes before the copy', async () => {
+    const conn = failing((cmd) =>
+      cmd.input.CopySource !== undefined
+        ? Promise.reject(sdkError('NoSuchKey', 404))
+        : (Promise.resolve({}) as Promise<never>),
+    )
+    await expect(DRIVER.moveFile?.(conn, 'src', 'dst')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
