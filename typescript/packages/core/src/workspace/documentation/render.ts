@@ -227,38 +227,6 @@ function fenced(text: string, info: string): string {
   return `${fence}${info}\n${text}\n${fence}`
 }
 
-/**
- * `template` with each code fence, and each code span holding `{prefix}`,
- * delimited past every backtick run in `prefix`, so a prefix put into one
- * cannot close it.
- */
-function widened(template: string, prefix: string): string {
-  const run = Math.max(0, ...(prefix.match(/`+/g) ?? []).map((r) => r.length))
-  if (run === 0) return template
-  const lines: string[] = []
-  let inside = false
-  for (let line of template.split('\n')) {
-    const bare = line.replace(/^ +/, '')
-    const ticks = bare.length - bare.replace(/^`+/, '').length
-    const indent = line.length - bare.length
-    if (ticks >= 3 && indent <= 3 && !bare.slice(ticks).includes('`')) {
-      inside = !inside
-      if (run >= 3) line = line.slice(0, indent) + '`'.repeat(run - 2) + bare
-    } else if (!inside && line.split('`').length % 2 === 1) {
-      const parts = line.split('`')
-      for (let i = 1; i < parts.length; i += 2) {
-        const span = '`'.repeat(run + 1)
-        parts[i] = parts[i]?.includes('{prefix}')
-          ? `${span} ${parts[i] ?? ''} ${span}`
-          : `\`${parts[i] ?? ''}\``
-      }
-      line = parts.join('')
-    }
-    lines.push(line)
-  }
-  return lines.join('\n')
-}
-
 function table(
   head: readonly [string, string],
   rows: readonly (readonly [string, string])[],
@@ -412,11 +380,15 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
       mode === mount.mode &&
       mount.vfs.vfsMd.trim() !== ''
     ) {
-      const layout = widened(mount.vfs.vfsMd, prefix)
+      const layout = mount.vfs.vfsMd
         .replaceAll('{prefix}', prefix)
         .replace(/^\n+|\n+$/g, '')
         .trimEnd()
-      layouts.push(`### ${code(prefix)}\n\n${layout}`)
+      // A backtick or line break in the prefix could close a code span or
+      // fence it is put in, so such a layout stays text.
+      layouts.push(
+        `### ${code(prefix)}\n\n${/[`\n\r]/.test(prefix) ? fenced(layout, 'text') : layout}`,
+      )
     }
     for (const entry of vis.shown?.entries ?? []) {
       if (entry.mode === null || isGlob(entry.path) || !pathVisible(vis, entry.path)) continue

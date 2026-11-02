@@ -15,7 +15,6 @@
 
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
-from itertools import groupby
 
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
@@ -279,43 +278,6 @@ def fenced(text: str, info: str) -> str:
     return f"{fence}{info}\n{text}\n{fence}"
 
 
-def widened(template: str, prefix: str) -> str:
-    """``template`` with each code fence, and each code span holding
-    ``{prefix}``, delimited past every backtick run in ``prefix``, so a
-    prefix put into one cannot close it.
-
-    Args:
-        template (str): a VFS's layout, ``{prefix}`` not yet replaced.
-        prefix (str): the mount path that replaces it.
-    """
-    run = max(
-        (len(list(g)) for c, g in groupby(prefix) if c == "`"), default=0
-    )
-    if run == 0:
-        return template
-    lines: list[str] = []
-    inside = False
-    for line in template.split("\n"):
-        bare = line.lstrip(" ")
-        ticks = len(bare) - len(bare.lstrip("`"))
-        indent = len(line) - len(bare)
-        if ticks >= 3 and indent <= 3 and "`" not in bare[ticks:]:
-            inside = not inside
-            if run >= 3:
-                line = line[:indent] + "`" * (run - 2) + bare
-        elif not inside and line.count("`") % 2 == 0:
-            parts = line.split("`")
-            for i in range(1, len(parts), 2):
-                if "{prefix}" in parts[i]:
-                    span = "`" * (run + 1)
-                    parts[i] = f"{span} {parts[i]} {span}"
-                else:
-                    parts[i] = f"`{parts[i]}`"
-            line = "".join(parts)
-        lines.append(line)
-    return "\n".join(lines)
-
-
 def table(head: tuple[str, str], rows: Sequence[tuple[str, str]]) -> str:
     lines = [f"| {head[0]} | {head[1]} |", "| --- | --- |"]
     lines.extend(f"| {path} | {text} |" for path, text in rows)
@@ -504,11 +466,14 @@ def vfs_md(registry: MountRegistry, session: SessionState) -> str:
             and mount.vfs.vfs_md.strip()
         ):
             layout = (
-                widened(mount.vfs.vfs_md, prefix)
-                .replace("{prefix}", prefix)
+                mount.vfs.vfs_md.replace("{prefix}", prefix)
                 .strip("\n")
                 .rstrip()
             )
+            # A backtick or line break in the prefix could close a code
+            # span or fence it is put in, so such a layout stays text.
+            if {"`", "\n", "\r"} & set(prefix):
+                layout = fenced(layout, "text")
             layouts.append(f"### {code(prefix)}\n\n{layout}")
         if vis.shown is not None:
             for entry in vis.shown.entries:
