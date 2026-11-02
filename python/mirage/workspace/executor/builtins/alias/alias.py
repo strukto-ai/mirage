@@ -19,9 +19,7 @@ from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.helpers import alias_rewrite
 from mirage.shell.types import TSNodeLike
 from mirage.utils.quote import single_quote
-from mirage.workspace.executor.builtins.alias.constants import (
-    BAD_NAME_CHARS,
-)
+from mirage.workspace.executor.builtins.alias.constants import BAD_NAME_RE
 from mirage.workspace.executor.builtins.alias.types import AliasMark
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import (
@@ -73,7 +71,7 @@ async def handle_alias(
     for word in operands:
         name, eq, value = word.partition("=")
         if eq:
-            if not name or any(c in BAD_NAME_CHARS for c in name):
+            if not name or BAD_NAME_RE.search(name):
                 # bash quotes the whole word for an empty name (`alias
                 # =x` is `=x: not found`, oddly) and the name otherwise.
                 if not name:
@@ -84,7 +82,7 @@ async def handle_alias(
             _changing(session, name, mark)
             session.aliases[name] = value
             continue
-        if any(c in BAD_NAME_CHARS for c in name):
+        if BAD_NAME_RE.search(name):
             errors.append(f"bash: alias: `{name}': invalid alias name")
             continue
         if name in session.aliases:

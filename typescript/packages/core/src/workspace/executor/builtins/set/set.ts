@@ -25,7 +25,8 @@ import type { SessionState } from '../../../session/session.ts'
 import { setPositionalParams, visibleEnv } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { SET_QUOTED_CHARS } from '../constants.ts'
-import { bashDeclareQuote, isControl } from '../declare/declare.ts'
+import { CONTROL_RE } from '../declare/constants.ts'
+import { bashDeclareQuote } from '../declare/declare.ts'
 import { builtinError, builtinUsage } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 
@@ -38,7 +39,7 @@ import type { BuiltinCall } from '../types.ts'
  * `y=a,b`.
  */
 function listedValue(value: string): string {
-  if (Array.from(value).some(isControl)) return bashDeclareQuote(value)
+  if (CONTROL_RE.test(value)) return bashDeclareQuote(value)
   let quoted = value.startsWith('#')
   for (let i = 0; i < value.length && !quoted; i++) {
     const ch = value.charAt(i)

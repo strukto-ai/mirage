@@ -28,7 +28,7 @@ import {
 import { scanOptions } from '../getopt.ts'
 import { builtinUsage, fail, finish, ok, result } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
-import { BAD_NAME_CHARS } from './constants.ts'
+import { BAD_NAME_RE } from './constants.ts'
 import type { AliasMark } from './types.ts'
 
 /** Define or print aliases. `mark` is the read the definition sits in:
@@ -54,7 +54,7 @@ export function handleAlias(
     const eq = word.indexOf('=')
     if (eq >= 0) {
       const name = word.slice(0, eq)
-      if (name === '' || Array.from(name).some((c) => BAD_NAME_CHARS.includes(c))) {
+      if (name === '' || BAD_NAME_RE.test(name)) {
         errors.push(
           name === ''
             ? `bash: alias: ${word}: not found`
@@ -66,7 +66,7 @@ export function handleAlias(
       setSessionEntry(session.aliases, name, word.slice(eq + 1))
       continue
     }
-    if (Array.from(word).some((c) => BAD_NAME_CHARS.includes(c))) {
+    if (BAD_NAME_RE.test(word)) {
       errors.push(`bash: alias: \`${word}': invalid alias name`)
       continue
     }

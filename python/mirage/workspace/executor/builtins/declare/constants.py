@@ -43,6 +43,8 @@ ANSI_C_ESCAPES = {
 
 BARE_KEY_RE = re.compile(r"[A-Za-z0-9_%+,./:=@~-]+\Z")
 
+CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
 # `arr[0]` and friends: a target that parses as an assignment but is
 # not a plain name, which the declaration builtins quote on its own.
 SUBSCRIPT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\[.*\]")
