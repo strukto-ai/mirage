@@ -1,6 +1,6 @@
 ---
 title: Trello
-icon: trello
+icon: /images/trello-logo.svg
 description: Mount Trello boards, lists, and cards as a Mirage filesystem.
 ---
 
@@ -77,7 +77,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `trello`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
+
+    ##### `/<path>`
 
     ```text
     /<path>
@@ -98,12 +100,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
                     <card-name>__<card-id>/
                       card.json
                       comments.jsonl
-      Always ls directories first to discover exact names.
-
-      To act on boards and cards (list boards, members, lists, labels,
-      cards and comments; create, update, move, assign, label and comment
-      on cards), use the trello CLI if installed: trello --help
     ```
+
+    - `ls` directories first to discover exact names.
+    - To act on boards and cards (list boards, members, lists, labels, cards
+      and comments; create, update, move, assign, label and comment on
+      cards), use the `trello` CLI if installed (`trello --help`).
 
     #### Supported Unix Commands for VFS
 
@@ -136,7 +138,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
     | --- | --- |
     | `/<path>` | `trello`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
+
+    ### `/<path>`
 
     ```text
     /<path>
@@ -157,12 +161,12 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
                     <card-name>__<card-id>/
                       card.json
                       comments.jsonl
-      Always ls directories first to discover exact names.
-
-      To act on boards and cards (list boards, members, lists, labels,
-      cards and comments; create, update, move, assign, label and comment
-      on cards), use the trello CLI if installed: trello --help
     ```
+
+    - `ls` directories first to discover exact names.
+    - To act on boards and cards (list boards, members, lists, labels, cards
+      and comments; create, update, move, assign, label and comment on
+      cards), use the `trello` CLI if installed (`trello --help`).
 
     ## Supported Unix Commands for VFS
 

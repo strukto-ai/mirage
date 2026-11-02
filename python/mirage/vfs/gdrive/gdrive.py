@@ -49,22 +49,23 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 
 VFS_MD = """\
+```text
 {prefix}
-  Mirrors Google Drive folder hierarchy. May contain:
-    <name>.gdoc.json    Google Docs    (cat returns gdoc.json - see /gdocs layout)
-    <name>.gsheet.json  Google Sheets  (cat returns gsheet.json - see /gsheets layout)
-    <name>.gslide.json  Google Slides  (cat returns gslide.json - see /gslides layout)
-    <other-files>       PDFs, images, etc. - cat returns raw bytes
+  <folder>/              # the Drive folder hierarchy, mirrored
+    <name>.gdoc.json     # Google Docs: the gdocs gdoc.json shape
+    <name>.gsheet.json   # Google Sheets: the gsheets gsheet.json shape
+    <name>.gslide.json   # Google Slides: the gslides gslide.json shape
+    <file>               # PDFs, images and the rest: raw bytes
+  <shared-drive>/        # each shared drive you can see
+```
 
-  No owned/ vs shared/ split here: gdrive shows the user's full Drive view,
-  including files shared with the user that have been added to My Drive.
-  Shared drives visible to the user are included as top-level directories.
-
-  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
-  Date-prefixed globs (2026-05-*) push to a Drive modifiedTime range query.
-
-  To act on Drive items by id (create, update, export, permissions),
-  use the gws CLI if installed: gws drive --help"""
+- There is no `owned/` and `shared/` split: this is your full Drive
+  view, including files shared with you that were added to My Drive.
+- This is a remote mount: prefer targeted reads over full scans. A
+  date-prefixed glob (`2026-05-*`) becomes a Drive `modifiedTime` range
+  query.
+- To act on Drive items by id (create, update, export, permissions), use
+  the `gws` CLI if installed (`gws drive --help`)."""
 
 
 class GoogleDriveVFS(BaseVFS):

@@ -13,12 +13,10 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.chroma.config import ChromaConfig
 
 VFS_MD = """\
-Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
-collection.
-
-Use cat, head, tail, ls, find, tree, and grep to inspect indexed documents.
-Paths are document slugs from the collection path tree. Writes are not
-supported."""
+- One ChromaDB collection, mounted read only.
+- Paths are document slugs from the collection's path tree.
+- Inspect documents with `cat`, `head`, `tail`, `ls`, `find`, `tree` and
+  `grep`. Writes are not supported."""
 
 
 class ChromaVFS(BaseVFS):

@@ -384,7 +384,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
         .replaceAll('{prefix}', prefix)
         .replace(/^\n+|\n+$/g, '')
         .trimEnd()
-      layouts.push(`## ${code(prefix)} layout\n\n${fenced(layout, 'text')}`)
+      layouts.push(`### ${code(prefix)}\n\n${layout}`)
     }
     for (const entry of vis.shown?.entries ?? []) {
       if (entry.mode === null || isGlob(entry.path) || !pathVisible(vis, entry.path)) continue
@@ -412,7 +412,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
   } else {
     parts.push(
       table(['Path', 'Description'], paths),
-      ...layouts,
+      ...(layouts.length > 0 ? ['## VFS Layout', ...layouts] : []),
       '## Supported Unix Commands for VFS',
       'Unix commands work on each path as on a local filesystem, as far as the path supports them:',
       table(['Path', 'Supported'], commands),

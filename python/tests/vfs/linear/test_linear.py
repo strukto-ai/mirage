@@ -48,14 +48,14 @@ def test_vfs_commands_registered(config):
 
 def test_vfs_md_includes_path_anatomy_and_normalized_shapes():
     rendered = VFS_MD.replace("{prefix}", "/linear")
-    assert "team.json:" in rendered
-    assert "issue.json:" in rendered
-    assert "comments.jsonl:" in rendered
-    assert "project.json:" in rendered
-    assert "cycle.json:" in rendered
-    assert "user.json:" in rendered
-    assert "document.json:" in rendered
-    assert "mirage-normalized" in rendered
+    assert "`team.json`:" in rendered
+    assert "`issue.json`:" in rendered
+    assert "`comments.jsonl`, one" in rendered
+    assert "A project (`projects/" in rendered
+    assert "A cycle (`cycles/" in rendered
+    assert "A member (`members/" in rendered
+    assert "A document (`documents/" in rendered
+    assert "normalized by Mirage" in rendered
     assert ".issue_key" in rendered
     assert ".label_names[]" in rendered
     assert "linear --help" in rendered

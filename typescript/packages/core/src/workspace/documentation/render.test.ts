@@ -186,8 +186,8 @@ describe('vfsMd', () => {
       { mode: MountMode.WRITE },
     )
     const markdown = await ws.vfsMd()
-    expect(markdown).toContain('## `/docs` layout\n\n```text\n/docs\n  owned/')
-    expect(markdown).not.toContain('## `/` layout')
+    expect(markdown).toContain('## VFS Layout\n\n### `/docs`\n\n```text\n/docs\n  owned/')
+    expect(markdown).not.toContain('### `/`\n')
   })
 
   it('keeps literal braces', async () => {
@@ -263,12 +263,12 @@ describe('vfsMd', () => {
     expect(markdown).not.toContain('<date>_<title>')
   })
 
-  it('fences a layout past a spaced fence inside it', async () => {
+  it('places a layout as Markdown', async () => {
     const docs = gdocs()
-    docs.vfsMd = 'Run:\n  ```sh\n  ls {prefix}\n  ```  \nDone.'
+    docs.vfsMd = 'Run:\n\n```sh\nls {prefix}\n```\n\n- Done.'
     const ws = new Workspace({ '/docs': [docs, MountMode.READ] })
     const markdown = await ws.vfsMd()
-    expect(markdown).toContain('````text\nRun:\n  ```sh\n  ls /docs\n  ```  \nDone.\n````')
+    expect(markdown).toContain('### `/docs`\n\nRun:\n\n```sh\nls /docs\n```\n\n- Done.\n\n')
   })
 
   it('names each search command the profile allows', async () => {

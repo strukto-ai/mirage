@@ -1,7 +1,7 @@
 ---
 title: Google Calendar
 description: Mount Google Calendar calendars and events as JSON files from Python.
-icon: calendar
+icon: /images/gcal-logo.svg
 ---
 The Google Calendar VFS exposes every calendar the account can see as a
 directory of date buckets, with one `.gcal.json` file per event.
@@ -58,50 +58,56 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Calendar mounted at 
     | --- | --- |
     | `/<path>` | `gcal`, write |
 
-    #### `/<path>` layout
+    #### VFS Layout
+
+    ##### `/<path>`
 
     ```text
-    Google Calendar is mounted as one directory per calendar, one
-    directory per date bucket, and one JSON file per event.
-
-        /<mount>/primary/calendar.json
-        /<mount>/primary/2026-08-11/<eventId>__0900-1030_Team_Standup.gcal.json
-        /<mount>/Engineering__team@group.calendar.google.com/2026-08-11/...
+    /<path>
+      primary/
+        calendar.json
+        2026-08-11/
+          <eventId>__0900-1030_Team_Standup.gcal.json
+      Engineering__team@group.calendar.google.com/
+        2026-08-11/
+          ...
+    ```
 
     Reading the tree:
 
-    - `ls <mount>/` lists the calendars. The primary one is always spelled
+    - `ls /<path>/` lists the calendars. The primary one is always spelled
       `primary`; every other directory ends in `__<calendarId>`.
-    - `ls <mount>/primary/` lists buckets with events from all available history
-      through today +90 days unless end_time is configured. start_time/end_time
-      restrict this mount, including direct paths, date globs and event reads.
-      A date glob such as `ls <mount>/primary/2027-03-*` selects its own
-      listing range within that scope, beyond the default future horizon.
-    - A bucket is one local day, named by its date. A well-formed date inside
-      the configured scope is a directory even when it holds no events. Dates
-      outside the scope are absent.
-    - A file name is `<eventId>__<HHMM-HHMM>_<Title>.gcal.json`. The times are
-      clamped to that day, so an event running through it reads `0000-2400`.
-      A multi-day event appears under every day it covers.
+    - `ls /<path>/primary/` lists buckets with events from all available
+      history through today +90 days unless `end_time` is configured.
+      `start_time`/`end_time` restrict this mount, including direct paths,
+      date globs and event reads. A date glob such as
+      `ls /<path>/primary/2027-03-*` selects its own listing range within
+      that scope, beyond the default future horizon.
+    - A bucket is one local day, named by its date. A well-formed date
+      inside the configured scope is a directory even when it holds no
+      events. Dates outside the scope are absent.
+    - A file name is `<eventId>__<HHMM-HHMM>_<Title>.gcal.json`. The times
+      are clamped to that day, so an event running through it reads
+      `0000-2400`. A multi-day event appears under every day it covers.
     - `cat` an event for the unmodified Calendar API payload, including
-      attendees, description, location and the original start/end with offsets.
-    - `calendar.json` carries the calendar's accessRole and, in
+      attendees, description, location and the original start and end with
+      offsets.
+    - `calendar.json` carries the calendar's `accessRole` and, in
       `bucketTimeZone`, the zone the buckets are cut in. That zone is
       mount-wide, so every calendar's `2026-08-11/` covers the same hours.
-    - On a calendar shared as free/busy only, Google returns no titles at all,
-      so events render as `busy`.
+    - On a calendar shared as free/busy only, Google returns no titles at
+      all, so events render as `busy`.
 
     Acting on it:
 
     - On a `write` path, `rm` an event file to delete that event for every
       attendee.
-    - Everything else goes through the `gws calendar` CLI, which takes the ids
-      the tree renders.
-    - A written event must carry an explicit UTC offset or timeZone; an
+    - Everything else goes through the `gws calendar` CLI, which takes the
+      ids the tree renders.
+    - A written event must carry an explicit UTC offset or `timeZone`; an
       ambiguous local time is not interpreted for you.
 
-      Time scope: start_time=unbounded (inclusive), end_time=unbounded (exclusive). Explicit paths and globs cannot escape this scope.
-    ```
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
 
     #### Supported Unix Commands for VFS
 
@@ -134,50 +140,56 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Calendar mounted at 
     | --- | --- |
     | `/<path>` | `gcal`, write |
 
-    ## `/<path>` layout
+    ## VFS Layout
+
+    ### `/<path>`
 
     ```text
-    Google Calendar is mounted as one directory per calendar, one
-    directory per date bucket, and one JSON file per event.
-
-        /<mount>/primary/calendar.json
-        /<mount>/primary/2026-08-11/<eventId>__0900-1030_Team_Standup.gcal.json
-        /<mount>/Engineering__team@group.calendar.google.com/2026-08-11/...
+    /<path>
+      primary/
+        calendar.json
+        2026-08-11/
+          <eventId>__0900-1030_Team_Standup.gcal.json
+      Engineering__team@group.calendar.google.com/
+        2026-08-11/
+          ...
+    ```
 
     Reading the tree:
 
-    - `ls <mount>/` lists the calendars. The primary one is always spelled
+    - `ls /<path>/` lists the calendars. The primary one is always spelled
       `primary`; every other directory ends in `__<calendarId>`.
-    - `ls <mount>/primary/` lists buckets with events from all available history
-      through today +90 days unless end_time is configured. start_time/end_time
-      restrict this mount, including direct paths, date globs and event reads.
-      A date glob such as `ls <mount>/primary/2027-03-*` selects its own
-      listing range within that scope, beyond the default future horizon.
-    - A bucket is one local day, named by its date. A well-formed date inside
-      the configured scope is a directory even when it holds no events. Dates
-      outside the scope are absent.
-    - A file name is `<eventId>__<HHMM-HHMM>_<Title>.gcal.json`. The times are
-      clamped to that day, so an event running through it reads `0000-2400`.
-      A multi-day event appears under every day it covers.
+    - `ls /<path>/primary/` lists buckets with events from all available
+      history through today +90 days unless `end_time` is configured.
+      `start_time`/`end_time` restrict this mount, including direct paths,
+      date globs and event reads. A date glob such as
+      `ls /<path>/primary/2027-03-*` selects its own listing range within
+      that scope, beyond the default future horizon.
+    - A bucket is one local day, named by its date. A well-formed date
+      inside the configured scope is a directory even when it holds no
+      events. Dates outside the scope are absent.
+    - A file name is `<eventId>__<HHMM-HHMM>_<Title>.gcal.json`. The times
+      are clamped to that day, so an event running through it reads
+      `0000-2400`. A multi-day event appears under every day it covers.
     - `cat` an event for the unmodified Calendar API payload, including
-      attendees, description, location and the original start/end with offsets.
-    - `calendar.json` carries the calendar's accessRole and, in
+      attendees, description, location and the original start and end with
+      offsets.
+    - `calendar.json` carries the calendar's `accessRole` and, in
       `bucketTimeZone`, the zone the buckets are cut in. That zone is
       mount-wide, so every calendar's `2026-08-11/` covers the same hours.
-    - On a calendar shared as free/busy only, Google returns no titles at all,
-      so events render as `busy`.
+    - On a calendar shared as free/busy only, Google returns no titles at
+      all, so events render as `busy`.
 
     Acting on it:
 
     - On a `write` path, `rm` an event file to delete that event for every
       attendee.
-    - Everything else goes through the `gws calendar` CLI, which takes the ids
-      the tree renders.
-    - A written event must carry an explicit UTC offset or timeZone; an
+    - Everything else goes through the `gws calendar` CLI, which takes the
+      ids the tree renders.
+    - A written event must carry an explicit UTC offset or `timeZone`; an
       ambiguous local time is not interpreted for you.
 
-      Time scope: start_time=unbounded (inclusive), end_time=unbounded (exclusive). Explicit paths and globs cannot escape this scope.
-    ```
+    Time scope: `start_time=unbounded` (inclusive), `end_time=unbounded` (exclusive). Explicit paths and globs cannot escape this scope.
 
     ## Supported Unix Commands for VFS
 

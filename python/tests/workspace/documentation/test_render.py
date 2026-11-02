@@ -140,8 +140,11 @@ async def test_vfs_md_shows_a_layout_only_where_the_vfs_has_one():
         mode=MountMode.WRITE,
     )
     markdown = await ws.vfs_md()
-    assert "## `/slack` layout\n\n```text\n/slack\n  channels/" in markdown
-    assert "## `/` layout" not in markdown
+    assert (
+        "## VFS Layout\n\n### `/slack`\n\n```text\n/slack\n  channels/"
+        in markdown
+    )
+    assert "### `/`\n" not in markdown
 
 
 @pytest.mark.asyncio
@@ -170,12 +173,12 @@ async def test_vfs_md_shows_the_users_own_text():
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_fences_a_layout_past_a_spaced_fence_inside_it():
+async def test_vfs_md_places_a_layout_as_markdown():
     slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
-    slack.vfs_md = "Run:\n  ```sh\n  ls {prefix}\n  ```  \nDone."
+    slack.vfs_md = "Run:\n\n```sh\nls {prefix}\n```\n\n- Done."
     ws = Workspace({"/slack": (slack, MountMode.READ)})
     markdown = await ws.vfs_md()
-    assert "````text\nRun:\n  ```sh\n  ls /slack\n  ```  \nDone.\n````" in (
+    assert "### `/slack`\n\nRun:\n\n```sh\nls /slack\n```\n\n- Done.\n\n" in (
         markdown
     )
 

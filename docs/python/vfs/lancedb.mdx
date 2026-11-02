@@ -77,15 +77,16 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
     | --- | --- |
     | `/<path>` | `lancedb`, read |
 
-    #### `/<path>` layout
+    #### VFS Layout
 
-    ```text
-    This mount is a LanceDB table exposed as a filesystem.
+    ##### `/<path>`
 
-    Directories are the configured group-by columns; descending narrows a filter.
-    Each matching row is a <id>.md card plus a <id>.<ext> blob file. Use
-    ls/cd/cat/tree/find/wc/grep/rg as usual.
-    ```
+    - A LanceDB table, exposed as a filesystem.
+    - Directories are the configured group-by columns; descending one narrows
+      a filter.
+    - Each matching row is a `<id>.md` card plus a `<id>.<ext>` blob file.
+    - `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
+      usual.
 
     #### Supported Unix Commands for VFS
 
@@ -106,7 +107,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
     Run `man <cmd>` or `<cmd> --help` for one command's usage.
   </Tab>
   <Tab title="Raw">
-    ````markdown
+    ```markdown
     ---
     name: workspace-filesystem
     description: The virtual filesystem layout of this workspace.
@@ -118,15 +119,16 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
     | --- | --- |
     | `/<path>` | `lancedb`, read |
 
-    ## `/<path>` layout
+    ## VFS Layout
 
-    ```text
-    This mount is a LanceDB table exposed as a filesystem.
+    ### `/<path>`
 
-    Directories are the configured group-by columns; descending narrows a filter.
-    Each matching row is a <id>.md card plus a <id>.<ext> blob file. Use
-    ls/cd/cat/tree/find/wc/grep/rg as usual.
-    ```
+    - A LanceDB table, exposed as a filesystem.
+    - Directories are the configured group-by columns; descending one narrows
+      a filter.
+    - Each matching row is a `<id>.md` card plus a `<id>.<ext>` blob file.
+    - `ls`, `cd`, `cat`, `tree`, `find`, `wc`, `grep` and `rg` work as
+      usual.
 
     ## Supported Unix Commands for VFS
 
@@ -145,7 +147,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
     | `/<path>` | Read only: no command changes files. `lancedb` answers only for `*/*.md`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man <cmd>` or `<cmd> --help` for one command's usage.
-    ````
+    ```
   </Tab>
 </Tabs>
 {/* generated: vfs-md lancedb end */}

@@ -50,18 +50,23 @@ from mirage.types import (
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.box.config import BoxConfig
 
-VFS_MD = """{prefix}
-  Mirrors Box folder hierarchy. Every item is served as its raw bytes:
-    <name>.boxnote      Box Note    (raw ProseMirror-style JSON; pipe to jq)
-    <name>.boxcanvas    Box Canvas  (raw canvas JSON; pipe to jq)
-    <name>.gdoc/.gsheet/.gslides  Box's Google-Workspace files, stored as
-                        Office Open XML (docx/xlsx/pptx) - opaque binary
-    <other-files>       PDFs, images, binaries, etc. - raw bytes
+VFS_MD = """\
+```text
+{prefix}
+  <folder>/            # the Box folder hierarchy, mirrored
+    <name>.boxnote     # Box Note: raw ProseMirror-style JSON
+    <name>.boxcanvas   # Box Canvas: raw canvas JSON
+    <name>.gdoc        # Box's Google Workspace files, stored as
+    <name>.gsheet      #   Office Open XML (docx, xlsx, pptx):
+    <name>.gslides     #   opaque binary
+    <file>             # PDFs, images and the rest: raw bytes
+```
 
-  IMPORTANT: This is a remote mount. Prefer targeted reads over full scans.
-  Box uses numeric folder IDs internally (root = 0); mirage caches the
-  path -> id mapping, so nested dirs cost one API call per level on first
-  access. Use ls on the parent dir before constructing a path."""
+- Every item is served as its raw bytes; pipe the JSON ones to `jq`.
+- This is a remote mount: prefer targeted reads over full scans.
+- Box names folders by numeric id (the root is `0`). The path-to-id
+  mapping is cached, so a nested directory costs one API call per level
+  on first access. `ls` the parent before constructing a path."""
 
 
 class BoxVFS(BaseVFS):

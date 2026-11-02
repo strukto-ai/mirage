@@ -31,13 +31,14 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.slack.config import SlackConfig
 
 VFS_MD = """\
+```text
 {prefix}
   channels/
     <channel-name>__<channel-id>/
       <yyyy-mm-dd>/
-        chat.jsonl                # messages for that date
-        files/                    # attachments shared that day (may be empty)
-          <name>__<F-id>.<ext>    # cat to download bytes
+        chat.jsonl              # messages for that date
+        files/                  # attachments shared that day
+          <name>__<F-id>.<ext>  # cat downloads the bytes
   dms/
     <user-name>__<dm-id>/
       <yyyy-mm-dd>/
@@ -45,23 +46,25 @@ VFS_MD = """\
         files/
           <name>__<F-id>.<ext>
   users/
-    <username>__<user-id>.json    # user profile
-  Naming: channel/DM/user directory names are `<display-name>__<id>`.
-  The display name keeps the original spelling from Slack; only `/` is
-  replaced with `∕` (U+2215) so paths don't break. Quote names
-  containing spaces in shell commands. Always ls the parent dir first
-  to discover exact entry names (they include IDs).
-  Without time bounds, bare channel listings show the latest 90 days
-  ending at the newest message. Date globs can discover earlier days.
-  With start_time/end_time, listings cover that scope; messages and their
-  attachments outside it are absent, including through direct paths.
-  Users and channel metadata remain available as context.
-  On a time-scoped mount grep and rg see only the in-scope files.
-  Messages are JSONL; use jq to extract fields like .text, .user, .ts, .files.
-  .user is a user ID (U…), not a username; resolve it through
-  users/<username>__<user-id>.json and filter messages by the ID.
-  Unless walk_limit is -1, grep -rw and rg -w read only the channel
-  and DM days Slack search names; attachments under files/ are always read."""
+    <username>__<user-id>.json  # user profile
+```
+
+- A channel, DM or user name is `<display-name>__<id>`. The display name
+  keeps Slack's spelling; only `/` becomes `∕` (U+2215). `ls` the parent
+  first to find exact names, and quote a name that has spaces.
+- Messages are JSONL; use `jq` for fields such as `.text`, `.user`,
+  `.ts` and `.files`. A day's `files/` may be empty.
+- `.user` is a user ID (`U…`), not a username; resolve it through
+  `users/<username>__<user-id>.json` and filter messages by the ID.
+- Without `start_time`/`end_time`, a channel lists the latest 90 days up
+  to its newest message; a date glob finds earlier days.
+- With `start_time`/`end_time`, listings cover that scope; messages and
+  attachments outside it are absent, direct paths included, and `grep`
+  and `rg` see only the in-scope files. Users and channel metadata stay
+  available as context.
+- Unless `walk_limit` is -1, `grep -rw` and `rg -w` read only the channel
+  and DM days Slack search names; attachments under `files/` are always
+  read."""
 
 
 class SlackVFS(BaseVFS):

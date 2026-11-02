@@ -11,8 +11,10 @@ import type { RedactedSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { Mem0Config } from './config.ts'
 
-export const VFS_MD = `{prefix}
-  <memory-id>.json`
+export const VFS_MD = `\`\`\`text
+{prefix}
+  <memory-id>.json
+\`\`\``
 
 export class Mem0VFS extends BaseVFS {
   override readonly handed = {

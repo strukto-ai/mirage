@@ -118,8 +118,8 @@ def test_vfs_md_includes_buckets_and_structure():
     assert "owned/" in rendered
     assert "shared/" in rendered
     assert "shared with you by others" in rendered
-    assert "still in owned/" in rendered
-    assert "gdoc.json structure" in rendered
+    assert "still in `owned/`" in rendered
+    assert "`documents.get`" in rendered
     assert ".tabs[].documentTab" in rendered
     assert "childTabs" in rendered
     assert "tabProperties" in rendered
