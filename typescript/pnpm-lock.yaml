@@ -335,6 +335,9 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.1116.0
         version: 3.1147.0
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.1116.0
+        version: 3.1147.0
       '@lancedb/lancedb':
         specifier: ^0.30.0
         version: 0.30.0(apache-arrow@21.1.0)

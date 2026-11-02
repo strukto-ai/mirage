@@ -515,7 +515,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     }).then(async (py) => {
       const ref = (this.config as PyodideConfig).initModule
       if (ref !== undefined) {
-        const module = (await import(ref)) as {
+        const module = (await import(/* @vite-ignore */ ref)) as {
           default: (runtime: PyodideInterface) => unknown
         }
         if (typeof module.default !== 'function') {

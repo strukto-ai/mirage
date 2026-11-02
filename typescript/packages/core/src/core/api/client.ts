@@ -73,7 +73,7 @@ export function stallTimeout(
       stop()
     }
     const source = response.body
-    if (source == null) return response
+    if (source == null || [204, 205, 304].includes(response.status)) return response
     let reading: ReadableStreamDefaultReader<Uint8Array> | undefined
     const body = new ReadableStream<Uint8Array>(
       {
