@@ -37,8 +37,11 @@ from mirage.io.config import IOConfig
 from mirage.io.network import (
     NetworkRule,
     NetworkSetting,
+    narrowed,
+    network_bound,
     network_layer,
     network_routes,
+    run_with_network,
 )
 from mirage.policy.constants import METHODS
 from mirage.policy.profile import (
@@ -1074,21 +1077,29 @@ async def build_mcp_clis(config: "WorkspaceConfig") -> dict[str, CLI]:
 
     The second async step of the YAML loader, after
     :func:`resolve_secrets`: an MCP CLI's subcommands are the server's
-    tools, so building one lists them over the network. Mirrors the
-    TypeScript ``buildCliEntries``, which awaits ``mcpCli`` inline.
+    tools, so building one lists them over the network, held to the
+    config's ``network`` and any rule already bound. Mirrors the
+    TypeScript ``configToWorkspaceArgs``.
 
     Args:
         config (WorkspaceConfig): a config whose pointers are resolved.
 
     Raises:
         ValidationError: an entry's config is not an MCPConfig.
-        MCPToolsError: a server could not be listed, or its tools
-            cannot be made into a CLI.
+        MCPToolsError: a server could not be listed, its network refused
+            it, or its tools cannot be made into a CLI.
     """
-    return {
-        name: await mcp.mcp_cli(block.config)
+    blocks = {
+        name: block
         for name, block in (config.clis or {}).items()
         if block.cli == MCP_CLI
+    }
+    if not blocks:
+        return {}
+    rule = narrowed(network_bound(), config.network)
+    return {
+        name: await run_with_network(rule, mcp.mcp_cli(block.config))
+        for name, block in blocks.items()
     }
 
 

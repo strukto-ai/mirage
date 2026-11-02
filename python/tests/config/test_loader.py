@@ -22,6 +22,7 @@ import pytest
 from mirage import MountBackend, MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
+from mirage.commands.cli.mcp import MCPToolsError
 from mirage.config import (
     DiskStoreBlock,
     RamCacheBlock,
@@ -1786,3 +1787,18 @@ async def test_an_mcp_entry_builds_from_its_server_with_an_env_token(
         finally:
             await ws.close()
     assert (result.exit_code, result.stdout) == (0, b"apple\nbanana\n")
+
+
+@pytest.mark.asyncio
+async def test_an_mcp_entry_is_listed_only_where_its_network_lets_it():
+    async with served_mcp() as fake:
+        cfg = load_config(
+            {
+                "mounts": {},
+                "network": False,
+                "clis": {"fx": {"cli": "mcp", "config": fake.bearer_config()}},
+            }
+        )
+        with pytest.raises(MCPToolsError):
+            await build_mcp_clis(cfg)
+    assert fake.requests == []

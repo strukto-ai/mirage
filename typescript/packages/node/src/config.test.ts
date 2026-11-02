@@ -2017,7 +2017,7 @@ describe('workspace I/O config', () => {
 describe('clis cli: mcp', () => {
   interface Fixture {
     TOKEN: string
-    servedMcp: () => Promise<{ url: string; close: () => Promise<void> }>
+    servedMcp: () => Promise<{ url: string; requests: unknown[]; close: () => Promise<void> }>
   }
   const FIXTURE = pathToFileURL(
     resolve(fileURLToPath(import.meta.url), '../../../core/tests/fixtures/mcp_server.ts'),
@@ -2048,6 +2048,24 @@ describe('clis cli: mcp', () => {
       }
     } finally {
       vi.unstubAllEnvs()
+      await fake.close()
+    }
+  })
+
+  it('lists its server only where its network lets it', async () => {
+    const { TOKEN, servedMcp } = (await import(FIXTURE)) as Fixture
+    const fake = await servedMcp()
+    try {
+      const cfg = loadWorkspaceConfig({
+        mounts: {},
+        network: false,
+        clis: {
+          fx: { cli: 'mcp', config: { url: fake.url, auth: { type: 'bearer', token: TOKEN } } },
+        },
+      })
+      await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/cannot list/)
+      expect(fake.requests).toEqual([])
+    } finally {
       await fake.close()
     }
   })

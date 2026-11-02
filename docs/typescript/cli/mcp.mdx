@@ -94,7 +94,8 @@ Text content prints as text; any other content prints as one line of
 JSON. A failed call is not retried. Cancelling the line cancels the call.
 
 A `preNetwork` policy or a `network` setting that excludes the server's
-host refuses the call before anything is sent.
+host refuses the call before anything is sent; a config's `network` also
+refuses listing its servers when it loads.
 
 ## Profiles
 

@@ -32,10 +32,10 @@ import { noMount } from '../../errors/fs.ts'
 import { IOConfig } from '../../io/config.ts'
 import type { MemoryBudget } from '../../io/memory.ts'
 import {
-  mergeRoutes,
+  narrowed,
   networkLayer,
   networkRoutes,
-  NetworkRule,
+  type NetworkRule,
   type NetworkSetting,
 } from '../../io/network.ts'
 import type { Observer } from '../../observe/observer.ts'
@@ -162,7 +162,7 @@ export class MountRegistry {
   systemClock: Clock | null = null
   // The rule each profile's `network` narrows it to, by the layer it adds,
   // with the rule it narrowed.
-  private readonly narrowed = new Map<string, [NetworkRule | null, NetworkRule]>()
+  private readonly narrowed = new Map<string, [NetworkRule | null, NetworkRule | null]>()
   // What starts judging the process's connections, which the host sets: a
   // profile can narrow a workspace that limits nothing itself.
   private watch: (() => void) | null = null
@@ -250,15 +250,7 @@ export class MountRegistry {
     const key = JSON.stringify([layer, routes])
     let held = this.narrowed.get(key)
     if (held?.[0] !== this.network) {
-      const base = this.network
-      held = [
-        base,
-        new NetworkRule(
-          [...(base?.layers ?? []), ...(layer === null ? [] : [layer])],
-          base?.metadata ?? false,
-          mergeRoutes(base?.routes ?? {}, routes),
-        ),
-      ]
+      held = [this.network, narrowed(this.network, setting ?? true)]
       this.narrowed.set(key, held)
       this.watch?.()
     }
@@ -272,7 +264,9 @@ export class MountRegistry {
 
   /** The rules `networkOf` built, whose connections close with the workspace. */
   narrowedNetworks(): NetworkRule[] {
-    return [...this.narrowed.values()].map(([, rule]) => rule)
+    return [...this.narrowed.values()].flatMap(([base, rule]) =>
+      rule === null || rule === base ? [] : [rule],
+    )
   }
 
   setReconciler(reconciler: ReadReconciler): void {

@@ -20,10 +20,13 @@ import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { IOConfig } from '@struktoai/mirage-core/io/config'
 import {
+  narrowed,
+  networkBound,
   networkLayer,
   networkRoutes,
   NetworkRule,
   type NetworkSetting,
+  runWithNetwork,
 } from '@struktoai/mirage-core/io/network'
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { METHODS } from '@struktoai/mirage-core/policy/constants'
@@ -85,6 +88,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 // builds from here), so it arms the builtin secrets sources like the
 // node Workspace module does.
 import './secrets/constants.ts'
+import { watchNetwork } from './io/network.ts'
 import { isModulePath, loadAttr, splitRef } from './utils/loader.ts'
 import { parseYaml } from './utils/yaml.ts'
 import { buildVfs } from './vfs/registry.ts'
@@ -971,9 +975,17 @@ export async function configToWorkspaceArgs(cfg: WorkspaceConfigRaw): Promise<{
   }
   const index = buildIndexConfig(cfg.index)
   const stateStore = buildStateStore(cfg.store)
+  const clis = cfg.clis
+  const mcp =
+    clis !== undefined &&
+    clis !== null &&
+    Object.values(clis).some((block) => isPlainObject(block) && block.cli === MCP_CLI)
+  // An MCP entry is listed at load, under the config's network and any rule already bound.
+  const rule = mcp ? narrowed(networkBound(), cfg.network ?? true) : networkBound()
+  if (rule !== null) watchNetwork()
   const cliEntries =
-    cfg.clis !== undefined && cfg.clis !== null
-      ? await buildCliEntries(cfg.clis, sources)
+    clis !== undefined && clis !== null
+      ? await runWithNetwork(rule, () => buildCliEntries(clis, sources))
       : undefined
   const runtimeEntries =
     cfg.runtimes !== undefined && cfg.runtimes !== null
