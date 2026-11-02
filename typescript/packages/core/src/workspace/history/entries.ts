@@ -21,6 +21,14 @@ function descendants(node: TSNodeLike): TSNodeLike[] {
   return [node, ...node.children.flatMap(descendants)]
 }
 
+/** The rows of blanks among `rows`, each an entry no command starts. */
+function blanks(rows: string): HistoryEntry[] {
+  return rows
+    .split('\n')
+    .filter((row) => row !== '' && row.trim() === '')
+    .map((text) => ({ text, at: null }))
+}
+
 /**
  * The entries bash's history adds for an input it reads interactively:
  * one per command it reads, a command and what else is on the line it
@@ -71,11 +79,10 @@ export function historyEntries(root: TSNodeLike): HistoryEntry[] {
     )
     const found = source.indexOf('\n', end - 1)
     const stop = found < 0 ? source.length : found
-    for (const row of source.slice(read, start).split('\n'))
-      if (row !== '' && row.trim() === '') entries.push({ text: row, at: null })
+    entries.push(...blanks(source.slice(read, start)))
     read = stop + 1
     if (nodes.some((node) => node.type === NT.ERROR)) {
-      entries.push({ text: source.slice(start, stop), at: first.startIndex ?? 0 })
+      entries.push({ text: source.slice(start, stop), at: typed(first.startIndex ?? 0) })
       continue
     }
     const comments = new Set(
@@ -149,7 +156,8 @@ export function historyEntries(root: TSNodeLike): HistoryEntry[] {
       at = ends + 1
     }
     if (folded.some((doc) => (doc.heredoc?.end ?? 0) - 1 === stop)) text += '\n'
-    entries.push({ text, at: first.startIndex ?? 0 })
+    entries.push({ text, at: typed(first.startIndex ?? 0) })
   }
+  entries.push(...blanks(source.slice(read)))
   return entries
 }

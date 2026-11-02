@@ -497,9 +497,12 @@ async function runPreparedLine(
               : literalTree(argv)
           // A line bash's reader reads as several commands records each as
           // it reaches it; any other is recorded as it starts, how it ended
-          // following it.
+          // following it, as is one a postExecute policy sees whole before
+          // any of its output escapes.
           const history =
-            recorded && argv === undefined
+            recorded &&
+            argv === undefined &&
+            !(await env.registry.policies.wantsFor('postExecute', targetSession.sessionId))
               ? LineHistory.open(
                   env.observer,
                   command,

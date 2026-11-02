@@ -51,6 +51,84 @@
         "stdout": "echo b\nexit 3\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "history_reads_each_comment",
+      "seq": 310064,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "# first\n# second",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_has_each_comment",
+      "seq": 310065,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -v '^#[0-9]' /.bash_history | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "# first\n# second\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_reads_a_trailing_blank_row",
+      "seq": 310066,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "echo t\n   ",
+      "expect": {
+        "exit": 0,
+        "stdout": "t\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_has_the_trailing_blank_row",
+      "seq": 310067,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -v '^#[0-9]' /.bash_history | tail -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "echo t\n   \n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "history_reads_on_after_extglob",
+      "seq": 310068,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "shopt -s extglob\necho a\necho b",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "bash_history_has_each_command_read_on",
+      "seq": 310069,
+      "targets": [
+        "ram-history"
+      ],
+      "command": "grep -v '^#[0-9]' /.bash_history | tail -n 3",
+      "expect": {
+        "exit": 0,
+        "stdout": "shopt -s extglob\necho a\necho b\n",
+        "stderr": ""
+      }
     }
   ]
 }

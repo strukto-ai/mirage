@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 from mirage.io import IOResult
 from mirage.observe.observer import Observer
@@ -32,7 +32,8 @@ class LineHistory:
     recorded whole. The line's root program reaches each command as it
     runs it (``reach``), and the line's end ends the last (``end``). A line
     answered before its tree runs, or run whole on a runtime (``typed``),
-    is recorded once, as typed. Mirrors TypeScript's LineHistory.
+    is recorded once, as typed. Input the root reads again (``read_on``)
+    goes on with the root it is read as. Mirrors TypeScript's LineHistory.
 
     Args:
         observer (Observer): the workspace's observer.
@@ -57,7 +58,9 @@ class LineHistory:
         line_id: str | None,
         terminal: Terminal,
     ) -> None:
-        self.root = root
+        self._root = root
+        self._shift = 0
+        self._next: int | None = None
         self._observer = observer
         self._command = command
         self._entries = entries
@@ -113,6 +116,41 @@ class LineHistory:
             sink,
         )
 
+    def reads(self, node: TSNodeLike) -> bool:
+        """Whether ``node``'s program reads the line: the line's root, or
+        the first root to run once its input is read again (``read_on``),
+        which takes over.
+
+        Args:
+            node (TSNodeLike): a program about to run its statements.
+        """
+        if node is self._root:
+            return True
+        if self._next is None or node.parent is not None:
+            return False
+        self._root = node
+        self._shift = self._next
+        self._next = None
+        return True
+
+    async def read_on(
+        self, at: int, run: Callable[[], Awaitable[IOResult]]
+    ) -> IOResult:
+        """Read the root's input again from a statement on, as a root of
+        its own that ``run`` parses and runs.
+
+        Args:
+            at (int): where, in the root's input, the input read again
+                starts: the statement's index less the blank rows put
+                ahead of it.
+            run (Callable[[], Awaitable[IOResult]]): reads it.
+        """
+        self._next = self._shift + at
+        try:
+            return await run()
+        finally:
+            self._next = None
+
     async def reach(
         self,
         child: TSNodeLike,
@@ -132,7 +170,9 @@ class LineHistory:
         """
         if self._whole or self._done:
             return
-        at = child.start_byte
+        offsets = getattr(self._root, "offsets", None) or ()
+        start = child.start_byte
+        at = self._shift + (offsets[start] if start < len(offsets) else start)
         reached = self._current
         for j in range(self._current + 1, len(self._entries)):
             entry_at = self._entries[j].at
@@ -166,7 +206,7 @@ class LineHistory:
     async def end(self, io: IOResult, records: Sequence[OpRecord]) -> None:
         """End the line: its last entry, with what the line wrote since and
         what it answered with besides, or, when no command was reached, the
-        line as typed. A line ends once.
+        line as typed, unless its root read it through. A line ends once.
 
         Args:
             io (IOResult): the line's result.
@@ -175,7 +215,7 @@ class LineHistory:
         """
         if self._done:
             return
-        if self._current < 0:
+        if self._current < 0 and not self._through:
             await self.typed()
         await self._close(io, records)
         self._done = True

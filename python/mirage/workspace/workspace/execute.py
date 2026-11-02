@@ -777,8 +777,15 @@ async def run_prepared_line(
         )
         # A line bash's reader reads as several commands records each as
         # it reaches it; any other is recorded as it starts, how it ended
-        # following it.
-        if recorded and argv is None:
+        # following it, as is one a post_execute policy sees whole before
+        # any of its output escapes.
+        if (
+            recorded
+            and argv is None
+            and not await ws.registry.policies.wants_for(
+                "post_execute", session_id
+            )
+        ):
             history = LineHistory.open(
                 ws.observer,
                 command,
@@ -846,9 +853,11 @@ async def run_prepared_line(
         # carry on its result. A session write on the line is a call of
         # the line's: its nod stands until the line ends, so a retry of a
         # line held on a later question (`x=1 cmd`, `export a=1; export
-        # b=2`) finds it.
+        # b=2`) finds it. A nested line keeps its caller's history, for
+        # the root an input read again runs as to take over.
+        caller = current_caller()
         line_token = bind_caller(
-            current_caller().changed(
+            caller.changed(
                 {
                     "refusals": note,
                     "call": (
@@ -856,7 +865,7 @@ async def run_prepared_line(
                         handed,
                         effective_session.session_id,
                     ),
-                    "history": history,
+                    "history": caller.history if history is None else history,
                 }
             )
         )

@@ -49,6 +49,8 @@ CASES = [
     ("if true # why\nthen :; fi\n", ["if true # why\nthen :; fi"]),
     ("if true\n\nthen :\n   \nfi\n", ["if true;  then :;     fi"]),
     ("# note\n\n   \nfalse\n", ["# note", "   ", "false"]),
+    ("echo a\necho b\n   \n\t\n", ["echo a", "echo b", "   ", "\t"]),
+    ("# first\n# second\n", ["# first", "# second"]),
 ]
 
 

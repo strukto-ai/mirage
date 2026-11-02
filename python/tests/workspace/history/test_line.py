@@ -16,7 +16,13 @@
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.policy import Deny, ExecuteResultContext, Policy
 from mirage.vfs.ram import RAMVFS
+
+
+class _DenyOutput(Policy):
+    async def post_execute(self, ctx: ExecuteResultContext) -> Deny:
+        return Deny(reason="output withheld")
 
 
 def _workspace() -> Workspace:
@@ -91,6 +97,55 @@ async def test_records_a_line_of_one_command_whole() -> None:
         assert [e.get("command", e.get("stdout")) for e in history] == [
             "cat <<A\nx\nA\n",
             "x\n",
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_records_a_line_whole_under_a_post_execute_policy() -> None:
+    ws = _workspace()
+    try:
+        ws.policies.add(_DenyOutput())
+        await ws.shell("echo secret\necho done\n")
+        history = await ws.history()
+        assert [e.get("command", e.get("stdout")) for e in history] == [
+            "echo secret\necho done\n",
+            "",
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_records_the_commands_read_again_after_the_parser_changes() -> (
+    None
+):
+    ws = _workspace()
+    try:
+        await ws.shell("shopt -s extglob\necho a\necho b\n")
+        history = await ws.history()
+        assert [e.get("command", e.get("stdout")) for e in history] == [
+            "shopt -s extglob",
+            "",
+            "echo a",
+            "a\n",
+            "echo b",
+            "b\n",
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_records_each_comment_of_a_line_of_comments() -> None:
+    ws = _workspace()
+    try:
+        await ws.shell("# first\n# second\n")
+        history = await ws.history()
+        assert [e["command"] for e in history if e["type"] == "command"] == [
+            "# first",
+            "# second",
         ]
     finally:
         await ws.close()

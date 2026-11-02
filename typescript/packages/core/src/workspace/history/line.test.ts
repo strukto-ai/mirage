@@ -13,11 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { Policy } from '../../policy/base.ts'
+import type { Deny, ExecuteResultContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
+
+class DenyOutput implements Policy {
+  postExecute(_ctx: ExecuteResultContext): Deny {
+    return { kind: 'deny', reason: 'output withheld' }
+  }
+}
 
 describe('a line of several commands', () => {
   function build(): Workspace {
@@ -72,6 +80,41 @@ describe('a line of several commands', () => {
     await ws.shell('cat <<A\nx\nA\n')
     const history = await ws.history()
     expect(history.map((e) => e.command ?? e.stdout)).toEqual(['cat <<A\nx\nA\n', 'x\n'])
+    await ws.close()
+  })
+
+  it('records a line whole when a postExecute policy may drop its output', async () => {
+    const ws = build()
+    ws.policies.add(new DenyOutput())
+    await ws.shell('echo secret\necho done\n')
+    const history = await ws.history()
+    expect(history.map((e) => e.command ?? e.stdout)).toEqual(['echo secret\necho done\n', ''])
+    await ws.close()
+  })
+
+  it('records the commands read again after the parser changes', async () => {
+    const ws = build()
+    await ws.shell('shopt -s extglob\necho a\necho b\n')
+    const history = await ws.history()
+    expect(history.map((e) => e.command ?? e.stdout)).toEqual([
+      'shopt -s extglob',
+      '',
+      'echo a',
+      'a\n',
+      'echo b',
+      'b\n',
+    ])
+    await ws.close()
+  })
+
+  it('records each comment of a line of comments', async () => {
+    const ws = build()
+    await ws.shell('# first\n# second\n')
+    const history = await ws.history()
+    expect(history.filter((e) => e.type === 'command').map((e) => e.command)).toEqual([
+      '# first',
+      '# second',
+    ])
     await ws.close()
   })
 })

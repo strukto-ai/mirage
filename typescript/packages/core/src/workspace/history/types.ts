@@ -16,6 +16,6 @@
 export interface HistoryEntry {
   /** The entry, its lines joined as `cmdhist` joins them. */
   readonly text: string
-  /** Where its first command starts in the text the tree reads; null for a line of blanks. */
+  /** Where its first command starts in the input as typed; null for a line of blanks. */
   readonly at: number | null
 }
