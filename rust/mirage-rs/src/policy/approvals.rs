@@ -37,7 +37,7 @@ pub(super) enum Scope {
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct Record {
-    key: RecordKey,
+    keys: Vec<RecordKey>,
     rule: Option<RuleKey>,
     same_line: bool,
     outcome: Option<Answer>,
@@ -285,9 +285,16 @@ impl State {
             .collect()
     }
 
-    fn standing(&self, claimant: Option<&Claimant>) -> Result<Vec<&Record>, StreamError> {
+    fn standing(
+        &self,
+        claimant: Option<&Claimant>,
+    ) -> Result<Vec<(RecordKey, &Record)>, StreamError> {
         if self.live.is_empty() {
-            return Ok(self.records.iter().collect());
+            return Ok(self
+                .records
+                .iter()
+                .filter_map(|record| record.keys.first().map(|&key| (key, record)))
+                .collect());
         }
         let mut offered = HashSet::new();
         if let Some(claimant) = claimant {
@@ -311,26 +318,32 @@ impl State {
         Ok(self
             .records
             .iter()
-            .filter(|record| !taken.contains(&record.key))
+            .filter_map(|record| {
+                record
+                    .keys
+                    .iter()
+                    .find(|key| !taken.contains(key))
+                    .map(|&key| (key, record))
+            })
             .collect())
     }
 
     fn plan(&self, rules: &[RuleKey], claimant: Option<&Claimant>) -> Result<Plan, StreamError> {
         let records = self.standing(claimant)?;
-        let found: Vec<Option<&Record>> = rules
+        let found: Vec<Option<(RecordKey, &Record)>> = rules
             .iter()
             .map(|rule| {
                 [Scope::Once, Scope::Session].iter().find_map(|scope| {
                     records
                         .iter()
-                        .find(|record| record.scope == *scope && covers(record, *rule))
+                        .find(|(_, record)| record.scope == *scope && covers(record, *rule))
                         .copied()
                 })
             })
             .collect();
-        let denied = found
-            .iter()
-            .position(|record| record.is_some_and(|record| record.outcome == Some(Answer::Deny)));
+        let denied = found.iter().position(|record| {
+            record.is_some_and(|(_, record)| record.outcome == Some(Answer::Deny))
+        });
         let missing: Vec<usize> = found
             .iter()
             .enumerate()
@@ -339,18 +352,19 @@ impl State {
         let once: Vec<RecordKey> = found
             .iter()
             .flatten()
-            .filter(|record| record.scope == Scope::Once)
-            .map(|record| record.key)
+            .filter(|(_, record)| record.scope == Scope::Once)
+            .map(|(key, _)| *key)
             .collect();
         let waiting = rules
             .iter()
             .map(|rule| {
-                self.records
-                    .iter()
-                    .find(|record| {
-                        record.outcome.is_none() && record.rule == Some(*rule) && record.same_line
-                    })
-                    .map(|record| record.key)
+                self.records.iter().find_map(|record| {
+                    if record.outcome.is_none() && record.rule == Some(*rule) && record.same_line {
+                        record.keys.first().copied()
+                    } else {
+                        None
+                    }
+                })
             })
             .collect();
         let claim = claimant
@@ -360,7 +374,7 @@ impl State {
         Ok(Plan {
             answers: found
                 .iter()
-                .map(|record| record.map(|record| record.key))
+                .map(|record| record.map(|(key, _)| key))
                 .collect(),
             denied,
             missing,
@@ -425,14 +439,13 @@ pub(super) fn answer(query: Query) -> Result<Reply, StreamError> {
             claimant,
         } => Reply::Plan(state.plan(&rules, claimant.as_ref())?),
 
-        Query::Waiting { records, rule } => Reply::Record(
-            records
-                .iter()
-                .find(|record| {
-                    record.outcome.is_none() && record.rule == Some(rule) && record.same_line
-                })
-                .map(|record| record.key),
-        ),
+        Query::Waiting { records, rule } => Reply::Record(records.iter().find_map(|record| {
+            if record.outcome.is_none() && record.rule == Some(rule) && record.same_line {
+                record.keys.first().copied()
+            } else {
+                None
+            }
+        })),
         Query::Answer {
             records,
             id,
@@ -541,7 +554,7 @@ mod tests {
     }
 
     fn record(key: usize, outcome: Value, scope: &str, reason: u32) -> Value {
-        json!({"key": key, "rule": rule(reason), "same_line": true,
+        json!({"keys": [key], "rule": rule(reason), "same_line": true,
             "outcome": outcome, "scope": scope})
     }
 
@@ -758,6 +771,22 @@ mod tests {
         assert_eq!(result["missing"], json!([1]));
         assert_eq!(result["waiting"], json!([null, 11, null]));
         assert_eq!(result["once"], json!([10, 10]));
+    }
+
+    #[test]
+    fn a_batch_selects_the_first_visible_key_and_keeps_aliases() {
+        let mut batch = record(10, json!("allow"), "once", 1);
+        batch["keys"] = json!([10, 11, 10]);
+        let result = plan(
+            json!({"records":[batch],
+                "holders":[{"key":0,"parent":null,"claims":[0]}],
+                "claims":[{"key":0,"record":10,"occurrence":0}], "live":[0],
+                "occurrences":[node(0,Value::Null,0,1)]}),
+            json!([rule(1), rule(1)]),
+            Value::Null,
+        );
+        assert_eq!(result["answers"], json!([11, 11]));
+        assert_eq!(result["once"], json!([11, 11]));
     }
 
     #[test]

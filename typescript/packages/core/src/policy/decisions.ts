@@ -514,13 +514,22 @@ export class Decisions extends DecisionOwner {
   ) {
     const records: Decision[] = []
     const recordRules: number[] = []
+    const knownRules = new Map<CommandRule, number>()
+    const asked = rules.map((rule) => {
+      const key = rules.findIndex((other) => sameRule(rule, other))
+      knownRules.set(rule, key)
+      return key
+    })
     for (const record of this.records(sessionId)) {
-      const rule = rules.findIndex((rule) => sameRule(record.rule, rule))
+      let rule = knownRules.get(record.rule)
+      if (rule === undefined) {
+        rule = rules.findIndex((rule) => sameRule(record.rule, rule))
+        knownRules.set(record.rule, rule)
+      }
       if (rule < 0) continue
       records.push(record)
       recordRules.push(rule)
     }
-    const asked = rules.map((rule) => rules.findIndex((other) => sameRule(rule, other)))
     return new ApprovalSnapshot(records, this.live.get(sessionId)).plan(
       recordRules,
       asked,

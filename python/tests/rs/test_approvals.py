@@ -10,7 +10,7 @@ from mirage.policy.types import (
     Outcome,
     Scope,
 )
-from mirage.rs.approvals import ApprovalSnapshot, record_wire
+from mirage.rs.approvals import ApprovalSnapshot
 
 
 def decision() -> Decision:
@@ -61,10 +61,9 @@ def test_equal_records_keep_separate_identity_and_duplicate_positions() -> (
     handed = HandOff(claimed=[Claim(Occurrence(None, "cat x", 0, 5), first)])
     records = (first, second, first)
     snapshot = ApprovalSnapshot(records, (handed,))
-    snapshot.wire["records"] = [
-        record_wire(record, snapshot.record_key(record), 0, ("cat", "x"), "/")
-        for record in records
-    ]
+    snapshot.wire["records"] = snapshot.records_wire(
+        [0, 0, 0], ("cat", "x"), "/"
+    )
     plan = snapshot.query("plan", rules=[0, 0], claimant=None)
     assert plan["answers"] == [1, 1]
     assert plan["once"] == [1, 1]

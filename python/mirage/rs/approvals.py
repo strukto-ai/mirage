@@ -1,7 +1,14 @@
 from collections.abc import Sequence
 from typing import Any, TypeVar
 
-from mirage.policy.types import Claim, Decision, HandOff, Occurrence
+from mirage.policy.types import (
+    Claim,
+    Decision,
+    HandOff,
+    Occurrence,
+    Outcome,
+    Scope,
+)
 from mirage.rs.document import units
 from mirage.rs.policy import admission_matcher
 
@@ -16,6 +23,17 @@ def _key(value: T, values: list[T], keys: dict[int, int]) -> int:
     keys[id(value)] = found
     values.append(value)
     return found
+
+
+def same_line(
+    record: Decision, command: str | None, argv: tuple[str, ...], cwd: str
+) -> bool:
+    return (
+        command is not None
+        and record.command == command
+        and record.argv == argv
+        and record.cwd == cwd
+    )
 
 
 def record_wire(
@@ -35,12 +53,11 @@ def record_wire(
         cwd (str): the requested working directory.
     """
     return {
-        "key": key,
+        "keys": [key],
         "rule": rule_key,
-        "same_line": bool(argv)
-        and record.command == argv[0]
-        and record.argv == argv[1:]
-        and record.cwd == cwd,
+        "same_line": same_line(
+            record, argv[0] if argv else None, argv[1:], cwd
+        ),
         "outcome": None if record.outcome is None else record.outcome.value,
         "scope": record.scope.value,
     }
@@ -73,11 +90,14 @@ class ApprovalSnapshot:
         live: Sequence[HandOff] = (),
         handed: HandOff | None = None,
     ) -> None:
-        self.record_objects: list[Decision] = []
+        self.records = records
+        self.record_objects = list(records)
         self.holder_objects: list[HandOff] = []
         self.claim_objects: list[Claim] = []
         self.occurrence_objects: list[Occurrence] = []
-        self._record_keys: dict[int, int] = {}
+        self._record_keys = {
+            id(record): key for key, record in enumerate(records)
+        }
         self._holder_keys: dict[int, int] = {}
         self._claim_keys: dict[int, int] = {}
         self._occurrence_keys: dict[int, int] = {}
@@ -90,8 +110,6 @@ class ApprovalSnapshot:
             "occurrences": [],
             "sources": [],
         }
-        for record in records:
-            self.record_key(record)
         if handed is not None:
             self.holder_key(handed)
         index = 0
@@ -120,6 +138,39 @@ class ApprovalSnapshot:
                 {"key": index, "parent": parent, "claims": claims}
             )
             index += 1
+
+    def records_wire(
+        self, rules: Sequence[int], argv: tuple[str, ...], cwd: str
+    ) -> list[dict[str, Any]]:
+        batches: list[dict[str, Any]] = []
+        previous: tuple[int, bool, Outcome | None, Scope] | None = None
+        command, args = (argv[0] if argv else None), argv[1:]
+        for record, rule in zip(self.records, rules, strict=True):
+            fields = (
+                rule,
+                same_line(record, command, args, cwd),
+                record.outcome,
+                record.scope,
+            )
+            key = self._record_keys.get(id(record))
+            if key is None:
+                key = self.record_key(record)
+            if fields == previous:
+                batches[-1]["keys"].append(key)
+            else:
+                batches.append(
+                    {
+                        "keys": [key],
+                        "rule": rule,
+                        "same_line": fields[1],
+                        "outcome": None
+                        if record.outcome is None
+                        else record.outcome.value,
+                        "scope": record.scope.value,
+                    }
+                )
+                previous = fields
+        return batches
 
     def record_key(self, record: Decision) -> int:
         return _key(record, self.record_objects, self._record_keys)

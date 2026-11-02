@@ -353,26 +353,28 @@ class Decisions(DecisionOwner):
         rules = ask.rules or (ask_rule(ctx, ask),)
         argv = (ctx.command, *ctx.argv)
         rule_keys = {rule: index for index, rule in enumerate(rules)}
-        records = tuple(
-            record
-            for record in self._records(ctx.session_id)
-            if record.rule in rule_keys
-        )
+        known_rules: dict[int, int | None] = {
+            id(rule): key for rule, key in rule_keys.items()
+        }
+        records: list[Decision] = []
+        record_rules: list[int] = []
+        for record in self._records(ctx.session_id):
+            identity = id(record.rule)
+            if identity not in known_rules:
+                known_rules[identity] = rule_keys.get(record.rule)
+            rule_key = known_rules[identity]
+            if rule_key is None:
+                continue
+            records.append(record)
+            record_rules.append(rule_key)
         snapshot = ApprovalSnapshot(
             records,
             self._live.get(ctx.session_id, ()),
             None if claimant is None else claimant.line,
         )
-        snapshot.wire["records"] = [
-            record_wire(
-                record,
-                snapshot.record_key(record),
-                rule_keys[record.rule],
-                argv,
-                ctx.cwd,
-            )
-            for record in records
-        ]
+        snapshot.wire["records"] = snapshot.records_wire(
+            record_rules, argv, ctx.cwd
+        )
         caller = (
             None
             if claimant is None
@@ -642,12 +644,7 @@ class Decisions(DecisionOwner):
         snapshot = ApprovalSnapshot(records)
         key: int | None = approval_query(
             "waiting",
-            records=[
-                record_wire(
-                    record, snapshot.record_key(record), 0, argv, ctx.cwd
-                )
-                for record in records
-            ],
+            records=snapshot.records_wire([0] * len(records), argv, ctx.cwd),
             rule=0,
         )
         return None if key is None else snapshot.record_objects[key]

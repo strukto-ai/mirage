@@ -5,6 +5,25 @@ import { admissionMatcher, type Wire } from './policy.ts'
 
 const key = z.number().int().nonnegative()
 
+function sameLine(
+  record: Decision,
+  command: string | undefined,
+  argv: readonly string[],
+  cwd: string,
+): boolean {
+  if (
+    command === undefined ||
+    record.cwd !== cwd ||
+    record.command !== command ||
+    record.argv.length !== argv.length
+  )
+    return false
+  for (let index = 0; index < argv.length; index++) {
+    if (record.argv[index] !== argv[index]) return false
+  }
+  return true
+}
+
 /** Decode one stateless approval result from the shared policy stream. */
 export function approvalQuery<T>(query: Wire, result: z.ZodType<T>): T {
   return result.parse(admissionMatcher(null).ask('approvals', { query }))
@@ -19,13 +38,9 @@ export function recordWire(
   cwd: string,
 ): Wire {
   return {
-    key,
+    keys: [key],
     rule,
-    same_line:
-      record.cwd === cwd &&
-      record.command === argv[0] &&
-      record.argv.length === argv.length - 1 &&
-      record.argv.every((arg, index) => arg === argv[index + 1]),
+    same_line: sameLine(record, argv[0], argv.slice(1), cwd),
     outcome: record.outcome,
     scope: record.scope,
   }
@@ -83,10 +98,10 @@ export class ApprovalSnapshot {
     live: Iterable<HandOff> = [],
     roots: readonly HandOff[] = [],
   ) {
-    this.recordObjects = []
+    this.recordObjects = [...records]
     this.recordKeys = new Map()
     this.live = [...live]
-    for (const record of records) this.recordKey(record)
+    records.forEach((record, index) => this.recordKeys.set(record, index))
     for (const holder of [...this.live, ...roots]) this.holderKey(holder)
   }
 
@@ -150,6 +165,39 @@ export class ApprovalSnapshot {
     return claim
   }
 
+  private recordsWire(rules: readonly number[], argv: readonly string[], cwd: string): Wire[] {
+    const batches: {
+      keys: number[]
+      rule: number
+      same_line: boolean
+      outcome: Decision['outcome']
+      scope: Decision['scope']
+    }[] = []
+    let previous: (typeof batches)[number] | undefined
+    const command = argv[0]
+    const args = argv.slice(1)
+    this.records.forEach((record, index) => {
+      const rule = rules[index]
+      if (rule === undefined) throw new Error('approval record has no rule key')
+      const line = sameLine(record, command, args, cwd)
+      const outcome = record.outcome
+      const scope = record.scope
+      const key = this.recordKeys.get(record) ?? this.recordKey(record)
+      if (
+        previous?.rule === rule &&
+        previous.same_line === line &&
+        previous.outcome === outcome &&
+        previous.scope === scope
+      ) {
+        previous.keys.push(key)
+      } else {
+        previous = { keys: [key], rule, same_line: line, outcome, scope }
+        batches.push(previous)
+      }
+    })
+    return batches
+  }
+
   get wire(): Wire {
     const sources: number[][] = []
     const sourceKeys = new Map<string, number>()
@@ -201,11 +249,7 @@ export class ApprovalSnapshot {
       kind: 'plan',
       state: {
         ...this.wire,
-        records: this.records.map((record, index) => {
-          const rule = recordRules[index]
-          if (rule === undefined) throw new Error('approval record has no rule key')
-          return recordWire(record, this.recordKey(record), rule, argv, cwd)
-        }),
+        records: this.recordsWire(recordRules, argv, cwd),
       },
       rules: [...rules],
       claimant: reader,
@@ -231,9 +275,7 @@ export class ApprovalSnapshot {
     const found = approvalQuery(
       {
         kind: 'waiting',
-        records: this.records.map((record) =>
-          recordWire(record, this.recordKey(record), 0, argv, cwd),
-        ),
+        records: this.recordsWire(Array<number>(this.records.length).fill(0), argv, cwd),
         rule: 0,
       },
       key.nullable(),
