@@ -755,6 +755,11 @@
     "parseMCPConfig": "A pydantic model validates itself (MCPConfig.model_validate); a zod schema parses through parseConfigWithSchema in vfs/secrets, which a command may not import."
    }
   },
+  "core/mcp/constants": {
+   "python_only": {
+    "CONNECT_TIMEOUT": "httpx takes connect, write and pool timeouts of its own; fetch takes none, so TypeScript leaves them to the runtime's defaults."
+   }
+  },
   "commands/cli/builtin/git/cat_file": {
    "typescript_only": {
     "raw": "isomorphic-git hands back a parsed object, so TypeScript reads the stored bytes in a helper; dulwich's as_raw_string gives them in Python."

@@ -326,7 +326,6 @@ async function steps(
         if (!url) throw new Error('set_cli requires MCP_URL')
         const config = { url, auth: { type: 'bearer', token: 'integ-token' } }
         const cli = await mcpCli(config)
-        if (ws.clis().has(name)) await ws.unregisterCli(name)
         ws.registerCli(name, cli, config)
         answers.push({ text: name })
       } else if (kind === 'delete_cli') {

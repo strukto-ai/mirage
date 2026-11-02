@@ -1137,10 +1137,7 @@ class InAppSteps:
     async def set_cli(self, wid: str, name: str) -> None:
         ws = self.workspaces[wid]
         config = mcp_entry()["config"]
-        cli = await mcp_cli(config)
-        if name in ws.clis():
-            await ws.unregister_cli(name)
-        ws.register_cli(name, cli, config)
+        ws.register_cli(name, await mcp_cli(config), config)
 
     async def delete_cli(self, wid: str, name: str) -> None:
         await self.workspaces[wid].unregister_cli(name)

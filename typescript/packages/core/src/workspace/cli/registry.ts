@@ -225,35 +225,6 @@ export class CLIRegistry {
   }
 
   /**
-   * Install a CLI in place of the one under its head word, if any, in one
-   * step, so the head word never stops resolving; `check` runs with the new
-   * install in place and, when it throws, the previous one is put back. The
-   * replaced one closes once the lines running on it are done.
-   */
-  async replace(
-    name: string,
-    spec: CLI,
-    config: Record<string, unknown> | null,
-    check: () => void,
-  ): Promise<CLIInstall> {
-    const previous = this.installs.get(name)
-    this.installs.delete(name)
-    let install: CLIInstall
-    try {
-      install = this.install(name, spec, config)
-      check()
-    } catch (error) {
-      const failed = this.installs.get(name)
-      if (previous !== undefined) this.installs.set(name, previous)
-      else this.installs.delete(name)
-      if (failed !== undefined) await this.track(failed, retire(failed, this.shutdown.signal))
-      throw error
-    }
-    if (previous !== undefined) await this.track(previous, retire(previous, this.shutdown.signal))
-    return install
-  }
-
-  /**
    * Remove an installed CLI now and close its accessor once the lines running
    * on it and their output streams are done; its head word stops resolving
    * (127) at once.

@@ -31,7 +31,6 @@ import { NTN } from '../../commands/cli/builtin/ntn/index.ts'
 import { SLACK } from '../../commands/cli/builtin/slack/index.ts'
 import { TRELLO } from '../../commands/cli/builtin/trello/index.ts'
 import { CLIRegistry } from './registry.ts'
-import type { CLIInstall } from './types.ts'
 
 // Mirrors python/tests/workspace/cli/test_registry.py.
 
@@ -151,46 +150,6 @@ describe('CLIRegistry', () => {
     await reg.uninstall('prog')
     expect(reg.get('prog')).toBeNull()
     await expect(reg.uninstall('prog')).rejects.toThrow(/not installed/)
-  })
-
-  it('replace swaps in one step and closes the old once idle', async () => {
-    const reg = new CLIRegistry()
-    const spec = tree(tokenConfig, (config) => new ClosingAccessor(config as TokenConfig))
-    const old = reg.install('prog', spec, { token: 'old' })
-    const release = old.activity.acquire()
-    const replacing = reg.replace('prog', spec, { token: 'new' }, () => undefined)
-    expect((reg.get('prog')?.config as TokenConfig).token).toBe('new')
-    expect((old.accessor as ClosingAccessor).closed).toBe(false)
-    release()
-    await replacing
-    expect((old.accessor as ClosingAccessor).closed).toBe(true)
-  })
-
-  it('a refused replace puts the old install back', async () => {
-    const reg = new CLIRegistry()
-    const spec = tree(tokenConfig, (config) => new ClosingAccessor(config as TokenConfig))
-    const old = reg.install('prog', spec, { token: 'old' })
-    await expect(
-      reg.replace('prog', spec, { token: 'new' }, () => {
-        throw new Error('refused')
-      }),
-    ).rejects.toThrow('refused')
-    expect(reg.get('prog')).toBe(old)
-    expect((old.accessor as ClosingAccessor).closed).toBe(false)
-  })
-
-  it('a refused first install leaves the name free', async () => {
-    const reg = new CLIRegistry()
-    const spec = tree(tokenConfig, (config) => new ClosingAccessor(config as TokenConfig))
-    const seen: (CLIInstall | null)[] = []
-    await expect(
-      reg.replace('prog', spec, { token: 'new' }, () => {
-        seen.push(reg.get('prog'))
-        throw new Error('refused')
-      }),
-    ).rejects.toThrow('refused')
-    expect(reg.get('prog')).toBeNull()
-    expect((seen[0]?.accessor as ClosingAccessor).closed).toBe(true)
   })
 
   it('close closes every accessor past a failed one', async () => {

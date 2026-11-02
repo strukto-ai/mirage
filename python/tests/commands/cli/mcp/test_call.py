@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -21,15 +22,25 @@ from mcp import types
 from mirage import Workspace
 from mirage.commands.cli.mcp import mcp_cli
 from mirage.commands.cli.mcp.call import render
+from mirage.policy import NetworkContext, Policy
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.mcp_server import TOKEN, FakeMCP, served_mcp
 
 
+class _Listening(Policy):
+    async def pre_network(self, ctx: NetworkContext) -> None:
+        return None
+
+
 @asynccontextmanager
-async def installed() -> AsyncIterator[tuple[Workspace, FakeMCP]]:
+async def installed(
+    policy: Policy | None = None,
+) -> AsyncIterator[tuple[Workspace, FakeMCP]]:
     async with served_mcp() as fake:
         config = fake.bearer_config()
         ws = Workspace({"/data": RAMVFS()})
+        if policy is not None:
+            ws.policies.add(policy)
         ws.register_cli("fx", await mcp_cli(config), config)
         try:
             yield ws, fake
@@ -107,6 +118,51 @@ async def test_an_unreachable_server_exits_1_without_the_token():
     assert result.exit_code == 1
     assert result.stderr.decode().startswith("list-items: MCP server failed: ")
     assert TOKEN not in result.stderr.decode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", [None, _Listening()], ids=["kept", "own"])
+async def test_a_call_past_the_timeout_exits_1_and_says_so(
+    monkeypatch, policy
+):
+    async with installed(policy) as (ws, fake):
+        monkeypatch.setattr("mirage.accessor.mcp.TIMEOUT", 1.0)
+        result = await ws.shell("fx wait-forever")
+        before = fake.opens()
+        after = await ws.shell("fx list-items")
+        assert fake.opens() == before + 1
+    assert (result.exit_code, result.stderr) == (
+        1,
+        b"wait-forever: MCP server timed out\n",
+    )
+    assert after.stdout == b"apple\nbanana\n"
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_never_opens_a_session_times_out(monkeypatch):
+    monkeypatch.setattr("mirage.accessor.mcp.TIMEOUT", 1.0)
+    monkeypatch.setattr("mcp.client.session.DISCOVER_TIMEOUT_SECONDS", 1.5)
+    held: list[asyncio.StreamWriter] = []
+    silent = await asyncio.start_server(
+        lambda _, writer: held.append(writer), "127.0.0.1", 0
+    )
+    port = silent.sockets[0].getsockname()[1]
+    async with served_mcp() as fake:
+        cli = await mcp_cli(fake.bearer_config())
+    ws = Workspace({"/data": RAMVFS()})
+    ws.register_cli("fx", cli, {"url": f"http://127.0.0.1:{port}/mcp"})
+    try:
+        result = await ws.shell("fx list-items")
+    finally:
+        await ws.close()
+        for writer in held:
+            writer.close()
+        silent.close()
+        await silent.wait_closed()
+    assert (result.exit_code, result.stderr) == (
+        1,
+        b"list-items: MCP server timed out\n",
+    )
 
 
 def _text(text: str) -> types.TextContent:

@@ -36,10 +36,12 @@ arguments. `mcpCli` rejects with `MCPToolsError` when the server cannot be
 listed or its tools cannot all become distinct subcommands.
 
 The tool list is read once, at registration. To pick up tools the server
-added later, reinstall it in one step; the name keeps working throughout:
+added later, list them again, then remove the CLI and register the new one:
 
 ```ts
-await ws.replaceCli('issues', await mcpCli(config), config)
+const cli = await mcpCli(config)
+await ws.unregisterCli('issues')
+ws.registerCli('issues', cli, config)
 ```
 
 ## Authentication
@@ -88,6 +90,7 @@ clis:
 | `issues list-labels` | the tool called with `{}` |
 | the tool reports an error | its text on stderr, exit 1 |
 | the server cannot be reached | `search-issues: MCP server failed: <reason>`, exit 1 |
+| the server gives no answer within 5 minutes | `search-issues: MCP server timed out`, exit 1 |
 | the operand is not one JSON object | `search-issues: invalid JSON`, `JSON must be an object` or `takes one JSON object`, exit 2, nothing sent |
 
 Text content prints as text; any other content prints as one line of
@@ -118,7 +121,7 @@ counts as a write.
 The [server](/typescript/access/server) takes `cli: mcp` entries in a
 workspace's create body.
 [`PUT /v1/workspaces/{id}/clis/{name}`](/home/access/http#install-an-mcp-cli)
-installs or replaces one on a live workspace, and
+installs one on a live workspace, and
 [`DELETE`](/home/access/http#remove-an-mcp-cli) removes it. `${VAR}` is
 expanded only in files; over HTTP, send the token or a pointer.
 

@@ -21,19 +21,18 @@ from contextlib import asynccontextmanager
 
 import httpx2
 from mcp import Client, types
+from mcp.client.session import DISCOVER_TIMEOUT_SECONDS
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import MCPError
 
 from mirage.accessor.base import Accessor
 from mirage.core.mcp.config import MCPConfig
+from mirage.core.mcp.constants import CONNECT_TIMEOUT, MAX_PAGES, TIMEOUT
 from mirage.io.gateway import live_egress
 from mirage.io.network import NetworkRule, network_bound, run_with_network
 from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
-
-TIMEOUT = httpx2.Timeout(30.0, read=300.0)
-MAX_PAGES = 64
 
 
 def answered(error: Exception) -> bool:
@@ -50,6 +49,18 @@ def answered(error: Exception) -> bool:
         types.INVALID_PARAMS,
         types.METHOD_NOT_FOUND,
     ) or not (-32768 <= error.code <= -32000)
+
+
+def timed_out(error: BaseException) -> bool:
+    """Whether the SDK gave up waiting for the server's answer, found
+    through any exception group the call raised.
+
+    Args:
+        error (BaseException): what the call raised.
+    """
+    if isinstance(error, BaseExceptionGroup):
+        return any(timed_out(inner) for inner in error.exceptions)
+    return isinstance(error, MCPError) and error.code == types.REQUEST_TIMEOUT
 
 
 class MCPAccessor(Accessor):
@@ -92,12 +103,18 @@ class MCPAccessor(Accessor):
     async def session(self) -> AsyncIterator[Client]:
         """An initialized client, closed when the block ends."""
         async with httpx2.AsyncClient(
-            headers=self.headers(), timeout=TIMEOUT
+            headers=self.headers(),
+            # Outlasts discover plus a request, so a stall ends as the SDK's timeout.
+            timeout=httpx2.Timeout(
+                CONNECT_TIMEOUT, read=DISCOVER_TIMEOUT_SECONDS + TIMEOUT + 1
+            ),
         ) as http:
             transport = streamable_http_client(
                 self.config.url, http_client=http
             )
-            async with Client(transport) as client:
+            async with Client(
+                transport, read_timeout_seconds=TIMEOUT
+            ) as client:
                 yield client
 
     async def list_tools(self) -> tuple[str, list[types.Tool]]:

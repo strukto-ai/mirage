@@ -236,40 +236,6 @@ class CLIRegistry:
         for install in self._installs.values():
             install.accessor.release_clock(id(install))
 
-    async def replace(
-        self,
-        name: str,
-        spec: CLI,
-        config: Mapping[str, JsonValue] | BaseModel | None,
-        check: Callable[[], None],
-    ) -> CLIInstall:
-        """Install a CLI in place of the one under its head word, if any,
-        in one step, so the head word never stops resolving; the replaced
-        one closes once the lines running on it are done.
-
-        Args:
-            name (str): head word.
-            spec (CLI): the program tree.
-            config (Mapping[str, JsonValue] | BaseModel | None):
-                installation config, as :meth:`install` takes it.
-            check (Callable[[], None]): run with the new install in
-                place; when it raises, the previous one is put back.
-        """
-        previous = self._installs.pop(name, None)
-        try:
-            install = self.install(name, spec, config)
-            check()
-        except BaseException:
-            failed = self._installs.pop(name, None)
-            if previous is not None:
-                self._installs[name] = previous
-            if failed is not None:
-                await self._let_go(failed)
-            raise
-        if previous is not None:
-            await self._let_go(previous)
-        return install
-
     async def uninstall(self, name: str) -> None:
         """Remove an installed CLI now and close its accessor once the
         lines running on it and their output streams are done; its head
@@ -281,15 +247,6 @@ class CLIRegistry:
         install = self._installs.pop(name, None)
         if install is None:
             raise KeyError(f"CLI name {name!r} is not installed")
-        await self._let_go(install)
-
-    async def _let_go(self, install: CLIInstall) -> None:
-        """Close an install no longer under its head word once the lines
-        running on it are done, as a tracked task.
-
-        Args:
-            install (CLIInstall): the install let go.
-        """
         identity = id(install)
         closing = asyncio.create_task(_retire(install, self._shutdown))
         self._retiring[identity] = closing

@@ -19,14 +19,11 @@ import type {
   Tool,
 } from '@modelcontextprotocol/client'
 import type { MCPConfig } from '../core/mcp/config.ts'
+import { MAX_PAGES, TIMEOUT } from '../core/mcp/constants.ts'
 import type { JsonValue } from '../types.ts'
 import { abortable } from '../utils/abort.ts'
 import { VERSION } from '../version.ts'
 import { Accessor } from './base.ts'
-
-/** How long one request may take, in milliseconds. */
-export const TIMEOUT = 300_000
-export const MAX_PAGES = 64
 
 /** Where a failed MCP session end or client close is reported; silent until a host sets `debug`. */
 export const logger: { debug?: (message: string) => void } = {}
@@ -42,6 +39,12 @@ export async function answered(error: unknown): Promise<boolean> {
   if (!(error instanceof ProtocolError)) return false
   const code = error.code
   return code === INVALID_PARAMS || code === METHOD_NOT_FOUND || code < -32768 || code > -32000
+}
+
+/** Whether the SDK gave up waiting for the server's answer. Mirrors Python's `timed_out`. */
+export async function timedOut(error: unknown): Promise<boolean> {
+  const { SdkError, SdkErrorCode } = await import('@modelcontextprotocol/client')
+  return error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout
 }
 
 /**
@@ -81,7 +84,7 @@ export class MCPAccessor extends Accessor {
     })
     const client = new Client({ name: 'mirage', version: VERSION }, { listMaxPages: MAX_PAGES })
     try {
-      await client.connect(transport, { timeout: TIMEOUT, ...(signal ? { signal } : {}) })
+      await client.connect(transport, { timeout: TIMEOUT * 1000, ...(signal ? { signal } : {}) })
     } catch (error) {
       await client.close()
       throw error
@@ -101,7 +104,7 @@ export class MCPAccessor extends Accessor {
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
             reject(new Error('the server did not end the session in time'))
-          }, TIMEOUT)
+          }, TIMEOUT * 1000)
         }),
       ])
     } catch (error) {
@@ -171,7 +174,7 @@ export class MCPAccessor extends Accessor {
   /** The server's title and every tool it lists; the SDK reads every page. */
   async listTools(): Promise<[string, Tool[]]> {
     return this.session(async (client) => {
-      const { tools } = await client.listTools({}, { timeout: TIMEOUT })
+      const { tools } = await client.listTools({}, { timeout: TIMEOUT * 1000 })
       const info = client.getServerVersion()
       if (info === undefined) return ['', tools]
       return [info.title === undefined || info.title === '' ? info.name : info.title, tools]
@@ -190,7 +193,7 @@ export class MCPAccessor extends Accessor {
       const client = await abortable(opening, signal)
       return await client.callTool(
         { name, arguments: args },
-        { timeout: TIMEOUT, ...(signal ? { signal } : {}) },
+        { timeout: TIMEOUT * 1000, ...(signal ? { signal } : {}) },
       )
     } catch (error) {
       if (signal?.aborted !== true && !(await answered(error))) this.drop(opening)

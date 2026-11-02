@@ -313,9 +313,9 @@
     {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
     {"id": "installs_an_mcp_cli", "input": {"step": "set_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
     {"id": "runs_one_of_its_tools", "input": {"step": "shell", "id": "w", "command": "items list-items"}, "expect": {"text": "apple\nbanana\n", "is_error": false}},
-    {"id": "replaces_it_by_name", "input": {"step": "set_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
     {"id": "removes_it", "input": {"step": "delete_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
     {"id": "its_name_is_gone", "input": {"step": "shell", "id": "w", "command": "items list-items"}, "expect": {"text": "items: command not found\n", "is_error": true}},
+    {"id": "installs_it_again", "input": {"step": "set_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },

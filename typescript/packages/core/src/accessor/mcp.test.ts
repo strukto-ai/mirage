@@ -32,7 +32,8 @@ import { MCPConfig } from '../core/mcp/config.ts'
 import { parseConfigWithSchema } from '../vfs/secrets.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { answered, MCPAccessor, TIMEOUT } from './mcp.ts'
+import { TIMEOUT } from '../core/mcp/constants.ts'
+import { answered, MCPAccessor } from './mcp.ts'
 
 describe('MCPAccessor', () => {
   it.each([
@@ -179,7 +180,7 @@ describe('MCPAccessor', () => {
       await vi.waitFor(() => {
         expect(fake.requests.map((r) => r.method)).toContain('DELETE')
       })
-      await vi.advanceTimersByTimeAsync(TIMEOUT)
+      await vi.advanceTimersByTimeAsync(TIMEOUT * 1000)
       await closing
     } finally {
       vi.useRealTimers()

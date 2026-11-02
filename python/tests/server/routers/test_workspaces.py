@@ -1894,7 +1894,7 @@ async def _run(client: AsyncClient, wid: str, line: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_put_installs_replaces_and_delete_removes_an_mcp_cli(tmp_path):
+async def test_put_installs_refuses_a_taken_name_and_delete_removes(tmp_path):
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
     async with (
         served_mcp() as fake,
@@ -1907,25 +1907,22 @@ async def test_put_installs_replaces_and_delete_removes_an_mcp_cli(tmp_path):
         route = f"/v1/workspaces/{wid}/clis/fx"
         r = await client.put(route, json=_mcp_entry(fake.url))
         assert (r.status_code, r.json()) == (200, {"name": "fx"})
-        await client.post(
-            f"/v1/workspaces/{wid}/sessions", json={"session_id": "early"}
-        )
-        assert (await _run(client, wid, "fx echo-args"))["stdout"] == "{}\n"
         r = await client.put(route, json=_mcp_entry(small.url))
-        assert r.status_code == 200
-        r = await client.post(
-            f"/v1/workspaces/{wid}/shell",
-            params={"session_id": "early"},
-            json={"command": "fx echo-args"},
+        assert (r.status_code, r.json()) == (
+            409,
+            {"detail": "CLI name 'fx' is already installed"},
         )
-        assert (r.json()["exit_code"], r.json()["stderr"]) == (
-            1,
-            "fx: 'echo-args' is not a fx command. See 'fx --help'.\n",
-        )
-        listed = await _run(client, wid, "fx list-items")
-        assert listed["stdout"] == "apple\nbanana\n"
+        assert small.requests == []
+        assert (await _run(client, wid, "fx echo-args"))["stdout"] == "{}\n"
         assert (await client.delete(route)).status_code == 200
         assert (await _run(client, wid, "fx list-items"))["exit_code"] == 127
+        assert (
+            await client.put(route, json=_mcp_entry(small.url))
+        ).status_code == 200
+        listed = await _run(client, wid, "fx list-items")
+        assert listed["stdout"] == "apple\nbanana\n"
+        assert (await _run(client, wid, "fx echo-args"))["exit_code"] == 1
+        assert (await client.delete(route)).status_code == 200
         assert (await client.delete(route)).status_code == 404
 
 
@@ -1962,7 +1959,7 @@ async def test_put_refuses_what_is_not_an_mcp_cli_before_any_request(
         r = await client.put(
             f"/v1/workspaces/{lin}/clis/lin", json=_mcp_entry(fake.url)
         )
-        assert r.status_code == 422
+        assert r.status_code == 409
         assert (
             await client.delete(f"/v1/workspaces/{lin}/clis/lin")
         ).status_code == 422
@@ -1983,7 +1980,7 @@ async def test_two_puts_at_once_leave_one_cli_installed(tmp_path):
             client.put(route, json=_mcp_entry(fake.url)),
             client.put(route, json=_mcp_entry(fake.url)),
         )
-        assert sorted(r.status_code for r in answers) == [200, 422]
+        assert sorted(r.status_code for r in answers) == [200, 409]
         assert (await _run(client, wid, "fx list-items"))["exit_code"] == 0
 
 
@@ -2008,35 +2005,22 @@ async def test_two_deletes_at_once_answer_200_and_404(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_put_keeps_the_installed_cli(tmp_path, monkeypatch):
+async def test_a_failed_put_leaves_the_name_free(tmp_path, monkeypatch):
     monkeypatch.setenv("FX_TOKEN", TOKEN)
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
     async with (
         served_mcp() as fake,
-        served_mcp(tools=TOOLS[2:]) as narrow,
         AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client,
     ):
         wid = await _mcp_workspace(client)
         route = f"/v1/workspaces/{wid}/clis/fx"
+        r = await client.put(route, json=_mcp_entry("http://127.0.0.1:9/mcp"))
+        assert r.status_code == 422
         pointer = {"from": "env", "key": "FX_TOKEN"}
         r = await client.put(route, json=_mcp_entry(fake.url, pointer))
         assert r.status_code == 200
-        r = await client.put(route, json=_mcp_entry("http://127.0.0.1:9/mcp"))
-        assert r.status_code == 422
-        r = await client.put(
-            f"/v1/workspaces/{wid}/profiles/guarded",
-            json={
-                "commands": {
-                    "deny": [{"commands": ["fx add-item"], "reason": "no"}]
-                }
-            },
-        )
-        assert r.status_code == 200
-        r = await client.put(route, json=_mcp_entry(narrow.url))
-        assert r.status_code == 422
-        assert "add-item" in r.json()["detail"]
         listed = await _run(client, wid, "fx list-items")
         assert listed["stdout"] == "apple\nbanana\n"
 

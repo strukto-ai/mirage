@@ -568,12 +568,11 @@ async def set_profile(
 async def set_cli(
     workspace_id: str, name: str, block: CLIBlock, request: Request
 ) -> dict[str, str]:
-    """Install an MCP server as a CLI on the live workspace, or replace it.
+    """Install an MCP server as a CLI on the live workspace.
 
     The body is one ``clis:`` entry, ``cli: mcp`` with its config, as a
     config file states it. Its pointers resolve and its tools are listed
-    under the workspace's network; a failure keeps the installed CLI,
-    and so does a tool list that drops a verb a defined profile names.
+    under the workspace's network. A name already installed answers 409.
 
     Args:
         workspace_id (str): the workspace.
@@ -586,14 +585,12 @@ async def set_cli(
     written = await request.json()
     await _admit(request, {"clis": {name: written}})
 
-    async def install() -> None:
+    async def install() -> bool:
         if block.cli != MCP_CLI:
             raise ValueError("only a cli: mcp entry installs over HTTP")
-        current = ws.clis().get(name)
-        if current is None:
-            ws.registry.clis.check_name(name)
-        elif current.cli.mcp is None:
-            raise ValueError(f"CLI {name!r} is not an MCP server")
+        if name in ws.clis():
+            return False
+        ws.registry.clis.check_name(name)
         sources = await resolve_sources_for(
             ws.declared_sources, [block.config]
         )
@@ -601,17 +598,18 @@ async def set_cli(
             block.config, sources, f"clis.{name}.config"
         )
         cli = await mcp.mcp_cli(config)
-        if ws.clis().get(name) is not current:
-            raise ValueError(
-                f"CLI {name!r} changed while its tools were listed"
-            )
-        await ws.replace_cli(name, cli, config)
+        if name in ws.clis():
+            return False
+        ws.register_cli(name, cli, config)
+        return True
 
     rule = request.app.state.registry.rule_for(ws.network)
     try:
-        await entry.runner.call(run_with_network(rule, install()))
+        installed = await entry.runner.call(run_with_network(rule, install()))
     except (OSError, ValueError, PolicyError, SecretsError) as exc:
         raise HTTPException(422, str(exc)) from exc
+    if not installed:
+        raise HTTPException(409, f"CLI name {name!r} is already installed")
     return {"name": name}
 
 

@@ -12,17 +12,31 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   bearerConfig,
   type FakeMCP,
+  opens,
   servedMcp,
   TOKEN,
 } from '../../../../tests/fixtures/mcp_server.ts'
+import type * as constants from '../../../core/mcp/constants.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { render } from './call.ts'
 import { mcpCli } from './index.ts'
+
+const limits = vi.hoisted(() => ({ timeout: 0 }))
+
+vi.mock('../../../core/mcp/constants.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof constants>()
+  return {
+    ...real,
+    get TIMEOUT() {
+      return limits.timeout || real.TIMEOUT
+    },
+  }
+})
 
 const opened: { ws: Workspace; fake: FakeMCP }[] = []
 
@@ -36,6 +50,7 @@ async function installed(): Promise<{ ws: Workspace; fake: FakeMCP }> {
 }
 
 afterEach(async () => {
+  limits.timeout = 0
   for (const { ws, fake } of opened.splice(0)) {
     await ws.close()
     await fake.close()
@@ -99,6 +114,27 @@ describe('an MCP tool call', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  it('exits 1 and says so for a call past the timeout, dropping the client', async () => {
+    const { ws, fake } = await installed()
+    limits.timeout = 1
+    const result = await ws.shell('fx wait-forever')
+    expect([result.exitCode, result.stderrText]).toEqual([
+      1,
+      'wait-forever: MCP server timed out\n',
+    ])
+    const before = opens(fake)
+    expect((await ws.shell('fx list-items')).stdoutText).toBe('apple\nbanana\n')
+    expect(opens(fake)).toBe(before + 1)
+  })
+
+  it('exits 1 and says so for a server that never opens a session', async () => {
+    const { ws, fake } = await installed()
+    limits.timeout = 1
+    fake.stalling = true
+    const result = await ws.shell('fx list-items')
+    expect([result.exitCode, result.stderrText]).toEqual([1, 'list-items: MCP server timed out\n'])
   })
 })
 

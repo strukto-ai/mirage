@@ -661,11 +661,10 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
   )
 
   /**
-   * Install an MCP server as a CLI on the live workspace, or replace it.
-   * The body is one `clis:` entry, `cli: mcp` with its config, as a config
-   * file states it. Its pointers resolve and its tools are listed under the
-   * workspace's network; a failure keeps the installed CLI, and so does a
-   * tool list that drops a verb a defined profile names.
+   * Install an MCP server as a CLI on the live workspace. The body is one
+   * `clis:` entry, `cli: mcp` with its config, as a config file states it.
+   * Its pointers resolve and its tools are listed under the workspace's
+   * network. A name already installed answers 409.
    */
   app.put<{ Params: { id: string; name: string }; Body: unknown }>(
     '/v1/workspaces/:id/clis/:name',
@@ -677,27 +676,32 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       const block = req.body
       const refusal = await admit(deps, req, reply, { clis: { [name]: block } })
       if (refusal !== null) return refusal
-      const install = async (): Promise<void> => {
+      const taken = (): boolean => ws.clis().has(name)
+      const install = async (): Promise<boolean> => {
         if (!isPlainObject(block) || block.cli !== MCP_CLI) {
           throw new Error('only a cli: mcp entry installs over HTTP')
         }
-        const current = ws.clis().get(name)
-        if (current === undefined) ws.registry.clis.checkName(name)
-        else if (current.cli.mcp === null) throw new Error(`CLI '${name}' is not an MCP server`)
+        if (taken()) return false
+        ws.registry.clis.checkName(name)
         const sources = await resolveSourcesFor(ws.declaredSources, [
           isPlainObject(block.config) ? block.config : {},
         ])
         const built = await buildCliEntries({ [name]: block }, sources)
         const [cli, config] = built[name] ?? []
-        if (ws.clis().get(name) !== current) {
-          throw new Error(`CLI '${name}' changed while its tools were listed`)
-        }
-        await ws.replaceCli(name, cli as CLI, config ?? null)
+        if (taken()) return false
+        ws.registerCli(name, cli as CLI, config ?? null)
+        return true
       }
+      let installed: boolean
       try {
-        await entry.runner.call(runWithNetwork(deps.registry.ruleFor(ws.network), install))
+        installed = await entry.runner.call(
+          runWithNetwork(deps.registry.ruleFor(ws.network), install),
+        )
       } catch (err) {
         return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
+      }
+      if (!installed) {
+        return reply.status(409).send({ detail: `CLI name '${name}' is already installed` })
       }
       return { name }
     },

@@ -1537,18 +1537,16 @@ describe('MCP CLI routes', () => {
     app: App,
     id: string,
     command: string,
-    session = '',
   ): Promise<{ exit_code: number; stdout: string; stderr: string }> {
-    const query = session === '' ? '' : `?session_id=${session}`
     const res = await app.inject({
       method: 'POST',
-      url: `/v1/workspaces/${id}/shell${query}`,
+      url: `/v1/workspaces/${id}/shell`,
       payload: { command },
     })
     return res.json()
   }
 
-  it('PUT installs and replaces, DELETE removes an MCP CLI', async () => {
+  it('PUT installs, refuses a taken name, DELETE removes an MCP CLI', async () => {
     const { TOKEN, TOOLS, servedMcp } = await fixture()
     const fake = await servedMcp()
     const small = await servedMcp(TOOLS.slice(0, 1))
@@ -1560,21 +1558,19 @@ describe('MCP CLI routes', () => {
         app.inject({ method: 'PUT', url: route, payload: mcpEntry(url, TOKEN) })
       const first = await put(fake.url)
       expect([first.statusCode, first.json()]).toEqual([200, { name: 'fx' }])
-      await app.inject({
-        method: 'POST',
-        url: `/v1/workspaces/${id}/sessions`,
-        payload: { session_id: 'early' },
-      })
-      expect((await run(app, id, 'fx echo-args')).stdout).toBe('{}\n')
-      expect((await put(small.url)).statusCode).toBe(200)
-      const early = await run(app, id, 'fx echo-args', 'early')
-      expect([early.exit_code, early.stderr]).toEqual([
-        1,
-        "fx: 'echo-args' is not a fx command. See 'fx --help'.\n",
+      const taken = await put(small.url)
+      expect([taken.statusCode, taken.json()]).toEqual([
+        409,
+        { detail: "CLI name 'fx' is already installed" },
       ])
-      expect((await run(app, id, 'fx list-items')).stdout).toBe('apple\nbanana\n')
+      expect(small.requests).toEqual([])
+      expect((await run(app, id, 'fx echo-args')).stdout).toBe('{}\n')
       expect((await app.inject({ method: 'DELETE', url: route })).statusCode).toBe(200)
       expect((await run(app, id, 'fx list-items')).exit_code).toBe(127)
+      expect((await put(small.url)).statusCode).toBe(200)
+      expect((await run(app, id, 'fx list-items')).stdout).toBe('apple\nbanana\n')
+      expect((await run(app, id, 'fx echo-args')).exit_code).toBe(1)
+      expect((await app.inject({ method: 'DELETE', url: route })).statusCode).toBe(200)
       expect((await app.inject({ method: 'DELETE', url: route })).statusCode).toBe(404)
     } finally {
       await app.close()
@@ -1596,7 +1592,7 @@ describe('MCP CLI routes', () => {
           payload: mcpEntry(fake.url, TOKEN),
         })
       const answers = await Promise.all([put(), put()])
-      expect(answers.map((r) => r.statusCode).sort()).toEqual([200, 422])
+      expect(answers.map((r) => r.statusCode).sort()).toEqual([200, 409])
       expect((await run(app, id, 'fx list-items')).exit_code).toBe(0)
     } finally {
       await app.close()
@@ -1652,12 +1648,12 @@ describe('MCP CLI routes', () => {
         payload: { config: { ...RAM, clis: { lin: { cli: 'linear', config: { api_key: 'k' } } } } },
       })
       const lin = linear.json<{ id: string }>().id
-      const replaced = await app.inject({
+      const taken = await app.inject({
         method: 'PUT',
         url: `/v1/workspaces/${lin}/clis/lin`,
         payload: entry,
       })
-      expect(replaced.statusCode).toBe(422)
+      expect(taken.statusCode).toBe(409)
       const removed = await app.inject({ method: 'DELETE', url: `/v1/workspaces/${lin}/clis/lin` })
       expect(removed.statusCode).toBe(422)
     } finally {
@@ -1666,34 +1662,22 @@ describe('MCP CLI routes', () => {
     }
   })
 
-  it('keeps the installed CLI when a PUT fails', async () => {
-    const { TOKEN, TOOLS, servedMcp } = await fixture()
+  it('leaves the name free when a PUT fails', async () => {
+    const { TOKEN, servedMcp } = await fixture()
     vi.stubEnv('FX_TOKEN', TOKEN)
     const fake = await servedMcp()
-    const narrow = await servedMcp(TOOLS.slice(2))
     const app = buildApp()
     try {
       const id = await mcpWorkspace(app)
-      const route = `/v1/workspaces/${id}/clis/fx`
       const put = (payload: Record<string, unknown>) =>
-        app.inject({ method: 'PUT', url: route, payload })
-      expect((await put(mcpEntry(fake.url, { from: 'env', key: 'FX_TOKEN' }))).statusCode).toBe(200)
+        app.inject({ method: 'PUT', url: `/v1/workspaces/${id}/clis/fx`, payload })
       expect((await put(mcpEntry('http://127.0.0.1:9/mcp', TOKEN))).statusCode).toBe(422)
-      const guarded = await app.inject({
-        method: 'PUT',
-        url: `/v1/workspaces/${id}/profiles/guarded`,
-        payload: { commands: { deny: [{ commands: ['fx add-item'], reason: 'no' }] } },
-      })
-      expect(guarded.statusCode).toBe(200)
-      const dropped = await put(mcpEntry(narrow.url, TOKEN))
-      expect(dropped.statusCode).toBe(422)
-      expect(dropped.json<{ detail: string }>().detail).toContain('add-item')
+      expect((await put(mcpEntry(fake.url, { from: 'env', key: 'FX_TOKEN' }))).statusCode).toBe(200)
       expect((await run(app, id, 'fx list-items')).stdout).toBe('apple\nbanana\n')
     } finally {
       vi.unstubAllEnvs()
       await app.close()
       await fake.close()
-      await narrow.close()
     }
   })
 

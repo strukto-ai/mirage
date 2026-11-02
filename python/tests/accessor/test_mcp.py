@@ -21,7 +21,7 @@ from mcp import types
 from mcp.shared.exceptions import MCPError
 
 from mirage import Workspace
-from mirage.accessor.mcp import MCPAccessor, answered
+from mirage.accessor.mcp import MCPAccessor, answered, timed_out
 from mirage.commands.cli.mcp import build_cli, mcp_cli
 from mirage.core.mcp.config import MCPConfig
 from mirage.policy import Deny, NetworkContext, Policy
@@ -165,6 +165,19 @@ async def test_an_error_the_server_answered_keeps_the_client():
 )
 def test_only_an_error_the_server_answered_keeps_the_client(error, kept):
     assert answered(error) is kept
+
+
+@pytest.mark.parametrize(
+    "error, expired",
+    [
+        (MCPError(types.REQUEST_TIMEOUT, "x"), True),
+        (ExceptionGroup("g", [ValueError("x"), MCPError(-32001, "x")]), True),
+        (ExceptionGroup("g", [ValueError("x")]), False),
+        (MCPError(-32000, "x"), False),
+    ],
+)
+def test_a_timeout_is_found_inside_any_exception_group(error, expired):
+    assert timed_out(error) is expired
 
 
 @pytest.mark.asyncio

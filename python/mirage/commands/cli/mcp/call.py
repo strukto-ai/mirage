@@ -18,7 +18,7 @@ from collections.abc import Iterator
 
 from mcp import types
 
-from mirage.accessor.mcp import MCPAccessor
+from mirage.accessor.mcp import MCPAccessor, timed_out
 from mirage.commands.config import Context
 from mirage.core.render.json import compact_json_text
 from mirage.io.types import IOResult
@@ -133,6 +133,8 @@ async def call_tool(
     try:
         result = await accessor.call_tool(tool, arguments)
     except Exception as error:
+        if timed_out(error):
+            return _refuse(f"{command}: MCP server timed out", 1)
         reason = "; ".join(causes(error))
         return _refuse(f"{command}: MCP server failed: {reason}", 1)
     out = render(result).encode()
