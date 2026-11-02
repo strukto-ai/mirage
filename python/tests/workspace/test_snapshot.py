@@ -22,6 +22,7 @@ import pytest
 from pydantic import BaseModel, SecretStr
 
 from mirage.commands.cli.builtin.gws import GWS
+from mirage.commands.cli.mcp import mcp_cli
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context
@@ -41,6 +42,7 @@ from mirage.workspace.mount import Mount
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.snapshot.keys import CLIKey, ScriptKey, StateKey
 from mirage.workspace.snapshot.utils import FORMAT_VERSION
+from tests.fixtures.mcp_server import API_KEY, TITLE, TOKEN, served_mcp
 
 
 def _load(*args, **kwargs):
@@ -842,3 +844,76 @@ async def test_copy_preserves_live_box_mount_policy_and_provenance():
     finally:
         await clone.close()
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"type": "bearer", "token": TOKEN},
+        {"type": "header", "name": "x-api-key", "token": API_KEY},
+    ],
+)
+async def test_an_mcp_cli_loads_offline_with_its_token_redacted(
+    tmp_path, auth
+):
+    path = tmp_path / "snap.tar"
+    async with served_mcp() as fake:
+        config = {"url": fake.url, "auth": auth}
+        ws = Workspace({"/data": RAMVFS()})
+        ws.register_cli("fx", await mcp_cli(config), config)
+        await ws.snapshot(str(path))
+        await ws.close()
+        raw = path.read_bytes()
+        assert auth["token"].encode() not in raw
+        with tarfile.open(path) as tf:
+            entry = json.loads(tf.extractfile("manifest.json").read())[
+                StateKey.CLIS
+            ][0]
+        saved_auth = {k: v for k, v in auth.items() if k != "token"}
+        assert entry[CLIKey.CONFIG] == {
+            "url": config["url"],
+            "auth": {
+                **saved_auth,
+                "token": REDACTED_SECRET,
+                "name": auth.get("name"),
+            },
+        }
+        assert entry[CLIKey.MCP]["title"] == TITLE
+        assert entry[CLIKey.MCP]["tools"][0]["inputSchema"] == {
+            "type": "object",
+            "properties": {},
+        }
+        with pytest.raises(ValueError, match="clis= must include"):
+            await Workspace.load(str(path))
+        fake.requests.clear()
+        restored = await Workspace.load(str(path), clis={"fx": config})
+        try:
+            help_io = await restored.shell("fx --help")
+            offline = list(fake.requests)
+            handlers = restored.clis()["fx"].cli.handlers
+            writes = (handlers["list-items"].write, handlers["add-item"].write)
+            listed = await restored.shell("fx list-items")
+        finally:
+            await restored.close()
+    assert offline == []
+    assert writes == (False, True)
+    assert (listed.exit_code, listed.stdout) == (0, b"apple\nbanana\n")
+    assert help_io.exit_code == 0
+    assert TITLE in help_io.stdout.decode()
+    assert "echo-args" in help_io.stdout.decode()
+
+
+@pytest.mark.asyncio
+async def test_a_copy_of_an_mcp_cli_still_authenticates():
+    async with served_mcp() as fake:
+        config = fake.bearer_config()
+        ws = Workspace({"/data": RAMVFS()})
+        ws.register_cli("fx", await mcp_cli(config), config)
+        clone = await ws.copy()
+        try:
+            result = await clone.shell("fx list-items")
+        finally:
+            await clone.close()
+            await ws.close()
+    assert (result.exit_code, result.stdout) == (0, b"apple\nbanana\n")

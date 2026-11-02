@@ -76,6 +76,16 @@ export const JobKey = Object.freeze({
   SESSION_ID: 'session_id',
 } as const)
 
+/** An MCP CLI's tool list as a snapshot carries it, spelled as Python's and as MCP spells it. */
+export const MCPKey = Object.freeze({
+  TITLE: 'title',
+  TOOLS: 'tools',
+  NAME: 'name',
+  DESCRIPTION: 'description',
+  INPUT_SCHEMA: 'inputSchema',
+  ANNOTATIONS: 'annotations',
+} as const)
+
 export const VFSStateKey = Object.freeze({
   TYPE: 'type',
   CONFIG: 'config',

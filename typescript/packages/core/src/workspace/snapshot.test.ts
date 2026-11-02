@@ -19,7 +19,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { NOOPAccessor } from '../accessor/base.ts'
 import { IndexType, type RedisIndexConfig } from '../cache/index/config.ts'
+import {
+  API_KEY as MCP_API_KEY,
+  servedMcp,
+  TITLE as MCP_TITLE,
+  TOKEN as MCP_TOKEN,
+} from '../../tests/fixtures/mcp_server.ts'
 import { GWS } from '../commands/cli/builtin/gws/index.ts'
+import { mcpCli } from '../commands/cli/mcp/index.ts'
 import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
@@ -49,7 +56,8 @@ import {
   savedVfsBuild,
   toStateDict,
 } from './snapshot/state.ts'
-import type { MountSnapshot } from './snapshot/types.ts'
+import { readSnapshotTar } from './snapshot/tar_io.ts'
+import type { CLISnapshot, MountSnapshot } from './snapshot/types.ts'
 import { RAMWorkspaceStateStore } from './store/ram.ts'
 import { ExecutionNode } from './types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -1456,6 +1464,67 @@ describe('the workspace clock across a snapshot', () => {
     } finally {
       await copied.close()
       await ws.close()
+    }
+  })
+})
+
+describe('an MCP CLI snapshot', () => {
+  it.each([
+    { type: 'bearer', token: MCP_TOKEN },
+    { type: 'header', name: 'x-api-key', token: MCP_API_KEY },
+  ])('loads offline with its token redacted (%j)', async (auth) => {
+    const path = join(tempDir, `mcp-${auth.type}.tar`)
+    const fake = await servedMcp()
+    const config = { url: fake.url, auth }
+    try {
+      const ws = new Workspace({ '/data': new RAMVFS() })
+      ws.registerCli('fx', await mcpCli(config), config)
+      await ws.snapshot(path)
+      await ws.close()
+      const raw = readFileSync(path)
+      expect(raw.includes(auth.token)).toBe(false)
+      const state = (await readSnapshotTar(new Uint8Array(raw))) as { clis: CLISnapshot[] }
+      const entry = state.clis[0]
+      expect(entry?.config).toEqual({ url: fake.url, auth: { ...auth, token: REDACTED_SECRET } })
+      expect(entry?.mcp?.title).toBe(MCP_TITLE)
+      expect(entry?.mcp?.tools[0]?.inputSchema).toEqual({ type: 'object', properties: {} })
+      await expect(Workspace.load(path)).rejects.toThrow(/clis= must include/)
+      fake.requests.length = 0
+      const restored = await Workspace.load(path, {}, {}, { fx: config })
+      try {
+        const help = await restored.shell('fx --help')
+        expect(help.exitCode).toBe(0)
+        expect(help.stdoutText).toContain(MCP_TITLE)
+        expect(help.stdoutText).toContain('echo-args')
+        expect(fake.requests).toEqual([])
+        const handlers = restored.clis().get('fx')?.cli.handlers
+        expect([handlers?.['list-items']?.write, handlers?.['add-item']?.write]).toEqual([
+          false,
+          true,
+        ])
+        const listed = await restored.shell('fx list-items')
+        expect([listed.exitCode, listed.stdoutText]).toEqual([0, 'apple\nbanana\n'])
+      } finally {
+        await restored.close()
+      }
+    } finally {
+      await fake.close()
+    }
+  })
+
+  it('keeps a copy authenticated', async () => {
+    const fake = await servedMcp()
+    const config = { url: fake.url, auth: { type: 'bearer', token: MCP_TOKEN } }
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    ws.registerCli('fx', await mcpCli(config), config)
+    const clone = await ws.copy()
+    try {
+      const result = await clone.shell('fx list-items')
+      expect([result.exitCode, result.stdoutText]).toEqual([0, 'apple\nbanana\n'])
+    } finally {
+      await clone.close()
+      await ws.close()
+      await fake.close()
     }
   })
 })

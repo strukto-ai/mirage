@@ -109,6 +109,16 @@ class CLIKey(StrEnum):
     CONFIG = "config"
     SCRIPT = "script"
     RUNTIME = "runtime"
+    MCP = "mcp"
+
+
+class MCPKey(StrEnum):
+    TITLE = "title"
+    TOOLS = "tools"
+    NAME = "name"
+    DESCRIPTION = "description"
+    INPUT_SCHEMA = "inputSchema"
+    ANNOTATIONS = "annotations"
 
 
 class ScriptKey(StrEnum):

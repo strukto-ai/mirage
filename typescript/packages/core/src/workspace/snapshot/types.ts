@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NetworkSetting } from '../../io/network.ts'
-import type { JsonObject, MountMode } from '../../types.ts'
+import type { JsonObject, JsonValue, MountMode } from '../../types.ts'
 import type { RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../../vfs/types.ts'
 import type { NodeFields } from '../mount/namespace/store.ts'
@@ -107,6 +107,16 @@ export interface CLISnapshot {
     module: boolean
   }
   runtime?: string | null
+  /** The tool list an MCP install was built from, so a load rebuilds it without the server. */
+  mcp?: {
+    title: string
+    tools: {
+      name: string
+      description: string
+      inputSchema: Record<string, JsonValue>
+      annotations: Record<string, JsonValue>
+    }[]
+  }
 }
 
 export interface WorkspaceStateDict {
