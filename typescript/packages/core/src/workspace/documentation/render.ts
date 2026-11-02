@@ -227,6 +227,26 @@ function fenced(text: string, info: string): string {
   return `${fence}${info}\n${text}\n${fence}`
 }
 
+/**
+ * `template` with each fence line lengthened past every backtick run in
+ * `prefix`, so a prefix put into a block cannot close it.
+ */
+function widened(template: string, prefix: string): string {
+  const run = Math.max(0, ...(prefix.match(/`+/g) ?? []).map((r) => r.length))
+  if (run < 3) return template
+  return template
+    .split('\n')
+    .map((line) => {
+      const bare = line.replace(/^ +/, '')
+      const ticks = bare.length - bare.replace(/^`+/, '').length
+      const indent = line.length - bare.length
+      return ticks >= 3 && indent <= 3 && !bare.slice(ticks).includes('`')
+        ? line.slice(0, indent) + '`'.repeat(run - 2) + bare
+        : line
+    })
+    .join('\n')
+}
+
 function table(
   head: readonly [string, string],
   rows: readonly (readonly [string, string])[],
@@ -380,7 +400,7 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
       mode === mount.mode &&
       mount.vfs.vfsMd.trim() !== ''
     ) {
-      const layout = mount.vfs.vfsMd
+      const layout = widened(mount.vfs.vfsMd, prefix)
         .replaceAll('{prefix}', prefix)
         .replace(/^\n+|\n+$/g, '')
         .trimEnd()

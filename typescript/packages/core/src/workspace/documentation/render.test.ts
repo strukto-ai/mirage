@@ -271,6 +271,13 @@ describe('vfsMd', () => {
     expect(markdown).toContain('### `/docs`\n\nRun:\n\n```sh\nls /docs\n```\n\n- Done.\n\n')
   })
 
+  it('keeps a layout fenced past a backtick prefix', async () => {
+    const ws = new Workspace({ '/a\n```': [gdocs(), MountMode.READ] })
+    const markdown = await ws.vfsMd()
+    expect(markdown).toContain('````text\n/a\n```\n  owned/')
+    expect(markdown).toContain('.gdoc.json\n````\n')
+  })
+
   it('names each search command the profile allows', async () => {
     const ws = new Workspace(
       { '/docs': [gdocs(), MountMode.WRITE] },
