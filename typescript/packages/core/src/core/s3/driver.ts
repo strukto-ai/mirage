@@ -860,7 +860,12 @@ async function deletePrefix(conn: S3Conn, pfx: string): Promise<void> {
 }
 
 async function copyFile(conn: S3Conn, srcKey: string, dstKey: string): Promise<boolean> {
-  await copyObject(conn, srcKey, dstKey)
+  try {
+    await copyObject(conn, srcKey, dstKey)
+  } catch (err) {
+    if (!isNotFound(err) || isMissingBucket(err)) throw err
+    return false
+  }
   return true
 }
 
@@ -879,7 +884,7 @@ async function moveFile(conn: S3Conn, srcKey: string, dstKey: string): Promise<b
     if (!isNotFound(err)) throw err
     return false
   }
-  await copyFile(conn, srcKey, dstKey)
+  if (!(await copyFile(conn, srcKey, dstKey))) return false
   await conn.send(new conn.mod.DeleteObjectCommand({ Bucket: conn.config.bucket, Key: srcKey }))
   return true
 }

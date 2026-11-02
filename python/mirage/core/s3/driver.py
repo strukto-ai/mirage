@@ -967,7 +967,12 @@ async def _delete_prefix(conn: S3Conn, pfx: str) -> None:
 
 
 async def _copy_file(conn: S3Conn, src_key: str, dst_key: str) -> bool:
-    await _copy_object(conn, src_key, dst_key)
+    try:
+        await _copy_object(conn, src_key, dst_key)
+    except Exception as exc:
+        if not is_not_found(exc):
+            raise
+        return False
     return True
 
 
@@ -987,7 +992,8 @@ async def _move_file(conn: S3Conn, src_key: str, dst_key: str) -> bool:
         if not is_not_found(exc):
             raise
         return False
-    await _copy_file(conn, src_key, dst_key)
+    if not await _copy_file(conn, src_key, dst_key):
+        return False
     await conn.client.delete_object(Bucket=conn.config.bucket, Key=src_key)
     return True
 
