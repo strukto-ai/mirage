@@ -3,7 +3,7 @@ import type { PathSpec, SetAttrFields } from '@struktoai/mirage-core/types'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { answered, davRequest, davUrl } from './dav.ts'
 import { parser } from './search/response.ts'
-import type { XmlRecord } from './search/types.ts'
+import type { XmlElement } from './search/types.ts'
 
 /** The PROPPATCH body that sets a node's modified time, in whole seconds since the epoch. */
 export function mtimePatch(seconds: number): string {
@@ -44,7 +44,7 @@ export async function setAttrs(
   if (response.status === 404) throw enoent(path)
   if (
     response.status !== 207 ||
-    answered(parser.parse(await response.text()) as XmlRecord, 'lastmodified') === null
+    answered(parser.parse(await response.text()) as XmlElement, 'lastmodified') === null
   ) {
     residual.mtime = fields.mtime
   }

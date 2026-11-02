@@ -240,6 +240,14 @@ export async function copyTree(
   }
 }
 
+function moveBody(src: DriveLoc, dst: DriveLoc): Record<string, unknown> {
+  const body: Record<string, unknown> = { name: baseName(dst.path) }
+  if (src.parent() !== dst.parent() || src.drive !== dst.drive) {
+    body.parentReference = { path: dst.reference(dst.parent()) }
+  }
+  return body
+}
+
 /** What a renameReplace moved, and what it replaced. */
 export interface MovedItem {
   moved: Record<string, unknown>
@@ -260,10 +268,7 @@ export async function renameReplace(
 ): Promise<MovedItem> {
   await checkItem(config, src, srcVirtual)
   await checkItem(config, dst, dstVirtual)
-  const body: Record<string, unknown> = { name: baseName(dst.path) }
-  if (src.parent() !== dst.parent() || src.drive !== dst.drive) {
-    body.parentReference = { path: dst.reference(dst.parent()) }
-  }
+  const body = moveBody(src, dst)
   try {
     return { moved: await graphPatch(config, src.item(), body), replacedNonFile: false }
   } catch (error) {

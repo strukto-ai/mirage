@@ -111,15 +111,11 @@ function pickTable(opts: ResolveOptions | undefined): Record<string, string> {
   return readDaemonTable(mirageHome())
 }
 
-function pickTokenFile(opts: ResolveOptions | undefined): string {
-  return opts?.tokenFile ?? defaultTokenFile()
-}
-
 export function resolveLocalToken(opts?: ResolveOptions): string | undefined {
   const env = pickEnv(opts)
   const fromEnv = (env[ENV_AUTH_TOKEN] ?? '').trim()
   if (fromEnv.length > 0) return fromEnv
-  return readTokenFile(pickTokenFile(opts))
+  return readTokenFile(opts?.tokenFile ?? defaultTokenFile())
 }
 
 function readJwtKey(env: Record<string, string | undefined>): string | undefined {

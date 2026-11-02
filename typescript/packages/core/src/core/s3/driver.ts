@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { callerSignal, currentCaller } from '../../context/session_context.ts'
-import { ABORT_JOIN_MS, joinOrAbort, hasAborted, makeAbortError } from '../../utils/abort.ts'
+import { ABORT_JOIN_MS, runCancellable, hasAborted, makeAbortError } from '../../utils/abort.ts'
 import { MoveError } from '../../errors/types.ts'
 import { CONDITION_SUPPORT } from './constants.ts'
 import { ByteSpool } from '../../io/spool.ts'
@@ -511,7 +511,7 @@ function deleteRejected(err: unknown): boolean {
 
 /** Join an owned move request within the caller's cancellation grace. */
 function joinMove<T>(request: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  return joinOrAbort(request, signal, ABORT_JOIN_MS)
+  return runCancellable(request, signal, ABORT_JOIN_MS)
 }
 
 async function recoverCopy(

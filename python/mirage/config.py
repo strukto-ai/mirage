@@ -112,26 +112,26 @@ def _coerce_mount_mode(value: Any) -> Any:
 _VAR_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 
 
-class _EnvInterpolator:
-    def __init__(self, env: dict[str, str], missing: list[str]) -> None:
-        self.env = env
-        self.missing = missing
+def _walk_interpolate(
+    value: Any, env: dict[str, str], missing: list[str]
+) -> Any:
+    if isinstance(value, str):
 
-    def _sub(self, m: re.Match[str]) -> str:
-        name = m.group(1)
-        if name not in self.env:
-            self.missing.append(name)
-            return ""
-        return self.env[name]
+        def sub(m: re.Match[str]) -> str:
+            name = m.group(1)
+            if name not in env:
+                missing.append(name)
+                return ""
+            return env[name]
 
-    def apply(self, value: Any) -> Any:
-        if isinstance(value, str):
-            return _VAR_RE.sub(self._sub, value)
-        if isinstance(value, dict):
-            return {k: self.apply(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [self.apply(v) for v in value]
-        return value
+        return _VAR_RE.sub(sub, value)
+    if isinstance(value, dict):
+        return {
+            k: _walk_interpolate(v, env, missing) for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_walk_interpolate(v, env, missing) for v in value]
+    return value
 
 
 def _interpolate_env(value: Any, env: dict[str, str]) -> Any:
@@ -148,8 +148,7 @@ def _interpolate_env(value: Any, env: dict[str, str]) -> Any:
         ValueError: any referenced variable is missing from ``env``.
     """
     missing: list[str] = []
-    interp = _EnvInterpolator(env, missing)
-    out = interp.apply(value)
+    out = _walk_interpolate(value, env, missing)
     if missing:
         unique_missing = sorted(set(missing))
         raise ValueError(f"missing environment variables: {unique_missing}")

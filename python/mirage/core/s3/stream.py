@@ -28,11 +28,13 @@ from mirage.errors.fs import eacces, enoent
 from mirage.observe.context import record_stream, revision_for
 from mirage.types import PathSpec
 
+DEFAULT_CHUNK_SIZE = 8192
+
 
 async def read_stream(
     accessor: S3Accessor,
     path_spec: PathSpec,
-    chunk_size: int = 8192,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
     *,
     on_version: Callable[[str | None], None] | None = None,
 ) -> AsyncIterator[bytes]:

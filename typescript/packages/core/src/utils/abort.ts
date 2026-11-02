@@ -159,7 +159,7 @@ export const ABORT_JOIN_MS = 250
  * blocked past that is left running and the caller is released. A
  * function is asked for the grace when the signal fires.
  */
-export async function joinOrAbort<T>(
+export async function runCancellable<T>(
   promise: Promise<T>,
   signal: AbortSignal | undefined,
   graceMs: number | (() => number) = ABORT_JOIN_MS,

@@ -16,7 +16,7 @@
 // (MIT; see licenses/third_party/go-gh.txt).
 
 import type { GitHubAccount } from '../../../../accessor/github.ts'
-import { GITHUB_API_BASE } from '../../../../core/github/client.ts'
+import { API_BASE } from '../../../../core/github/constants.ts'
 import { parseRepo, repoHost, type RepoRef } from '../../../../core/github/repo.ts'
 import { Engine, localZone, type Ending, type JqRun } from '../../../../core/jq/index.ts'
 import { UsageError } from '../../../errors.ts'
@@ -57,7 +57,7 @@ export function checkHost(accessor: GitHubAccount, host: string | null): void {
  */
 export function webOrigin(accessor: GitHubAccount): string {
   const base = accessor.config.baseUrl
-  if (base === undefined || base.replace(/\/+$/, '') === GITHUB_API_BASE) {
+  if (base === undefined || base.replace(/\/+$/, '') === API_BASE) {
     return `https://${GITHUB_HOST}`
   }
   let url: URL

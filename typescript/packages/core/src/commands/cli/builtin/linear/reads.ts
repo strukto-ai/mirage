@@ -27,7 +27,6 @@ import {
   searchIssues,
 } from '../../../../core/linear/client.ts'
 import {
-  buildProjectIssue,
   normalizeComment,
   normalizeCycle,
   normalizeDocument,
@@ -36,6 +35,7 @@ import {
   normalizeProject,
   normalizeTeam,
   normalizeUser,
+  projectIssueRows,
 } from '../../../../core/linear/normalize.ts'
 import { jsonBytes } from '../../../../core/render/json.ts'
 import { enoent } from '../../../../errors/fs.ts'
@@ -43,34 +43,13 @@ import { IOResult } from '../../../../io/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import { pickString } from '../../../../utils/records.ts'
 import { firstText, resolveIssue } from './util.ts'
 
 function requireTeam(fl: FlagView): string {
   const team = fl.asStr('team')
   if (team === undefined || team === '') throw new Error('--team is required')
   return team
-}
-
-function teamStr(team: Record<string, unknown>, key: string): string | null {
-  const value = team[key]
-  return typeof value === 'string' ? value : null
-}
-
-async function teamProjectRows(
-  accessor: LinearAccessor,
-  teamId: string,
-  projectId: string,
-): Promise<ReturnType<typeof buildProjectIssue>[]> {
-  const teamIssues = await listTeamIssues(accessor.transport, teamId, undefined, [projectId])
-  const rows: ReturnType<typeof buildProjectIssue>[] = []
-  for (const issue of teamIssues) {
-    const proj = issue.project
-    const projObj =
-      proj !== null && typeof proj === 'object' ? (proj as Record<string, unknown>) : {}
-    if (projObj.id !== projectId) continue
-    rows.push(buildProjectIssue(issue))
-  }
-  return rows
 }
 
 async function allUsers(accessor: LinearAccessor): Promise<Record<string, unknown>[]> {
@@ -160,12 +139,15 @@ export async function projectList(
   const payload = []
   for (const project of projects) {
     const projectId = typeof project.id === 'string' ? project.id : ''
-    const rows = await teamProjectRows(accessor, teamId, projectId)
+    const rows = projectIssueRows(
+      await listTeamIssues(accessor.transport, teamId, undefined, [projectId]),
+      projectId,
+    )
     payload.push(
       normalizeProject(project, {
         teamId,
-        teamKey: teamStr(team, 'key'),
-        teamName: teamStr(team, 'name'),
+        teamKey: pickString(team, 'key'),
+        teamName: pickString(team, 'name'),
         issues: rows,
       }),
     )
@@ -185,13 +167,16 @@ export async function projectGet(
   const projects = await listTeamProjects(accessor.transport, teamId)
   for (const project of projects) {
     if (project.id === projectId) {
-      const rows = await teamProjectRows(accessor, teamId, projectId)
+      const rows = projectIssueRows(
+        await listTeamIssues(accessor.transport, teamId, undefined, [projectId]),
+        projectId,
+      )
       return [
         jsonBytes(
           normalizeProject(project, {
             teamId,
-            teamKey: teamStr(team, 'key'),
-            teamName: teamStr(team, 'name'),
+            teamKey: pickString(team, 'key'),
+            teamName: pickString(team, 'name'),
             issues: rows,
           }),
         ),

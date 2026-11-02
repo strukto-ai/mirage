@@ -15,6 +15,7 @@
 from pydantic import ConfigDict, SecretStr
 
 from mirage.core.api.config import TimeoutConfig
+from mirage.core.notion.constants import DEFAULT_API_BASE_URL
 
 
 class NotionConfig(TimeoutConfig):
@@ -22,7 +23,7 @@ class NotionConfig(TimeoutConfig):
 
     api_key: SecretStr
     """Notion integration token."""
-    base_url: str = "https://api.notion.com/v1"
+    base_url: str = DEFAULT_API_BASE_URL
     """Notion API root; override to point at a fake or proxy."""
     # None means the generation the client is written against. A CLI
     # verb overrides it per line from --notion-version, so the override

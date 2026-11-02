@@ -17,7 +17,7 @@ import {
   bindTree,
   dropPruned,
   emitStartPath,
-  optionsTree,
+  argsToTree,
   printfKind,
   settlePendingPrunes,
   startBasename,
@@ -50,16 +50,6 @@ import { linksOf } from '../utils/links.ts'
 import { dotRefusal, linkFollow, statOrEnoent, vfsStatPath } from '../utils/paths.ts'
 
 const ENC = new TextEncoder()
-
-function invalidFindArg(message: string): CommandFnResult {
-  return [
-    null,
-    new IOResult({
-      exitCode: 1,
-      stderr: ENC.encode(`${message}\n`),
-    }),
-  ]
-}
 
 // The stat probe's path for one display row.
 function rowSpec(row: string): PathSpec {
@@ -315,7 +305,12 @@ export function findGeneric(
   try {
     limits = expr === null && flagWords.length > 0 ? parseFindExpression(flagWords) : null
   } catch (err) {
-    if (err instanceof UsageError) return Promise.resolve(invalidFindArg(err.message))
+    if (err instanceof UsageError) {
+      return Promise.resolve([
+        null,
+        new IOResult({ exitCode: 1, stderr: ENC.encode(`${err.message}\n`) }),
+      ])
+    }
     throw err
   }
   const maxDepth = limits?.maxDepth ?? null
@@ -368,7 +363,7 @@ export function findGeneric(
       // `-path` matches the row as printed; stamp the operand's spelling onto
       // path nodes before the walk (#396). Bound per start point: options is
       // shared by every one of them and must stay unbound.
-      const tree = bindTree(optionsTree(options), '', root.virtual, root.rawPath)
+      const tree = bindTree(argsToTree(options), '', root.virtual, root.rawPath)
       const rootOptions: FindOptions = { ...options, tree }
       // A start point that is itself a symlink is the walk's to report: the
       // table it walks answers the link's own row, and GNU's default -P
@@ -440,7 +435,7 @@ export function findGeneric(
             root,
             start,
             rootOptions,
-            optionsTree(rootOptions),
+            argsToTree(rootOptions),
             expr !== null ? expr.usesEmpty : emptyFlag,
             effMtimeMin,
             effMtimeMax,
@@ -467,7 +462,7 @@ export function findGeneric(
         !(pushMtime && (effMtimeMin !== null || effMtimeMax !== null))
       ) {
         const rootRows =
-          rootDirResults(root, rootOptions, optionsTree(rootOptions), null).length > 0
+          rootDirResults(root, rootOptions, argsToTree(rootOptions), null).length > 0
             ? [rstripSlash(root.virtual) || '/']
             : []
         const checked =
@@ -535,7 +530,7 @@ export function findGeneric(
         rows = withRootRow(
           rootMatches,
           root.virtual === '/' ? '/' : rstripSlash(root.virtual),
-          rootDirResults(root, rootOptions, optionsTree(rootOptions), rootEmpty),
+          rootDirResults(root, rootOptions, argsToTree(rootOptions), rootEmpty),
         )
       }
       const filtered =

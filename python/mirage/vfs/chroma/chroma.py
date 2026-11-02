@@ -20,8 +20,6 @@ Use cat, head, tail, ls, find, tree, and grep to inspect indexed documents.
 Paths are document slugs from the collection path tree. Writes are not
 supported."""
 
-_readdir = CHROMA_TREE.readdir
-
 
 class ChromaVFS(BaseVFS):
     accessor: ChromaAccessor
@@ -42,7 +40,7 @@ class ChromaVFS(BaseVFS):
     async def readdir(
         self, path: PathSpec, entry: FileStat | None = None
     ) -> DirListing:
-        return await _readdir(self.accessor, path, entry)
+        return await CHROMA_TREE.readdir(self.accessor, path, entry)
 
     async def read(
         self, path: PathSpec, entry: FileStat | None = None

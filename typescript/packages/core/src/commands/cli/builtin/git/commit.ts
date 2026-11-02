@@ -21,7 +21,7 @@ import type { SessionView } from '../../../../view/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { headEntries } from './changes.ts'
+import { headEntries, stagedEntries } from './changes.ts'
 import {
   AllWithPathsError,
   BrokenHeadError,
@@ -42,7 +42,7 @@ import { deltas, shownSides, type Delta } from './rows.ts'
 import { opened } from './session.ts'
 import { reportRows } from './status.ts'
 import { report } from './summary.ts'
-import { TREE_MODE, type TreeEntry } from './tree.ts'
+import { TREE_MODE } from './tree.ts'
 import type { IndexState } from './types.ts'
 import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -104,15 +104,6 @@ export function identity(fl: FlagView, session: SessionView | undefined): Identi
   const match = /^(.*?)\s*<([^>]*)>\s*$/.exec(author)
   if (match === null) return { name: author, email: '', line: `${author} <>` }
   return { name: match[1] ?? '', email: match[2] ?? '', line: author }
-}
-
-/** The tree entries the index describes, keyed by path. */
-function indexTree(state: IndexState): Map<string, TreeEntry> {
-  const out = new Map<string, TreeEntry>()
-  for (const [path, entry] of state.entries) {
-    out.set(path, { oid: entry.oid, mode: entry.mode.toString(8) })
-  }
-  return out
 }
 
 /**
@@ -233,7 +224,7 @@ export async function commit(
   const restaged = staging ? await stageTracked(repo, vfs, state) : null
   const head = await readHead(vfs, repo.location.gitdir)
   const before = await headEntries(repo)
-  const after = indexTree(state)
+  const after = stagedEntries(state)
   const same =
     before !== null &&
     before.size === after.size &&

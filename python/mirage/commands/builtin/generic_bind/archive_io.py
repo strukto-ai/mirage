@@ -1,6 +1,5 @@
 import logging
 from functools import partial
-from typing import cast
 
 from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
@@ -17,7 +16,7 @@ from mirage.commands.builtin.utils.tree import (
 )
 from mirage.core.generic.find import walk_find
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec, ReaddirFn, StatFn
+from mirage.types import FileType, PathSpec, ReaddirFn, StatFn
 from mirage.view.types import ChildMounts
 
 logger = logging.getLogger(__name__)
@@ -123,17 +122,6 @@ def is_dir_of(files: CommandFiles) -> DirProbe:
     return partial(_is_dir_with, files.stat, files.readdir)
 
 
-async def _relayed_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
-    """Stat one path on the mount that owns it.
-
-    Args:
-        dispatch (DispatchFn): the workspace op dispatcher.
-        path (PathSpec): the path to stat.
-    """
-    found, _ = await dispatch("stat", path)
-    return cast(FileStat, found)
-
-
 async def _own_listing(
     readdir: WalkCall, owed: ChildMounts | None, path: PathSpec
 ) -> list[str]:
@@ -185,7 +173,7 @@ def relay_walk_of(
     readdir, stat = tree_walk(
         read_tree,
         partial(dispatched_call, dispatch, "readdir"),
-        partial(_relayed_stat, dispatch),
+        partial(dispatched_call, dispatch, "stat"),
     )
     return partial(
         _walk_with,
@@ -204,6 +192,6 @@ def relay_is_dir_of(dispatch: DispatchFn) -> DirProbe:
     """
     return partial(
         _is_dir_with,
-        partial(_relayed_stat, dispatch),
+        partial(dispatched_call, dispatch, "stat"),
         partial(dispatched_call, dispatch, "readdir"),
     )

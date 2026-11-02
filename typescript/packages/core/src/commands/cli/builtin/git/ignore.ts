@@ -17,7 +17,7 @@ import { readOptional } from './io.ts'
 
 import type { Files } from '../../../../workspace/files.ts'
 
-const GITIGNORE = '.gitignore'
+export const GITIGNORE = '.gitignore'
 const INFO_EXCLUDE = 'info/exclude'
 
 const DEC = new TextDecoder('utf-8', { fatal: false })
@@ -144,6 +144,19 @@ function verdict(rules: readonly Rule[], path: string, isDir: boolean): boolean 
 }
 
 /**
+ * Spell a repository-relative path relative to a filter's directory.
+ *
+ * A `.gitignore` names paths from its own directory down, so the same path is
+ * a different string to each filter on the stack.
+ *
+ * @param prefix the filter's directory, repository-relative, empty at the root
+ * @param path repository-relative path being tested
+ */
+function relative(prefix: string, path: string): string {
+  return prefix === '' ? path : path.slice(prefix.length + 1)
+}
+
+/**
  * The `.gitignore` files governing one directory, innermost last.
  *
  * Immutable, and pushed rather than mutated, so a walk hands each subdirectory
@@ -181,11 +194,8 @@ export class IgnoreStack {
       const held = this.filters[i]
       if (held === undefined) continue
       const [prefix, rules] = held
-      // A `.gitignore` names paths from its own directory down, so the same
-      // path is a different string to each filter on the stack.
       if (prefix !== '' && !path.startsWith(`${prefix}/`)) continue
-      const relative = prefix === '' ? path : path.slice(prefix.length + 1)
-      const answer = verdict(rules, relative, isDir)
+      const answer = verdict(rules, relative(prefix, path), isDir)
       if (answer !== null) return answer
     }
     return false

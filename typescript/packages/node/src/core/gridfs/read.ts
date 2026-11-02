@@ -21,6 +21,7 @@ import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import type { ObjectId } from 'mongodb'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { bucket, fileById, gridfsKey, latestFile, loadGridFSModule } from './client.ts'
+import { isNotFound } from './driver.ts'
 
 export async function resolveFileId(
   accessor: GridFSAccessor,
@@ -75,18 +76,12 @@ async function downloadBytes(
       chunks.push(chunk)
     }
   } catch (err) {
-    if ((err as { code?: string } | null)?.code === 'ENOENT' || isNoFileError(err)) {
+    if ((err as { code?: string } | null)?.code === 'ENOENT' || isNotFound(err)) {
       throw enoent(path)
     }
     throw err
   }
   return concat(chunks)
-}
-
-export function isNoFileError(err: unknown): boolean {
-  if (err === null || typeof err !== 'object') return false
-  const message = (err as { message?: string }).message ?? ''
-  return message.includes('FileNotFound')
 }
 
 export async function read(

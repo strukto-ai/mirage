@@ -19,7 +19,7 @@ import type { FsCondition } from './types.ts'
 // stamp), plus the aliases other raisers use:
 // EOPNOTSUPP is ENOTSUP's second POSIX spelling, and ENODATA/ENOATTR
 // are the two platform names for one "attribute not set" condition.
-export const CODE_ARMS: Record<string, FsCondition> = {
+export const ERRNO_ARMS: Record<string, FsCondition> = {
   EBADF: 'EBADF',
   ENOENT: 'ENOENT',
   ENOTDIR: 'ENOTDIR',

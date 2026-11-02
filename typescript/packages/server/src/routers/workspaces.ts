@@ -46,10 +46,11 @@ import { explanationToDict } from '../io_serde.ts'
 import { refused } from '../metrics.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
 import { Claim, type WorkspaceRegistry } from '../registry.ts'
-import type {
-  CloneWorkspaceRequest,
-  CreateWorkspaceRequest,
-  LoadWorkspaceRequest,
+import {
+  SnapshotWorkspaceRequest,
+  type CloneWorkspaceRequest,
+  type CreateWorkspaceRequest,
+  type LoadWorkspaceRequest,
 } from '../schemas.ts'
 import { makeBrief, makeDetail } from '../summary.ts'
 import { queryFlag } from './vfs.ts'
@@ -75,8 +76,6 @@ interface WorkspaceHistoryQuery {
   last?: string
   vfs?: string
 }
-
-const SnapshotBodySchema = z.object({ key: z.string() }).strict()
 
 const LoadBodySchema = z
   .object({
@@ -724,7 +723,7 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     const { id } = req.params
     const entry = deps.registry.visible(id, req.account)
     if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
-    const parsed = SnapshotBodySchema.safeParse(req.body)
+    const parsed = SnapshotWorkspaceRequest.safeParse(req.body)
     if (!parsed.success) {
       return reply.status(400).send({ detail: `bad snapshot request: ${parsed.error.message}` })
     }

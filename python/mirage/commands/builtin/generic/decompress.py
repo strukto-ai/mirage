@@ -30,6 +30,10 @@ from mirage.utils.compress import GzipDataError, gunzip_stream
 _ASCII_LOWER = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
 
 
+def _ascii_lower(text: str) -> str:
+    return text.translate(_ASCII_LOWER)
+
+
 def gzip_suffix(name: str, suffix: str) -> str | None:
     """The compression suffix gzip reads off ``name``, as spelled there.
 
@@ -48,11 +52,11 @@ def gzip_suffix(name: str, suffix: str) -> str | None:
         len(suffix) < len(known) and known.endswith(suffix)
         for known in GZIP_KNOWN_SUFFIXES
     )
-    own = suffix.translate(_ASCII_LOWER)
+    own = _ascii_lower(suffix)
     order = (
         (*GZIP_KNOWN_SUFFIXES, own) if inner else (own, *GZIP_KNOWN_SUFFIXES)
     )
-    lowered = name.translate(_ASCII_LOWER)
+    lowered = _ascii_lower(name)
     for known in order:
         cut = len(lowered) - len(known)
         if cut > 0 and lowered.endswith(known) and lowered[cut - 1] != "/":
@@ -86,7 +90,7 @@ def _decompressed(path: PathSpec, suffix: str) -> tuple[str, PathSpec] | None:
     found = gzip_suffix(path.raw_path, suffix)
     if found is None:
         return None
-    tar = ".tar" if found.translate(_ASCII_LOWER) in GZIP_TAR_SUFFIXES else ""
+    tar = ".tar" if _ascii_lower(found) in GZIP_TAR_SUFFIXES else ""
     cut = len(found)
     return (
         path.raw_path[:-cut] + tar,

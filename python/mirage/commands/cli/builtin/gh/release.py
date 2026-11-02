@@ -61,24 +61,23 @@ def _release(value: JsonValue) -> dict[str, Any]:
     return result
 
 
-def _list_line(row: dict[str, Any]) -> str:
-    kind = (
-        "Draft"
-        if row.get("isDraft")
-        else "Pre-release"
-        if row.get("isPrerelease")
-        else "Latest"
-        if row.get("isLatest")
-        else ""
-    )
-    return (
-        f"{row.get('name', '')}\t{row.get('tagName', '')}\t{kind}\t"
-        f"{row.get('publishedAt', '')}\n"
-    )
-
-
 def _list_text(rows: list[dict[str, Any]]) -> str:
-    return "".join(_list_line(row) for row in rows)
+    lines: list[str] = []
+    for row in rows:
+        kind = (
+            "Draft"
+            if row.get("isDraft")
+            else "Pre-release"
+            if row.get("isPrerelease")
+            else "Latest"
+            if row.get("isLatest")
+            else ""
+        )
+        lines.append(
+            f"{row.get('name', '')}\t{row.get('tagName', '')}\t{kind}\t"
+            f"{row.get('publishedAt', '')}\n"
+        )
+    return "".join(lines)
 
 
 async def list_cmd(

@@ -106,7 +106,7 @@ DEFAULT_ENTRIES: tuple[str, ...] = (
 )
 
 # TypeScript-only runtime names a cross-language config may carry.
-TS_ONLY_HINTS: dict[str, str] = {
+RUNTIME_HINTS: dict[str, str] = {
     "pyodide": (
         "runtime 'pyodide' is TypeScript-only (a WASM CPython for "
         "runtimes without a host Python); Python supports 'monty' "
@@ -134,8 +134,8 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
         module_path, attr = SANDBOX_MODULES[name].split(":")
         cls = getattr(importlib.import_module(module_path), attr)
     if cls is None:
-        if name in TS_ONLY_HINTS:
-            raise ValueError(TS_ONLY_HINTS[name])
+        if name in RUNTIME_HINTS:
+            raise ValueError(RUNTIME_HINTS[name])
         known = ", ".join(repr(n) for n in known_runtimes())
         raise ValueError(
             f"unknown runtime: {name!r} (expected one of {known})"

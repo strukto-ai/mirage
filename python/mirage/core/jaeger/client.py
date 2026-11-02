@@ -14,6 +14,7 @@
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -64,10 +65,6 @@ def _micros(iso: str | None, default: int) -> int:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return int(parsed.timestamp() * 1_000_000)
-
-
-def _now_micros() -> int:
-    return int(datetime.now(timezone.utc).timestamp() * 1_000_000)
 
 
 def _error_of(resp: aiohttp.ClientResponse, text: str) -> Exception:
@@ -185,7 +182,7 @@ async def fetch_traces(
         "service": service,
         "limit": limit,
         "start": _micros(from_timestamp, 0),
-        "end": _micros(to_timestamp, _now_micros()),
+        "end": _micros(to_timestamp, time.time_ns() // 1000),
     }
     payload = await _get(accessor, "/api/traces", params)
     return [row for row in _data_list(payload) if isinstance(row, dict)]

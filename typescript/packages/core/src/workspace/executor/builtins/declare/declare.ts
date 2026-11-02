@@ -61,7 +61,6 @@ import {
 import {
   ANSI_C_ESCAPES,
   BARE_KEY_RE,
-  CONTROL_RE,
   EXPORT_FLAGS,
   LISTED_ATTRIBUTES,
   READONLY_FLAGS,
@@ -406,7 +405,7 @@ export async function storeStagedArrays(
   return null
 }
 
-function isControl(ch: string): boolean {
+export function isControl(ch: string): boolean {
   const code = ch.codePointAt(0) ?? 0
   return code < 0x20 || code === 0x7f
 }
@@ -423,7 +422,7 @@ function isControl(ch: string): boolean {
  */
 export function bashDeclareQuote(value: string): string {
   let out = ''
-  if (CONTROL_RE.test(value)) {
+  if (Array.from(value).some(isControl)) {
     for (const ch of value) {
       const escape = ANSI_C_ESCAPES[ch]
       if (escape !== undefined) out += escape

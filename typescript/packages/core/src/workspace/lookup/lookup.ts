@@ -65,11 +65,6 @@ export function runtimeRefused(
   )
 }
 
-/** The runtime that captures a name by name, not through the fallback. */
-function runtimeFor(name: string, registry: MountRegistry): Runtime | undefined {
-  return registry.runtimeBindings[name]
-}
-
 /**
  * Whether the runtime runs the name as a native program. A language runtime
  * that also runs processes (local) still interprets its own language's
@@ -229,10 +224,10 @@ export function program(
     if (
       consumer === Consumer.SESSION &&
       INTERPRETER_NAMES.has(name) &&
-      !(runtimeFor(name, registry) instanceof LanguageRuntime)
+      !(registry.runtimeBindings[name] instanceof LanguageRuntime)
     )
       return null
-    if (consumer === Consumer.EXTERNAL && runtimeFor(name, registry) === undefined) return null
+    if (consumer === Consumer.EXTERNAL && registry.runtimeBindings[name] === undefined) return null
     return consumer
   }
   return null
@@ -269,7 +264,7 @@ export function programNote(
 ): string | null {
   const consumer = program(name, session, registry)
   if (consumer === null) return null
-  const runtime = runtimeFor(name, registry)
+  const runtime = registry.runtimeBindings[name]
   if (runtime !== undefined && (consumer === Consumer.EXTERNAL || INTERPRETER_NAMES.has(name))) {
     return `${name} runs on the workspace's ${runtime.name} runtime.`
   }

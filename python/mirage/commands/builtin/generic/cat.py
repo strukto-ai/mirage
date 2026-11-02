@@ -60,19 +60,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> CatFlags:
     )
 
 
-def _wants_display(parsed: CatFlags) -> bool:
-    return any(
-        (
-            parsed.number_lines,
-            parsed.number_nonblank,
-            parsed.show_ends,
-            parsed.squeeze_blank,
-            parsed.show_tabs,
-            parsed.show_nonprinting,
-        )
-    )
-
-
 async def cat_generic(
     paths: list[PathSpec],
     texts: list[str],
@@ -100,6 +87,16 @@ async def cat_generic(
     stat = stdin_stat(stat)
     stream = stdin_stream(stream, ctx.stdin)
     parsed = parse_flags(ctx.flags)
+    wants_display = any(
+        (
+            parsed.number_lines,
+            parsed.number_nonblank,
+            parsed.show_ends,
+            parsed.squeeze_blank,
+            parsed.show_tabs,
+            parsed.show_nonprinting,
+        )
+    )
     read = normalized_read(stream)
     if paths:
         stats: dict[str, FileStat] = {}
@@ -131,11 +128,11 @@ async def cat_generic(
                 for p in readable
             ]
         )
-        if _wants_display(parsed):
+        if wants_display:
             return display_lines(source, parsed), io
         return source, io
     source = resolve_source(ctx.stdin)
-    if _wants_display(parsed):
+    if wants_display:
         return display_lines(source, parsed), IOResult()
     return source, IOResult()
 

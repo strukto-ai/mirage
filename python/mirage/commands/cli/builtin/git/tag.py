@@ -88,7 +88,6 @@ from mirage.utils.clock import system_now
 # git's own formats for a tag listing: the name, or under -n<num> the
 # name padded to 15 columns and that many lines of the message.
 NAME_FORMAT = "%(refname:lstrip=2)"
-UTC = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,7 +197,7 @@ def build_tag(
     tag.object = (type(target), target.id)
     tag.tagger = tagger
     tag.tag_time = when
-    tag.tag_timezone = UTC
+    tag.tag_timezone = 0
     tag.message = f"{message}\n".encode() if message else b""
     repo.object_store.add_object(tag)
     return tag

@@ -17,7 +17,7 @@ import {
   SignalStop,
   abortable,
   atDeadline,
-  joinOrAbort,
+  runCancellable,
   makeAbortError,
   sleep,
   stopSignal,
@@ -55,7 +55,7 @@ describe('abortable', () => {
   })
 })
 
-describe('joinOrAbort', () => {
+describe('runCancellable', () => {
   it('lets a responsive tree report its own error within the grace', async () => {
     const controller = new AbortController()
     const reason = new Error('caller stopped the run')
@@ -66,7 +66,7 @@ describe('joinOrAbort', () => {
         }, 20)
       })
     })
-    const pending = joinOrAbort(tree, controller.signal, 200)
+    const pending = runCancellable(tree, controller.signal, 200)
     controller.abort(reason)
     await expect(pending).rejects.toBe(reason)
   })
@@ -80,7 +80,7 @@ describe('joinOrAbort', () => {
         }, 20)
       })
     })
-    const pending = joinOrAbort(tree, controller.signal, 200)
+    const pending = runCancellable(tree, controller.signal, 200)
     controller.abort()
     await expect(pending).resolves.toBe('done')
   })
@@ -95,7 +95,7 @@ describe('joinOrAbort', () => {
         }, 80)
       })
     })
-    const pending = joinOrAbort(tree, controller.signal, () => grace)
+    const pending = runCancellable(tree, controller.signal, () => grace)
     grace = 400
     controller.abort()
     await expect(pending).resolves.toBe('done')
@@ -104,7 +104,7 @@ describe('joinOrAbort', () => {
   it('releases the caller once a stalled tree outlives the grace', async () => {
     const controller = new AbortController()
     const t0 = Date.now()
-    const pending = joinOrAbort(never(), controller.signal, 30)
+    const pending = runCancellable(never(), controller.signal, 30)
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
     expect(Date.now() - t0).toBeLessThan(500)

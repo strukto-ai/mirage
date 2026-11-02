@@ -225,21 +225,18 @@ function hashLine(digest: string, label: string, flags: ChecksumFlags): string {
   return `${digest} ${marker}${label}${terminator}`
 }
 
-function makePathSpec(virtual: string, mountPrefix: string, rawPath: string): PathSpec {
+// The recorded name resolves against the command's cwd, exactly like GNU
+// resolves it against the process cwd (a relative `f.txt` in the sums
+// file names a sibling of wherever `-c` runs, not of the sums file).
+function checkTarget(filename: string, cwd: string, mountPrefix: string): PathSpec {
+  const virtual = resolvePath(filename, cwd)
   return new PathSpec({
     virtual,
     directory: virtual,
     vfsPath: mountKey(virtual, mountPrefix),
     resolved: true,
-    rawPath,
+    rawPath: filename,
   })
-}
-
-// The recorded name resolves against the command's cwd, exactly like GNU
-// resolves it against the process cwd (a relative `f.txt` in the sums
-// file names a sibling of wherever `-c` runs, not of the sums file).
-function checkTarget(filename: string, cwd: string, mountPrefix: string): PathSpec {
-  return makePathSpec(resolvePath(filename, cwd), mountPrefix, filename)
 }
 
 function countNoun(count: number, singular: string, plural: string): string {
@@ -255,7 +252,18 @@ export function dispatchedReader(dispatch: DispatchFn, stream: ReadStreamFn): Re
   return (path) => (isStdin(path) ? stream(path) : callerStream(dispatch, caller, path))
 }
 
-async function checkFile(
+// The stderr line for a checksum list that cannot be read: a directory
+// reports the literal "read error" (its open succeeds and the read fails),
+// anything else its strerror. Mirrors Python's `_check_list_error`.
+function checkListError(name: string, p: PathSpec, error: unknown): string {
+  const label = p.rawPath !== '' ? p.rawPath : p.virtual
+  const detail = isEisdir(error)
+    ? 'read error'
+    : (fsStrerror(error) ?? (error instanceof Error ? error.message : String(error)))
+  return `${name}: ${label}: ${detail}`
+}
+
+async function hashCheck(
   stream: ReadStreamFn,
   p: PathSpec,
   algorithm: string,
@@ -412,14 +420,10 @@ export async function checksumGeneric(
       for (const p of paths.length > 0 ? paths : [STDIN_OPERAND]) {
         let checked: [ByteSource, ByteSource, number]
         try {
-          checked = await checkFile(stream, p, parsed.algorithm.split('-')[0] ?? '', ctx, parsed)
+          checked = await hashCheck(stream, p, parsed.algorithm.split('-')[0] ?? '', ctx, parsed)
         } catch (error) {
           if (!isWalkError(error)) throw error
-          const label = p.rawPath !== '' ? p.rawPath : p.virtual
-          const detail = isEisdir(error)
-            ? 'read error'
-            : (fsStrerror(error) ?? (error instanceof Error ? error.message : String(error)))
-          await checkNote(errors, `${name}: ${label}: ${detail}`)
+          await checkNote(errors, checkListError(name, p, error))
           exitCode = 1
           continue
         }

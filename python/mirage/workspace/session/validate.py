@@ -17,21 +17,6 @@ from mirage.policy.errors import PolicyError
 from mirage.policy.match import head_allowed, split_pattern
 from mirage.policy.types import AdmissionRules, CommandRule
 
-UNINSTALLED = (
-    "{verb} rule names {command}, which the allow list never "
-    "allows, so the rule can never fire"
-)
-
-SHADOWED = (
-    "ask rule {ask} can never fire: the deny rule {deny} refuses "
-    "the same commands and outranks it"
-)
-
-UNKNOWN_VERB = (
-    "{verb} rule names {line}, which the {cli} CLI has no verb "
-    "for, so the rule can never fire"
-)
-
 
 def _head(pattern: str) -> str:
     """The command name a pattern starts with, empty for a bare
@@ -116,7 +101,10 @@ def _uninstalled(rules: AdmissionRules) -> str | None:
                 if not head or head not in SPECS:
                     continue
                 if not head_allowed(head, rules):
-                    return UNINSTALLED.format(verb=verb, command=head)
+                    return (
+                        f"{verb} rule names {head}, which the allow list "
+                        "never allows, so the rule can never fire"
+                    )
     return None
 
 
@@ -133,9 +121,11 @@ def _dead_ask(rules: AdmissionRules) -> str | None:
     for ask in rules.ask:
         for deny in rules.deny:
             if _shadowed(ask, deny):
-                return SHADOWED.format(
-                    ask=", ".join(ask.commands) or "*",
-                    deny=", ".join(deny.commands) or "*",
+                a = ", ".join(ask.commands) or "*"
+                d = ", ".join(deny.commands) or "*"
+                return (
+                    f"ask rule {a} can never fire: the deny rule {d} "
+                    "refuses the same commands and outranks it"
                 )
     return None
 
@@ -194,5 +184,6 @@ def check_cli_verbs(
                 if tokens[1] == "*" or tokens[1] in verbs[tokens[0]]:
                     continue
                 raise PolicyError(
-                    UNKNOWN_VERB.format(verb=verb, line=pattern, cli=tokens[0])
+                    f"{verb} rule names {pattern}, which the {tokens[0]} CLI "
+                    "has no verb for, so the rule can never fire"
                 )

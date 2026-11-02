@@ -1,8 +1,9 @@
 import { XMLParser } from 'fast-xml-parser'
 import { SyntaxValidator } from 'fast-xml-validator'
+import { isRecord } from '@struktoai/mirage-core/utils/records'
 import { CONTENT_LENGTH, LAST_MODIFIED, RESOURCE_TYPE } from './constants.ts'
 import { relativePath } from './target.ts'
-import type { Property, SearchEntry, SearchTarget, XmlRecord } from './types.ts'
+import type { Property, SearchEntry, SearchTarget, XmlElement } from './types.ts'
 
 export const parser = new XMLParser({
   ignoreAttributes: false,
@@ -11,11 +12,7 @@ export const parser = new XMLParser({
   trimValues: false,
 })
 
-function isRecord(value: unknown): value is XmlRecord {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function records(value: unknown): XmlRecord[] {
+export function records(value: unknown): XmlElement[] {
   if (Array.isArray(value)) return value.filter(isRecord)
   return isRecord(value) ? [value] : []
 }
@@ -25,12 +22,15 @@ function stringValue(value: unknown): string | null {
   return null
 }
 
-function successfulProperties(response: XmlRecord): XmlRecord[] {
-  const properties: XmlRecord[] = []
+export function successfulStatus(status: string): boolean {
+  return status.split(/\s+/)[1] === '200'
+}
+
+function successfulProperties(response: XmlElement): XmlElement[] {
+  const properties: XmlElement[] = []
   for (const propstat of records(response.propstat)) {
     const status = stringValue(propstat.status) ?? ''
-    const fields = status.split(/\s+/)
-    if (fields[1] === '200' && isRecord(propstat.prop)) properties.push(propstat.prop)
+    if (successfulStatus(status) && isRecord(propstat.prop)) properties.push(propstat.prop)
   }
   if (properties.length === 0) {
     throw new Error('Nextcloud Files Search result has no successful properties')
@@ -38,7 +38,7 @@ function successfulProperties(response: XmlRecord): XmlRecord[] {
   return properties
 }
 
-function findText(properties: XmlRecord[], field: Property): string | null {
+function findText(properties: XmlElement[], field: Property): string | null {
   for (const propertySet of properties) {
     const value = stringValue(propertySet[field.name])
     if (value !== null) return value
@@ -46,7 +46,7 @@ function findText(properties: XmlRecord[], field: Property): string | null {
   return null
 }
 
-function hasCollection(properties: XmlRecord[]): boolean {
+function hasCollection(properties: XmlElement[]): boolean {
   return properties.some((propertySet) => {
     const resourceType = propertySet[RESOURCE_TYPE.name]
     return isRecord(resourceType) && 'collection' in resourceType
@@ -64,7 +64,7 @@ function modifiedText(value: string | null): string | null {
   return new Date(milliseconds).toISOString().replace(/\.\d{3}Z$/, 'Z')
 }
 
-function contentLength(properties: XmlRecord[]): number | null {
+function contentLength(properties: XmlElement[]): number | null {
   const value = findText(properties, CONTENT_LENGTH)
   if (value === null) return null
   const size = Number(value)
@@ -72,7 +72,7 @@ function contentLength(properties: XmlRecord[]): number | null {
   return size
 }
 
-function parseResponse(response: XmlRecord, target: SearchTarget): SearchEntry {
+function parseResponse(response: XmlElement, target: SearchTarget): SearchEntry {
   const href = stringValue(response.href)
   if (href === null) throw new Error('Nextcloud Files Search result is missing href')
   const properties = successfulProperties(response)

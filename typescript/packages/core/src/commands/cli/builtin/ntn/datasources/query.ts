@@ -25,16 +25,15 @@ import type { CommandFnResult, Context } from '../../../../config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { Files } from '../../../../../workspace/files.ts'
 import {
-  asObject,
   firstText,
   notionTransport,
   parseJsonText,
   prettyJson,
   propertyCell,
-  strOf,
   usageError,
   type NtnAccessor,
 } from '../util.ts'
+import { asObject, stringOf } from '../../../../../utils/records.ts'
 import { compareCodePoints } from '../../../../../utils/sort.ts'
 
 const ENC = new TextEncoder()
@@ -95,7 +94,7 @@ async function resolveSource(
   const stubs: unknown[] = Array.isArray(database.data_sources) ? database.data_sources : []
   const head = stubs[0]
   if (head === undefined) throw new Error(`database ${ref} has no data sources`)
-  return getDataSource(transport, strOf(asObject(head), 'id'))
+  return getDataSource(transport, stringOf(asObject(head), 'id'))
 }
 
 // The query filter comes from --filter or --filter-file, and the file is read
@@ -141,7 +140,7 @@ export async function query(
 
   const transport = notionTransport(accessor, ctx.flags)
   const dataSource = await resolveSource(transport, ref)
-  const result = await queryDataSourcePage(transport, strOf(dataSource, 'id'), body)
+  const result = await queryDataSourcePage(transport, stringOf(dataSource, 'id'), body)
   if (fl.asBool('json')) return [prettyJson(result), new IOResult()]
 
   // Columns are the property names the returned rows actually carry, in
@@ -161,7 +160,7 @@ export async function query(
     const record = asObject(row)
     const props = asObject(record.properties)
     const cells = columns.map((name) => propertyCell(props[name]))
-    out += `${[strOf(record, 'id'), ...cells].join('\t')}\n`
+    out += `${[stringOf(record, 'id'), ...cells].join('\t')}\n`
   }
   const stdout = ENC.encode(out)
   const cursor = result.next_cursor

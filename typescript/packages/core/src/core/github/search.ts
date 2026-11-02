@@ -17,9 +17,55 @@ import { PathSpec } from '../../types.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../utils/filetype.ts'
 import { mountKey, mountPrefixOf, rawPathOf } from '../../utils/key_prefix.ts'
 import { lstripSlash, stripSlash } from '../../utils/slash.ts'
-import { type GitHubTransport, searchCode } from './client.ts'
-import { SCOPE_WARN } from './constants.ts'
+import type { GitHubTransport } from './client.ts'
+import { SCOPE_WARN, SEARCH_PAGE_SIZE } from './constants.ts'
 import { countScopeFiles, searchSafe, unsearchableKeys } from './pushdown.ts'
+
+export interface SearchResult {
+  path: string
+  sha: string
+}
+
+// The literal is sent verbatim, so the answer has to vouch for itself: an
+// item is kept only when its repository.full_name names this repository
+// (compared case-insensitively, as GitHub resolves `repo:`), and the answer is
+// complete only when incomplete_results is false and total_count is an
+// integer no larger than the rows returned. A missing or malformed field
+// counts against it, which costs a full scan and never a missed file.
+export async function searchCode(
+  transport: GitHubTransport,
+  owner: string,
+  repo: string,
+  query: string,
+  pathFilter?: string,
+) {
+  let q = `${query} repo:${owner}/${repo}`
+  if (pathFilter !== undefined && pathFilter !== '') q += ` path:${pathFilter}`
+  const data = (await transport.get(`/search/code`, {
+    q,
+    per_page: String(SEARCH_PAGE_SIZE),
+  })) as {
+    total_count?: unknown
+    incomplete_results?: unknown
+    items?: { path: string; sha: string; repository?: { full_name?: unknown } | null }[] | null
+  }
+  const items = data.items ?? []
+  const total = data.total_count
+  const complete =
+    data.incomplete_results === false &&
+    typeof total === 'number' &&
+    Number.isInteger(total) &&
+    total <= items.length
+  const want = `${owner}/${repo}`.toLowerCase()
+  const results: SearchResult[] = []
+  for (const it of items) {
+    const name = it.repository?.full_name
+    if (typeof name === 'string' && name.toLowerCase() === want) {
+      results.push({ path: it.path, sha: it.sha })
+    }
+  }
+  return { results, truncated: !complete }
+}
 
 // Use GitHub code search to narrow grep/rg scopes to candidate files.
 // Returns null whenever the narrowed set cannot be trusted as a superset of

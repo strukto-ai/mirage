@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+DEFAULT_API_BASE_URL = "https://api.notion.com/v1"
 # 2025-09-03 is the generation that split databases into data sources: a
 # database became a container of data sources and the column schema moved to
 # the data source, so `/databases/{id}` no longer answers with `properties` and

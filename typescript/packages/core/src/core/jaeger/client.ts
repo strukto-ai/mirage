@@ -41,18 +41,6 @@ export interface JaegerTransport {
   request(path: string, query?: Record<string, string | number | undefined>): Promise<unknown>
 }
 
-function errorMessage(body: unknown, status: number): string {
-  if (body !== null && typeof body === 'object') {
-    const errors = (body as Record<string, unknown>).errors
-    if (Array.isArray(errors) && errors.length > 0) {
-      const first = errors[0] as Record<string, unknown> | undefined
-      const msg = first?.msg
-      if (typeof msg === 'string' && msg !== '') return msg
-    }
-  }
-  return `Jaeger API error: HTTP ${String(status)}`
-}
-
 // The parse comes before the status check, so a non-JSON error body reports
 // as invalid JSON rather than a bare status, matching the old transport.
 function errorOf(response: Response, text: string): JaegerApiError {
@@ -63,7 +51,16 @@ function errorOf(response: Response, text: string): JaegerApiError {
     const msg = err instanceof Error ? err.message : String(err)
     return new JaegerApiError(`Jaeger API: invalid JSON: ${msg}`, response.status)
   }
-  return new JaegerApiError(errorMessage(body, response.status), response.status)
+  let message = `Jaeger API error: HTTP ${String(response.status)}`
+  if (body !== null && typeof body === 'object') {
+    const errors = (body as Record<string, unknown>).errors
+    if (Array.isArray(errors) && errors.length > 0) {
+      const first = errors[0] as Record<string, unknown> | undefined
+      const msg = first?.msg
+      if (typeof msg === 'string' && msg !== '') message = msg
+    }
+  }
+  return new JaegerApiError(message, response.status)
 }
 
 export class HttpJaegerTransport implements JaegerTransport {

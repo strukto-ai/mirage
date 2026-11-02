@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.gdrive import NATIVE_RESOURCE_TYPES
+from mirage.core.gdrive.fingerprint import NATIVE_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import live_row
 from mirage.core.gdrive.resolve import eacces_on_denied
 from mirage.core.gdrive.write import write

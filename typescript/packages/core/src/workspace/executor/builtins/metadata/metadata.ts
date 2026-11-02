@@ -179,6 +179,31 @@ export async function setattrLink(
   await dispatch('setattr', path, [], { ...(fields as Record<string, unknown>), nofollow: true })
 }
 
+/**
+ * Follow symlinks for one operand, collecting the ELOOP error. `action`
+ * words the step that failed (`cannot access`, `cannot touch`, `setting
+ * times of`). Mirrors Python's follow_operand.
+ */
+export function followOperand(
+  links: NamespaceLinks,
+  cmd: string,
+  action: string,
+  target: PathSpec,
+  errors: string[],
+): PathSpec | null {
+  let virtual: string
+  try {
+    virtual = links.follow(target.virtual)
+  } catch (err) {
+    if (err instanceof CycleError) {
+      errors.push(`${cmd}: ${action} '${target.rawPath}': Too many levels of symbolic links\n`)
+      return null
+    }
+    throw err
+  }
+  return PathSpec.fromStrPath(virtual)
+}
+
 // A subtree as [path, stat] pairs, parents before children. Each entry's
 // stat is captured during the walk because chmod's symbolic clauses (u+x)
 // build on the entry's own current mode. Symlinks are skipped by name:
@@ -209,17 +234,8 @@ export async function resolveOperand(
     )
     return null
   }
-  let virtual: string
-  try {
-    virtual = links.follow(target.virtual)
-  } catch (err) {
-    if (err instanceof CycleError) {
-      errors.push(`${cmd}: cannot access '${target.rawPath}': Too many levels of symbolic links\n`)
-      return null
-    }
-    throw err
-  }
-  const resolved = PathSpec.fromStrPath(virtual)
+  const resolved = followOperand(links, cmd, 'cannot access', target, errors)
+  if (resolved === null) return null
   try {
     const [result] = await dispatch('stat', resolved)
     return [resolved, result as FileStat]

@@ -73,11 +73,6 @@ async function blobData(repo: Repo, oid: string | null): Promise<Uint8Array> {
   }
 }
 
-function hasNul(data: Uint8Array): boolean {
-  const window = data.subarray(0, BINARY_SNIFF)
-  return window.includes(0)
-}
-
 /** Line insertions and deletions between two text blobs. */
 function countLines(oldData: Uint8Array, newData: Uint8Array): [number, number] {
   const split = (data: Uint8Array): string[] => {
@@ -113,7 +108,8 @@ export async function diffstat(
     if (old?.oid === now?.oid && old?.mode === now?.mode) continue
     const oldData = await blobData(repo, old?.oid ?? null)
     const newData = await blobData(repo, now?.oid ?? null)
-    const binary = hasNul(oldData) || hasNul(newData)
+    const binary =
+      oldData.subarray(0, BINARY_SNIFF).includes(0) || newData.subarray(0, BINARY_SNIFF).includes(0)
     let insertions = 0
     let deletions = 0
     if (!binary && old?.oid !== now?.oid) {

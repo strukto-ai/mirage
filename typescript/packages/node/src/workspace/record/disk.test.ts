@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecordNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
-import { DiskRecordClient } from './disk.ts'
+import { DiskRecordClient, reclaimStaleLock } from './disk.ts'
 
 vi.mock('node:fs/promises', async (original) => {
   const real = await original<typeof fs>()
@@ -150,8 +150,7 @@ describe('DiskRecordClient lock reclaim and release', () => {
       }
       return real.open(...args)
     }) as typeof fs.open)
-    const reclaim = client as unknown as { reclaimStaleLock(path: string): Promise<boolean> }
-    expect(await reclaim.reclaimStaleLock(lock)).toBe(false)
+    expect(await reclaimStaleLock(lock)).toBe(false)
     expect(readdirSync(root)).toEqual(['k.json.lock'])
   })
 

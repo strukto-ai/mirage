@@ -21,8 +21,6 @@ import { checkMemory, memoryRoom } from './memory.ts'
 import { type ByteSource, DeviceInput, type PipeEnd, PipeStream } from './types.ts'
 import type { PathSpec } from '../types.ts'
 
-const NEWLINE = 0x0a
-
 /**
  * The read end an `exec` keeps on a live pipe (`exec 3<"$1"`). It holds the
  * pipe, not the name it was opened by. Each read takes a stream of its own
@@ -101,7 +99,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     return { done: false, value: line }
   }
 
-  async readline(signal?: AbortSignal, eol = NEWLINE): Promise<Uint8Array | null> {
+  async readline(signal?: AbortSignal, eol = 0x0a): Promise<Uint8Array | null> {
     try {
       // A buffered line is handed out without a pull, so the signal is
       // checked here as well, on both sides of the yield.
@@ -281,7 +279,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
     signal?: AbortSignal,
   ): Promise<[Uint8Array<ArrayBuffer>, boolean]> {
     const [data, found] = await this.readDelimited(delim, signal)
-    return [copyOf(data), found]
+    return [new Uint8Array(data), found]
   }
 
   /**
@@ -297,7 +295,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         if (pending !== undefined) await pending
         const result = await this.pull(signal)
         if (result.done === true) this.exhausted = true
-        else this.buf = copyOf(result.value)
+        else this.buf = new Uint8Array(result.value)
       }
       return true
     } catch (error) {
@@ -374,10 +372,10 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           else this.buf = concat([this.buf, result.value])
           continue
         }
-        if (this.buf.byteLength === 0) return [copyOf(out), false]
+        if (this.buf.byteLength === 0) return [new Uint8Array(out), false]
         if (delim !== null && this.buf[0] === delim) {
           this.buf = this.buf.subarray(1)
-          return [copyOf(out), true]
+          return [new Uint8Array(out), true]
         }
         const width = charWidth(this.buf)
         if (room !== null && out.byteLength + width > room) throw new MemoryExhausted()
@@ -385,7 +383,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         this.buf = this.buf.subarray(width)
         taken++
       }
-      return [copyOf(out), true]
+      return [new Uint8Array(out), true]
     } catch (error) {
       await this.failed(error, [out])
       throw error
@@ -486,12 +484,6 @@ export function charWidth(data: Uint8Array): number {
     if (byte < 0x80 || byte >= 0xc0) return i
   }
   return limit
-}
-
-function copyOf(buf: Uint8Array): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(buf.byteLength)
-  out.set(buf, 0)
-  return out
 }
 
 /** Close unreferenced cursors once, preserving duplicate descriptors. */

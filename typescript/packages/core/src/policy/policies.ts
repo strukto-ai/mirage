@@ -60,6 +60,7 @@ import {
   type NetworkContext,
   type NetworkResultContext,
   type Pending,
+  type PolicyMethod,
   type Route,
   type SessionContext,
   type SessionResultContext,
@@ -69,7 +70,15 @@ import {
   type WorkspaceContext,
 } from './types.ts'
 
-type Method = keyof typeof VALIDITY
+type MethodContext =
+  | CommandContext
+  | RouteContext
+  | VfsContext
+  | VfsResultContext
+  | ExecuteResultContext
+  | SessionContext
+  | WorkspaceContext
+  | NetworkContext
 
 /**
  * The command plane's rendering of a refusal: stderr and exit code. The
@@ -691,7 +700,7 @@ export class Policies {
   private readonly policies: Policy[]
   private readonly mode: Policy = new MountModePolicy()
   private placement: Policy | null = null
-  private wanted: ReadonlySet<Method> = new Set()
+  private wanted: ReadonlySet<PolicyMethod> = new Set()
   decisions: Decisions = new Decisions()
   views:
     | ((
@@ -722,7 +731,7 @@ export class Policies {
    * True when any policy defines `method`. O(1); the op seam gates on it
    * so a workspace with no op policies pays nothing per VFS op.
    */
-  wants(method: Method): boolean {
+  wants(method: PolicyMethod): boolean {
     return this.wanted.has(method)
   }
 
@@ -736,7 +745,7 @@ export class Policies {
    * every session's. `codedOnly` leaves the profile's rules out, for a
    * caller whose line's gate already answers for them.
    */
-  async wantsFor(method: Method, sessionId: string, codedOnly = false): Promise<boolean> {
+  async wantsFor(method: PolicyMethod, sessionId: string, codedOnly = false): Promise<boolean> {
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
     for (const policy of policies.filter((p) => !(codedOnly && p instanceof PermissionsPolicy))) {
       if (policy[method] === undefined) continue
@@ -747,9 +756,9 @@ export class Policies {
   }
 
   private rescan(): void {
-    const wanted = new Set<Method>()
+    const wanted = new Set<PolicyMethod>()
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
-    for (const method of Object.keys(VALIDITY) as Method[]) {
+    for (const method of Object.keys(VALIDITY) as PolicyMethod[]) {
       if (policies.some((p) => p[method] !== undefined)) wanted.add(method)
     }
     this.wanted = wanted
@@ -775,16 +784,8 @@ export class Policies {
   }
 
   private async evaluate(
-    method: Method,
-    ctx:
-      | CommandContext
-      | RouteContext
-      | VfsContext
-      | VfsResultContext
-      | ExecuteResultContext
-      | SessionContext
-      | WorkspaceContext
-      | NetworkContext,
+    method: PolicyMethod,
+    ctx: MethodContext,
     every: boolean,
     placed = false,
     rulesOnly = false,
@@ -889,16 +890,8 @@ export class Policies {
   }
 
   private async fire(
-    method: Method,
-    ctx:
-      | CommandContext
-      | RouteContext
-      | VfsContext
-      | VfsResultContext
-      | ExecuteResultContext
-      | SessionContext
-      | WorkspaceContext
-      | NetworkContext,
+    method: PolicyMethod,
+    ctx: MethodContext,
     placed = false,
     rulesOnly = false,
   ): Promise<[Deny | Ask | null, Limit | null, Route | null]> {
@@ -918,16 +911,8 @@ export class Policies {
    * `chain` takes it. Mirrors the Python `answers`.
    */
   async answers(
-    method: Method,
-    ctx:
-      | CommandContext
-      | RouteContext
-      | VfsContext
-      | VfsResultContext
-      | ExecuteResultContext
-      | SessionContext
-      | WorkspaceContext
-      | NetworkContext,
+    method: PolicyMethod,
+    ctx: MethodContext,
     every = true,
     rulesOnly = false,
   ): Promise<(Deny | Ask | Route)[]> {

@@ -90,10 +90,6 @@ export interface Haystack {
   resolver: LinkResolver | null
 }
 
-function errorText(err: unknown): string {
-  return fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
-}
-
 /**
  * An OS error the way ripgrep's Rust `io::Error` displays it: the strerror,
  * then the Linux errno it came from (`No such file or directory (os error
@@ -101,7 +97,7 @@ function errorText(err: unknown): string {
  * Mirrors Python's os_error_text.
  */
 export function osErrorText(err: unknown): string {
-  const text = errorText(err)
+  const text = fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
   const condition = classify(err)
   return condition === null ? text : `${text} (os error ${String(posixErrno(condition))})`
 }

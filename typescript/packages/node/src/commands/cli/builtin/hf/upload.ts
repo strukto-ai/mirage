@@ -43,10 +43,6 @@ import { refuseVariadic } from './download.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 
-async function isDir(vfs: Files, path: PathSpec): Promise<boolean> {
-  return (await vfs.stat(path)).type === FileType.DIRECTORY
-}
-
 /**
  * Read workspace files as additions relative to the source.
  * Walk one level at a time so symlink targets outside `local` retain the
@@ -57,7 +53,7 @@ async function collect(
   vfs: Files,
   local: PathSpec,
 ): Promise<{ rows: Addition[]; fromDir: boolean }> {
-  if (!(await isDir(vfs, local))) {
+  if ((await vfs.stat(local)).type !== FileType.DIRECTORY) {
     const data = await vfs.read(local)
     const name = rstripSlash(local.virtual)
     return {
@@ -74,7 +70,7 @@ async function collect(
       const child = current.join(entry)
       const leaf = rstripSlash(child.virtual)
       const name = `${prefix}${leaf.slice(leaf.lastIndexOf('/') + 1)}`
-      if (await isDir(vfs, child)) {
+      if ((await vfs.stat(child)).type === FileType.DIRECTORY) {
         pending.push([child, `${name}/`])
         continue
       }

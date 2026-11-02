@@ -49,6 +49,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     visible_entries,
 )
 from mirage.commands.cli.builtin.git.session import opened
+from mirage.commands.cli.builtin.git.tree import Tree
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
@@ -61,8 +62,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.workspace.files import Files
-
-Tree = dict[bytes, tuple[int, bytes]]
 
 
 @dataclass(frozen=True, slots=True)

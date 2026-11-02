@@ -135,10 +135,5 @@ async def resolve_newer_refs(
         # A reference with no reported mtime is never "older" than
         # anything: the epoch bound admits every dated entry, which is
         # the most a backend without times can honestly say.
-        times.append(_modified_or_epoch(stat.modified))
+        times.append(iso_timestamp(stat.modified) or 0.0)
     return times, None
-
-
-def _modified_or_epoch(modified: str | None) -> float:
-    ts = iso_timestamp(modified)
-    return ts if ts is not None else 0.0

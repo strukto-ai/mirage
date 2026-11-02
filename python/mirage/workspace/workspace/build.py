@@ -13,17 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass
-from typing import Any
 
 from mirage.observe.store import ObserverStore
-from mirage.runtime.base import Runtime
-from mirage.runtime.binding import WorkspaceBinding
 from mirage.shell.job_table.store import JobStore
-from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
-from mirage.workspace.workspace.routing import Router
-from mirage.workspace.workspace.runtimes import Runtimes
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,27 +75,3 @@ def resolve_control_stores(
         sessions=session_store,
         jobs=state_store.jobs(workspace_id),
     )
-
-
-def wire_runtime_world(
-    registry: MountRegistry,
-    binding: WorkspaceBinding,
-    entries: list[Runtime[Any] | str] | None,
-) -> tuple[Runtimes, Router]:
-    """Build the ordered runtime world and its route-policy router.
-
-    Instances and the workspace marker; the first capturer binds each
-    command. An explicit list fails loud per entry; the default world
-    builds gracefully (a missing extra leaves the command reporting
-    its install hint per invocation, never a silent escalation to
-    another runtime).
-
-    Args:
-        registry (MountRegistry): mount table the bindings install on.
-        binding (WorkspaceBinding): workspace services for runtime adapters.
-        entries (list[Runtime | str] | None): explicit runtime world;
-            None builds the default.
-    """
-    runtimes = Runtimes(registry, binding)
-    runtimes.resolve(entries)
-    return runtimes, Router(registry, runtimes)

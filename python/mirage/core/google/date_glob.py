@@ -12,13 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import date
-
 from mirage.utils.glob_walk import glob_span
-
-
-def _iso(d: date) -> str:
-    return d.strftime("%Y-%m-%dT00:00:00Z")
 
 
 def glob_to_modified_range(pattern: str | None) -> tuple[str, str] | None:
@@ -38,4 +32,5 @@ def glob_to_modified_range(pattern: str | None) -> tuple[str, str] | None:
     span = glob_span(pattern)
     if span is None:
         return None
-    return _iso(span[0]), _iso(span[1])
+    start, end = span
+    return f"{start:%Y-%m-%d}T00:00:00Z", f"{end:%Y-%m-%d}T00:00:00Z"

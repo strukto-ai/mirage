@@ -167,10 +167,6 @@ def parse_flags(
         raise UsageError(exc.message, 1) from exc
 
 
-def _operand_word(path: PathSpec) -> str:
-    return path.raw_path
-
-
 async def join(
     paths: list[PathSpec],
     *,
@@ -190,7 +186,7 @@ async def join(
     """
     if len(paths) <= max(flags.files):
         raise missing_operand_error(
-            CommandName.JOIN, _operand_word(paths[-1]) if paths else None
+            CommandName.JOIN, paths[-1].raw_path if paths else None
         )
     file1, file2 = (paths[index] for index in flags.files)
     if file1.raw_path == "-" and file2.raw_path == "-":
@@ -199,7 +195,7 @@ async def join(
         )
     read = stdin_stream(read_stream, stdin)
     readers = (AsyncLineIterator(read(file1)), AsyncLineIterator(read(file2)))
-    names = (_operand_word(file1), _operand_word(file2))
+    names = (file1.raw_path, file2.raw_path)
     stream = engine or open_stream(
         "join",
         {
@@ -345,14 +341,12 @@ async def join_generic(
     resolved = [path for group in groups for path in group]
     flags = spread_operands(
         ctx.flags,
-        [[_operand_word(path) for path in group] for group in groups],
+        [[path.raw_path for path in group] for group in groups],
     )
     try:
         engine = open_stream(
             "join",
-            _options(
-                flags, [_operand_word(path) for path in resolved], ctx.argv
-            ),
+            _options(flags, [path.raw_path for path in resolved], ctx.argv),
         )
     except StreamRefusal as exc:
         raise UsageError(exc.message, 1) from exc

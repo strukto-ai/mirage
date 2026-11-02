@@ -33,8 +33,6 @@ from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
-_OPTIONS = "pvV"
-
 
 def _probe(
     mode: str,
@@ -118,7 +116,7 @@ async def handle_command_builtin(
         call_stack (CallStack | None): the caller's frames; None runs
             the target as a line of its own.
     """
-    scan = scan_options(args, _OPTIONS)
+    scan = scan_options(args, "pvV")
     if scan.bad is not None:
         return result(
             "command",

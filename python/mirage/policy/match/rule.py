@@ -115,6 +115,10 @@ def _grant_indices(
     ]
 
 
+def _rule_at(rules: AdmissionRules, index: int) -> CommandRule:
+    return (*rules.deny, *rules.ask)[index]
+
+
 def io_refusal(
     rules: AdmissionRules | None,
     tokens: Sequence[str],
@@ -153,7 +157,7 @@ def io_refusal(
         path=units(virtual),
         granted=_grant_indices(rules, granted),
     )
-    return None if result is None else (*rules.deny, *rules.ask)[result].reason
+    return None if result is None else _rule_at(rules, result).reason
 
 
 def posix_level(rule: CommandRule) -> bool:
@@ -234,4 +238,4 @@ def op_ruling(
     if result is None:
         return None
     index, asks = result
-    return (*rules.deny, *rules.ask)[index], asks
+    return _rule_at(rules, index), asks

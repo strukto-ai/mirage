@@ -55,8 +55,6 @@ import { unlink as diskUnlink } from '../../core/disk/unlink.ts'
 import { openRegular, readEntries, resolveInside } from '../../core/disk/utils.ts'
 import { write as diskWrite } from '../../core/disk/write.ts'
 
-const isMountedOp = (a: DiskAccessor) => a.root !== ''
-
 export interface DiskVFSOptions {
   root: string
   // Store each listing at its folder's version. Folder versions assume a
@@ -283,7 +281,7 @@ export class DiskVFS extends BaseVFS {
   }
 
   override isMounted(): boolean {
-    return isMountedOp(this.accessor)
+    return this.accessor.root !== ''
   }
 
   override async getState(): Promise<DiskVFSState> {

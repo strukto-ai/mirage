@@ -27,7 +27,7 @@ import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
 import type { PathSpec, Producer } from '../../../types.ts'
 import { errorVirtualPath, isFsError } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { ABORT_JOIN_MS, hasAborted, joinOrAbort, mergeSignals } from '../../../utils/abort.ts'
+import { ABORT_JOIN_MS, hasAborted, runCancellable, mergeSignals } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import {
@@ -49,7 +49,7 @@ import {
  * what the result already held. A reader that stops early stops the run,
  * which then exits 141, as SIGPIPE leaves a program, and keeps the stderr it
  * had written. A stopped run that does not end within the stop bound is left
- * running, as a stopped handler is (`joinOrAbort`). Mirrors Python's
+ * running, as a stopped handler is (`runCancellable`). Mirrors Python's
  * `run_output`, whose cancel ends the run outright.
  *
  * @param run starts the run, given where it writes stdout, where it writes
@@ -125,7 +125,7 @@ export function runOutput(
         stop.abort()
       }
       if (task !== undefined) {
-        await joinOrAbort(task, stop.signal, grace).catch((error: unknown) => {
+        await runCancellable(task, stop.signal, grace).catch((error: unknown) => {
           if (stopped || error instanceof PipeClosed) return
           console.debug(`runtime output ended: ${String(error)}`)
         })

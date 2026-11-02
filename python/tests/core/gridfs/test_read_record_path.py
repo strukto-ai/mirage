@@ -58,7 +58,7 @@ def _accessor():
 
 
 def _patch(monkeypatch, fn) -> None:
-    monkeypatch.setitem(fn.__globals__, "latest_file", _latest_file)
+    monkeypatch.setitem(read.__globals__, "latest_file", _latest_file)
     monkeypatch.setitem(
         fn.__globals__, "bucket", lambda _a, _c=None: _Bucket()
     )

@@ -3,7 +3,7 @@ import { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { sedGeneric } from '../../sed.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { crossOpts, fileStreamOp, flatten } from '../utils.ts'
+import { crossOpts, fileStreamOp, flatScopes } from '../utils.ts'
 import { Files } from '../../../../../workspace/files.ts'
 
 /**
@@ -24,7 +24,7 @@ export async function runSed(
 ): Promise<CrossResult> {
   return (
     (await sedGeneric(
-      flatten(scopes),
+      flatScopes(scopes),
       texts,
       {
         ...crossOpts(bag),

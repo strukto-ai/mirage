@@ -342,6 +342,25 @@ def refuse_variadic(names: list[str], flag: str, patterns: list[str]) -> None:
     )
 
 
+async def _listed_or_empty(accessor: HfHubAccessor) -> dict[str, TreeEntry]:
+    """The repo's listing, or an empty one when the Hub refused to show it.
+
+    A refused walk names the same three absences an empty one does, and
+    refuse_absent asks the Hub which it was, in upstream's own words.
+    Anything else is a real failure and propagates.
+
+    Args:
+        accessor (HfHubAccessor): the Hub handle for the repository.
+    """
+    try:
+        return await fetch_tree(accessor)
+    except HfHubError as exc:
+        if exc.status not in ABSENT_STATUSES:
+            raise
+        logger.debug("hf download tree refused: %s", exc)
+        return {}
+
+
 async def refuse_absent(accessor: HfHubAccessor, names: list[str]) -> None:
     """Report why nothing was selected, in the Hub's own terms.
 
@@ -430,16 +449,7 @@ async def download_cmd(
     if exclude:
         refuse_variadic(names, "--exclude", exclude)
     hub = hub_for(accessor, repo_id, repo_type_of(fl), fl.as_str("revision"))
-    try:
-        tree = await fetch_tree(hub)
-    except HfHubError as exc:
-        # A refused walk names the same three absences an empty one
-        # does; refuse_absent asks the Hub which it was, in upstream's
-        # own words. Anything else is a real failure and propagates.
-        if exc.status not in ABSENT_STATUSES:
-            raise
-        logger.debug("hf download tree refused: %s", exc)
-        tree = {}
+    tree = await _listed_or_empty(hub)
     wanted = selected(tree, names, include, exclude)
     if not wanted:
         await refuse_absent(hub, names)

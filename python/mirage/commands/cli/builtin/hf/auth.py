@@ -19,11 +19,9 @@ from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.cli.builtin.hf.accessor import require_token, text_out
 from mirage.commands.config import Context
 from mirage.core.hf_hub.account import whoami
+from mirage.core.hf_hub.constants import API_BASE
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
-
-# The origin upstream treats as "not a private endpoint".
-PUBLIC_HUB = "https://huggingface.co"
 
 
 async def whoami_cmd(
@@ -60,7 +58,7 @@ async def whoami_cmd(
     # Upstream prints this whenever the endpoint is not huggingface.co, which
     # for every mirage install is always: the endpoint is the deployment's.
     endpoint = accessor.endpoint.rstrip("/")
-    if endpoint != PUBLIC_HUB:
+    if endpoint != API_BASE:
         lines.append(f"Authenticated through private endpoint: {endpoint}")
     return text_out("\n".join(lines) + "\n")
 

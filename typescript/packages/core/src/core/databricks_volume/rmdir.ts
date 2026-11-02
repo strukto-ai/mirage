@@ -16,7 +16,6 @@ import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.
 import { FileType, type PathSpec } from '../../types.ts'
 
 import { deleteDirectory, listDirectoryContents } from './client.ts'
-import { ensurePathSpec } from './_helpers.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
 import { holdsChild } from './rm.ts'
@@ -24,29 +23,28 @@ import { stat } from './stat.ts'
 import { enoent, enotdir, enotempty } from '../../errors/fs.ts'
 
 export async function rmdir(accessor: DatabricksVolumeAccessor, path: PathSpec): Promise<void> {
-  const p = ensurePathSpec(path)
-  const fileStat = await stat(accessor, p)
+  const fileStat = await stat(accessor, path)
   if (fileStat.type !== FileType.DIRECTORY) {
-    throw enotdir(p.virtual)
+    throw enotdir(path.virtual)
   }
-  const remotePath = backendPath(accessor.config, p)
+  const remotePath = backendPath(accessor.config, path)
   let entries
   try {
     entries = await listDirectoryContents(accessor, remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw enoent(p.virtual)
+    if (isNotFound(exc)) throw enoent(path.virtual)
     throw exc
   }
   if (entries.length > 0) {
-    throw enotempty(p.virtual)
+    throw enotempty(path.virtual)
   }
   try {
     await deleteDirectory(accessor, remotePath)
   } catch (exc) {
-    if (isNotFound(exc)) throw enoent(p.virtual)
+    if (isNotFound(exc)) throw enoent(path.virtual)
     // The Files API deletes only an empty directory, so a child written
     // after the listing refuses it.
-    if (await holdsChild(accessor, remotePath)) throw enotempty(p.virtual)
+    if (await holdsChild(accessor, remotePath)) throw enotempty(path.virtual)
     throw exc
   }
 }

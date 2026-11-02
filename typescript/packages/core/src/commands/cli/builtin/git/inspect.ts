@@ -407,6 +407,10 @@ function configKey(key: string): string {
     .join('.')
 }
 
+function inGitDir(start: string, location: RepoLocation): boolean {
+  return start === location.gitdir.virtual || start.startsWith(`${location.gitdir.virtual}/`)
+}
+
 /**
  * The answers rev-parse gives for the options that report where the line runs,
  * keyed by spelling. Pinned against git 2.47: `--git-dir` is `.git` at the top
@@ -416,11 +420,9 @@ function configKey(key: string): string {
  */
 async function placeAnswers(repo: Repo, start: string): Promise<Map<string, string>> {
   const location: RepoLocation = repo.location
-  const inGitDir =
-    start === location.gitdir.virtual || start.startsWith(`${location.gitdir.virtual}/`)
   const top = location.worktree.virtual === '/' ? '/' : `${location.worktree.virtual}/`
   const inWorkTree =
-    !inGitDir &&
+    !inGitDir(start, location) &&
     !(await isBare(repo.vfs, location)) &&
     (start === location.worktree.virtual || start.startsWith(top))
   const prefix =
@@ -533,12 +535,7 @@ export async function revParse(
     if (typeof mode === 'string') abbrevStrict(mode, true)
     repo = await opened(ctx, fl, toplevel)
     const start = startPoint(fl).virtual
-    if (
-      toplevel &&
-      (start === repo.location.gitdir.virtual ||
-        start.startsWith(`${repo.location.gitdir.virtual}/`))
-    )
-      throw new NotAWorkTreeError()
+    if (toplevel && inGitDir(start, repo.location)) throw new NotAWorkTreeError()
     const answers = await placeAnswers(repo, start)
     if (fl.asBool('is_shallow_repository')) {
       const shallow = await readOptional(repo.vfs, repo.location.commondir.join('shallow'))

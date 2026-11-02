@@ -19,10 +19,6 @@ import { RAMConsoleStore } from './ram.ts'
 import type { ConsoleStore } from './store.ts'
 import { decodeText, encodeText } from '../bytes.ts'
 
-function join(chunks: ConsoleChunk[]): Uint8Array {
-  return concat(chunks.map((c) => c.data))
-}
-
 /**
  * Everything one job has printed, readable from any position.
  *
@@ -171,9 +167,9 @@ export class JobConsole {
   async snapshot(channel: Channel | null = null): Promise<Uint8Array> {
     const [chunks] = await this.backing.readFrom(0)
     if (channel === null) {
-      return join(chunks.filter((c) => c.channel !== Channel.CONTROL))
+      return concat(chunks.filter((c) => c.channel !== Channel.CONTROL).map((c) => c.data))
     }
-    return join(chunks.filter((c) => c.channel === channel))
+    return concat(chunks.filter((c) => c.channel === channel).map((c) => c.data))
   }
 
   /** Release the underlying store. */

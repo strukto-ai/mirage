@@ -22,7 +22,6 @@ import {
   graphqlUrl,
   HttpGitHubTransport,
 } from './client.ts'
-import { searchCode } from './client.ts'
 import { fetchDirTree, fetchDirPage, fetchTree } from './tree.ts'
 
 interface Seen {
@@ -297,127 +296,6 @@ it.each([
   expect(new URL(SEEN[0]?.url ?? '').searchParams.get('q')).toBe(
     new URLSearchParams(`q=${query}`).get('q'),
   )
-})
-
-// Twin of the search_code tests in python/tests/core/github/test_search.py.
-describe('searchCode', () => {
-  type Item = Record<string, unknown>
-
-  function stub(
-    body: Record<string, unknown>,
-    seen: Record<string, string>[] = [],
-  ): GitHubTransport {
-    return {
-      get(_path: string, params?: Record<string, string>): Promise<unknown> {
-        seen.push(params ?? {})
-        return Promise.resolve(body)
-      },
-      request(): Promise<unknown> {
-        throw new Error('unexpected request')
-      },
-    }
-  }
-
-  function item(path: string, fullName: unknown): Item {
-    return { path, sha: path, repository: { full_name: fullName } }
-  }
-
-  function body(items: Item[], total?: unknown): Record<string, unknown> {
-    return { total_count: total ?? items.length, incomplete_results: false, items }
-  }
-
-  it('asks for the largest page', async () => {
-    // The default page is 30 rows, and a first page read as the whole
-    // answer silently narrows grep to 30 files.
-    const seen: Record<string, string>[] = []
-    await searchCode(stub(body([]), seen), 'acme', 'proj', 'needle')
-    expect(seen[0]?.per_page).toBe('100')
-  })
-
-  it('keeps only the mounted repository', async () => {
-    // The pattern is sent verbatim, so a qualifier inside it can rescope the
-    // search; a fork shares the repository name and a prefix is not a match.
-    const out = await searchCode(
-      stub(
-        body([
-          item('src/a.py', 'acme/proj'),
-          item('src/a.py', 'other/x'),
-          item('src/a.py', 'other/proj'),
-          item('src/a.py', 'acme/other'),
-          item('src/a.py', 'acme/proj-fork'),
-        ]),
-      ),
-      'acme',
-      'proj',
-      'needle',
-    )
-    expect(out.results).toEqual([{ path: 'src/a.py', sha: 'src/a.py' }])
-  })
-
-  it.each([
-    ['Acme/Proj', 'acme', 'proj'],
-    ['acme/proj', 'Acme', 'Proj'],
-  ])('compares %s with %s/%s case-insensitively', async (fullName, owner, repo) => {
-    const out = await searchCode(stub(body([item('src/a.py', fullName)])), owner, repo, 'needle')
-    expect(out.results.map((r) => r.path)).toEqual(['src/a.py'])
-  })
-
-  it.each<[string, Item]>([
-    ['no repository', { path: 'src/a.py', sha: 'x' }],
-    ['a null repository', { path: 'src/a.py', sha: 'x', repository: null }],
-    ['an empty repository', { path: 'src/a.py', sha: 'x', repository: {} }],
-    ['a null full_name', item('src/a.py', null)],
-    ['a numeric full_name', item('src/a.py', 123)],
-  ])('drops an item with %s, without throwing', async (_label, entry) => {
-    // Nothing vouches for such an item, and dropping it must not throw: a
-    // throw inside narrowPaths voids the whole narrowing.
-    const out = await searchCode(stub(body([entry])), 'acme', 'proj', 'needle')
-    expect(out.results).toEqual([])
-  })
-
-  it.each<[string, Record<string, unknown>, boolean]>([
-    ['a count equal to the rows', { total_count: 1, incomplete_results: false }, false],
-    ['a count below the rows', { total_count: 0, incomplete_results: false }, false],
-    ['a count above the rows', { total_count: 2, incomplete_results: false }, true],
-    ['incomplete results', { total_count: 1, incomplete_results: true }, true],
-    ['no count', { incomplete_results: false }, true],
-    ['a string count', { total_count: '1', incomplete_results: false }, true],
-    ['a boolean count', { total_count: true, incomplete_results: false }, true],
-    ['a fractional count', { total_count: 0.5, incomplete_results: false }, true],
-    ['no incomplete flag', { total_count: 1 }, true],
-  ])('reports %s as truncated=%s', async (_label, head, truncated) => {
-    // Only an answer that says it is complete, with a count no larger than
-    // the rows it carries, is the whole set; anything else is truncated.
-    const out = await searchCode(
-      stub({ ...head, items: [item('src/a.py', 'acme/proj')] }),
-      'acme',
-      'proj',
-      'needle',
-    )
-    expect(out.truncated).toBe(truncated)
-  })
-
-  it('reads null items as no rows', async () => {
-    const out = await searchCode(
-      stub({ total_count: 0, incomplete_results: false, items: null }),
-      'acme',
-      'proj',
-      'needle',
-    )
-    expect(out).toEqual({ results: [], truncated: false })
-  })
-
-  it('judges completeness before filtering', async () => {
-    // total_count counts every row the search matched, foreign ones too.
-    const out = await searchCode(
-      stub(body([item('src/a.py', 'acme/proj'), item('src/b.py', 'other/x')])),
-      'acme',
-      'proj',
-      'needle',
-    )
-    expect(out.results.map((r) => r.path)).toEqual(['src/a.py'])
-    expect(out.truncated).toBe(false)
-  })
 })
 
 describe('tree reference encoding', () => {

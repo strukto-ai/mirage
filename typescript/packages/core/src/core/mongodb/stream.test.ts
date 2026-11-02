@@ -19,7 +19,7 @@ import { mountKey } from '../../utils/key_prefix.ts'
 import { resolveMongoDBConfig } from '../../vfs/mongodb/config.ts'
 import { arrayIter, stubMongoDriver } from '../../../tests/core/mongodb/_test_util.ts'
 import { DBRef, Long } from 'bson'
-import { applyElision, follow, lastLines, lineCount, readStream, stringifyDoc } from './stream.ts'
+import { applyElision, follow, lastLines, lineCount, readStream, renderDoc } from './stream.ts'
 
 function docs(database: string, kind = 'collections', name = 'users'): PathSpec {
   const virtual = `/mongo/${database}/${kind}/${name}/documents.jsonl`
@@ -260,7 +260,7 @@ describe('mongodb read stand-ins', () => {
 
 describe('mongodb document rendering', () => {
   it('writes an Int64 past 2^53 with its exact digits', () => {
-    expect(stringifyDoc({ a: Long.fromString('9007199254740993'), b: Long.MIN_VALUE })).toBe(
+    expect(renderDoc({ a: Long.fromString('9007199254740993'), b: Long.MIN_VALUE })).toBe(
       '{"a": 9007199254740993, "b": -9223372036854775808}',
     )
   })
@@ -268,7 +268,7 @@ describe('mongodb document rendering', () => {
   it('writes the exact digits inside a DBRef and a document with a constructor field', () => {
     const id = Long.fromString('9007199254740993')
     expect(
-      stringifyDoc({
+      renderDoc({
         ref: new DBRef('authors', id as never, 'db', { note: id }),
         doc: { constructor: 'part', n: id },
       }),
@@ -280,13 +280,13 @@ describe('mongodb document rendering', () => {
 
   it('keeps a stored _bsontype field as an ordinary field', () => {
     expect(
-      stringifyDoc({ a: { _bsontype: 'DBRef', note: 'keep' }, b: { _bsontype: 'Long', n: 1 } }),
+      renderDoc({ a: { _bsontype: 'DBRef', note: 'keep' }, b: { _bsontype: 'Long', n: 1 } }),
     ).toBe('{"a": {"_bsontype": "DBRef", "note": "keep"}, "b": {"_bsontype": "Long", "n": 1}}')
   })
 
   it('writes a $date as ISO-8601 for years 1970 through 9999 only', () => {
     expect(
-      stringifyDoc({
+      renderDoc({
         a: new Date(0),
         b: new Date(253402300799999),
         c: new Date(253402300800000),

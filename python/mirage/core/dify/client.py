@@ -3,18 +3,7 @@ from typing import Any
 
 from mirage.accessor.dify import DifyAccessor
 from mirage.core.api.client import RetryPolicy, api_request, status_error
-from mirage.vfs.dify.config import DifyConfig
 from mirage.vfs.secrets import reveal_secret
-
-
-def _policy(config: DifyConfig) -> RetryPolicy:
-    return RetryPolicy(
-        statuses=frozenset({429}) | frozenset(range(500, 600)),
-        max_retries=config.retry_attempts - 1,
-        max_backoff=config.retry_max_delay,
-        delay_source="header",
-        retry_transport=True,
-    )
 
 
 async def dify_request(
@@ -36,7 +25,13 @@ async def dify_request(
             headers=headers,
             params=params,
             json_body=json_body,
-            retry=_policy(accessor.config),
+            retry=RetryPolicy(
+                statuses=frozenset({429}) | frozenset(range(500, 600)),
+                max_retries=accessor.config.retry_attempts - 1,
+                max_backoff=accessor.config.retry_max_delay,
+                delay_source="header",
+                retry_transport=True,
+            ),
             session=accessor.pool,
         )
     if not isinstance(payload, dict):

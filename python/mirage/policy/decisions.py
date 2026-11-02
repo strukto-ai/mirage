@@ -169,6 +169,18 @@ def ask_rule(
     return CommandRule(reason=ask.reason, commands=(ctx.line,))
 
 
+def _same_line(record: Decision, argv: tuple[str, ...], cwd: str) -> bool:
+    """Whether a record was asked for this line: the same words, name
+    first, in the same working directory.
+
+    Args:
+        record (Decision): the recorded question.
+        argv (tuple[str, ...]): the line's words, name first.
+        cwd (str): the session working directory.
+    """
+    return (record.command, *record.argv) == argv and record.cwd == cwd
+
+
 def covers(
     record: Decision, rule: CommandRule, argv: tuple[str, ...], cwd: str
 ) -> bool:
@@ -191,7 +203,7 @@ def covers(
         return False
     if record.scope is Scope.SESSION:
         return record.outcome is Outcome.ALLOW
-    return (record.command, *record.argv) == argv and record.cwd == cwd
+    return _same_line(record, argv, cwd)
 
 
 def lineage(handed: HandOff | None) -> tuple[HandOff, ...]:
@@ -981,8 +993,7 @@ class Decisions(DecisionOwner):
             if (
                 record.outcome is None
                 and record.rule == rule
-                and (record.command, *record.argv) == argv
-                and record.cwd == ctx.cwd
+                and _same_line(record, argv, ctx.cwd)
             ):
                 return record
         return None

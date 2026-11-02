@@ -106,3 +106,8 @@ def test_type_listing_sorts_names_and_globs():
     assert "py: *.py, *.pyi, *.zz" in listing
     assert listing == sorted(listing)
     assert listing[0] == "ada: *.adb, *.ads"
+
+
+def test_type_listing_sorts_by_code_point():
+    types = FileTypes([("add", "zz:*.\U0001f600"), ("add", "zz:*.\ue000")], [])
+    assert "zz: *.\ue000, *.\U0001f600" in type_listing(types.definitions)

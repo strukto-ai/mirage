@@ -30,8 +30,6 @@ STAT_REFUSALS = frozenset(
     {FsCondition.ENOTDIR, FsCondition.ELOOP, FsCondition.EACCES}
 )
 
-_SWALLOW = (FileNotFoundError, ValueError)
-
 
 def child_path(parent: PathSpec, name: str) -> PathSpec:
     return descendant_path(parent, parent.virtual.rstrip("/") + "/" + name)
@@ -133,7 +131,7 @@ async def path_exists(stat: StatFn, path: PathSpec) -> bool:
     # same command (duplicate basenames), which the cache does not reflect.
     try:
         await stat(path)
-    except _SWALLOW:
+    except (FileNotFoundError, ValueError):
         return False
     return True
 
@@ -141,6 +139,6 @@ async def path_exists(stat: StatFn, path: PathSpec) -> bool:
 async def is_directory(stat: StatFn, path: PathSpec) -> bool:
     try:
         info = await stat(path)
-    except _SWALLOW:
+    except (FileNotFoundError, ValueError):
         return False
     return info.type == FileType.DIRECTORY

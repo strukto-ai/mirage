@@ -18,7 +18,7 @@ import type { FlagValue } from '../../../../spec/types.ts'
 import { relayIsDirOf, relayWalkOf } from '../../../generic_bind/archive_io.ts'
 import { dispatchedReadTree } from '../../../generic_bind/files.ts'
 import { parseFlags, tarGeneric } from '../../tar/tar.ts'
-import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
+import { crossOpts, flatScopes, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import { Files } from '../../../../../workspace/files.ts'
 import { linkLocation, linkView, mountView, owedNames } from '../../../utils/links.ts'
@@ -59,7 +59,7 @@ export async function runTar(
   const created = parsed.archive !== null && parsed.create ? scopes : []
   const result = await tarGeneric(
     parsed,
-    flatten(created),
+    flatScopes(created),
     textArgs,
     {
       ...crossOpts(flagKwargs),

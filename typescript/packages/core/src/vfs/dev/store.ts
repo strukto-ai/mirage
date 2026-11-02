@@ -23,10 +23,6 @@ import type { RAMAttrs } from '../ram/store.ts'
 
 const DEV_NAMES = new Set(['null', 'zero'])
 
-function strip(key: string): string {
-  return stripSlash(key)
-}
-
 // Real backing store plus a synthetic /null, /zero overlay. The synthetic
 // device names read as empty/zeros and swallow writes until they are
 // deleted (GNU: `rm /dev/null` succeeds and the path is gone). A deleted
@@ -115,13 +111,13 @@ export class DevFiles extends PipeFiles {
   }
 
   deviceOf(key: string): string | null {
-    const name = strip(key)
+    const name = stripSlash(key)
     return this.syntheticActive(name) ? name : null
   }
 
   override has(key: string): boolean {
     if (key.startsWith('/fd/')) return this.visibleInputs().has(key)
-    return this.state.files.has(key) || this.syntheticActive(strip(key))
+    return this.state.files.has(key) || this.syntheticActive(stripSlash(key))
   }
 
   override get(key: string): Uint8Array | undefined {
@@ -130,7 +126,7 @@ export class DevFiles extends PipeFiles {
       return undefined
     }
     if (this.state.files.has(key)) return this.state.files.get(key)
-    const name = strip(key)
+    const name = stripSlash(key)
     if (this.syntheticActive(name)) return this.syntheticBytes(name)
     return undefined
   }
@@ -140,7 +136,7 @@ export class DevFiles extends PipeFiles {
       if (this.pipeOf(key) === null) throw enoent(`/dev${key}`)
       throw einval(`/dev${key}`)
     }
-    const name = strip(key)
+    const name = stripSlash(key)
     if (this.syntheticActive(name)) return this
     this.state.files.set(key, value)
     this.state.tombstones.delete(name)
@@ -152,7 +148,7 @@ export class DevFiles extends PipeFiles {
       if (this.pipeOf(key) === null) return false
       throw fsError(`/dev${key}`, 'EPERM')
     }
-    const name = strip(key)
+    const name = stripSlash(key)
     if (this.state.files.has(key)) {
       this.state.files.delete(key)
       if (DEV_NAMES.has(name)) this.state.tombstones.add(name)

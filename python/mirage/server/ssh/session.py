@@ -467,6 +467,17 @@ class ShellChannel:
         return status
 
 
+def _refuse(process: asyncssh.SSHServerProcess[str], message: str) -> None:
+    """Tell the client why its channel cannot run, and exit it 1.
+
+    Args:
+        process (asyncssh.SSHServerProcess[str]): the channel's process.
+        message (str): the reason, after ``mirage: ``.
+    """
+    process.stderr.write(f"mirage: {message}\n")
+    process.exit(1)
+
+
 async def open_login(
     registry: WorkspaceRegistry,
     process: asyncssh.SSHServerProcess[str],
@@ -493,8 +504,7 @@ async def open_login(
         registry, process.channel.get_connection(), workspace_id
     )
     if entry is None:
-        process.stderr.write(f"mirage: no such workspace: {workspace_id}\n")
-        process.exit(1)
+        _refuse(process, f"no such workspace: {workspace_id}")
         return None
     session_id = new_session_id()
     runner = entry.runner
@@ -513,13 +523,12 @@ async def open_login(
         logger.warning(
             "%s: cannot open a session on %s: %r", door, workspace_id, exc
         )
-        process.stderr.write(f"mirage: cannot open a session: {exc}\n")
-        process.exit(1)
+        _refuse(process, f"cannot open a session: {exc}")
         return None
     return entry, session_id
 
 
-async def handle_process(
+async def handle_channel(
     registry: WorkspaceRegistry, process: asyncssh.SSHServerProcess[str]
 ) -> None:
     """Serve one session channel: a command, or an interactive shell.
@@ -532,10 +541,7 @@ async def handle_process(
         process (asyncssh.SSHServerProcess[str]): the channel's process.
     """
     if process.subsystem is not None:
-        process.stderr.write(
-            f"mirage: unsupported subsystem: {process.subsystem}\n"
-        )
-        process.exit(1)
+        _refuse(process, f"unsupported subsystem: {process.subsystem}")
         return
     opened = await open_login(registry, process, "ssh")
     if opened is None:

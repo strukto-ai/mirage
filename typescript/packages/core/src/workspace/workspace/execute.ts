@@ -33,7 +33,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
 import { activeRecords, lostPaths, runWithRecording } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
-import type { OpRecord, RecordingState } from '../../observe/record.ts'
+import type { OpRecord, Recorder } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
 import { Terminal } from '../../shell/console/index.ts'
@@ -60,7 +60,7 @@ import {
   mergeSignals,
   abortable,
   ABORT_JOIN_MS,
-  joinOrAbort,
+  runCancellable,
   stopSignal,
 } from '../../utils/abort.ts'
 import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
@@ -193,7 +193,7 @@ async function answerLine(
 ): Promise<ExecuteResult> {
   recordStatus(session, result.exitCode)
   if (options.record !== false && command.replaceAll('\n', '') !== '') {
-    await joinOrAbort(
+    await runCancellable(
       env.observer.logResult(
         await shown(
           new IOResult({
@@ -255,7 +255,7 @@ export async function executeLine(
     // the tree.
     const sink = options.sink
     if (sink !== undefined) {
-      result = await joinOrAbort(drainToSink(sink, result), options.signal)
+      result = await runCancellable(drainToSink(sink, result), options.signal)
     }
     if (hasAborted(options.signal)) throw makeAbortError(options.signal)
     return result
@@ -395,10 +395,10 @@ async function runLine(
   try {
     // What reaches a streaming caller goes under the line's grace, as the
     // sink drain does: a stalled reader releases an aborted caller.
-    await joinOrAbort(tty.attach(options.sink ?? null), options.signal)
+    await runCancellable(tty.attach(options.sink ?? null), options.signal)
     result = await run()
     const answered = result
-    await joinOrAbort(
+    await runCancellable(
       tty
         .emit(Channel.STDOUT, answered.stdout)
         .then(() => tty.emit(Channel.STDERR, answered.stderr)),
@@ -490,7 +490,7 @@ async function runPreparedLine(
         try {
           // The line is recorded as it starts; how it ended follows it.
           if (recorded) {
-            await joinOrAbort(
+            await runCancellable(
               env.observer.logCommand(
                 command,
                 targetSession.sessionId,
@@ -855,7 +855,7 @@ async function runPreparedLine(
           // refused or failed preflight) ends it here, as Python's finally
           // ends every line; one already ended is left as it is.
           if (recorded) {
-            await joinOrAbort(
+            await runCancellable(
               env.observer.logResult(
                 new IOResult({
                   stdout: answered.stdout,
@@ -893,7 +893,7 @@ async function runPreparedLine(
     // every execute, success or failure, mirroring Python's finally. It
     // joins under the grace like the tree: a stalled store finishes in
     // the background instead of holding an aborted caller.
-    await joinOrAbort(env.sessions.flush(targetSession.sessionId), options.signal)
+    await runCancellable(env.sessions.flush(targetSession.sessionId), options.signal)
   }
 }
 
@@ -1062,7 +1062,7 @@ async function runParsedLine(
         held = isPending(refused.refusal)
         recordStatus(targetSession, refused.exitCode)
         if (isLine) {
-          await joinOrAbort(
+          await runCancellable(
             env.observer.logResult(
               await shown(
                 new IOResult({
@@ -1129,7 +1129,7 @@ async function runParsedLine(
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
       // failed or was aborted still happened.
-      const recording: RecordingState = {
+      const recording: Recorder = {
         records: [],
         mountId: null,
         ledger: env.records,
@@ -1139,7 +1139,7 @@ async function runParsedLine(
       // Joined like the tree's record: a stalled store releases the caller,
       // a fast one records before history is read.
       const logLine = async (io: IOResult): Promise<void> => {
-        await joinOrAbort(
+        await runCancellable(
           env.observer.logResult(
             await shown(io, options.sink),
             lineRecords,
@@ -1285,7 +1285,7 @@ async function runParsedLine(
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.
         const runner = currentCaller().process
-        const result = await joinOrAbort(
+        const result = await runCancellable(
           running,
           mergeSignals(killed, deadline?.expiry.signal),
           () =>
@@ -1354,7 +1354,10 @@ async function runParsedLine(
     else if (handed.parent !== null)
       env.registry.decisions.handUp(effectiveSession.sessionId, handed)
     else
-      await joinOrAbort(env.registry.decisions.revoke(effectiveSession.sessionId, handed), killed)
+      await runCancellable(
+        env.registry.decisions.revoke(effectiveSession.sessionId, handed),
+        killed,
+      )
   }
   const [[materialized, io], opRecords] = execResult
   const callerError =
@@ -1415,7 +1418,7 @@ async function runParsedLine(
     io.stderr = stderrBytes
     // Joined, not raced: a fast store still records the line before the
     // caller reads history, and a stalled one releases the caller.
-    await joinOrAbort(
+    await runCancellable(
       env.observer.logResult(
         await shown(io, options.sink),
         opRecords,
