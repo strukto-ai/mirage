@@ -27,6 +27,8 @@ export const WORKSPACE_CONFIG_CANDIDATES = [
   'mirage.yml',
 ]
 
+const DEFAULT_ENV_NAMES = ['MIRAGE_CONFIG']
+
 export interface WorkspaceConfigResolutionOptions {
   cwd?: string
   env?: Record<string, string | undefined>
@@ -46,7 +48,7 @@ export function resolveWorkspaceConfig(
   const env = options.env ?? process.env
   if (config !== undefined) return requireConfig(resolve(cwd, config))
 
-  for (const name of options.envNames ?? ['MIRAGE_CONFIG']) {
+  for (const name of options.envNames ?? DEFAULT_ENV_NAMES) {
     const value = env[name]
     if (value !== undefined) return requireConfig(resolve(cwd, value))
   }
@@ -60,7 +62,7 @@ export function resolveWorkspaceConfig(
     const parent = dirname(dir)
     dir = parent === dir ? undefined : parent
   }
-  const envNames = options.envNames ?? ['MIRAGE_CONFIG']
+  const envNames = options.envNames ?? DEFAULT_ENV_NAMES
   throw new Error(
     `No Mirage workspace config found. Pass a config path or set ${envNames.join(' or ')}.`,
   )

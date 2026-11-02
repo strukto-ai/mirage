@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock
 
 import boto3
 import pytest
-from botocore.exceptions import ClientError
 from moto.server import ThreadedMotoServer
 
 from mirage.accessor.ram import RAMAccessor
@@ -500,11 +499,7 @@ def moto_bucket() -> Iterator[tuple[str, str]]:
 @pytest.mark.parametrize(
     ("cls", "unenforced"), [(S3VFS, frozenset()), (AwsS3, UNENFORCED_COPY)]
 )
-async def test_s3_fails_the_mutation_contract_only_at_no_such_key(
-    cls, unenforced, moto_bucket
-):
-    """Every case passes up to a copy of a missing source: s3 raises
-    NoSuchKey there, not FileNotFoundError. Fixing that fails this test."""
+async def test_s3_meets_the_mutation_contract(cls, unenforced, moto_bucket):
     endpoint, bucket = moto_bucket
     vfs = cls(
         S3Config(
@@ -516,11 +511,9 @@ async def test_s3_fails_the_mutation_contract_only_at_no_such_key(
         )
     )
     try:
-        with pytest.raises(ClientError) as raised:
-            await check_mutation_contract(vfs, SCRATCH, unenforced=unenforced)
+        await check_mutation_contract(vfs, SCRATCH, unenforced=unenforced)
     finally:
         await vfs.close()
-    assert raised.value.response["Error"]["Code"] == "NoSuchKey"
 
 
 @pytest.mark.asyncio

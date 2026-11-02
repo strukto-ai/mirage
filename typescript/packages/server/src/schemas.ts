@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { OverrideShape } from './clone.ts'
 
 export interface MountSummary {
@@ -61,6 +62,8 @@ export interface CloneWorkspaceRequest {
   id?: string
   override?: OverrideShape
 }
+
+export const SnapshotWorkspaceRequest = z.object({ key: z.string() }).strict()
 
 export interface LoadWorkspaceRequest {
   key?: string

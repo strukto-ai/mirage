@@ -28,10 +28,6 @@ def _random_suffix(ids: IdSource, length: int) -> str:
     )
 
 
-def _typed(value: PathSpec | None) -> str:
-    return value.raw_path if value is not None else ""
-
-
 def plan_template(
     template: str | None,
     suffix: str | None,
@@ -159,7 +155,7 @@ async def mktemp(
     """
     if len(texts) > 1:
         raise extra_operand_error(CommandName.MKTEMP, texts[1])
-    dest_dir = _typed(p)
+    dest_dir = p.raw_path if p is not None else ""
     use_dest_dir = use_dest_dir or p is not None
     template, x_count, suffix_len = plan_template(
         texts[0] if texts else None,

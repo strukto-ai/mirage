@@ -21,10 +21,6 @@ import {
   records,
 } from '../../utils/records.ts'
 
-function nodesOf(value: unknown): JsonObject[] {
-  return records(asObject(value).nodes)
-}
-
 interface NormalizedTeamState {
   state_id: string | null
   state_name: string | null
@@ -33,7 +29,7 @@ interface NormalizedTeamState {
 
 export function normalizeTeam(team: JsonObject) {
   const states: NormalizedTeamState[] = []
-  for (const state of nodesOf(team.states)) {
+  for (const state of records(asObject(team.states).nodes)) {
     states.push({
       state_id: pickString(state, 'id'),
       state_name: pickString(state, 'name'),
@@ -72,7 +68,7 @@ export function normalizeIssue(issue: JsonObject) {
   const cycle = asObject(issue.cycle)
   const assignee = asObject(issue.assignee)
   const creator = asObject(issue.creator)
-  const labels = nodesOf(issue.labels)
+  const labels = records(asObject(issue.labels).nodes)
   return {
     issue_id: pickString(issue, 'id'),
     issue_key: pickString(issue, 'identifier'),
@@ -123,7 +119,7 @@ export interface NormalizeProjectContext {
   teamId: string
   teamKey: string | null
   teamName: string | null
-  issues: ReturnType<typeof buildProjectIssue>[]
+  issues: ReturnType<typeof projectIssueRows>
 }
 
 export function normalizeProject(project: JsonObject, ctx: NormalizeProjectContext) {
@@ -183,16 +179,20 @@ export function normalizeDocument(document: JsonObject) {
   }
 }
 
-export function buildProjectIssue(issue: JsonObject) {
-  const state = asObject(issue.state)
-  return {
-    issue_id: pickString(issue, 'id'),
-    issue_key: pickString(issue, 'identifier'),
-    title: pickString(issue, 'title'),
-    state_id: pickString(state, 'id'),
-    state_name: pickString(state, 'name'),
-    url: pickString(issue, 'url'),
-  }
+export function projectIssueRows(issues: readonly JsonObject[], projectId: string | null) {
+  return issues
+    .filter((issue) => pickString(asObject(issue.project), 'id') === projectId)
+    .map((issue) => {
+      const state = asObject(issue.state)
+      return {
+        issue_id: pickString(issue, 'id'),
+        issue_key: pickString(issue, 'identifier'),
+        title: pickString(issue, 'title'),
+        state_id: pickString(state, 'id'),
+        state_name: pickString(state, 'name'),
+        url: pickString(issue, 'url'),
+      }
+    })
 }
 
 // The fields of an issue's JSON Linear's issue search reads; every other field

@@ -33,6 +33,7 @@ from mirage.runtime.types import (
     DispatchFn,
     RouteDecision,
     RuntimeIdentity,
+    ShellFn,
 )
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
@@ -167,21 +168,20 @@ def scalar_find_flags(
     }
 
 
-async def run_nested_line(
-    execute_fn: ExecuteLine,
-    session_id: str,
-    line: str,
-    stdin: ByteSource | None = None,
-) -> IOResult:
-    """Run a line a command handler asked for, in the handler's session.
+def nested_shell(execute_fn: ExecuteLine, session_id: str) -> ShellFn:
+    """The entry point a command handler runs a nested line through
+    (``ctx.shell``): a line it asks for runs in the handler's session,
+    reading the input it is handed, None for the ambient one.
 
     Args:
         execute_fn (ExecuteLine): runs a line in a session.
         session_id (str): the session the calling command runs under.
-        line (str): the line.
-        stdin (ByteSource | None): its input, None for the ambient one.
     """
-    return await execute_fn(line, session_id=session_id, stdin=stdin)
+
+    async def shell(line: str, stdin: ByteSource | None = None) -> IOResult:
+        return await execute_fn(line, session_id=session_id, stdin=stdin)
+
+    return shell
 
 
 async def run_on_mount(
@@ -304,9 +304,7 @@ async def run_on_mount(
                     ),
                 ),
                 shell=(
-                    functools.partial(
-                        run_nested_line, execute_fn, session.session_id
-                    )
+                    nested_shell(execute_fn, session.session_id)
                     if execute_fn is not None
                     else None
                 ),

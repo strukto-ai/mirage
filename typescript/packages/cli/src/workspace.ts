@@ -24,7 +24,7 @@ import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
 // exactly as `create` rebases them, so `vfs: ./wiki.mjs:WikiVFS`
 // in an override means "next to this file", never "wherever the daemon
 // runs". Not validated, because an override may name only a subset of
-// mounts. Mirrors `_resolve_config_arg` in the Python CLI, which is sync:
+// mounts. Mirrors `_load_config_argument` in the Python CLI, which is sync:
 // this half is async only because it defers `mirage-node/config` and
 // `yaml` so a `mirage` spawn that never loads a config pays neither. The
 // behaviour is the same; the divergence is the `await`, and it is the

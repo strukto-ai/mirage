@@ -35,9 +35,6 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
 from mirage.types import JsonValue, PathSpec
 
-INT_RE = re.compile(r"^-?\d+$")
-KEY_RE = re.compile(r"^([^\[\]]+)((?:\[[^\[\]]*\])*)$")
-
 
 class _EmptyArray:
     pass
@@ -82,7 +79,7 @@ def typed(value: str) -> JsonValue:
         return False
     if value == "null":
         return None
-    if INT_RE.match(value):
+    if re.match(r"^-?\d+$", value):
         return int(value)
     return value
 
@@ -100,7 +97,7 @@ def split(
 
 
 def _key_parts(key: str) -> list[str | None]:
-    match = KEY_RE.fullmatch(key)
+    match = re.fullmatch(r"^([^\[\]]+)((?:\[[^\[\]]*\])*)$", key)
     if match is None:
         raise ValueError(f'invalid field key: "{key}"')
     parts: list[str | None] = [match.group(1)]

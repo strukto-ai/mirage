@@ -59,7 +59,7 @@ import {
 } from '../errors/fs.ts'
 import { concat, findBytes } from '../utils/bytes.ts'
 import { isMacosMetadata } from './platform/macos.ts'
-import type { MountAttrs, Handle } from './types.ts'
+import type { MountAttrs, Handle, WriteBuf } from './types.ts'
 
 export interface MountCoreOptions {
   rootPrefix?: string
@@ -394,10 +394,7 @@ export class MountCore {
    * rather than from a copy, so a write another action made since stays; a
    * mount that declined once is remembered. Mirrors Python's `_append`.
    */
-  private async appendTo(
-    target: string,
-    data: Uint8Array | [number, Uint8Array | ByteSlice][],
-  ): Promise<void> {
+  private async appendTo(target: string, data: Uint8Array | WriteBuf): Promise<void> {
     const mount = this.files.mountOf(target) ?? target
     if (!this.noAppend.has(mount)) {
       try {
@@ -699,8 +696,8 @@ export class MountCore {
    * file has then, and the reader's own go last. Mirrors Python's
    * `_writes_on`.
    */
-  private writesOn(key: string, ctx: Handle | null): [number, Uint8Array | ByteSlice][] {
-    const out: [number, Uint8Array | ByteSlice][] = []
+  private writesOn(key: string, ctx: Handle | null): WriteBuf {
+    const out: WriteBuf = []
     for (const other of this.openOn(key)) {
       if (other !== ctx && !other.mode.append)
         for (const item of other.writeBuf ?? []) out.push(item)
@@ -771,7 +768,7 @@ export class MountCore {
   }
 
   /** The buffered writes held in memory, in arrival order. */
-  private static held(writes: [number, Uint8Array | ByteSlice][]): [number, Uint8Array][] {
+  private static held(writes: WriteBuf): [number, Uint8Array][] {
     return writes.filter((write): write is [number, Uint8Array] => write[1] instanceof Uint8Array)
   }
 
@@ -845,13 +842,9 @@ export class MountCore {
   }
 
   /** `writes` with the range a newer write took cut out of them. Mirrors Python's `_cut`. */
-  private static cut(
-    writes: [number, Uint8Array | ByteSlice][],
-    pos: number,
-    size: number,
-  ): [number, Uint8Array | ByteSlice][] {
+  private static cut(writes: WriteBuf, pos: number, size: number): WriteBuf {
     const end = pos + size
-    const kept: [number, Uint8Array | ByteSlice][] = []
+    const kept: WriteBuf = []
     for (const [at, run] of writes) {
       if (at >= end || at + run.byteLength <= pos) {
         kept.push([at, run])
@@ -868,7 +861,7 @@ export class MountCore {
    * other writes took meanwhile, so a retry never lands bytes older than
    * theirs. Mirrors Python's `_put_back`.
    */
-  private static putBack(ctx: Handle, writes: [number, Uint8Array | ByteSlice][]): void {
+  private static putBack(ctx: Handle, writes: WriteBuf): void {
     let kept = writes
     for (const [pos, size] of ctx.cuts ?? []) kept = MountCore.cut(kept, pos, size)
     ctx.writeBuf = [...kept, ...(ctx.writeBuf ?? [])]
@@ -1289,10 +1282,7 @@ export class MountCore {
    * appends. The groups that landed leave `groups`, as `applyWrites` drops
    * its runs. Mirrors Python's `_land_spooled`.
    */
-  private async landSpooled(
-    ctx: Handle,
-    groups: [number, Uint8Array | ByteSlice][][],
-  ): Promise<void> {
+  private async landSpooled(ctx: Handle, groups: WriteBuf[]): Promise<void> {
     const target = this.resolve(ctx.path)
     let landed = 0
     try {

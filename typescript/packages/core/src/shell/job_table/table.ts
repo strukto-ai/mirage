@@ -52,12 +52,6 @@ interface ListEntry {
   ending?: string
 }
 
-function isAbortError(err: unknown): boolean {
-  if (err instanceof Error && err.name === 'AbortError') return true
-  if (err instanceof DOMException && err.name === 'AbortError') return true
-  return false
-}
-
 /** The status and exit code a console's ending records. */
 function ended(outcome: string): [JobStatus, number] {
   const [form = '', code = '0'] = outcome.split(':')
@@ -131,9 +125,11 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
     if (job.abort?.signal.aborted) throw new DOMException('aborted', 'AbortError')
     result = await run(job)
   } catch (err) {
-    if (isAbortError(err) || job.status !== JobStatus.RUNNING) {
+    const aborted =
+      (err instanceof Error || err instanceof DOMException) && err.name === 'AbortError'
+    if (aborted || job.status !== JobStatus.RUNNING) {
       await record(job, JobStatus.KILLED, stoppedStatus(job))
-      return isAbortError(err) ? job.exitCode : 1
+      return aborted ? job.exitCode : 1
     }
     // Recorded as the job's output and exit status rather than
     // rethrown: nobody awaits this task, so rethrowing would only

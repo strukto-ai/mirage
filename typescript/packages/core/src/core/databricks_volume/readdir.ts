@@ -24,16 +24,13 @@ import { backendPath } from './path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { listingError } from '../../errors/fs.ts'
 
-async function head(
+async function exists(
   accessor: DatabricksVolumeAccessor,
-  endpoint: 'files' | 'directories',
+  probe: (accessor: DatabricksVolumeAccessor, path: string) => Promise<unknown>,
   key: string,
 ): Promise<boolean> {
   try {
-    await (endpoint === 'files' ? getMetadata : getDirectoryMetadata)(
-      accessor,
-      backendPath(accessor.config, key),
-    )
+    await probe(accessor, backendPath(accessor.config, key))
   } catch (exc) {
     if (isNotFound(exc)) return false
     throw exc
@@ -68,8 +65,8 @@ export async function readdir(
       throw await listingError(
         listPath.virtual,
         listPath.mountPath,
-        (p) => head(accessor, 'files', p),
-        (p) => head(accessor, 'directories', p),
+        (p) => exists(accessor, getMetadata, p),
+        (p) => exists(accessor, getDirectoryMetadata, p),
       )
     }
     throw exc

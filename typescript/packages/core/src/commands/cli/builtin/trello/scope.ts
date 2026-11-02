@@ -15,14 +15,10 @@
 import type { TrelloAccessor } from '../../../../accessor/trello.ts'
 import { getCard, getList } from '../../../../core/trello/client.ts'
 import { boardInScope, scopeIsNarrowed } from '../../../../core/trello/readdir.ts'
+import { stringOf } from '../../../../utils/records.ts'
 
 function outside(kind: string, id: string): Error {
   return new Error(`${kind} ${id} is outside the configured scope`)
-}
-
-function boardOf(record: Record<string, unknown>): string {
-  const value = record.idBoard
-  return typeof value === 'string' ? value : ''
 }
 
 /**
@@ -40,12 +36,12 @@ export async function requireBoard(accessor: TrelloAccessor, boardId: string): P
 export async function requireList(accessor: TrelloAccessor, listId: string): Promise<void> {
   if (!scopeIsNarrowed(accessor)) return
   const list = await getList(accessor.transport, listId)
-  if (!(await boardInScope(accessor, boardOf(list)))) throw outside('list', listId)
+  if (!(await boardInScope(accessor, stringOf(list, 'idBoard')))) throw outside('list', listId)
 }
 
 /** Refuse a card on a board the install's scope leaves out. */
 export async function requireCard(accessor: TrelloAccessor, cardId: string): Promise<void> {
   if (!scopeIsNarrowed(accessor)) return
   const card = await getCard(accessor.transport, cardId)
-  if (!(await boardInScope(accessor, boardOf(card)))) throw outside('card', cardId)
+  if (!(await boardInScope(accessor, stringOf(card, 'idBoard')))) throw outside('card', cardId)
 }

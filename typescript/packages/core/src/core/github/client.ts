@@ -25,10 +25,8 @@ import {
   stallTimeout,
 } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
-import { GRAPHQL_PATH, RAW_MEDIA_TYPE, SEARCH_PAGE_SIZE } from './constants.ts'
+import { API_BASE, API_VERSION, GRAPHQL_PATH, RAW_MEDIA_TYPE } from './constants.ts'
 
-export const GITHUB_API_BASE = 'https://api.github.com'
-export const GITHUB_API_VERSION = '2022-11-28'
 // A rate limit is a wait, not a failure, but an unbounded wait is a hang;
 // three attempts is what octokit's own docs use for an unattended client.
 // The count rides plugin-retry's own options rather than every request's:
@@ -114,7 +112,7 @@ export class HttpGitHubTransport implements GitHubTransport {
   private readonly fetcher: typeof fetch
 
   constructor(opts: { token: string; baseUrl?: string; timeout?: number }) {
-    this.baseUrl = opts.baseUrl ?? GITHUB_API_BASE
+    this.baseUrl = opts.baseUrl ?? API_BASE
     this.fetcher = stallTimeout(opts.timeout)
     this.kit = new Kit({
       auth: opts.token,
@@ -126,7 +124,7 @@ export class HttpGitHubTransport implements GitHubTransport {
         // is github.com's, not the API's: a GHES install does not impose it
         // and a fake certainly does not, so paying it there would add a
         // second per write for nothing.
-        enabled: this.baseUrl === GITHUB_API_BASE,
+        enabled: this.baseUrl === API_BASE,
         onRateLimit: (_after: number, _options: unknown, _kit: unknown, count: number) =>
           count < GITHUB_RETRIES,
         onSecondaryRateLimit: (_after: number, _options: unknown, _kit: unknown, count: number) =>
@@ -200,7 +198,7 @@ export class HttpGitHubTransport implements GitHubTransport {
         method: method.toUpperCase(),
         url:
           escapeRoute(target) + (query === '' ? '' : `${target.includes('?') ? '&' : '?'}${query}`),
-        headers: { 'X-GitHub-Api-Version': GITHUB_API_VERSION, ...headers },
+        headers: { 'X-GitHub-Api-Version': API_VERSION, ...headers },
         request: {
           fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
             failed = undefined
@@ -414,50 +412,4 @@ export async function* streamBlob(
 
 function blobPath(owner: string, repo: string, sha: string): string {
   return `/repos/${owner}/${repo}/git/blobs/${sha}`
-}
-
-export interface GitHubCodeSearchResult {
-  path: string
-  sha: string
-}
-
-// The literal is sent verbatim, so the answer has to vouch for itself: an
-// item is kept only when its repository.full_name names this repository
-// (compared case-insensitively, as GitHub resolves `repo:`), and the answer is
-// complete only when incomplete_results is false and total_count is an
-// integer no larger than the rows returned. A missing or malformed field
-// counts against it, which costs a full scan and never a missed file.
-export async function searchCode(
-  transport: GitHubTransport,
-  owner: string,
-  repo: string,
-  query: string,
-  pathFilter?: string,
-) {
-  let q = `${query} repo:${owner}/${repo}`
-  if (pathFilter !== undefined && pathFilter !== '') q += ` path:${pathFilter}`
-  const data = (await transport.get(`/search/code`, {
-    q,
-    per_page: String(SEARCH_PAGE_SIZE),
-  })) as {
-    total_count?: unknown
-    incomplete_results?: unknown
-    items?: { path: string; sha: string; repository?: { full_name?: unknown } | null }[] | null
-  }
-  const items = data.items ?? []
-  const total = data.total_count
-  const complete =
-    data.incomplete_results === false &&
-    typeof total === 'number' &&
-    Number.isInteger(total) &&
-    total <= items.length
-  const want = `${owner}/${repo}`.toLowerCase()
-  const results: GitHubCodeSearchResult[] = []
-  for (const it of items) {
-    const name = it.repository?.full_name
-    if (typeof name === 'string' && name.toLowerCase() === want) {
-      results.push({ path: it.path, sha: it.sha })
-    }
-  }
-  return { results, truncated: !complete }
 }

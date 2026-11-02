@@ -204,6 +204,16 @@ export interface IssueListFilter {
   readonly labels?: readonly string[]
 }
 
+const ISSUE_LIST =
+  '\tquery IssueList($owner: String!, $repo: String!, $limit: Int, $endCursor: String, ' +
+  '$states: [IssueState!] = OPEN, $assignee: String, $author: String, $mention: String, ' +
+  '$labels: [String!]) {\n\t\trepository(owner: $owner, name: $repo) {\n' +
+  '\t\t\thasIssuesEnabled\n\t\t\tissues(first: $limit, after: $endCursor, orderBy: ' +
+  '{field: CREATED_AT, direction: DESC}, states: $states, filterBy: {assignee: $assignee, ' +
+  'createdBy: $author, mentioned: $mention, labels: $labels}) {\n\t\t\t\ttotalCount\n' +
+  '\t\t\t\tnodes {\n\t\t\t\t\t...issue\n\t\t\t\t}\n\t\t\t\tpageInfo {\n' +
+  '\t\t\t\t\thasNextPage\n\t\t\t\t\tendCursor\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\t'
+
 /**
  * The selected fields of a repository's issues, over GraphQL, as gh's
  * IssueList asks for them for `issue list --json`: newest first, a page of
@@ -224,16 +234,7 @@ export async function listIssueFields(
   limit: number,
   selection: string,
 ): Promise<Record<string, unknown>[]> {
-  const query =
-    `fragment issue on Issue {${selection}}\n` +
-    '\tquery IssueList($owner: String!, $repo: String!, $limit: Int, $endCursor: String, ' +
-    '$states: [IssueState!] = OPEN, $assignee: String, $author: String, $mention: String, ' +
-    '$labels: [String!]) {\n\t\trepository(owner: $owner, name: $repo) {\n' +
-    '\t\t\thasIssuesEnabled\n\t\t\tissues(first: $limit, after: $endCursor, orderBy: ' +
-    '{field: CREATED_AT, direction: DESC}, states: $states, filterBy: {assignee: $assignee, ' +
-    'createdBy: $author, mentioned: $mention, labels: $labels}) {\n\t\t\t\ttotalCount\n' +
-    '\t\t\t\tnodes {\n\t\t\t\t\t...issue\n\t\t\t\t}\n\t\t\t\tpageInfo {\n' +
-    '\t\t\t\t\thasNextPage\n\t\t\t\t\tendCursor\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\t'
+  const query = `fragment issue on Issue {${selection}}\n${ISSUE_LIST}`
   const rows: Record<string, unknown>[] = []
   let cursor: string | null = null
   let pageLimit = Math.min(limit, 100)

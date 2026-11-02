@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { encodeBase64 } from '@struktoai/mirage-core/utils/base64'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { createHash } from 'node:crypto'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
@@ -58,10 +59,6 @@ export class LfsRequiredError extends Error {
   }
 }
 
-function b64(data: Uint8Array): string {
-  return Buffer.from(data).toString('base64')
-}
-
 /** The commit endpoint for one revision. */
 export function commitUrl(accessor: HfHubAccessor, revision?: string): string {
   const rev = revision ?? accessor.revision
@@ -101,7 +98,7 @@ export async function preupload(
       ...(gitIgnore === undefined ? {} : { gitIgnore }),
       files: chunk.map((add) => ({
         path: add.path,
-        sample: b64(add.data.slice(0, PREUPLOAD_SAMPLE_BYTES)),
+        sample: encodeBase64(add.data.slice(0, PREUPLOAD_SAMPLE_BYTES)),
         size: add.data.length,
       })),
     }
@@ -144,7 +141,7 @@ export function payload(
   for (const add of additions) {
     lines.push({
       key: 'file',
-      value: { content: b64(add.data), path: add.path, encoding: 'base64' },
+      value: { content: encodeBase64(add.data), path: add.path, encoding: 'base64' },
     })
   }
   for (const path of deletions) lines.push({ key: 'deletedFile', value: { path } })

@@ -18,8 +18,8 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import { CHECKSUM_PROPFIND, CHECKSUM_TYPES } from './constants.ts'
 import { davRequest, davUrl } from './dav.ts'
-import { parser, records } from './search/response.ts'
-import type { XmlRecord } from './search/types.ts'
+import { parser, records, successfulStatus } from './search/response.ts'
+import type { XmlElement } from './search/types.ts'
 
 /**
  * The digest Nextcloud keeps for a file, from `oc:checksums`.
@@ -55,7 +55,7 @@ export async function checksum(
     )
     return null
   }
-  const tree = parser.parse(await response.text()) as XmlRecord
+  const tree = parser.parse(await response.text()) as XmlElement
   const listed: string[] = []
   const groups = records(tree.multistatus)
     .flatMap((multistatus) => records(multistatus.response))
@@ -63,7 +63,7 @@ export async function checksum(
   for (const propstat of groups) {
     const prop = records(propstat.prop)[0]
     const status = typeof propstat.status === 'string' ? propstat.status : ''
-    if (prop === undefined || status.split(/\s+/)[1] !== '200') continue
+    if (prop === undefined || !successfulStatus(status)) continue
     if (records(prop.resourcetype).some((type) => 'collection' in type)) return null
     for (const sums of records(prop.checksums)) {
       const values: unknown[] = Array.isArray(sums.checksum) ? sums.checksum : [sums.checksum]

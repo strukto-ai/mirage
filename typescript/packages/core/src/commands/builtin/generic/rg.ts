@@ -64,6 +64,7 @@ import { type LinkResolver, linkResolver, mountsOf, dispatchOf, mountRoot } from
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { compareCodePoints } from '../../../utils/sort.ts'
 import { NOT_FOUND_STATUS } from '../../../shell/constants.ts'
 
 const ENC = new TextEncoder()
@@ -369,10 +370,6 @@ function sortKey(h: Haystack, key: string): string | null {
   return null
 }
 
-function compareStrings(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
 /**
  * The haystacks in --sort/--sortr order, where that is a global one.
  * Ascending path order is the walk's own (each directory in name order,
@@ -384,13 +381,13 @@ export function sortHaystacks(found: Haystack[], f: RgFlags): Haystack[] {
   if (f.sort === null || f.sort === 'none') return found
   if (f.sort === 'path') {
     if (!f.sortReverse) return found
-    return [...found].sort((a, b) => compareStrings(b.shown, a.shown))
+    return [...found].sort((a, b) => compareCodePoints(b.shown, a.shown))
   }
   const key = f.sort
   const known = found.filter((h) => sortKey(h, key) !== null)
   const unknown = found.filter((h) => sortKey(h, key) === null)
   known.sort((a, b) => {
-    const order = compareStrings(sortKey(a, key) ?? '', sortKey(b, key) ?? '')
+    const order = compareCodePoints(sortKey(a, key) ?? '', sortKey(b, key) ?? '')
     return f.sortReverse ? -order : order
   })
   return f.sortReverse ? [...unknown, ...known] : [...known, ...unknown]

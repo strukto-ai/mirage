@@ -195,7 +195,7 @@ export class OpRecord {
  * own recording, which no other call joins), and the workspace clock every
  * op recorded here is timed and stamped on.
  */
-export interface RecordingState {
+export interface Recorder {
   records: OpRecord[]
   mountId: string | null
   ledger: OpRecord[] | null

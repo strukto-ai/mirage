@@ -231,6 +231,10 @@ def filename_mode(fl: FlagView) -> bool | None:
     return mode
 
 
+def _reason(exc: BaseException) -> str:
+    return fs_strerror(exc) or str(exc)
+
+
 def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
     """Convert the raw flag bag into GrepFlags, the only string-keyed reads.
 
@@ -407,7 +411,7 @@ async def grep_generic(
                 else []
             )
         except WALK_ERRORS as exc:
-            warn(f"grep: {p.raw_path}: {fs_strerror(exc) or exc}")
+            warn(f"grep: {p.raw_path}: {_reason(exc)}")
             return
         if walked and follow is not None and info.type == FileType.SYMLINK:
             warn(f"grep: {p.raw_path}: {posix_phrase(FsCondition.ENOENT)}")
@@ -435,10 +439,7 @@ async def grep_generic(
                         if (await walked_st(entry)).type == FileType.DIRECTORY:
                             continue
                     except WALK_ERRORS as exc:
-                        warn(
-                            f"grep: {child.raw_path}: "
-                            f"{fs_strerror(exc) or exc}"
-                        )
+                        warn(f"grep: {child.raw_path}: {_reason(exc)}")
                         continue
                 async with aclosing(scan(child, True, chain)) as child_stream:
                     async for chunk in child_stream:
@@ -487,7 +488,7 @@ async def grep_generic(
                 if file_io.stderr:
                     diagnostics.append(await materialize(file_io.stderr))
         except FS_ERRORS as exc:
-            warn(f"grep: {p.raw_path}: {fs_strerror(exc) or exc}")
+            warn(f"grep: {p.raw_path}: {_reason(exc)}")
 
     async def run() -> AsyncIterator[bytes]:
         try:

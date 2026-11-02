@@ -176,11 +176,6 @@ CLIOverrides = dict[
     str, dict[str, Any] | tuple[str | CLI, dict[str, Any] | None]
 ]
 
-# What a snapshot restores into the env plane, once the gate has passed
-# it: the parsed session tables and the env template (None when the
-# snapshot carries none).
-RestoredEnv = tuple[list[SessionState], dict[str, ShellVar] | None]
-
 
 def cli_config_dump(
     config: BaseModel | dict[str, JsonValue] | None, reveal: bool = False
@@ -800,7 +795,7 @@ async def _restore_nodes(ws: WorkspaceLike, state: dict[str, Any]) -> None:
 
 async def _gate_restored_state(
     ws: WorkspaceLike, state: dict[str, Any], built_for_state: bool = False
-) -> RestoredEnv:
+) -> tuple[list[SessionState], dict[str, ShellVar] | None]:
     """Vet every env input the snapshot carries before any of it lands.
 
     Each session table and the env template fire the ``pre_session``

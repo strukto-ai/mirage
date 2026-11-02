@@ -1,5 +1,5 @@
 {
- "baseline": 1996,
+ "baseline": 1682,
  "modules": {
   "server/app": {
    "python_only": {
@@ -58,7 +58,6 @@
     "named": "A Python connect names only an address, so the lookup it followed is remembered for the gateway to report the host and try the name's other addresses; Node's gateway is handed the name and looks it up itself, and a page's fetch carries its host."
    },
    "typescript_only": {
-    "ConnectOptions": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
     "Found": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
     "Lookup": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
     "LookupDone": "Node watches a connection by wrapping net.Socket.prototype.connect and its lookup, with one fetch pool per rule; the browser by wrapping fetch and WebSocket. Python's audit hook needs none of these.",
@@ -344,7 +343,6 @@
   },
   "workspace/executor/command/handler": {
    "typescript_only": {
-    "RunHandlerOpts": "TypeScript passes runHandler's optional hooks as one options object; Python takes them as keyword arguments.",
     "abandon": "Racing a TypeScript promise does not stop its work, so the runner closes what a body hands back after its caller left; Python's timeout cancels the body itself.",
     "aborted": "TypeScript recognises an abort by the error's name; Python's cancellation is asyncio.CancelledError, which no voice words."
    }
@@ -417,11 +415,6 @@
    },
    "typescript_only": {
     "registerRpcCommand": "Typer registers one function per verb, so the rpc verb is a module-level `rpc_cmd`; the TypeScript CLI builds the same verb on a commander program inside registerRpcCommand."
-   }
-  },
-  "server/rpc/server": {
-   "typescript_only": {
-    "MirageRpcServerOptions": "Python's MirageRpcServer takes its session, tool table, name and version as keyword arguments; the TypeScript constructor takes them as one options object, as MirageMcpServerOptions does for the MCP server."
    }
   },
   "cli/shell": {
@@ -1114,11 +1107,6 @@
     "nanoseconds": "A stat's epoch milliseconds as the nanoseconds preview1 asks in; Python's rows are nanoseconds already."
    }
   },
-  "vfs/ram/ram": {
-   "typescript_only": {
-    "RAMVFSOptions": "TypeScript constructors take one options object, as DiskVFSOptions and RedisVFSOptions do; Python's RAMVFS takes capacity as a keyword."
-   }
-  },
   "vfs/registry": {
    "typescript_only": {
     "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords."
@@ -1153,9 +1141,6 @@
    }
   },
   "server/workers/proxy": {
-   "typescript_only": {
-    "WorkerProxyOptions": "The TypeScript constructor's options object; Python takes the same settings as keyword arguments."
-   },
    "python_only": {
     "_FALSE": "FastAPI reads several spellings of a false flag; the TypeScript router takes only true and false."
    }

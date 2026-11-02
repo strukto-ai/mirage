@@ -124,10 +124,6 @@ interface Change {
   score: number
 }
 
-function equal(a: TreeEntry | undefined, b: TreeEntry | undefined): boolean {
-  return a?.oid === b?.oid && a?.mode === b?.mode
-}
-
 export async function compare(
   repo: Repo,
   before: ReadonlyMap<string, TreeEntry>,
@@ -140,7 +136,7 @@ export async function compare(
   for (const path of [...new Set([...before.keys(), ...after.keys()])].sort(compareCodePoints)) {
     const a = before.get(path),
       b = after.get(path)
-    if (equal(a, b)) continue
+    if (a?.oid === b?.oid && a?.mode === b?.mode) continue
     codes.set(path, !a ? 'A' : !b ? 'D' : a.mode.slice(0, 3) !== b.mode.slice(0, 3) ? 'T' : 'M')
     const entry = b ?? a
     if (entry) {

@@ -30,7 +30,7 @@ from mirage.server.ssh.constants import (
     KEEPALIVE_INTERVAL_SECONDS,
 )
 from mirage.server.ssh.keys import load_host_key
-from mirage.server.ssh.session import TunnelSSHServer, handle_process
+from mirage.server.ssh.session import TunnelSSHServer, handle_channel
 from mirage.server.ssh.sftp import serve_sftp
 from mirage.server.ssh.stream import ENCODING, ERRORS, MAX_TERMINAL_LINE
 
@@ -91,7 +91,7 @@ async def serve_channel(
     if process.subsystem == CODEX_SUBSYSTEM:
         await serve_codex(registry, process)
         return
-    await handle_process(registry, process)
+    await handle_channel(registry, process)
 
 
 async def _server_options(

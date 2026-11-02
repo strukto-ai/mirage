@@ -215,10 +215,7 @@ from mirage.workspace.snapshot.utils import QUIESCE_SECONDS
 from mirage.workspace.store import WorkspaceStateStore
 from mirage.workspace.tools.file_version import FileVersionTracker
 from mirage.workspace.tools.tool_operations import MirageToolOperations
-from mirage.workspace.workspace.build import (
-    resolve_control_stores,
-    wire_runtime_world,
-)
+from mirage.workspace.workspace.build import resolve_control_stores
 from mirage.workspace.workspace.cache import build_file_cache
 from mirage.workspace.workspace.events import EventManager
 from mirage.workspace.workspace.execute import (
@@ -247,6 +244,8 @@ from mirage.workspace.workspace.mounts import (
     prepare_added_mount,
     unmount_prefix,
 )
+from mirage.workspace.workspace.routing import Router
+from mirage.workspace.workspace.runtimes import Runtimes
 from mirage.workspace.workspace.types import VFSMount
 from mirage.workspace.workspace.utils import fork_for_call
 
@@ -662,9 +661,9 @@ class Workspace:
             self.get_session,
             self._sandbox_mounts,
         )
-        self._runtimes, self._router = wire_runtime_world(
-            self._registry, self._runtime_binding, runtimes
-        )
+        self._runtimes = Runtimes(self._registry, self._runtime_binding)
+        self._runtimes.resolve(runtimes)
+        self._router = Router(self._registry, self._runtimes)
         if route_policy is not None:
             self._registry.policies.place(
                 RoutePolicy(route_policy, self._script_policy)

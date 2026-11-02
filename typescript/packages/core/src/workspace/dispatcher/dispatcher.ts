@@ -657,13 +657,6 @@ function probed(call: Call, mount: MountEntry): FileStat | null {
   return manager.probedStat(call.path)
 }
 
-/** The filetype a read is rendered as, null for none. */
-function readType(call: Call): string | null {
-  const requested = call.kwargs?.filetype
-  if (requested === undefined) return getExtension(call.path.virtual)
-  return typeof requested === 'string' ? requested : null
-}
-
 /**
  * The virtual path each item of a custom function's answer names, null when
  * the answer is not a list of paths or of records with a `path`. Mirrors
@@ -2089,7 +2082,9 @@ export class Dispatcher {
   /** Whether a filetype renderer answers this read on `vfs`; asked each
    * time, since a renderer can land while the read runs. */
   private rendersRead(call: Call, mount: MountEntry): boolean {
-    return mount.renders(readType(call))
+    const requested = call.kwargs?.filetype
+    if (requested === undefined) return mount.renders(getExtension(call.path.virtual))
+    return mount.renders(typeof requested === 'string' ? requested : null)
   }
 
   /**

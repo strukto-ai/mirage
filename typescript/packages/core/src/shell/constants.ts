@@ -261,14 +261,14 @@ export const SET_OPTION_NAMES: ReadonlySet<string> = new Set([
   'xtrace',
 ])
 
-const DEFAULT_ON: ReadonlySet<string> = new Set(['braceexpand', 'hashall', 'interactive-comments'])
-
 // What each option reads as before anything sets it, pinned from
 // `bash -c 'set -o'` on debian:stable-slim (5.2.37). Only three are on,
 // and all three are on for a non-interactive shell too, so this is the
 // table `set -o` prints rather than an interactive shell's.
 export const SET_OPTION_DEFAULTS: ReadonlyMap<string, boolean> = new Map(
-  [...SET_OPTION_NAMES].sort(compareCodePoints).map((name) => [name, DEFAULT_ON.has(name)]),
+  [...SET_OPTION_NAMES]
+    .sort(compareCodePoints)
+    .map((name) => [name, ['braceexpand', 'hashall', 'interactive-comments'].includes(name)]),
 )
 
 // Every name GNU's `shopt` accepts and what it reads as before anything

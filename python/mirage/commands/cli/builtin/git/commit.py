@@ -72,7 +72,6 @@ DEFAULT_EMAIL = "mirage@localhost"
 AUTHOR_NAME = "GIT_AUTHOR_NAME"
 AUTHOR_EMAIL = "GIT_AUTHOR_EMAIL"
 FALLBACK_EMAIL = "EMAIL"
-UTC = 0
 
 
 def identity(fl: FlagView, session: SessionView | None = None) -> bytes:
@@ -149,8 +148,8 @@ def build_commit(
     commit.committer = author
     commit.author_time = when
     commit.commit_time = when
-    commit.author_timezone = UTC
-    commit.commit_timezone = UTC
+    commit.author_timezone = 0
+    commit.commit_timezone = 0
     commit.encoding = b"UTF-8"
     commit.message = message.encode() + b"\n"
     store.add_object(commit)

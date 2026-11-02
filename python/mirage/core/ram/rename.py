@@ -27,6 +27,11 @@ from mirage.utils.path import norm
 from mirage.vfs.ram.store import RAMStore
 
 
+def _move_attrs(store: RAMStore, src: str, dst: str) -> None:
+    if src in store.attrs:
+        store.attrs[dst] = store.attrs.pop(src)
+
+
 def _move_subtree(store: RAMStore, s: str, d: str) -> None:
     """Re-key every descendant of a renamed directory.
 
@@ -88,14 +93,12 @@ async def rename(
     if s in store.files:
         store.files[d] = store.files.pop(s)
         store.modified[d] = store.modified.pop(s, now)
-        if s in store.attrs:
-            store.attrs[d] = store.attrs.pop(s)
+        _move_attrs(store, s, d)
     elif s in store.dirs:
         store.dirs.discard(s)
         store.dirs.add(d)
         store.modified[d] = store.modified.pop(s, now)
-        if s in store.attrs:
-            store.attrs[d] = store.attrs.pop(s)
+        _move_attrs(store, s, d)
         _move_subtree(store, s, d)
     else:
         raise lookup_error(store, src_spec, s)

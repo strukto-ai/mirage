@@ -63,6 +63,8 @@ export class Slot {
   }
 }
 
+export type Segment = string | Slot
+
 /**
  * One addressable position in a fixed API hierarchy.
  *
@@ -74,14 +76,14 @@ export class Slot {
  */
 export class Scope {
   readonly kind: string
-  readonly segments: readonly (string | Slot)[]
+  readonly segments: readonly Segment[]
   readonly leaf: boolean
   readonly filetype: ContentType | null
   readonly probed: boolean
 
   constructor(init: {
     kind: string
-    segments: readonly (string | Slot)[]
+    segments: readonly Segment[]
     leaf?: boolean
     filetype?: ContentType
     probed?: boolean
@@ -141,7 +143,7 @@ export function decodeSlot(slot: Slot, part: string): Record<string, string> | n
 }
 
 /** The scope's variadic slot and its position, null when it has none. */
-export function variadicSlot(segments: readonly (string | Slot)[]): [number, Slot] | null {
+export function variadicSlot(segments: readonly Segment[]): [number, Slot] | null {
   let found: [number, Slot] | null = null
   for (const [i, segment] of segments.entries()) {
     if (typeof segment !== 'string' && segment.variadic) {
@@ -153,7 +155,7 @@ export function variadicSlot(segments: readonly (string | Slot)[]): [number, Slo
 }
 
 function matchRun(
-  segments: readonly (string | Slot)[],
+  segments: readonly Segment[],
   parts: readonly string[],
 ): Record<string, string> | null {
   const slots: Record<string, string> = {}
@@ -171,7 +173,7 @@ function matchRun(
 }
 
 function matchSegments(
-  segments: readonly (string | Slot)[],
+  segments: readonly Segment[],
   parts: readonly string[],
 ): Record<string, string> | null {
   const found = variadicSlot(segments)

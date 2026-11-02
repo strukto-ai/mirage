@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from './classify.ts'
-import { CODE_ARMS, OPERAND_CONDITIONS } from './constants.ts'
+import { ERRNO_ARMS, OPERAND_CONDITIONS } from './constants.ts'
 import { posixPhrase } from './posix.ts'
 import { CommandTimeoutError } from './types.ts'
 import type {
@@ -379,7 +379,7 @@ export function fsStrerror(err: unknown): string | null {
   if (err === null || typeof err !== 'object') return null
   const code = (err as { code?: unknown }).code
   if (typeof code !== 'string') return null
-  const condition = CODE_ARMS[code]
+  const condition = ERRNO_ARMS[code]
   if (condition === undefined || !OPERAND_CONDITIONS.has(condition)) return null
   return posixPhrase(condition)
 }

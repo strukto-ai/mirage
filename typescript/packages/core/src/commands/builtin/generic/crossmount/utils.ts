@@ -118,7 +118,7 @@ export async function mergeOperandIos(results: OperandRun[], exitCode: number): 
 // paths; the relayed primitives route each full path to its owning mount. Used
 // by transfer/compare where the generic does path arithmetic; read commands
 // pass scopes through unchanged.
-export function flatten(scopes: PathSpec[]): PathSpec[] {
+export function flatScopes(scopes: PathSpec[]): PathSpec[] {
   return scopes.map(virtualKey)
 }
 
@@ -171,6 +171,15 @@ export function streamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<U
   return gen
 }
 
+/** Write one whole file on the mount that owns it. Mirrors Python's `_relay_write`. */
+export async function relayWrite(
+  dispatch: DispatchFn,
+  path: PathSpec,
+  data: ByteSource,
+): Promise<void> {
+  await dispatch('write', path, [data])
+}
+
 /**
  * Copy one file store to store, from its mount onto `dst`'s. The dispatcher
  * judges the source as a read and the destination as a create, and answers
@@ -195,9 +204,7 @@ export function transferLinksOf(
     ...(owns !== undefined ? { owns } : {}),
     relay: {
       read: fileStreamOp(dispatch),
-      write: async (p: PathSpec, data: ByteSource) => {
-        await dispatch('write', p, [data])
-      },
+      write: (p: PathSpec, data: ByteSource) => relayWrite(dispatch, p, data),
       mkdir: async (p: PathSpec) => {
         await dispatch('mkdir', p)
       },

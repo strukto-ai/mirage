@@ -18,7 +18,6 @@ from typing import Any
 
 from mirage.accessor.airtable import AirtableAccessor
 from mirage.commands.cli.builtin.airtable.util import (
-    Outcome,
     find_table,
     json_object,
     no_operands,
@@ -48,7 +47,7 @@ from mirage.core.airtable.normalize import (
     records_jsonl,
 )
 from mirage.core.render.json import compact_json_text, json_bytes
-from mirage.io.types import IOResult
+from mirage.io.types import CommandOutput, IOResult
 
 Rows = list[dict[str, Any]]
 
@@ -117,7 +116,7 @@ async def writable(
 
 async def landed(
     batches: AsyncIterator[Rows], render: Callable[[Rows], bytes]
-) -> Outcome:
+) -> CommandOutput:
     """Everything the batches wrote, and the failure that stopped them.
 
     Batches land one request at a time, so a failure part way leaves
@@ -148,7 +147,7 @@ async def _record_create_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     no_operands(texts)
     fields = fl.as_str("fields")
     table = fl.as_str("table") or ""
@@ -176,7 +175,7 @@ async def _record_update_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     record_id = optional_operand(texts)
     fields = fl.as_str("fields")
     table = fl.as_str("table") or ""
@@ -214,7 +213,7 @@ async def _record_delete_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     if texts:
         record_ids = list(texts)
     elif ctx.stdin is not None:
@@ -236,7 +235,7 @@ async def _comment_add_body(
     texts: list[str],
     ctx: Context,
     fl: FlagView,
-) -> Outcome:
+) -> CommandOutput:
     record_id = one_operand(texts, "RECORD")
     text = fl.as_str("text")
     if text is None:

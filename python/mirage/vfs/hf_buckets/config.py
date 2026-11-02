@@ -17,6 +17,8 @@ from pydantic import ConfigDict, SecretStr, field_validator
 from mirage.core.api.config import TimeoutConfig
 from mirage.utils import key_prefix as kp
 
+HF_ENDPOINT = "https://huggingface.co"
+
 
 class HfBucketsConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -25,7 +27,7 @@ class HfBucketsConfig(TimeoutConfig):
     """Bucket id in `namespace/name` form."""
     token: SecretStr | None = None
     """Hugging Face access token."""
-    endpoint: str = "https://huggingface.co"
+    endpoint: str = HF_ENDPOINT
     """Hub origin requests go to, for a mirror or a self-hosted Hub."""
     key_prefix: str | None = None
     """Path inside the bucket that becomes the mount root; files outside it
@@ -64,7 +66,7 @@ class HfRepoConfig(TimeoutConfig):
     token: SecretStr | None = None
     """Hugging Face access token; unset sends anonymous requests, which
     reach public repositories only."""
-    endpoint: str = "https://huggingface.co"
+    endpoint: str = HF_ENDPOINT
     """Hub origin requests go to, for a mirror or a self-hosted Hub."""
     key_prefix: str | None = None
     """Path inside the repository that becomes the mount root; files outside

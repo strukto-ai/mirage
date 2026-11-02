@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+export const API_BASE = 'https://api.github.com'
+export const API_VERSION = '2022-11-28'
 export const SCOPE_WARN = 100
 // GitHub's code search does not index a file at or over this size.
 export const CODE_SEARCH_SIZE_LIMIT = 384 * 1024

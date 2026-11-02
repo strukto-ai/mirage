@@ -15,7 +15,7 @@
 import { UsageError } from '../errors.ts'
 import type { WordChoices, WordRefusalKind } from './word_choice.ts'
 import { quoteText } from '../quote.ts'
-import { CODE_ARMS } from '../../errors/constants.ts'
+import { ERRNO_ARMS } from '../../errors/constants.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import type { FsCondition } from '../../errors/types.ts'
 import {
@@ -60,7 +60,7 @@ export function operandExitCode(cmdName: string): number {
  * answer a directory and a missing file differently. Mirrors the python
  * `read_fail_exit`.
  *
- * Gated on READ_FAIL_CODES, and nothing wider: the tables are keyed by
+ * Gated on READ_FAIL_ERRORS, and nothing wider: the tables are keyed by
  * command and the executor's chokepoints catch everything a command can
  * throw, so a loose gate makes them answer in the wrong voice. Two cases
  * set the width. A bad script is not a filesystem error at all (`sed
@@ -71,7 +71,7 @@ export function operandExitCode(cmdName: string): number {
  * code; that is the safe side, and it is what the executor already did
  * before the tables existed.
  */
-const READ_FAIL_CODES: ReadonlySet<FsCondition> = new Set<FsCondition>([
+const READ_FAIL_ERRORS: ReadonlySet<FsCondition> = new Set<FsCondition>([
   'ENOENT',
   'EISDIR',
   'ENOTDIR',
@@ -89,8 +89,8 @@ function readFailCode(cmdName: string, isDir: boolean): number {
 
 export function readFailExitCode(cmdName: string, err: unknown): number {
   const code = (err as { code?: string }).code
-  const condition = code === undefined ? undefined : CODE_ARMS[code]
-  if (condition === undefined || !READ_FAIL_CODES.has(condition)) return 1
+  const condition = code === undefined ? undefined : ERRNO_ARMS[code]
+  if (condition === undefined || !READ_FAIL_ERRORS.has(condition)) return 1
   return readFailCode(cmdName, condition === 'EISDIR')
 }
 
@@ -107,7 +107,7 @@ export function readFailExitCode(cmdName: string, err: unknown): number {
 function lineReadFailCode(cmdName: string, line: string): number | null {
   const cut = line.lastIndexOf(': ')
   const terminal = cut === -1 ? line : line.slice(cut + 2)
-  for (const code of READ_FAIL_CODES) {
+  for (const code of READ_FAIL_ERRORS) {
     if (posixPhrase(code) === terminal) return readFailCode(cmdName, code === 'EISDIR')
   }
   return null

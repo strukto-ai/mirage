@@ -46,22 +46,6 @@ export function recordWire(
   }
 }
 
-/** One occurrence node; parents travel as keys so depth does not become JSON nesting. */
-export function occurrenceWire(
-  occurrence: Occurrence,
-  key: number,
-  parent: number | null,
-  source: number,
-): Wire {
-  return {
-    key,
-    parent,
-    source,
-    start: occurrence.start,
-    end: occurrence.end,
-  }
-}
-
 /** Mechanical identity transport for a synchronous Rust approval query. */
 export class ApprovalSnapshot {
   private static readonly RESPONSE = {
@@ -208,7 +192,13 @@ export class ApprovalSnapshot {
         sourceKeys.set(occurrence.source, source)
         sources.push(units(occurrence.source))
       }
-      return occurrenceWire(occurrence, key, this.occurrenceKey(occurrence.parent), source)
+      return {
+        key,
+        parent: this.occurrenceKey(occurrence.parent),
+        source,
+        start: occurrence.start,
+        end: occurrence.end,
+      }
     })
     return {
       holders: this.holderObjects.map((holder, key) => ({

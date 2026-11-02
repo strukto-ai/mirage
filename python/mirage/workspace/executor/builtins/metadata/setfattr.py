@@ -32,8 +32,6 @@ from mirage.workspace.executor.builtins.shared import finish, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.session import SessionState
 
-_OCTAL = b"01234567"
-
 
 def decode_value(text: str) -> bytes | None:
     """A ``-v`` value as setfattr stores it, or None when it is malformed.
@@ -64,7 +62,7 @@ def decode_value(text: str) -> bytes | None:
     while i < len(raw):
         if raw[i] == 0x5C:
             digits = raw[i + 1 : i + 4]
-            if len(digits) == 3 and all(b in _OCTAL for b in digits):
+            if len(digits) == 3 and all(0x30 <= b <= 0x37 for b in digits):
                 out.append(int(digits, 8) & 0xFF)
                 i += 4
                 continue

@@ -83,12 +83,6 @@ RETRY = RetryPolicy(
 WRITE_RETRY = replace(RETRY, statuses=frozenset({429}))
 
 
-def _headers(accessor: AirtableAccessor) -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {reveal_secret(accessor.config.token)}",
-    }
-
-
 async def _request(
     accessor: AirtableAccessor,
     method: str,
@@ -106,7 +100,9 @@ async def _request(
         method,
         f"{url}?{query}" if query else url,
         error_of=partial(_error_of, call=f"{method} {path}"),
-        headers=_headers(accessor),
+        headers={
+            "Authorization": f"Bearer {reveal_secret(accessor.config.token)}",
+        },
         params=params,
         json_body=json_body,
         retry=retry,

@@ -169,6 +169,13 @@ export type RangedReader<A extends Accessor> = (
   size: number | null,
 ) => Promise<Uint8Array>
 
+export type ReadFn<A extends Accessor> = (
+  accessor: A,
+  path: PathSpec,
+  entry?: FileStat | null,
+  parent?: FileStat | null,
+) => Promise<Uint8Array>
+
 /**
  * Build a byte-ranged read over a hierarchy read.
  *
@@ -181,12 +188,7 @@ export type RangedReader<A extends Accessor> = (
  */
 export function makeReadRange<A extends Accessor>(
   detect: DetectFn,
-  read: (
-    accessor: A,
-    path: PathSpec,
-    entry?: FileStat | null,
-    parent?: FileStat | null,
-  ) => Promise<Uint8Array>,
+  read: ReadFn<A>,
   ranged: Readonly<Record<string, RangedReader<A>>>,
 ): (
   accessor: A,

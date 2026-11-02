@@ -45,9 +45,6 @@ import type { RedactedSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { DropboxConfig } from './config.ts'
 
-const mkdirOp = (accessor: DropboxAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
-  dropboxMkdir(accessor, path, parents)
-
 export class DropboxVFS extends BaseVFS {
   override get conditionSupport(): ConditionSupport {
     return CONDITION_SUPPORT
@@ -145,7 +142,7 @@ export class DropboxVFS extends BaseVFS {
   }
 
   override mkdir(path: PathSpec, parents = false): Promise<void> {
-    return mkdirOp(this.accessor, path, parents)
+    return dropboxMkdir(this.accessor, path, parents)
   }
 
   override unlink(path: PathSpec): Promise<void> {

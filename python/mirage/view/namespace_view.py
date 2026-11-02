@@ -176,7 +176,7 @@ def merge_readdir(
         links (NamespaceLinks | None): the namespace symlink table.
         parent (str): the directory that was listed, as a virtual path.
     """
-    present = {e.rstrip("/").rsplit("/", 1)[-1] for e in entries}
+    present = {_strip_entry(e) for e in entries}
     base = parent.rstrip("/")
     merged = list(entries)
     for name in namespace_names(vis, prefixes, links, parent):
@@ -185,6 +185,15 @@ def merge_readdir(
         present.add(name)
         merged.append(f"{base}/{name}")
     return merged
+
+
+def _strip_entry(entry: str) -> str:
+    """An entry's final path segment, whatever shape its backend gave it.
+
+    Args:
+        entry (str): a bare name, a trailing-slash name or a full path.
+    """
+    return entry.rstrip("/").rsplit("/", 1)[-1]
 
 
 def namespace_listing(
@@ -231,7 +240,7 @@ def namespace_stat(
     """
     if namespace_listing(vis, prefixes, links, path) is None:
         return None
-    name = path.rstrip("/").rsplit("/", 1)[-1] or "/"
+    name = _strip_entry(path) or "/"
     return FileStat(name=name, type=FileType.DIRECTORY)
 
 

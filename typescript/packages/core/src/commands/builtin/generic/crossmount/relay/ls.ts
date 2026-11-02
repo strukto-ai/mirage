@@ -26,7 +26,7 @@ import { linkLocation, linkView, mountView } from '../../../utils/links.ts'
 import { treeWalk } from '../../../utils/tree.ts'
 import { lsGeneric } from '../../ls.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { crossOpts, flatten, readdirOp } from '../utils.ts'
+import { crossOpts, flatScopes, readdirOp } from '../utils.ts'
 
 // lstat one entry on the mount that owns it, named by its own path.
 //
@@ -91,6 +91,6 @@ export async function runLs(
     true,
     ctx.signal,
   )
-  const result = await lsGeneric(flatten(scopes), ctx, readdir, stat, null)
+  const result = await lsGeneric(flatScopes(scopes), ctx, readdir, stat, null)
   return result ?? [null, new IOResult()]
 }

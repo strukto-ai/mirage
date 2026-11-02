@@ -377,7 +377,7 @@ export function buildTree(opts: BuildTreeOptions): PredNode {
 // The predicate tree for a FindOptions bag: the pre-built expression tree
 // when present, otherwise the flag-form fields. Single source of truth for
 // the fallback every backend find op used to hand-roll.
-export function optionsTree(options: {
+export function argsToTree(options: {
   name?: string | null
   iname?: string | null
   pathPattern?: string | null

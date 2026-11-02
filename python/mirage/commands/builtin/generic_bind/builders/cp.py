@@ -14,7 +14,6 @@
 
 from collections.abc import Awaitable, Callable
 from functools import partial
-from typing import Any
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.cp import cp_generic as generic_cp
@@ -88,12 +87,6 @@ def _make_find(files: CommandFiles) -> Callable[..., Awaitable[list[str]]]:
     return partial(_walk_find, readdir, stat)
 
 
-async def _write(
-    write: Callable[..., Awaitable[Any]], path: PathSpec, data: bytes = b""
-) -> None:
-    await write(path, data)
-
-
 async def cp(
     accessor: Accessor,
     paths: list[PathSpec],
@@ -140,7 +133,7 @@ async def cp(
         # per-entry refusals are worded.
         strategy = PrimitiveCopy(
             read=files.read,
-            write=partial(_write, write),
+            write=write,
             mkdir=files.mkdir,
             readdir=files.readdir,
         )

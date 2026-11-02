@@ -14,7 +14,6 @@
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { FileType, type PathSpec } from '../../types.ts'
-import { ensurePathSpec } from './_helpers.ts'
 import { copy, copyTree } from './copy.ts'
 import { backendPath } from './path.ts'
 import { removeTree } from './rm.ts'
@@ -29,11 +28,9 @@ export async function rename(
 ): Promise<void> {
   // Non-atomic: the Databricks Files API has no native rename, so this is
   // implemented as copy + delete and can leave partial state on failure.
-  const s = ensurePathSpec(src)
-  const d = ensurePathSpec(dst)
-  const srcStat = await stat(accessor, s)
-  const remoteSrc = backendPath(accessor.config, s)
-  const remoteDst = backendPath(accessor.config, d)
+  const srcStat = await stat(accessor, src)
+  const remoteSrc = backendPath(accessor.config, src)
+  const remoteDst = backendPath(accessor.config, dst)
   if (remoteSrc === remoteDst) {
     // rename(2) onto the same path is a no-op; copy + unlink here would
     // upload the file onto itself then delete it, destroying the data.
@@ -45,16 +42,16 @@ export async function rename(
       // Moving a directory into its own subtree would run away in the
       // recursive copy and then removeTree would delete the original.
       // Refuse before either side effect.
-      throw new Error(`cannot move '${s.virtual}' to a subdirectory of itself, '${d.virtual}'`)
+      throw new Error(`cannot move '${src.virtual}' to a subdirectory of itself, '${dst.virtual}'`)
     }
     // Only what the copy carried is deleted: a file written under the
     // source after its listing stays there, and the move is ENOTEMPTY.
     const copied = new Map<string, DirectoryEntry>()
     await copyTree(accessor, remoteSrc, remoteDst, copied)
-    await removeTree(accessor, s, copied)
+    await removeTree(accessor, src, copied)
   } else {
-    await copy(accessor, s, d)
-    await unlink(accessor, s)
+    await copy(accessor, src, dst)
+    await unlink(accessor, src)
   }
   // Only a positive file rules out a subtree at the source. The destination
   // keeps the subtree drop: the upload overwrites whatever stands there,

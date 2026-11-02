@@ -19,6 +19,8 @@ import type {
   OAuthTokens,
 } from '@modelcontextprotocol/client'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import type { JsonObject } from '../../types.ts'
+import { asObject, isRecord } from '../../utils/records.ts'
 import { apiRequest, type RetryPolicy } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
 import type { NotionConfig } from './config.ts'
@@ -61,15 +63,10 @@ interface ToolResult {
   structuredContent?: unknown
 }
 
-function asObject(value: unknown): Record<string, unknown> | null {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
-  return value as Record<string, unknown>
-}
-
 function firstTextContent(content: unknown): string | null {
   if (!Array.isArray(content) || content.length === 0) return null
-  const first = asObject(content[0])
-  if (first === null) return null
+  const first: unknown = content[0]
+  if (!isRecord(first)) return null
   if (first.type !== 'text') return null
   const text = first.text
   return typeof text === 'string' ? text : null
@@ -114,8 +111,7 @@ export class MCPNotionTransport implements NotionTransport {
       const text = firstTextContent(result.content) ?? 'tool returned error'
       throw new NotionMCPError(`Notion MCP tool error: ${text}`, { raw: result })
     }
-    const structured = asObject(result.structuredContent)
-    if (structured !== null) return structured
+    if (isRecord(result.structuredContent)) return result.structuredContent
     if (!Array.isArray(result.content) || result.content.length === 0) {
       throw new NotionMCPError('empty tool result', { raw: result })
     }
@@ -129,11 +125,10 @@ export class MCPNotionTransport implements NotionTransport {
     } catch {
       throw new NotionMCPError('failed to parse tool result', { raw: text })
     }
-    const obj = asObject(parsed)
-    if (obj === null) {
+    if (!isRecord(parsed)) {
       throw new NotionMCPError('failed to parse tool result', { raw: text })
     }
-    return obj
+    return parsed
   }
 }
 
@@ -229,6 +224,17 @@ function errorOf(response: Response, body: string): NotionAPIError {
       : `Notion API error: HTTP ${String(response.status)}`
   const code = typeof data.code === 'string' ? data.code : null
   return new NotionAPIError(message, response.status, code)
+}
+
+/** Refuse a list response Notion marked incomplete. */
+export function completePage(page: JsonObject): JsonObject {
+  const status = asObject(page.request_status)
+  if (status.type === 'incomplete') {
+    const reason =
+      typeof status.incomplete_reason === 'string' ? status.incomplete_reason : 'unknown'
+    throw new NotionAPIError(`Notion query incomplete: ${reason}`, null, reason)
+  }
+  return page
 }
 
 export interface RestCall {

@@ -61,6 +61,7 @@ import type { VFSStateBase } from '../../vfs/types.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import type { Documents } from '../documentation/documents.ts'
 import { WritePolicyError } from '../mount/errors.ts'
+import type { MountEntry } from '../mount/mount.ts'
 import {
   metaFromFields,
   metaToFields,
@@ -185,48 +186,15 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   // this one has not read yet. A killed job is finished only once its
   // console ended: its runner may still leave output and a status.
   for (const s of ws.sessionManager.list()) await ws.jobTable.sync(s.sessionId)
-  // Output is stored per channel rather than chunk by chunk: the manifest
-  // externalizes byte fields into tar entries, so keeping chunks would
-  // write one entry per write a job ever made. The cost is that a restored
-  // job's stdout and stderr no longer interleave, which only affects jobs
-  // that have already ended.
   const jobs: JobSnapshot[] = await Promise.all(
     ws.jobTable
       .allJobs()
       .filter((j) => j.status !== JobStatus.RUNNING && (j.process === null || j.console.finished))
-      .map(async (j) => ({
-        id: j.id,
-        command: j.command,
-        cwd: j.cwd,
-        status: j.status,
-        stdout: await j.console.snapshot(Channel.STDOUT),
-        stderr: await j.console.snapshot(Channel.STDERR),
-        exit_code: j.exitCode,
-        created_at: j.createdAt,
-        session_id: j.sessionId,
-        execution_id: j.executionId,
-      })),
+      .map((j) => jobToDict(j)),
   )
-  const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) => {
-    const entry: CLISnapshot = {
-      name,
-      spec: install.cli.spec.name,
-      config: captureCliConfig(install),
-    }
-    // A script install has no name to resolve (the spec is synthesized
-    // from a yaml `script:`), so its embedded program rides along and
-    // load rebuilds the spec from it.
-    const script = install.cli.script
-    if (script !== null) {
-      entry.script = {
-        source: script.source,
-        language: script.language,
-        module: script.module,
-      }
-      entry.runtime = install.cli.runtime
-    }
-    return entry
-  })
+  const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) =>
+    cliSnapshot(name, install),
+  )
   const historyEvents = (await ws.observer.events()).filter(
     (e) =>
       e.type === EVENT_COMMAND ||
@@ -296,7 +264,7 @@ function cliSpecFromEntry(entry: CLISnapshot): string | CLI {
   })
 }
 
-function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
+function cliConfigDump(install: CLIInstall): Record<string, unknown> | null {
   const model = install.cli.configModel
   if (model instanceof z.ZodObject) {
     return redactConfigWithSchema(model, install.config)
@@ -309,6 +277,28 @@ function captureCliConfig(install: CLIInstall): Record<string, unknown> | null {
     return install.config as Record<string, unknown>
   }
   return null
+}
+
+/** One installed CLI as snapshot state. */
+function cliSnapshot(name: string, install: CLIInstall): CLISnapshot {
+  const entry: CLISnapshot = {
+    name,
+    spec: install.cli.spec.name,
+    config: cliConfigDump(install),
+  }
+  // A script install has no name to resolve (the spec is synthesized
+  // from a yaml `script:`), so its embedded program rides along and
+  // load rebuilds the spec from it.
+  const script = install.cli.script
+  if (script !== null) {
+    entry.script = {
+      source: script.source,
+      language: script.language,
+      module: script.module,
+    }
+    entry.runtime = install.cli.runtime
+  }
+  return entry
 }
 
 /**
@@ -836,6 +826,30 @@ async function restoreHistory(ws: WorkspaceLike, state: WorkspaceStateDict): Pro
   await ws.observer.loadEvents((state.history as JsonObject[] | undefined) ?? [])
 }
 
+/**
+ * Serialize one finished job.
+ *
+ * Output is stored per channel rather than chunk by chunk: the manifest
+ * externalizes byte fields into tar entries, so keeping chunks would
+ * write one entry per write a job ever made. The cost is that a restored
+ * job's stdout and stderr no longer interleave, which only affects jobs
+ * that have already ended.
+ */
+async function jobToDict(j: Job): Promise<JobSnapshot> {
+  return {
+    id: j.id,
+    command: j.command,
+    cwd: j.cwd,
+    status: j.status,
+    stdout: await j.console.snapshot(Channel.STDOUT),
+    stderr: await j.console.snapshot(Channel.STDERR),
+    exit_code: j.exitCode,
+    created_at: j.createdAt,
+    session_id: j.sessionId,
+    execution_id: j.executionId,
+  }
+}
+
 /** Rebuild a finished job's console from its serialized output. */
 function restoredConsole(j: JobSnapshot): JobConsole {
   const chunks: ConsoleChunk[] = []
@@ -862,21 +876,21 @@ function restoredConsole(j: JobSnapshot): JobConsole {
   return console
 }
 
+function jobFromDict(j: JobSnapshot): Job {
+  return new Job({
+    id: j.id,
+    command: j.command,
+    cwd: j.cwd,
+    sessionId: j.session_id,
+    createdAt: j.created_at,
+    status: j.status as JobStatus,
+    exitCode: j.exit_code,
+    console: restoredConsole(j),
+  })
+}
+
 async function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): Promise<void> {
-  for (const j of state.jobs) {
-    await ws.jobTable.load(
-      new Job({
-        id: j.id,
-        command: j.command,
-        cwd: j.cwd,
-        sessionId: j.session_id,
-        createdAt: j.created_at,
-        status: j.status as JobStatus,
-        exitCode: j.exit_code,
-        console: restoredConsole(j),
-      }),
-    )
-  }
+  for (const j of state.jobs) await ws.jobTable.load(jobFromDict(j))
 }
 
 /**
@@ -902,4 +916,34 @@ async function diskStateAsRam(vfsState: Record<string, unknown>): Promise<RAMVFS
     }
   }
   return { type: VFSName.RAM, files, dirs: [...dirs], attrs }
+}
+
+/** Live mounts a copy should share with its origin. Mirrors Python's `reusable_mounts`. */
+export function reusableMounts(
+  mounts: readonly MountEntry[],
+  state: WorkspaceStateDict,
+): Record<string, Mount> {
+  const overrides: Record<string, Mount> = {}
+  for (const mount of mounts) {
+    for (const snap of state.mounts) {
+      if (snap.prefix === mount.prefix && vfsStateRequiresOverride(snap.vfs_state)) {
+        overrides[mount.prefix] = new Mount(mount.vfs, { read: mount.read, vfsRef: mount.vfsRef })
+      }
+    }
+  }
+  return overrides
+}
+
+/**
+ * Live-install overrides a same-process copy reinstalls from: every CLI's
+ * spec and validated config, the way remote mounts share their live
+ * mounts, so a directly installed spec and a redacted secret both survive
+ * without a registry lookup.
+ */
+export function reusableClis(ws: WorkspaceLike): CLIOverrides {
+  const overrides: CLIOverrides = {}
+  for (const [name, install] of ws.registry.clis.items()) {
+    overrides[name] = [install.cli, install.config as Record<string, unknown> | null]
+  }
+  return overrides
 }

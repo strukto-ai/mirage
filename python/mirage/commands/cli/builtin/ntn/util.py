@@ -147,6 +147,22 @@ def plain_text_of(fragments: JsonValue) -> str:
     return out
 
 
+def _names_of(value: JsonValue) -> str:
+    """Join the names a multi-select or a people property holds.
+
+    Args:
+        value (JsonValue): the property's array of named entries.
+
+    Returns:
+        str: the names, joined with a comma and a space.
+    """
+    if not isinstance(value, list):
+        return ""
+    return ", ".join(
+        str(one.get("name", "")) for one in value if isinstance(one, dict)
+    )
+
+
 def property_cell(prop: JsonValue) -> str:
     """Render one property value as `ntn datasources query` prints it.
 
@@ -175,21 +191,10 @@ def property_cell(prop: JsonValue) -> str:
         return str(int(value)) if float(value).is_integer() else str(value)
     if kind == "select" or kind == "status":
         return str(value.get("name", "")) if isinstance(value, dict) else ""
-    if kind == "multi_select":
-        if not isinstance(value, list):
-            return ""
-        names = [
-            str(one.get("name", "")) for one in value if isinstance(one, dict)
-        ]
-        return ", ".join(names)
+    if kind in ("multi_select", "people"):
+        return _names_of(value)
     if kind == "date":
         return str(value.get("start", "")) if isinstance(value, dict) else ""
-    if kind == "people":
-        if not isinstance(value, list):
-            return ""
-        return ", ".join(
-            str(one.get("name", "")) for one in value if isinstance(one, dict)
-        )
     if isinstance(value, str):
         return value
     if isinstance(value, bool) or value is None:

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ZERO_TIME, exported, list, orNull, pointer, struct } from './shape.ts'
+import { ZERO_TIME, exported, listOf, orNull, pointer, struct } from './shape.ts'
 
 describe('gh export shapes', () => {
   it('zero-fills the Go primitives', () => {
@@ -31,7 +31,7 @@ describe('gh export shapes', () => {
       'a',
     ])
     expect(exported(null, pointer(['oid', 'string']))).toBeNull()
-    expect(exported(null, list('string'))).toBeNull()
+    expect(exported(null, listOf('string'))).toBeNull()
   })
 
   it('prints a user author with its id and a bot as app/<login>', () => {

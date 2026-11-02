@@ -16,7 +16,7 @@
 // 1.25.5's encoding/json prints them (MIT and BSD-3-Clause; see
 // licenses/third_party/gh.txt and go.txt).
 
-import { exported, list, pointer, struct, type Shape } from './shape.ts'
+import { exported, listOf, pointer, struct, type Shape } from './shape.ts'
 
 /** A GraphQL connection as gh reads one: its nodes, and whether more follow. */
 export interface Connection {
@@ -169,7 +169,7 @@ export function nodes(
 ): readonly [string, Field] {
   const spec: Field = {
     select,
-    export: (node) => exported(connection(node[name]).nodes, list(item)),
+    export: (node) => exported(connection(node[name]).nodes, listOf(item)),
   }
   return [name, pages === undefined ? spec : { ...spec, pages }]
 }

@@ -176,6 +176,12 @@ def run_interpreter(
     return run_output(run, stdin=ctx.stdin)
 
 
+def _failed(label: str, message: str, exit_code: int) -> CommandOutput:
+    return None, IOResult(
+        exit_code=exit_code, stderr=f"{label}: {message}\n".encode()
+    )
+
+
 def not_bound(label: str, unavailable: str | None) -> CommandOutput:
     """The answer of an interpreter command no runtime runs.
 
@@ -192,10 +198,7 @@ def not_bound(label: str, unavailable: str | None) -> CommandOutput:
             command has no runtime (a default entry's build error),
             None when nothing captures it at all.
     """
-    hint = unavailable or "command not found"
-    return None, IOResult(
-        exit_code=NOT_FOUND_STATUS, stderr=f"{label}: {hint}\n".encode()
-    )
+    return _failed(label, unavailable or "command not found", NOT_FOUND_STATUS)
 
 
 async def runtime_version(
@@ -236,9 +239,11 @@ def exec_refusal(
         if allowed:
             return None
         display = script.raw_path or script.virtual
-        err = f"{label}: {display}: not in EXEC mode\n".encode()
-        return None, IOResult(exit_code=CANNOT_EXECUTE_STATUS, stderr=err)
+        return _failed(
+            label, f"{display}: not in EXEC mode", CANNOT_EXECUTE_STATUS
+        )
     if placement.exec_allowed:
         return None
-    err = f"{label}: root mount '/' is not in EXEC mode\n".encode()
-    return None, IOResult(exit_code=CANNOT_EXECUTE_STATUS, stderr=err)
+    return _failed(
+        label, "root mount '/' is not in EXEC mode", CANNOT_EXECUTE_STATUS
+    )

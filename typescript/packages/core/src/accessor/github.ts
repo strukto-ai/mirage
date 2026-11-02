@@ -12,12 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  GITHUB_API_BASE,
-  HttpGitHubTransport,
-  type GitHubTransport,
-} from '../core/github/client.ts'
+import { HttpGitHubTransport, type GitHubTransport } from '../core/github/client.ts'
 import type { GhConfig } from '../core/github/config.ts'
+import { API_BASE } from '../core/github/constants.ts'
 import type { TreeEntry } from '../core/github/tree_entry.ts'
 import { Accessor } from './base.ts'
 
@@ -38,7 +35,7 @@ export class GitHubAccount extends Accessor {
 
   /** The REST base its calls go to: github.com's when none is set. */
   get apiBase(): string {
-    return (this.config.baseUrl ?? GITHUB_API_BASE).replace(/\/+$/, '')
+    return (this.config.baseUrl ?? API_BASE).replace(/\/+$/, '')
   }
 
   /**

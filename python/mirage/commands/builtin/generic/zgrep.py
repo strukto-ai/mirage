@@ -1,6 +1,5 @@
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import aclosing
-from functools import partial
 
 from mirage.commands.builtin.generic.decompress import decompress_inputs
 from mirage.commands.builtin.generic.grep import listing_mode, max_count
@@ -21,7 +20,6 @@ from mirage.commands.builtin.utils.constants import (
     STDIN_OPERAND,
 )
 from mirage.commands.builtin.utils.links import LinkResolver
-from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import operand_label
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -36,10 +34,6 @@ from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 # script's line number and its $0 path, which name a file mirage
 # does not have.
 ZGREP_NO_PATTERN = "zgrep: missing pattern; try `zgrep --help' for help"
-
-
-async def _read_plain(read: PolymorphicReadFn, path: PathSpec) -> bytes:
-    return await materialize(normalized_read(read)(path))
 
 
 def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
@@ -92,7 +86,7 @@ async def zgrep_generic(
     pattern, never_match = await resolve_pattern(
         texts,
         fl,
-        partial(_read_plain, read),
+        read,
         ZGREP_NO_PATTERN,
     )
     f = parse_flags(fl, never_match)

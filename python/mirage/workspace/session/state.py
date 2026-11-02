@@ -1617,15 +1617,6 @@ async def mark_var(
         raise
 
 
-def session_profile(session: SessionState) -> str | None:
-    """The name of the profile the session runs under, None when none.
-
-    Args:
-        session (SessionState): the session to read.
-    """
-    return session.profile
-
-
 def _one_call(
     session: SessionState,
     policies: Policies | None,
@@ -1689,7 +1680,7 @@ def session_view(
             session, policies, functools.partial(mark_var, session, policies)
         ),
         is_readonly=functools.partial(env_is_readonly, session),
-        profile=functools.partial(session_profile, session),
+        profile=lambda: session.profile,
         cwd=lambda: session.cwd,
         session_id=session.session_id,
         access=functools.partial(session_access, session),

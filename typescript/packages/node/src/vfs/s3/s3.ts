@@ -14,7 +14,6 @@
 
 import { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
 import { VFSName } from '@struktoai/mirage-core/types'
-import type { S3HttpAgents } from '@struktoai/mirage-core/vfs/s3/config'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { S3VFS as CoreS3VFS } from '@struktoai/mirage-core/vfs/s3/s3'
 import { s3StorageLocation } from '@struktoai/mirage-core/vfs/s3/storage_id'
@@ -23,10 +22,6 @@ import type { ConfigState } from '@struktoai/mirage-core/vfs/types'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { S3Config } from './config.ts'
-
-function createProxyAgents(proxy: string): S3HttpAgents {
-  return { httpAgent: new HttpProxyAgent(proxy), httpsAgent: new HttpsProxyAgent(proxy) }
-}
 
 /**
  * The endpoint a mount declares, for its write-condition row: the config's,
@@ -73,7 +68,12 @@ export class S3VFS extends CoreS3VFS {
       ...cfg,
       ...(this.declared !== undefined ? { endpoint: this.declared } : {}),
       ...(proxy !== undefined && proxy !== ''
-        ? { httpAgentProvider: () => createProxyAgents(proxy) }
+        ? {
+            httpAgentProvider: () => ({
+              httpAgent: new HttpProxyAgent(proxy),
+              httpsAgent: new HttpsProxyAgent(proxy),
+            }),
+          }
         : {}),
     })
   }

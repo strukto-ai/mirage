@@ -422,6 +422,7 @@ async def _copy_if(
     except Exception as exc:
         # A 404 is lost only while the source is still there.
         lost = is_condition_lost(exc)
+        probe_failed = False
         if (
             not lost
             and condition_version(cond) is not None
@@ -430,13 +431,17 @@ async def _copy_if(
             try:
                 lost = await _head(conn, src_key) is not None
             except Exception:
+                probe_failed = True
                 logger.debug(
                     "source probe failed for %s", src_key, exc_info=True
                 )
         if lost:
             gone = not is_condition_lost(exc)
             raise ConditionLostError([dst_key], gone=gone) from exc
-        raise
+        if probe_failed or not is_not_found(exc):
+            raise
+        logger.debug("copy source %s is missing", src_key, exc_info=True)
+        return False
     return True
 
 
@@ -967,7 +972,13 @@ async def _delete_prefix(conn: S3Conn, pfx: str) -> None:
 
 
 async def _copy_file(conn: S3Conn, src_key: str, dst_key: str) -> bool:
-    await _copy_object(conn, src_key, dst_key)
+    try:
+        await _copy_object(conn, src_key, dst_key)
+    except Exception as exc:
+        if not is_not_found(exc):
+            raise
+        logger.debug("copy source %s is missing", src_key, exc_info=True)
+        return False
     return True
 
 
@@ -987,7 +998,8 @@ async def _move_file(conn: S3Conn, src_key: str, dst_key: str) -> bool:
         if not is_not_found(exc):
             raise
         return False
-    await _copy_file(conn, src_key, dst_key)
+    if not await _copy_file(conn, src_key, dst_key):
+        raise enoent(src_key)
     await conn.client.delete_object(Bucket=conn.config.bucket, Key=src_key)
     return True
 

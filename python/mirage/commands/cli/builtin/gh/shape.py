@@ -77,6 +77,10 @@ _REACTION = struct(
 )
 
 
+def _record(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
 
@@ -87,7 +91,7 @@ def _author(value: Any) -> dict[str, Any]:
     Args:
         value (Any): the actor as the answer carried it.
     """
-    row = value if isinstance(value, dict) else {}
+    row = _record(value)
     ident = _text(row.get("id"))
     if not ident:
         return {"is_bot": True, "login": f"app/{_text(row.get('login'))}"}
@@ -110,8 +114,7 @@ def _reactions(value: Any) -> list[Any]:
         return []
     kept: list[Any] = []
     for group in value:
-        users = group.get("users") if isinstance(group, dict) else None
-        count = users.get("totalCount") if isinstance(users, dict) else None
+        count = _record(_record(group).get("users")).get("totalCount")
         if isinstance(count, int) and not isinstance(count, bool) and count:
             kept.append(exported(group, _REACTION))
     return kept
@@ -123,7 +126,7 @@ def _owner(value: Any) -> dict[str, Any]:
     Args:
         value (Any): the owner as the answer carried it.
     """
-    row = value if isinstance(value, dict) else {}
+    row = _record(value)
     out: dict[str, Any] = {}
     if _text(row.get("id")):
         out["id"] = row["id"]
@@ -171,7 +174,7 @@ def exported(value: Any, shape: Shape) -> Any:
     assert isinstance(shape, Struct)
     if value is None and shape.nullable:
         return None
-    row = value if isinstance(value, dict) else {}
+    row = _record(value)
     return {
         name: exported(row.get(source or name), inner)
         for name, inner, source in shape.fields

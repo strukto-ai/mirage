@@ -19,7 +19,7 @@ import { materialize, type ByteSource, type IOResult } from '../../io/types.ts'
 import { Channel, JobConsole, Terminal } from '../../shell/console/index.ts'
 import { getProcessSubBody, getProcessSubDirection } from '../../shell/helpers.ts'
 import { ProcessSubDirection, type TSNodeLike } from '../../shell/types.ts'
-import { joinOrAbort, makeAbortError, mergeSignals } from '../../utils/abort.ts'
+import { runCancellable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
 import type { EvaluationContext } from '../evaluation.ts'
@@ -145,7 +145,7 @@ export class ProcessSubScope {
         ...[...kept.values()].flat().map((lines) => lines.loadRest()),
         ...this.held.map(async (child) => {
           try {
-            await joinOrAbort(child.task, child.signal)
+            await runCancellable(child.task, child.signal)
           } catch (error) {
             // A join the caller cut short leaves the child to settle on its
             // own; its late output must not reach a console the caller left.

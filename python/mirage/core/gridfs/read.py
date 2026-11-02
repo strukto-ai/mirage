@@ -22,6 +22,27 @@ from mirage.observe.context import record, revision_for, start_op
 from mirage.types import PathSpec
 
 
+async def resolve_file_id(
+    accessor: GridFSAccessor, path_spec: PathSpec, key: str
+) -> ObjectId:
+    """The revision a read of ``path_spec`` opens: the one the line pinned,
+    or the newest stored under ``key``.
+
+    Args:
+        accessor (GridFSAccessor): GridFS accessor.
+        path_spec (PathSpec): File path.
+        key (str): the path's backend key.
+    """
+    pinned_revision = revision_for(path_spec.virtual)
+    if pinned_revision is not None:
+        return ObjectId(pinned_revision)
+    doc = await latest_file(accessor, key)
+    if doc is None:
+        raise enoent(path_spec.virtual)
+    file_id: ObjectId = doc["_id"]
+    return file_id
+
+
 async def read(
     accessor: GridFSAccessor,
     path_spec: PathSpec,
@@ -41,14 +62,7 @@ async def read(
     config = accessor.config
     key = gridfs_key(path, config)
     timer = start_op()
-    pinned_revision = revision_for(virtual)
-    if pinned_revision is not None:
-        file_id = ObjectId(pinned_revision)
-    else:
-        doc = await latest_file(accessor, key)
-        if doc is None:
-            raise enoent(virtual)
-        file_id = doc["_id"]
+    file_id = await resolve_file_id(accessor, path_spec, key)
     try:
         out = await bucket(accessor).open_download_stream(file_id)
     except NoFile as exc:

@@ -23,7 +23,7 @@ from mirage.cli import workspace as workspace_cli
 from mirage.cli.workspace import (
     _format_history,
     _format_workspace_explanation,
-    _resolve_config_arg,
+    _load_config_argument,
 )
 
 OVERRIDE = """
@@ -41,7 +41,7 @@ clis:
 
 
 @pytest.mark.parametrize(
-    "resolve", [workspace_cli.resolve_config, _resolve_config_arg]
+    "resolve", [workspace_cli.resolve_config, _load_config_argument]
 )
 def test_exponent_ttl_reaches_the_daemon_as_a_number(tmp_path, resolve):
     path = tmp_path / "workspace.yaml"
@@ -59,7 +59,7 @@ def test_a_load_override_rebases_relative_code_refs_onto_its_dir(
     deploy.mkdir()
     path = deploy / "override.yaml"
     path.write_text(OVERRIDE)
-    resolved = _resolve_config_arg(path)
+    resolved = _load_config_argument(path)
     mounts = resolved["mounts"]
     assert mounts["/wiki"]["vfs"] == (f"{deploy}/backends/wiki.py:WikiVFS")
     # A module dotpath is importlib's to resolve, and a builtin name is

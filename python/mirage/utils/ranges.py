@@ -101,6 +101,14 @@ def splice_window(data: bytes, offset: int, payload: bytes) -> bytes:
     return head + payload + data[offset + len(payload) :]
 
 
+# HTTP 416, and the spellings the stores put on it. S3 and its clones
+# answer ``InvalidRange``, Azure/OneDrive ``InvalidRange`` too, and a
+# bare WebDAV or static host only sets the status line.
+_UNSATISFIABLE_CODES = frozenset(
+    {"InvalidRange", "RequestedRangeNotSatisfiable"}
+)
+
+
 def _status_of(exc: BaseException) -> int | None:
     """The HTTP status an exception carries, across the client libraries.
 
@@ -158,7 +166,7 @@ def is_unsatisfiable_range(exc: BaseException) -> bool:
     """
     if _status_of(exc) == 416:
         return True
-    if _code_of(exc) in ("InvalidRange", "RequestedRangeNotSatisfiable"):
+    if _code_of(exc) in _UNSATISFIABLE_CODES:
         return True
     text = str(exc).lower()
     if "range not satisfiable" in text:

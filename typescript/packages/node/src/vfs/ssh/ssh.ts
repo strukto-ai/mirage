@@ -47,9 +47,6 @@ import { unlink as sshUnlink } from '../../core/ssh/unlink.ts'
 import { write as sshWrite } from '../../core/ssh/write.ts'
 import { SSHConfig } from './config.ts'
 
-const mkdirOp = (accessor: SSHAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
-  sshMkdir(accessor, path, parents === true)
-
 export class SSHVFS extends BaseVFS {
   override readonly name = VFSName.SSH
   override readonly cachesReads: boolean = true
@@ -161,7 +158,7 @@ export class SSHVFS extends BaseVFS {
   }
 
   override mkdir(path: PathSpec, parents = false): Promise<void> {
-    return mkdirOp(this.accessor, path, parents)
+    return sshMkdir(this.accessor, path, parents)
   }
 
   override unlink(path: PathSpec): Promise<void> {

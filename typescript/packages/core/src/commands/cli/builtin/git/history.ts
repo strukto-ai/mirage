@@ -1080,30 +1080,41 @@ async function messageMatches(
 }
 
 /**
+ * Whether an `--author` or `--committer` pattern matches `ident`, the recorded
+ * `Name <email>`, or `exact`, the same identity as its own bytes when they were
+ * not UTF-8, once the mailmap (empty under `--no-mailmap`) has mapped it.
+ */
+async function identMatches(
+  ident: string,
+  exact: string | undefined,
+  patterns: readonly LinePattern[],
+  mailmap: readonly MailmapEntry[],
+  signal?: AbortSignal,
+): Promise<boolean> {
+  // The map is read as text, so the identity is looked up the same way; one it
+  // leaves alone is matched as its own bytes.
+  const mapped = mappedIdentity(ident, mailmap)
+  const subject = mapped === ident ? (exact ?? ident) : mapped
+  for (const pattern of patterns) if (await hits(pattern, subject, signal)) return true
+  return false
+}
+
+/**
  * Whether a commit passes `--author`, `--grep`, `--merges`, `--no-merges` and
  * kin. Several `--author`s or several `--grep`s are alternatives, while an
  * `--author` and a `--grep` must both match.
  */
 async function filtersPass(commit: CommitFacts, flags: LogFlags): Promise<boolean> {
   const mailmap = flags.useMailmap ? flags.mailmap : []
-  // A commit whose text was not UTF-8 is matched as its bytes. The map is read
-  // as text, so the identity is looked up the same way; one it leaves alone is
-  // matched as its own bytes.
+  // A commit whose text was not UTF-8 is matched as its bytes.
   const bytes = commit.bytes
   const idents: [string, string | undefined, readonly LinePattern[]][] = [
     [`${commit.authorName} <${commit.authorEmail}>`, bytes?.author, flags.authors],
     [`${commit.committerName} <${commit.committerEmail}>`, bytes?.committer, flags.committers],
   ]
   for (const [ident, exact, patterns] of idents) {
-    if (patterns.length === 0) continue
-    const mapped = mappedIdentity(ident, mailmap)
-    const subject = mapped === ident ? (exact ?? ident) : mapped
-    let hit = false
-    for (const re of patterns) {
-      hit = await hits(re, subject, flags.signal)
-      if (hit) break
-    }
-    if (!hit) return false
+    if (patterns.length && !(await identMatches(ident, exact, patterns, mailmap, flags.signal)))
+      return false
   }
   if (
     flags.greps.length &&

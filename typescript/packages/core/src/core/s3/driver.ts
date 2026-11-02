@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { callerSignal, currentCaller } from '../../context/session_context.ts'
-import { ABORT_JOIN_MS, joinOrAbort, hasAborted, makeAbortError } from '../../utils/abort.ts'
+import { ABORT_JOIN_MS, runCancellable, hasAborted, makeAbortError } from '../../utils/abort.ts'
 import { MoveError } from '../../errors/types.ts'
 import { CONDITION_SUPPORT } from './constants.ts'
 import { ByteSpool } from '../../io/spool.ts'
@@ -432,15 +432,19 @@ async function copyIf(
   } catch (err) {
     // A 404 is lost only while the source is still there.
     let lost = isConditionLost(err)
+    let probeFailed = false
     if (!lost && cond.kind === 'match' && isNotFound(err) && !isMissingBucket(err)) {
       try {
         lost = (await head(conn, srcKey)) !== null
       } catch (probeErr) {
+        probeFailed = true
         console.debug(`source probe failed for ${srcKey}: ${String(probeErr)}`)
       }
     }
     if (lost) throw new ConditionLostError([dstKey], { gone: !isConditionLost(err) })
-    throw err
+    if (probeFailed || !isNotFound(err) || isMissingBucket(err)) throw err
+    console.debug(`copy source ${srcKey} is missing: ${String(err)}`)
+    return false
   }
   return true
 }
@@ -507,7 +511,7 @@ function deleteRejected(err: unknown): boolean {
 
 /** Join an owned move request within the caller's cancellation grace. */
 function joinMove<T>(request: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
-  return joinOrAbort(request, signal, ABORT_JOIN_MS)
+  return runCancellable(request, signal, ABORT_JOIN_MS)
 }
 
 async function recoverCopy(
@@ -860,7 +864,13 @@ async function deletePrefix(conn: S3Conn, pfx: string): Promise<void> {
 }
 
 async function copyFile(conn: S3Conn, srcKey: string, dstKey: string): Promise<boolean> {
-  await copyObject(conn, srcKey, dstKey)
+  try {
+    await copyObject(conn, srcKey, dstKey)
+  } catch (err) {
+    if (!isNotFound(err) || isMissingBucket(err)) throw err
+    console.debug(`copy source ${srcKey} is missing: ${String(err)}`)
+    return false
+  }
   return true
 }
 
@@ -879,7 +889,7 @@ async function moveFile(conn: S3Conn, srcKey: string, dstKey: string): Promise<b
     if (!isNotFound(err)) throw err
     return false
   }
-  await copyFile(conn, srcKey, dstKey)
+  if (!(await copyFile(conn, srcKey, dstKey))) throw enoent(srcKey)
   await conn.send(new conn.mod.DeleteObjectCommand({ Bucket: conn.config.bucket, Key: srcKey }))
   return true
 }

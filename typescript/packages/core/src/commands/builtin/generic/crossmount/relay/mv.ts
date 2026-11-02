@@ -20,7 +20,7 @@ import type { PathSpec } from '../../../../../types.ts'
 import { refuseReveal } from '../../../generic_bind/files.ts'
 import { mvGeneric, parseFlags } from '../../mv.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { flatten, readdirOp, relayCopy, statOp } from '../utils.ts'
+import { flatScopes, readdirOp, relayCopy, relayWrite, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
@@ -44,12 +44,10 @@ export async function runMv(
   // Refuses a source whose mount cannot condition the delete.
   checkUnlink?: (path: PathSpec) => void,
 ): Promise<CrossResult> {
-  const flat = flatten(scopes)
+  const flat = flatScopes(scopes)
   const stat = statOp(dispatch)
   const readdir = readdirOp(dispatch)
-  const write = async (p: PathSpec, data: ByteSource): Promise<void> => {
-    await dispatch('write', p, [data])
-  }
+  const write = (p: PathSpec, data: ByteSource): Promise<void> => relayWrite(dispatch, p, data)
   const mkdir = async (p: PathSpec): Promise<void> => {
     await dispatch('mkdir', p)
   }

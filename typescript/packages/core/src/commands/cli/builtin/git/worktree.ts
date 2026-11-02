@@ -20,7 +20,7 @@ import { isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { GIT_DIR } from './constants.ts'
 import { WorkTreeLimitError } from './errors.ts'
 import { under } from './pathspec.ts'
-import { type IgnoreStack, loadIgnores } from './ignore.ts'
+import { GITIGNORE, type IgnoreStack, loadIgnores } from './ignore.ts'
 import { readNames, readOptional } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
@@ -29,8 +29,6 @@ import type { MountView } from '../../../../view/types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { callerSignal } from '../../../../context/session_context.ts'
-
-const GITIGNORE = '.gitignore'
 
 // git's three untracked modes. "normal" names an untracked directory once
 // instead of everything inside it, "all" names every file, and "no" leaves them

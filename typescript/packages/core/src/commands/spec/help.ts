@@ -21,6 +21,7 @@ import {
 import { ARG_PLACEHOLDER } from './constants.ts'
 import { type Argument, type CommandSpec, UsageStyle } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { rstripNewlines } from '../../utils/text.ts'
 
 /**
  * The bare name of an option's value, declared or derived.
@@ -51,14 +52,6 @@ function valueLabel(opt: Argument): string {
   const value = `<${opt.metavar ?? (opt.type === 'path' ? 'path' : 'text')}>`
   if (opt.valueTypes.length > 0) return ` <name> ${value}`
   return ` ${value}`.repeat(typeof opt.nargs === 'number' ? opt.nargs : 1)
-}
-
-// Python's rstrip('\n'). A `/\n+$/` regex is a polynomial ReDoS on a long
-// run of trailing newlines, so the trim walks backwards instead.
-function trimTrailingNewlines(text: string): string {
-  let end = text.length
-  while (end > 0 && text[end - 1] === '\n') end -= 1
-  return text.slice(0, end)
 }
 
 function flagDisplay(opt: Argument): string {
@@ -189,7 +182,7 @@ export function renderHelp(
 
   if (spec.epilog !== null && spec.epilog !== '') {
     lines.push('')
-    lines.push(trimTrailingNewlines(spec.epilog))
+    lines.push(rstripNewlines(spec.epilog))
   }
 
   return lines.join('\n') + '\n'

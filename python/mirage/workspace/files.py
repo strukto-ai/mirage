@@ -45,6 +45,22 @@ from mirage.view.types import FollowOperands, SessionBind
 from mirage.workspace.dispatcher.reader import NamespaceReader
 
 
+def _payload_bytes(result: Any, kwargs: dict[str, Any]) -> int:
+    """The op's byte count for recording: result first, else input.
+
+    Args:
+        result (Any): what the op returned.
+        kwargs (dict): the op's keyword arguments (write payloads travel
+            as ``data``).
+    """
+    if isinstance(result, (bytes, bytearray)):
+        return len(result)
+    return next(
+        (len(v) for v in kwargs.values() if isinstance(v, (bytes, bytearray))),
+        0,
+    )
+
+
 async def _recorded(
     stream: AsyncIterator[bytes], record: Callable[[], None]
 ) -> AsyncIterator[bytes]:
@@ -236,26 +252,6 @@ class Files:
             path (str | PathSpec): virtual directory path.
         """
         return self._reader().submounts(path)
-
-    @staticmethod
-    def _payload_bytes(result: Any, kwargs: dict[str, Any]) -> int:
-        """The op's byte count for recording: result first, else input.
-
-        Args:
-            result (Any): what the op returned.
-            kwargs (dict): the op's keyword arguments (write payloads
-                travel as ``data``).
-        """
-        if isinstance(result, (bytes, bytearray)):
-            return len(result)
-        return next(
-            (
-                len(v)
-                for v in kwargs.values()
-                if isinstance(v, (bytes, bytearray))
-            ),
-            0,
-        )
 
     async def dispatch(
         self, name: str, path: PathSpec, /, **kwargs: Any
@@ -505,9 +501,7 @@ class Files:
             op,
             ran,
             report.source or owner.resource_type,
-            moved
-            if moved is not None
-            else self._payload_bytes(answer, kwargs),
+            moved if moved is not None else _payload_bytes(answer, kwargs),
             timer,
         )
 
