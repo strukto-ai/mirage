@@ -1,15 +1,7 @@
 import { z } from 'zod'
-import type {
-  Claim,
-  Claimant,
-  CommandRule,
-  Decision,
-  HandOff,
-  Occurrence,
-  Outcome,
-} from '../policy/types.ts'
+import type { Claim, Claimant, Decision, HandOff, Occurrence, Outcome } from '../policy/types.ts'
 import { units } from './document.ts'
-import { admissionMatcher, ruleWire, type Wire } from './policy.ts'
+import { admissionMatcher, type Wire } from './policy.ts'
 
 const key = z.number().int().nonnegative()
 
@@ -19,25 +11,37 @@ export function approvalQuery<T>(query: Wire, result: z.ZodType<T>): T {
 }
 
 /** One existing record, with an invocation-local identity distinct from its public id. */
-export function recordWire(record: Decision, key: number): Wire {
+export function recordWire(
+  record: Decision,
+  key: number,
+  rule: number | null,
+  argv: readonly string[],
+  cwd: string,
+): Wire {
   return {
     key,
-    id: units(record.id),
-    command: units(record.command),
-    argv: record.argv.map(units),
-    cwd: units(record.cwd),
-    rule: ruleWire(record.rule),
+    rule,
+    same_line:
+      record.cwd === cwd &&
+      record.command === argv[0] &&
+      record.argv.length === argv.length - 1 &&
+      record.argv.every((arg, index) => arg === argv[index + 1]),
     outcome: record.outcome,
     scope: record.scope,
   }
 }
 
 /** One occurrence node; parents travel as keys so depth does not become JSON nesting. */
-export function occurrenceWire(occurrence: Occurrence, key: number, parent: number | null): Wire {
+export function occurrenceWire(
+  occurrence: Occurrence,
+  key: number,
+  parent: number | null,
+  source: number,
+): Wire {
   return {
     key,
     parent,
-    source: units(occurrence.source),
+    source,
     start: occurrence.start,
     end: occurrence.end,
   }
@@ -147,8 +151,18 @@ export class ApprovalSnapshot {
   }
 
   get wire(): Wire {
+    const sources: number[][] = []
+    const sourceKeys = new Map<string, number>()
+    const occurrences = this.occurrenceObjects.map((occurrence, key) => {
+      let source = sourceKeys.get(occurrence.source)
+      if (source === undefined) {
+        source = sources.length
+        sourceKeys.set(occurrence.source, source)
+        sources.push(units(occurrence.source))
+      }
+      return occurrenceWire(occurrence, key, this.occurrenceKey(occurrence.parent), source)
+    })
     return {
-      records: this.records.map((record) => recordWire(record, this.recordKey(record))),
       holders: this.holderObjects.map((holder, key) => ({
         key,
         parent: holder.parent === null ? null : this.holderKey(holder.parent),
@@ -163,15 +177,15 @@ export class ApprovalSnapshot {
         record: this.recordKey(claim.decision),
         occurrence: this.occurrenceKey(claim.occurrence),
       })),
-      occurrences: this.occurrenceObjects.map((occurrence, key) =>
-        occurrenceWire(occurrence, key, this.occurrenceKey(occurrence.parent)),
-      ),
+      occurrences,
+      sources,
       live: this.live.map((holder) => this.holderKey(holder)),
     }
   }
 
   plan(
-    rules: readonly CommandRule[],
+    recordRules: readonly number[],
+    rules: readonly number[],
     argv: readonly string[],
     cwd: string,
     claimant: Claimant | null,
@@ -185,10 +199,15 @@ export class ApprovalSnapshot {
           }
     const query = {
       kind: 'plan',
-      state: this.wire,
-      rules: rules.map(ruleWire),
-      argv: argv.map(units),
-      cwd: units(cwd),
+      state: {
+        ...this.wire,
+        records: this.records.map((record, index) => {
+          const rule = recordRules[index]
+          if (rule === undefined) throw new Error('approval record has no rule key')
+          return recordWire(record, this.recordKey(record), rule, argv, cwd)
+        }),
+      },
+      rules: [...rules],
       claimant: reader,
     } satisfies Wire
     const result = approvalQuery(query, ApprovalSnapshot.RESPONSE.plan)
@@ -208,14 +227,14 @@ export class ApprovalSnapshot {
     }
   }
 
-  waiting(rule: CommandRule, argv: readonly string[], cwd: string): Decision | null {
+  waiting(argv: readonly string[], cwd: string): Decision | null {
     const found = approvalQuery(
       {
         kind: 'waiting',
-        records: this.wire.records ?? [],
-        rule: ruleWire(rule),
-        argv: argv.map(units),
-        cwd: units(cwd),
+        records: this.records.map((record) =>
+          recordWire(record, this.recordKey(record), 0, argv, cwd),
+        ),
+        rule: 0,
       },
       key.nullable(),
     )
@@ -224,7 +243,16 @@ export class ApprovalSnapshot {
 
   answer(id: string, outcome: Outcome): Decision | null {
     const found = approvalQuery(
-      { kind: 'answer', records: this.wire.records ?? [], id: units(id), outcome },
+      {
+        kind: 'answer',
+        records: this.records.map((record) => ({
+          key: this.recordKey(record),
+          id: units(record.id),
+          outcome: record.outcome,
+        })),
+        id: units(id),
+        outcome,
+      },
       key.nullable(),
     )
     return found === null ? null : this.record(found)

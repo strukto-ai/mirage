@@ -3,7 +3,7 @@ from typing import Any, TypeVar
 
 from mirage.policy.types import Claim, Decision, HandOff, Occurrence
 from mirage.rs.document import units
-from mirage.rs.policy import admission_matcher, rule_wire
+from mirage.rs.policy import admission_matcher
 
 T = TypeVar("T")
 
@@ -18,20 +18,29 @@ def _key(value: T, values: list[T], keys: dict[int, int]) -> int:
     return found
 
 
-def record_wire(record: Decision, key: int) -> dict[str, Any]:
-    """Encode a record while retaining its invocation-local identity.
+def record_wire(
+    record: Decision,
+    key: int,
+    rule_key: int | None,
+    argv: tuple[str, ...],
+    cwd: str,
+) -> dict[str, Any]:
+    """Encode value-equality facts with the original record identity.
 
     Args:
         record (Decision): the original host record.
         key (int): its identity in this invocation.
+        rule_key (int | None): the equal requested rule, if any.
+        argv (tuple[str, ...]): the requested command and arguments.
+        cwd (str): the requested working directory.
     """
     return {
         "key": key,
-        "id": units(record.id),
-        "command": units(record.command),
-        "argv": [units(word) for word in record.argv],
-        "cwd": units(record.cwd),
-        "rule": rule_wire(record.rule),
+        "rule": rule_key,
+        "same_line": bool(argv)
+        and record.command == argv[0]
+        and record.argv == argv[1:]
+        and record.cwd == cwd,
         "outcome": None if record.outcome is None else record.outcome.value,
         "scope": record.scope.value,
     }
@@ -72,16 +81,17 @@ class ApprovalSnapshot:
         self._holder_keys: dict[int, int] = {}
         self._claim_keys: dict[int, int] = {}
         self._occurrence_keys: dict[int, int] = {}
+        self._source_keys: dict[str, int] = {}
         self.wire: dict[str, Any] = {
-            "records": [
-                record_wire(record, self.record_key(record))
-                for record in records
-            ],
+            "records": [],
             "holders": [],
             "claims": [],
             "live": [self.holder_key(holder) for holder in live],
             "occurrences": [],
+            "sources": [],
         }
+        for record in records:
+            self.record_key(record)
         if handed is not None:
             self.holder_key(handed)
         index = 0
@@ -137,13 +147,21 @@ class ApprovalSnapshot:
                 {
                     "key": index,
                     "parent": parent,
-                    "source": units(current.source),
+                    "source": self._source_key(current.source),
                     "start": current.start,
                     "end": current.end,
                 }
             )
             index += 1
         return first
+
+    def _source_key(self, source: str) -> int:
+        found = self._source_keys.get(source)
+        if found is None:
+            found = len(self.wire["sources"])
+            self._source_keys[source] = found
+            self.wire["sources"].append(units(source))
+        return found
 
     def query(self, kind: str, **args: Any) -> Any:
         return approval_query(kind, state=self.wire, **args)

@@ -55,7 +55,6 @@ from mirage.rs.approvals import (
     record_wire,
 )
 from mirage.rs.document import units
-from mirage.rs.policy import rule_wire
 from mirage.types import PathSpec, Refusal
 
 # A host that answers an Ask inside the line.
@@ -182,10 +181,10 @@ def covers(
     return (
         approval_query(
             "covers",
-            record=record_wire(record, 0),
-            rule=rule_wire(rule),
-            argv=[units(word) for word in argv],
-            cwd=units(cwd),
+            record=record_wire(
+                record, 0, 0 if record.rule == rule else None, argv, cwd
+            ),
+            rule=0,
         )
         is True
     )
@@ -213,6 +212,7 @@ def encloses(scope: Occurrence, occurrence: Occurrence) -> bool:
         approval_query(
             "encloses",
             occurrences=snapshot.wire["occurrences"],
+            sources=snapshot.wire["sources"],
             scope=scope_key,
             occurrence=occurrence_key,
         )
@@ -287,15 +287,13 @@ class Decisions(DecisionOwner):
     def list(self, session_id: str = "") -> tuple[Decision, ...]:
         if session_id:
             return self._records(session_id)
-        return tuple((r for key in self._keys() for r in self._records(key)))
+        return tuple(r for key in self._keys() for r in self._records(key))
 
     def pending(self, session_id: str = "") -> tuple[Decision, ...]:
         return tuple(
-            (
-                record
-                for record in self.list(session_id)
-                if record.outcome is None
-            )
+            record
+            for record in self.list(session_id)
+            if record.outcome is None
         )
 
     async def answer(
@@ -323,7 +321,16 @@ class Decisions(DecisionOwner):
             snapshot = ApprovalSnapshot(candidates)
             key: int | None = approval_query(
                 "answer",
-                records=snapshot.wire["records"],
+                records=[
+                    {
+                        "key": snapshot.record_key(record),
+                        "id": units(record.id),
+                        "outcome": None
+                        if record.outcome is None
+                        else record.outcome.value,
+                    }
+                    for record in candidates
+                ],
                 id=units(decision_id),
                 outcome=outcome.value,
             )
@@ -344,16 +351,28 @@ class Decisions(DecisionOwner):
         self, ctx: CommandContext, ask: Ask, claimant: Claimant | None = None
     ) -> tuple[tuple[CommandRule, ...], ApprovalSnapshot, dict[str, Any]]:
         rules = ask.rules or (ask_rule(ctx, ask),)
+        argv = (ctx.command, *ctx.argv)
+        rule_keys = {rule: index for index, rule in enumerate(rules)}
         records = tuple(
             record
             for record in self._records(ctx.session_id)
-            if any(record.rule == rule for rule in rules)
+            if record.rule in rule_keys
         )
         snapshot = ApprovalSnapshot(
             records,
             self._live.get(ctx.session_id, ()),
             None if claimant is None else claimant.line,
         )
+        snapshot.wire["records"] = [
+            record_wire(
+                record,
+                snapshot.record_key(record),
+                rule_keys[record.rule],
+                argv,
+                ctx.cwd,
+            )
+            for record in records
+        ]
         caller = (
             None
             if claimant is None
@@ -364,9 +383,7 @@ class Decisions(DecisionOwner):
         )
         plan = snapshot.query(
             "plan",
-            rules=[rule_wire(rule) for rule in rules],
-            argv=[units(word) for word in (ctx.command, *ctx.argv)],
-            cwd=units(ctx.cwd),
+            rules=[rule_keys[rule] for rule in rules],
             claimant=caller,
         )
         return rules, snapshot, plan
@@ -521,11 +538,11 @@ class Decisions(DecisionOwner):
 
     def release(self, session_id: str, handed: HandOff) -> None:
         handed.claimed.clear()
-        self._live[session_id] = [
-            holder
-            for holder in self._live.get(session_id, ())
-            if holder is not handed
-        ]
+        live = self._live.get(session_id)
+        if live is not None:
+            self._live[session_id] = [
+                holder for holder in live if holder is not handed
+            ]
 
     def held(
         self, ctx: CommandContext, ask: Ask, claimant: Claimant | None = None
@@ -604,6 +621,8 @@ class Decisions(DecisionOwner):
         claimant: Claimant,
         reply: dict[str, Any],
     ) -> None:
+        if not reply["records"]:
+            return
         claimant.line.claimed.extend(
             Claim(claimant.occurrence, snapshot.record_objects[key])
             for key in reply["records"]
@@ -623,10 +642,13 @@ class Decisions(DecisionOwner):
         snapshot = ApprovalSnapshot(records)
         key: int | None = approval_query(
             "waiting",
-            records=snapshot.wire["records"],
-            rule=rule_wire(rule),
-            argv=[units(word) for word in argv],
-            cwd=units(ctx.cwd),
+            records=[
+                record_wire(
+                    record, snapshot.record_key(record), 0, argv, ctx.cwd
+                )
+                for record in records
+            ],
+            rule=0,
         )
         return None if key is None else snapshot.record_objects[key]
 

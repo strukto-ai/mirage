@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use super::{Rule, Text};
+use super::Text;
 use crate::StreamError;
 
 macro_rules! key {
@@ -17,6 +17,8 @@ key!(RecordKey);
 key!(HolderKey);
 key!(ClaimKey);
 key!(OccurrenceKey);
+key!(RuleKey);
+key!(SourceKey);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -36,20 +38,24 @@ pub(super) enum Scope {
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct Record {
     key: RecordKey,
-    id: Text,
-    command: Text,
-    argv: Vec<Text>,
-    cwd: Text,
-    rule: Rule,
+    rule: Option<RuleKey>,
+    same_line: bool,
     outcome: Option<Answer>,
     scope: Scope,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct AnswerRecord {
+    key: RecordKey,
+    id: Text,
+    outcome: Option<Answer>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct Occurrence {
     key: OccurrenceKey,
     parent: Option<OccurrenceKey>,
-    source: Text,
+    source: SourceKey,
     start: usize,
     end: usize,
 }
@@ -76,6 +82,7 @@ pub(super) struct State {
     claims: Vec<Claim>,
     live: Vec<HolderKey>,
     occurrences: Vec<Occurrence>,
+    sources: Vec<Text>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,33 +96,28 @@ pub(super) struct Claimant {
 pub(super) enum Query {
     Covers {
         record: Record,
-        rule: Rule,
-        argv: Vec<Text>,
-        cwd: Text,
+        rule: RuleKey,
     },
 
     Encloses {
         occurrences: Vec<Occurrence>,
+        sources: Vec<Text>,
         scope: OccurrenceKey,
         occurrence: OccurrenceKey,
     },
 
     Plan {
         state: State,
-        rules: Vec<Rule>,
-        argv: Vec<Text>,
-        cwd: Text,
+        rules: Vec<RuleKey>,
         claimant: Option<Claimant>,
     },
 
     Waiting {
         records: Vec<Record>,
-        rule: Rule,
-        argv: Vec<Text>,
-        cwd: Text,
+        rule: RuleKey,
     },
     Answer {
-        records: Vec<Record>,
+        records: Vec<AnswerRecord>,
         id: Text,
         outcome: Answer,
     },
@@ -175,27 +177,23 @@ pub(super) enum Reply {
     HandedUp(HandedUp),
 }
 
-fn same_line(record: &Record, argv: &[Text], cwd: &[u32]) -> bool {
-    record.cwd == cwd
-        && argv.first() == Some(&record.command)
-        && argv.get(1..) == Some(record.argv.as_slice())
-}
-
-fn covers(record: &Record, rule: &Rule, argv: &[Text], cwd: &[u32]) -> bool {
-    if record.outcome.is_none() || !same_rule(&record.rule, rule) {
+fn covers(record: &Record, rule: RuleKey) -> bool {
+    if record.outcome.is_none() || record.rule != Some(rule) {
         return false;
     }
     match record.scope {
         Scope::Session => record.outcome == Some(Answer::Allow),
-        Scope::Once => same_line(record, argv, cwd),
+        Scope::Once => record.same_line,
     }
 }
 
-fn same_rule(left: &Rule, right: &Rule) -> bool {
-    left == right
-}
-
 impl State {
+    fn source(&self, key: SourceKey) -> Result<&Text, StreamError> {
+        self.sources
+            .get(key.0)
+            .ok_or_else(|| StreamError::new("unknown approval source"))
+    }
+
     fn occurrence(&self, key: OccurrenceKey) -> Result<&Occurrence, StreamError> {
         self.occurrences
             .iter()
@@ -215,7 +213,10 @@ impl State {
             }
             let a = self.occurrence(a)?;
             let b = self.occurrence(b)?;
-            if a.source != b.source || a.start != b.start || a.end != b.end {
+            if self.source(a.source)? != self.source(b.source)?
+                || a.start != b.start
+                || a.end != b.end
+            {
                 return Ok(false);
             }
             left = a.parent;
@@ -237,7 +238,9 @@ impl State {
                 return Err(StreamError::new("cyclic approval occurrence lineage"));
             }
             let node = self.occurrence(key)?;
-            if node.source == scope.source && self.same_occurrence(node.parent, scope.parent)? {
+            if self.source(node.source)? == self.source(scope.source)?
+                && self.same_occurrence(node.parent, scope.parent)?
+            {
                 return Ok(scope.start <= node.start && node.end <= scope.end);
             }
             within = node.parent;
@@ -312,13 +315,7 @@ impl State {
             .collect())
     }
 
-    fn plan(
-        &self,
-        rules: &[Rule],
-        argv: &[Text],
-        cwd: &[u32],
-        claimant: Option<&Claimant>,
-    ) -> Result<Plan, StreamError> {
+    fn plan(&self, rules: &[RuleKey], claimant: Option<&Claimant>) -> Result<Plan, StreamError> {
         let records = self.standing(claimant)?;
         let found: Vec<Option<&Record>> = rules
             .iter()
@@ -326,7 +323,7 @@ impl State {
                 [Scope::Once, Scope::Session].iter().find_map(|scope| {
                     records
                         .iter()
-                        .find(|record| record.scope == *scope && covers(record, rule, argv, cwd))
+                        .find(|record| record.scope == *scope && covers(record, *rule))
                         .copied()
                 })
             })
@@ -351,14 +348,13 @@ impl State {
                 self.records
                     .iter()
                     .find(|record| {
-                        record.outcome.is_none()
-                            && same_rule(&record.rule, rule)
-                            && same_line(record, argv, cwd)
+                        record.outcome.is_none() && record.rule == Some(*rule) && record.same_line
                     })
                     .map(|record| record.key)
             })
             .collect();
         let claim = claimant
+            .filter(|_| !once.is_empty())
             .map(|reader| self.claim_changes(reader.holder, &once))
             .transpose()?;
         Ok(Plan {
@@ -407,20 +403,17 @@ impl State {
 
 pub(super) fn answer(query: Query) -> Result<Reply, StreamError> {
     Ok(match query {
-        Query::Covers {
-            record,
-            rule,
-            argv,
-            cwd,
-        } => Reply::Bool(covers(&record, &rule, &argv, &cwd)),
+        Query::Covers { record, rule } => Reply::Bool(covers(&record, rule)),
 
         Query::Encloses {
             occurrences,
+            sources,
             scope,
             occurrence,
         } => Reply::Bool(
             State {
                 occurrences,
+                sources,
                 ..State::default()
             }
             .encloses(scope, occurrence)?,
@@ -429,23 +422,14 @@ pub(super) fn answer(query: Query) -> Result<Reply, StreamError> {
         Query::Plan {
             state,
             rules,
-            argv,
-            cwd,
             claimant,
-        } => Reply::Plan(state.plan(&rules, &argv, &cwd, claimant.as_ref())?),
+        } => Reply::Plan(state.plan(&rules, claimant.as_ref())?),
 
-        Query::Waiting {
-            records,
-            rule,
-            argv,
-            cwd,
-        } => Reply::Record(
+        Query::Waiting { records, rule } => Reply::Record(
             records
                 .iter()
                 .find(|record| {
-                    record.outcome.is_none()
-                        && same_rule(&record.rule, &rule)
-                        && same_line(record, &argv, &cwd)
+                    record.outcome.is_none() && record.rule == Some(rule) && record.same_line
                 })
                 .map(|record| record.key),
         ),
@@ -537,7 +521,15 @@ pub(super) fn answer(query: Query) -> Result<Reply, StreamError> {
 mod tests {
     use serde_json::{Value, json};
 
-    fn ask(query: Value) -> Value {
+    fn ask(mut query: Value) -> Value {
+        if let Some(state) = query.get_mut("state") {
+            if state.get("sources").is_none() {
+                state["sources"] = json!([[99, 97, 116]]);
+            }
+        }
+        if query["kind"] == "encloses" && query.get("sources").is_none() {
+            query["sources"] = json!([[99, 97, 116]]);
+        }
         let request = serde_json::to_vec(&json!({"op": "approvals", "query": query})).unwrap();
         let (bytes, error) = crate::run("policy", "{}", &[&request]);
         assert!(error.is_none(), "{:?}", error.map(|error| error.message));
@@ -545,29 +537,29 @@ mod tests {
     }
 
     fn rule(reason: u32) -> Value {
-        json!({"reason": [reason], "commands": [[99]], "mount": null})
+        json!(reason)
     }
 
     fn record(key: usize, outcome: Value, scope: &str, reason: u32) -> Value {
-        json!({"key": key, "id": [1], "command": [99], "argv": [[47,115]],
-            "cwd": [47], "rule": rule(reason), "outcome": outcome, "scope": scope})
+        json!({"key": key, "rule": rule(reason), "same_line": true,
+            "outcome": outcome, "scope": scope})
     }
 
     fn node(key: usize, parent: Value, start: usize, end: usize) -> Value {
-        json!({"key": key, "parent": parent, "source": [99,97,116], "start": start, "end": end})
+        json!({"key": key, "parent": parent, "source": 0, "start": start, "end": end})
     }
 
     fn plan(state: Value, rules: Value, claimant: Value) -> Value {
         ask(json!({"kind": "plan", "state": state, "rules": rules,
-            "argv": [[99],[47,115]], "cwd": [47], "claimant": claimant}))
+            "claimant": claimant}))
     }
 
     #[test]
     fn public_ids_do_not_identify_records_or_answer_all_questions() {
         let records = json!([
-            record(10, json!("allow"), "once", 1),
-            record(11, Value::Null, "once", 2),
-            record(12, Value::Null, "once", 3)
+            {"key":10,"id":[1],"outcome":"allow"},
+            {"key":11,"id":[1],"outcome":null},
+            {"key":12,"id":[1],"outcome":null}
         ]);
         assert_eq!(
             ask(json!({"kind":"answer", "records":records,
@@ -622,30 +614,27 @@ mod tests {
     }
 
     #[test]
-    fn missing_mount_is_not_an_explicit_empty_mount() {
-        let left = rule(1);
-        let mut right = left.clone();
-        right["mount"] = json!([]);
+    fn another_rule_key_does_not_cover() {
+        let right = rule(2);
         assert_eq!(
             ask(
                 json!({"kind":"covers", "record":record(1,json!("allow"),"once",1),
-            "rule":right, "argv":[[99],[47,115]], "cwd":[47]})
+            "rule":right})
             ),
             false
         );
     }
 
     #[test]
-    fn waiting_uses_the_exact_rule_words_and_directory() {
+    fn waiting_requires_the_rule_key_and_exact_line_fact() {
         let records = json!([
             record(10, Value::Null, "once", 1),
             record(11, Value::Null, "once", 2)
         ]);
-        let query = json!({"kind":"waiting", "records":records, "rule":rule(2),
-            "argv":[[99],[47,115]], "cwd":[47]});
+        let query = json!({"kind":"waiting", "records":records, "rule":rule(2)});
         assert_eq!(ask(query.clone()), 11);
         let mut moved = query;
-        moved["cwd"] = json!([47, 120]);
+        moved["records"][1]["same_line"] = json!(false);
         assert_eq!(ask(moved), Value::Null);
     }
 
@@ -743,6 +732,32 @@ mod tests {
             "scope":0,"occurrence":699})),
             true
         );
+    }
+
+    #[test]
+    fn source_pool_compares_values_across_distinct_keys() {
+        let mut other = node(1, Value::Null, 1, 2);
+        other["source"] = json!(1);
+        let query = json!({"kind":"encloses", "sources":[[99,97,116],[99,97,116]],
+            "occurrences":[node(0,Value::Null,0,3),other], "scope":0,"occurrence":1});
+        assert_eq!(ask(query.clone()), true);
+        let mut changed = query;
+        changed["sources"][1] = json!([100]);
+        assert_eq!(ask(changed), false);
+    }
+
+    #[test]
+    fn equal_requested_rule_keys_keep_each_position_and_record_identity() {
+        let result = plan(
+            json!({"records":[record(10,json!("allow"),"once",1),
+                record(11,Value::Null,"once",2)]}),
+            json!([rule(1), rule(2), rule(1)]),
+            Value::Null,
+        );
+        assert_eq!(result["answers"], json!([10, null, 10]));
+        assert_eq!(result["missing"], json!([1]));
+        assert_eq!(result["waiting"], json!([null, 11, null]));
+        assert_eq!(result["once"], json!([10, 10]));
     }
 
     #[test]

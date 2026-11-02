@@ -71,11 +71,19 @@ def _record(record: Decision) -> dict[str, Any]:
 async def observations(case: dict[str, Any]) -> list[dict[str, Any]]:
     sessions = Sessions()
     prompts = 0
+    asked_rules: list[int] = []
     scripted = iter(case.get("answers", ()))
 
     async def answer(record: Decision) -> Decision | None:
         nonlocal prompts
         prompts += 1
+        asked_rules.append(
+            next(
+                index
+                for index, rule in enumerate(rules)
+                if rule is record.rule
+            )
+        )
         value = next(scripted, None)
         if value is None:
             return None
@@ -163,14 +171,30 @@ async def observations(case: dict[str, Any]) -> list[dict[str, Any]]:
                 outcome = {"kind": "abandoned"}
             else:
                 outcome = {"kind": "allow"}
-        result.append(
-            {
-                "result": outcome,
-                "records": [_record(record) for record in ledger.list("s")],
-                "flushes": sessions.flushes,
-                "prompts": prompts,
+        records = ledger.list("s")
+        observed: dict[str, Any] = {
+            "result": outcome,
+            "records": [_record(record) for record in records],
+            "flushes": sessions.flushes,
+            "prompts": prompts,
+        }
+        if case.get("trace"):
+            observed["asked_rules"] = list(asked_rules)
+            observed["claims"] = {
+                name: [
+                    next(
+                        (
+                            index
+                            for index, record in enumerate(records)
+                            if record is claim.decision
+                        ),
+                        -1,
+                    )
+                    for claim in holder.claimed
+                ]
+                for name, holder in holders.items()
             }
-        )
+        result.append(observed)
     return result
 
 

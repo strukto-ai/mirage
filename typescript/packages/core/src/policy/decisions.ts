@@ -14,8 +14,6 @@
 
 import { z } from 'zod'
 import { ApprovalSnapshot, approvalQuery, recordWire } from '../rs/approvals.ts'
-import { units } from '../rs/document.ts'
-import { ruleWire } from '../rs/policy.ts'
 import { concat } from '../utils/bytes.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
@@ -175,10 +173,8 @@ export function covers(
   return approvalQuery(
     {
       kind: 'covers',
-      record: recordWire(record, 0),
-      rule: ruleWire(rule),
-      argv: argv.map(units),
-      cwd: units(cwd),
+      record: recordWire(record, 0, sameRule(record.rule, rule) ? 0 : null, argv, cwd),
+      rule: 0,
     },
     z.boolean(),
   )
@@ -238,10 +234,12 @@ export function encloses(scope: Occurrence, occurrence: Occurrence): boolean {
   const facts = new ApprovalSnapshot()
   const outer = facts.occurrenceKey(scope)
   const inner = facts.occurrenceKey(occurrence)
+  const state = facts.wire
   return approvalQuery(
     {
       kind: 'encloses',
-      occurrences: facts.wire.occurrences ?? [],
+      occurrences: state.occurrences ?? [],
+      sources: state.sources ?? [],
       scope: outer,
       occurrence: inner,
     },
@@ -491,7 +489,7 @@ export class Decisions extends DecisionOwner {
     const records = this.records(ctx.sessionId ?? '').filter((record) =>
       sameRule(record.rule, rule),
     )
-    return new ApprovalSnapshot(records).waiting(rule, argv, ctx.cwd)
+    return new ApprovalSnapshot(records).waiting(argv, ctx.cwd)
   }
 
   private async spend(sessionId: string, spent: readonly Decision[]): Promise<void> {
@@ -514,10 +512,22 @@ export class Decisions extends DecisionOwner {
     cwd: string,
     claimant: Claimant | null,
   ) {
-    const records = this.records(sessionId).filter((record) =>
-      rules.some((rule) => sameRule(record.rule, rule)),
+    const records: Decision[] = []
+    const recordRules: number[] = []
+    for (const record of this.records(sessionId)) {
+      const rule = rules.findIndex((rule) => sameRule(record.rule, rule))
+      if (rule < 0) continue
+      records.push(record)
+      recordRules.push(rule)
+    }
+    const asked = rules.map((rule) => rules.findIndex((other) => sameRule(rule, other)))
+    return new ApprovalSnapshot(records, this.live.get(sessionId)).plan(
+      recordRules,
+      asked,
+      argv,
+      cwd,
+      claimant,
     )
-    return new ApprovalSnapshot(records, this.live.get(sessionId)).plan(rules, argv, cwd, claimant)
   }
 
   private applyClaim(
@@ -525,6 +535,7 @@ export class Decisions extends DecisionOwner {
     claimant: Claimant,
     result: { records: readonly Decision[]; live: readonly HandOff[] },
   ): void {
+    if (result.records.length === 0) return
     claimant.line.claimed.push(
       ...result.records.map((decision) => ({ occurrence: claimant.occurrence, decision })),
     )

@@ -74,6 +74,7 @@ const corpus = z
     cases: z.array(
       z.object({
         name: z.string(),
+        trace: z.boolean().default(false),
         rules: z.array(z.string()).default(['first']),
         occurrences: z
           .record(
@@ -149,7 +150,9 @@ describe('approval behavior recorded from main', () => {
   it.each(corpus.cases)('$name', async (row) => {
     const sessions = new Sessions()
     let prompts = 0
+    const askedRules: number[] = []
     const onAsk = (value: Decision): Promise<Decision | null> => {
+      askedRules.push(rules.indexOf(value.rule))
       const answer = row.answers?.[prompts]
       prompts += 1
       return Promise.resolve(
@@ -242,11 +245,23 @@ describe('approval behavior recorded from main', () => {
           await ledger.revoke('s', required(holders, step.holder))
           break
       }
+      const records = ledger.list('s')
       actual.push({
         result,
-        records: ledger.list('s').map(record),
+        records: records.map(record),
         flushes: sessions.flushes,
         prompts,
+        ...(row.trace
+          ? {
+              asked_rules: [...askedRules],
+              claims: Object.fromEntries(
+                [...holders].map(([name, holder]) => [
+                  name,
+                  holder.claimed.map((claim) => records.indexOf(claim.decision)),
+                ]),
+              ),
+            }
+          : {}),
       })
     }
     expect(actual).toEqual(row.expected)
@@ -337,4 +352,99 @@ it('observes mutable approval fields and aliased rule arrays without replacing t
   granted.outcome = Outcome.DENY
   expect(await ledger.resolve(ctx, ask)).toMatchObject({ kind: 'deny' })
   expect(ledger.list('s')).toEqual([])
+})
+
+it('reads mutable fields through independently allocated equal rules', async () => {
+  const sessions = new Sessions()
+  const ledger = new Decisions(sessions)
+  const ctx: CommandContext = {
+    command: 'git',
+    argv: ['push'],
+    paths: [],
+    cwd: '/repo',
+    sessionId: 's',
+  }
+  await ledger.resolve(ctx, {
+    kind: 'ask',
+    reason: 'first',
+    rule: { reason: 'first', commands: ['git push'] },
+  })
+  const pending = ledger.list('s')[0]
+  if (pending === undefined) throw new Error('expected the pending approval')
+  await ledger.answer(pending.id, Outcome.ALLOW)
+  const records = ledger.list('s')
+  const stored = sessions.records.get('s')
+  const granted = records[0]
+  if (granted === undefined) throw new Error('expected the settled approval')
+  const ask = {
+    kind: 'ask',
+    reason: 'first',
+    rule: { reason: 'first', commands: ['git push'] },
+  } satisfies { kind: 'ask'; reason: string; rule: CommandRule }
+  expect(granted.rule).not.toBe(ask.rule)
+  expect(await ledger.held(ctx, ask)).toBeNull()
+  const argv = ['status']
+  granted.argv = argv
+  expect(await ledger.held(ctx, ask)).toMatchObject({ kind: 'pending' })
+  expect(await ledger.held({ ...ctx, argv: ['status'] }, ask)).toBeNull()
+  argv[0] = 'fetch'
+  expect(await ledger.held({ ...ctx, argv: ['status'] }, ask)).toMatchObject({ kind: 'pending' })
+  expect(await ledger.held({ ...ctx, argv: ['fetch'] }, ask)).toBeNull()
+  granted.cwd = '/other'
+  expect(await ledger.held({ ...ctx, argv: ['fetch'] }, ask)).toMatchObject({ kind: 'pending' })
+  const current = { ...ctx, argv: ['fetch'], cwd: '/other' }
+  expect(await ledger.held(current, ask)).toBeNull()
+  const commands = ['git push']
+  granted.rule.commands = commands
+  expect(await ledger.held(current, ask)).toBeNull()
+  commands[0] = 'git status'
+  expect(await ledger.held(current, ask)).toMatchObject({ kind: 'pending' })
+  ask.rule.commands = ['git status']
+  expect(await ledger.held(current, ask)).toBeNull()
+  expect(sessions.records.get('s')).toBe(stored)
+  expect(ledger.list('s')[0]).toBe(granted)
+  expect(await ledger.resolve(current, ask)).toBeNull()
+  expect(ledger.list('s')).toEqual([])
+})
+
+it.each([
+  {
+    stored: { reason: 'first' },
+    asked: { reason: 'first', commands: [], paths: [] },
+    covered: true,
+  },
+  {
+    stored: { reason: 'first', commands: [], paths: [] },
+    asked: { reason: 'first' },
+    covered: true,
+  },
+  { stored: { reason: 'first' }, asked: { reason: 'first', mount: '' }, covered: false },
+  { stored: { reason: 'first', mount: '' }, asked: { reason: 'first' }, covered: false },
+])('compares independent rule values: $stored / $asked', async ({ stored, asked, covered }) => {
+  const ledger = new Decisions(new Sessions())
+  const ctx: CommandContext = {
+    command: 'git',
+    argv: ['push'],
+    paths: [],
+    cwd: '/repo',
+    sessionId: 's',
+  }
+  await ledger.resolve(ctx, { kind: 'ask', reason: 'first', rule: stored })
+  const pending = ledger.list('s')[0]
+  if (pending === undefined) throw new Error('expected the pending approval')
+  await ledger.answer(pending.id, Outcome.ALLOW, Scope.SESSION)
+  const ask = { kind: 'ask', reason: 'first', rule: asked } satisfies {
+    kind: 'ask'
+    reason: string
+    rule: CommandRule
+  }
+  if (covered) {
+    expect(await ledger.held(ctx, ask)).toBeNull()
+    expect(await ledger.resolve(ctx, ask)).toBeNull()
+    expect(ledger.list('s')).toHaveLength(1)
+  } else {
+    expect(await ledger.held(ctx, ask)).toMatchObject({ kind: 'pending' })
+    expect(await ledger.resolve(ctx, ask)).toMatchObject({ kind: 'pending' })
+    expect(ledger.list('s')).toHaveLength(2)
+  }
 })
