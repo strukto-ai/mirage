@@ -147,31 +147,26 @@ Useful PR title prefixes:
 ## Releasing
 
 A release publishes `mirage-ai` to PyPI and the `@struktoai/mirage-*`
-packages to npm, all at one version, from `.github/workflows/release.yml`.
-Both carry the Rust in `rust/`: each `mirage-ai` wheel its native module
+packages to npm, all at one version. `.github/workflows/release.yml`
+builds and checks them; publishing is by hand. Both carry the Rust in `rust/`: each `mirage-ai` wheel its native module
 (`mirage._rs`), `@struktoai/mirage-core` its WebAssembly build.
 
 1. Set the new version in `python/pyproject.toml`, `rust/Cargo.toml` and
    each published `typescript/packages/*/package.json`, then refresh the
    locks (`uv lock` in `python/`, `cargo update --workspace` in `rust/`).
    `python3 scripts/check_release_versions.py` says whether they agree.
-1. Run the Release workflow by hand to build and check everything without
-   publishing: the `mirage-ai` wheels for Linux (glibc and musl), macOS and
-   Windows on x86_64 and arm64, each installed with its dependencies and
-   run on its own platform, the sdist, built and run the same way, and the
-   npm tarballs.
-1. Push a tag named for the npm spelling of the version (`v0.0.7`,
-   `v0.0.7-alpha.3`) on that commit. The workflow checks the tag against
-   the versions, builds again, then publishes `mirage-ai` and the npm
-   packages in that order. A pre-release goes out under npm's `alpha`,
-   `beta` or `rc` dist-tag, a release under `latest`.
-
-Publishing uses trusted publishing, so no token is stored: PyPI needs a
-trusted publisher for `mirage-ai` naming this repository,
-`release.yml` and the `pypi` environment, and npm one per package naming
-`release.yml` and the `npm` environment. To make a publish wait for
-approval, add required reviewers to those two environments and limit them to
-`v*` tags.
+1. Run the Release workflow by hand to build and check everything: the
+   `mirage-ai` wheels for Linux (glibc and musl), macOS and Windows on
+   x86_64 and arm64, each installed with its dependencies and run on its
+   own platform, the sdist, built and run the same way, and the npm
+   tarballs.
+1. Push a tag named for the version (`v0.0.8`) on that commit. The
+   workflow checks the tag against the versions and builds again.
+1. Download the run's `mirage-ai-*` and `npm-tarballs` artifacts, check
+   them, and publish them by hand: `mirage-ai` to PyPI first, then the npm
+   tarballs, `core` before the packages that depend on it. A pre-release
+   goes out under npm's `alpha`, `beta` or `rc` dist-tag, a release under
+   `latest`.
 
 ## Getting Help
 
