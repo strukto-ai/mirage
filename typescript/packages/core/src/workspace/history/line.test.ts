@@ -15,9 +15,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Policy } from '../../policy/base.ts'
 import type { Deny, ExecuteResultContext } from '../../policy/types.ts'
+import { Terminal } from '../../shell/console/index.ts'
+import { ParseScope } from '../../shell/parse/scope.ts'
+import type { TSNodeLike } from '../../shell/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { LineHistory } from './line.ts'
 
 const DEC = new TextDecoder()
 
@@ -105,6 +110,33 @@ describe('a line of several commands', () => {
       'b\n',
     ])
     await ws.close()
+  })
+
+  it("hands the line to the root read again alone, never a job's", async () => {
+    const ws = build()
+    const scope = new ParseScope()
+    const parse = (input: string): TSNodeLike => scope.parse(input) as unknown as TSNodeLike
+    try {
+      const line = 'shopt -s extglob\necho a\n'
+      const history = LineHistory.open(
+        ws.observer,
+        line,
+        parse(line),
+        'default',
+        new SessionState({ sessionId: 'default' }),
+        undefined,
+        new Terminal(),
+      )
+      if (history === null) throw new Error('a line of two commands has a history')
+      const job = parse('eval :')
+      const again = history.readOn(line.indexOf('echo') - 1)
+      expect(history.reads(job)).toBe(false)
+      expect(again.reads(parse('\necho a\n'))).toBe(true)
+      expect(again.reads(job)).toBe(false)
+    } finally {
+      scope.release()
+      await ws.close()
+    }
   })
 
   it('records each comment of a line of comments', async () => {

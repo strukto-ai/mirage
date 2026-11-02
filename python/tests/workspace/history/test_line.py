@@ -17,7 +17,11 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.policy import Deny, ExecuteResultContext, Policy
+from mirage.shell.console import Terminal
+from mirage.shell.parse.parse import parse
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.history.line import LineHistory
+from mirage.workspace.session.session import SessionState
 
 
 class _DenyOutput(Policy):
@@ -133,6 +137,30 @@ async def test_records_the_commands_read_again_after_the_parser_changes() -> (
             "echo b",
             "b\n",
         ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_hands_the_line_to_the_root_read_again_alone() -> None:
+    ws = _workspace()
+    try:
+        line = "shopt -s extglob\necho a\n"
+        history = LineHistory.open(
+            ws.observer,
+            line,
+            parse(line),
+            "default",
+            SessionState(session_id="default"),
+            None,
+            Terminal(),
+        )
+        assert history is not None
+        job = parse("eval :")
+        again = history.read_on(line.index("echo") - 1)
+        assert not history.reads(job)
+        assert again.reads(parse("\necho a\n"))
+        assert not again.reads(job)
     finally:
         await ws.close()
 
