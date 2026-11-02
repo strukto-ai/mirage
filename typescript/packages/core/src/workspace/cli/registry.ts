@@ -62,17 +62,13 @@ export class CLIRegistry {
   ) {}
 
   /**
-   * Install a CLI under a head word. The name must be a single word and
-   * must not collide with another installed CLI, a shell builtin, or a
-   * general command (a runtime capture of the same name is fine: the
-   * policy steers per line).
+   * Refuse a head word no CLI may be installed under: not a single word,
+   * or one that collides with a shell builtin, a keyword or a general
+   * command. Mirrors Python's `CLIRegistry.check_name`.
    */
-  install(name: string, spec: CLI, config: Record<string, unknown> | null = null): CLIInstall {
+  checkName(name: string): void {
     if (name === '' || /\s/.test(name)) {
       throw new Error(`CLI name '${name}' must be a single word`)
-    }
-    if (this.installs.has(name)) {
-      throw new Error(`CLI name '${name}' is already installed`)
     }
     if (SHELL_NAMES.has(name) || JOB_BUILTINS.has(name)) {
       throw new Error(`CLI name '${name}' collides with a shell builtin`)
@@ -85,6 +81,19 @@ export class CLIRegistry {
     if (NAMESPACE_COMMANDS.has(name) || name in BUILTIN_SPECS) {
       throw new Error(`CLI name '${name}' collides with a general command`)
     }
+  }
+
+  /**
+   * Install a CLI under a head word. The name must be a single word and
+   * must not collide with another installed CLI, a shell builtin, or a
+   * general command (a runtime capture of the same name is fine: the
+   * policy steers per line).
+   */
+  install(name: string, spec: CLI, config: Record<string, unknown> | null = null): CLIInstall {
+    if (this.installs.has(name)) {
+      throw new Error(`CLI name '${name}' is already installed`)
+    }
+    this.checkName(name)
     const validated = this.validateConfig(name, spec, config)
     const accessor = spec.accessor(validated)
     accessor.join?.([...this.peers(), ...[...this.installs.values()].map((i) => i.accessor)])
@@ -213,6 +222,35 @@ export class CLIRegistry {
   releaseClocks(): void {
     this.clocksBound = false
     for (const install of this.installs.values()) install.accessor.releaseClock?.(install)
+  }
+
+  /**
+   * Install a CLI in place of the one under its head word, if any, in one
+   * step, so the head word never stops resolving; `check` runs with the new
+   * install in place and, when it throws, the previous one is put back. The
+   * replaced one closes once the lines running on it are done.
+   */
+  async replace(
+    name: string,
+    spec: CLI,
+    config: Record<string, unknown> | null,
+    check: () => void,
+  ): Promise<CLIInstall> {
+    const previous = this.installs.get(name)
+    this.installs.delete(name)
+    let install: CLIInstall
+    try {
+      install = this.install(name, spec, config)
+      check()
+    } catch (error) {
+      const failed = this.installs.get(name)
+      if (previous !== undefined) this.installs.set(name, previous)
+      else this.installs.delete(name)
+      if (failed !== undefined) await this.track(failed, retire(failed, this.shutdown.signal))
+      throw error
+    }
+    if (previous !== undefined) await this.track(previous, retire(previous, this.shutdown.signal))
+    return install
   }
 
   /**

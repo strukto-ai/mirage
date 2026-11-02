@@ -31,6 +31,7 @@ import {
   Workspace,
   configToWorkspaceArgs,
   loadWorkspaceConfigFile,
+  mcpCli,
 } from '@struktoai/mirage-node'
 
 type Json = Record<string, unknown>
@@ -48,7 +49,7 @@ interface Suite {
   cases: Case[]
 }
 
-const STEP_OPS = new Set(['workspace', 'session_admin', 'snapshot', 'ask', 'history'])
+const STEP_OPS = new Set(['workspace', 'session_admin', 'cli_admin', 'snapshot', 'ask', 'history'])
 const WAITED = 'the line waited for all of its input'
 const STREAM_WAIT_MS = 10_000
 const BESIDE_WAIT_MS = 20_000
@@ -317,6 +318,19 @@ async function steps(
         answers.push({ text: step.session })
       } else if (kind === 'set_profile') {
         get(wid).setProfile(step.name as string, SessionProfile(step.profile))
+        answers.push({ text: step.name })
+      } else if (kind === 'set_cli') {
+        const ws = get(wid)
+        const name = step.name as string
+        const url = process.env.MCP_URL
+        if (!url) throw new Error('set_cli requires MCP_URL')
+        const config = { url, auth: { type: 'bearer', token: 'integ-token' } }
+        const cli = await mcpCli(config)
+        if (ws.clis().has(name)) await ws.unregisterCli(name)
+        ws.registerCli(name, cli, config)
+        answers.push({ text: name })
+      } else if (kind === 'delete_cli') {
+        await get(wid).unregisterCli(step.name as string)
         answers.push({ text: step.name })
       } else if (kind === 'close_workspace') {
         await get(wid).close()

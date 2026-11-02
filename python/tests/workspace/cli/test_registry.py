@@ -53,6 +53,10 @@ class ClosingAccessor(Accessor):
             raise RuntimeError("logout failed")
 
 
+def refuse() -> None:
+    raise ValueError("refused")
+
+
 def tree(config_model=None, accessor=NOOPAccessor) -> CLI:
     return CLI(
         spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
@@ -247,6 +251,54 @@ async def test_uninstall_removes_and_unknown_raises():
     assert reg.get("prog") is None
     with pytest.raises(KeyError, match="not installed"):
         await reg.uninstall("prog")
+
+
+@pytest.mark.asyncio
+async def test_replace_swaps_in_one_step_and_closes_the_old_once_idle():
+    reg = CLIRegistry()
+    spec = tree(TokenConfig, ClosingAccessor)
+    old = reg.install("prog", spec, {"token": "old"})
+    release = old.activity.acquire()
+    replacing = asyncio.create_task(
+        reg.replace("prog", spec, {"token": "new"}, lambda: None)
+    )
+    await asyncio.sleep(0)
+    assert reg.get("prog").config.token == "new"
+    assert not old.accessor.closed
+    release()
+    await asyncio.wait_for(replacing, 1)
+    assert old.accessor.closed
+
+
+@pytest.mark.asyncio
+async def test_a_refused_replace_puts_the_old_install_back():
+    reg = CLIRegistry()
+    spec = tree(TokenConfig, ClosingAccessor)
+    old = reg.install("prog", spec, {"token": "old"})
+    with pytest.raises(ValueError, match="refused"):
+        await reg.replace("prog", spec, {"token": "new"}, refuse)
+    assert reg.get("prog") is old
+    assert not old.accessor.closed
+
+
+@pytest.mark.asyncio
+async def test_a_refused_first_install_leaves_the_name_free():
+    reg = CLIRegistry()
+    seen = []
+
+    def refuse_new() -> None:
+        seen.append(reg.get("prog"))
+        raise ValueError("refused")
+
+    with pytest.raises(ValueError, match="refused"):
+        await reg.replace(
+            "prog",
+            tree(TokenConfig, ClosingAccessor),
+            {"token": "new"},
+            refuse_new,
+        )
+    assert reg.get("prog") is None
+    assert seen[0].accessor.closed
 
 
 @pytest.mark.asyncio

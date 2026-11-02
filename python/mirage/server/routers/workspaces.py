@@ -26,10 +26,14 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from mirage import Workspace, WorkspaceRunner
+from mirage.commands.cli import mcp
+from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
 from mirage.concurrency.limiter import run_blocking
 from mirage.config import (
+    CLIBlock,
     WorkspaceConfig,
     _load_profile_policy,
+    build_mcp_clis,
     resolve_secrets,
 )
 from mirage.io.network import NetworkRule, run_with_network
@@ -37,6 +41,7 @@ from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.profile import SessionProfile
 from mirage.secrets.errors import SecretsError
+from mirage.secrets.sources import resolve_config_secrets, resolve_sources_for
 from mirage.server.clone import (
     build_override_mounts,
     clone_workspace_with_override,
@@ -187,9 +192,10 @@ async def _construct(
     Raises:
         ValueError: the saved sessions are past the cap.
     """
-    kwargs = (
-        await run_with_network(rule, resolve_secrets(config))
-    ).to_workspace_kwargs()
+    resolved = await run_with_network(rule, resolve_secrets(config))
+    kwargs = resolved.to_workspace_kwargs(
+        mcp_clis=await run_with_network(rule, build_mcp_clis(resolved))
+    )
     kwargs["workspace_id"] = workspace_id
     if "store" not in kwargs:
         kwargs["store"] = DiskWorkspaceStateStore(state_root)
@@ -555,6 +561,79 @@ async def set_profile(
         await entry.runner.call(define())
     except (OSError, ValueError, PolicyError, SecretsError) as exc:
         raise HTTPException(422, str(exc)) from exc
+    return {"name": name}
+
+
+@router.put("/{workspace_id}/clis/{name}")
+async def set_cli(
+    workspace_id: str, name: str, block: CLIBlock, request: Request
+) -> dict[str, str]:
+    """Install an MCP server as a CLI on the live workspace, or replace it.
+
+    The body is one ``clis:`` entry, ``cli: mcp`` with its config, as a
+    config file states it. Its pointers resolve and its tools are listed
+    under the workspace's network; a failure keeps the installed CLI,
+    and so does a tool list that drops a verb a defined profile names.
+
+    Args:
+        workspace_id (str): the workspace.
+        name (str): the head word.
+        block (CLIBlock): the entry.
+        request (Request): the HTTP request, for the app's registry.
+    """
+    entry = require_entry(request, workspace_id)
+    ws = entry.runner.ws
+    written = await request.json()
+    await _admit(request, {"clis": {name: written}})
+
+    async def install() -> None:
+        if block.cli != MCP_CLI:
+            raise ValueError("only a cli: mcp entry installs over HTTP")
+        current = ws.clis().get(name)
+        if current is None:
+            ws.registry.clis.check_name(name)
+        elif current.cli.mcp is None:
+            raise ValueError(f"CLI {name!r} is not an MCP server")
+        sources = await resolve_sources_for(
+            ws.declared_sources, [block.config]
+        )
+        config = await resolve_config_secrets(
+            block.config, sources, f"clis.{name}.config"
+        )
+        cli = await mcp.mcp_cli(config)
+        if ws.clis().get(name) is not current:
+            raise ValueError(
+                f"CLI {name!r} changed while its tools were listed"
+            )
+        await ws.replace_cli(name, cli, config)
+
+    rule = request.app.state.registry.rule_for(ws.network)
+    try:
+        await entry.runner.call(run_with_network(rule, install()))
+    except (OSError, ValueError, PolicyError, SecretsError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"name": name}
+
+
+@router.delete("/{workspace_id}/clis/{name}")
+async def delete_cli(
+    workspace_id: str, name: str, request: Request
+) -> dict[str, str]:
+    """Remove an MCP CLI from the live workspace.
+
+    Args:
+        workspace_id (str): the workspace.
+        name (str): the head word.
+        request (Request): the HTTP request, for the app's registry.
+    """
+    entry = require_entry(request, workspace_id)
+    ws = entry.runner.ws
+    current = ws.clis().get(name)
+    if current is None:
+        raise HTTPException(404, f"no CLI named {name!r}")
+    if current.cli.mcp is None:
+        raise HTTPException(422, f"CLI {name!r} is not an MCP server")
+    await entry.runner.call(ws.unregister_cli(name))
     return {"name": name}
 
 

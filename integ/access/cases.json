@@ -10,6 +10,7 @@
   "session": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio", "ssh"],
   "workspace": ["inapp", "http", "cli"],
   "session_admin": ["inapp", "http", "cli"],
+  "cli_admin": ["inapp", "http"],
   "snapshot": ["inapp", "http", "cli"],
   "ask": ["inapp", "http", "cli"],
   "history": ["inapp", "http", "cli"],
@@ -24,6 +25,7 @@
   "Cancel a running line": "cancel",
   "Cancel or kill all of a session's or workspace's work": "session_admin",
   "VFS.md, SKILL.md and session profiles": "session_admin",
+  "Install and remove MCP CLIs": "cli_admin",
   "The seven agent tools": "tool",
   "File operations on bytes": "bytes",
   "Explain a line or a VFS call": "explain",
@@ -301,6 +303,19 @@
     {"id": "starts_a_job_in_it", "input": {"step": "shell", "id": "w", "session": "s2", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},
     {"id": "cancels_the_sessions_lines", "input": {"step": "cancel_lines", "id": "w", "session": "s2"}, "expect": {"text": "0"}},
     {"id": "kills_the_sessions_jobs", "input": {"step": "kill_jobs", "id": "w", "session": "s2"}, "expect": {"text": "1"}},
+    {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
+   ]
+  },
+  {
+   "id": "cli_admin",
+   "op": "cli_admin",
+   "cases": [
+    {"id": "creates_the_workspace", "input": {"step": "create", "id": "w"}, "expect": {"text": "w"}},
+    {"id": "installs_an_mcp_cli", "input": {"step": "set_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
+    {"id": "runs_one_of_its_tools", "input": {"step": "shell", "id": "w", "command": "items list-items"}, "expect": {"text": "apple\nbanana\n", "is_error": false}},
+    {"id": "replaces_it_by_name", "input": {"step": "set_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
+    {"id": "removes_it", "input": {"step": "delete_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
+    {"id": "its_name_is_gone", "input": {"step": "shell", "id": "w", "command": "items list-items"}, "expect": {"text": "items: command not found\n", "is_error": true}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },

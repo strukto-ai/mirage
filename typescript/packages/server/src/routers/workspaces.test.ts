@@ -16,7 +16,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '@struktoai/mirage-node'
 import { readSnapshotTar, writeSnapshotTar } from '@struktoai/mirage-core/workspace/snapshot/tar_io'
@@ -1495,6 +1496,251 @@ describe('workspace cancel, kill and close', () => {
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+// Mirrors test_workspaces.py's MCP CLI routes; the fixture is outside rootDir, so it is imported by URL.
+describe('MCP CLI routes', () => {
+  interface FakeMCP {
+    url: string
+    requests: unknown[]
+    close: () => Promise<void>
+  }
+  interface Fixture {
+    TOKEN: string
+    TOOLS: unknown[]
+    servedMcp: (tools?: unknown[]) => Promise<FakeMCP>
+  }
+  const FIXTURE = pathToFileURL(
+    resolve(fileURLToPath(import.meta.url), '../../../../core/tests/fixtures/mcp_server.ts'),
+  ).href
+
+  async function fixture(): Promise<Fixture> {
+    return (await import(FIXTURE)) as Fixture
+  }
+
+  function mcpEntry(url: string, token: unknown): Record<string, unknown> {
+    return { cli: 'mcp', config: { url, auth: { type: 'bearer', token } } }
+  }
+
+  async function mcpWorkspace(app: App, network = true): Promise<string> {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { config: { ...RAM, network } },
+    })
+    return res.json<{ id: string }>().id
+  }
+
+  async function run(
+    app: App,
+    id: string,
+    command: string,
+    session = '',
+  ): Promise<{ exit_code: number; stdout: string; stderr: string }> {
+    const query = session === '' ? '' : `?session_id=${session}`
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/workspaces/${id}/shell${query}`,
+      payload: { command },
+    })
+    return res.json()
+  }
+
+  it('PUT installs and replaces, DELETE removes an MCP CLI', async () => {
+    const { TOKEN, TOOLS, servedMcp } = await fixture()
+    const fake = await servedMcp()
+    const small = await servedMcp(TOOLS.slice(0, 1))
+    const app = buildApp()
+    try {
+      const id = await mcpWorkspace(app)
+      const route = `/v1/workspaces/${id}/clis/fx`
+      const put = (url: string) =>
+        app.inject({ method: 'PUT', url: route, payload: mcpEntry(url, TOKEN) })
+      const first = await put(fake.url)
+      expect([first.statusCode, first.json()]).toEqual([200, { name: 'fx' }])
+      await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${id}/sessions`,
+        payload: { session_id: 'early' },
+      })
+      expect((await run(app, id, 'fx echo-args')).stdout).toBe('{}\n')
+      expect((await put(small.url)).statusCode).toBe(200)
+      const early = await run(app, id, 'fx echo-args', 'early')
+      expect([early.exit_code, early.stderr]).toEqual([
+        1,
+        "fx: 'echo-args' is not a fx command. See 'fx --help'.\n",
+      ])
+      expect((await run(app, id, 'fx list-items')).stdout).toBe('apple\nbanana\n')
+      expect((await app.inject({ method: 'DELETE', url: route })).statusCode).toBe(200)
+      expect((await run(app, id, 'fx list-items')).exit_code).toBe(127)
+      expect((await app.inject({ method: 'DELETE', url: route })).statusCode).toBe(404)
+    } finally {
+      await app.close()
+      await fake.close()
+      await small.close()
+    }
+  })
+
+  it('leaves one CLI installed after two PUTs at once', async () => {
+    const { TOKEN, servedMcp } = await fixture()
+    const fake = await servedMcp()
+    const app = buildApp()
+    try {
+      const id = await mcpWorkspace(app)
+      const put = () =>
+        app.inject({
+          method: 'PUT',
+          url: `/v1/workspaces/${id}/clis/fx`,
+          payload: mcpEntry(fake.url, TOKEN),
+        })
+      const answers = await Promise.all([put(), put()])
+      expect(answers.map((r) => r.statusCode).sort()).toEqual([200, 422])
+      expect((await run(app, id, 'fx list-items')).exit_code).toBe(0)
+    } finally {
+      await app.close()
+      await fake.close()
+    }
+  })
+
+  it('PUT refuses what is not an MCP CLI before any request', async () => {
+    const { TOKEN, servedMcp } = await fixture()
+    const fake = await servedMcp()
+    const app = buildApp()
+    try {
+      const id = await mcpWorkspace(app)
+      const put = (name: string, payload: Record<string, unknown>) =>
+        app.inject({ method: 'PUT', url: `/v1/workspaces/${id}/clis/${name}`, payload })
+      const entry = mcpEntry(fake.url, TOKEN)
+      const badAuth = {
+        cli: 'mcp',
+        config: { url: fake.url, auth: { type: 'bearer', token: TOKEN, extra: 1 } },
+      }
+      const refused = [
+        await put('sl', { cli: 'slack' }),
+        await put('pg', { script: 'pager.py' }),
+        await put('ls', entry),
+        await put('fx', badAuth),
+        await put('fx', { ...entry, nope: 1 }),
+      ]
+      expect(refused.map((r) => r.statusCode)).toEqual([422, 422, 422, 422, 422])
+      expect(fake.requests).toEqual([])
+      const linear = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { config: { ...RAM, clis: { lin: { cli: 'linear', config: { api_key: 'k' } } } } },
+      })
+      const lin = linear.json<{ id: string }>().id
+      const replaced = await app.inject({
+        method: 'PUT',
+        url: `/v1/workspaces/${lin}/clis/lin`,
+        payload: entry,
+      })
+      expect(replaced.statusCode).toBe(422)
+      const removed = await app.inject({ method: 'DELETE', url: `/v1/workspaces/${lin}/clis/lin` })
+      expect(removed.statusCode).toBe(422)
+    } finally {
+      await app.close()
+      await fake.close()
+    }
+  })
+
+  it('keeps the installed CLI when a PUT fails', async () => {
+    const { TOKEN, TOOLS, servedMcp } = await fixture()
+    vi.stubEnv('FX_TOKEN', TOKEN)
+    const fake = await servedMcp()
+    const narrow = await servedMcp(TOOLS.slice(2))
+    const app = buildApp()
+    try {
+      const id = await mcpWorkspace(app)
+      const route = `/v1/workspaces/${id}/clis/fx`
+      const put = (payload: Record<string, unknown>) =>
+        app.inject({ method: 'PUT', url: route, payload })
+      expect((await put(mcpEntry(fake.url, { from: 'env', key: 'FX_TOKEN' }))).statusCode).toBe(200)
+      expect((await put(mcpEntry('http://127.0.0.1:9/mcp', TOKEN))).statusCode).toBe(422)
+      const guarded = await app.inject({
+        method: 'PUT',
+        url: `/v1/workspaces/${id}/profiles/guarded`,
+        payload: { commands: { deny: [{ commands: ['fx add-item'], reason: 'no' }] } },
+      })
+      expect(guarded.statusCode).toBe(200)
+      const dropped = await put(mcpEntry(narrow.url, TOKEN))
+      expect(dropped.statusCode).toBe(422)
+      expect(dropped.json<{ detail: string }>().detail).toContain('add-item')
+      expect((await run(app, id, 'fx list-items')).stdout).toBe('apple\nbanana\n')
+    } finally {
+      vi.unstubAllEnvs()
+      await app.close()
+      await fake.close()
+      await narrow.close()
+    }
+  })
+
+  class NoMCP implements Policy {
+    preWorkspace(ctx: WorkspaceContext): Deny | null {
+      const clis = (ctx.config.clis ?? {}) as Record<string, { cli?: string }>
+      return Object.values(clis).some((entry) => entry.cli === 'mcp')
+        ? { kind: 'deny', reason: 'no MCP servers' }
+        : null
+    }
+  }
+
+  it.each(['policy', 'network'])('never reaches a server a %s refuses', async (refusal) => {
+    const { TOKEN, servedMcp } = await fixture()
+    const fake = await servedMcp()
+    const app = buildApp(refusal === 'policy' ? { policies: [new NoMCP()] } : {})
+    try {
+      const id = await mcpWorkspace(app, refusal !== 'network')
+      const res = await app.inject({
+        method: 'PUT',
+        url: `/v1/workspaces/${id}/clis/fx`,
+        payload: mcpEntry(fake.url, TOKEN),
+      })
+      expect(res.statusCode).toBe(refusal === 'policy' ? 403 : 422)
+      expect(fake.requests).toEqual([])
+    } finally {
+      await app.close()
+      await fake.close()
+    }
+  })
+
+  it('never reaches an MCP server outside a created workspace network', async () => {
+    const { TOKEN, servedMcp } = await fixture()
+    const fake = await servedMcp()
+    const app = buildApp()
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: {
+          config: { ...RAM, network: false, clis: { fx: mcpEntry(fake.url, TOKEN) } },
+        },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json<{ detail: string }>().detail).toContain("cannot list the server's tools")
+      expect(fake.requests).toEqual([])
+    } finally {
+      await app.close()
+      await fake.close()
+    }
+  })
+
+  it('answers a create whose MCP server lists no tools with 400', async () => {
+    const { TOKEN, servedMcp } = await fixture()
+    const empty = await servedMcp([])
+    const app = buildApp()
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { config: { ...RAM, clis: { fx: mcpEntry(empty.url, TOKEN) } } },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json<{ detail: string }>().detail).toContain('the server lists no tools')
+    } finally {
+      await app.close()
+      await empty.close()
     }
   })
 })

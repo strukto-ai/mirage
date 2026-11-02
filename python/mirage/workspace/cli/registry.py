@@ -73,6 +73,31 @@ class CLIRegistry:
         self._retiring: dict[int, asyncio.Task[None]] = {}
         self._shutdown = asyncio.Event()
 
+    def check_name(self, name: str) -> None:
+        """Refuse a head word no CLI may be installed under.
+
+        Args:
+            name (str): the head word.
+
+        Raises:
+            ValueError: not a single word, or it collides with a shell
+                builtin, a keyword or a general command.
+        """
+        if not name or any(ch.isspace() for ch in name):
+            raise ValueError(f"CLI name {name!r} must be a single word")
+        if name in SHELL_NAMES or name in JOB_BUILTINS:
+            raise ValueError(
+                f"CLI name {name!r} collides with a shell builtin"
+            )
+        # A reserved word never reaches dispatch (the parser consumes it),
+        # so an install under one would be unreachable rather than wrong.
+        if name in KEYWORDS:
+            raise ValueError(f"CLI name {name!r} is a shell keyword")
+        if name in NAMESPACE_COMMANDS or name in SPECS:
+            raise ValueError(
+                f"CLI name {name!r} collides with a general command"
+            )
+
     def install(
         self,
         name: str,
@@ -92,22 +117,9 @@ class CLIRegistry:
                 spec's ``config_model``, or an instance of that model or
                 of a subclass of it, narrowed to the model's fields.
         """
-        if not name or any(ch.isspace() for ch in name):
-            raise ValueError(f"CLI name {name!r} must be a single word")
         if name in self._installs:
             raise ValueError(f"CLI name {name!r} is already installed")
-        if name in SHELL_NAMES or name in JOB_BUILTINS:
-            raise ValueError(
-                f"CLI name {name!r} collides with a shell builtin"
-            )
-        # A reserved word never reaches dispatch (the parser consumes it),
-        # so an install under one would be unreachable rather than wrong.
-        if name in KEYWORDS:
-            raise ValueError(f"CLI name {name!r} is a shell keyword")
-        if name in NAMESPACE_COMMANDS or name in SPECS:
-            raise ValueError(
-                f"CLI name {name!r} collides with a general command"
-            )
+        self.check_name(name)
         validated = self._validate_config(name, spec, config)
         accessor = spec.accessor(validated)
         accessor.join(
@@ -224,6 +236,40 @@ class CLIRegistry:
         for install in self._installs.values():
             install.accessor.release_clock(id(install))
 
+    async def replace(
+        self,
+        name: str,
+        spec: CLI,
+        config: Mapping[str, JsonValue] | BaseModel | None,
+        check: Callable[[], None],
+    ) -> CLIInstall:
+        """Install a CLI in place of the one under its head word, if any,
+        in one step, so the head word never stops resolving; the replaced
+        one closes once the lines running on it are done.
+
+        Args:
+            name (str): head word.
+            spec (CLI): the program tree.
+            config (Mapping[str, JsonValue] | BaseModel | None):
+                installation config, as :meth:`install` takes it.
+            check (Callable[[], None]): run with the new install in
+                place; when it raises, the previous one is put back.
+        """
+        previous = self._installs.pop(name, None)
+        try:
+            install = self.install(name, spec, config)
+            check()
+        except BaseException:
+            failed = self._installs.pop(name, None)
+            if previous is not None:
+                self._installs[name] = previous
+            if failed is not None:
+                await self._let_go(failed)
+            raise
+        if previous is not None:
+            await self._let_go(previous)
+        return install
+
     async def uninstall(self, name: str) -> None:
         """Remove an installed CLI now and close its accessor once the
         lines running on it and their output streams are done; its head
@@ -235,6 +281,15 @@ class CLIRegistry:
         install = self._installs.pop(name, None)
         if install is None:
             raise KeyError(f"CLI name {name!r} is not installed")
+        await self._let_go(install)
+
+    async def _let_go(self, install: CLIInstall) -> None:
+        """Close an install no longer under its head word once the lines
+        running on it are done, as a tracked task.
+
+        Args:
+            install (CLIInstall): the install let go.
+        """
         identity = id(install)
         closing = asyncio.create_task(_retire(install, self._shutdown))
         self._retiring[identity] = closing

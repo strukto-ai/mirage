@@ -749,6 +749,22 @@ export class Workspace {
     await this.registry.clis.uninstall(name)
   }
 
+  /**
+   * Install a CLI under a head word, replacing the one there in one step, so
+   * the head word never stops resolving; every defined profile is checked
+   * against it, and on refusal the previous install stays.
+   */
+  async replaceCli(
+    name: string,
+    spec: CLI,
+    config: Record<string, unknown> | null = null,
+  ): Promise<CLIInstall> {
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    return this.registry.clis.replace(name, spec, config, () => {
+      for (const [profile, doc] of Object.entries(this.profiles)) this.setProfile(profile, doc)
+    })
+  }
+
   /** Snapshot of the installed CLIs keyed by head word. */
   clis(): Map<string, CLIInstall> {
     return this.registry.clis.items()

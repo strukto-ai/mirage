@@ -1219,6 +1219,32 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         await self._registry.clis.uninstall(name)
 
+    async def replace_cli(
+        self,
+        name: str,
+        spec: CLI,
+        config: Mapping[str, JsonValue] | BaseModel | None = None,
+    ) -> CLIInstall:
+        """Install a CLI under a head word, replacing the one there in
+        one step, so the head word never stops resolving; every defined
+        profile is checked against it, and on refusal the previous
+        install stays.
+
+        Args:
+            name (str): head word to install under.
+            spec (CLI): the program tree.
+            config (Mapping[str, JsonValue] | BaseModel | None):
+                installation config, as :meth:`register_cli` takes it.
+        """
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+
+        def check() -> None:
+            for profile, doc in dict(self._profiles).items():
+                self.set_profile(profile, doc)
+
+        return await self._registry.clis.replace(name, spec, config, check)
+
     def clis(self) -> dict[str, CLIInstall]:
         """Snapshot of the installed CLIs keyed by head word."""
         return self._registry.clis.items()
