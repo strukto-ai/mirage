@@ -23,6 +23,9 @@ struct Config {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Request {
+    Approvals {
+        query: super::approvals::Query,
+    },
     PathVisible {
         path: Text,
     },
@@ -147,6 +150,7 @@ impl Policy {
         let vis = &self.visibility;
         let rules = &self.admission;
         match request {
+            Request::Approvals { query } => reply(out, super::approvals::answer(query)?),
             Request::PathVisible { path } => reply(out, vis.path_visible(&path)),
             Request::MoveReveals { src, dst } => reply(out, vis.move_reveals(&src, &dst)),
             Request::HidesIntersect { path } => reply(out, vis.hides_intersect(&path)),
