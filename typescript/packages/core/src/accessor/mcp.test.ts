@@ -35,6 +35,21 @@ import { Workspace } from '../workspace/workspace/workspace.ts'
 import { TIMEOUT } from '../core/mcp/constants.ts'
 import { answered, MCPAccessor } from './mcp.ts'
 
+async function kept(use: (ws: Workspace, fake: FakeMCP) => Promise<void>): Promise<FakeMCP> {
+  const fake = await servedMcp()
+  const config = bearerConfig(fake)
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  try {
+    ws.registerCli('fx', await mcpCli(config), config)
+    fake.requests.length = 0
+    await use(ws, fake)
+  } finally {
+    await ws.close()
+    await fake.close()
+  }
+  return fake
+}
+
 describe('MCPAccessor', () => {
   it.each([
     [{ type: 'bearer', token: 't' }, { Authorization: 'Bearer t' }],
@@ -66,21 +81,6 @@ describe('MCPAccessor', () => {
       await fake.close()
     }
   })
-
-  async function kept(use: (ws: Workspace, fake: FakeMCP) => Promise<void>): Promise<FakeMCP> {
-    const fake = await servedMcp()
-    const config = bearerConfig(fake)
-    const ws = new Workspace({ '/data': new RAMVFS() })
-    try {
-      ws.registerCli('fx', await mcpCli(config), config)
-      fake.requests.length = 0
-      await use(ws, fake)
-    } finally {
-      await ws.close()
-      await fake.close()
-    }
-    return fake
-  }
 
   it('shares one client across calls', async () => {
     const fake = await kept(async (ws) => {

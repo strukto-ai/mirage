@@ -1500,52 +1500,53 @@ describe('workspace cancel, kill and close', () => {
   })
 })
 
-// Mirrors test_workspaces.py's MCP CLI routes; the fixture is outside rootDir, so it is imported by URL.
+// The MCP fixture is outside rootDir, so it is imported by URL.
+interface FakeMCP {
+  url: string
+  requests: unknown[]
+  close: () => Promise<void>
+}
+interface Fixture {
+  TOKEN: string
+  TOOLS: unknown[]
+  servedMcp: (tools?: unknown[]) => Promise<FakeMCP>
+}
+const FIXTURE = pathToFileURL(
+  resolve(fileURLToPath(import.meta.url), '../../../../core/tests/fixtures/mcp_server.ts'),
+).href
+
+async function fixture(): Promise<Fixture> {
+  return (await import(FIXTURE)) as Fixture
+}
+
+function mcpEntry(url: string, token: unknown): Record<string, unknown> {
+  return { cli: 'mcp', config: { url, auth: { type: 'bearer', token } } }
+}
+
+async function mcpWorkspace(app: App, network = true): Promise<string> {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/v1/workspaces',
+    payload: { config: { ...RAM, network } },
+  })
+  return res.json<{ id: string }>().id
+}
+
+async function run(
+  app: App,
+  id: string,
+  command: string,
+): Promise<{ exit_code: number; stdout: string; stderr: string }> {
+  const res = await app.inject({
+    method: 'POST',
+    url: `/v1/workspaces/${id}/shell`,
+    payload: { command },
+  })
+  return res.json()
+}
+
+// Mirrors test_workspaces.py's MCP CLI routes.
 describe('MCP CLI routes', () => {
-  interface FakeMCP {
-    url: string
-    requests: unknown[]
-    close: () => Promise<void>
-  }
-  interface Fixture {
-    TOKEN: string
-    TOOLS: unknown[]
-    servedMcp: (tools?: unknown[]) => Promise<FakeMCP>
-  }
-  const FIXTURE = pathToFileURL(
-    resolve(fileURLToPath(import.meta.url), '../../../../core/tests/fixtures/mcp_server.ts'),
-  ).href
-
-  async function fixture(): Promise<Fixture> {
-    return (await import(FIXTURE)) as Fixture
-  }
-
-  function mcpEntry(url: string, token: unknown): Record<string, unknown> {
-    return { cli: 'mcp', config: { url, auth: { type: 'bearer', token } } }
-  }
-
-  async function mcpWorkspace(app: App, network = true): Promise<string> {
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/workspaces',
-      payload: { config: { ...RAM, network } },
-    })
-    return res.json<{ id: string }>().id
-  }
-
-  async function run(
-    app: App,
-    id: string,
-    command: string,
-  ): Promise<{ exit_code: number; stdout: string; stderr: string }> {
-    const res = await app.inject({
-      method: 'POST',
-      url: `/v1/workspaces/${id}/shell`,
-      payload: { command },
-    })
-    return res.json()
-  }
-
   it('PUT installs, refuses a taken name, DELETE removes an MCP CLI', async () => {
     const { TOKEN, TOOLS, servedMcp } = await fixture()
     const fake = await servedMcp()
