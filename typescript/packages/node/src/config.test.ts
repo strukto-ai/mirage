@@ -40,7 +40,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   absolutizeScripts,
   checkWorkspaceConfigFile,
@@ -2010,5 +2010,63 @@ describe('workspace I/O config', () => {
     { bufferBytes: 262144 },
   ])('rejects invalid block %j', (io) => {
     expect(() => loadWorkspaceConfig({ mounts: {}, io })).toThrow()
+  })
+})
+
+// Mirrors test_loader.py's mcp entries; the fixture is outside rootDir, so it is imported by URL.
+describe('clis cli: mcp', () => {
+  interface Fixture {
+    TOKEN: string
+    servedMcp: () => Promise<{ url: string; requests: unknown[]; close: () => Promise<void> }>
+  }
+  const FIXTURE = pathToFileURL(
+    resolve(fileURLToPath(import.meta.url), '../../../core/tests/fixtures/mcp_server.ts'),
+  ).href
+
+  it('builds from its server with an env token', async () => {
+    const { TOKEN, servedMcp } = (await import(FIXTURE)) as Fixture
+    vi.stubEnv('FX_TOKEN', TOKEN)
+    const fake = await servedMcp()
+    try {
+      const token = { from: 'env', key: 'FX_TOKEN' }
+      const cfg = loadWorkspaceConfig(
+        {
+          mounts: {},
+          clis: {
+            fx: { cli: 'mcp', config: { url: fake.url, auth: { type: 'bearer', token } } },
+          },
+        },
+        { FX_TOKEN: TOKEN },
+      )
+      const args = await configToWorkspaceArgs(cfg)
+      const ws = new Workspace(args.mounts, args.options)
+      try {
+        const result = await ws.shell('fx list-items')
+        expect([result.exitCode, result.stdoutText]).toEqual([0, 'apple\nbanana\n'])
+      } finally {
+        await ws.close()
+      }
+    } finally {
+      vi.unstubAllEnvs()
+      await fake.close()
+    }
+  })
+
+  it('lists its server only where its network lets it', async () => {
+    const { TOKEN, servedMcp } = (await import(FIXTURE)) as Fixture
+    const fake = await servedMcp()
+    try {
+      const cfg = loadWorkspaceConfig({
+        mounts: {},
+        network: false,
+        clis: {
+          fx: { cli: 'mcp', config: { url: fake.url, auth: { type: 'bearer', token: TOKEN } } },
+        },
+      })
+      await expect(configToWorkspaceArgs(cfg)).rejects.toThrow(/cannot list/)
+      expect(fake.requests).toEqual([])
+    } finally {
+      await fake.close()
+    }
   })
 })

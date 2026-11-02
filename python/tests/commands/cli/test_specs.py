@@ -197,3 +197,14 @@ def test_every_builtin_config_model_forbids_extra_keys():
         if model is not None and model.model_config.get("extra") != "forbid":
             lax.append(f"{name}: {model.__name__}")
     assert lax == []
+
+
+def test_the_mcp_name_is_reserved():
+    spec = CLI(
+        spec=CommandSpec(name="mcp", subcommands=(CommandSpec(name="run"),)),
+        handlers={"run": CLIHandler(fn=noop)},
+    )
+    with pytest.raises(ValueError, match="reserved"):
+        register_cli_spec(spec)
+    with pytest.raises(ValueError, match="mcp_cli"):
+        cli_spec_for("mcp")
