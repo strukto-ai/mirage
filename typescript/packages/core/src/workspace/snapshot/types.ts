@@ -113,7 +113,7 @@ export interface CLISnapshot {
     tools: {
       name: string
       description: string
-      inputSchema: Record<string, JsonValue>
+      input_schema: Record<string, JsonValue>
       annotations: Record<string, JsonValue>
     }[]
   }

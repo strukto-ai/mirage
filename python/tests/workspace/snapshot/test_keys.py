@@ -32,9 +32,16 @@ KEYS_TS = (
     / "keys.ts"
 )
 
-# These five have a typescript twin in `keys.ts`; the rest of the module
-# is spelled as literals over there, so only these can be diffed.
-SHARED = ["StateKey", "MountKey", "CacheKey", "JobKey", "VFSStateKey"]
+# These have a typescript twin in `keys.ts`; the rest of the module is
+# spelled as literals over there, so only these can be diffed.
+SHARED = [
+    "StateKey",
+    "MountKey",
+    "CacheKey",
+    "JobKey",
+    "VFSStateKey",
+    "MCPKey",
+]
 
 
 def _typescript_tables() -> dict[str, dict[str, str]]:
@@ -62,7 +69,7 @@ def test_every_key_is_a_lowercase_wire_name():
         and issubclass(value, StrEnum)
         and value is not StrEnum
     ]
-    assert len(enums) == 8
+    assert len(enums) == 9
     for enum in enums:
         for member in enum:
             assert member.value == member.name.lower()

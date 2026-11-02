@@ -82,7 +82,7 @@ export const MCPKey = Object.freeze({
   TOOLS: 'tools',
   NAME: 'name',
   DESCRIPTION: 'description',
-  INPUT_SCHEMA: 'inputSchema',
+  INPUT_SCHEMA: 'input_schema',
   ANNOTATIONS: 'annotations',
 } as const)
 

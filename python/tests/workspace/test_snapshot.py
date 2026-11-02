@@ -880,7 +880,7 @@ async def test_an_mcp_cli_loads_offline_with_its_token_redacted(
             },
         }
         assert entry[CLIKey.MCP]["title"] == TITLE
-        assert entry[CLIKey.MCP]["tools"][0]["inputSchema"] == {
+        assert entry[CLIKey.MCP]["tools"][0]["input_schema"] == {
             "type": "object",
             "properties": {},
         }

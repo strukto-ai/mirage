@@ -1487,7 +1487,7 @@ describe('an MCP CLI snapshot', () => {
       const entry = state.clis[0]
       expect(entry?.config).toEqual({ url: fake.url, auth: { ...auth, token: REDACTED_SECRET } })
       expect(entry?.mcp?.title).toBe(MCP_TITLE)
-      expect(entry?.mcp?.tools[0]?.inputSchema).toEqual({ type: 'object', properties: {} })
+      expect(entry?.mcp?.tools[0]?.input_schema).toEqual({ type: 'object', properties: {} })
       await expect(Workspace.load(path)).rejects.toThrow(/clis= must include/)
       fake.requests.length = 0
       const restored = await Workspace.load(path, {}, {}, { fx: config })
