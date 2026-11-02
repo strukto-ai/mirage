@@ -27,6 +27,14 @@ def _descendants(node: TSNodeLike) -> list[TSNodeLike]:
     return [node, *(d for c in node.children for d in _descendants(c))]
 
 
+def _blanks(rows: bytes) -> list[HistoryEntry]:
+    return [
+        HistoryEntry(decode_text(row), None)
+        for row in rows.split(b"\n")
+        if row and not row.strip()
+    ]
+
+
 def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
     """The entries bash's history adds for an input it reads
     interactively: one per command it reads, a command and what else is on
@@ -91,13 +99,13 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
         )
         found = source.find(b"\n", end - 1)
         stop = len(source) if found < 0 else found
-        for row in source[read:start].split(b"\n"):
-            if row and not row.strip():
-                entries.append(HistoryEntry(decode_text(row), None))
+        entries.extend(_blanks(source[read:start]))
         read = stop + 1
         if any(n.type == NT.ERROR for n in nodes):
             entries.append(
-                HistoryEntry(decode_text(source[start:stop]), first.start_byte)
+                HistoryEntry(
+                    decode_text(source[start:stop]), typed(first.start_byte)
+                )
             )
             continue
         comments = {typed(n.start_byte) for n in nodes if n.type == NT.COMMENT}
@@ -188,5 +196,8 @@ def history_entries(root: TSNodeLike) -> list[HistoryEntry]:
             at = ends + 1
         if any(doc.end - 1 == stop for _, doc in folded):
             text += b"\n"
-        entries.append(HistoryEntry(decode_text(text), first.start_byte))
+        entries.append(
+            HistoryEntry(decode_text(text), typed(first.start_byte))
+        )
+    entries.extend(_blanks(source[read:]))
     return entries

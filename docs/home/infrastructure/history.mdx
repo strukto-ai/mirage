@@ -18,7 +18,9 @@ reads the line interactively: one entry per command read, with what that
 command wrote. A command spanning lines is one entry, its lines joined as
 `cmdhist` joins them (`for i in 1 2; do echo $i; done`), and a heredoc keeps
 its body. A line that stops at an `exit` or a `set -e` failure records no
-command after it, as bash never reads one.
+command after it, as bash never reads one. A line a `post_execute` policy
+judges is recorded whole once the policy has answered, so no output it drops
+reaches the history.
 
 History is kept per session. A workspace built again shows a session's
 history once it has that session again: keep the

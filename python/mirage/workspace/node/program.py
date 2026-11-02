@@ -61,6 +61,7 @@ from mirage.workspace.executor.traps import (
     run_err_trap,
     run_exit_trap,
 )
+from mirage.workspace.history.line import LineHistory
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -196,7 +197,7 @@ async def _run_program(
     # A typed line bash's reader reads as several commands is recorded a
     # command at a time, as its root reaches each.
     history = current_caller().history
-    reading = history if history is not None and history.root is node else None
+    reading = history if history is not None and history.reads(node) else None
     last_row = -1
 
     i = 0
@@ -302,6 +303,7 @@ async def _run_program(
                         statement_stdin(session, stdin, bound),
                         recorder,
                         call_stack,
+                        reading,
                     )
                 else:
                     stdout, io, last_exec = await recurse(
@@ -621,6 +623,7 @@ async def _read_on(
     stdin: ByteSource | None,
     sink: JobConsole | None,
     call_stack: CallStack | None,
+    reading: LineHistory | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Read the input again from ``child`` on, as bash reads its next
     line: with the aliases as they are now, and refused there if bash
@@ -635,17 +638,25 @@ async def _read_on(
         stdin (ByteSource | None): the statement's standard input.
         sink (JobConsole | None): where its statements write.
         call_stack (CallStack | None): the program's frames.
+        reading (LineHistory | None): the line's history, when the
+            program reads its line.
     """
     original: bytes = getattr(node, "source_text", b"")
     at: int = getattr(node, "offsets", ())[child.start_byte]
     rest = original[at:]
-    io = await execute_fn(
-        decode_text(b"\n" * original.count(b"\n", 0, at) + rest),
-        session_id=session.session_id,
-        stdin=stdin,
-        sink=sink,
-        call_stack=call_stack,
-    )
+    rows = original.count(b"\n", 0, at)
+
+    async def run() -> IOResult:
+        io: IOResult = await execute_fn(
+            decode_text(b"\n" * rows + rest),
+            session_id=session.session_id,
+            stdin=stdin,
+            sink=sink,
+            call_stack=call_stack,
+        )
+        return io
+
+    io = await (run() if reading is None else reading.read_on(at - rows, run))
     return (
         io.stdout,
         io,

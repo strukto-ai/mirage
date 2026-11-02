@@ -55,6 +55,7 @@ import {
 } from '../executor/statement.ts'
 import { errTrapArmed, runErrTrap, runExitTrap } from '../executor/traps.ts'
 import type { ExecuteFn } from '../expand/types.ts'
+import type { LineHistory } from '../history/line.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
@@ -189,7 +190,7 @@ async function runProgram(
   // A typed line bash's reader reads as several commands is recorded a
   // command at a time, as its root reaches each.
   const history = currentCaller().history
-  const reading = history?.root === node ? history : null
+  const reading = history?.reads(node) === true ? history : null
   let lastRow = -1
 
   let i = 0
@@ -288,7 +289,7 @@ async function runProgram(
       let s: ByteSource | null
       ;[s, io, lastExec] = await recording(recorder, () =>
         reread
-          ? readOn(reader, node, child, session, childStdin, recorder, callStack)
+          ? readOn(reader, node, child, session, childStdin, recorder, callStack, reading)
           : recurse(child, context, childStdin, callStack, { sink: recorder }),
       )
       ran.push(lastExec)
@@ -551,16 +552,19 @@ async function readOn(
   stdin: ByteSource | null,
   sink: JobConsole | null,
   callStack: CallStack | null,
+  reading: LineHistory | null,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   const original = node.sourceText ?? node.text
   const at = node.offsets?.[child.startIndex ?? 0] ?? 0
   const rest = original.slice(at)
   const rows = original.slice(0, at).split('\n').length - 1
-  const io = await executeFn('\n'.repeat(rows) + rest, {
-    sessionId: session.sessionId,
-    stdin,
-    ...(sink === null ? {} : { sink }),
-    ...(callStack === null ? {} : { callStack }),
-  })
+  const run = (): Promise<IOResult> =>
+    executeFn('\n'.repeat(rows) + rest, {
+      sessionId: session.sessionId,
+      stdin,
+      ...(sink === null ? {} : { sink }),
+      ...(callStack === null ? {} : { callStack }),
+    })
+  const io = reading === null ? await run() : await reading.readOn(at - rows, run)
   return [io.stdout, io, new ExecutionNode({ command: rest, exitCode: io.exitCode })]
 }

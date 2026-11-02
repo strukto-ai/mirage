@@ -38,9 +38,12 @@ declare module '../../context/session_context.ts' {
  * line's root program reaches each command as it runs it (`reach`), and
  * the line's end ends the last (`end`). A line answered before its tree
  * runs, or run whole on a runtime (`typed`), is recorded once, as typed.
- * Mirrors Python's LineHistory.
+ * Input the root reads again (`readOn`) goes on with the root it is read
+ * as. Mirrors Python's LineHistory.
  */
 export class LineHistory {
+  private shift = 0
+  private next: number | null = null
   private current = -1
   private opened = 0
   private line: string | undefined
@@ -52,7 +55,7 @@ export class LineHistory {
   private constructor(
     private readonly observer: Observer,
     private readonly command: string,
-    readonly root: TSNodeLike,
+    private root: TSNodeLike,
     private readonly entries: readonly HistoryEntry[],
     private readonly sessionId: string,
     private readonly session: SessionState,
@@ -89,6 +92,38 @@ export class LineHistory {
   }
 
   /**
+   * Whether `node`'s program reads the line: the line's root, or the first
+   * root to run once its input is read again (`readOn`), which takes over.
+   *
+   * @param node a program about to run its statements.
+   */
+  reads(node: TSNodeLike): boolean {
+    if (node === this.root) return true
+    if (this.next === null || (node.parent ?? null) !== null) return false
+    this.root = node
+    this.shift = this.next
+    this.next = null
+    return true
+  }
+
+  /**
+   * Read the root's input again from a statement on, as a root of its own
+   * that `run` parses and runs.
+   *
+   * @param at where, in the root's input, the input read again starts:
+   *   the statement's index less the blank rows put ahead of it.
+   * @param run reads it.
+   */
+  async readOn(at: number, run: () => Promise<IOResult>): Promise<IOResult> {
+    this.next = this.shift + at
+    try {
+      return await run()
+    } finally {
+      this.next = null
+    }
+  }
+
+  /**
    * Reach the command the root program runs next: end the entry before it
    * and record the entries up to it, its own last.
    *
@@ -103,7 +138,8 @@ export class LineHistory {
     records: readonly OpRecord[],
   ): Promise<void> {
     if (this.whole || this.done) return
-    const at = child.startIndex ?? 0
+    const start = child.startIndex ?? 0
+    const at = this.shift + (this.root.offsets?.[start] ?? start)
     let reached = this.current
     for (let j = this.current + 1; j < this.entries.length; j++) {
       const entry = this.entries[j]
@@ -136,7 +172,7 @@ export class LineHistory {
   /**
    * End the line: its last entry, with what the line wrote since and what
    * it answered with besides, or, when no command was reached, the line as
-   * typed. A line ends once.
+   * typed, unless its root read it through. A line ends once.
    *
    * @param io the line's result.
    * @param records the line's op records, of which the last entry's are
@@ -144,7 +180,7 @@ export class LineHistory {
    */
   async end(io: IOResult, records: readonly OpRecord[]): Promise<void> {
     if (this.done) return
-    if (this.current < 0) await this.typed()
+    if (this.current < 0 && !this.through) await this.typed()
     await this.close(io, records)
     this.done = true
     if (!this.through || this.whole) return

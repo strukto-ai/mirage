@@ -22,8 +22,8 @@ class HistoryEntry:
 
     Args:
         text (str): the entry, its lines joined as ``cmdhist`` joins them.
-        at (int | None): where its first command starts in the text the
-            tree reads; None for a line of blanks.
+        at (int | None): where its first command starts in the input as
+            typed; None for a line of blanks.
     """
 
     text: str

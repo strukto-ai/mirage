@@ -15,6 +15,7 @@
 import asyncio
 from collections import deque
 from collections.abc import Awaitable, Callable
+from itertools import islice
 from typing import Any
 
 from mirage.concurrency.limiter import owned_task
@@ -47,6 +48,9 @@ class Terminal(JobConsole):
         self.attaching: asyncio.Event | None = None
         self._prefix = bytearray()
         self._err_prefix = bytearray()
+        # The chunks at the head of ``chunks`` the line's history entries
+        # took, and the bytes of each channel they took in all.
+        self._taken = 0
         self._marked = (0, 0)
         self._draining: asyncio.Task[None] | None = None
 
@@ -117,6 +121,7 @@ class Terminal(JobConsole):
         """
         self._prefix.clear()
         self._err_prefix.clear()
+        self._taken = 0
         self._marked = (0, 0)
         if reader is None:
             self.reader = None
@@ -136,6 +141,7 @@ class Terminal(JobConsole):
             while self.chunks:
                 channel, data, _ = self.chunks.popleft()
                 self.held -= len(data)
+                self._taken = max(0, self._taken - 1)
                 self._remember(channel, data)
                 await reader.emit(channel, data)
                 if self.ended != ended:
@@ -166,6 +172,7 @@ class Terminal(JobConsole):
         to be bounded and put back (``put_back``)."""
         chunks, self.chunks = self.chunks, deque()
         self.held = 0
+        self._taken = 0
         return (
             b"".join(d for c, d, _ in chunks if c == Channel.STDOUT),
             b"".join(d for c, d, _ in chunks if c == Channel.STDERR),
@@ -181,26 +188,43 @@ class Terminal(JobConsole):
             self._prefix.clear()
             self._err_prefix.clear()
             return shown
-        out, err = self.drain()
-        self.put_back(out, err)
-        start, start_err = self._marked
-        self._marked = (len(out), len(err))
-        return out[start:], err[start_err:]
+        fresh = list(islice(self.chunks, self._taken, None))
+        self._taken = len(self.chunks)
+        out = b"".join(d for c, d, _ in fresh if c == Channel.STDOUT)
+        err = b"".join(d for c, d, _ in fresh if c == Channel.STDERR)
+        self._marked = (self._marked[0] + len(out), self._marked[1] + len(err))
+        return out, err
 
     def put_back(self, out: bytes, err: bytes) -> None:
-        """Return drained output ahead of whatever arrived meanwhile.
+        """Return drained output ahead of whatever arrived meanwhile,
+        what the line's history entries took of it first.
 
         Args:
             out (bytes): the stdout to return.
             err (bytes): the stderr to return.
         """
-        returned = [
+        start = min(self._marked[0], len(out))
+        start_err = min(self._marked[1], len(err))
+        taken = [
             (channel, data, False)
-            for channel, data in ((Channel.STDOUT, out), (Channel.STDERR, err))
+            for channel, data in (
+                (Channel.STDOUT, out[:start]),
+                (Channel.STDERR, err[:start_err]),
+            )
             if data
         ]
-        self.chunks = deque(returned) + self.chunks
+        rest = [
+            (channel, data, False)
+            for channel, data in (
+                (Channel.STDOUT, out[start:]),
+                (Channel.STDERR, err[start_err:]),
+            )
+            if data
+        ]
+        self.chunks = deque(taken + rest) + self.chunks
         self.held += len(out) + len(err)
+        self._taken = len(taken)
+        self._marked = (start, start_err)
 
     def take(self) -> tuple[bytes, bytes]:
         """End a line: its stdout and stderr, jobs' output among them."""
@@ -219,6 +243,7 @@ class Terminal(JobConsole):
         self.reader = None
         self._prefix.clear()
         self._err_prefix.clear()
+        self._taken = 0
         self._marked = (0, 0)
         self.ended += 1
         if self.attaching is not None:
