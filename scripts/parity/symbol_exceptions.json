@@ -750,6 +750,11 @@
     "_whole": "json.loads reads whole numbers through parse_int, apart from floats; the TypeScript JSON.parse reviver sees both as numbers in finite."
    }
   },
+  "core/mcp/config": {
+   "typescript_only": {
+    "parseMCPConfig": "A pydantic model validates itself (MCPConfig.model_validate); a zod schema parses through parseConfigWithSchema in vfs/secrets, which a command may not import."
+   }
+  },
   "commands/cli/builtin/git/cat_file": {
    "typescript_only": {
     "raw": "isomorphic-git hands back a parsed object, so TypeScript reads the stored bytes in a helper; dulwich's as_raw_string gives them in Python."

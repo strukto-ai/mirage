@@ -14,7 +14,7 @@
 
 import { z } from 'zod'
 import type { ConfigOf } from '../../vfs/secrets.ts'
-import { secretStr } from '../../vfs/secrets.ts'
+import { parseConfigWithSchema, secretStr } from '../../vfs/secrets.ts'
 
 export const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
 export const HEADER_VALUE = /^[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?$/
@@ -73,3 +73,8 @@ export const MCPConfig = z.strictObject({
 })
 
 export type MCPConfig = ConfigOf<typeof MCPConfig>
+
+/** `config` checked against MCPConfig, as every config is parsed; ZodError for one it refuses. */
+export function parseMCPConfig(config: Record<string, unknown>): MCPConfig {
+  return parseConfigWithSchema(MCPConfig, config)
+}

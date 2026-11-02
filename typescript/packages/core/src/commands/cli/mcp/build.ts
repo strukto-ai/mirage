@@ -14,10 +14,9 @@
 
 import type { Tool } from '@modelcontextprotocol/client'
 import { MCPAccessor } from '../../../accessor/mcp.ts'
-import { MCPConfig } from '../../../core/mcp/config.ts'
+import { MCPConfig, parseMCPConfig } from '../../../core/mcp/config.ts'
 import { compactJsonText } from '../../../core/render/json.ts'
 import type { JsonValue } from '../../../types.ts'
-import { parseConfigWithSchema } from '../../../vfs/secrets.ts'
 import { Argument, CommandSpec } from '../../spec/types.ts'
 import { CLI, CLIHandler, type CLIVerbFn } from '../types.ts'
 import { callTool, causes, commandName } from './call.ts'
@@ -93,7 +92,7 @@ export function buildCli(source: MCPSource): CLI {
  * cannot be made into a CLI, and ZodError for a config MCPConfig refuses.
  */
 export async function mcpCli(config: MCPConfig | Record<string, unknown>): Promise<CLI> {
-  const validated = parseConfigWithSchema(MCPConfig, config as Record<string, unknown>)
+  const validated = parseMCPConfig(config as Record<string, unknown>)
   let listed: [string, Tool[]]
   try {
     listed = await new MCPAccessor(validated).listTools()
