@@ -56,12 +56,15 @@ function send(ctx: GwsCtx): Reply {
   return ok({ id: msg.id, threadId: msg.threadId, labelIds: [...msg.labelIds] })
 }
 
-function fmtDraft(draft: GmailDraft, msg: GmailMessage, full = false): JsonObj {
+// A draft as drafts.get gives it, its message in `format`, or with ids only
+// when the format is undefined, as create and update answer.
+function fmtDraft(draft: GmailDraft, msg: GmailMessage, format?: string | null): JsonObj {
   return {
     id: draft.id,
-    message: full
-      ? fmtGmailMessage(msg)
-      : { id: msg.id, threadId: msg.threadId, labelIds: [...msg.labelIds] },
+    message:
+      format === undefined
+        ? { id: msg.id, threadId: msg.threadId, labelIds: [...msg.labelIds] }
+        : fmtGmailMessage(msg, format),
   }
 }
 
@@ -147,7 +150,8 @@ export function gmailRoutes(): KitRoute<C>[] {
     route('POST', '/gmail/v1/users/me/drafts/send', sendDraft, { write: true }),
     route('GET', '/gmail/v1/users/me/drafts/:id', (ctx) => {
       const found = draftOf(ctx.db, ctx.params.id ?? '')
-      return found === null ? notFound() : ok(fmtDraft(found.draft, found.msg, true))
+      if (found === null) return notFound()
+      return ok(fmtDraft(found.draft, found.msg, ctx.query.get('format')))
     }),
     route('PUT', '/gmail/v1/users/me/drafts/:id', updateDraft, { write: true }),
     route('DELETE', '/gmail/v1/users/me/drafts/:id', deleteDraft, { write: true }),
@@ -175,7 +179,7 @@ export function gmailRoutes(): KitRoute<C>[] {
     route('GET', '/gmail/v1/users/me/messages/:id', (ctx) => {
       const msg = ctx.db.messages.get(ctx.params.id ?? '')
       if (msg === undefined) return notFound()
-      return ok(fmtGmailMessage(msg))
+      return ok(fmtGmailMessage(msg, ctx.query.get('format')))
     }),
   ]
 }
