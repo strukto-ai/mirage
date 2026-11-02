@@ -95,8 +95,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Sheets mounted at `/
     - `<title>` is sanitized: spaces and any character outside
       `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
     - `<spreadsheet-id>` is the Google Sheets spreadsheet id.
-    - `shared/` holds sheets shared with you by others, not sheets you
-      own and shared with others; those are still in `owned/`.
+    - `shared/` holds sheets shared with you by others; ones you own
+      and shared with others are still in `owned/`.
 
     A `.gsheet.json` matches the Google Sheets API `spreadsheets.get`
     response:
@@ -205,8 +205,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Sheets mounted at `/
     - `<title>` is sanitized: spaces and any character outside
       `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
     - `<spreadsheet-id>` is the Google Sheets spreadsheet id.
-    - `shared/` holds sheets shared with you by others, not sheets you
-      own and shared with others; those are still in `owned/`.
+    - `shared/` holds sheets shared with you by others; ones you own
+      and shared with others are still in `owned/`.
 
     A `.gsheet.json` matches the Google Sheets API `spreadsheets.get`
     response:

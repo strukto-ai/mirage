@@ -163,32 +163,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
 </Tabs>
 {/* generated: vfs-md trello end */}
 
-```text
-/trello/
-  workspaces/
-    <workspace-name>__<workspace-id>/
-      workspace.json
-      boards/
-        <board-name>__<board-id>/
-          board.json
-          members/
-            <full-name>__<member-id>.json
-            ...
-          labels/
-            <label-name>__<label-id>.json
-            ...
-          lists/
-            <list-name>__<list-id>/
-              list.json
-              cards/
-                <card-name>__<card-id>/
-                  card.json
-                  comments.jsonl
-                ...
-            ...
-```
-
-Example:
+An example mount:
 
 ```text
 /trello/

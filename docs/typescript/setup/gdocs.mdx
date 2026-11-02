@@ -99,8 +99,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
     - `<title>` is sanitized: spaces and any character outside
       `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
     - `<doc-id>` is the Google Docs document id.
-    - `shared/` holds docs shared with you by others, not docs you
-      own and shared with others; those are still in `owned/`.
+    - `shared/` holds docs shared with you by others; ones you own
+      and shared with others are still in `owned/`.
 
     A `.gdoc.json` holds the Google Docs API `documents.get` response, read
     with `includeTabsContent=true` so every tab is present:
@@ -234,8 +234,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Docs mounted at `/<p
     - `<title>` is sanitized: spaces and any character outside
       `[A-Za-z0-9_.-]` become `_`, at most 100 characters.
     - `<doc-id>` is the Google Docs document id.
-    - `shared/` holds docs shared with you by others, not docs you
-      own and shared with others; those are still in `owned/`.
+    - `shared/` holds docs shared with you by others; ones you own
+      and shared with others are still in `owned/`.
 
     A `.gdoc.json` holds the Google Docs API `documents.get` response, read
     with `includeTabsContent=true` so every tab is present:

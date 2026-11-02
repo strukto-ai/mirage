@@ -282,22 +282,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
 </Tabs>
 {/* generated: vfs-md discord end */}
 
-```text
-/discord/
-  <guild-name>__<guild-id>/
-    channels/
-      <channel-name>__<channel-id>/
-        <yyyy-mm-dd>/
-          chat.jsonl
-          files/
-            <stem>__<attachment-id>.<ext>
-            ...
-        ...
-    members/
-      <username>__<user-id>.json
-      ...
-```
-
 The root lists one directory per guild the bot has access to. Each guild contains a `channels/` directory with text channels (types 0, 5, 15) and a `members/` directory with one `.json` file per member. Each channel directory contains day-partitioned **directories** for the 30 days leading up to the channel's last message, inactive channels show dates around their last activity, not today. Each day directory holds `chat.jsonl` (one JSON object per message) and a `files/` directory with that day's attachments, `cat`'ing a blob downloads it from the Discord CDN. Soft errors (403 missing permissions, 404 unknown channel, 429 rate limit) on a single day are swallowed so listings, `find`, and `grep` keep working across the rest of the tree.
 
 Display names keep their original spelling from Discord (spaces, apostrophes, emoji are all preserved). Only `/` is replaced with `∕` (U+2215) so it cannot collide with a directory boundary. The Discord snowflake ID is appended after `__` (double underscore) on guild, channel, member, and attachment names so VFS-specific commands can extract it without an extra lookup, and so two same named entities never collide. Quote names containing spaces in shell commands.
