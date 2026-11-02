@@ -34,12 +34,26 @@ const NAME_ONLY_DIFF =
   'diff --git a/sub dir/x y.txt b/sub dir/x y.txt\n' +
   '+++ b/sub dir/x y.txt\t\n'
 const FIELDS = vi.fn<typeof PullModule.pullRequestFields>()
+const CALLS: unknown[][] = []
+let REOPEN_ROW: Record<string, unknown> = {}
 const LIST = vi.fn<typeof PullModule.listPullRequestFields>()
 
 vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof PullModule>()
   return {
     ...actual,
+    getPull: (_t: unknown, _r: unknown, number: number) => {
+      CALLS.push(['get', number])
+      return Promise.resolve({ number, title: 't', ...REOPEN_ROW })
+    },
+    commentPull: (_t: unknown, _r: unknown, number: number, body: string) => {
+      CALLS.push(['comment', number, body])
+      return Promise.resolve({})
+    },
+    editPull: (_t: unknown, _r: unknown, number: number, body: unknown) => {
+      CALLS.push(['edit', number, body])
+      return Promise.resolve({})
+    },
     diffPull: () => Promise.resolve(NAME_ONLY_DIFF),
     pullChecks: () => Promise.resolve(ROWS),
     pullRequestFields: (...args: Parameters<typeof PullModule.pullRequestFields>) =>
@@ -49,7 +63,7 @@ vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
   }
 })
 
-const { PR_FIELDS, checksCmd, diffCmd, listCmd, viewCmd } = await import('./pull.ts')
+const { PR_FIELDS, checksCmd, diffCmd, listCmd, reopenCmd, viewCmd } = await import('./pull.ts')
 
 function json(result: Awaited<ReturnType<typeof viewCmd>>): Record<string, unknown> {
   if (result === null) throw new Error('expected a result tuple')
@@ -385,5 +399,48 @@ describe('gh pr diff --name-only', () => {
     expect(new TextDecoder().decode(result[0] as Uint8Array)).toBe(
       'README.md\n"caf\\303\\251.txt"\nmoved/contributing.md\n"q\\"t.txt"\nsub dir/x y.txt\n',
     )
+  })
+})
+
+describe('gh pr reopen', () => {
+  beforeEach(() => {
+    CALLS.length = 0
+  })
+
+  function decode(bytes: unknown): string {
+    return new TextDecoder().decode(bytes as Uint8Array)
+  }
+
+  it('comments before it reopens', async () => {
+    REOPEN_ROW = { state: 'closed', merged: false }
+    const result = await reopenCmd(...args({ comment: 'back' }))
+    if (result === null) throw new Error('expected a result tuple')
+    expect(decode(result[0])).toBe('✓ Reopened pull request o/r#5 (t)\n')
+    expect(result[1].exitCode).toBe(0)
+    expect(CALLS).toEqual([
+      ['get', 5],
+      ['comment', 5, 'back'],
+      ['edit', 5, { state: 'open' }],
+    ])
+  })
+
+  it('leaves an open pull request alone', async () => {
+    REOPEN_ROW = { state: 'open', merged: false }
+    const result = await reopenCmd(...args({ comment: 'back' }))
+    if (result === null) throw new Error('expected a result tuple')
+    expect(result[1].exitCode).toBe(0)
+    expect(decode(result[1].stderr)).toBe('! Pull request o/r#5 (t) is already open\n')
+    expect(CALLS).toEqual([['get', 5]])
+  })
+
+  it('refuses a merged pull request', async () => {
+    REOPEN_ROW = { state: 'closed', merged: true }
+    const result = await reopenCmd(...args())
+    if (result === null) throw new Error('expected a result tuple')
+    expect(result[1].exitCode).toBe(1)
+    expect(decode(result[1].stderr)).toBe(
+      "X Pull request o/r#5 (t) can't be reopened because it was already merged\n",
+    )
+    expect(CALLS).toEqual([['get', 5]])
   })
 })

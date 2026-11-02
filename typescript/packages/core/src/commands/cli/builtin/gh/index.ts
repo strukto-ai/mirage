@@ -50,6 +50,7 @@ import {
   editCmd as prEdit,
   listCmd as prList,
   mergeCmd as prMerge,
+  reopenCmd as prReopen,
   viewCmd as prView,
 } from './pull.ts'
 import {
@@ -80,6 +81,9 @@ const LIMIT_30 = new Argument(['-L', '--limit'], { type: 'int', default: '30' })
 const BODY = new Argument(['-b', '--body'])
 const BODY_FILE = new Argument(['-F', '--body-file'], { type: 'path' })
 const TITLE = new Argument(['-t', '--title'])
+const REOPEN_COMMENT = new Argument(['-c', '--comment'], {
+  help: 'Post this comment before reopening',
+})
 const NUMBER = new Argument('NUMBER')
 
 // gh's boolean flags are pflag's: a bare `--draft` is true, and `--draft=true`
@@ -168,7 +172,7 @@ function issue(): CommandSpec {
       new CommandSpec({
         name: 'reopen',
         description: 'Reopen an issue',
-        arguments: [REPO, NUMBER],
+        arguments: [REPO, REOPEN_COMMENT, NUMBER],
       }),
       new CommandSpec({
         name: 'comment',
@@ -251,6 +255,11 @@ function pr(): CommandSpec {
         name: 'close',
         description: 'Close a pull request',
         arguments: [REPO, NUMBER],
+      }),
+      new CommandSpec({
+        name: 'reopen',
+        description: 'Reopen a pull request',
+        arguments: [REPO, REOPEN_COMMENT, NUMBER],
       }),
       new CommandSpec({
         name: 'comment',
@@ -626,6 +635,7 @@ export const GH = new CLI({
     'pr edit': new CLIHandler({ fn: prEdit, write: true }),
     'pr merge': new CLIHandler({ fn: prMerge, write: true }),
     'pr close': new CLIHandler({ fn: prClose, write: true }),
+    'pr reopen': new CLIHandler({ fn: prReopen, write: true }),
     'pr comment': new CLIHandler({ fn: prComment, write: true }),
     'pr diff': new CLIHandler({ fn: prDiff }),
     'pr checks': new CLIHandler({ fn: prChecks }),

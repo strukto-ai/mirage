@@ -23,6 +23,7 @@ from mirage.commands.cli.builtin.gh.pull import (
     checks_cmd,
     diff_cmd,
     list_cmd,
+    reopen_cmd,
     view_cmd,
 )
 from mirage.commands.config import Context
@@ -517,3 +518,71 @@ async def test_pr_list_json_lists_over_graphql_with_ghs_states(monkeypatch):
     assert selection == (
         "number,files(first: 100) {nodes {additions,deletions,path}}"
     )
+
+
+def _reopen_calls(monkeypatch, row) -> list[tuple]:
+    calls: list[tuple] = []
+
+    async def get(config, ref, number):
+        calls.append(("get", number))
+        return {"number": number, "title": "t", **row}
+
+    async def comment(config, ref, number, body):
+        calls.append(("comment", number, body))
+        return {}
+
+    async def edit(config, ref, number, body):
+        calls.append(("edit", number, body))
+        return {}
+
+    monkeypatch.setitem(reopen_cmd.__globals__, "get_pull", get)
+    monkeypatch.setitem(reopen_cmd.__globals__, "comment_pull", comment)
+    monkeypatch.setitem(reopen_cmd.__globals__, "edit_pull", edit)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_reopen_comments_before_it_reopens(monkeypatch):
+    calls = _reopen_calls(monkeypatch, {"state": "closed", "merged": False})
+
+    out, io = await reopen_cmd(
+        *_args(texts=["5"], flags={"repo": "o/r", "comment": "back"})
+    )
+
+    assert (
+        await materialize(out)
+        == "✓ Reopened pull request o/r#5 (t)\n".encode()
+    )
+    assert io.exit_code == 0
+    assert calls == [
+        ("get", 5),
+        ("comment", 5, "back"),
+        ("edit", 5, {"state": "open"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reopen_leaves_an_open_pull_request_alone(monkeypatch):
+    calls = _reopen_calls(monkeypatch, {"state": "open", "merged": False})
+
+    _, io = await reopen_cmd(
+        *_args(texts=["5"], flags={"repo": "o/r", "comment": "back"})
+    )
+
+    assert io.exit_code == 0
+    assert io.stderr == b"! Pull request o/r#5 (t) is already open\n"
+    assert calls == [("get", 5)]
+
+
+@pytest.mark.asyncio
+async def test_reopen_refuses_a_merged_pull_request(monkeypatch):
+    calls = _reopen_calls(monkeypatch, {"state": "closed", "merged": True})
+
+    _, io = await reopen_cmd(*_args(texts=["5"], flags={"repo": "o/r"}))
+
+    assert io.exit_code == 1
+    assert io.stderr == (
+        b"X Pull request o/r#5 (t) can't be reopened because it was "
+        b"already merged\n"
+    )
+    assert calls == [("get", 5)]

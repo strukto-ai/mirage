@@ -20,18 +20,32 @@ import type { PathSpec } from '../../../../types.ts'
 import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const FIELDS = vi.fn<typeof IssueModule.issueFields>()
+const CALLS: unknown[][] = []
+let REOPEN_ROW: Record<string, unknown> = {}
 const LIST = vi.fn<typeof IssueModule.listIssueFields>()
 
 vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof IssueModule>()
   return {
     ...actual,
+    getIssue: (_t: unknown, _r: unknown, number: number) => {
+      CALLS.push(['get', number])
+      return Promise.resolve({ number, title: 't', ...REOPEN_ROW })
+    },
+    commentIssue: (_t: unknown, _r: unknown, number: number, body: string) => {
+      CALLS.push(['comment', number, body])
+      return Promise.resolve({})
+    },
+    editIssue: (_t: unknown, _r: unknown, number: number, body: unknown) => {
+      CALLS.push(['edit', number, body])
+      return Promise.resolve({})
+    },
     issueFields: (...args: Parameters<typeof IssueModule.issueFields>) => FIELDS(...args),
     listIssueFields: (...args: Parameters<typeof IssueModule.listIssueFields>) => LIST(...args),
   }
 })
 
-const { ISSUE_FIELDS, listCmd, viewCmd } = await import('./issue.ts')
+const { ISSUE_FIELDS, listCmd, reopenCmd, viewCmd } = await import('./issue.ts')
 
 const ACCOUNT = new GitHubAccount({ token: 't' })
 
@@ -159,5 +173,46 @@ describe('gh issue list --json', () => {
     })
     expect(LIST.mock.calls[0]?.[3]).toBe(30)
     expect(LIST.mock.calls[0]?.[4]).toBe('number,stateReason')
+  })
+})
+
+describe('gh issue reopen', () => {
+  beforeEach(() => {
+    CALLS.length = 0
+  })
+
+  function decode(bytes: unknown): string {
+    return new TextDecoder().decode(bytes as Uint8Array)
+  }
+
+  it('comments before it reopens', async () => {
+    REOPEN_ROW = { state: 'closed', merged: false }
+    const result = await reopenCmd(...args({ comment: 'back' }))
+    if (result === null) throw new Error('expected a result tuple')
+    expect(decode(result[0])).toBe('✓ Reopened issue o/r#4 (t)\n')
+    expect(result[1].exitCode).toBe(0)
+    expect(CALLS).toEqual([
+      ['get', 4],
+      ['comment', 4, 'back'],
+      ['edit', 4, { state: 'open' }],
+    ])
+  })
+
+  it('leaves an open issue alone', async () => {
+    REOPEN_ROW = { state: 'open', merged: false }
+    const result = await reopenCmd(...args({ comment: 'back' }))
+    if (result === null) throw new Error('expected a result tuple')
+    expect(result[1].exitCode).toBe(0)
+    expect(decode(result[1].stderr)).toBe('! Issue o/r#4 (t) is already open\n')
+    expect(CALLS).toEqual([['get', 4]])
+  })
+
+  it('posts no comment for an empty one', async () => {
+    REOPEN_ROW = { state: 'closed' }
+    await reopenCmd(...args({ comment: '' }))
+    expect(CALLS).toEqual([
+      ['get', 4],
+      ['edit', 4, { state: 'open' }],
+    ])
   })
 })

@@ -216,6 +216,7 @@ def test_registers_itself_under_the_grammar_gh_uses():
         "edit",
         "merge",
         "close",
+        "reopen",
         "comment",
         "diff",
         "checks",
