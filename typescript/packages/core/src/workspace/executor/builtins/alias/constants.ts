@@ -15,4 +15,4 @@
 // The names bash's `alias` refuses: a shell metacharacter, a quote, `/`,
 // `$` or a backtick anywhere in the name makes it unusable, since the parser
 // would never read such a word as one command name.
-export const BAD_NAME_CHARS = ' \t\n/=$`\'"|&;()<>'
+export const BAD_NAME_RE = /[ \t\n/=$`'"|&;()<>]/

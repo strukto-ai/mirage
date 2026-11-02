@@ -45,6 +45,9 @@ export const ANSI_C_ESCAPES: Record<string, string> = {
 
 export const BARE_KEY_RE = /^[A-Za-z0-9_%+,./:=@~-]+$/
 
+// eslint-disable-next-line no-control-regex
+export const CONTROL_RE = /[\x00-\x1f\x7f]/
+
 // `arr[0]` and friends: a target that parses as an assignment but is
 // not a plain name, which the declaration builtins quote on its own.
 export const SUBSCRIPT_RE = /^[A-Za-z_][A-Za-z0-9_]*\[.*\]$/

@@ -1226,7 +1226,7 @@
       "command": "n=0; for f in /mail/*/*/*.gmail.json; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
       "expect": {
         "exit": 0,
-        "stdout": "11 match\n",
+        "stdout": "12 match\n",
         "stderr": ""
       }
     },
@@ -1239,7 +1239,7 @@
       "command": "n=0; for f in /mail/*/*/*/*; do test \"$(stat -c %s \"$f\")\" = \"$(cat \"$f\" | wc -c)\" && n=$((n+1)); done; echo \"$n match\"",
       "expect": {
         "exit": 0,
-        "stdout": "6 match\n",
+        "stdout": "7 match\n",
         "stderr": ""
       }
     },

@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 
 # The names bash's `alias` refuses: a shell metacharacter, a quote, `/`,
 # `$` or a backtick anywhere in the name makes it unusable, since the parser
 # would never read such a word as one command name.
-BAD_NAME_CHARS = frozenset(" \t\n/=$`'\"|&;()<>")
+BAD_NAME_RE = re.compile(r"[ \t\n/=$`'\"|&;()<>]")

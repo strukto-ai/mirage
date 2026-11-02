@@ -16,12 +16,12 @@
     {
       "id": "find_astral_sorts_after_bmp",
       "seq": 960051,
-      "note": "The same ordering through find's traversal, which sorts entries independently of ls.",
+      "note": "The same ordering through find's traversal, which sorts entries independently of ls, and its reverse through rg --sortr path.",
       "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
-      "command": "mkdir -p /data/astralf && touch '/data/astralf/.txt' '/data/astralf/😀.txt' && find /data/astralf -type f",
+      "command": "mkdir -p /data/astralf && touch '/data/astralf/.txt' '/data/astralf/😀.txt' && find /data/astralf -type f; rg --files --sortr path /data/astralf",
       "expect": {
         "exit": 0,
-        "stdout": "/data/astralf/.txt\n/data/astralf/😀.txt\n",
+        "stdout": "/data/astralf/.txt\n/data/astralf/😀.txt\n/data/astralf/😀.txt\n/data/astralf/.txt\n",
         "stderr": ""
       },
       "flags": ["type"]

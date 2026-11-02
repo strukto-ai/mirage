@@ -20,9 +20,9 @@ from mirage.shell.constants import SET_OPTION_DEFAULTS, SET_OPTION_NAMES
 from mirage.shell.options import parse_option_word
 from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.constants import SET_QUOTED_CHARS
+from mirage.workspace.executor.builtins.declare.constants import CONTROL_RE
 from mirage.workspace.executor.builtins.declare.declare import (
     bash_declare_quote,
-    is_control,
 )
 from mirage.workspace.executor.builtins.shared import (
     builtin_error,
@@ -133,7 +133,7 @@ def _listed_value(value: str) -> str:
     Args:
         value (str): the variable's value.
     """
-    if any(is_control(ch) for ch in value):
+    if CONTROL_RE.search(value):
         return bash_declare_quote(value)
     tilde = any(
         ch == "~" and (i == 0 or value[i - 1] in "=:")
