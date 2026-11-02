@@ -164,26 +164,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Drive mounted at `/<
 </Tabs>
 {/* generated: vfs-md gdrive end */}
 
-An example mount:
-
-```text
-/gdrive/
-  Projects/
-    spec.pdf
-    roadmap.gsheet.json
-    Budget/
-      Q1.gsheet.json
-      Q2.gsheet.json
-  Notes/
-    meeting.gdoc.json
-  Presentations/
-    quarterly_review.gslide.json
-  Team Drive/
-    shared-spec.pdf
-  data.csv
-  report.pdf
-```
-
 The mount mirrors the actual Google Drive folder hierarchy. The root
 contains the Drive API `root` folder plus each Shared Drive visible to
 the user. Shared Drives appear as top-level directories. Duplicate names

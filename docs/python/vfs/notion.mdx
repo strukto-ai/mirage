@@ -164,27 +164,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Notion mounted at `/<path>`
 </Tabs>
 {/* generated: vfs-md notion end */}
 
-An example mount:
-
-```text
-/notion/
-  pages/
-    Project_Roadmap__a1b2c3d4/
-      page.json
-      Q1_Goals__e5f6g7h8/
-        page.json
-      Q2_Goals__i9j0k1l2/
-        page.json
-    Meeting_Notes__m3n4o5p6/
-      page.json
-  databases/
-    Tasks__4a3b21915e77/
-      database.json
-      Tasks__d5000000-2222-3333-4444-555566667777/
-        data_source.json
-        rows.jsonl
-```
-
 The `pages/` hierarchy mirrors Notion's standalone page tree. Each page
 directory contains a `page.json` with the page metadata and content, and
 child pages appear as nested directories.

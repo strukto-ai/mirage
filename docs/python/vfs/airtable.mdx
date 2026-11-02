@@ -178,21 +178,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Airtable mounted at `/<path
 </Tabs>
 {/* generated: vfs-md airtable end */}
 
-An example mount:
-
-```text
-/airtable/
-  bases/
-    Product_Roadmap__appRoadmapBase001/
-      base.json
-      Features__tblFeatures000001/
-        table.json
-        records.jsonl
-        views/
-          Grid_view__viwGrid0000000001.jsonl
-          Done_shipped__viwDone0000000001.jsonl
-```
-
 Names are sanitized (`Ops / Finance` becomes `Ops_Finance`); the id after the
 last `__` is exact. List a directory to discover names rather than building
 them.

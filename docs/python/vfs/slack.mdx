@@ -185,36 +185,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Slack mounted at `/<path>`.
 </Tabs>
 {/* generated: vfs-md slack end */}
 
-An example mount:
-
-```text
-/slack/
-  channels/
-    general__C04KEPWF6V7/
-      2026-04-04/
-        chat.jsonl
-        files/
-      2026-04-05/
-        chat.jsonl
-        files/
-    random__C04JVGZM7UN/
-      2026-04-11/
-        chat.jsonl
-        files/
-  dms/
-    alice__D0AQDJ5FP9V/
-      2026-04-04/
-        chat.jsonl
-        files/
-    slackbot__D0ARPA1QSPJ/
-      2026-04-04/
-        chat.jsonl
-        files/
-  users/
-    alice__U12345678.json
-    bob__U87654321.json
-```
-
 Directory names embed the Slack ID so that write commands
 (`slack send-message --channel`, etc.) can reference the correct
 VFS without extra lookups.

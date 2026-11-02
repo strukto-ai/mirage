@@ -161,39 +161,6 @@ The mount mirrors MongoDB's `cluster → database → collection / view`
 model. The database directory always appears in the path, even when
 `databases` filters to a single entry.
 
-```text
-/mongodb/
-  <database>/
-    database.json                  # collection and view names
-    collections/
-      <collection>/
-        schema.json                # sampled types + indexes + validator
-        documents.jsonl            # streamed BSON Extended JSON
-    views/
-      <view>/
-        schema.json                # view-aware (no indexes / validator)
-        documents.jsonl            # streamed, same format as collections
-```
-
-Example:
-
-```text
-/mongodb/
-  sample_mflix/
-    database.json
-    collections/
-      movies/
-        schema.json
-        documents.jsonl
-      comments/
-        schema.json
-        documents.jsonl
-    views/
-      top_rated_movies/
-        schema.json
-        documents.jsonl
-```
-
 Discovery lists databases, collections, views, and their fixed file names.
 It does not enumerate one filesystem entry per document. Schema inspection
 is separate from bulk document reads, so discovering a collection does not

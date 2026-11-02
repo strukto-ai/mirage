@@ -137,12 +137,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
 The tree is flat: the mount root lists one `<memory_id>.json` file per memory in
 the configured scope.
 
-```text
-/memory/
-  6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json
-  4d221f85-b200-4cf1-8eff-05e0ba71d145.json
-```
-
 `cat` returns the full memory JSON, including `memory`, `categories`,
 `metadata`, `created_at`, `updated_at`, and `structured_attributes`:
 

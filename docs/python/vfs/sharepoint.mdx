@@ -185,21 +185,6 @@ driveItem.
 - **Level 1** (`/sharepoint/{site}/`): lists document libraries (drives) in that site
 - **Level 2+** (`/sharepoint/{site}/{library}/...`): lists files and folders
 
-For example:
-
-```text
-/sharepoint/
-  Engineering/
-    Documents/
-      spec.md
-      deck.pptx
-    Reports/
-      q1.csv
-  Marketing/
-    Shared Documents/
-      brand.pdf
-```
-
 Path mapping: virtual `/sharepoint/Engineering/Documents/spec.md` resolves the
 site `Engineering` to a site id, the library `Documents` to a drive id, then
 reads the driveItem at `/root:/spec.md`.
