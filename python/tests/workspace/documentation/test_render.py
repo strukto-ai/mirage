@@ -184,6 +184,18 @@ async def test_vfs_md_places_a_layout_as_markdown():
 
 
 @pytest.mark.asyncio
+async def test_vfs_md_keeps_a_layout_fenced_past_a_backtick_prefix():
+    slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
+    ws = Workspace({"/a\n```": (slack, MountMode.READ)})
+    markdown = await ws.vfs_md()
+    assert "````text\n/a\n```\n  channels/" in markdown
+    assert (
+        "\n  users/\n    <username>__<user-id>.json  # user profile\n````"
+        in (markdown)
+    )
+
+
+@pytest.mark.asyncio
 async def test_vfs_md_substitutes_prefix():
     cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
     gdocs = GDocsVFS(config=cfg)
