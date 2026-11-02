@@ -24,6 +24,7 @@ import { SEARCH } from './builtin/search/index.ts'
 import { SLACK } from './builtin/slack/index.ts'
 import { TRELLO } from './builtin/trello/index.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
+import { NAME as MCP_CLI } from './mcp/constants.ts'
 
 // Named CLI trees the YAML `clis:` section resolves against
 // (`cli: slack` looks up "slack" here). The bundled programs are seeded
@@ -41,6 +42,9 @@ const CLI_SPECS = new Map<string, CLI>(
 
 /** Make a CLI resolvable by name from YAML; its root name is the key. */
 export function registerCliSpec(spec: CLI): void {
+  if (spec.spec.name === MCP_CLI) {
+    throw new Error(`CLI spec '${MCP_CLI}' is reserved for MCP servers; build one with mcpCli`)
+  }
   if (CLI_SPECS.has(spec.spec.name)) {
     throw new Error(`CLI spec '${spec.spec.name}' is already registered`)
   }
@@ -57,6 +61,9 @@ export function unregisterCliSpec(name: string): void {
 
 /** Resolve a YAML `cli:` key to its registered tree, fail loud. */
 export function cliSpecFor(name: string): CLI {
+  if (name === MCP_CLI) {
+    throw new Error(`cli '${MCP_CLI}' is built from its server: await mcpCli(config)`)
+  }
   const spec = CLI_SPECS.get(name)
   if (spec === undefined) {
     const known = [...CLI_SPECS.keys()].sort(compareCodePoints).join(', ') || 'none registered'

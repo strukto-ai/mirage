@@ -8,10 +8,19 @@ The history store records every command a session runs at the top level. The
 `history` builtin and `/.bash_history` are two views of that one record, and a
 [policy](/home/policy/policies) reads it as `/.bash_history`.
 From outside, `ws.history()`, [`GET /v1/workspaces/{id}/history`](/home/access/http#read-a-workspaces-history)
-and `mirage workspace history` read every session's record: each line as a
+and `mirage workspace history` read every session's record: each command as a
 `command` entry when it starts and a `result` entry (exit code, stdout,
 stderr) when it ends, and with `vfs`, each call it made to a mount between
 them.
+
+A line of several commands is recorded as bash's history adds it when it
+reads the line interactively: one entry per command read, with what that
+command wrote. A command spanning lines is one entry, its lines joined as
+`cmdhist` joins them (`for i in 1 2; do echo $i; done`), and a heredoc keeps
+its body. A line that stops at an `exit` or a `set -e` failure records no
+command after it, as bash never reads one. A line a `post_execute` policy
+judges is recorded whole once the policy has answered, so no output it drops
+reaches the history.
 
 History is kept per session. A workspace built again shows a session's
 history once it has that session again: keep the

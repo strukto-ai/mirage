@@ -24,6 +24,8 @@ from pydantic import BaseModel
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
+from mirage.commands.cli import mcp
+from mirage.commands.cli.mcp.types import MCPSource, MCPTool
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
@@ -117,6 +119,7 @@ from mirage.workspace.snapshot.keys import (
     CacheKey,
     CLIKey,
     JobKey,
+    MCPKey,
     MountKey,
     ScriptKey,
     StateKey,
@@ -235,6 +238,20 @@ def cli_snapshot(name: str, install: CLIInstall) -> dict[str, Any]:
             ScriptKey.MODULE: script.module,
         }
         entry[CLIKey.RUNTIME] = install.cli.runtime
+    source = install.cli.mcp
+    if source is not None:
+        entry[CLIKey.MCP] = {
+            MCPKey.TITLE: source.title,
+            MCPKey.TOOLS: [
+                {
+                    MCPKey.NAME: tool.name,
+                    MCPKey.DESCRIPTION: tool.description,
+                    MCPKey.INPUT_SCHEMA: dict(tool.input_schema),
+                    MCPKey.ANNOTATIONS: dict(tool.annotations),
+                }
+                for tool in source.tools
+            ],
+        }
     return entry
 
 
@@ -250,6 +267,22 @@ def cli_spec_from_entry(entry: dict[str, Any]) -> str | CLI:
             rather than carried to the selector, which would report the
             world's runtimes for a language that never existed.
     """
+    source = entry.get(CLIKey.MCP)
+    if isinstance(source, dict):
+        return mcp.build_cli(
+            MCPSource(
+                title=str(source[MCPKey.TITLE]),
+                tools=tuple(
+                    MCPTool(
+                        name=str(tool[MCPKey.NAME]),
+                        description=str(tool[MCPKey.DESCRIPTION]),
+                        input_schema=tool[MCPKey.INPUT_SCHEMA],
+                        annotations=tool[MCPKey.ANNOTATIONS],
+                    )
+                    for tool in source[MCPKey.TOOLS]
+                ),
+            )
+        )
     script = entry.get(CLIKey.SCRIPT)
     if not isinstance(script, dict):
         return str(entry[CLIKey.SPEC])

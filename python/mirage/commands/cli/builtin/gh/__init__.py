@@ -48,6 +48,9 @@ LIMIT_30 = Argument("-L", "--limit", type="int", default="30")
 BODY = Argument("-b", "--body")
 BODY_FILE = Argument("-F", "--body-file", type="path")
 TITLE = Argument("-t", "--title")
+REOPEN_COMMENT = Argument(
+    "-c", "--comment", help="Post this comment before reopening"
+)
 NUMBER = Argument("NUMBER")
 
 
@@ -176,6 +179,7 @@ def _issue() -> CommandSpec:
                 arguments=(
                     NUMBER,
                     REPO,
+                    REOPEN_COMMENT,
                 ),
             ),
             CommandSpec(
@@ -279,6 +283,15 @@ def _pr() -> CommandSpec:
                 arguments=(
                     NUMBER,
                     REPO,
+                ),
+            ),
+            CommandSpec(
+                name="reopen",
+                description="Reopen a pull request",
+                arguments=(
+                    NUMBER,
+                    REPO,
+                    REOPEN_COMMENT,
                 ),
             ),
             CommandSpec(
@@ -756,6 +769,7 @@ GH = CLI(
         "pr edit": CLIHandler(fn=pull_commands.edit_cmd, write=True),
         "pr merge": CLIHandler(fn=pull_commands.merge_cmd, write=True),
         "pr close": CLIHandler(fn=pull_commands.close_cmd, write=True),
+        "pr reopen": CLIHandler(fn=pull_commands.reopen_cmd, write=True),
         "pr comment": CLIHandler(fn=pull_commands.comment_cmd, write=True),
         "pr diff": CLIHandler(fn=pull_commands.diff_cmd),
         "pr checks": CLIHandler(fn=pull_commands.checks_cmd),

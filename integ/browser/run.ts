@@ -16,11 +16,83 @@ import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import type {
+  S3BrowserOperation,
+  S3BrowserPresignedUrlProvider,
+  S3BrowserSignOptions,
+  S3Config,
+} from '@struktoai/mirage-browser'
 import { chromium } from 'playwright-core'
 import { build, preview } from 'vite'
 import type { Outcome } from './suite.ts'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
+const endpoint = process.env.S3_ENDPOINT
+const bucket = process.env.S3_BUCKET ?? 'mirage-integ'
+// A page holds no keys: it asks its server for each signed URL, as this
+// signer answers the page's provider.
+const signer =
+  endpoint === undefined || endpoint === ''
+    ? null
+    : new S3Client({
+        region: process.env.S3_REGION ?? 'us-east-1',
+        endpoint,
+        forcePathStyle: true,
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'testing',
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'testing',
+        },
+      })
+
+async function sign(
+  path: string,
+  operation: S3BrowserOperation,
+  options: S3BrowserSignOptions = {},
+): Promise<string> {
+  if (signer === null) throw new Error('S3_ENDPOINT is unset')
+  const Key = path.replace(/^\//, '')
+  switch (operation) {
+    case 'GET':
+      return getSignedUrl(signer, new GetObjectCommand({ Bucket: bucket, Key }))
+    case 'HEAD':
+      return getSignedUrl(signer, new HeadObjectCommand({ Bucket: bucket, Key }))
+    case 'DELETE':
+      return getSignedUrl(signer, new DeleteObjectCommand({ Bucket: bucket, Key }))
+    case 'PUT':
+      return getSignedUrl(
+        signer,
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key,
+          ...(options.contentType !== undefined ? { ContentType: options.contentType } : {}),
+        }),
+      )
+    case 'LIST':
+      return getSignedUrl(
+        signer,
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          ...(options.listPrefix !== undefined ? { Prefix: options.listPrefix } : {}),
+          ...(options.listDelimiter !== undefined ? { Delimiter: options.listDelimiter } : {}),
+          ...(options.listContinuationToken !== undefined
+            ? { ContinuationToken: options.listContinuationToken }
+            : {}),
+        }),
+      )
+    case 'COPY':
+      throw new Error('the browser suite signs no COPY')
+  }
+}
+
 const output = await mkdtemp(join(tmpdir(), 'mirage-browser-shell-'))
 let failed = true
 try {
@@ -71,11 +143,12 @@ try {
     try {
       const page = await browser.newPage()
       page.on('pageerror', (error) => console.error(error))
+      if (signer !== null) await page.exposeFunction('signS3', sign)
       const baseUrl = server.resolvedUrls?.local[0]
       if (baseUrl === undefined) throw new Error('the preview server published no local URL')
       await page.goto(baseUrl)
       const outcomes = await page.evaluate(
-        async ([entry, quickjsHome]) => {
+        async ([entry, quickjsHome, s3Bucket]) => {
           if (quickjsHome !== null) {
             const container = navigator.serviceWorker
             await container.register('/pyodide-sw.js')
@@ -88,11 +161,19 @@ try {
             }
           }
           const suite = (await import(entry)) as {
-            runSuite(quickjsHome: string | null): Promise<Outcome[]>
+            runSuite(quickjsHome: string | null, s3: S3Config | null): Promise<Outcome[]>
           }
-          return suite.runSuite(quickjsHome)
+          const signS3 = (window as unknown as { signS3: S3BrowserPresignedUrlProvider }).signS3
+          return suite.runSuite(
+            quickjsHome,
+            s3Bucket === null ? null : { bucket: s3Bucket, presignedUrlProvider: signS3 },
+          )
         },
-        ['/suite.js', quickjs !== undefined && quickjs !== '' ? '/quickjs/' : null] as const,
+        [
+          '/suite.js',
+          quickjs !== undefined && quickjs !== '' ? '/quickjs/' : null,
+          signer === null ? null : bucket,
+        ] as const,
       )
       for (const outcome of outcomes) {
         console.log(

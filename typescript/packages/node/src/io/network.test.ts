@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mcpCli } from '@struktoai/mirage-core/commands/cli/mcp/build'
 import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import type { NetworkSetting } from '@struktoai/mirage-core/io/network'
@@ -28,6 +29,8 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { type LookupFunction, connect as netConnect, Socket } from 'node:net'
+import { resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { rulePool } from './network.ts'
@@ -669,5 +672,62 @@ describe('a workspace network rule', () => {
     expect(() => SessionProfile({ network: { denied_domains: ['10.0.0.0/33'] } })).toThrow(
       /is not an address, a range/,
     )
+  })
+})
+
+// Mirrors test_mcp.py's network refusal; the fixture is outside rootDir, so it is imported by URL.
+describe('an MCP CLI', () => {
+  interface Fixture {
+    TOKEN: string
+    servedMcp: () => Promise<{ url: string; requests: unknown[]; close: () => Promise<void> }>
+  }
+  const FIXTURE = pathToFileURL(
+    resolve(fileURLToPath(import.meta.url), '../../../../core/tests/fixtures/mcp_server.ts'),
+  ).href
+
+  it.each(['policy', 'network'])('never reaches a server the %s refuses', async (refusal) => {
+    const { TOKEN, servedMcp } = (await import(FIXTURE)) as Fixture
+    const fake = await servedMcp()
+    const config = { url: fake.url, auth: { type: 'bearer', token: TOKEN } }
+    const cli = await mcpCli(config)
+    fake.requests.length = 0
+    const ws = new Workspace({ '/data': new RAMVFS() }, { network: refusal !== 'network' })
+    if (refusal === 'policy') {
+      ws.policies.add({ preNetwork: (): Deny => ({ kind: 'deny', reason: 'not for this tenant' }) })
+    }
+    try {
+      ws.registerCli('fx', cli, config)
+      expect((await ws.shell('fx list-items')).exitCode).toBe(1)
+      expect(fake.requests).toEqual([])
+    } finally {
+      await ws.close()
+      await fake.close()
+    }
+  })
+  it.each([
+    ['a listening policy', 'echo offline >/dev/null; fx list-items', null],
+    ['a narrower session rule', 'fx list-items', 'closed'],
+  ])('never lets %s ride the kept client', async (_name, line, session) => {
+    const { TOKEN, servedMcp } = (await import(FIXTURE)) as Fixture
+    const fake = await servedMcp()
+    const config = { url: fake.url, auth: { type: 'bearer', token: TOKEN } }
+    const ws = new Workspace({ '/data': new RAMVFS() })
+    ws.policies.add({
+      preNetwork: (ctx: NetworkContext): Deny | null =>
+        ctx.line?.includes('offline') === true ? { kind: 'deny', reason: 'offline' } : null,
+    })
+    try {
+      ws.registerCli('fx', await mcpCli(config), config)
+      expect((await ws.shell('fx list-items')).exitCode).toBe(0)
+      ws.createSession('closed', { profile: SessionProfile({ network: false }) })
+      fake.requests.length = 0
+      expect((await ws.shell(line, session === null ? {} : { sessionId: session })).exitCode).toBe(
+        1,
+      )
+      expect(fake.requests).toEqual([])
+    } finally {
+      await ws.close()
+      await fake.close()
+    }
   })
 })

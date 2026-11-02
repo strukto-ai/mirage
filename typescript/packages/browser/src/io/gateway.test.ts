@@ -100,6 +100,19 @@ describe('the page gateway', () => {
     answer = () => new Response('ok')
   })
 
+  it('hands back a 204 that Chrome gives an empty body', async () => {
+    const policy = new Watch()
+    answer = () => {
+      const response = new Response(null, { status: 204 })
+      Object.defineProperty(response, 'body', { value: new ReadableStream() })
+      return response
+    }
+    const response = await judged(policy, () => fetch('https://api.test/c', { method: 'DELETE' }))
+    expect(response.status).toBe(204)
+    expect(policy.ended.map((ctx) => ctx.ended)).toEqual(['closed'])
+    answer = () => new Response('ok')
+  })
+
   it('asks a workspace once when its calls nest', async () => {
     const policy = new Watch()
     const policies = new Policies([policy])

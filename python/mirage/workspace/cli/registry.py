@@ -73,6 +73,31 @@ class CLIRegistry:
         self._retiring: dict[int, asyncio.Task[None]] = {}
         self._shutdown = asyncio.Event()
 
+    def check_name(self, name: str) -> None:
+        """Refuse a head word no CLI may be installed under.
+
+        Args:
+            name (str): the head word.
+
+        Raises:
+            ValueError: not a single word, or it collides with a shell
+                builtin, a keyword or a general command.
+        """
+        if not name or any(ch.isspace() for ch in name):
+            raise ValueError(f"CLI name {name!r} must be a single word")
+        if name in SHELL_NAMES or name in JOB_BUILTINS:
+            raise ValueError(
+                f"CLI name {name!r} collides with a shell builtin"
+            )
+        # A reserved word never reaches dispatch (the parser consumes it),
+        # so an install under one would be unreachable rather than wrong.
+        if name in KEYWORDS:
+            raise ValueError(f"CLI name {name!r} is a shell keyword")
+        if name in NAMESPACE_COMMANDS or name in SPECS:
+            raise ValueError(
+                f"CLI name {name!r} collides with a general command"
+            )
+
     def install(
         self,
         name: str,
@@ -92,22 +117,9 @@ class CLIRegistry:
                 spec's ``config_model``, or an instance of that model or
                 of a subclass of it, narrowed to the model's fields.
         """
-        if not name or any(ch.isspace() for ch in name):
-            raise ValueError(f"CLI name {name!r} must be a single word")
         if name in self._installs:
             raise ValueError(f"CLI name {name!r} is already installed")
-        if name in SHELL_NAMES or name in JOB_BUILTINS:
-            raise ValueError(
-                f"CLI name {name!r} collides with a shell builtin"
-            )
-        # A reserved word never reaches dispatch (the parser consumes it),
-        # so an install under one would be unreachable rather than wrong.
-        if name in KEYWORDS:
-            raise ValueError(f"CLI name {name!r} is a shell keyword")
-        if name in NAMESPACE_COMMANDS or name in SPECS:
-            raise ValueError(
-                f"CLI name {name!r} collides with a general command"
-            )
+        self.check_name(name)
         validated = self._validate_config(name, spec, config)
         accessor = spec.accessor(validated)
         accessor.join(

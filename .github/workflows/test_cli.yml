@@ -479,6 +479,16 @@ jobs:
         with:
           build-typescript: "true"
 
+      # The cli_admin suite installs the shared MCP fake as a CLI.
+      - name: Start fake MCP server
+        working-directory: integ
+        run: |
+          nohup ./node_modules/.bin/tsx server/mcp/main.ts --port 5110 > /tmp/mcp.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "MCP_URL=" /tmp/mcp.log && break; sleep 1; done
+          cat /tmp/mcp.log
+          grep -q "MCP_URL=" /tmp/mcp.log
+          echo "MCP_URL=http://127.0.0.1:5110/mcp" >> "$GITHUB_ENV"
+
       - name: Run every access on both hosts
         run: ./python/.venv/bin/python integ/access/run.py --deployment ${{ matrix.deployment }} --host-jobs 2 --suite-jobs 3
 

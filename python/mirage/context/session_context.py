@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     from mirage.shell.console import JobConsole
     from mirage.shell.types import Redirect
     from mirage.workspace.evaluation import EvaluationContext
+    from mirage.workspace.history.line import LineHistory
     from mirage.workspace.session.session import SessionState
     from mirage.workspace.types import ExecutionNode, StatusWriter
 
@@ -146,6 +147,8 @@ class Caller:
             running on this task.
         recorder (Recorder | None): where the running line records its
             calls, with the mount serving them.
+        history (LineHistory | None): the typed line whose root program
+            records its history a command read at a time.
         command_sink (tuple | None): the running command's own records,
             and those of the command it runs in.
         revisions (dict[str, str] | None): the revision pins reads honor.
@@ -199,6 +202,7 @@ class Caller:
     write_held: bool = False
     line_writer: StatusWriter | None = None
     recorder: Recorder | None = None
+    history: LineHistory | None = None
     command_sink: tuple[list[OpRecord] | None, list[OpRecord]] | None = None
     revisions: dict[str, str] | None = None
     cache_manager: CacheInvalidator | None = None

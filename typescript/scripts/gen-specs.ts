@@ -30,6 +30,7 @@ import { SHELL_SPECS } from '@struktoai/mirage-core/commands/spec/shell'
 import { SHELL_SYNOPSES, SYNOPSES } from '@struktoai/mirage-core/commands/spec/synopsis'
 import type { Command } from '@struktoai/mirage-core/commands/config'
 import { declaredFacts } from '@struktoai/mirage-core/commands/builtin/generic_bind/factory'
+import { MCPAuth, MCPConfig } from '@struktoai/mirage-core/core/mcp/config'
 import { LineFacts } from '@struktoai/mirage-core/types'
 import { lineFacts } from '@struktoai/mirage-core/workspace/lookup/constants'
 
@@ -362,6 +363,24 @@ function factsDump(): Record<string, unknown> {
   return { declared, lines }
 }
 
+// A `cli: mcp` config's fields per model; mirrors `_mcp_config` in gen_specs.py.
+function mcpConfig(): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries({ MCPConfig, MCPAuth }).map(([name, schema]) => [
+      name,
+      Object.fromEntries(
+        Object.entries(schema.shape).map(([field, type]) => [
+          field,
+          {
+            required: !type.isOptional(),
+            ...('options' in type ? { values: type.options } : {}),
+          },
+        ]),
+      ),
+    ]),
+  )
+}
+
 function emitVfsNames(
   name: string,
   knownVfsNames: string[],
@@ -380,6 +399,7 @@ function emitVfsNames(
     capabilities,
     configs,
     cli_specs: programs,
+    mcp_config: mcpConfig(),
     shell_specs: Object.fromEntries(
       Object.keys(SHELL_SPECS)
         .sort(compareCodePoints)

@@ -1,0 +1,268 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+
+from collections.abc import Sequence
+
+from mirage.io import IOResult
+from mirage.observe.observer import Observer
+from mirage.observe.record import OpRecord
+from mirage.shell.console import JobConsole, Terminal
+from mirage.shell.types import TSNodeLike
+from mirage.workspace.history.entries import history_entries
+from mirage.workspace.history.types import HistoryEntry
+from mirage.workspace.session.session import SessionState
+
+
+class _Recording:
+    """What a line's history has recorded so far, whichever root reads
+    the line.
+
+    Args:
+        observer (Observer): the workspace's observer.
+        command (str): the line as typed.
+        entries (list[HistoryEntry]): the line's entries.
+        session_id (str): the session the line is recorded under.
+        session (SessionState): the session the line runs on, whose cwd
+            its entries name.
+        line_id (str | None): the line's execution id, its first entry's.
+        terminal (Terminal): where the line writes.
+    """
+
+    def __init__(
+        self,
+        observer: Observer,
+        command: str,
+        entries: list[HistoryEntry],
+        session_id: str,
+        session: SessionState,
+        line_id: str | None,
+        terminal: Terminal,
+    ) -> None:
+        self.command = command
+        self.entries = entries
+        self._observer = observer
+        self._session_id = session_id
+        self._session = session
+        self._id = line_id
+        self._terminal = terminal
+        self.current = -1
+        self.opened = 0
+        self.line: str | None = None
+        self.ops = 0
+        self.whole = False
+        self.through = False
+        self.done = False
+
+    async def begin(self, text: str) -> None:
+        """Start an entry.
+
+        Args:
+            text (str): the entry.
+        """
+        self.line = (
+            self._id
+            if self.opened == 0 or self._id is None
+            else f"{self._id}.{self.opened}"
+        )
+        self.opened += 1
+        await self._observer.log_command(
+            text, self._session_id, self._session.cwd, self.line
+        )
+
+    async def close(self, io: IOResult, records: Sequence[OpRecord]) -> None:
+        """End the entry open, with what reached the terminal since the
+        one before and what ``io`` answered with besides.
+
+        Args:
+            io (IOResult): the entry's status, and output besides.
+            records (Sequence[OpRecord]): the line's op records so far.
+        """
+        if self.opened == 0:
+            return
+        stdout, stderr = self._terminal.entry()
+        await self._observer.log_result(
+            IOResult(
+                stdout=stdout + await io.materialize_stdout(),
+                stderr=stderr + await io.materialize_stderr(),
+                exit_code=io.exit_code,
+            ),
+            list(records[self.ops :]),
+            self._session_id,
+            self._session.cwd,
+            self.line,
+        )
+        self.ops = len(records)
+
+
+class LineHistory:
+    """A typed line's history, recorded as bash's line reader adds it: an
+    entry per command the line reads, each with what it wrote to the
+    terminal and the status it left, where a line of one command is
+    recorded whole. The line's root program reaches each command as it
+    runs it (``reach``), and the line's end ends the last (``end``). A line
+    answered before its tree runs, or run whole on a runtime (``typed``),
+    is recorded once, as typed. Input the root reads again goes on with
+    the root it is read as, which the history ``read_on`` gives it
+    records. Mirrors TypeScript's LineHistory.
+
+    Args:
+        recording (_Recording): what the line recorded so far.
+        root (TSNodeLike | None): the root that reads the line; None until
+            the first to run takes it.
+        shift (int): where the root's input starts in the line as typed.
+    """
+
+    def __init__(
+        self, recording: _Recording, root: TSNodeLike | None, shift: int
+    ) -> None:
+        self._recording = recording
+        self._root = root
+        self._shift = shift
+
+    @classmethod
+    def open(
+        cls,
+        observer: Observer,
+        command: str,
+        root: TSNodeLike,
+        session_id: str,
+        session: SessionState,
+        line_id: str | None,
+        sink: JobConsole | None,
+    ) -> "LineHistory | None":
+        """The history of a line whose input bash's reader reads as more
+        than one entry, written to a terminal; None for any other line,
+        which the line records whole as it starts.
+
+        Args:
+            observer (Observer): the workspace's observer.
+            command (str): the line as typed.
+            root (TSNodeLike): the parsed line.
+            session_id (str): the session the line is recorded under.
+            session (SessionState): the session the line runs on.
+            line_id (str | None): the line's execution id.
+            sink (JobConsole | None): where the line writes.
+        """
+        if not isinstance(sink, Terminal):
+            return None
+        entries = history_entries(root)
+        if len(entries) < 2:
+            return None
+        recording = _Recording(
+            observer, command, entries, session_id, session, line_id, sink
+        )
+        return cls(recording, root, 0)
+
+    def reads(self, node: TSNodeLike) -> bool:
+        """Whether ``node``'s program reads the line: this history's root,
+        or, for the history of input read again (``read_on``), the first
+        root to run.
+
+        Args:
+            node (TSNodeLike): a program about to run its statements.
+        """
+        if self._root is None and node.parent is None:
+            self._root = node
+        return node is self._root
+
+    def read_on(self, at: int) -> "LineHistory":
+        """The history of the root's input read again from a statement on,
+        as a root of its own: bound to the call that reads it, whose first
+        root takes the line over.
+
+        Args:
+            at (int): where, in the root's input, the input read again
+                starts: the statement's index less the blank rows put
+                ahead of it.
+        """
+        return LineHistory(self._recording, None, self._shift + at)
+
+    async def reach(
+        self,
+        child: TSNodeLike,
+        session: SessionState,
+        records: Sequence[OpRecord],
+    ) -> None:
+        """Reach the command the root program runs next: end the entry
+        before it and record the entries up to it, its own last.
+
+        Args:
+            child (TSNodeLike): the root's statement about to run.
+            session (SessionState): the shell running it, whose ``$?``
+                ends the entry before.
+            records (Sequence[OpRecord]): the line's op records so far, of
+                which the entry before's are those since the one before it
+                ended.
+        """
+        line = self._recording
+        if line.whole or line.done:
+            return
+        offsets = getattr(self._root, "offsets", None) or ()
+        start = child.start_byte
+        at = self._shift + (offsets[start] if start < len(offsets) else start)
+        reached = line.current
+        for j in range(line.current + 1, len(line.entries)):
+            entry_at = line.entries[j].at
+            if entry_at is not None and entry_at > at:
+                break
+            if entry_at is not None:
+                reached = j
+        if reached <= line.current:
+            return
+        status = IOResult(exit_code=session.last_exit_code)
+        await line.close(status, records)
+        for j in range(line.current + 1, reached):
+            await line.begin(line.entries[j].text)
+            await line.close(status, records)
+        line.current = reached
+        await line.begin(line.entries[reached].text)
+
+    def read(self) -> None:
+        """The root program read the input to its end, so the entries
+        after its last command are read too."""
+        self._recording.through = True
+
+    async def typed(self) -> None:
+        """Record the line once, as typed, before it runs whole on a
+        runtime."""
+        line = self._recording
+        if line.current >= 0 or line.whole:
+            return
+        line.whole = True
+        await line.begin(line.command)
+
+    async def end(self, io: IOResult, records: Sequence[OpRecord]) -> None:
+        """End the line: its last entry, with what the line wrote since and
+        what it answered with besides, or, when no command was reached, the
+        line as typed, unless its root read it through. A line ends once.
+
+        Args:
+            io (IOResult): the line's result.
+            records (Sequence[OpRecord]): the line's op records, of which
+                the last entry's are those since the entry before ended.
+        """
+        line = self._recording
+        if line.done:
+            return
+        if line.current < 0 and not line.through:
+            await self.typed()
+        await line.close(io, records)
+        line.done = True
+        if not line.through or line.whole:
+            return
+        status = IOResult(exit_code=io.exit_code)
+        for j in range(line.current + 1, len(line.entries)):
+            await line.begin(line.entries[j].text)
+            await line.close(status, records)

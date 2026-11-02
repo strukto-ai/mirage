@@ -756,9 +756,9 @@ export class Workspace {
 
   /**
    * What the hidden recorder holds, oldest first: a `command` entry when a
-   * line starts and a `result` entry when it ends, naming the line as its
-   * `parent`, and with `vfs` a `vfs` entry for every call a line made to a
-   * mount. `sessionId` keeps one session's entries, `since`
+   * command a line reads starts and a `result` entry when it ends, naming
+   * it as its `parent`, and with `vfs` a `vfs` entry for every call it made
+   * to a mount. `sessionId` keeps one session's entries, `since`
    * those at or after an epoch millisecond, `last` the newest that many.
    * Mirrors Python's `Workspace.history`.
    */

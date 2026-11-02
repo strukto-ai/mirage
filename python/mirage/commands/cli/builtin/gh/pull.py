@@ -630,6 +630,35 @@ async def close_cmd(
     )
 
 
+async def reopen_cmd(
+    accessor: GitHubAccount,
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+) -> tuple[ByteSource | None, IOResult]:
+    fl = FlagView(ctx.flags)
+    ref, number = _target(accessor, texts, fl)
+    row = _pull(await get_pull(accessor, ref, number))
+    name = f"{ref.owner}/{ref.repo}#{number} ({row.get('title', '')})"
+    if row.get("merged"):
+        return None, IOResult(
+            exit_code=1,
+            stderr=(
+                f"X Pull request {name} can't be reopened because it was "
+                "already merged\n"
+            ).encode(),
+        )
+    if not row["closed"]:
+        return b"", IOResult(
+            stderr=f"! Pull request {name} is already open\n".encode()
+        )
+    comment = fl.as_str("comment")
+    if comment:
+        await comment_pull(accessor, ref, number, comment)
+    await edit_pull(accessor, ref, number, {"state": "open"})
+    return text_out(f"✓ Reopened pull request {name}\n")
+
+
 async def comment_cmd(
     accessor: GitHubAccount,
     paths: list[PathSpec],
