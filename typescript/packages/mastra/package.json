@@ -46,7 +46,7 @@
     "@struktoai/mirage-core": "workspace:*"
   },
   "peerDependencies": {
-    "@mastra/core": "^1.81.0"
+    "@mastra/core": "^1.79.0"
   },
   "devDependencies": {
     "@mastra/core": "^1.81.0",

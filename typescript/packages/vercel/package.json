@@ -46,7 +46,7 @@
     "@struktoai/mirage-core": "workspace:*"
   },
   "peerDependencies": {
-    "ai": "^7.0.159"
+    "ai": "^7.0.153"
   },
   "devDependencies": {
     "@struktoai/mirage-node": "workspace:*",
