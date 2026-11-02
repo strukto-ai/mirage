@@ -48,7 +48,7 @@
     "picomatch": "^4.0.4"
   },
   "peerDependencies": {
-    "deepagents": "^1.16.2"
+    "deepagents": "^1.15.1"
   },
   "devDependencies": {
     "@langchain/core": "^1.3.2",
