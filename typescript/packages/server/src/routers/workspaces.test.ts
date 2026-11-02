@@ -1604,6 +1604,26 @@ describe('MCP CLI routes', () => {
     }
   })
 
+  it('answers 200 and 404 to two DELETEs at once', async () => {
+    const { TOKEN, servedMcp } = await fixture()
+    const fake = await servedMcp()
+    const app = buildApp()
+    try {
+      const id = await mcpWorkspace(app)
+      const url = `/v1/workspaces/${id}/clis/fx`
+      const put = await app.inject({ method: 'PUT', url, payload: mcpEntry(fake.url, TOKEN) })
+      expect(put.statusCode).toBe(200)
+      const answers = await Promise.all([
+        app.inject({ method: 'DELETE', url }),
+        app.inject({ method: 'DELETE', url }),
+      ])
+      expect(answers.map((r) => r.statusCode).sort()).toEqual([200, 404])
+    } finally {
+      await app.close()
+      await fake.close()
+    }
+  })
+
   it('PUT refuses what is not an MCP CLI before any request', async () => {
     const { TOKEN, servedMcp } = await fixture()
     const fake = await servedMcp()

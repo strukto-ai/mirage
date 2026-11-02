@@ -633,7 +633,10 @@ async def delete_cli(
         raise HTTPException(404, f"no CLI named {name!r}")
     if current.cli.mcp is None:
         raise HTTPException(422, f"CLI {name!r} is not an MCP server")
-    await entry.runner.call(ws.unregister_cli(name))
+    try:
+        await entry.runner.call(ws.unregister_cli(name))
+    except KeyError as exc:
+        raise HTTPException(404, f"no CLI named {name!r}") from exc
     return {"name": name}
 
 

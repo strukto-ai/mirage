@@ -1988,6 +1988,26 @@ async def test_two_puts_at_once_leave_one_cli_installed(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_two_deletes_at_once_answer_200_and_404(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with (
+        served_mcp() as fake,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        wid = await _mcp_workspace(client)
+        route = f"/v1/workspaces/{wid}/clis/fx"
+        assert (
+            await client.put(route, json=_mcp_entry(fake.url))
+        ).status_code == 200
+        answers = await asyncio.gather(
+            client.delete(route), client.delete(route)
+        )
+        assert sorted(r.status_code for r in answers) == [200, 404]
+
+
+@pytest.mark.asyncio
 async def test_a_failed_put_keeps_the_installed_cli(tmp_path, monkeypatch):
     monkeypatch.setenv("FX_TOKEN", TOKEN)
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
