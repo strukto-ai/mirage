@@ -90,7 +90,7 @@ describe('a failed disk mutation records only what it may have changed', () => {
   it.each<[string, [string, string, number][]]>([
     ['rm /m/missing', []],
     ['mv /m/missing /m/x', []],
-    ['mkdir /m/e', []],
+    ['mkdir /m/e', [['mkdir', '/m/e', 0]]],
     ['rmdir /m/d', []],
     ['mkdir -p /m/a.txt/z', [['mkdir', '/m/a.txt/z', 0]]],
   ])('%s', async (line, expected) => {

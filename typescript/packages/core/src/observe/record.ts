@@ -162,7 +162,7 @@ export class OpRecord {
   durationMs: number
   fingerprint: string | null
   revision: string | null
-  readonly mountId: string | null
+  mountId: string | null
   status: OpStatus
   errno: number | null
   changed: boolean
@@ -302,6 +302,12 @@ export class LostPaths {
     if (mark === undefined) return false
     return !this.records
       .slice(mark.at)
-      .some((rec) => rec.path === key && STAMP_FINGERPRINT_OPS.has(rec.op))
+      .some(
+        (rec) =>
+          rec.path === key &&
+          STAMP_FINGERPRINT_OPS.has(rec.op) &&
+          rec.status === 'ok' &&
+          (rec.op === 'read' || rec.changed),
+      )
   }
 }

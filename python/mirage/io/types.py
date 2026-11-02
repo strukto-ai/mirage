@@ -21,11 +21,14 @@ from collections.abc import (
 )
 from contextlib import aclosing
 from dataclasses import dataclass, field
-from typing import Any, Generic, Literal, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, TypeVar
 
 from mirage.io.cooperative import chunks
 from mirage.io.memory import check_memory
 from mirage.types import PathSpec, Producer, Refusal
+
+if TYPE_CHECKING:
+    from mirage.observe.record import OpRecord, OpServed
 
 ByteSource = bytes | AsyncIterator[bytes]
 StreamName = Literal["stdout", "stderr"]
@@ -207,12 +210,13 @@ class OpReport:
 
     Args:
         completed (bool): the op ran against its answering store. False
-            until the dispatcher says otherwise, so a refusal at a pre gate
-            or a backend failure leaves nothing to record.
-        source (str | None): who answered, when that was not the owning
-            mount: "ram" for a warm file-cache hit and for a synthetic
-            namespace answer, since neither contacted a backend. None
-            means the owning mount answered.
+            until the dispatcher says otherwise; a failed op still records its failure.
+        answerer (OpServed | None): The answering layer; None is the backend.
+        detached (bool): Collect the row here when async tasks share their context.
+        record (OpRecord | None): The detached caller's row, delivered at close.
+        driver_recorded (bool): Rows below the dispatcher already account for this call.
+        fingerprint (str | None): The token accompanying a cache answer.
+        source (str | None): An alternate answering store, when supplied.
         bytes (int | None): bytes the answering store moved, when the
             delivered result no longer measures them. None means "the
             result is the measure".
@@ -225,6 +229,12 @@ class OpReport:
             mount answers.
     """
 
+    detached: bool = False
+    record: "OpRecord | None" = None
+    fingerprint: str | None = None
+    stream_records: "list[OpRecord] | None" = None
+    driver_recorded: bool = False
+    answerer: "OpServed | None" = None
     completed: bool = False
     source: str | None = None
     bytes: int | None = None

@@ -79,7 +79,7 @@ def test_write_record_carries_the_backend_token():
                 return [
                     (r.op, r.path, r.fingerprint)
                     for r in ws.vfs.records
-                    if r.served == "backend"
+                    if r.served == "backend" and r.op == "write"
                 ]
             finally:
                 await ws.close()

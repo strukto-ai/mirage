@@ -372,7 +372,7 @@ async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
         with pytest.raises(PermissionError):
             await ws.vfs.read("/data/prod/x.txt")
         rec = ws.vfs.records[-1]
-        assert rec.source == "ram"
+        assert rec.source == "s3"
         assert rec.served == "cache"
         assert ws.vfs.network_bytes == 0
     finally:
@@ -1696,7 +1696,7 @@ async def test_a_stream_its_reader_stops_early_closes_as_its_command():
             0,
             b"line 0\n",
         )
-        (read,) = policy.seen["cat"]
+        (read,) = (r for r in policy.seen["cat"] if r["op"] == "read")
         assert (read["op"], read["path"]) == ("read", "/data/big")
         assert 0 < read["bytes"] < len(big)
         assert policy.seen["head"] == []
@@ -2024,7 +2024,10 @@ async def test_post_execute_sees_the_line_its_output_and_each_result():
         await ws.shell("grep hit /data/x; true")
         grep, _ = spy.seen[-1].results["children"]
         assert grep["exit_code"] == 0
-        assert [r["path"] for r in grep["records"]] == ["/data/x"]
+        assert [(r["op"], r["path"]) for r in grep["records"]] == [
+            ("stat", "/data/x"),
+            ("read", "/data/x"),
+        ]
     finally:
         await ws.close()
 

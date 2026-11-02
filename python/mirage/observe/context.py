@@ -463,6 +463,8 @@ def record_stream(
     source: str,
     fingerprint: str | None = None,
     revision: str | None = None,
+    *,
+    served: OpServed = OpServed.BACKEND,
 ) -> OpRecord | None:
     """Start recording a streaming transfer. Returns a mutable OpRecord.
 
@@ -501,6 +503,7 @@ def record_stream(
         duration_ms=0,
         fingerprint=fingerprint,
         revision=revision,
+        served=served,
         mount_id=rec.mount_id,
         execution_id=current_execution_id(),
     )

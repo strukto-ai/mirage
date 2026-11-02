@@ -17,24 +17,21 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any, Literal, cast, overload
 
 from mirage.context import (
-    Caller,
     bind_caller,
     current_caller,
     get_current_session,
     reset_caller,
     session_visibility,
 )
-from mirage.context.session_context import calls_as, effective_path_mode
+from mirage.context.session_context import effective_path_mode
 from mirage.errors.types import NoMountError
-from mirage.io import IOResult, OpReport
+from mirage.io import IOResult
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
 from mirage.observe.context import (
-    OpTimer,
     active_recorder,
     command_records,
     fresh_recorder,
-    record,
 )
 from mirage.observe.record import OpRecord, Recorder
 from mirage.runtime.types import DispatchFn
@@ -45,31 +42,13 @@ from mirage.view.types import FollowOperands, SessionBind
 from mirage.workspace.dispatcher.reader import NamespaceReader
 
 
-def _payload_bytes(result: Any, kwargs: dict[str, Any]) -> int:
-    """The op's byte count for recording: result first, else input.
-
-    Args:
-        result (Any): what the op returned.
-        kwargs (dict): the op's keyword arguments (write payloads travel
-            as ``data``).
-    """
-    if isinstance(result, (bytes, bytearray)):
-        return len(result)
-    return next(
-        (len(v) for v in kwargs.values() if isinstance(v, (bytes, bytearray))),
-        0,
-    )
-
-
 async def _recorded(
     stream: AsyncIterator[bytes], record: Callable[[], None]
 ) -> AsyncIterator[bytes]:
-    """A streamed answer, recorded once it ends.
+    """Deliver a stream's records when it closes.
 
-    The dispatcher stamps the report with the bytes the stream carried when it
-    ends, so the record waits for that rather than counting none. The
-    caller runs it to its empty first step, inside the ``try``, so a
-    stream closed before its first pull is still closed and recorded.
+    The source owns their byte counts and timing. The empty first step
+    keeps early close observable.
 
     Args:
         stream (AsyncIterator[bytes]): the dispatcher's stream.
@@ -355,9 +334,7 @@ class Files:
         observer once the op ends, a stream's once it closes. What records it is what
         records a line's calls: the backend and the dispatcher, with the
         tokens they read. An op nothing below recorded (a stat, a listing,
-        a warm cache hit, a synthetic namespace answer) is recorded here,
-        on the path the dispatcher's report says it ran on, its links
-        followed.
+        a warm cache hit, a synthetic namespace answer) is recorded by the dispatcher.
 
         Whether the op is a write is the dispatcher's call too: it reads that
         off the op name, so there is nothing for a caller here to
@@ -374,8 +351,6 @@ class Files:
         if not self._ledger:
             answer, _ = await self._dispatch(op, typed, **kwargs)
             return answer
-        timer = OpTimer(self._clock)
-        report = OpReport()
         seen: list[str] = []
         # Only a line this workspace runs is joined: another workspace's
         # line, or another call's own recorder seen through a shared
@@ -401,7 +376,6 @@ class Files:
             return await self._dispatch(
                 op,
                 typed,
-                report=report,
                 **kwargs,
             )
 
@@ -412,7 +386,6 @@ class Files:
         outer = held[0] if held is not None else None
         try:
             with command_records(own=True) as mine:
-                caller = current_caller()
                 try:
                     bound = (
                         self._session_id if session_id is None else session_id
@@ -421,16 +394,6 @@ class Files:
                         run() if self._bind is None else self._bind(bound, run)
                     )
                 except BaseException:
-                    # Anything raised after the op ran (a post_vfs deny, a
-                    # hard output cap, a bookkeeping failure) suppresses the
-                    # result, not the effect, so observation must reflect
-                    # the op before the error propagates. The dispatcher
-                    # stamps the report at the moment of completion, so even
-                    # a foreign error the dispatcher never defined leaves the
-                    # transfer on the books.
-                    self._settle(
-                        op, typed, report, None, kwargs, timer, mine, caller
-                    )
                     self._hand_over(own, seen, mine, outer)
                     raise
                 finally:
@@ -441,69 +404,16 @@ class Files:
         finally:
             if token is not None:
                 reset_caller(token)
-        if (
-            op == "write" and kwargs.get("admit_only")
-        ) or "retained" in kwargs:
-            self._hand_over(own, seen, mine, outer)
-            return result
 
-        def settle(answer: Any) -> None:
-            self._settle(
-                op, typed, report, answer, kwargs, timer, mine, caller
-            )
+        def deliver() -> None:
             self._hand_over(own, seen, mine, outer)
 
         if hasattr(result, "__aiter__"):
-            recorded = _recorded(result, lambda: settle(None))
+            recorded = _recorded(result, deliver)
             await recorded.__anext__()
             return recorded
-        settle(result)
+        deliver()
         return result
-
-    def _settle(
-        self,
-        op: str,
-        typed: PathSpec,
-        report: OpReport,
-        answer: Any,
-        kwargs: dict[str, Any],
-        timer: OpTimer,
-        mine: list[OpRecord],
-        caller: Caller,
-    ) -> None:
-        """Record an op that ran and that nothing below recorded.
-
-        The dispatcher names the server when it was not the owning mount (a
-        warm cache hit, a synthetic namespace answer): neither moved
-        bytes over the network, and "ram" is what ``OpRecord.is_cache``
-        reads. It names the moved bytes when the delivered result no
-        longer measures them, because a cap truncated it or a refusal
-        withheld it entirely.
-
-        Args:
-            op (str): the op name.
-            typed (PathSpec): the path as asked.
-            report (OpReport): the dispatcher's account of what ran.
-            answer (Any): what the op returned, None when withheld.
-            kwargs (dict[str, Any]): the op's arguments.
-            timer (OpTimer): the stopwatch opened when the op started.
-            mine (list[OpRecord]): what the op recorded below.
-            caller (Caller): the op's caller, its recorder bound.
-        """
-        if mine or not report.completed:
-            return
-        ran = report.path or typed.virtual
-        owner = self._reader().owner(ran)
-        if owner is None:
-            return
-        moved = report.bytes
-        calls_as(caller, record)(
-            op,
-            ran,
-            report.source or owner.resource_type,
-            moved if moved is not None else _payload_bytes(answer, kwargs),
-            timer,
-        )
 
     def _hand_over(
         self,

@@ -42,6 +42,7 @@ from mirage.types import (
     PathSpec,
     Visibility,
 )
+from mirage.utils.path import norm
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.ram.store import RAMStore
@@ -612,8 +613,8 @@ async def test_a_namespace_answer_is_not_a_backend_op(deep_only_session):
     try:
         ws.vfs.records.clear()
         assert await ws.vfs.readdir("/m/inner") == ["/m/inner/deep"]
-        assert [(r.source, r.served == "cache") for r in ws.vfs.records] == [
-            ("ram", True)
+        assert [(r.served, r.changed) for r in ws.vfs.records] == [
+            ("namespace", False)
         ]
     finally:
         await ws.close()
@@ -642,8 +643,8 @@ async def test_a_denied_namespace_answer_is_not_a_backend_op(
         ws.vfs.records.clear()
         with pytest.raises(PermissionError):
             await ws.vfs.readdir("/m/inner")
-        assert [(r.source, r.served == "cache") for r in ws.vfs.records] == [
-            ("ram", True)
+        assert [(r.served, r.changed) for r in ws.vfs.records] == [
+            ("namespace", False)
         ]
     finally:
         await ws.close()
@@ -919,16 +920,15 @@ class TestAttachedOpsOneDispatcher:
             await ws.close()
 
     @pytest.mark.asyncio
-    async def test_a_pre_vfs_deny_records_nothing(self):
-        # The mirror of "a post deny still records the completed op"
-        # (pinned in tests/workspace/workspace/test_policies.py): a pre
-        # deny means the backend never ran, so nothing is recorded.
+    async def test_a_pre_vfs_deny_records_a_failed_op(self):
         ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
         try:
             ws.policies.add(_DenyEverything())
             with pytest.raises(PolicyDenied):
                 await ws.vfs.write("/data/x.txt", b"body")
-            assert ws.vfs.records == []
+            assert [
+                (r.status, r.changed, r.errno) for r in ws.vfs.records
+            ] == [("failed", False, errno.EACCES)]
         finally:
             await ws.close()
 
@@ -1221,5 +1221,107 @@ async def test_a_policys_read_leaves_the_op_it_judges_on_the_ledger():
             ("read", "/d/rules"),
             ("unlink", "/d/f"),
         ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_removal_keeps_a_warm_read_and_records_its_failure(
+    monkeypatch,
+):
+    vfs = _HeldRAM()
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/m/a", b"warm")
+        await ws.cache.set("/m/a", b"warm", ttl=600)
+
+        monkeypatch.setattr(
+            vfs,
+            "unlink",
+            AsyncMock(
+                side_effect=PermissionError(errno.EACCES, "denied", "/m/a")
+            ),
+        )
+        start = len(ws.vfs.records)
+        removal = await ws.shell("rm /m/a")
+        assert removal.exit_code == 1
+        assert await ws.cache.get("/m/a") == b"warm"
+        io = await ws.shell("cat /m/a")
+        assert await io.stdout_str() == "warm"
+        rows = ws.vfs.records[start:]
+        failed = [r for r in rows if r.op == "unlink"]
+        assert len(failed) == 1
+        assert (failed[0].status, failed[0].changed, failed[0].errno) == (
+            "failed",
+            False,
+            errno.EACCES,
+        )
+        reads = [r for r in rows if r.op == "read"]
+        assert len(reads) == 1
+        assert (reads[0].served, reads[0].source, reads[0].bytes) == (
+            "cache",
+            "ram",
+            4,
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_records_a_default_mutation_once():
+    from mirage.observe.context import RecordingScope
+
+    ws = Workspace({"/m": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/m/a", b"x")
+        scope = RecordingScope()
+        try:
+            await ws.dispatch("unlink", PathSpec.from_str_path("/m/a"))
+        finally:
+            scope.close()
+        rows = [r for r in scope.records if r.op == "unlink"]
+        assert len(rows) == 1
+        assert (rows[0].status, rows[0].changed, rows[0].served) == (
+            "ok",
+            True,
+            "backend",
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stored_listing_records_the_index_as_its_server():
+    ws = Workspace({"/m": _ListedRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/m/a", b"x")
+        await ws.vfs.readdir("/m")
+        ws.vfs.records.clear()
+        assert await ws.vfs.readdir("/m") == ["/m/a"]
+        row = ws.vfs.records[-1]
+        assert (row.op, row.served, row.changed) == ("readdir", "index", False)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_default_write_row_counts_its_input_bytes(monkeypatch):
+    vfs = RAMVFS()
+
+    async def silent_write(path, data, **kwargs):
+        vfs._store.files[norm(path.mount_path)] = data
+
+    monkeypatch.setattr(vfs, "write", silent_write)
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/m/a", b"abc")
+        rows = [r for r in ws.vfs.records if r.op == "write"]
+        assert len(rows) == 1
+        assert (rows[0].bytes, rows[0].status, rows[0].changed) == (
+            3,
+            "ok",
+            True,
+        )
+        assert await ws.vfs.read("/m/a") == b"abc"
     finally:
         await ws.close()

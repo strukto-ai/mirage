@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify } from '@struktoai/mirage-core/errors/classify'
+import { posixErrno } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { access, constants, copyFile } from 'node:fs/promises'
 
@@ -50,13 +52,11 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
   } finally {
     // Also when the copy raised: copyFile that fails part-way has already
     // written the destination, as on the object stores.
+    const condition = classify(failure)
     record('copy', dst.virtual, VFSName.DISK, 0, timer, {
       status: failure === null ? 'ok' : 'partial',
       changed: true,
-      errno:
-        failure instanceof Error && 'errno' in failure && typeof failure.errno === 'number'
-          ? failure.errno
-          : null,
+      errno: condition === null ? null : posixErrno(condition),
     })
   }
 }

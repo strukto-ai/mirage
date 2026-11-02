@@ -52,6 +52,7 @@ from mirage.context.session_context import (
     effective_path_mode,
     session_access,
 )
+from mirage.errors import classify, posix_errno
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -77,18 +78,25 @@ from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, PipeStream
 from mirage.io.yield_budget import task_turn
 from mirage.observe.context import (
+    OpTimer,
     RecordingScope,
     active_lost,
     active_recorder,
     command_records,
     finish_record,
+    fresh_recorder,
+    push_mount_context,
     record,
+    record_stream,
+    reset_active_recorder,
     start_op,
 )
 from mirage.observe.record import (
     RETRACT_FINGERPRINT_OPS,
     WRITE_FINGERPRINT_OPS,
     OpRecord,
+    OpServed,
+    OpStatus,
 )
 from mirage.policy.boundary import Boundary
 from mirage.policy.builtin.output_cap import walk_bound
@@ -679,6 +687,19 @@ def _follow_or_loop(
         raise eloop(path) from None
 
 
+def _payload_bytes(result: Any, kwargs: Mapping[str, Any]) -> int:
+    if isinstance(result, (bytes, bytearray)):
+        return len(result)
+    return next(
+        (
+            len(value)
+            for value in kwargs.values()
+            if isinstance(value, (bytes, bytearray))
+        ),
+        0,
+    )
+
+
 def _retracted(virtual: str) -> bool:
     """Whether the running line's newest word on ``virtual`` is that a
     change it made took the path's version (a copy, a move, a removal).
@@ -1229,6 +1250,197 @@ class Dispatcher:
         report: OpReport | None = None,
         **kwargs: Any,
     ) -> tuple[Any, IOResult]:
+        report = report if report is not None else OpReport()
+        timer = start_op()
+        answer: Any = None
+        failure: BaseException | None = None
+        streaming = False
+        skip = (
+            kwargs.get("admit_only")
+            or "retained" in kwargs
+            or kwargs.get("warm")
+        )
+        with command_records() as mine:
+            try:
+                answer, io = await self._dispatch_op(
+                    name, path, caller, report=report, **kwargs
+                )
+                if (
+                    name in DISPATCH_READ_OPS
+                    and hasattr(answer, "__aiter__")
+                    and not mine
+                    and not report.driver_recorded
+                    and not skip
+                ):
+                    mount = self._namespace.try_mount_for(
+                        report.path or path.virtual
+                    )
+                    rec = record_stream(
+                        name,
+                        report.path or path.virtual,
+                        str(mount.vfs.name) if mount is not None else "ram",
+                        fingerprint=report.fingerprint,
+                        served=report.answerer or OpServed.BACKEND,
+                    )
+                    if rec is not None:
+                        rec.mount_id = (
+                            mount.mount_id if mount is not None else None
+                        )
+                        observed = self._record_stream(answer, rec, timer)
+                        await anext(observed)
+                        answer = (
+                            PipeStream(observed, answer.path, answer.end)
+                            if isinstance(answer, PipeStream)
+                            else observed
+                        )
+                    streaming = True
+                return answer, io
+            except BaseException as exc:
+                failure = exc
+                raise
+            finally:
+                if (
+                    not skip
+                    and not streaming
+                    and not mine
+                    and not report.driver_recorded
+                ):
+                    ran = report.path or path.virtual
+                    if (
+                        name in COPY_OPS
+                        and isinstance(kwargs.get("dst"), PathSpec)
+                        and report.completed
+                    ):
+                        ran = kwargs["dst"].virtual
+                    mount = self._namespace.try_mount_for(ran)
+                    mark = (
+                        declared(type(mount.vfs), name)
+                        if mount is not None
+                        else None
+                    )
+                    mark = mark or CALLS.get(name)
+                    changed = (
+                        report.completed
+                        and mark is not None
+                        and mark.effect not in (Effect.READ, Effect.METADATA)
+                    )
+                    condition = (
+                        classify(failure) if failure is not None else None
+                    )
+                    status = (
+                        OpStatus.OK
+                        if failure is None
+                        else OpStatus.PARTIAL
+                        if changed
+                        else OpStatus.FAILED
+                    )
+                    if failure is not None or report.completed:
+                        token = push_mount_context(
+                            mount.mount_id if mount is not None else None
+                        )
+                        try:
+                            record(
+                                name,
+                                ran,
+                                str(mount.vfs.name)
+                                if mount is not None
+                                else "ram",
+                                report.bytes
+                                if report.bytes is not None
+                                else _payload_bytes(answer, kwargs)
+                                if report.completed
+                                else 0,
+                                timer,
+                                fingerprint=report.fingerprint,
+                                status=status,
+                                errno=posix_errno(condition)
+                                if condition is not None
+                                else getattr(failure, "errno", None),
+                                changed=changed,
+                                served=report.answerer or OpServed.BACKEND,
+                            )
+                        finally:
+                            reset_active_recorder(token)
+
+    async def _record_stream(
+        self,
+        source: AsyncIterator[bytes],
+        rec: OpRecord | None,
+        timer: OpTimer,
+    ) -> AsyncIterator[bytes]:
+        """Count a read while collecting a driver's late row separately.
+
+        Args:
+            source (AsyncIterator[bytes]): The already opened read.
+            rec (OpRecord | None): Its default row, appended at open.
+            timer (OpTimer): The dispatcher's timer.
+        """
+        parent = current_caller()
+        driver = fresh_recorder(clock=timer.clock)
+        caller = parent.changed({"recorder": driver, "command_sink": None})
+        try:
+            yield b""
+            while True:
+                token = bind_caller(caller)
+                try:
+                    chunk = await anext(source)
+                except StopAsyncIteration:
+                    break
+                finally:
+                    reset_caller(token)
+                if rec is not None:
+                    rec.bytes += len(chunk)
+                yield chunk
+            if rec is not None:
+                rec.complete = True
+        except Exception as exc:
+            if rec is not None:
+                rec.status = OpStatus.FAILED
+                condition = classify(exc)
+                rec.errno = (
+                    posix_errno(condition)
+                    if condition is not None
+                    else getattr(exc, "errno", None)
+                )
+            raise
+        finally:
+            token = bind_caller(caller)
+            try:
+                await close_quietly(source)
+            finally:
+                reset_caller(token)
+            for row in driver.sink:
+                if (
+                    rec is not None
+                    and row.op == rec.op
+                    and row.path == rec.path
+                ):
+                    rec.bytes = row.bytes
+                    rec.fingerprint = row.fingerprint
+                    rec.revision = row.revision
+                    if row.status != OpStatus.OK:
+                        rec.status, rec.errno = row.status, row.errno
+                else:
+                    if parent.recorder is not None:
+                        parent.recorder.sink.append(row)
+                    if parent.command_sink is not None:
+                        command, mine = parent.command_sink
+                        mine.append(row)
+                        if command is not None and command is not mine:
+                            command.append(row)
+            if rec is not None:
+                rec.duration_ms = timer.elapsed_ms
+
+    async def _dispatch_op(
+        self,
+        name: str,
+        path: PathSpec,
+        caller: Caller,
+        /,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[Any, IOResult]:
         # The dispatcher's own keywords: a read answered as it is pulled, a
         # read of what the backend holds now, past the file cache, a read
         # of what the file cache alone holds, and a stat of what the
@@ -1415,6 +1627,8 @@ class Dispatcher:
             await boundary.complete(mark, call.path, call.write, None)
             return None, IOResult()
         if across is not None:
+            if report is not None:
+                report.driver_recorded = True
             await self._copy_across(call, mount, across)
             await boundary.complete(mark, call.path, call.write, None)
             return None, IOResult()
@@ -1436,12 +1650,19 @@ class Dispatcher:
             else []
         )
         try:
-            with command_records() as records:
-                ran = await (
-                    self._fresh_call(call, mount)
-                    if call.fresh
-                    else self._call(call, mount, self._filler(call, mount))
-                )
+            enclosing = current_caller().command_sink
+            with command_records(own=True) as records:
+                try:
+                    ran = await (
+                        self._fresh_call(call, mount)
+                        if call.fresh
+                        else self._call(call, mount, self._filler(call, mount))
+                    )
+                finally:
+                    if report is not None:
+                        report.driver_recorded = bool(records)
+                    if enclosing is not None and enclosing[0] is not None:
+                        enclosing[0].extend(records)
             if not call.read_records:
                 call.read_records = records
         except BaseException as exc:
@@ -1451,7 +1672,7 @@ class Dispatcher:
                 and mount.cache_manager is not None
             ):
                 mount.cache_manager.observe_miss(call.path, call.caller)
-            if settles:
+            if settles and any(rec.changed for rec in records):
                 await self._evict_failed_write(mount, name, call.path, kwargs)
             try:
                 await self._date_made(caller, mount, made, failed=True)
@@ -2328,7 +2549,9 @@ class Dispatcher:
         # leaves the caller able to tell: without the stamp a refused
         # warm read is recorded against the backend and counted as
         # traffic that never happened.
-        _memory_answered(call.report, len(served))
+        _memory_answered(call.report, len(served), OpServed.CACHE)
+        if call.report is not None:
+            call.report.fingerprint = held[1] if held is not None else None
         result = await boundary.complete(mark, call.path, call.write, served)
         if (
             mount.write is WritePolicy.CONDITIONAL
@@ -2342,6 +2565,7 @@ class Dispatcher:
                     len(served),
                     start_op(),
                     fingerprint=held[1] if held is not None else None,
+                    served=OpServed.CACHE,
                 )
             ]
             if call.stream:
@@ -2476,6 +2700,8 @@ class Dispatcher:
                         mount, call.path.virtual
                     )
                 probed = _probed(call, mount)
+                if probed is not None and call.report is not None:
+                    call.report.answerer = OpServed.INDEX
                 result = (
                     probed
                     if probed is not None
@@ -2484,6 +2710,7 @@ class Dispatcher:
                         call.path
                         if call.name == "readdir"
                         else call.path.virtual,
+                        report=call.report,
                         **kwargs,
                     )
                 )
@@ -2817,9 +3044,10 @@ class Dispatcher:
                         call.name, call.path.virtual, **kwargs
                     )
             except BaseException:
-                await self._evict_failed_write(
-                    mount, call.name, call.path, kwargs
-                )
+                if any(rec.changed for rec in mine):
+                    await self._evict_failed_write(
+                        mount, call.name, call.path, kwargs
+                    )
                 raise
             finally:
                 scope.close()
@@ -3666,6 +3894,7 @@ class Dispatcher:
             VFSName.RAM.value,
             len(encode_text(target)),
             timer,
+            served=OpServed.NAMESPACE,
         )
         _memory_answered(report)
         return await boundary.complete(mark, path, write, result)
@@ -3997,6 +4226,7 @@ class Dispatcher:
             VFSName.RAM.value,
             len(result) if isinstance(result, bytes) else 0,
             timer,
+            served=OpServed.NAMESPACE,
         )
         if report is not None:
             report.served(None, None)
@@ -4134,7 +4364,14 @@ class Dispatcher:
             if (value := kwargs.get(key)) is not None
         }
         await self._write_overlay(path.virtual, overlay)
-        record("setattr", path.virtual, VFSName.RAM.value, 0, timer)
+        record(
+            "setattr",
+            path.virtual,
+            VFSName.RAM.value,
+            0,
+            timer,
+            served=OpServed.NAMESPACE,
+        )
         return overlay
 
     async def _write_overlay(

@@ -522,3 +522,30 @@ describe('installFingerprints under DriftPolicy.OFF', () => {
     expect(drift.pending).toBe(false)
   })
 })
+
+it('a failed mutation does not drop a snapshot pin', () => {
+  const read = new OpRecord({
+    op: 'read',
+    path: '/s3/a',
+    source: 's3',
+    bytes: 1,
+    timestamp: 0,
+    durationMs: 0,
+    fingerprint: 'v1',
+  })
+  const failed = new OpRecord({
+    op: 'unlink',
+    path: '/s3/a',
+    source: 's3',
+    bytes: 0,
+    timestamp: 1,
+    durationMs: 0,
+    status: 'failed',
+    errno: 13,
+  })
+  const mount = makeMount('/s3/', true)
+  const registry = { tryMountFor: () => mount, allMounts: () => [mount] }
+  expect(captureFingerprints([read, failed], registry)).toEqual(
+    captureFingerprints([read], registry),
+  )
+})

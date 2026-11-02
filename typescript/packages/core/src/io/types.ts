@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { OpRecord, OpServed } from '../observe/record.ts'
 import type { PathSpec, Producer, Refusal } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { chunks } from './cooperative.ts'
@@ -103,10 +104,12 @@ export async function materialize(source: ByteSource | null | undefined): Promis
  * cache-store outage, an invalid policy return) the same way.
  *
  * `completed` says the op ran against its answering store; false until
- * the dispatcher says otherwise, so a refusal at a pre gate or a backend
- * failure leaves nothing to record. `source` names who answered when
- * that was not the owning mount ('ram' for a warm file-cache hit and
- * for a synthetic namespace answer; null means the owning mount).
+ * the dispatcher says otherwise; a failed op still records its failure.
+ * `answerer` names the answering layer independently of the backend.
+ * `detached` keeps the default row on `record` for a file caller whose
+ * shared browser context cannot attribute driver rows to overlapping calls.
+ * `driverRecorded` says rows below the dispatcher already account for the call.
+ * `fingerprint` carries the token accompanying a cache answer.
  * `bytes` is what the answering store moved when the delivered result
  * no longer measures it; null means "the result is the measure".
  * `path` is the path the op ran on once the dispatcher followed its
@@ -115,6 +118,12 @@ export async function materialize(source: ByteSource | null | undefined): Promis
  * Mirrors Python's mirage.io.types.OpReport.
  */
 export class OpReport {
+  detached = false
+  record: OpRecord | null = null
+  fingerprint: string | null = null
+  streamRecords: OpRecord[] | null = null
+  driverRecorded = false
+  answerer: OpServed = 'backend'
   completed = false
   source: string | null = null
   bytes: number | null = null

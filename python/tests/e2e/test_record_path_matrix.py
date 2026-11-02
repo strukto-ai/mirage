@@ -54,6 +54,11 @@ EXEMPT_OPS = {
     "listxattr",
     "setxattr",
     "removexattr",
+    "stat",
+    "readdir",
+    "read_tree",
+    "before_full_walk",
+    "statfs",
 }
 
 K = "/m/m/k.txt"
@@ -80,69 +85,7 @@ _GENERIC_OUT = [
 
 # Op sequences were measured by running SCRIPT on each backend; every path is
 # predicted as the operand's virtual path, never copied from the measurement.
-# echo's `>` is opened by its output write: one write. RAM and Redis skip
-# recording an empty append; disk and SSH record it.
-# ram and redis record nothing for same-mount cp/mv/rm/rmdir/rm -r.
-# A caching mount serves each read of what the line just wrote from the
-# bytes the write kept, so only the writes reach the backend.
-_WARM_OUT = [op for op in _GENERIC_OUT[1:] if op[0] == "write"]
-
-_NATIVE_APPEND = [
-    ("write", K),
-    ("append", K),
-    ("append", K),
-    ("write", NEW),
-    ("truncate", NEW),
-    ("read", K),
-    ("read", K),
-    ("write", DF),
-    *_GENERIC_OUT,
-    ("create", C),
-    ("append", C),
-]
-
-# s3 has no native append (read + write), and the rewrite proves the
-# cached copy it extends, so cat, the cp source and gzip's read are served
-# from cache; it records its own copy, rename, unlink, rmdir and rm_r.
-_S3 = [
-    ("write", K),
-    ("read", K),
-    ("write", K),
-    ("read", K),
-    ("write", K),
-    ("write", NEW),
-    ("truncate", NEW),
-    ("copy", "/m/m/k2.txt"),
-    ("rename", NEW),
-    ("rename", "/m/m/moved.txt"),
-    ("unlink", "/m/m/moved.txt"),
-    ("rmdir", "/m/m/e"),
-    ("write", DF),
-    ("rm_r", "/m/m/d"),
-    *_WARM_OUT,
-    ("create", C),
-    ("read", C),
-    ("write", C),
-]
-
-# ssh records cat's read; gzip's and split's are served from cache, and cp,
-# mv, rm, rmdir and rm -r record nothing.
-_SSH = [
-    ("write", K),
-    ("append", K),
-    ("append", K),
-    ("append", K),
-    ("write", NEW),
-    ("truncate", NEW),
-    ("read", K),
-    ("write", DF),
-    *_WARM_OUT,
-    ("create", C),
-    ("append", C),
-]
-
-# disk records the rows s3 does for cp, mv, rm, rmdir and rm -r, and
-# a mkdir row as dropbox does.
+# Driver rows retain their spelling; default rename rows name the source.
 _DISK = [
     ("write", K),
     ("append", K),
@@ -165,13 +108,40 @@ _DISK = [
     ("create", C),
     ("append", C),
 ]
-
+_NATIVE_APPEND = [
+    pair for pair in _DISK if pair != ("rename", "/m/m/moved.txt")
+]
+_S3 = [
+    ("write", K),
+    ("append", K),
+    ("read", K),
+    ("write", K),
+    ("read", K),
+    ("write", K),
+    ("write", NEW),
+    ("truncate", NEW),
+    ("read", K),
+    ("read", K),
+    ("copy", "/m/m/k2.txt"),
+    ("rename", NEW),
+    ("rename", "/m/m/moved.txt"),
+    ("unlink", "/m/m/moved.txt"),
+    ("mkdir", "/m/m/e"),
+    ("rmdir", "/m/m/e"),
+    ("mkdir", "/m/m/d"),
+    ("write", DF),
+    ("rm_r", "/m/m/d"),
+    *_GENERIC_OUT,
+    ("create", C),
+    ("read", C),
+    ("write", C),
+]
 EXPECTED = {
     "ram": _NATIVE_APPEND,
     "disk": _DISK,
     "redis": _NATIVE_APPEND,
     "s3": _S3,
-    "ssh": _SSH,
+    "ssh": _NATIVE_APPEND,
 }
 
 S3_BUCKET = "test-bucket-1"
@@ -185,7 +155,7 @@ def _ledger(records) -> list[tuple[str, str]]:
     return [
         (r.op, r.path)
         for r in records
-        if _under_m(r.path) and r.op not in EXEMPT_OPS
+        if _under_m(r.path) and r.op not in EXEMPT_OPS and r.status == "ok"
     ]
 
 

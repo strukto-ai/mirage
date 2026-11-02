@@ -151,7 +151,7 @@ def test_execute_records_op_source():
     asyncio.run(ws.shell("echo hello > /data/test.txt"))
     asyncio.run(ws.shell("cat /data/test.txt"))
     events = asyncio.run(ws.observer.events())
-    ops = [e for e in events if e["type"] == "vfs"]
+    ops = [e for e in events if e["type"] == "vfs" and e["vfs"] != "stat"]
     assert ops
     assert all("source" in e for e in ops)
     assert "/data/test.txt" in {e["path"] for e in ops if e["vfs"] == "read"}
@@ -168,7 +168,11 @@ def test_execute_records_op_path_per_mount():
     ):
         asyncio.run(ws.shell(line))
     events = asyncio.run(ws.observer.events())
-    ops = [(e["vfs"], e["path"]) for e in events if e["type"] == "vfs"]
+    ops = [
+        (e["vfs"], e["path"])
+        for e in events
+        if e["type"] == "vfs" and e["vfs"] in {"read", "write"}
+    ]
     assert ops == [
         ("write", "/s3/report.json"),
         ("write", "/db/report.json"),
@@ -209,6 +213,7 @@ async def test_history_filters_by_session_time_count_and_vfs():
             ("vfs", "write"),
             ("result", 0),
             ("command", "cat /data/a.txt"),
+            ("vfs", "stat"),
             ("vfs", "read"),
             ("result", 0),
         ]

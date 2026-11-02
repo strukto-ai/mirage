@@ -82,7 +82,7 @@ def test_disk_mutation_records_object_store_rows(tmp_path, line, expected):
     [
         ("rm /m/missing", []),
         ("mv /m/missing /m/x", []),
-        ("mkdir /m/e", []),
+        ("mkdir /m/e", [("mkdir", "/m/e", 0)]),
         ("rmdir /m/d", []),
         ("mkdir -p /m/a.txt/z", [("mkdir", "/m/a.txt/z", 0)]),
     ],

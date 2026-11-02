@@ -56,6 +56,11 @@ const EXEMPT = new Set([
   'setxattr',
   'listxattr',
   'removexattr',
+  'stat',
+  'readdir',
+  'read_tree',
+  'before_full_walk',
+  'statfs',
 ])
 
 const K = '/m/m/k.txt'
@@ -79,22 +84,32 @@ const GENERIC_OUT: [string, string][] = [
   ['write', '/m/m/cs01'],
 ]
 
-// echo's `>` is opened by its output write: one write. Opening `>>` on an existing file records no data write.
 const SHELL_LEDGER: [string, string][] = [
   ['write', K],
+  ['append', K],
   ['append', K],
   ['append', K],
   ['write', NEW],
   ['truncate', NEW],
   ['read', K],
   ['read', K],
+  ['copy', '/m/m/k2.txt'],
+  ['rename', NEW],
+  ['unlink', '/m/m/moved.txt'],
+  ['mkdir', '/m/m/e'],
+  ['rmdir', '/m/m/e'],
+  ['mkdir', '/m/m/d'],
   ['write', '/m/m/d/f'],
+  ['rm_r', '/m/m/d'],
   ...GENERIC_OUT,
 ]
 
 function underM(records: readonly OpRecord[]): [string, string][] {
   return records
-    .filter((r) => (r.path === '/m' || r.path.startsWith('/m/')) && !EXEMPT.has(r.op))
+    .filter(
+      (r) =>
+        (r.path === '/m' || r.path.startsWith('/m/')) && !EXEMPT.has(r.op) && r.status === 'ok',
+    )
     .map((r) => [r.op, r.path])
 }
 

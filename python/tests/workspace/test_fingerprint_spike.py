@@ -900,7 +900,7 @@ def test_one_line_serves_each_mount_under_its_own_policy(
             records = [
                 (r.op, r.path)
                 for r in ws.vfs.records[mark:]
-                if r.served == "backend"
+                if r.served == "backend" and r.op in {"read", "write"}
             ]
             line_calls = dict(client.bucket_calls)
             client.bucket_calls.clear()

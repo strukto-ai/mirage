@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify } from '@struktoai/mirage-core/errors/classify'
+import { posixErrno } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { mkdir as fsMkdir } from 'node:fs/promises'
 
@@ -47,13 +49,11 @@ export async function mkdir(
     } finally {
       // Also when it threw: the chain may have made its first directories
       // before a later one failed.
+      const condition = classify(failure)
       record('mkdir', path.virtual, VFSName.DISK, 0, timer, {
         status: failure === null ? 'ok' : 'partial',
         changed: true,
-        errno:
-          failure instanceof Error && 'errno' in failure && typeof failure.errno === 'number'
-            ? failure.errno
-            : null,
+        errno: condition === null ? null : posixErrno(condition),
       })
     }
     return

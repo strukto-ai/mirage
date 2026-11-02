@@ -15,21 +15,20 @@
 import type { KeyHold } from '../../cache/lock.ts'
 import { ensureStream } from '../../io/stream.ts'
 import type { ByteSource, OpReport } from '../../io/types.ts'
-import { VFSName } from '../../types.ts'
+import type { OpServed } from '../../observe/record.ts'
 import { concat } from '../../utils/bytes.ts'
 
 /**
  * Stamp the caller's report: memory answered, no backend ran.
  *
- * Fires at the moment a warm file-cache hit or a synthetic namespace
- * answer is in hand, before the post gate and any output cap, so
- * whatever those throw cannot erase the fact. The value is
- * `VFSName.RAM`, which is how a record says "this never crossed
- * the network": `OpRecord.isCache` is defined as that string, and
- * every network/cache total derives from it.
  */
-export function memoryAnswered(report: OpReport | undefined, moved: number | null = null): void {
-  report?.served(VFSName.RAM, moved)
+export function memoryAnswered(
+  report: OpReport | undefined,
+  moved: number | null = null,
+  answerer: OpServed = 'namespace',
+): void {
+  if (report !== undefined) report.answerer = answerer
+  report?.served(null, moved)
 }
 
 /**

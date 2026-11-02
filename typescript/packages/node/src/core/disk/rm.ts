@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify } from '@struktoai/mirage-core/errors/classify'
+import { posixErrno } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { rm } from 'node:fs/promises'
 
@@ -32,13 +34,11 @@ export async function rmR(accessor: DiskAccessor, path: PathSpec): Promise<void>
   } finally {
     // Also when the walk raised: a removal that fails part-way has
     // already removed entries, as on the object stores.
+    const condition = classify(failure)
     record('rm_r', path.virtual, VFSName.DISK, 0, timer, {
       status: failure === null ? 'ok' : 'partial',
       changed: true,
-      errno:
-        failure instanceof Error && 'errno' in failure && typeof failure.errno === 'number'
-          ? failure.errno
-          : null,
+      errno: condition === null ? null : posixErrno(condition),
     })
   }
 }

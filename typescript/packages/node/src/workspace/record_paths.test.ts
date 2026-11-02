@@ -62,6 +62,11 @@ const EXEMPT = new Set([
   'setxattr',
   'listxattr',
   'removexattr',
+  'stat',
+  'readdir',
+  'read_tree',
+  'before_full_walk',
+  'statfs',
 ])
 
 const K = '/m/m/k.txt'
@@ -87,7 +92,10 @@ const GENERIC_OUT: [string, string][] = [
 
 function underM(records: readonly OpRecord[]): [string, string][] {
   return records
-    .filter((r) => (r.path === '/m' || r.path.startsWith('/m/')) && !EXEMPT.has(r.op))
+    .filter(
+      (r) =>
+        (r.path === '/m' || r.path.startsWith('/m/')) && !EXEMPT.has(r.op) && r.status === 'ok',
+    )
     .map((r) => [r.op, r.path])
 }
 
@@ -111,16 +119,23 @@ async function ledger(vfs: BaseVFS, setup: string | null): Promise<[string, stri
   }
 }
 
-// echo's `>` is opened by its output write: one write. RAM skips recording an empty append; disk and SSH record it.
 const NATIVE_APPEND: [string, string][] = [
   ['write', K],
+  ['append', K],
   ['append', K],
   ['append', K],
   ['write', NEW],
   ['truncate', NEW],
   ['read', K],
   ['read', K],
+  ['copy', '/m/m/k2.txt'],
+  ['rename', NEW],
+  ['unlink', '/m/m/moved.txt'],
+  ['mkdir', '/m/m/e'],
+  ['rmdir', '/m/m/e'],
+  ['mkdir', '/m/m/d'],
   ['write', '/m/m/d/f'],
+  ['rm_r', '/m/m/d'],
   ...GENERIC_OUT,
 ]
 
@@ -182,20 +197,25 @@ describe('record paths name the virtual path (node backends)', () => {
       // cached copy it extends.
       expect(await ledger(vfs, null)).toEqual([
         ['write', K],
+        ['append', K],
         ['read', K],
         ['write', K],
         ['read', K],
         ['write', K],
         ['write', NEW],
         ['truncate', NEW],
+        ['read', K],
+        ['read', K],
         ['copy', '/m/m/k2.txt'],
         ['rename', NEW],
         ['rename', '/m/m/moved.txt'],
         ['unlink', '/m/m/moved.txt'],
+        ['mkdir', '/m/m/e'],
         ['rmdir', '/m/m/e'],
+        ['mkdir', '/m/m/d'],
         ['write', '/m/m/d/f'],
         ['rm_r', '/m/m/d'],
-        ...GENERIC_OUT.filter(([op]) => op === 'write'),
+        ...GENERIC_OUT,
         ['create', C],
         ['read', C],
         ['write', C],
@@ -219,17 +239,14 @@ describe('record paths name the virtual path (node backends)', () => {
     // the in-mount cp's native copy, a read and a write over sftp; the later
     // reads are served from the cache.
     expect(await ledger(vfs, null)).toEqual([
-      ['write', K],
-      ['append', K],
-      ['append', K],
-      ['append', K],
-      ['write', NEW],
-      ['truncate', NEW],
-      ['read', K],
-      ['read', K],
-      ['write', '/m/m/k2.txt'],
-      ['write', '/m/m/d/f'],
-      ...GENERIC_OUT.filter(([op]) => op === 'write'),
+      ...NATIVE_APPEND.flatMap(([op, path]): [string, string][] =>
+        op === 'copy'
+          ? [
+              ['read', K],
+              ['write', path],
+            ]
+          : [[op, path]],
+      ),
       ['create', C],
       ['append', C],
     ])
@@ -296,7 +313,9 @@ async function sweep(vfs: BaseVFS, setup: string | null): Promise<Swept> {
 }
 
 function expectResolvable(swept: Swept): void {
-  const checked = swept.records.filter((r) => r.mountId !== null && !EXEMPT.has(r.op))
+  const checked = swept.records.filter(
+    (r) => r.mountId !== null && !EXEMPT.has(r.op) && r.status === 'ok',
+  )
   expect(checked.length).toBeGreaterThan(0)
   for (const r of checked) {
     expect(swept.resolve(r.path), `${r.op} ${r.path}`).toBe(r.mountId)
@@ -360,7 +379,10 @@ describe('every record resolves to the mount whose id it carries (node backends)
 describe('command streams carry the mount id', () => {
   it('ram cat', async () => {
     const swept = await sweep(new RAMVFS(), 'mkdir -p /m/m')
-    expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([['read', K]])
+    expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([
+      ['stat', K],
+      ['read', K],
+    ])
     expect(swept.catRecords[0]?.mountId).toBe(swept.mountId)
   })
 
@@ -369,7 +391,10 @@ describe('command streams carry the mount id', () => {
     mkdirSync(join(root, 'm'))
     try {
       const swept = await sweep(new DiskVFS({ root }), null)
-      expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([['read', K]])
+      expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([
+        ['stat', K],
+        ['read', K],
+      ])
       expect(swept.catRecords[0]?.mountId).toBe(swept.mountId)
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -383,7 +408,7 @@ describe('dispatcher records carry the mount id', () => {
   it('ram', async () => {
     const swept = await sweep(new RAMVFS(), 'mkdir -p /m/m')
     const unattributed = swept.records
-      .filter((r) => r.mountId === null && !EXEMPT.has(r.op))
+      .filter((r) => r.mountId === null && !EXEMPT.has(r.op) && r.status === 'ok')
       .map((r) => [r.op, r.path])
     expect(unattributed).toEqual([])
     expect(swept.records.some((r) => r.op === 'create' && r.mountId === swept.mountId)).toBe(true)

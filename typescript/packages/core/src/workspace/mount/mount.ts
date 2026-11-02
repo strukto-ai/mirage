@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { OpReport } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { publishRead, readVersioned, requireSupported } from '../../cache/context.ts'
@@ -1631,6 +1632,7 @@ export class MountEntry {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
     access?: SessionAccess,
+    report?: OpReport,
   ): Promise<unknown> {
     if (name === 'read_tree' && kwargs.level === true) {
       return this.level(scope.virtual, kwargs.limit as number | undefined, access)
@@ -1660,7 +1662,10 @@ export class MountEntry {
           found = await this.handedFor(name, scope, null, index)
           stored = await this.stored(name, scope, index)
         }
-        if (stored !== null) return stored
+        if (stored !== null) {
+          if (report !== undefined) report.answerer = 'index'
+          return stored
+        }
       }
       for (const call of levels) {
         const refill =

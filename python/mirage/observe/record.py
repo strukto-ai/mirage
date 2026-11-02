@@ -127,6 +127,10 @@ class OpRecord:
             bytes can be re-fetched even if the live object has moved on.
             Strictly stronger than ``fingerprint`` — populated only by
             backends that can guarantee revision durability.
+        status (OpStatus): Whether the op succeeded, failed or partly changed state.
+        errno (int | None): The failure's POSIX errno, when available.
+        changed (bool | None): Whether state changed; None derives it from the op.
+        served (OpServed): The answering layer, independent of the backend.
         mount_id (str | None): In-process mount identity for snapshot
             ownership checks; never used as a persisted backend revision.
     """

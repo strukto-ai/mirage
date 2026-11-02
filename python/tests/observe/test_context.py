@@ -398,7 +398,7 @@ async def _dispatch_recording_read(
     finally:
         scope.close()
         await ws.close()
-    return [r.path for r in scope.records]
+    return [r.path for r in scope.records if r.op == "read"]
 
 
 @pytest.mark.asyncio

@@ -107,3 +107,28 @@ def test_log_entry_omits_cwd_when_not_provided():
     entry = LogEntry.from_op_record(rec, session="s")
     parsed = json.loads(entry.to_json_line())
     assert "cwd" not in parsed
+
+
+def test_vfs_entry_serializes_the_operation_outcome():
+    from mirage.observe.record import OpServed, OpStatus
+
+    rec = OpRecord(
+        "unlink",
+        "/m/a",
+        "ram",
+        0,
+        1,
+        0,
+        status=OpStatus.FAILED,
+        errno=13,
+        served=OpServed.BACKEND,
+    )
+    entry = json.loads(LogEntry.from_op_record(rec, "s").to_json_line())
+    assert {
+        key: entry[key] for key in ("status", "errno", "changed", "served")
+    } == {
+        "status": "failed",
+        "errno": 13,
+        "changed": False,
+        "served": "backend",
+    }

@@ -19,9 +19,11 @@ import { render } from '../test-utils.ts'
 import type { Policy } from '../policy/base.ts'
 import { PolicyDenied, PolicyError } from '../policy/errors.ts'
 import type { Action, VfsContext, VfsResultContext } from '../policy/types.ts'
+import { norm } from '../utils/path.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import type { Handed } from '../vfs/types.ts'
 import type { PathSpec } from '../types.ts'
+import { record, startOp, runWithRecording } from '../observe/context.ts'
 import { stat as ramStat } from '../core/ram/stat.ts'
 import { DEFAULT_READ_TTL, FileStat, FileType, Limit, MountMode, ReadPolicy } from '../types.ts'
 import { eacces, enoent, enotdir } from '../errors/fs.ts'
@@ -740,7 +742,7 @@ describe('Files goes through the dispatcher', () => {
     await runWithSession(session, async () => {
       ws.records.length = 0
       expect(await ws.vfs.readdir('/m/inner')).toEqual(['/m/inner/deep'])
-      expect(ws.records.map((r) => [r.source, r.served === 'cache'])).toEqual([['ram', true]])
+      expect(ws.records.map((r) => [r.served, r.changed])).toEqual([['namespace', false]])
     })
   })
 
@@ -757,7 +759,7 @@ describe('Files goes through the dispatcher', () => {
     await runWithSession(session, async () => {
       ws.records.length = 0
       await expect(ws.vfs.readdir('/m/inner')).rejects.toThrow(PolicyDenied)
-      expect(ws.records.map((r) => [r.source, r.served === 'cache'])).toEqual([['ram', true]])
+      expect(ws.records.map((r) => [r.served, r.changed])).toEqual([['namespace', false]])
     })
   })
 
@@ -977,11 +979,14 @@ describe('Files accounting survives the delegation', () => {
     expect(read?.bytes).toBe(5)
   })
 
-  it('records nothing for a pre-denied read: the backend never ran', async () => {
+  it('records a failed pre-denied read', async () => {
     const ws = mkWs(new SealReads())
     await ws.vfs.write('/data/a.txt', 'hello')
     await expect(ws.vfs.read('/data/a.txt')).rejects.toThrow(PolicyDenied)
-    expect(ws.records.map((r) => r.op)).toEqual(['write'])
+    expect(ws.records.map((r) => [r.op, r.status, r.changed])).toEqual([
+      ['write', 'ok', true],
+      ['read', 'failed', false],
+    ])
   })
 })
 
@@ -1299,4 +1304,107 @@ describe('readStream', () => {
       await ws.close()
     }
   })
+})
+
+it('a failed removal keeps a warm cached cat', async () => {
+  const vfs = new RAMVFS()
+  Object.assign(vfs, { cachesReads: true })
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/m/a', 'warm')
+    await ws.cache.set('/m/a', new TextEncoder().encode('warm'), { ttl: 600 })
+    vfs.unlink = (path) => Promise.reject(eacces(path))
+    const start = ws.records.length
+    expect((await ws.shell('rm /m/a')).exitCode).toBe(1)
+    expect(DEC.decode((await ws.cache.get('/m/a')) ?? undefined)).toBe('warm')
+    expect(DEC.decode((await ws.shell('cat /m/a')).stdout)).toBe('warm')
+    const rows = ws.records.slice(start)
+    const failed = rows.filter((r) => r.op === 'unlink')
+    expect(failed).toHaveLength(1)
+    expect(failed[0]).toMatchObject({ status: 'failed', changed: false, errno: 13 })
+    const reads = rows.filter((r) => r.op === 'read')
+    expect(reads).toHaveLength(1)
+    expect(reads[0]).toMatchObject({ served: 'cache', source: 'ram', bytes: 4 })
+  } finally {
+    await ws.close()
+  }
+})
+
+it('dispatch records a default mutation once', async () => {
+  const ws = new Workspace({ '/m': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/m/a', 'x')
+    const [, rows] = await runWithRecording(() => ws.dispatch('unlink', '/m/a'))
+    expect(rows.filter((r) => r.op === 'unlink')).toHaveLength(1)
+    expect(rows.find((r) => r.op === 'unlink')).toMatchObject({
+      status: 'ok',
+      changed: true,
+      served: 'backend',
+    })
+  } finally {
+    await ws.close()
+  }
+})
+
+it('a stored listing records the index as its server', async () => {
+  const ws = new Workspace({ '/m': new ListedRAM() }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/m/a', 'x')
+    await ws.vfs.readdir('/m')
+    ws.records.length = 0
+    expect(await ws.vfs.readdir('/m')).toEqual(['/m/a'])
+    expect(ws.records.at(-1)).toMatchObject({ op: 'readdir', served: 'index', changed: false })
+  } finally {
+    await ws.close()
+  }
+})
+
+it('a driver recording at stream close finalizes one read row', async () => {
+  const payload = [new TextEncoder().encode('ab'), new TextEncoder().encode('cd')]
+  async function* late(path: PathSpec): AsyncGenerator<Uint8Array> {
+    const timer = startOp()
+    let sent = 0
+    try {
+      for (const chunk of payload) {
+        await Promise.resolve()
+        sent += chunk.byteLength
+        yield chunk
+      }
+    } finally {
+      record('read', path.virtual, 'ram', sent, timer, { fingerprint: 'v1' })
+    }
+  }
+  const vfs = new RAMVFS()
+  vfs.read = (path) => Promise.resolve(late(path))
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/m/a', 'abcd')
+    const before = ws.records.length
+    const stream = await ws.vfs.read('/m/a', { stream: true })
+    const iterator = stream[Symbol.asyncIterator]()
+    await iterator.next()
+    await iterator.return?.()
+    const rows = ws.records.slice(before).filter((row) => row.op === 'read')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ bytes: 2, fingerprint: 'v1', complete: false })
+  } finally {
+    await ws.close()
+  }
+})
+
+it('a default write row counts its input bytes', async () => {
+  const vfs = new RAMVFS()
+  vfs.write = async (path, data) => {
+    vfs.store.files.set(norm(path.mountPath), await materialize(data))
+  }
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/m/a', 'abc')
+    const rows = ws.records.filter((row) => row.op === 'write')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ bytes: 3, status: 'ok', changed: true })
+    expect(DEC.decode(await ws.vfs.read('/m/a'))).toBe('abc')
+  } finally {
+    await ws.close()
+  }
 })

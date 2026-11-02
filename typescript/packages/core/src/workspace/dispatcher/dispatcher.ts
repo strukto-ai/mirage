@@ -62,12 +62,14 @@ import {
   walkDeclined,
   walkRefusal,
 } from '../../errors/fs.ts'
+import { classify } from '../../errors/classify.ts'
+import { posixErrno } from '../../errors/posix.ts'
 import { type FsError } from '../../errors/types.ts'
 import { type Egress, liveEgress, runWithEgress } from '../../io/gateway.ts'
 import { runWithMemory } from '../../io/memory.ts'
 import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { IOResult, type OpReport, PipeStream } from '../../io/types.ts'
+import { IOResult, OpReport, PipeStream } from '../../io/types.ts'
 import {
   activeRecords,
   commandRecords,
@@ -75,6 +77,9 @@ import {
   lostPaths,
   record,
   recordIndex,
+  recordStream,
+  runWithMountContext,
+  type OpTimer,
   runWithRecording,
   startOp,
 } from '../../observe/context.ts'
@@ -452,6 +457,18 @@ function operands(
 }
 
 /** The byte window a read asked for, whole file when it asked none. */
+function payloadBytes(
+  result: unknown,
+  args: readonly unknown[] | undefined,
+  kwargs: OpKwargs | undefined,
+): number {
+  if (result instanceof Uint8Array) return result.byteLength
+  for (const value of args ?? []) if (value instanceof Uint8Array) return value.byteLength
+  for (const value of Object.values(kwargs ?? {}))
+    if (value instanceof Uint8Array) return value.byteLength
+  return 0
+}
+
 function readWindow(kwargs: OpKwargs | undefined): [number, number | null] {
   return [
     typeof kwargs?.offset === 'number' ? kwargs.offset : 0,
@@ -862,7 +879,186 @@ export class Dispatcher {
     return caller
   }
 
-  private dispatchAdmitted: DispatchFn = async (name, path, args, kwargs, report) => {
+  private dispatchAdmitted: DispatchFn = async (name, path, args, kwargs, supplied) => {
+    const report = supplied ?? new OpReport()
+    const timer = startOp()
+    const skip =
+      kwargs?.admit_only === true || 'retained' in (kwargs ?? {}) || kwargs?.warm === true
+    return commandRecords(async (mine) => {
+      let answer: unknown = null
+      let failure: unknown = null
+      let streaming = false
+      try {
+        const [result, io] = await this.dispatchOp(name, path, args, kwargs, report)
+        answer = result
+        if (
+          DISPATCH_READ_OPS.has(name) &&
+          result !== null &&
+          typeof result === 'object' &&
+          Symbol.asyncIterator in result &&
+          (report.detached || (mine.length === 0 && !report.driverRecorded)) &&
+          !skip
+        ) {
+          const mount = this.namespace.tryMountFor(report.path ?? path.virtual)
+          const rec = report.detached
+            ? finishRecord(
+                name,
+                report.path ?? path.virtual,
+                mount?.vfs.name ?? VFSName.RAM,
+                0,
+                timer,
+                { served: report.answerer, fingerprint: report.fingerprint },
+              )
+            : await runWithMountContext(
+                () =>
+                  Promise.resolve(
+                    recordStream(
+                      name,
+                      report.path ?? path.virtual,
+                      mount?.vfs.name ?? VFSName.RAM,
+                      {
+                        served: report.answerer,
+                        fingerprint: report.fingerprint,
+                      },
+                    ),
+                  ),
+                mount?.mountId,
+              )
+          if (report.detached) {
+            report.record = rec
+            if (rec !== null) {
+              rec.mountId = mount?.mountId ?? null
+              rec.complete = false
+            }
+          }
+          if (rec !== null) {
+            const observed = this.recordStream(
+              result as AsyncIterable<Uint8Array>,
+              rec,
+              timer,
+              report.streamRecords ?? [],
+            )
+            await observed.next()
+            answer =
+              result instanceof PipeStream
+                ? new PipeStream(observed, result.path, result.end)
+                : observed
+          }
+          streaming = true
+        }
+        return [answer, io]
+      } catch (err) {
+        failure = err
+        throw err
+      } finally {
+        if (
+          !skip &&
+          !streaming &&
+          (report.detached || (mine.length === 0 && !report.driverRecorded)) &&
+          (failure !== null || report.completed)
+        ) {
+          const destination = args?.[0] ?? kwargs?.dst
+          const ran =
+            COPY_OPS.has(name) && destination instanceof PathSpec && report.completed
+              ? destination.virtual
+              : (report.path ?? path.virtual)
+          const mount = this.namespace.tryMountFor(ran)
+          const mark =
+            (mount === null ? null : declared(mount.vfs.constructor, name)) ?? CALLS.get(name)
+          const changed =
+            report.completed &&
+            mark !== undefined &&
+            mark.effect !== Effect.READ &&
+            mark.effect !== Effect.METADATA
+          const condition = classify(failure)
+          const bytes = report.bytes ?? (report.completed ? payloadBytes(answer, args, kwargs) : 0)
+          const options = {
+            status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
+            errno: condition === null ? null : posixErrno(condition),
+            changed,
+            served: report.answerer,
+            fingerprint: report.fingerprint,
+          } satisfies Parameters<typeof finishRecord>[5]
+          if (report.detached) {
+            const rec = finishRecord(
+              name,
+              ran,
+              mount?.vfs.name ?? VFSName.RAM,
+              bytes,
+              timer,
+              options,
+            )
+            rec.mountId = mount?.mountId ?? null
+            report.record = rec
+          } else {
+            await runWithMountContext(() => {
+              record(name, ran, mount?.vfs.name ?? VFSName.RAM, bytes, timer, options)
+              return Promise.resolve()
+            }, mount?.mountId)
+          }
+        }
+      }
+    })
+  }
+
+  /** Count the default read and fold in a driver's row emitted at close. */
+  private async *recordStream(
+    source: AsyncIterable<Uint8Array>,
+    rec: OpRecord | null,
+    timer: OpTimer,
+    rows: OpRecord[],
+  ): AsyncGenerator<Uint8Array> {
+    const parent = currentCaller()
+    const caller: Caller = {
+      ...parent,
+      recording: { records: rows, mountId: rec?.mountId ?? null, ledger: null, clock: timer.clock },
+      commandSink: null,
+    }
+    const iterator = source[Symbol.asyncIterator]()
+    try {
+      yield new Uint8Array()
+      for (;;) {
+        const next = await runWithCaller(caller, () => iterator.next())
+        if (next.done === true) break
+        if (rec !== null) rec.bytes += next.value.byteLength
+        yield next.value
+      }
+      if (rec !== null) rec.complete = true
+    } catch (err) {
+      if (rec !== null) {
+        rec.status = 'failed'
+        const condition = classify(err)
+        rec.errno = condition === null ? null : posixErrno(condition)
+      }
+      throw err
+    } finally {
+      await runWithCaller(
+        caller,
+        () => iterator.return?.() ?? Promise.resolve({ done: true as const, value: undefined }),
+      )
+      for (const row of rows) {
+        if (rec !== null && row.op === rec.op && row.path === rec.path) {
+          rec.bytes = row.bytes
+          rec.fingerprint = row.fingerprint
+          rec.revision = row.revision
+          if (row.status !== 'ok') {
+            rec.status = row.status
+            rec.errno = row.errno
+          }
+        } else {
+          parent.recording?.records.push(row)
+          const held = parent.commandSink
+          if (held !== null) {
+            held[1].push(row)
+            if (held[0] !== null && held[0] !== held[1]) held[0].push(row)
+          }
+        }
+      }
+      if (rec !== null) rec.durationMs = timer.elapsedMs
+    }
+  }
+
+  private dispatchOp: DispatchFn = async (name, path, args, kwargs, report) => {
     const egressOwner = liveEgress().at(-1) ?? null
     const caller = this.readCaller()
     // The caller's own mark on the op, lifted before any gate fires so
@@ -1081,6 +1277,7 @@ export class Dispatcher {
         return [null, new IOResult()]
       }
       if (across !== null) {
+        if (report !== undefined) report.driverRecorded = true
         await this.copyAcross(call, owner, across)
         await boundary.complete(mark, call.path, call.write, null, call.issuer)
         return [null, new IOResult()]
@@ -1131,21 +1328,27 @@ export class Dispatcher {
         : []
     let ran: Awaited<ReturnType<typeof this.callBackend>>
     try {
-      const [answer, records] = await commandRecords(
-        async (mine) =>
-          [
+      const enclosing = currentCaller().commandSink?.[0]
+      const [answer, records] = await commandRecords(async (mine) => {
+        try {
+          return [
             await (call.fresh
               ? this.freshCall(call, mount, vfs, scope, mode)
               : this.callBackend(call, mount, vfs, scope, mode)),
             mine,
-          ] as const,
-      )
+          ] as const
+        } finally {
+          if (report !== undefined) report.driverRecorded = mine.length > 0
+          enclosing?.push(...mine)
+          if (call.readRecords.length === 0) call.readRecords = mine
+        }
+      }, true)
       ran = answer
       if (call.readRecords.length === 0) call.readRecords = records
     } catch (err) {
       if (isEnoent(err) && MISS_OPS.has(name))
         mount.cacheManager?.observeMiss(call.path, call.caller)
-      if (settles) {
+      if (settles && call.readRecords.some((rec) => rec.changed)) {
         await this.evictFailedWrite(
           name,
           call.path,
@@ -2062,10 +2265,18 @@ export class Dispatcher {
     scope: PathSpec,
     filler: CacheManager | null,
   ): Promise<AsyncIterable<Uint8Array>> {
-    const [source, records] = await commandRecords((mine) =>
-      Promise.resolve([mount.readStream(scope, this.access), mine] as const),
+    const parent = currentCaller()
+    const records: OpRecord[] = []
+    const caller: Caller = {
+      ...parent,
+      commandSink: null,
+      recording: parent.recording === null ? null : { ...parent.recording, records },
+    }
+    const source = await runWithCaller(caller, () =>
+      Promise.resolve(mount.readStream(scope, this.access)),
     )
     call.readRecords = records
+    if (call.report !== undefined) call.report.streamRecords = records
     const pipe = mount.livePipe(scope.virtual, this.access)
     if (pipe !== null) {
       const live = new PipeStream(await primed(source, call.report, false), call.path, pipe)
@@ -2076,7 +2287,16 @@ export class Dispatcher {
       filler === null
         ? source
         : filler.fillStream(call.path, source, records, () => !this.rendersRead(call, mount))
-    return await primed(stream, call.report)
+    try {
+      return await primed(stream, call.report)
+    } finally {
+      parent.recording?.records.push(...records)
+      const held = parent.commandSink
+      if (held !== null) {
+        held[1].push(...records)
+        if (held[0] !== null && held[0] !== held[1]) held[0].push(...records)
+      }
+    }
   }
 
   /** Whether a filetype renderer answers this read on `vfs`; asked each
@@ -2152,7 +2372,8 @@ export class Dispatcher {
     // the caller able to tell: without the stamp a refused warm read is
     // recorded against the backend and counted as traffic that never
     // happened.
-    memoryAnswered(call.report, window.byteLength)
+    memoryAnswered(call.report, window.byteLength, 'cache')
+    if (call.report !== undefined) call.report.fingerprint = held?.[1] ?? null
     const result = (await boundary.complete(
       mark,
       call.path,
@@ -2164,6 +2385,7 @@ export class Dispatcher {
       call.readRecords = [
         finishRecord('read', call.path.virtual, 'ram', window.byteLength, startOp(), {
           fingerprint: held?.[1] ?? null,
+          served: 'cache',
         }),
       ]
       if (call.stream) {
@@ -2412,7 +2634,7 @@ export class Dispatcher {
             const pending = Promise.resolve(
               name === 'setattr'
                 ? this.applySetattr(mount, scope, p, opKwargs)
-                : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
+                : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access, report),
             )
             onCall?.(pending)
             return pending
@@ -2503,12 +2725,14 @@ export class Dispatcher {
               )
             },
             async () => {
-              await this.evictFailedWrite(name, p, dst, others, lostPaths(line), owners)
+              if (mine.some((rec) => rec.changed))
+                await this.evictFailedWrite(name, p, dst, others, lostPaths(line), owners)
             },
             owners,
           )
         } catch (err) {
-          await this.evictFailedWrite(name, p, dst, others, lostPaths(line))
+          if (mine.some((rec) => rec.changed))
+            await this.evictFailedWrite(name, p, dst, others, lostPaths(line))
           throw err
         }
       } else if (name === 'before_full_walk' && !(await isDirectory(mount, p))) {
@@ -2521,6 +2745,7 @@ export class Dispatcher {
           fullKwargs.files = await this.fullWalkFiles(mount, vfs, call)
         if (names(call, this.caller)) await this.reconciler.reconcileRead(mount, p.virtual)
         const answered = probed(call, mount)
+        if (answered !== null && report !== undefined) report.answerer = 'index'
         result = answered ?? (await run(fullKwargs))
         if (call.fresh) {
           await this.reconciler.onFreshStat(
@@ -3517,7 +3742,9 @@ export class Dispatcher {
       target = found
       result = found
     }
-    record(name, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
+    record(name, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer, {
+      served: 'namespace',
+    })
     memoryAnswered(report)
     return (await boundary.complete(mark, path, write, result, issuer)) as string | FileStat | null
   }
@@ -3935,7 +4162,7 @@ export class Dispatcher {
       if (value !== undefined && value !== null) overlay[key] = value as number | string
     }
     await this.writeOverlay(p.virtual, overlay)
-    record('setattr', p.virtual, VFSName.RAM, 0, timer)
+    record('setattr', p.virtual, VFSName.RAM, 0, timer, { served: 'namespace' })
     return overlay
   }
 
