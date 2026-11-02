@@ -16,6 +16,7 @@ import { currentCaller, type RedirectResult } from '../../context/session_contex
 import { isFsError } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { asyncChain } from '../../io/stream.ts'
+import { activeRecords } from '../../observe/context.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -211,7 +212,7 @@ async function runProgram(
       continue
     }
     if (session.shellOptions.noexec === true) break
-    if (reading !== null) await reading.reach(child, session)
+    if (reading !== null) await reading.reach(child, session, activeRecords() ?? [])
     if (!reread && startRow > echoedRow) {
       const first = echoedRow + 1
       const last = child.endPosition?.row ?? startRow

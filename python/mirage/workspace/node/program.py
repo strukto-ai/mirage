@@ -19,6 +19,7 @@ from mirage.context.session_context import current_caller
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
+from mirage.observe.context import active_records
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.runtime.types import DispatchFn
@@ -221,7 +222,7 @@ async def _run_program(
         if session.shell_options.get("noexec"):
             break
         if reading is not None:
-            await reading.reach(child, session)
+            await reading.reach(child, session, active_records() or [])
         if not reread and child.start_point[0] > echoed_row:
             first = echoed_row + 1
             last = child.end_point[0]

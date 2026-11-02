@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from mirage.workspace.evaluation import EvaluationContext
     from mirage.workspace.session.session import SessionState
     from mirage.workspace.types import ExecutionNode, StatusWriter
-    from mirage.workspace.workspace.history import LineHistory
+    from mirage.workspace.history.line import LineHistory
 
 
 T = TypeVar("T")

@@ -13,48 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ParseScope } from '../../shell/parse/scope.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { historyEntries } from './history.ts'
-import { Workspace } from './workspace.ts'
+import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
-
-function entries(input: string): (string | null)[] {
-  const scope = new ParseScope()
-  try {
-    return historyEntries(scope.parse(input) as unknown as TSNodeLike).map((e) => e.text)
-  } finally {
-    scope.release()
-  }
-}
-
-describe('historyEntries', () => {
-  // Each pinned against Debian Bash 5.2.37, `bash --norc -i` with `set +H`.
-  it.each([
-    ['echo a\necho b; echo c\n', ['echo a', 'echo b; echo c']],
-    ['for i in 1 2\ndo echo $i\ndone\n', ['for i in 1 2; do echo $i; done']],
-    ['if true\nthen\necho y\nelse\necho n\nfi\n', ['if true; then echo y; else echo n; fi']],
-    ['f()\n{\n:\n}\n', ['f() { :; }']],
-    ['echo a |\ncat\ntrue &&\necho b\n', ['echo a | cat', 'true && echo b']],
-    ['echo c \\\n  d\n', ['echo c   d']],
-    ['echo "q\nr" $(echo a\necho b)\n', ['echo "q\nr" $(echo a\necho b)']],
-    ['case y in\ny)\necho y\n;;\nesac\n', ['case y in y) echo y; ;; esac']],
-    ['if (true)\nthen :\nfi\na=(1\n2)\n', ['if (true); then :; fi', 'a=(1 2)']],
-    ['cat <<A; echo after\nbody\nA\necho z\n', ['cat <<A; echo after\nbody\nA\n', 'echo z']],
-    ['if true; then cat <<A\nx\nA\nfi\n', ['if true; then cat <<A\nx\nA\n fi']],
-    ['X=$(cat <<A\nx\nA\n)\n', ['X=$(cat <<A\nx\nA\n\n)']],
-    ['X=$(curl a \\\n  -H b)\n', ['X=$(curl a \\\n  -H b)']],
-    ['for i in 1\n# c\ndo :\ndone\n', ['for i in 1\ndo :; done']],
-    ['if true # why\nthen :; fi\n', ['if true # why\nthen :; fi']],
-    ['if true\n\nthen :\n   \nfi\n', ['if true;  then :;     fi']],
-    ['# note\n\n   \nfalse\n', ['# note', '   ', 'false']],
-  ])('%j', (input, expected) => {
-    expect(entries(input)).toEqual(expected)
-  })
-})
 
 describe('a line of several commands', () => {
   function build(): Workspace {
