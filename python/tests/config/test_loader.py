@@ -30,7 +30,9 @@ from mirage.config import (
     S3StoreBlock,
     WorkspaceConfig,
     _build_runtime_entries,
+    build_mcp_clis,
     load_config,
+    resolve_secrets,
 )
 from mirage.io.memory import MAX_MEMORY
 from mirage.policy import DEFAULT_DENY_REASON, CommandRule
@@ -59,6 +61,7 @@ from mirage.workspace.store import (
     RAMWorkspaceStateStore,
     RedisWorkspaceStateStore,
 )
+from tests.fixtures.mcp_server import TOKEN, served_mcp
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -1740,3 +1743,46 @@ def test_a_ram_config_refuses_a_capacity_that_is_not_a_size(capacity):
     )
     with pytest.raises(ValueError, match="capacity must be a size like 100MB"):
         cfg.to_workspace_kwargs()
+
+
+def test_an_mcp_entry_needs_its_cli_built_first():
+    cfg = load_config(
+        {
+            "mounts": {},
+            "clis": {"fx": {"cli": "mcp", "config": {"url": "http://x/mcp"}}},
+        }
+    )
+    with pytest.raises(ValueError, match="build_mcp_clis"):
+        cfg.to_workspace_kwargs()
+
+
+@pytest.mark.asyncio
+async def test_an_mcp_entry_builds_from_its_server_with_an_env_token(
+    monkeypatch,
+):
+    monkeypatch.setenv("FX_TOKEN", TOKEN)
+    token = {"from": "env", "key": "FX_TOKEN"}
+    async with served_mcp() as fake:
+        cfg = await resolve_secrets(
+            load_config(
+                {
+                    "mounts": {},
+                    "clis": {
+                        "fx": {
+                            "cli": "mcp",
+                            "config": {
+                                "url": fake.url,
+                                "auth": {"type": "bearer", "token": token},
+                            },
+                        }
+                    },
+                }
+            )
+        )
+        kwargs = cfg.to_workspace_kwargs(mcp_clis=await build_mcp_clis(cfg))
+        ws = Workspace(**kwargs)
+        try:
+            result = await ws.shell("fx list-items")
+        finally:
+            await ws.close()
+    assert (result.exit_code, result.stdout) == (0, b"apple\nbanana\n")

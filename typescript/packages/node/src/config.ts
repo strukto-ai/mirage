@@ -14,6 +14,8 @@
 
 import type { CacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import type { IndexConfig, RedisIndexConfig } from '@struktoai/mirage-core/cache/index/config'
+import { mcpCli } from '@struktoai/mirage-core/commands/cli/mcp/build'
+import { NAME as MCP_CLI } from '@struktoai/mirage-core/commands/cli/mcp/constants'
 import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { IOConfig } from '@struktoai/mirage-core/io/config'
@@ -1089,12 +1091,16 @@ function asCliSpec(value: unknown, name: string, ref: string): CLI {
   throw new Error(`clis entry '${name}': ${ref} is not a CLI`)
 }
 
-async function buildCliEntries(
-  clis: Record<string, CLIBlock>,
+/**
+ * Each `clis:` entry checked and resolved to its tree and its config, pointers
+ * read; an `mcp` entry's tree is listed from its server.
+ */
+export async function buildCliEntries(
+  clis: Readonly<Record<string, unknown>>,
   sources?: Readonly<Record<string, ResolvedSource>>,
 ): Promise<Record<string, [string | CLI, Record<string, unknown> | null]>> {
   const out: Record<string, [string | CLI, Record<string, unknown> | null]> = {}
-  for (const [name, block] of Object.entries(clis as Record<string, unknown>)) {
+  for (const [name, block] of Object.entries(clis)) {
     // The raw config arrives as unvalidated YAML: the CLIBlock type is
     // a claim, not a guarantee, so validate the shape here.
     if (!isPlainObject(block)) {
@@ -1128,20 +1134,21 @@ async function buildCliEntries(
     // is synchronous. A `vfs:` value reads the same way, resolved by
     // `buildVfs` rather than here, because a mount block reaches the
     // registry and a `clis` block does not.
+    // `cli: mcp` names no registered tree: the tree is its server's tool list.
     const entry = hasScript
       ? new CLI({
           spec: new CommandSpec({ name }),
           script: loadScriptSource(block.script as string),
           runtime: block.runtime ?? null,
         })
-      : await resolveCliRef(block.cli as string, name)
+      : block.cli === MCP_CLI
+        ? null
+        : await resolveCliRef(block.cli as string, name)
     // A CLI credential reads a pointer the way a mount's does: the
     // account CLI's `config_model` is the same model a VFS
     // parses, so it must receive the credential, not the pointer.
-    out[name] = [
-      entry,
-      await resolveConfigSecrets(block.config ?? {}, sources, `clis.${name}.config`),
-    ]
+    const config = await resolveConfigSecrets(block.config ?? {}, sources, `clis.${name}.config`)
+    out[name] = [entry ?? (await mcpCli(config)), config]
   }
   return out
 }
