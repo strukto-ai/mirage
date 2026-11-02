@@ -21,18 +21,32 @@ from aiofiles.os import path as aio_path
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record, start_op
+from mirage.observe.record import OpStatus
 from mirage.types import PathSpec
 
 
 async def rm_r(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     p = await resolve_inside(accessor.root, path_spec)
     timer = start_op()
+    failure: BaseException | None = None
     try:
         if await aio_path.isdir(p):
             await asyncio.to_thread(shutil.rmtree, p)
         elif await aio_path.exists(p):
             await aiofiles.os.remove(p)
+    except BaseException as exc:
+        failure = exc
+        raise
     finally:
         # Also when the walk raised: rmtree that fails part-way has
         # already removed entries, as on the object stores.
-        record("rm_r", path_spec.virtual, "disk", 0, timer)
+        record(
+            "rm_r",
+            path_spec.virtual,
+            "disk",
+            0,
+            timer,
+            status=OpStatus.PARTIAL if failure else OpStatus.OK,
+            errno=getattr(failure, "errno", None),
+            changed=True,
+        )

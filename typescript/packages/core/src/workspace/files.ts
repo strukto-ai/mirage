@@ -797,14 +797,14 @@ export class WorkspaceFiles extends Files {
   /** Total bytes transferred over the network. */
   get networkBytes(): number {
     let total = 0
-    for (const r of this.recorded) if (!r.isCache) total += r.bytes
+    for (const r of this.recorded) if (r.served === 'backend') total += r.bytes
     return total
   }
 
   /** Total bytes served from cache. */
   get cacheBytes(): number {
     let total = 0
-    for (const r of this.recorded) if (r.isCache) total += r.bytes
+    for (const r of this.recorded) if (r.served === 'cache') total += r.bytes
     return total
   }
 }

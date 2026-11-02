@@ -137,6 +137,10 @@ def test_internal_mount_identity_is_not_serialized():
         "duration_ms",
         "fingerprint",
         "revision",
+        "status",
+        "errno",
+        "changed",
+        "served",
     }
     assert ExecutionNode(records=[record]).to_dict()["records"] == [fields]
 
@@ -189,3 +193,22 @@ def test_the_index_reads_each_record_once():
     index.newest_version("/a")
     records[0] = _op("read", "/b")
     assert index.newest_version("/b") is None
+
+
+def test_failed_mutation_preserves_the_read_version():
+    from mirage.observe.record import OpStatus
+
+    read = _op("read", "/a")
+    failed = OpRecord(
+        "unlink", "/a", "ram", 0, 1, 0, status=OpStatus.FAILED, errno=13
+    )
+    assert failed.changed is False
+    assert RecordIndex([read, failed]).newest_version("/a") is read
+    assert failed.to_dict()["status"] == "failed"
+
+
+def test_mutations_and_ram_reads_have_independent_effect_and_server():
+    assert _op("write", "/a").changed is True
+    read = OpRecord("read", "/a", "ram", 3, 1, 0)
+    assert read.changed is False
+    assert read.served == "backend"

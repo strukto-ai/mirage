@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.key_prefix import under_path
@@ -79,7 +80,29 @@ VERSION_OPS = STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS
 SUBTREE_RETRACT_OPS = frozenset({"rm_r", "rename_prefix", "copy_prefix"})
 
 
-@dataclass
+class OpStatus(StrEnum):
+    OK = "ok"
+    FAILED = "failed"
+    PARTIAL = "partial"
+
+
+class OpServed(StrEnum):
+    BACKEND = "backend"
+    CACHE = "cache"
+    INDEX = "index"
+    NAMESPACE = "namespace"
+
+
+MUTATION_OPS = (
+    CONTENT_CHANGING_OPS
+    | RETRACT_FINGERPRINT_OPS
+    | frozenset(
+        {"mkdir", "setattr", "symlink", "setxattr", "removexattr", "dir_copy"}
+    )
+)
+
+
+@dataclass(init=False)
 class OpRecord:
     """A single observed I/O operation.
 
@@ -120,10 +143,48 @@ class OpRecord:
     execution_id: str | None = None
     complete: bool = field(default=True, init=False, repr=False, compare=False)
 
-    @property
-    def is_cache(self) -> bool:
-        """Whether this op was served from the in-memory cache."""
-        return self.source == "ram"
+    status: OpStatus = OpStatus.OK
+    errno: int | None = None
+    changed: bool = False
+    served: OpServed = OpServed.BACKEND
+
+    def __init__(
+        self,
+        op: str,
+        path: str,
+        source: str,
+        bytes: int,
+        timestamp: int,
+        duration_ms: int,
+        fingerprint: str | None = None,
+        revision: str | None = None,
+        mount_id: str | None = None,
+        execution_id: str | None = None,
+        *,
+        status: OpStatus = OpStatus.OK,
+        errno: int | None = None,
+        changed: bool | None = None,
+        served: OpServed = OpServed.BACKEND,
+    ) -> None:
+        self.op = op
+        self.path = path
+        self.source = source
+        self.bytes = bytes
+        self.timestamp = timestamp
+        self.duration_ms = duration_ms
+        self.fingerprint = fingerprint
+        self.revision = revision
+        self.mount_id = mount_id
+        self.execution_id = execution_id
+        self.complete = True
+        self.status = status
+        self.errno = errno
+        self.changed = (
+            status != OpStatus.FAILED and op in MUTATION_OPS
+            if changed is None
+            else changed
+        )
+        self.served = served
 
     def to_dict(self) -> dict[str, str | int | None]:
         """Public observation fields, excluding in-process mount ownership."""
@@ -136,6 +197,10 @@ class OpRecord:
             "duration_ms": self.duration_ms,
             "fingerprint": self.fingerprint,
             "revision": self.revision,
+            "status": self.status,
+            "errno": self.errno,
+            "changed": self.changed,
+            "served": self.served,
             **(
                 {"execution_id": self.execution_id}
                 if self.execution_id is not None
@@ -165,6 +230,10 @@ class RecordIndex:
     def _absorb(self) -> None:
         for i in range(self._seen, len(self._records)):
             rec = self._records[i]
+            if rec.status == OpStatus.FAILED or (
+                rec.op != "read" and not rec.changed
+            ):
+                continue
             if rec.op in VERSION_OPS:
                 self._at[rec.path] = i
             if rec.op in SUBTREE_RETRACT_OPS:
@@ -273,7 +342,10 @@ class LostPaths:
         if mark is None:
             return False
         return not any(
-            rec.path == key and rec.op in STAMP_FINGERPRINT_OPS
+            rec.path == key
+            and rec.op in STAMP_FINGERPRINT_OPS
+            and rec.status == OpStatus.OK
+            and (rec.op == "read" or rec.changed)
             for rec in self.sink[mark.at :]
         )
 

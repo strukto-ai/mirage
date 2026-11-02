@@ -32,9 +32,11 @@ export async function mkdir(
   const full = await resolveInside(root, path)
   const timer = startOp()
   if (parents) {
+    let failure: unknown = null
     try {
       await fsMkdir(full, { recursive: true })
     } catch (err) {
+      failure = err
       // The kernel names the whole path; GNU names the component it tripped
       // on, so the chain is walked only now that it is known to be broken.
       const named =
@@ -45,7 +47,14 @@ export async function mkdir(
     } finally {
       // Also when it threw: the chain may have made its first directories
       // before a later one failed.
-      record('mkdir', path.virtual, VFSName.DISK, 0, timer)
+      record('mkdir', path.virtual, VFSName.DISK, 0, timer, {
+        status: failure === null ? 'ok' : 'partial',
+        changed: true,
+        errno:
+          failure instanceof Error && 'errno' in failure && typeof failure.errno === 'number'
+            ? failure.errno
+            : null,
+      })
     }
     return
   }

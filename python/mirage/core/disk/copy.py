@@ -22,6 +22,7 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_error
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record, start_op
+from mirage.observe.record import OpStatus
 from mirage.types import PathSpec
 
 
@@ -32,6 +33,7 @@ async def copy(
     s = await resolve_inside(root, src_spec)
     d = await resolve_inside(root, dst_spec)
     timer = start_op()
+    failure: BaseException | None = None
     try:
         try:
             await asyncio.to_thread(shutil.copyfile, s, d)
@@ -46,7 +48,19 @@ async def copy(
             ) and not await aiofiles.os.access(s, os.R_OK)
             spec = src_spec if blame_src else dst_spec
             raise disk_error(exc, spec.virtual) from exc
+    except BaseException as exc:
+        failure = exc
+        raise
     finally:
         # Also when the copy raised: copyfile that fails part-way has
         # already written the destination, as on the object stores.
-        record("copy", dst_spec.virtual, "disk", 0, timer)
+        record(
+            "copy",
+            dst_spec.virtual,
+            "disk",
+            0,
+            timer,
+            status=OpStatus.PARTIAL if failure else OpStatus.OK,
+            errno=getattr(failure, "errno", None),
+            changed=True,
+        )

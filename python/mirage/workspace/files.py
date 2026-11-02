@@ -1126,12 +1126,12 @@ class WorkspaceFiles(Files):
     @property
     def network_bytes(self) -> int:
         """Total bytes transferred over the network."""
-        return sum(r.bytes for r in self.records if not r.is_cache)
+        return sum(r.bytes for r in self.records if r.served == "backend")
 
     @property
     def cache_bytes(self) -> int:
         """Total bytes served from cache."""
-        return sum(r.bytes for r in self.records if r.is_cache)
+        return sum(r.bytes for r in self.records if r.served == "cache")
 
     def is_mounted(self, path: str) -> bool:
         """Check if a path is under a mount someone made.

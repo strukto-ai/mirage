@@ -221,6 +221,10 @@ export function recordingActive(): boolean {
 }
 
 export interface RecordOptions {
+  status?: OpRecord['status']
+  errno?: number | null
+  changed?: boolean
+  served?: OpRecord['served']
   fingerprint?: string | null
   revision?: string | null
 }
@@ -281,6 +285,7 @@ export function finishRecord(
     bytes: nbytes,
     timestamp: Math.floor(timer.clock.now() * 1000),
     durationMs: elapsed,
+    ...options,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
     mountId: currentCaller().recording?.mountId ?? null,
@@ -338,6 +343,7 @@ export function recordStream(
     bytes: 0,
     timestamp: Math.floor(state.clock.now() * 1000),
     durationMs: 0,
+    ...options,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
     mountId: currentCaller().recording?.mountId ?? null,

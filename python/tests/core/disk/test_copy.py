@@ -122,3 +122,38 @@ async def test_copy_never_leaks_the_host_path(accessor):
                 PathSpec.from_str_path(dst),
             )
         assert str(accessor.root) not in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_copy_records_partial_after_bytes_were_written(
+    accessor, monkeypatch
+):
+    import errno
+
+    from mirage.core.disk import copy as module
+    from mirage.observe.context import RecordingScope
+
+    (accessor.root / "src").write_bytes(b"content")
+
+    def fail_metadata(src, dst):
+        raise OSError(errno.EACCES, "denied")
+
+    monkeypatch.setattr(module.shutil, "copystat", fail_metadata)
+    scope = RecordingScope()
+    try:
+        with pytest.raises(OSError):
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/dst"),
+            )
+    finally:
+        scope.close()
+    assert (accessor.root / "dst").read_bytes() == b"content"
+    assert len(scope.records) == 1
+    row = scope.records[0]
+    assert (row.status, row.changed, row.errno) == (
+        "partial",
+        True,
+        errno.EACCES,
+    )

@@ -25,6 +25,7 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
   const s = await resolveInside(accessor.root, src)
   const d = await resolveInside(accessor.root, dst)
   const timer = startOp()
+  let failure: unknown = null
   try {
     try {
       await copyFile(s, d)
@@ -43,9 +44,19 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
       }
       throw diskError(err, blame)
     }
+  } catch (err) {
+    failure = err
+    throw err
   } finally {
     // Also when the copy raised: copyFile that fails part-way has already
     // written the destination, as on the object stores.
-    record('copy', dst.virtual, VFSName.DISK, 0, timer)
+    record('copy', dst.virtual, VFSName.DISK, 0, timer, {
+      status: failure === null ? 'ok' : 'partial',
+      changed: true,
+      errno:
+        failure instanceof Error && 'errno' in failure && typeof failure.errno === 'number'
+          ? failure.errno
+          : null,
+    })
   }
 }

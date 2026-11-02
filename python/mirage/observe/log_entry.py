@@ -15,7 +15,7 @@
 import json
 from dataclasses import asdict, dataclass
 
-from mirage.observe.record import OpRecord
+from mirage.observe.record import OpRecord, OpServed, OpStatus
 
 EVENT_VFS = "vfs"
 EVENT_COMMAND = "command"
@@ -73,6 +73,10 @@ class LogEntry:
     stdout: str | None = None
     stderr: str | None = None
     offset: int | None = None
+    status: OpStatus | None = None
+    errno: int | None = None
+    changed: bool | None = None
+    served: OpServed | None = None
 
     @staticmethod
     def from_op_record(
@@ -103,6 +107,10 @@ class LogEntry:
             bytes=rec.bytes,
             duration_ms=rec.duration_ms,
             parent=parent,
+            status=rec.status,
+            errno=rec.errno,
+            changed=rec.changed,
+            served=rec.served,
         )
 
     def to_json_line(self) -> str:

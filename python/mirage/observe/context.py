@@ -26,6 +26,8 @@ from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     LostPaths,
     OpRecord,
+    OpServed,
+    OpStatus,
     Recorder,
     RecordIndex,
 )
@@ -348,6 +350,11 @@ def finish_record(
     timer: OpTimer,
     fingerprint: str | None = None,
     revision: str | None = None,
+    *,
+    status: OpStatus = OpStatus.OK,
+    errno: int | None = None,
+    changed: bool | None = None,
+    served: OpServed = OpServed.BACKEND,
 ) -> OpRecord:
     """Close ``timer`` and build the finished record.
 
@@ -376,6 +383,10 @@ def finish_record(
         duration_ms=elapsed,
         fingerprint=fingerprint,
         revision=revision,
+        status=status,
+        errno=errno,
+        changed=changed,
+        served=served,
         mount_id=recorder.mount_id if recorder is not None else None,
         execution_id=current_execution_id(),
     )
@@ -405,6 +416,11 @@ def record(
     timer: OpTimer,
     fingerprint: str | None = None,
     revision: str | None = None,
+    *,
+    status: OpStatus = OpStatus.OK,
+    errno: int | None = None,
+    changed: bool | None = None,
+    served: OpServed = OpServed.BACKEND,
 ) -> None:
     """Record a byte transfer event. No-op if no recording context is active.
 
@@ -432,6 +448,10 @@ def record(
         timer,
         fingerprint=fingerprint,
         revision=revision,
+        status=status,
+        errno=errno,
+        changed=changed,
+        served=served,
     )
     rec.sink.append(op_rec)
     _charge(op_rec)

@@ -19,6 +19,7 @@ from mirage.core.disk.dest import mkdir_component_error
 from mirage.core.disk.errors import disk_error, disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record, start_op
+from mirage.observe.record import OpStatus
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
@@ -33,9 +34,11 @@ async def mkdir(
     if parents:
         # Not `disk_errors`: that restamps every OSError against the
         # operand, which would undo the component naming below.
+        failure: BaseException | None = None
         try:
             await aiofiles.os.makedirs(p, exist_ok=True)
         except NotADirectoryError as exc:
+            failure = exc
             # The kernel names the whole path; GNU names the component it
             # tripped on, so the chain is walked only now that it is known
             # to be broken. A failure the walk cannot explain keeps the
@@ -43,11 +46,24 @@ async def mkdir(
             named = await mkdir_component_error(root, path_spec, norm(path))
             raise (named or disk_error(exc, path_spec.virtual)) from exc
         except OSError as exc:
+            failure = exc
             raise disk_error(exc, path_spec.virtual) from exc
+        except BaseException as exc:
+            failure = exc
+            raise
         finally:
             # Also when it raised: the chain may have made its first
             # directories before a later one failed.
-            record("mkdir", path_spec.virtual, "disk", 0, timer)
+            record(
+                "mkdir",
+                path_spec.virtual,
+                "disk",
+                0,
+                timer,
+                status=OpStatus.PARTIAL if failure else OpStatus.OK,
+                errno=getattr(failure, "errno", None),
+                changed=True,
+            )
         return
     # An existing target is EEXIST, not success: only -p is idempotent.
     done = True

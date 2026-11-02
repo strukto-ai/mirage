@@ -86,7 +86,7 @@ async def test_a_written_path_carries_no_token_then_heals_in_one_read():
             writes = [
                 r.fingerprint
                 for r in ws.vfs.records
-                if not r.is_cache and r.op == "write"
+                if r.served == "backend" and r.op == "write"
             ]
             assert writes == [None]
             # Absent, not merely different: an invented token would pass a

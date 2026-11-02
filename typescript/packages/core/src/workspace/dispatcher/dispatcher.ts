@@ -427,7 +427,7 @@ function retracted(virtual: string): boolean {
   const records = activeRecords()
   if (records === undefined) return false
   const rec = recordIndex(records).newestVersion(virtual)
-  return rec !== null && RETRACT_FINGERPRINT_OPS.has(rec.op)
+  return rec !== null && rec.changed && RETRACT_FINGERPRINT_OPS.has(rec.op)
 }
 
 /**

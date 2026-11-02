@@ -23,11 +23,22 @@ import { resolveInside } from './utils.ts'
 export async function rmR(accessor: DiskAccessor, path: PathSpec): Promise<void> {
   const full = await resolveInside(accessor.root, path)
   const timer = startOp()
+  let failure: unknown = null
   try {
     await rm(full, { recursive: true, force: true })
+  } catch (err) {
+    failure = err
+    throw err
   } finally {
     // Also when the walk raised: a removal that fails part-way has
     // already removed entries, as on the object stores.
-    record('rm_r', path.virtual, VFSName.DISK, 0, timer)
+    record('rm_r', path.virtual, VFSName.DISK, 0, timer, {
+      status: failure === null ? 'ok' : 'partial',
+      changed: true,
+      errno:
+        failure instanceof Error && 'errno' in failure && typeof failure.errno === 'number'
+          ? failure.errno
+          : null,
+    })
   }
 }

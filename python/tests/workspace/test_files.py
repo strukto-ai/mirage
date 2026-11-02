@@ -612,7 +612,7 @@ async def test_a_namespace_answer_is_not_a_backend_op(deep_only_session):
     try:
         ws.vfs.records.clear()
         assert await ws.vfs.readdir("/m/inner") == ["/m/inner/deep"]
-        assert [(r.source, r.is_cache) for r in ws.vfs.records] == [
+        assert [(r.source, r.served == "cache") for r in ws.vfs.records] == [
             ("ram", True)
         ]
     finally:
@@ -642,7 +642,7 @@ async def test_a_denied_namespace_answer_is_not_a_backend_op(
         ws.vfs.records.clear()
         with pytest.raises(PermissionError):
             await ws.vfs.readdir("/m/inner")
-        assert [(r.source, r.is_cache) for r in ws.vfs.records] == [
+        assert [(r.source, r.served == "cache") for r in ws.vfs.records] == [
             ("ram", True)
         ]
     finally:

@@ -694,7 +694,9 @@ def _retracted(virtual: str) -> bool:
     if recorder is None:
         return False
     rec = recorder.index.newest_version(virtual)
-    return rec is not None and rec.op in RETRACT_FINGERPRINT_OPS
+    return (
+        rec is not None and rec.changed and rec.op in RETRACT_FINGERPRINT_OPS
+    )
 
 
 def _spelled_under(call: "_Call", entries: list[str]) -> list[str]:
