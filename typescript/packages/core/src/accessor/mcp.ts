@@ -59,6 +59,7 @@ export class MCPAccessor extends Accessor {
   private opening: Promise<Client> | null = null
   private readonly calls = new Map<Promise<Client>, number>()
   private readonly dropped = new Set<Promise<Client>>()
+  private readonly closing = new Set<Promise<void>>()
 
   constructor(readonly config: MCPConfig) {
     super()
@@ -88,14 +89,41 @@ export class MCPAccessor extends Accessor {
     return client
   }
 
-  /** End the server's MCP session, then close the client, as Python's SDK does on close. */
+  /**
+   * End the server's MCP session, waiting at most the call timeout, then close
+   * the client, which aborts a session end still in flight.
+   */
   private async shut(client: Client): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      await (client.transport as StreamableHTTPClientTransport | undefined)?.terminateSession()
+      await Promise.race([
+        (client.transport as StreamableHTTPClientTransport | undefined)?.terminateSession(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error('the server did not end the session in time'))
+          }, TIMEOUT)
+        }),
+      ])
     } catch (error) {
       logger.debug?.(`MCP session end failed: ${String(error)}`)
+    } finally {
+      clearTimeout(timer)
     }
     await client.close()
+  }
+
+  /** Shut `opening` in the background, kept in `closing` so `close` joins it. */
+  private shutting(opening: Promise<Client>): Promise<void> {
+    const done: Promise<void> = opening
+      .then((client) => this.shut(client))
+      .catch((error: unknown) => {
+        logger.debug?.(`MCP client close failed: ${String(error)}`)
+      })
+      .finally(() => {
+        this.closing.delete(done)
+      })
+    this.closing.add(done)
+    return done
   }
 
   /** Run `use` on an initialized client, closed when it settles. */
@@ -137,12 +165,7 @@ export class MCPAccessor extends Accessor {
       return
     }
     this.calls.delete(opening)
-    if (!this.dropped.delete(opening)) return
-    void opening
-      .then((client) => this.shut(client))
-      .catch((error: unknown) => {
-        logger.debug?.(`MCP client close failed: ${String(error)}`)
-      })
+    if (this.dropped.delete(opening)) void this.shutting(opening)
   }
 
   /** The server's title and every tool it lists; the SDK reads every page. */
@@ -182,12 +205,7 @@ export class MCPAccessor extends Accessor {
     const openings = [...(this.opening === null ? [] : [this.opening]), ...this.dropped]
     this.opening = null
     this.dropped.clear()
-    for (const opening of openings) {
-      try {
-        await this.shut(await opening)
-      } catch (error) {
-        logger.debug?.(`MCP client close failed: ${String(error)}`)
-      }
-    }
+    for (const opening of openings) void this.shutting(opening)
+    while (this.closing.size > 0) await Promise.allSettled([...this.closing])
   }
 }

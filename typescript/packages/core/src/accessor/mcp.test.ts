@@ -18,7 +18,7 @@ import {
   METHOD_NOT_FOUND,
   ProtocolError,
 } from '@modelcontextprotocol/client'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   bearerConfig,
   API_KEY,
@@ -32,7 +32,7 @@ import { MCPConfig } from '../core/mcp/config.ts'
 import { parseConfigWithSchema } from '../vfs/secrets.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { answered, MCPAccessor } from './mcp.ts'
+import { answered, MCPAccessor, TIMEOUT } from './mcp.ts'
 
 describe('MCPAccessor', () => {
   it.each([
@@ -140,6 +140,51 @@ describe('MCPAccessor', () => {
     [new Error('x'), false],
   ])('keeps the client only for an error the server answered: %s', async (error, kept) => {
     expect(await answered(error)).toBe(kept)
+  })
+
+  it('joins a dropped client still closing when it closes', async () => {
+    const fake = await servedMcp()
+    const accessor = new MCPAccessor(parseConfigWithSchema(MCPConfig, bearerConfig(fake)))
+    try {
+      const held = accessor.callTool('echo_args', { delay: 300 })
+      for (let i = 0; i < 500 && fake.started.length === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      fake.down = true
+      await expect(accessor.callTool('list_items', {})).rejects.toThrow()
+      fake.down = false
+      fake.stalling = true
+      await held
+      let closed = false
+      const closing = accessor.close().then(() => {
+        closed = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      expect(closed).toBe(false)
+      await fake.close()
+      await closing
+    } finally {
+      await fake.close()
+    }
+  })
+
+  it('cuts a session end the server never answers off after the call timeout', async () => {
+    const fake = await servedMcp()
+    const accessor = new MCPAccessor(parseConfigWithSchema(MCPConfig, bearerConfig(fake)))
+    try {
+      await accessor.callTool('list_items', {})
+      fake.stalling = true
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const closing = accessor.close()
+      await vi.waitFor(() => {
+        expect(fake.requests.map((r) => r.method)).toContain('DELETE')
+      })
+      await vi.advanceTimersByTimeAsync(TIMEOUT)
+      await closing
+    } finally {
+      vi.useRealTimers()
+      await fake.close()
+    }
   })
 
   it('closes the client when the CLI is removed', async () => {
