@@ -32,7 +32,7 @@ from mirage.observe.log_entry import (
     STDOUT_TRUNCATE,
     LogEntry,
 )
-from mirage.observe.record import OpRecord
+from mirage.observe.record import OpRecord, OpStatus
 from mirage.observe.store import ObserverStore, RAMObserverStore
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.dates import utc_date_folder
@@ -118,8 +118,16 @@ def _trace_line(
                     "mirage.vfs.path": rec.path,
                     "mirage.vfs.source": rec.source,
                     "mirage.vfs.bytes": rec.bytes,
+                    "mirage.vfs.status": rec.status.value,
+                    "mirage.vfs.changed": rec.changed,
+                    "mirage.vfs.served": rec.served.value,
                 },
             )
+            if rec.errno is not None:
+                call.set_attribute("mirage.vfs.errno", rec.errno)
+                call.set_attribute("error.type", str(rec.errno))
+            if rec.status in (OpStatus.FAILED, OpStatus.PARTIAL):
+                call.set_status(trace.StatusCode.ERROR)
             call.end(end_time=rec.timestamp * _NS_PER_MS)
     line.end(end_time=span[1] * _NS_PER_MS)
 

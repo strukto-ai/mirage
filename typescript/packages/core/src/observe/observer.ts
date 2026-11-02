@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { context, trace, type Attributes, type Tracer } from '@opentelemetry/api'
+import { context, trace, SpanStatusCode, type Attributes, type Tracer } from '@opentelemetry/api'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
 import type { JsonObject } from '../types.ts'
@@ -92,10 +92,19 @@ function traceLine(
             'mirage.vfs.path': rec.path,
             'mirage.vfs.source': rec.source,
             'mirage.vfs.bytes': rec.bytes,
+            'mirage.vfs.status': rec.status,
+            'mirage.vfs.changed': rec.changed,
+            'mirage.vfs.served': rec.served,
           },
         },
         parent,
       )
+      if (rec.errno !== null) {
+        call.setAttribute('mirage.vfs.errno', rec.errno)
+        call.setAttribute('error.type', String(rec.errno))
+      }
+      if (rec.status === 'failed' || rec.status === 'partial')
+        call.setStatus({ code: SpanStatusCode.ERROR })
       call.end(rec.timestamp)
     }
   }

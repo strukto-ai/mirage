@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 
+import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
@@ -463,6 +464,9 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
             "mirage.vfs.path": "/d/a",
             "mirage.vfs.source": "s3",
             "mirage.vfs.bytes": 6,
+            "mirage.vfs.status": "ok",
+            "mirage.vfs.changed": False,
+            "mirage.vfs.served": "backend",
         },
     )
     assert (call.start_time, call.end_time) == (
@@ -491,3 +495,51 @@ def test_bash_history_lists_lines_in_the_order_they_ended():
         ("quick", 1000),
         ("slow", 3000),
     ]
+
+
+@pytest.mark.parametrize(
+    "status,changed", [("failed", False), ("partial", True)]
+)
+def test_failed_and_partial_child_spans_export_the_outcome(
+    monkeypatch, status, changed
+):
+    from opentelemetry.trace import StatusCode
+
+    from mirage.observe.record import OpServed, OpStatus
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        observer_module, "_tracer", lambda: provider.get_tracer("t")
+    )
+    rec = OpRecord(
+        "unlink",
+        "/d/a",
+        "disk",
+        0,
+        1000,
+        5,
+        status=OpStatus(status),
+        errno=13,
+        changed=changed,
+        served=OpServed.BACKEND,
+    )
+    observer_module._trace_line("w", "s", "rm /d/a", (990, 1000), 1, [rec])
+    child, parent = exporter.get_finished_spans()
+    assert child.status.status_code == StatusCode.ERROR
+    assert (
+        child.parent is not None
+        and child.parent.span_id == parent.context.span_id
+    )
+    assert dict(child.attributes or {}) == {
+        "mirage.vfs.path": "/d/a",
+        "mirage.vfs.source": "disk",
+        "mirage.vfs.bytes": 0,
+        "mirage.vfs.status": status,
+        "mirage.vfs.errno": 13,
+        "mirage.vfs.changed": changed,
+        "mirage.vfs.served": "backend",
+        "error.type": "13",
+    }
+    provider.shutdown()
