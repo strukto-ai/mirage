@@ -10,7 +10,7 @@
       "command": "ls /mail",
       "expect": {
         "exit": 0,
-        "stdout": "INBOX\nSENT\nTRASH\nUNREAD\nexpenses\n",
+        "stdout": "DRAFT\nINBOX\nSENT\nTRASH\nUNREAD\nexpenses\n",
         "stderr": ""
       }
     },

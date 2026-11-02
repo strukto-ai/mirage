@@ -1547,6 +1547,72 @@
         "stdout": "msg0009\nmsg0008\nmsg0007\nmsg0006\nmsg0005\nmsg0003\nmsg0004\nmsg0001\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gw_gmail_drafts_create_passthrough",
+      "seq": 9940007,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "gws gmail users drafts create --params '{\"userId\": \"me\"}' --json '{\"message\": {\"raw\": \"VG86IGRhbmFAZXhhbXBsZS5jb20NClN1YmplY3Q6IERyYWZ0IHBsYW4NCg0KZmlyc3QgY3V0DQo=\"}}' | jq -r '.message.labelIds[]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "DRAFT\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_drafts_visible_via_mount",
+      "seq": 9940008,
+      "targets": [
+        "cli-gws"
+      ],
+      "clear_cache": true,
+      "command": "ls /mail/DRAFT/2026-02-01 | sed 's/__.*//'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Draft_plan\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_drafts_update_passthrough",
+      "seq": 9940009,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "D=$(gws gmail users drafts list --params '{\"userId\": \"me\"}' | jq -r '.drafts[0].id') && gws gmail users drafts update --params \"{\\\"userId\\\": \\\"me\\\", \\\"id\\\": \\\"$D\\\"}\" --json '{\"message\": {\"raw\": \"VG86IGRhbmFAZXhhbXBsZS5jb20NClN1YmplY3Q6IERyYWZ0IHBsYW4gdjINCg0Kc2Vjb25kIGN1dA0K\"}}' > /dev/null && gws gmail users drafts get --params \"{\\\"userId\\\": \\\"me\\\", \\\"id\\\": \\\"$D\\\"}\" | jq -r '.message.payload.headers[] | select(.name == \"Subject\") | .value'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Draft plan v2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_drafts_send_passthrough",
+      "seq": 9940010,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "D=$(gws gmail users drafts list --params '{\"userId\": \"me\"}' | jq -r '.drafts[0].id') && gws gmail users drafts send --params '{\"userId\": \"me\"}' --json \"{\\\"id\\\": \\\"$D\\\"}\" | jq -r '.labelIds[]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "SENT\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gw_gmail_drafts_delete_passthrough",
+      "seq": 9940011,
+      "targets": [
+        "cli-gws"
+      ],
+      "command": "D=$(gws gmail users drafts create --params '{\"userId\": \"me\"}' --json '{\"message\": {\"raw\": \"VG86IGRhbmFAZXhhbXBsZS5jb20NClN1YmplY3Q6IFNjcmFwDQoNCm5ldmVyIG1pbmQNCg==\"}}' | jq -r .id) && gws gmail users drafts delete --params \"{\\\"userId\\\": \\\"me\\\", \\\"id\\\": \\\"$D\\\"}\" && gws gmail users drafts list --params '{\"userId\": \"me\"}' | jq -c .",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"resultSizeEstimate\":0}\n",
+        "stderr": ""
+      }
     }
   ]
 }

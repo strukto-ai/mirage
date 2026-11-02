@@ -885,6 +885,73 @@ async function driveMoveHttp(at: string): Promise<void> {
   ])
 }
 
+async function draftsHttp(at: string): Promise<void> {
+  const base = `${at}/_run/drafts`
+  const gmail = `${base}/gmail/v1/users/me`
+  check('drafts world seeds', (await reset(base, { tenants: ['t1'], epoch: EPOCH })) === 200)
+  const message = (subject: string): JsonValue => ({
+    raw: Buffer.from(`To: dana@example.com\r\nSubject: ${subject}\r\n\r\nhello\r\n`).toString(
+      'base64url',
+    ),
+  })
+  const put = (id: string, body: JsonValue): ReturnType<typeof api> =>
+    api(`${gmail}/drafts/${id}`, 't1', { method: 'PUT', body: JSON.stringify(body) })
+  const made = obj((await post(`${gmail}/drafts`, 't1', { message: message('Plan') })).body)
+  const id = String(made.id)
+  const first = String(obj(made.message).id)
+  eq('drafts: a new draft holds a DRAFT message', obj(made.message).labelIds ?? null, ['DRAFT'])
+  eq(
+    'drafts: drafts.list lists it',
+    field(obj((await api(`${gmail}/drafts`, 't1')).body).drafts, 'id'),
+    [id],
+  )
+  eq(
+    'drafts: messages.list has its message under DRAFT',
+    field(obj((await api(`${gmail}/messages?labelIds=DRAFT`, 't1')).body).messages, 'id'),
+    [first],
+  )
+  const second = String(obj(obj((await put(id, { message: message('Plan v2') })).body).message).id)
+  check('drafts: drafts.update swaps in a new message', second !== first, second)
+  eq(
+    'drafts: and the one it held is gone',
+    (await api(`${gmail}/messages/${first}`, 't1')).status,
+    404,
+  )
+  const held = obj(obj((await api(`${gmail}/drafts/${id}`, 't1')).body).message)
+  eq(
+    'drafts: drafts.get gives the message in full',
+    arr(obj(held.payload).headers)
+      .map(obj)
+      .filter((h) => h.name === 'Subject')
+      .map((h) => h.value ?? null),
+    ['Plan v2'],
+  )
+  const sent = obj((await post(`${gmail}/drafts/send`, 't1', { id })).body)
+  eq(
+    'drafts: drafts.send sends the message it holds',
+    [sent.id ?? null, sent.labelIds ?? null],
+    [second, ['SENT']],
+  )
+  eq('drafts: and the draft is gone', (await api(`${gmail}/drafts/${id}`, 't1')).status, 404)
+  eq('drafts: drafts.list is then empty', (await api(`${gmail}/drafts`, 't1')).body, {
+    resultSizeEstimate: 0,
+  })
+  const scrap = String(
+    obj((await post(`${gmail}/drafts`, 't1', { message: message('Scrap') })).body).id,
+  )
+  eq(
+    'drafts: drafts.delete answers 204',
+    (await api(`${gmail}/drafts/${scrap}`, 't1', { method: 'DELETE' })).status,
+    204,
+  )
+  eq(
+    'drafts: a deleted draft cannot be sent',
+    (await post(`${gmail}/drafts/send`, 't1', { id: scrap })).status,
+    404,
+  )
+  eq('drafts: a draft needs a raw message', (await post(`${gmail}/drafts`, 't1', {})).status, 400)
+}
+
 async function formulasHttp(at: string): Promise<void> {
   const tenant = 'formulas'
   await reset(at, { tenants: [tenant], epoch: EPOCH })
@@ -1154,12 +1221,14 @@ async function main(): Promise<void> {
     await compatibilityHttp(at)
     await gridRangesHttp(at)
     await driveMoveHttp(at)
+    await draftsHttp(at)
     // ---- the base world is fixture rows, not constructor state
     check('a bare /reset seeds', (await reset(at, { tenants: ['t1'], epoch: EPOCH })) === 200)
     const labels = await api(`${at}/gmail/v1/users/me/labels`, 't1')
-    eq('the four system labels are fixture rows', field(obj(labels.body).labels, 'id'), [
+    eq('the five system labels are fixture rows', field(obj(labels.body).labels, 'id'), [
       'INBOX',
       'SENT',
+      'DRAFT',
       'UNREAD',
       'TRASH',
     ])

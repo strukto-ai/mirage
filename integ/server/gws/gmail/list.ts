@@ -14,11 +14,18 @@
 
 import type { JsonValue, Reply } from '../../kit/typescript/index.ts'
 import type { GwsState } from '../store/state.ts'
+import type { GmailMessage } from '../store/types.ts'
 import type { JsonObj } from '../wire/json.ts'
 import { ok } from '../wire/reply.ts'
 import { matchGmailQuery } from './query.ts'
 
 const DEFAULT_MAX_RESULTS = 100
+
+function newestFirst(a: GmailMessage, b: GmailMessage): number {
+  return a.internalDate === b.internalDate
+    ? b.id.localeCompare(a.id)
+    : b.internalDate - a.internalDate
+}
 
 export function listGmailMessages(st: GwsState, query: URLSearchParams): Reply {
   const q = query.get('q')
@@ -34,13 +41,36 @@ export function listGmailMessages(st: GwsState, query: URLSearchParams): Reply {
   if (q !== null && q.trim() !== '') {
     items = items.filter((msg) => matchGmailQuery(st, msg, q))
   }
-  items.sort((a, b) =>
-    a.internalDate === b.internalDate ? b.id.localeCompare(a.id) : b.internalDate - a.internalDate,
-  )
+  items.sort(newestFirst)
   items = items.slice(0, maxResults)
   const out: JsonObj = { resultSizeEstimate: items.length }
   if (items.length > 0) {
     out.messages = items.map((msg): JsonValue => ({ id: msg.id, threadId: msg.threadId }))
+  }
+  return ok(out)
+}
+
+// drafts.list: each draft with its message's ids, newest message first, and
+// `q` matched against the message as messages.list matches it.
+export function listGmailDrafts(st: GwsState, query: URLSearchParams): Reply {
+  const q = query.get('q')
+  const maxResults = parseInt(query.get('maxResults') ?? String(DEFAULT_MAX_RESULTS), 10)
+  const held = new Map<string, string>()
+  for (const draft of st.drafts.values()) held.set(draft.messageId, draft.id)
+  let items = [...held.keys()].flatMap((id) => {
+    const msg = st.messages.get(id)
+    return msg === undefined ? [] : [msg]
+  })
+  if (q !== null && q.trim() !== '') {
+    items = items.filter((msg) => matchGmailQuery(st, msg, q))
+  }
+  items = items.sort(newestFirst).slice(0, maxResults)
+  const out: JsonObj = { resultSizeEstimate: items.length }
+  if (items.length > 0) {
+    out.drafts = items.map((msg): JsonValue => ({
+      id: held.get(msg.id) ?? '',
+      message: { id: msg.id, threadId: msg.threadId },
+    }))
   }
   return ok(out)
 }
