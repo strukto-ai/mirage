@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "id": "truncate_resize_cuts_and_grows_a_multipart_file",
+      "seq": 15500601,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "tidb-filesystem"
+      ],
+      "command": "mkdir -p /data/fcE_tr && f=/data/fcE_tr/big; truncate -s 9M $f; wc -c < $f; truncate -s 8388600 $f; printf MARKER >> $f; truncate -s 9M $f; wc -c < $f; truncate -s 8388603 $f; tail -c 3 $f; echo; wc -c < $f; truncate -s 60000 $f; wc -c < $f; truncate -s 10 $f; wc -c < $f; truncate -s 0 $f; wc -c < $f; rm -rf /data/fcE_tr",
+      "expect": {
+        "exit": 0,
+        "stdout": "9437184\n9437184\nMAR\n8388603\n60000\n10\n0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ],
+      "note": "Sizes either side of drive9's 8 MiB part and 50,000-byte inline threshold, so on tidb-filesystem the cut inside the second part keeps the bytes before it, a cut to 60,000 and to 10 bytes go through a patch upload, and the growth goes through a native append."
+    },
+    {
+      "id": "truncate_resize_cuts_and_pads_a_small_file",
+      "seq": 15500602,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "tidb-filesystem"
+      ],
+      "command": "mkdir -p /data/fcE_ts2 && f=/data/fcE_ts2/s; printf 'hello world' > $f; truncate -s 5 $f; cat $f; echo; truncate -s 7 $f; wc -c < $f; tail -c 2 $f | tr '\\0' z; echo; truncate -s 0 $f; wc -c < $f; truncate -s 3 /data/fcE_ts2/new; wc -c < /data/fcE_ts2/new; printf abc > $f; : > $f; wc -c < $f; rm -rf /data/fcE_ts2",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\n7\nzz\n0\n3\n0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "s"
+      ]
+    }
+  ]
+}

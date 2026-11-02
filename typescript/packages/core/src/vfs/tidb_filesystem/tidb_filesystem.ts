@@ -24,6 +24,7 @@ import { rmRecursive as tfsRmR } from '../../core/tidb_filesystem/rm.ts'
 import { rmdir as tfsRmdir } from '../../core/tidb_filesystem/rmdir.ts'
 import { stat as tfsStat } from '../../core/tidb_filesystem/stat.ts'
 import { readStream as tfsStream } from '../../core/tidb_filesystem/stream.ts'
+import { truncate as tfsTruncate } from '../../core/tidb_filesystem/truncate.ts'
 import { unlink as tfsUnlink } from '../../core/tidb_filesystem/unlink.ts'
 import { write as tfsWrite } from '../../core/tidb_filesystem/write.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -66,6 +67,10 @@ export class TiDBFilesystemVFS extends BaseVFS<TiDBFilesystemAccessor> {
 
   override append(path: PathSpec, data: ByteSource): Promise<void> {
     return tfsAppend(this.accessor, path, data)
+  }
+
+  override truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
+    return tfsTruncate(this.accessor, path, length, noCreate)
   }
 
   override create(path: PathSpec): Promise<void> {

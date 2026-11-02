@@ -32,7 +32,9 @@ from mirage.core.api.client import (
 )
 from mirage.core.tidb_filesystem.constants import (
     BATCH_STAT_LIMIT,
+    MAX_PARTS,
     MAX_UPLOAD_WORKERS,
+    PATCH_PART_SIZE,
     PRESIGN_BATCH,
     SMALL_FILE_LIMIT,
     TREE_DELETE_RETRY,
@@ -97,11 +99,14 @@ class _AppendPart(_PresignedPart):
     read_headers: dict[str, str] = Field(default_factory=dict)
 
 
-class _AppendPlan(BaseModel):
+class _PatchPlan(BaseModel):
     upload_id: str
     part_size: int = Field(gt=0)
-    base_size: int = Field(ge=0)
     upload_parts: list[_AppendPart] = Field(default_factory=list)
+
+
+class _AppendPlan(_PatchPlan):
+    base_size: int = Field(ge=0)
 
 
 _BYTES = TypeAdapter(bytes)
@@ -308,6 +313,25 @@ async def _put_part(
     return str(response.headers.get("etag", ""))
 
 
+async def _read_part(
+    accessor: TiDBFilesystemAccessor, part: _AppendPart
+) -> bytes:
+    if part.read_url is None:
+        return b""
+    return _BYTES.validate_python(
+        await api_request(
+            "GET",
+            part.read_url,
+            error_of=error_of,
+            headers=part.read_headers,
+            session=accessor.pool,
+            retry=NO_RETRY,
+            read="bytes",
+        ),
+        strict=True,
+    )
+
+
 async def _abort(
     accessor: TiDBFilesystemAccessor, method: str, target: str
 ) -> None:
@@ -445,20 +469,7 @@ async def append_to(
 
     async def put(part: _AppendPart) -> str:
         own = kept(part)
-        original = b""
-        if own and part.read_url is not None:
-            original = _BYTES.validate_python(
-                await api_request(
-                    "GET",
-                    part.read_url,
-                    error_of=error_of,
-                    headers=part.read_headers,
-                    session=accessor.pool,
-                    retry=NO_RETRY,
-                    read="bytes",
-                ),
-                strict=True,
-            )
+        original = await _read_part(accessor, part) if own else b""
         start = (part.number - 1) * plan.part_size + own - plan.base_size
         added = (
             await _slice_of(data, start, part.size - own)
@@ -476,6 +487,66 @@ async def append_to(
             raise TiDBFilesystemApiError(
                 "the append plan does not cover the appended bytes", 502
             )
+        await bounded_map(plan.upload_parts, put, MAX_UPLOAD_WORKERS)
+        await _request(
+            accessor,
+            "POST",
+            f"{host}/v1/uploads/{plan.upload_id}/complete",
+            read="none",
+        )
+    except BaseException:
+        await _abort(accessor, "DELETE", f"{host}/v1/uploads/{plan.upload_id}")
+        raise
+    return True
+
+
+async def shrink_to(
+    accessor: TiDBFilesystemAccessor, remote_path: str, length: int
+) -> bool:
+    """Cut a file drive9 keeps in object storage to ``length`` bytes.
+
+    A PATCH names the part the cut falls in as the one dirty part, so the
+    server copies the whole parts before it into a new upload and hands
+    out a read URL for that part's kept bytes, which go up again as they
+    came. The part size grows with the file so it never needs more than
+    S3's 10,000 parts. False, with nothing sent, for a file drive9 keeps
+    inline (400) or a path that is not a file (404).
+
+    Args:
+        accessor (TiDBFilesystemAccessor): the file system's accessor.
+        remote_path (str): the file in the file system.
+        length (int): its new size, above zero and below its size.
+    """
+    host = accessor.config.host
+    mib = 1024 * 1024
+    part_size = max(PATCH_PART_SIZE, -(-length // (MAX_PARTS * mib)) * mib)
+    try:
+        raw = await _request(
+            accessor,
+            "PATCH",
+            _url(accessor, remote_path),
+            json_body={
+                "new_size": length,
+                "dirty_parts": [-(-length // part_size)],
+                "part_size": part_size,
+            },
+        )
+    except TiDBFilesystemApiError as exc:
+        if not (has_status(exc, 400) or has_status(exc, 404)):
+            raise
+        logger.debug("tidb_filesystem: no native shrink: %s", exc)
+        return False
+    plan = _PatchPlan.model_validate(raw)
+
+    async def put(part: _AppendPart) -> str:
+        kept = await _read_part(accessor, part)
+        if len(kept) != part.size:
+            raise TiDBFilesystemApiError(
+                f"patch part {part.number} does not match its plan", 502
+            )
+        return await _put_part(accessor, part, kept)
+
+    try:
         await bounded_map(plan.upload_parts, put, MAX_UPLOAD_WORKERS)
         await _request(
             accessor,
