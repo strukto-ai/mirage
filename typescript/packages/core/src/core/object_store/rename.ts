@@ -90,7 +90,12 @@ export function makeRename<A extends Accessor, C>(
           knownVersions(dst, kpfx),
         )
       } else {
-        if (await moveFile(conn, srcKey, kp.apply(kpfx, dst.mountPath))) return true
+        try {
+          if (await moveFile(conn, srcKey, kp.apply(kpfx, dst.mountPath))) return true
+        } catch (err) {
+          if ((err as { code?: string } | null)?.code === 'ENOENT') throw enoent(src)
+          throw err
+        }
         // A directory owns no object of its own, so a clean false here is
         // the ordinary way into the prefix walk, not an answer about it.
         op = 'rename_prefix'

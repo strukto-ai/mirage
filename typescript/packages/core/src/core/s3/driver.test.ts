@@ -131,14 +131,30 @@ describe('a conditioned copy', () => {
   })
 })
 
+class HeadObject extends Command {}
+class CopyObject extends Command {}
+class DeleteObject extends Command {}
+
 describe('a move', () => {
   it('is ENOENT when its source vanishes before the copy', async () => {
-    const conn = failing((cmd) =>
-      cmd.input.CopySource !== undefined
-        ? Promise.reject(sdkError('NoSuchKey', 404))
-        : (Promise.resolve({}) as Promise<never>),
-    )
+    const sent: Command[] = []
+    const conn: S3Conn = {
+      config: { bucket: 'b' } as S3Config,
+      mod: {
+        HeadObjectCommand: HeadObject,
+        CopyObjectCommand: CopyObject,
+        DeleteObjectCommand: DeleteObject,
+      } as unknown as S3Module,
+      async send(raw) {
+        await Promise.resolve()
+        const cmd = raw as Command
+        sent.push(cmd)
+        if (cmd instanceof CopyObject) throw sdkError('NoSuchKey', 404)
+        return {}
+      },
+    }
     await expect(DRIVER.moveFile?.(conn, 'src', 'dst')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(sent.some((cmd) => cmd instanceof DeleteObject)).toBe(false)
   })
 })
 

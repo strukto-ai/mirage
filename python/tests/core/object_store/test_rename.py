@@ -21,6 +21,7 @@ import pytest
 from mirage.core.object_store.exists import make_exists
 from mirage.core.object_store.rename import make_rename
 from mirage.core.object_store.stat import make_stat
+from mirage.errors.fs import enoent
 from mirage.observe.context import RecordingScope
 from tests.core.object_store.conftest import (
     FakeStore,
@@ -85,6 +86,18 @@ def test_rename_missing_source_is_enoent(accessor):
     store = FakeStore()
     with pytest.raises(FileNotFoundError):
         asyncio.run(_rename_for(store)(accessor, spec("/never"), spec("/dst")))
+
+
+async def _vanished(conn, src_key: str, dst_key: str) -> bool:
+    raise enoent(src_key)
+
+
+def test_rename_names_the_source_a_store_lost_mid_move(accessor):
+    driver = replace(make_driver(FakeStore()), move_file=_vanished)
+    rename = make_rename(driver, make_exists(make_stat(driver)))
+    with pytest.raises(FileNotFoundError) as raised:
+        asyncio.run(rename(accessor, spec("/a/src.txt"), spec("/b/dst.txt")))
+    assert raised.value.filename == "/mnt/a/src.txt"
 
 
 def test_rename_onto_the_same_key_is_a_guarded_no_op(accessor):

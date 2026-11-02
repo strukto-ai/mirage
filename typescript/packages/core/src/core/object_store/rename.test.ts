@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { enoent } from '../../errors/fs.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { makeExists } from './exists.ts'
 import {
@@ -75,6 +76,16 @@ describe('object_store rename', () => {
     await expect(codeOf(renameFor(store)(accessor, spec('/never'), spec('/dst')))).resolves.toBe(
       'ENOENT',
     )
+  })
+
+  it('names the source a store lost mid-move', async () => {
+    const driver = makeDriver(new FakeStore())
+    driver.moveFile = (_conn, srcKey) => Promise.reject(enoent(srcKey))
+    const rename = makeRename(driver, makeExists(makeStat(driver)))
+    await expect(rename(accessor, spec('/a/src.txt'), spec('/b/dst.txt'))).rejects.toMatchObject({
+      code: 'ENOENT',
+      virtualPath: '/mnt/a/src.txt',
+    })
   })
 
   it('renaming onto the same key is a guarded no-op', async () => {
