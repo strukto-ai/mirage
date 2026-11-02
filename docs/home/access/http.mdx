@@ -385,6 +385,38 @@ curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/profiles/reader \
   -d '{"paths":{"hide":["/vault"]},"commands":{"allow":["cat","ls","whoami"]}}'
 ```
 
+### Install an MCP CLI
+
+<Badge color="orange">PUT</Badge> `/v1/workspaces/{id}/clis/{name}`
+
+The body is one `clis` entry with `cli: mcp`, the same document as in the
+workspace YAML ([From MCP](/python/cli/mcp)). The server resolves its
+credential pointers, lists the server's tools under the workspace's network
+rules, and installs them as the CLI `name`, replacing the MCP CLI already
+there. Returns `{"name": "issues"}`.
+
+When the body is not an MCP entry, `name` belongs to another CLI or a
+command, the server cannot be listed, or the new tool list drops a
+subcommand a profile names, the server returns HTTP 422 Unprocessable
+Entity and keeps the installed CLI. A server
+policy that refuses the entry returns HTTP 403. The workspace's config is
+not rewritten, so creating the workspace again installs only the CLIs its
+YAML defines.
+
+```bash
+curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/clis/issues \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"cli":"mcp","config":{"url":"https://mcp.example.com/mcp","auth":{"type":"bearer","token":{"from":"env","key":"ISSUES_TOKEN"}}}}'
+```
+
+### Remove an MCP CLI
+
+<Badge color="red">DELETE</Badge> `/v1/workspaces/{id}/clis/{name}`
+
+Removes the MCP CLI installed as `name`, returning `{"name": "issues"}`.
+A name with no CLI returns HTTP 404 Not Found; a CLI that is not an MCP
+server returns HTTP 422.
+
 ### Clone a workspace
 
 <Badge color="green">POST</Badge> `/v1/workspaces/{id}/clone`

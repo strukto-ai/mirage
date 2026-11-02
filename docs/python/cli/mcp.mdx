@@ -1,0 +1,144 @@
+---
+title: From MCP
+description: "Install a streamable-HTTP MCP server's tools as one CLI."
+icon: plug
+---
+
+An MCP server's tools become one CLI: each tool is a subcommand that takes
+the tool's arguments as one JSON object. Profiles, network rules and
+snapshots apply to it as to any CLI.
+
+## Register a server
+
+`mcp_cli` reads the server's tool list and returns a `CLI`; install it
+with `register_cli`, passing the same config:
+
+```python
+import os
+
+from mirage import Workspace, mcp_cli
+
+config = {
+    "url": "https://mcp.example.com/mcp",
+    "auth": {"type": "bearer", "token": os.environ["ISSUES_TOKEN"]},
+}
+ws = Workspace({})
+ws.register_cli("issues", await mcp_cli(config), config)
+```
+
+```bash
+issues --help
+issues search-issues --help
+issues search-issues '{"query": "login bug"}'
+```
+
+A tool named `search_issues` becomes the subcommand `search-issues`; its
+`--help` prints the tool's description and the JSON schema of its
+arguments. `mcp_cli` raises `MCPToolsError` when the server cannot be
+listed or its tools cannot all become distinct subcommands.
+
+The tool list is read once, at registration. To pick up tools the server
+added later, reinstall it in one step; the name keeps working throughout:
+
+```python
+await ws.replace_cli("issues", await mcp_cli(config), config)
+```
+
+## Authentication
+
+`auth` sets the one header every request carries. Leave it out for a
+server that needs none.
+
+| `auth` | Header sent |
+| --- | --- |
+| `{"type": "bearer", "token": T}` | `Authorization: Bearer T` |
+| `{"type": "header", "name": N, "token": T}` | `N: T` |
+
+The token is redacted in snapshots. The URL is saved as written, so keep
+credentials in `auth`, not in the URL. A token must be printable ASCII
+with no leading or trailing space; any other is refused at registration.
+
+## Register from YAML
+
+An MCP server is a `clis:` entry with `cli: mcp`. The token can come from
+`${VAR}` or a [credential pointer](/home/authentication):
+
+```yaml workspace.yaml
+mounts:
+  /:
+    vfs: ram
+clis:
+  issues:
+    cli: mcp
+    config:
+      url: https://mcp.example.com/mcp
+      auth:
+        type: bearer
+        token:
+          from: env
+          key: ISSUES_TOKEN
+```
+
+`mirage workspace create workspace.yaml` builds it on the server. A
+program that loads the file itself passes the listed servers to
+`to_workspace_kwargs`, which raises `ValueError` without them:
+
+```python
+from mirage import Workspace
+from mirage.config import build_mcp_clis, load_config, resolve_secrets
+
+config = await resolve_secrets(load_config("workspace.yaml"))
+ws = Workspace(
+    **config.to_workspace_kwargs(mcp_clis=await build_mcp_clis(config))
+)
+```
+
+## Call a tool
+
+| Call | Result |
+| --- | --- |
+| `issues search-issues '{"query": "x"}'` | the tool's answer on stdout, exit 0 |
+| `issues list-labels` | the tool called with `{}` |
+| the tool reports an error | its text on stderr, exit 1 |
+| the server cannot be reached | `search-issues: MCP server failed: <reason>`, exit 1 |
+| the operand is not one JSON object | `search-issues: invalid JSON`, `JSON must be an object` or `takes one JSON object`, exit 2, nothing sent |
+
+Text content prints as text; any other content prints as one line of
+JSON. A failed call is not retried. Cancelling the line cancels the call.
+
+A `pre_network` policy or a `network:` setting that excludes the server's
+host refuses the call before anything is sent.
+
+## Profiles
+
+A profile names a tool the way it names any CLI subcommand:
+
+```yaml
+profiles:
+  triage:
+    commands:
+      deny:
+        - commands: ["issues delete-issue"]
+          reason: triage never deletes
+```
+
+A tool the server marks `readOnlyHint` runs as a read; every other tool
+counts as a write.
+
+## On a server
+
+The [server](/python/access/server) takes `cli: mcp` entries in a
+workspace's create body.
+[`PUT /v1/workspaces/{id}/clis/{name}`](/home/access/http#install-an-mcp-cli)
+installs or replaces one on a live workspace, and
+[`DELETE`](/home/access/http#remove-an-mcp-cli) removes it. `${VAR}` is
+expanded only in files; over HTTP, send the token or a pointer.
+
+## Snapshots
+
+A snapshot keeps the tool list, so loading one rebuilds the CLI without
+contacting the server. The token is redacted, so pass the config again:
+
+```python
+ws = await Workspace.load("snap.tar", clis={"issues": config})
+```
