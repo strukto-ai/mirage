@@ -50,6 +50,7 @@ from mirage.server.auth.config import AuthConfig, JWTConfig
 from mirage.server.env import ENV_HOME
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import workspaces as workspaces_router
+from mirage.types import JsonValue
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.tar_io import write_tar
@@ -1872,7 +1873,7 @@ def _cancelled(*args, **kwargs):
     raise asyncio.CancelledError()
 
 
-def _mcp_entry(url: str, token: object = TOKEN) -> dict:
+def _mcp_entry(url: str, token: JsonValue = TOKEN) -> dict[str, JsonValue]:
     return {
         "cli": "mcp",
         "config": {"url": url, "auth": {"type": "bearer", "token": token}},

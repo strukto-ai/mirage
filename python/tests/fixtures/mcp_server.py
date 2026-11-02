@@ -17,10 +17,12 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import Any
 
 import anyio
 import uvicorn
 from mcp import types
+from mcp.server.context import ServerRequestContext
 from mcp.server.lowlevel import Server
 from mcp.shared.exceptions import MCPError
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -117,7 +119,8 @@ def _text(text: str, error: bool = False) -> types.CallToolResult:
 
 def _server(fake: FakeMCP, tools: list[types.Tool]) -> Server:
     async def list_tools(
-        ctx: object, params: types.PaginatedRequestParams | None
+        ctx: ServerRequestContext[Any],
+        params: types.PaginatedRequestParams | None,
     ) -> types.ListToolsResult:
         start = int(params.cursor) if params and params.cursor else 0
         if fake.repeating:
@@ -134,7 +137,7 @@ def _server(fake: FakeMCP, tools: list[types.Tool]) -> Server:
         )
 
     async def call_tool(
-        ctx: object, params: types.CallToolRequestParams
+        ctx: ServerRequestContext[Any], params: types.CallToolRequestParams
     ) -> types.CallToolResult:
         arguments = params.arguments or {}
         if params.name not in {tool.name for tool in tools}:
