@@ -506,10 +506,12 @@
   },
   "server/routers/workspaces": {
    "python_only": {
+    "delete_cli": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "cancel_workspace_lines": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "close_workspace": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy.",
+    "set_cli": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "workspace_history": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes."
    },
    "typescript_only": {
@@ -653,7 +655,8 @@
   },
   "config": {
    "python_only": {
-    "S3WorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker."
+    "S3WorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker.",
+    "build_mcp_clis": "Python's to_workspace_kwargs is sync, so the MCP servers a config names are listed in this separate async step after resolve_secrets; the TypeScript buildCliEntries is async and awaits mcpCli inline."
    },
    "typescript_only": {
     "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same entry point."
@@ -740,6 +743,11 @@
   "server/mcp/http": {
    "python_only": {
     "DaemonMcpServer": "A Python Session call runs on the workspace runner's loop, so the daemon serves MCP with a subclass whose hop does it, as DaemonRpcServer does for RPC; TypeScript has one loop and hands its tool table to createMirageMcpServer."
+   }
+  },
+  "commands/cli/mcp/call": {
+   "python_only": {
+    "_whole": "json.loads reads whole numbers through parse_int, apart from floats; the TypeScript JSON.parse reviver sees both as numbers in finite."
    }
   },
   "commands/cli/builtin/git/cat_file": {
