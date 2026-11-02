@@ -302,3 +302,39 @@ it('hydrates a main-saved grant and checks it without store I/O', async () => {
   expect([store.reads, store.writes]).toEqual(baseline)
   expect(sessions.get('s').toDict().decisions).toEqual(saved.decisions)
 })
+
+it('observes mutable approval fields and aliased rule arrays without replacing the record list', async () => {
+  const sessions = new Sessions()
+  const ledger = new Decisions(sessions)
+  const rule: CommandRule = { reason: 'first', commands: ['git push'] }
+  const ask = { kind: 'ask', reason: 'first', rule } satisfies {
+    kind: 'ask'
+    reason: string
+    rule: CommandRule
+  }
+  const ctx: CommandContext = {
+    command: 'git',
+    argv: ['push'],
+    paths: [],
+    cwd: '/repo',
+    sessionId: 's',
+  }
+  await ledger.resolve(ctx, ask)
+  const record = ledger.list('s')[0]
+  if (record === undefined) throw new Error('expected the pending approval')
+  await ledger.answer(record.id, Outcome.ALLOW, Scope.SESSION)
+  const granted = ledger.list('s')[0]
+  if (granted === undefined) throw new Error('expected the settled approval')
+  expect(await ledger.resolve(ctx, ask)).toBeNull()
+  granted.rule.reason = 'updated'
+  expect(await ledger.resolve(ctx, ask)).toBeNull()
+  const commands = ['git push']
+  granted.rule.commands = commands
+  expect(await ledger.resolve(ctx, ask)).toBeNull()
+  commands[0] = 'git status'
+  expect(await ledger.resolve(ctx, ask)).toBeNull()
+  granted.scope = Scope.ONCE
+  granted.outcome = Outcome.DENY
+  expect(await ledger.resolve(ctx, ask)).toMatchObject({ kind: 'deny' })
+  expect(ledger.list('s')).toEqual([])
+})

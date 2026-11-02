@@ -50,7 +50,9 @@ class PausedSessions:
 async def test_approval_state_is_visible_at_each_suspension() -> None:
     sessions = PausedSessions()
     prompting = asyncio.Event()
-    answer: asyncio.Future[Decision] = asyncio.get_running_loop().create_future()
+    answer: asyncio.Future[Decision] = (
+        asyncio.get_running_loop().create_future()
+    )
 
     async def prompt(record: Decision) -> Decision:
         prompting.set()
@@ -60,9 +62,14 @@ async def test_approval_state_is_visible_at_each_suspension() -> None:
     ctx = CommandContext(
         command="git", argv=("push",), paths=(), cwd="/repo", session_id="s"
     )
-    ask = Ask("first", rule=CommandRule(reason="first", commands=("git push",)))
+    ask = Ask(
+        "first", rule=CommandRule(reason="first", commands=("git push",))
+    )
     occurrence = Occurrence(None, "git push", 0, 8)
-    first, other = Claimant(HandOff(), occurrence), Claimant(HandOff(), occurrence)
+    first, other = (
+        Claimant(HandOff(), occurrence),
+        Claimant(HandOff(), occurrence),
+    )
     running = asyncio.create_task(ledger.resolve(ctx, ask, claimant=first))
     try:
         await asyncio.wait_for(sessions.saving[0].wait(), 5)

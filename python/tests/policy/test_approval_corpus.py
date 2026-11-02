@@ -153,7 +153,9 @@ async def observations(case: dict[str, Any]) -> list[dict[str, Any]]:
         if op in {"resolve", "held"}:
             if isinstance(action, Pending):
                 outcome = {
-                    "kind": "pending", "id": action.id, "reason": action.reason
+                    "kind": "pending",
+                    "id": action.id,
+                    "reason": action.reason,
                 }
             elif isinstance(action, Deny):
                 outcome = {"kind": "deny", "reason": action.reason}
@@ -216,7 +218,9 @@ async def test_main_saved_grant_hydrates_and_checks_without_store_io() -> None:
     ctx = CommandContext(
         command="git", argv=("push",), paths=(), cwd="/repo", session_id="s"
     )
-    ask = Ask("first", rule=CommandRule(reason="first", commands=("git push",)))
+    ask = Ask(
+        "first", rule=CommandRule(reason="first", commands=("git push",))
+    )
     for _ in range(3):
         assert await ledger.resolve(ctx, ask) is None
         assert ledger.held(ctx, ask) is None
