@@ -956,6 +956,19 @@ async function draftsHttp(at: string): Promise<void> {
     [field(page.drafts, 'id'), field(rest.drafts, 'id'), rest.nextPageToken ?? null],
     [[extra], [id], null],
   )
+  for (const size of [0, -1]) {
+    const all = obj((await api(`${gmail}/drafts?maxResults=${size}`, 't1')).body)
+    eq(
+      `drafts: maxResults=${size} lists every draft on one page`,
+      [field(all.drafts, 'id'), all.nextPageToken ?? null],
+      [[extra, id], null],
+    )
+  }
+  eq(
+    'drafts: a page token that is not an offset is a 400',
+    (await api(`${gmail}/drafts?pageToken=nope`, 't1')).status,
+    400,
+  )
   const replaced = obj(
     (await post(`${gmail}/drafts/send`, 't1', { id: extra, message: message('Extra v2') })).body,
   )
