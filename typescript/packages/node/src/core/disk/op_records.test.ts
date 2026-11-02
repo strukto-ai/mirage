@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MountMode } from '@struktoai/mirage-core/types'
@@ -97,3 +97,30 @@ describe('a failed disk mutation records only what it may have changed', () => {
     expect(await rows(line, 1)).toEqual(expected)
   })
 })
+
+describe.skipIf(process.getuid?.() === 0)(
+  'a disk mutation that fails part-way still records',
+  () => {
+    beforeEach(() => {
+      mkdirSync(join(root, 'ro'))
+      mkdirSync(join(root, 'd', 's'))
+      writeFileSync(join(root, 'd', 's', 'g.txt'), 'g\n')
+      chmodSync(join(root, 'ro'), 0o500)
+      chmodSync(join(root, 'd', 's'), 0o500)
+    })
+
+    afterEach(() => {
+      chmodSync(join(root, 'ro'), 0o700)
+      if (existsSync(join(root, 'd', 's'))) chmodSync(join(root, 'd', 's'), 0o700)
+    })
+
+    it('cp /m/a.txt /m/ro/c.txt', async () => {
+      expect(await rows('cp /m/a.txt /m/ro/c.txt', 1)).toEqual([['copy', '/m/ro/c.txt', 0]])
+    })
+
+    it('rm -r /m/d', async () => {
+      expect(await rows('rm -r /m/d', 1)).toEqual([['rm_r', '/m/d', 0]])
+      expect(existsSync(join(root, 'd', 'f.txt'))).toBe(false)
+    })
+  },
+)
