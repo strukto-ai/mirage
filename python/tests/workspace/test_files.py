@@ -1226,7 +1226,7 @@ async def test_a_policys_read_leaves_the_op_it_judges_on_the_ledger():
 
 
 @pytest.mark.asyncio
-async def test_failed_removal_keeps_a_warm_read_and_records_its_failure(
+async def test_failed_removal_drops_the_warm_read_and_records_its_failure(
     monkeypatch,
 ):
     vfs = _HeldRAM()
@@ -1245,7 +1245,7 @@ async def test_failed_removal_keeps_a_warm_read_and_records_its_failure(
         start = len(ws.vfs.records)
         removal = await ws.shell("rm /m/a")
         assert removal.exit_code == 1
-        assert await ws.cache.get("/m/a") == b"warm"
+        assert await ws.cache.get("/m/a") is None
         io = await ws.shell("cat /m/a")
         assert await io.stdout_str() == "warm"
         rows = ws.vfs.records[start:]
@@ -1258,11 +1258,7 @@ async def test_failed_removal_keeps_a_warm_read_and_records_its_failure(
         )
         reads = [r for r in rows if r.op == "read"]
         assert len(reads) == 1
-        assert (reads[0].served, reads[0].source, reads[0].bytes) == (
-            "cache",
-            "ram",
-            4,
-        )
+        assert (reads[0].served, reads[0].bytes) == ("backend", 4)
     finally:
         await ws.close()
 

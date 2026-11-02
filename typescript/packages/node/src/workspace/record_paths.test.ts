@@ -379,10 +379,7 @@ describe('every record resolves to the mount whose id it carries (node backends)
 describe('command streams carry the mount id', () => {
   it('ram cat', async () => {
     const swept = await sweep(new RAMVFS(), 'mkdir -p /m/m')
-    expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([
-      ['stat', K],
-      ['read', K],
-    ])
+    expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([['read', K]])
     expect(swept.catRecords[0]?.mountId).toBe(swept.mountId)
   })
 
@@ -391,10 +388,7 @@ describe('command streams carry the mount id', () => {
     mkdirSync(join(root, 'm'))
     try {
       const swept = await sweep(new DiskVFS({ root }), null)
-      expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([
-        ['stat', K],
-        ['read', K],
-      ])
+      expect(swept.catRecords.map((r) => [r.op, r.path])).toEqual([['read', K]])
       expect(swept.catRecords[0]?.mountId).toBe(swept.mountId)
     } finally {
       rmSync(root, { recursive: true, force: true })

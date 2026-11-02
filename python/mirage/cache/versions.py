@@ -22,7 +22,6 @@ from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     SUBTREE_RETRACT_OPS,
     OpRecord,
-    OpStatus,
 )
 from mirage.utils.key_prefix import under_path
 
@@ -75,9 +74,7 @@ class VersionHistory:
             key (str): resolved mount-relative file name.
             rec (OpRecord): the operation's own result.
         """
-        if rec.status == OpStatus.FAILED or (
-            rec.op != "read" and not rec.changed
-        ):
+        if not rec.settles:
             return
         if (
             rec.op == "read"

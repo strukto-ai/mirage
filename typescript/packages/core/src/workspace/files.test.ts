@@ -1306,7 +1306,7 @@ describe('readStream', () => {
   })
 })
 
-it('a failed removal keeps a warm cached cat', async () => {
+it('a failed removal drops the warm cached read and records its failure', async () => {
   const vfs = new RAMVFS()
   Object.assign(vfs, { cachesReads: true })
   const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
@@ -1316,7 +1316,7 @@ it('a failed removal keeps a warm cached cat', async () => {
     vfs.unlink = (path) => Promise.reject(eacces(path))
     const start = ws.records.length
     expect((await ws.shell('rm /m/a')).exitCode).toBe(1)
-    expect(DEC.decode((await ws.cache.get('/m/a')) ?? undefined)).toBe('warm')
+    expect(await ws.cache.get('/m/a')).toBeNull()
     expect(DEC.decode((await ws.shell('cat /m/a')).stdout)).toBe('warm')
     const rows = ws.records.slice(start)
     const failed = rows.filter((r) => r.op === 'unlink')
@@ -1324,7 +1324,7 @@ it('a failed removal keeps a warm cached cat', async () => {
     expect(failed[0]).toMatchObject({ status: 'failed', changed: false, errno: 13 })
     const reads = rows.filter((r) => r.op === 'read')
     expect(reads).toHaveLength(1)
-    expect(reads[0]).toMatchObject({ served: 'cache', source: 'ram', bytes: 4 })
+    expect(reads[0]).toMatchObject({ served: 'backend', bytes: 4 })
   } finally {
     await ws.close()
   }

@@ -102,7 +102,7 @@ MUTATION_OPS = (
 )
 
 
-@dataclass(init=False)
+@dataclass
 class OpRecord:
     """A single observed I/O operation.
 
@@ -147,48 +147,27 @@ class OpRecord:
     execution_id: str | None = None
     complete: bool = field(default=True, init=False, repr=False, compare=False)
 
-    status: OpStatus = OpStatus.OK
-    errno: int | None = None
-    changed: bool = False
-    served: OpServed = OpServed.BACKEND
+    status: OpStatus = field(default=OpStatus.OK, kw_only=True)
+    errno: int | None = field(default=None, kw_only=True)
+    changed: bool | None = field(default=None, kw_only=True)
+    served: OpServed = field(default=OpServed.BACKEND, kw_only=True)
 
-    def __init__(
-        self,
-        op: str,
-        path: str,
-        source: str,
-        bytes: int,
-        timestamp: int,
-        duration_ms: int,
-        fingerprint: str | None = None,
-        revision: str | None = None,
-        mount_id: str | None = None,
-        execution_id: str | None = None,
-        *,
-        status: OpStatus = OpStatus.OK,
-        errno: int | None = None,
-        changed: bool | None = None,
-        served: OpServed = OpServed.BACKEND,
-    ) -> None:
-        self.op = op
-        self.path = path
-        self.source = source
-        self.bytes = bytes
-        self.timestamp = timestamp
-        self.duration_ms = duration_ms
-        self.fingerprint = fingerprint
-        self.revision = revision
-        self.mount_id = mount_id
-        self.execution_id = execution_id
-        self.complete = True
-        self.status = status
-        self.errno = errno
-        self.changed = (
-            status != OpStatus.FAILED and op in MUTATION_OPS
-            if changed is None
-            else changed
+    def __post_init__(self) -> None:
+        self.status = OpStatus(self.status)
+        self.served = OpServed(self.served)
+        if self.changed is None:
+            self.changed = (
+                self.status != OpStatus.FAILED and self.op in MUTATION_OPS
+            )
+
+    @property
+    def settles(self) -> bool:
+        """Whether the row speaks for the path's version: a read, or a
+        change that landed. A failed op and a mutation that changed
+        nothing leave the version as it was."""
+        return self.status != OpStatus.FAILED and (
+            self.op == "read" or bool(self.changed)
         )
-        self.served = served
 
     def to_dict(self) -> dict[str, str | int | None]:
         """Public observation fields, excluding in-process mount ownership."""
@@ -234,9 +213,7 @@ class RecordIndex:
     def _absorb(self) -> None:
         for i in range(self._seen, len(self._records)):
             rec = self._records[i]
-            if rec.status == OpStatus.FAILED or (
-                rec.op != "read" and not rec.changed
-            ):
+            if not rec.settles:
                 continue
             if rec.op in VERSION_OPS:
                 self._at[rec.path] = i
@@ -349,7 +326,7 @@ class LostPaths:
             rec.path == key
             and rec.op in STAMP_FINGERPRINT_OPS
             and rec.status == OpStatus.OK
-            and (rec.op == "read" or rec.changed)
+            and rec.settles
             for rec in self.sink[mark.at :]
         )
 

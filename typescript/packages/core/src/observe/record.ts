@@ -110,7 +110,7 @@ export class RecordIndex {
     for (let i = this.seen; i < this.records.length; i++) {
       const rec = this.records[i]
       if (rec === undefined) continue
-      if (rec.status === 'failed' || (rec.op !== 'read' && !rec.changed)) continue
+      if (!rec.settles) continue
       if (VERSION_OPS.has(rec.op)) this.at.set(rec.path, i)
       if (SUBTREE_RETRACT_OPS.has(rec.op)) this.subtree.push(i)
     }
@@ -198,6 +198,11 @@ export class OpRecord {
     this.errno = init.errno ?? null
     this.changed = init.changed ?? (this.status !== 'failed' && MUTATION_OPS.has(this.op))
     this.served = init.served ?? 'backend'
+  }
+
+  /** Whether the row speaks for the path's version: a read, or a change that landed. */
+  get settles(): boolean {
+    return this.status !== 'failed' && (this.op === 'read' || this.changed)
   }
 
   toJSON(): Record<string, unknown> {
@@ -307,7 +312,7 @@ export class LostPaths {
           rec.path === key &&
           STAMP_FINGERPRINT_OPS.has(rec.op) &&
           rec.status === 'ok' &&
-          (rec.op === 'read' || rec.changed),
+          rec.settles,
       )
   }
 }

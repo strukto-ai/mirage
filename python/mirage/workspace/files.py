@@ -25,7 +25,7 @@ from mirage.context import (
 )
 from mirage.context.session_context import effective_path_mode
 from mirage.errors.types import NoMountError
-from mirage.io import IOResult
+from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
 from mirage.observe.context import (
@@ -376,6 +376,7 @@ class Files:
             return await self._dispatch(
                 op,
                 typed,
+                report=OpReport(metadata_rows=True),
                 **kwargs,
             )
 

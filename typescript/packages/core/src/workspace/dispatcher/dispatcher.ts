@@ -882,8 +882,15 @@ export class Dispatcher {
   private dispatchAdmitted: DispatchFn = async (name, path, args, kwargs, supplied) => {
     const report = supplied ?? new OpReport()
     const timer = startOp()
+    const listed = CALLS.get(name)
     const skip =
-      kwargs?.admit_only === true || 'retained' in (kwargs ?? {}) || kwargs?.warm === true
+      (!report.metadataRows &&
+        listed !== undefined &&
+        (listed.effect === Effect.METADATA ||
+          (listed.effect === Effect.READ && listed.target === Target.DIR))) ||
+      kwargs?.admit_only === true ||
+      'retained' in (kwargs ?? {}) ||
+      kwargs?.warm === true
     return commandRecords(async (mine) => {
       let answer: unknown = null
       let failure: unknown = null
@@ -959,7 +966,7 @@ export class Dispatcher {
         ) {
           const destination = args?.[0] ?? kwargs?.dst
           const ran =
-            COPY_OPS.has(name) && destination instanceof PathSpec && report.completed
+            COPY_OPS.has(name) && destination instanceof PathSpec
               ? destination.virtual
               : (report.path ?? path.virtual)
           const mount = this.namespace.tryMountFor(ran)
@@ -979,22 +986,15 @@ export class Dispatcher {
             served: report.answerer,
             fingerprint: report.fingerprint,
           } satisfies Parameters<typeof finishRecord>[5]
-          if (report.detached) {
-            const rec = finishRecord(
-              name,
-              ran,
-              mount?.vfs.name ?? VFSName.RAM,
-              bytes,
-              timer,
-              options,
-            )
-            rec.mountId = mount?.mountId ?? null
+          if (mount !== null && condition !== 'EXDEV' && report.detached) {
+            const rec = finishRecord(name, ran, mount.vfs.name, bytes, timer, options)
+            rec.mountId = mount.mountId
             report.record = rec
-          } else {
+          } else if (mount !== null && condition !== 'EXDEV') {
             await runWithMountContext(() => {
-              record(name, ran, mount?.vfs.name ?? VFSName.RAM, bytes, timer, options)
+              record(name, ran, mount.vfs.name, bytes, timer, options)
               return Promise.resolve()
-            }, mount?.mountId)
+            }, mount.mountId)
           }
         }
       }
@@ -1348,7 +1348,7 @@ export class Dispatcher {
     } catch (err) {
       if (isEnoent(err) && MISS_OPS.has(name))
         mount.cacheManager?.observeMiss(call.path, call.caller)
-      if (settles && call.readRecords.some((rec) => rec.changed)) {
+      if (settles) {
         await this.evictFailedWrite(
           name,
           call.path,
@@ -2725,14 +2725,12 @@ export class Dispatcher {
               )
             },
             async () => {
-              if (mine.some((rec) => rec.changed))
-                await this.evictFailedWrite(name, p, dst, others, lostPaths(line), owners)
+              await this.evictFailedWrite(name, p, dst, others, lostPaths(line), owners)
             },
             owners,
           )
         } catch (err) {
-          if (mine.some((rec) => rec.changed))
-            await this.evictFailedWrite(name, p, dst, others, lostPaths(line))
+          await this.evictFailedWrite(name, p, dst, others, lostPaths(line))
           throw err
         }
       } else if (name === 'before_full_walk' && !(await isDirectory(mount, p))) {

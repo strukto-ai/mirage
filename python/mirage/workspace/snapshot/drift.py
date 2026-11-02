@@ -25,7 +25,6 @@ from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     SUBTREE_RETRACT_OPS,
     OpRecord,
-    OpStatus,
 )
 from mirage.types import DriftPolicy
 from mirage.utils.key_prefix import mount_key
@@ -229,9 +228,7 @@ def capture_fingerprints(
     # retraction can otherwise sit before the write it retracts. The
     # sort is stable, so same-millisecond records keep their order.
     for rec in sorted(records, key=lambda r: r.timestamp):
-        if rec.status == OpStatus.FAILED or (
-            rec.op != "read" and not rec.changed
-        ):
+        if not rec.settles:
             continue
         if rec.op in RETRACT_FINGERPRINT_OPS:
             # Resolved to bound the sweep, never to gate the drop: a

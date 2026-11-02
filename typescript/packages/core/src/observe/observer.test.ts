@@ -461,7 +461,7 @@ describe('a damaged history file', () => {
           'mirage.vfs.status': status,
           'mirage.vfs.changed': status === 'partial',
           'mirage.vfs.served': 'cache',
-          ...(status === 'ok' ? {} : { 'mirage.vfs.errno': 13, 'error.type': '13' }),
+          ...(status === 'ok' ? {} : { 'mirage.vfs.errno': 13, 'error.type': 'EACCES' }),
         })
         expect(child?.status.code).toBe(
           status === 'ok' ? SpanStatusCode.UNSET : SpanStatusCode.ERROR,

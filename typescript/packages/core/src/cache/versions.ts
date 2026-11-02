@@ -52,7 +52,7 @@ export class VersionHistory {
   /** Keep the exact record, including a stream's later token stamp. */
   observe(scope: VersionScope, key: string, rec: OpRecord): void {
     if (rec.op === 'read' && !rec.complete && (rec.bytes === 0 || rec.fingerprint === null)) return
-    if (rec.status === 'failed' || (rec.op !== 'read' && !rec.changed)) return
+    if (!rec.settles) return
     if (
       !STAMP_FINGERPRINT_OPS.has(rec.op) &&
       !RETRACT_FINGERPRINT_OPS.has(rec.op) &&

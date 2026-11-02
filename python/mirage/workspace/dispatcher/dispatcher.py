@@ -52,7 +52,7 @@ from mirage.context.session_context import (
     effective_path_mode,
     session_access,
 )
-from mirage.errors import classify, posix_errno
+from mirage.errors import FsCondition, classify, posix_errno
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import (
     eacces,
@@ -716,7 +716,9 @@ def _retracted(virtual: str) -> bool:
         return False
     rec = recorder.index.newest_version(virtual)
     return (
-        rec is not None and rec.changed and rec.op in RETRACT_FINGERPRINT_OPS
+        rec is not None
+        and bool(rec.changed)
+        and rec.op in RETRACT_FINGERPRINT_OPS
     )
 
 
@@ -1255,8 +1257,20 @@ class Dispatcher:
         answer: Any = None
         failure: BaseException | None = None
         streaming = False
+        listed = CALLS.get(name)
         skip = (
-            kwargs.get("admit_only")
+            (
+                not report.metadata_rows
+                and listed is not None
+                and (
+                    listed.effect is Effect.METADATA
+                    or (
+                        listed.effect is Effect.READ
+                        and listed.target is Target.DIR
+                    )
+                )
+            )
+            or kwargs.get("admit_only")
             or "retained" in kwargs
             or kwargs.get("warm")
         )
@@ -1306,10 +1320,8 @@ class Dispatcher:
                     and not report.driver_recorded
                 ):
                     ran = report.path or path.virtual
-                    if (
-                        name in COPY_OPS
-                        and isinstance(kwargs.get("dst"), PathSpec)
-                        and report.completed
+                    if name in COPY_OPS and isinstance(
+                        kwargs.get("dst"), PathSpec
                     ):
                         ran = kwargs["dst"].virtual
                     mount = self._namespace.try_mount_for(ran)
@@ -1317,8 +1329,7 @@ class Dispatcher:
                         declared(type(mount.vfs), name)
                         if mount is not None
                         else None
-                    )
-                    mark = mark or CALLS.get(name)
+                    ) or CALLS.get(name)
                     changed = (
                         report.completed
                         and mark is not None
@@ -1334,17 +1345,17 @@ class Dispatcher:
                         if changed
                         else OpStatus.FAILED
                     )
-                    if failure is not None or report.completed:
-                        token = push_mount_context(
-                            mount.mount_id if mount is not None else None
-                        )
+                    if (
+                        mount is not None
+                        and condition is not FsCondition.EXDEV
+                        and (failure is not None or report.completed)
+                    ):
+                        token = push_mount_context(mount.mount_id)
                         try:
                             record(
                                 name,
                                 ran,
-                                str(mount.vfs.name)
-                                if mount is not None
-                                else "ram",
+                                str(mount.vfs.name),
                                 report.bytes
                                 if report.bytes is not None
                                 else _payload_bytes(answer, kwargs)
@@ -1672,7 +1683,7 @@ class Dispatcher:
                 and mount.cache_manager is not None
             ):
                 mount.cache_manager.observe_miss(call.path, call.caller)
-            if settles and any(rec.changed for rec in records):
+            if settles:
                 await self._evict_failed_write(mount, name, call.path, kwargs)
             try:
                 await self._date_made(caller, mount, made, failed=True)
@@ -3044,10 +3055,9 @@ class Dispatcher:
                         call.name, call.path.virtual, **kwargs
                     )
             except BaseException:
-                if any(rec.changed for rec in mine):
-                    await self._evict_failed_write(
-                        mount, call.name, call.path, kwargs
-                    )
+                await self._evict_failed_write(
+                    mount, call.name, call.path, kwargs
+                )
                 raise
             finally:
                 scope.close()

@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { context, trace, SpanStatusCode, type Attributes, type Tracer } from '@opentelemetry/api'
+import { POSIX } from '../errors/posix.ts'
+import type { FsCondition } from '../errors/types.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
 import type { JsonObject } from '../types.ts'
@@ -51,6 +53,11 @@ const KNOWN_EVENTS = new Set<string>([
 const NAME_LIMIT = 200
 
 const TRACER_NAME = 'mirage.observe'
+
+function errnoName(errno: number): string {
+  const found = (Object.keys(POSIX) as FsCondition[]).find((name) => POSIX[name].errno === errno)
+  return found ?? String(errno)
+}
 
 /**
  * The tracer a finished line goes to: a no-op until the process sets up
@@ -101,7 +108,7 @@ function traceLine(
       )
       if (rec.errno !== null) {
         call.setAttribute('mirage.vfs.errno', rec.errno)
-        call.setAttribute('error.type', String(rec.errno))
+        call.setAttribute('error.type', errnoName(rec.errno))
       }
       if (rec.status === 'failed' || rec.status === 'partial')
         call.setStatus({ code: SpanStatusCode.ERROR })

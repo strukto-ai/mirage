@@ -361,6 +361,7 @@ export class Files {
     const outer = currentCaller()
     const report = new OpReport()
     report.detached = !asyncContextIsolatesTasks
+    report.metadataRows = true
     // Only a line this workspace runs is joined: another workspace's line
     // would take this workspace's records.
     const own: Recorder | null =

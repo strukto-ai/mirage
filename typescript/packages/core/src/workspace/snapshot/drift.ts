@@ -234,7 +234,7 @@ export function captureFingerprints(
   // sit before the write it retracts. The sort is stable, so
   // same-millisecond records keep their order.
   for (const rec of [...records].sort((a, b) => a.timestamp - b.timestamp)) {
-    if (rec.status === 'failed' || (rec.op !== 'read' && !rec.changed)) continue
+    if (!rec.settles) continue
     if (RETRACT_FINGERPRINT_OPS.has(rec.op)) {
       // Resolved to bound the sweep, never to gate the drop: a
       // retraction whose mount has since gone still applies.

@@ -1696,7 +1696,7 @@ async def test_a_stream_its_reader_stops_early_closes_as_its_command():
             0,
             b"line 0\n",
         )
-        (read,) = (r for r in policy.seen["cat"] if r["op"] == "read")
+        (read,) = policy.seen["cat"]
         assert (read["op"], read["path"]) == ("read", "/data/big")
         assert 0 < read["bytes"] < len(big)
         assert policy.seen["head"] == []
@@ -2024,10 +2024,7 @@ async def test_post_execute_sees_the_line_its_output_and_each_result():
         await ws.shell("grep hit /data/x; true")
         grep, _ = spy.seen[-1].results["children"]
         assert grep["exit_code"] == 0
-        assert [(r["op"], r["path"]) for r in grep["records"]] == [
-            ("stat", "/data/x"),
-            ("read", "/data/x"),
-        ]
+        assert [r["path"] for r in grep["records"]] == ["/data/x"]
     finally:
         await ws.close()
 

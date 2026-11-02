@@ -2095,13 +2095,7 @@ describe('a streamed read', () => {
 class LostReply extends Tape {
   // A store whose write lands and whose reply then breaks off.
   override async write(path: PathSpec, data: ByteSource): Promise<void> {
-    const timer = startOp()
-    const bytes = await materialize(data)
-    this.files.set(path.vfsPath.replace(/^\/+/, ''), bytes)
-    record('write', path.virtual, 'tape', bytes.byteLength, timer, {
-      status: 'partial',
-      changed: true,
-    })
+    this.files.set(path.vfsPath.replace(/^\/+/, ''), await materialize(data))
     throw new Error('reply lost')
   }
 }

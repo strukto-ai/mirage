@@ -42,7 +42,6 @@ from mirage.errors.types import (
 from mirage.io import OpReport
 from mirage.io.stream import yield_bytes
 from mirage.observe.context import RecordingScope, record, start_op
-from mirage.observe.record import OpStatus
 from mirage.policy import (
     Action,
     AdmissionRules,
@@ -2588,17 +2587,7 @@ class _LostReply(Tape):
     async def write(
         self, path: PathSpec, data: bytes, index: IndexCacheStore = NULL_INDEX
     ) -> None:
-        timer = start_op()
         self.files[path.vfs_path.strip("/")] = data
-        record(
-            "write",
-            path.virtual,
-            "tape",
-            len(data),
-            timer,
-            status=OpStatus.PARTIAL,
-            changed=True,
-        )
         raise ConnectionError("reply lost")
 
 

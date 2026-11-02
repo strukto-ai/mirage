@@ -21,6 +21,7 @@ from urllib.parse import quote
 
 from opentelemetry import trace
 
+from mirage.errors.posix import POSIX
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.observe.log_entry import (
@@ -76,6 +77,17 @@ def _tracer() -> trace.Tracer:
     return trace.get_tracer(TRACER_NAME)
 
 
+def _errno_name(number: int) -> str:
+    return next(
+        (
+            condition.name
+            for condition, posix in POSIX.items()
+            if posix.errno == number
+        ),
+        str(number),
+    )
+
+
 def _trace_line(
     workspace_id: str | None,
     session: str,
@@ -119,13 +131,13 @@ def _trace_line(
                     "mirage.vfs.source": rec.source,
                     "mirage.vfs.bytes": rec.bytes,
                     "mirage.vfs.status": rec.status.value,
-                    "mirage.vfs.changed": rec.changed,
+                    "mirage.vfs.changed": bool(rec.changed),
                     "mirage.vfs.served": rec.served.value,
                 },
             )
             if rec.errno is not None:
                 call.set_attribute("mirage.vfs.errno", rec.errno)
-                call.set_attribute("error.type", str(rec.errno))
+                call.set_attribute("error.type", _errno_name(rec.errno))
             if rec.status in (OpStatus.FAILED, OpStatus.PARTIAL):
                 call.set_status(trace.StatusCode.ERROR)
             call.end(end_time=rec.timestamp * _NS_PER_MS)

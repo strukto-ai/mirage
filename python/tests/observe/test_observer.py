@@ -540,6 +540,6 @@ def test_failed_and_partial_child_spans_export_the_outcome(
         "mirage.vfs.errno": 13,
         "mirage.vfs.changed": changed,
         "mirage.vfs.served": "backend",
-        "error.type": "13",
+        "error.type": "EACCES",
     }
     provider.shutdown()
