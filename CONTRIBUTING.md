@@ -155,18 +155,22 @@ builds and checks them; publishing is by hand. Both carry the Rust in `rust/`: e
    each published `typescript/packages/*/package.json`, then refresh the
    locks (`uv lock` in `python/`, `cargo update --workspace` in `rust/`).
    `python3 scripts/check_release_versions.py` says whether they agree.
+
 1. Run the Release workflow by hand to build and check everything: the
    `mirage-ai` wheels for Linux (glibc and musl), macOS and Windows on
    x86_64 and arm64, each installed with its dependencies and run on its
    own platform, the sdist, built and run the same way, and the npm
    tarballs.
+
 1. Push a tag named for the version (`v0.0.8`) on that commit. The
    workflow checks the tag against the versions and builds again.
+
 1. Download the run's `mirage-ai-*` and `npm-tarballs` artifacts, check
    them, and publish them by hand: `mirage-ai` to PyPI first, then the npm
    tarballs, `core` before the packages that depend on it. A pre-release
    goes out under npm's `alpha`, `beta` or `rc` dist-tag, a release under
    `latest`.
+
 1. From a checkout of the tag, push the sandbox image to the GitHub
    container registry under the version and `latest`:
 
