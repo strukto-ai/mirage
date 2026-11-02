@@ -73,7 +73,7 @@ import type { Deny, HandOff, Pending } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
-import { LineHistory } from './history.ts'
+import { LineHistory } from '../history/line.ts'
 import {
   recordStatus,
   restoreStatus,

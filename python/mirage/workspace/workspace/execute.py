@@ -94,6 +94,7 @@ from mirage.workspace.node.occurrence import (
 )
 from mirage.workspace.node.program import refused_row
 from mirage.workspace.node.run_tree import run_command_tree
+from mirage.workspace.history.line import LineHistory
 from mirage.workspace.session import (
     SessionState,
     get_current_session_for,
@@ -115,7 +116,6 @@ from mirage.workspace.workspace.fill import (
     guest_bound,
     line_nodes,
 )
-from mirage.workspace.workspace.history import LineHistory
 from mirage.workspace.workspace.line import run_whole_line
 from mirage.workspace.workspace.meta import WorkspaceMeta
 from mirage.workspace.workspace.routing import Router
