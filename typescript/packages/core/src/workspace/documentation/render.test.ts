@@ -271,18 +271,18 @@ describe('vfsMd', () => {
     expect(markdown).toContain('### `/docs`\n\nRun:\n\n```sh\nls /docs\n```\n\n- Done.\n\n')
   })
 
-  it('keeps a layout fenced past a backtick prefix', async () => {
+  it('keeps a layout text under a fence-forming prefix', async () => {
     const ws = new Workspace({ '/a\n```': [gdocs(), MountMode.READ] })
     const markdown = await ws.vfsMd()
-    expect(markdown).toContain('````text\n/a\n```\n  owned/')
-    expect(markdown).toContain('.gdoc.json\n````\n')
+    expect(markdown).toContain('````text\n```text\n/a\n```\n  owned/')
+    expect(markdown).toContain('any other name is refused.\n````')
   })
 
-  it('keeps a code span whole past a backtick prefix', async () => {
+  it('keeps a layout text under a backtick prefix', async () => {
     const docs = gdocs()
-    docs.vfsMd = 'Run `ls {prefix}/x` or `ls`.'
-    const ws = new Workspace({ '/mail`archive': [docs, MountMode.READ] })
-    expect(await ws.vfsMd()).toContain('Run `` ls /mail`archive/x `` or `ls`.')
+    docs.vfsMd = 'Run ``ls {prefix}/x`` or `ls`.'
+    const ws = new Workspace({ '/mail``archive': [docs, MountMode.READ] })
+    expect(await ws.vfsMd()).toContain('```text\nRun ``ls /mail``archive/x`` or `ls`.\n```')
   })
 
   it('names each search command the profile allows', async () => {

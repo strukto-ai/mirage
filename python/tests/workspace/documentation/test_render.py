@@ -184,24 +184,21 @@ async def test_vfs_md_places_a_layout_as_markdown():
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_keeps_a_layout_fenced_past_a_backtick_prefix():
+async def test_vfs_md_keeps_a_layout_text_under_a_fence_forming_prefix():
     slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
     ws = Workspace({"/a\n```": (slack, MountMode.READ)})
     markdown = await ws.vfs_md()
-    assert "````text\n/a\n```\n  channels/" in markdown
-    assert (
-        "\n  users/\n    <username>__<user-id>.json  # user profile\n````"
-        in (markdown)
-    )
+    assert "````text\n```text\n/a\n```\n  channels/" in markdown
+    assert "cannot escape this scope.\n````" in markdown
 
 
 @pytest.mark.asyncio
-async def test_vfs_md_keeps_a_code_span_whole_past_a_backtick_prefix():
+async def test_vfs_md_keeps_a_layout_text_under_a_backtick_prefix():
     slack = SlackVFS(config=SlackConfig(token="xoxb-fake"))
-    slack.vfs_md = "Run `ls {prefix}/x` or `ls`."
-    ws = Workspace({"/mail`archive": (slack, MountMode.READ)})
+    slack.vfs_md = "Run ``ls {prefix}/x`` or `ls`."
+    ws = Workspace({"/mail``archive": (slack, MountMode.READ)})
     markdown = await ws.vfs_md()
-    assert "Run `` ls /mail`archive/x `` or `ls`." in markdown
+    assert "```text\nRun ``ls /mail``archive/x`` or `ls`.\n```" in markdown
 
 
 @pytest.mark.asyncio
