@@ -153,30 +153,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Langfuse mounted at `/<path
 </Tabs>
 {/* generated: vfs-md langfuse end */}
 
-An example mount:
-
-```text
-/langfuse/
-  traces/
-    abc123.json
-    def456.json
-  sessions/
-    chat-session-1/
-      abc123.json
-      ghi789.json
-  prompts/
-    summarize/
-      1.json
-      2.json
-    classify/
-      1.json
-  datasets/
-    eval-v1/
-      items.jsonl
-      runs/
-        run-2026-04-01.jsonl
-```
-
 ### Traces
 
 `/langfuse/traces/` lists traces (capped at `default_trace_limit`,

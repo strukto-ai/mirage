@@ -169,27 +169,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Discord mounted at `/<path>
 </Tabs>
 {/* generated: vfs-md discord end */}
 
-An example mount:
-
-```text
-/discord/
-  My Server__111222333444555666/
-    channels/
-      general__777888999000111222/
-        2026-04-04/
-          chat.jsonl
-          files/
-            screenshot__1488111222333444555.png
-        2026-04-05/
-          chat.jsonl
-      random__777888999000111223/
-        2026-04-11/
-          chat.jsonl
-    members/
-      alice__444555666777888999.json
-      bob__444555666777888900.json
-```
-
 Display names keep their original spelling from Discord (spaces,
 apostrophes, emoji are all preserved). Only `/` is replaced with `∕`
 (U+2215) so it cannot collide with a directory boundary. The Discord

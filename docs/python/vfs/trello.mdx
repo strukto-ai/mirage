@@ -163,38 +163,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
 </Tabs>
 {/* generated: vfs-md trello end */}
 
-An example mount:
-
-```text
-/trello/
-  workspaces/
-    engineering__abc123def/
-      workspace.json
-      boards/
-        product-roadmap__brd_001/
-          board.json
-          members/
-            alice__mem_001.json
-            bob__mem_002.json
-          labels/
-            bug__lbl_001.json
-            feature__lbl_002.json
-          lists/
-            backlog__lst_001/
-              list.json
-              cards/
-                fix-login__crd_001/
-                  card.json
-                  comments.jsonl
-                add-search__crd_002/
-                  card.json
-                  comments.jsonl
-            in-progress__lst_002/
-              list.json
-              cards/
-                ...
-```
-
 Directory and file names embed the Trello ID after `__` so that
 [trello CLI](/python/cli/trello) commands can take an ID without extra
 lookups.

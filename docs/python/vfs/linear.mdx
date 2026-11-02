@@ -387,31 +387,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Linear mounted at `/<path>`
 </Tabs>
 {/* generated: vfs-md linear end */}
 
-An example mount:
-
-```text
-/linear/
-  teams/
-    ENG__Engineering__abc123def/
-      team.json
-      members/
-        alice__usr_001.json
-        bob__usr_002.json
-      issues/
-        ENG-123__iss_001/
-          issue.json
-          comments.jsonl
-        ENG-124__iss_002/
-          issue.json
-          comments.jsonl
-      projects/
-        Mirage__proj_001.json
-      cycles/
-        Sprint-12__cyc_001.json
-      documents/
-        Search-Architecture__doc_001.json
-```
-
 Directory and file names embed the Linear ID after `__` so that
 VFS-specific commands can reference the correct VFS without
 extra lookups.

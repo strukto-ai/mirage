@@ -232,26 +232,6 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Gmail mounted at `/<path>`.
 </Tabs>
 {/* generated: vfs-md gmail end */}
 
-An example mount:
-
-```text
-/gmail/
-  INBOX/
-    2026-04-12/
-      Meeting_Notes__msg123.gmail.json
-      Meeting_Notes__msg123/
-        report.pdf
-        screenshot.png
-      Simple_Email__msg456.gmail.json
-    2026-04-11/
-      Hello__msg789.gmail.json
-  SENT/
-    2026-04-12/
-      Reply__msg012.gmail.json
-  STARRED/
-  My_Custom_Label/
-```
-
 Label directories appear at the root. System labels use the Gmail
 label ID (e.g., `INBOX`, `SENT`, `STARRED`). User-created labels
 use their label name as is.
