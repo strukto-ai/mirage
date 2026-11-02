@@ -42,8 +42,11 @@ export async function mkdir(
           ? await mkdirComponentError(root, path, norm(path.mountPath))
           : null
       throw named ?? diskError(err, path)
+    } finally {
+      // Also when it threw: the chain may have made its first directories
+      // before a later one failed.
+      record('mkdir', path.virtual, VFSName.DISK, 0, timer)
     }
-    record('mkdir', path.virtual, VFSName.DISK, 0, timer)
     return
   }
   // An existing target is EEXIST, not success: only -p is idempotent (GNU).

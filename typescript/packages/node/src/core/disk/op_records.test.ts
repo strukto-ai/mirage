@@ -36,12 +36,12 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-async function rows(line: string): Promise<[string, string, number][]> {
+async function rows(line: string, exitCode = 0): Promise<[string, string, number][]> {
   const ws = new Workspace({ '/m': new DiskVFS({ root }) }, { mode: MountMode.WRITE })
   try {
     const start = ws.records.length
     const io = await ws.shell(line)
-    expect(io.exitCode, new TextDecoder().decode(io.stderr)).toBe(0)
+    expect(io.exitCode, new TextDecoder().decode(io.stderr)).toBe(exitCode)
     const recs = ws.records.slice(start)
     expect(recs.every((r) => r.executionId !== null)).toBe(true)
     return recs
@@ -83,5 +83,17 @@ describe('disk mutations record the object-store rows', () => {
     ['rm -r /m/d', [['rm_r', '/m/d', 0]]],
   ])('%s', async (line, expected) => {
     expect(await rows(line)).toEqual(expected)
+  })
+})
+
+describe('a failed disk mutation records only what it may have changed', () => {
+  it.each<[string, [string, string, number][]]>([
+    ['rm /m/missing', []],
+    ['mv /m/missing /m/x', []],
+    ['mkdir /m/e', []],
+    ['rmdir /m/d', []],
+    ['mkdir -p /m/a.txt/z', [['mkdir', '/m/a.txt/z', 0]]],
+  ])('%s', async (line, expected) => {
+    expect(await rows(line, 1)).toEqual(expected)
   })
 })

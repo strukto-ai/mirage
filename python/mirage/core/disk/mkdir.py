@@ -44,9 +44,21 @@ async def mkdir(
             raise (named or disk_error(exc, path_spec.virtual)) from exc
         except OSError as exc:
             raise disk_error(exc, path_spec.virtual) from exc
-        record("mkdir", path_spec.virtual, "disk", 0, timer)
+        finally:
+            # Also when it raised: the chain may have made its first
+            # directories before a later one failed.
+            record("mkdir", path_spec.virtual, "disk", 0, timer)
         return
     # An existing target is EEXIST, not success: only -p is idempotent.
-    with disk_errors(path_spec.virtual):
-        await aiofiles.os.mkdir(p)
-    record("mkdir", path_spec.virtual, "disk", 0, timer)
+    done = True
+    try:
+        with disk_errors(path_spec.virtual):
+            await aiofiles.os.mkdir(p)
+    except OSError:
+        done = False
+        raise
+    finally:
+        # A refused mkdir(2) made nothing; a cancelled wait may not have
+        # stopped the worker's.
+        if done:
+            record("mkdir", path_spec.virtual, "disk", 0, timer)
