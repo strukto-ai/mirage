@@ -119,6 +119,11 @@ export interface GmailMessage {
   attachments: GmailAttachment[]
 }
 
+export interface GmailDraft {
+  id: string
+  messageId: string
+}
+
 export interface GmailLabel {
   id: string
   name: string
