@@ -62,9 +62,9 @@ if TYPE_CHECKING:
     from mirage.shell.console import JobConsole
     from mirage.shell.types import Redirect
     from mirage.workspace.evaluation import EvaluationContext
+    from mirage.workspace.history.line import LineHistory
     from mirage.workspace.session.session import SessionState
     from mirage.workspace.types import ExecutionNode, StatusWriter
-    from mirage.workspace.history.line import LineHistory
 
 
 T = TypeVar("T")
