@@ -422,7 +422,7 @@ async def _copy_if(
     except Exception as exc:
         # A 404 is lost only while the source is still there.
         lost = is_condition_lost(exc)
-        probed = True
+        probe_failed = False
         if (
             not lost
             and condition_version(cond) is not None
@@ -431,14 +431,14 @@ async def _copy_if(
             try:
                 lost = await _head(conn, src_key) is not None
             except Exception:
-                probed = False
+                probe_failed = True
                 logger.debug(
                     "source probe failed for %s", src_key, exc_info=True
                 )
         if lost:
             gone = not is_condition_lost(exc)
             raise ConditionLostError([dst_key], gone=gone) from exc
-        if not probed or not is_not_found(exc):
+        if probe_failed or not is_not_found(exc):
             raise
         logger.debug("copy source %s is missing", src_key, exc_info=True)
         return False

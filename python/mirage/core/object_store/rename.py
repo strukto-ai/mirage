@@ -106,8 +106,11 @@ def make_rename(
                     known_versions(dst_spec, kpfx),
                 )
             else:
-                if await move_file(conn, src_key, kp.apply(kpfx, dst)):
-                    return True
+                try:
+                    if await move_file(conn, src_key, kp.apply(kpfx, dst)):
+                        return True
+                except FileNotFoundError as exc:
+                    raise enoent(src_spec) from exc
                 # A directory owns no object of its own, so a clean False
                 # here is the ordinary way into the prefix walk, not an
                 # answer about it.

@@ -432,17 +432,17 @@ async function copyIf(
   } catch (err) {
     // A 404 is lost only while the source is still there.
     let lost = isConditionLost(err)
-    let probed = true
+    let probeFailed = false
     if (!lost && cond.kind === 'match' && isNotFound(err) && !isMissingBucket(err)) {
       try {
         lost = (await head(conn, srcKey)) !== null
       } catch (probeErr) {
-        probed = false
+        probeFailed = true
         console.debug(`source probe failed for ${srcKey}: ${String(probeErr)}`)
       }
     }
     if (lost) throw new ConditionLostError([dstKey], { gone: !isConditionLost(err) })
-    if (!probed || !isNotFound(err) || isMissingBucket(err)) throw err
+    if (probeFailed || !isNotFound(err) || isMissingBucket(err)) throw err
     console.debug(`copy source ${srcKey} is missing: ${String(err)}`)
     return false
   }
