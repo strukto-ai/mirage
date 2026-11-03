@@ -319,7 +319,7 @@ async def plan(
         conflicted (set[str]): of those, the ones left unmerged.
         flags (MvFlags): the parsed flags.
     """
-    destination = repo_relative(location, start, operands[-1])
+    destination = repo_relative(location, start, operands[-1], magic=False)
     target = await lstat(vfs, location.worktree.join(destination))
     into = destination == "" or (
         target is not None and target.type is FileType.DIRECTORY
@@ -329,7 +329,7 @@ async def plan(
     moves: list[Move] = []
     claimed: set[str] = set()
     for operand in operands[:-1]:
-        source = repo_relative(location, start, operand)
+        source = repo_relative(location, start, operand, magic=False)
         landing = (
             posixpath.join(destination, posixpath.basename(source))
             if into

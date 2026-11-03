@@ -832,3 +832,25 @@ async def test_an_operand_left_with_only_rejected_paths_matches_nothing(
     assert not (repo_path / "sub").exists()
     staged = await git_parent.shell("cd /w/work && git ls-files")
     assert staged.stdout == b"a.txt\nb.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_the_retry_a_refused_clone_suggests_restores_the_rest(
+    git_parent, repo_path: Path
+):
+    branch_with_paths(
+        repo_path, "odd", {"a.txt": b"a\n", "sub/.git/config": b"[core]\n"}
+    )
+    await git_parent.shell("cd /w && git clone -b odd work dst")
+    result = await git_parent.shell(
+        "cd /w/dst && git restore --source=HEAD :/"
+    )
+    assert (result.exit_code, result.stderr) == (
+        0,
+        b"error: invalid path 'sub/.git/config'\n",
+    )
+    dst = repo_path.parent / "dst"
+    assert (dst / "a.txt").read_bytes() == b"a\n"
+    assert not (dst / "sub").exists()
+    staged = await git_parent.shell("cd /w/dst && git ls-files")
+    assert staged.stdout == b""

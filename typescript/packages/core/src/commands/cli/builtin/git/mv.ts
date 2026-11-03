@@ -249,14 +249,14 @@ export async function plan(
   conflicted: ReadonlySet<string>,
   flags: MvFlags,
 ): Promise<Move[]> {
-  const destination = repoRelative(location, start, operands[operands.length - 1] ?? '')
+  const destination = repoRelative(location, start, operands[operands.length - 1] ?? '', false)
   const target = await lstat(vfs, location.worktree.join(destination))
   const into = destination === '' || target?.type === FileType.DIRECTORY
   if (operands.length > 2 && !into) throw new NotADirectoryDestinationError(destination)
   const moves: Move[] = []
   const claimed = new Set<string>()
   for (const operand of operands.slice(0, -1)) {
-    const source = repoRelative(location, start, operand)
+    const source = repoRelative(location, start, operand, false)
     const landing = into
       ? destination === ''
         ? entryName(source)

@@ -21,6 +21,8 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 import { readerOf } from '../../../../workspace/files.ts'
 
 const MAGIC = ':'
+const TOP = ':/'
+const EXCLUDE = ['!', '^']
 const SLASH = '/'
 
 /**
@@ -41,21 +43,47 @@ export function absoluteOperand(start: string, operand: string): string {
 }
 
 /**
+ * The root-relative path a top-magic operand names, null for any other operand.
+ *
+ * git's short magic `:/` reads the rest from the work tree root, an optional
+ * `:` ending the magic; `:/!` and `:/^` add exclusion, which this build lacks.
+ * Pinned against git 2.51.2.
+ *
+ * @param operand the operand as the user spelled it
+ */
+export function topPath(operand: string): string | null {
+  if (!operand.startsWith(TOP)) return null
+  const rest = operand.slice(TOP.length)
+  if (EXCLUDE.some((mark) => rest.startsWith(mark))) return null
+  return (rest.startsWith(MAGIC) ? rest.slice(MAGIC.length) : rest).replace(/^\/+/, '')
+}
+
+/**
  * A path operand as a repository-relative path.
  *
  * Empty string for the working tree root itself, which is what `git add .` from
  * the top resolves to and means "everything". Git uses the work tree as the
- * base when invoked from outside it, as with --git-dir and --work-tree.
+ * base when invoked from outside it, as with --git-dir and --work-tree. A
+ * pathspec's top magic (`:/`) names a path from the root; `mv` reads its
+ * operands as plain paths, so it turns magic off.
  *
  * @param location the discovered repository
  * @param start absolute virtual path git is running in
  * @param operand the operand as the user spelled it
+ * @param magic whether a `:/` prefix is top magic
  */
-export function repoRelative(location: RepoLocation, start: string, operand: string): string {
+export function repoRelative(
+  location: RepoLocation,
+  start: string,
+  operand: string,
+  magic = true,
+): string {
   const root = rstripSlash(location.worktree.virtual) || '/'
   const prefix = root.endsWith('/') ? root : `${root}/`
+  const top = magic ? topPath(operand) : null
   const base = start === root || start.startsWith(prefix) ? start : root
-  const absolute = absoluteOperand(base, operand)
+  const absolute =
+    top === null ? absoluteOperand(base, operand) : absoluteOperand(root, top === '' ? '.' : top)
   if (absolute === root) return ''
   if (!absolute.startsWith(prefix)) throw new OutsideRepositoryError(operand, root)
   return absolute.slice(prefix.length)
@@ -95,8 +123,8 @@ export function matched(paths: Iterable<string>, target: string): Set<string> {
  *
  * A trailing slash survives, because `docs/` names only what lies under a
  * directory where `docs` also names a file of that name. An empty operand is
- * git's own refusal, and magic (`:(top)`, `:!`) is refused as unsupported
- * rather than matched as a path.
+ * git's own refusal, and magic other than `:/` (`:(top)`, `:!`) is refused as
+ * unsupported rather than matched as a path.
  *
  * @param location the discovered repository
  * @param start absolute virtual path git is running in
@@ -109,7 +137,9 @@ export function pathspecPatterns(
 ): string[] {
   return operands.map((operand) => {
     if (operand === '') throw new EmptyPathspecError()
-    if (operand.startsWith(MAGIC)) throw new UnsupportedPathspecError(operand)
+    if (operand.startsWith(MAGIC) && topPath(operand) === null) {
+      throw new UnsupportedPathspecError(operand)
+    }
     const pattern = repoRelative(location, start, operand)
     return pattern !== '' && operand.endsWith(SLASH) ? pattern + SLASH : pattern
   })

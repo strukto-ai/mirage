@@ -69,6 +69,13 @@ async def test_a_missing_source_is_fatal(git_rw):
 
 
 @pytest.mark.asyncio
+async def test_a_top_magic_source_is_a_literal_path(git_rw):
+    code, _out, err = await run(git_rw, "mv :/a.txt c.txt")
+    assert code == 128
+    assert err == b"fatal: bad source, source=:/a.txt, destination=c.txt\n"
+
+
+@pytest.mark.asyncio
 async def test_an_untracked_source_is_fatal(git_rw):
     await git_rw.shell("echo u > /repo/u.txt")
     _code, _out, err = await run(git_rw, "mv u.txt c.txt")
