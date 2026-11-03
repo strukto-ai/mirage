@@ -111,9 +111,11 @@ export async function loadPyodideRuntime(
   const distribution = origin === undefined ? null : indexURL
   let mod: { loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown> }
   try {
-    mod = (await (distribution === null
-      ? import('pyodide')
-      : import(/* @vite-ignore */ `${distribution}pyodide.mjs`))) as unknown as {
+    // Each import is awaited where it stands inside the try, so a bundler
+    // leaves a pyodide that is not installed to fail here, not the build.
+    mod = (distribution === null
+      ? await import('pyodide')
+      : await import(/* @vite-ignore */ `${distribution}pyodide.mjs`)) as unknown as {
       loadPyodide: (opts?: Record<string, unknown>) => Promise<unknown>
     }
   } catch (err) {

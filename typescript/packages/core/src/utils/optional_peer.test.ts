@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { loadOptionalPeer } from './optional_peer.ts'
+import { loadOptionalPeer, missingPeer } from './optional_peer.ts'
 
 const CONFIG = {
   feature: 'FUSE support',
@@ -62,5 +62,16 @@ describe('loadOptionalPeer', () => {
     const load = loadOptionalPeer(() => Promise.reject(err), { ...CONFIG, systemHint: HINT })
     await expect(load).rejects.toThrow(/No native build was found/)
     await expect(load).rejects.toThrow(/macFUSE on macOS/)
+  })
+})
+
+describe('missingPeer', () => {
+  it("answers an import's own catch as loadOptionalPeer does", async () => {
+    const err = withCode("Cannot find package '@zkochan/fuse-native'", 'ERR_MODULE_NOT_FOUND')
+    await expect(Promise.reject(err).catch(missingPeer(CONFIG))).rejects.toThrow(
+      /pnpm add @zkochan\/fuse-native/,
+    )
+    const load = withCode('dlopen(fuse.node): Library not loaded', 'ERR_DLOPEN_FAILED')
+    await expect(Promise.reject(load).catch(missingPeer(CONFIG))).rejects.toBe(load)
   })
 })
