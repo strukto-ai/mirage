@@ -14,19 +14,34 @@
 
 import { Accessor } from './index.ts'
 import { DEFAULT_TIMEOUT } from '../core/api/constants.ts'
-import { loadOptionalPeer } from '../utils/optional_peer.ts'
+import { missingPeer } from '../utils/optional_peer.ts'
 import type { ImapFlow } from 'imapflow'
+import { judgeSocket } from '../io/web/network.ts'
 import { currentRequest, type IncomingRequest } from '../io/web/request.ts'
 import type { EmailConfig } from '../core/email/config.ts'
 
 export class EmailAccessor extends Accessor {
   readonly config: EmailConfig
-  private clientPromise: Promise<ImapFlow> | null = null
-  private opener: IncomingRequest | null = null
+  // The client outside any incoming request, as on Node, where one serves
+  // every call.
+  private shared: Promise<ImapFlow> | null = null
+  // An edge runtime cancels a socket with the request that opened it, so
+  // each request there keeps its own client, let go with the request.
+  private perRequest = new WeakMap<IncomingRequest, Promise<ImapFlow>>()
 
   constructor(config: EmailConfig) {
     super()
     this.config = config
+  }
+
+  private slot(request: IncomingRequest | null): Promise<ImapFlow> | null {
+    return request === null ? this.shared : (this.perRequest.get(request) ?? null)
+  }
+
+  private setSlot(request: IncomingRequest | null, client: Promise<ImapFlow> | null): void {
+    if (request === null) this.shared = client
+    else if (client === null) this.perRequest.delete(request)
+    else this.perRequest.set(request, client)
   }
 
   /**
@@ -38,22 +53,16 @@ export class EmailAccessor extends Accessor {
    * so the next access connects afresh instead of reusing a dead socket.
    */
   async getImap(): Promise<ImapFlow> {
+    // An edge isolate opens the socket past its fetch guard, so the network
+    // rule is asked here; elsewhere this is a no-op.
+    judgeSocket(this.config.imapHost, this.config.imapPort)
     const request = currentRequest()
-    if (this.clientPromise !== null && this.opener !== request) {
-      // An edge runtime cancelled the socket with the request that opened
-      // it: closing it from here is I/O it refuses, so it is let go.
-      this.clientPromise = null
-    }
-    if (this.clientPromise === null) {
-      this.opener = request
+    let current = this.slot(request)
+    if (current === null) {
       const pending: Promise<ImapFlow> = (async () => {
-        const mod = await loadOptionalPeer(
-          () =>
-            import('imapflow') as unknown as Promise<{
-              ImapFlow: typeof ImapFlow
-            }>,
-          { feature: 'EmailAccessor', packageName: 'imapflow' },
-        )
+        const mod = (await import('imapflow').catch(
+          missingPeer({ feature: 'EmailAccessor', packageName: 'imapflow' }),
+        )) as unknown as { ImapFlow: typeof ImapFlow }
         const timeoutMs = (this.config.timeout ?? DEFAULT_TIMEOUT) * 1000
         const client = new mod.ImapFlow({
           host: this.config.imapHost,
@@ -66,32 +75,37 @@ export class EmailAccessor extends Accessor {
           socketTimeout: timeoutMs,
         })
         const drop = (): void => {
-          if (this.clientPromise === pending) this.clientPromise = null
+          if (this.slot(request) === pending) this.setSlot(request, null)
         }
         client.on('error', drop)
         client.on('close', drop)
         await client.connect()
         return client
       })()
-      this.clientPromise = pending
+      this.setSlot(request, pending)
+      current = pending
     }
-    const current = this.clientPromise
     try {
       return await current
     } catch (err) {
-      if (this.clientPromise === current) this.clientPromise = null
+      if (this.slot(request) === current) this.setSlot(request, null)
       throw err
     }
   }
 
   override async close(): Promise<void> {
-    if (this.clientPromise === null) return
+    // Another request's client is let go: closing it from here is I/O an
+    // edge runtime refuses.
+    const request = currentRequest()
+    const current = this.slot(request)
+    this.shared = null
+    this.perRequest = new WeakMap()
+    if (current === null) return
     try {
-      const c = await this.clientPromise
+      const c = await current
       await c.logout()
     } catch {
       // ignore — best-effort cleanup
     }
-    this.clientPromise = null
   }
 }

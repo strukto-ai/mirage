@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadOptionalPeer } from '../../utils/optional_peer.ts'
+import { missingPeer } from '../../utils/optional_peer.ts'
 import type {
   AddressObject,
   EmailAddress as MailparserEmailAddress,
@@ -34,13 +34,9 @@ let parserPromise: Promise<typeof simpleParser> | null = null
 
 async function getParser(): Promise<typeof simpleParser> {
   parserPromise ??= (async () => {
-    const mod = await loadOptionalPeer(
-      () =>
-        import('mailparser') as unknown as Promise<{
-          simpleParser: typeof simpleParser
-        }>,
-      { feature: 'parseRfc822', packageName: 'mailparser' },
-    )
+    const mod = (await import('mailparser').catch(
+      missingPeer({ feature: 'parseRfc822', packageName: 'mailparser' }),
+    )) as unknown as { simpleParser: typeof simpleParser }
     return mod.simpleParser
   })()
   return parserPromise

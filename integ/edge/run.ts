@@ -277,9 +277,10 @@ async function startFakes(dir: string): Promise<ChildProcess> {
   for await (const line of lines) {
     const at = line.indexOf('=')
     if (at > 0) process.env[line.slice(0, at)] = line.slice(at + 1)
-    if (wanted.every((name) => process.env[name] !== undefined)) break
+    if (wanted.every((name) => process.env[name] !== undefined)) return child
   }
-  return child
+  child.kill()
+  throw new Error('the fakes exited before announcing their URLs')
 }
 
 /** The edge test worker under `wrangler dev`, answering on `port`. */
@@ -316,21 +317,23 @@ async function startEdge(port: number): Promise<ChildProcess> {
 async function main(): Promise<void> {
   const only = process.argv.slice(2)
   const dir = mkdtempSync(join(tmpdir(), 'mirage-integ-edge-'))
-  const fakes = await startFakes(dir)
   const port = 8799
-  const worker = await startEdge(port)
   const base = `http://127.0.0.1:${String(port)}`
-  const cases = loadCases(root)
-  const targets = [...loadTargets(root).values()].filter(
-    (t) =>
-      OPENERS[t.service ?? ''] !== undefined &&
-      t.env === undefined &&
-      (only.length === 0 || only.includes(t.id)),
-  )
+  let fakes: ChildProcess | null = null
+  let worker: ChildProcess | null = null
   let passed = 0
   let failed = 0
   let skipped = 0
   try {
+    fakes = await startFakes(dir)
+    worker = await startEdge(port)
+    const cases = loadCases(root)
+    const targets = [...loadTargets(root).values()].filter(
+      (t) =>
+        OPENERS[t.service ?? ''] !== undefined &&
+        t.env === undefined &&
+        (only.length === 0 || only.includes(t.id)),
+    )
     for (const target of targets) {
       const config = await OPENERS[target.service ?? '']!(target)
       // A session's inline permissions document rides in as a profile of its
@@ -393,8 +396,8 @@ async function main(): Promise<void> {
       console.log(`ok ${target.id}`)
     }
   } finally {
-    worker.kill()
-    fakes.kill()
+    worker?.kill()
+    fakes?.kill()
     rmSync(dir, { recursive: true, force: true })
   }
   console.log(
