@@ -56,8 +56,8 @@ function unauthorized(reason: string): Response {
 }
 
 /**
- * The server API on a web `Request`/`Response` host such as a Cloudflare
- * Worker: the same routes the Node daemon serves, over workspaces held in
+ * The server API on an edge runtime's web `Request`/`Response`: the same
+ * routes the Node daemon serves, over workspaces held in
  * this isolate's memory. SSH, kernel mounts and policy files on disk are
  * the Node daemon's alone.
  */

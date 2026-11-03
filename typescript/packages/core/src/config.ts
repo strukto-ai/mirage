@@ -600,7 +600,7 @@ interface CLIBlock {
  * runtime has its own table), the state store a `store:` block names, a
  * path-form script's text, a `source:Name` reference's export, and the
  * network watch a rule needs. Node reads files and imports modules; a host
- * with no files (a Cloudflare Worker) refuses those, and the rest of the
+ * with no files (an edge runtime) refuses those, and the rest of the
  * loader is the same.
  */
 export interface ConfigHost {

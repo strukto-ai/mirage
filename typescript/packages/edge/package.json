@@ -1,7 +1,7 @@
 {
   "name": "@struktoai/mirage-edge",
   "version": "0.0.8",
-  "description": "Mirage for edge runtimes: Cloudflare Workers and other hosts with no Node and no threads",
+  "description": "Mirage for edge runtimes: hosts with web Request/Response and no Node or threads",
   "keywords": [
     "bash",
     "typescript",
@@ -9,8 +9,8 @@
     "ai-agents",
     "agent-sandbox",
     "virtual-filesystem",
-    "cloudflare-workers",
-    "edge"
+    "edge",
+    "serverless"
   ],
   "homepage": "https://github.com/strukto-ai/mirage#readme",
   "bugs": {

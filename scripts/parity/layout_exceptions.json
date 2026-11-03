@@ -150,7 +150,7 @@
     "daemon": "The uvicorn import target (mirage.server.daemon:app) the CLI spawns. Its twin is TypeScript's server/bin/daemon.ts, under the npm bin directory already excused as server/bin."
    },
    "typescript_only": {
-    "routes": "The route contract (RouteApp, RouteRequest, RouteReply) the routers register on, so one set of routes runs on Fastify under Node and on a web Request/Response host such as a Cloudflare Worker. Python's routers register on FastAPI alone and have no second host to share them with.",
+    "routes": "The route contract (RouteApp, RouteRequest, RouteReply) the routers register on, so one set of routes runs on Fastify under Node and on the web Request/Response of an edge runtime. Python's routers register on FastAPI alone and have no second host to share them with.",
     "api": "Registers every HTTP route once (registerApi) for the Fastify daemon and the web Request/Response host of @struktoai/mirage-edge alike. Python's app.py includes its routers on its one FastAPI app."
    }
   },

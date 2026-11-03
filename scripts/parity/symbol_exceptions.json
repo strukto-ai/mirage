@@ -663,7 +663,7 @@
    },
    "typescript_only": {
     "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same entry point.",
-    "ConfigHost": "TypeScript runs the config loader on more than one host: Node reads scripts and code references from disk and builds its own stores, a Cloudflare Worker has no disk. Python's loader runs on one host and reads files itself.",
+    "ConfigHost": "TypeScript runs the config loader on more than one host: Node reads scripts and code references from disk and builds its own stores, an edge runtime has no disk. Python's loader runs on one host and reads files itself.",
     "HOST": "Node's ConfigHost: what the shared loader in @struktoai/mirage-core/config reads from Node (files, module references, its VFS table and stores). Python has one loader and no host to bind."
    }
   },
@@ -1207,7 +1207,7 @@
   },
   "runtime/python/monty/loader": {
    "typescript_only": {
-    "provideMontyModule": "A host with no worker threads (a Cloudflare Worker) hands TypeScript an in-process monty pool; Python imports pydantic_monty natively and starts its own workers.",
+    "provideMontyModule": "A host with no worker threads (an edge runtime) hands TypeScript an in-process monty pool; Python imports pydantic_monty natively and starts its own workers.",
     "provided": "The host's monty loader that provideMontyModule sets; Python has no such hook."
    }
   }

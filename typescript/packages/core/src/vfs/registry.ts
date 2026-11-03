@@ -31,7 +31,7 @@ import { parseConfigWithSchema, refuseUnknownKeys, z } from './secrets.ts'
  * This table holds the backends core implements, which every runtime
  * builds the same way; `@struktoai/mirage-node` and
  * `@struktoai/mirage-browser` add their own on top of it, and a runtime
- * with neither (a Cloudflare Worker) builds from this one alone.
+ * with neither (an edge runtime) builds from this one alone.
  *
  * Configs are normalized from Python-style snake_case (used in YAML and
  * by the Python `mirage.config` loader) to TS-idiomatic camelCase. So
