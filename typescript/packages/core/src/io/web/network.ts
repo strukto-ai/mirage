@@ -53,6 +53,9 @@ const BODY_HEADERS = [
   'content-type',
 ]
 
+// The headers that carry credentials, dropped on a hop to another origin.
+const CREDENTIALS = ['authorization', 'cookie', 'proxy-authorization']
+
 const IPV4 = /^\d+\.\d+\.\d+\.\d+(?::\d+)?$/
 
 /** Whether a `network` entry names an address or a range rather than a host. */
@@ -171,7 +174,7 @@ function nextHop(
   } else if (body instanceof ReadableStream || (init.body === undefined && base?.body != null)) {
     return null
   }
-  if (to.origin !== from.origin) headers.delete('authorization')
+  if (to.origin !== from.origin) for (const name of CREDENTIALS) headers.delete(name)
   return {
     ...init,
     method,

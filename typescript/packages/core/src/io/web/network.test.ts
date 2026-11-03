@@ -101,8 +101,11 @@ describe('the page network watcher', () => {
     const sent: string[] = []
     answer = (input, init) => {
       const url = input instanceof Request ? input.url : String(input)
-      const auth = new Headers(init?.headers).get('authorization') ?? '-'
-      sent.push(`${init?.method ?? 'GET'} ${url} ${auth}`)
+      const headers = new Headers(init?.headers)
+      const auth = ['authorization', 'cookie', 'proxy-authorization'].map(
+        (name) => headers.get(name) ?? '-',
+      )
+      sent.push(`${init?.method ?? 'GET'} ${url} ${auth.join(' ')}`)
       const to = { 'https://api.test/a': 'https://dl.test/f', 'https://api.test/b': '/c' }[url]
       if (url === 'https://api.test/bad') {
         return Promise.resolve(
@@ -119,23 +122,28 @@ describe('the page network watcher', () => {
       fetch('https://api.test/a', {
         method: 'POST',
         body: 'x',
-        headers: { authorization: 'Bearer t', 'content-type': 'text/plain' },
+        headers: {
+          authorization: 'Bearer t',
+          cookie: 'session=s',
+          'proxy-authorization': 'Basic p',
+          'content-type': 'text/plain',
+        },
       }),
     )
     expect(await download.text()).toBe('https://dl.test/f')
     const relative = await runWithNetwork(rule, () =>
-      fetch('https://api.test/b', { headers: { authorization: 'Bearer t' } }),
+      fetch('https://api.test/b', { headers: { authorization: 'Bearer t', cookie: 'session=s' } }),
     )
     expect(await relative.text()).toBe('https://api.test/c')
     await expect(runWithNetwork(rule, () => fetch('https://api.test/bad'))).rejects.toThrow(
       'Failed to fetch',
     )
     expect(sent).toEqual([
-      'POST https://api.test/a Bearer t',
-      'GET https://dl.test/f -',
-      'GET https://api.test/b Bearer t',
-      'GET https://api.test/c Bearer t',
-      'GET https://api.test/bad -',
+      'POST https://api.test/a Bearer t session=s Basic p',
+      'GET https://dl.test/f - - -',
+      'GET https://api.test/b Bearer t session=s -',
+      'GET https://api.test/c Bearer t session=s -',
+      'GET https://api.test/bad - - -',
     ])
   })
 
