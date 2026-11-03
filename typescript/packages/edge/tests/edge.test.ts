@@ -69,6 +69,17 @@ describe('mirage in workerd', () => {
     expect(jq?.stdout).toBe('3\n')
   })
 
+  it("diffs in the isolate's own thread, which has no worker to start", async () => {
+    const [changed, same, missing] = await run([
+      'echo a > /data/a; echo b > /data/b; diff /data/a /data/b',
+      'diff /data/a /data/a',
+      'diff /data/missing /data/a',
+    ])
+    expect(changed).toEqual({ exit: 1, stdout: '1c1\n< a\n---\n> b\n', stderr: '' })
+    expect(same).toEqual({ exit: 0, stdout: '', stderr: '' })
+    expect(missing?.stderr).toBe('diff: /data/missing: No such file or directory\n')
+  })
+
   it('runs python3 on in-process monty, reading the workspace', async () => {
     const [inline, write, script] = await run([
       "python3 -c 'print(sum(range(10)))'",

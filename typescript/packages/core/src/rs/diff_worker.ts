@@ -43,60 +43,67 @@ export const DiffReply = z.discriminatedUnion('kind', [
 export type DiffReply = z.infer<typeof DiffReply>
 
 const DEC = new TextDecoder()
-let stream: OpenStream | undefined
 
 function refusalReply(error: unknown): DiffReply {
   if (!(error instanceof StreamRefusal)) throw error
   return { kind: 'refusal', message: error.message, output: error.output }
 }
 
-export async function diffDispatch(raw: unknown): Promise<DiffReply> {
-  const request = DiffRequest.parse(raw)
-  try {
-    if (request.kind === 'close' || request.kind === 'open') {
+/**
+ * A diff dispatcher holding the one stream its worker compares through. A
+ * thread has a dispatcher of its own; a host without threads makes one per
+ * worker, so two diffs in the same thread never share a stream.
+ */
+export function diffDispatcher(): (raw: unknown) => Promise<DiffReply> {
+  let stream: OpenStream | undefined
+  return async (raw) => {
+    const request = DiffRequest.parse(raw)
+    try {
+      if (request.kind === 'close' || request.kind === 'open') {
+        stream?.close()
+        stream = undefined
+        if (request.kind === 'open') {
+          stream = await openStream('diff', { ...request.options })
+        }
+        return { kind: 'output', output: new Uint8Array() }
+      }
+      if (stream === undefined) throw new Error('diff stream is not open')
+      switch (request.kind) {
+        case 'feed':
+          return { kind: 'output', output: stream.feedInput(request.index, request.chunk) }
+        case 'end':
+          return { kind: 'output', output: stream.endInput(request.index) }
+        case 'drain':
+          return { kind: 'output', output: stream.drain() }
+        case 'inspect': {
+          const metadata = DiffOutcome.parse(JSON.parse(DEC.decode(stream.metadata())))
+          const reply = {
+            kind: 'state',
+            busy: stream.busy(),
+            status: z.union([z.literal(0), z.literal(1), z.literal(2)]).parse(stream.status()),
+            stderr: stream.takeStderr(),
+            outcome: metadata.outcome,
+          } satisfies DiffReply
+          if (!reply.busy) {
+            stream.close()
+            stream = undefined
+          }
+          return reply
+        }
+      }
+    } catch (error) {
+      if (
+        request.kind === 'open' &&
+        (error instanceof WebAssembly.CompileError || error instanceof WebAssembly.LinkError)
+      )
+        return {
+          kind: 'unavailable',
+          message: `cannot initialize the Rust diff module: ${error.message}`,
+        }
+      if (!(error instanceof StreamRefusal)) throw error
       stream?.close()
       stream = undefined
-      if (request.kind === 'open') {
-        stream = await openStream('diff', { ...request.options })
-      }
-      return { kind: 'output', output: new Uint8Array() }
+      return refusalReply(error)
     }
-    if (stream === undefined) throw new Error('diff stream is not open')
-    switch (request.kind) {
-      case 'feed':
-        return { kind: 'output', output: stream.feedInput(request.index, request.chunk) }
-      case 'end':
-        return { kind: 'output', output: stream.endInput(request.index) }
-      case 'drain':
-        return { kind: 'output', output: stream.drain() }
-      case 'inspect': {
-        const metadata = DiffOutcome.parse(JSON.parse(DEC.decode(stream.metadata())))
-        const reply = {
-          kind: 'state',
-          busy: stream.busy(),
-          status: z.union([z.literal(0), z.literal(1), z.literal(2)]).parse(stream.status()),
-          stderr: stream.takeStderr(),
-          outcome: metadata.outcome,
-        } satisfies DiffReply
-        if (!reply.busy) {
-          stream.close()
-          stream = undefined
-        }
-        return reply
-      }
-    }
-  } catch (error) {
-    if (
-      request.kind === 'open' &&
-      (error instanceof WebAssembly.CompileError || error instanceof WebAssembly.LinkError)
-    )
-      return {
-        kind: 'unavailable',
-        message: `cannot initialize the Rust diff module: ${error.message}`,
-      }
-    if (!(error instanceof StreamRefusal)) throw error
-    stream?.close()
-    stream = undefined
-    return refusalReply(error)
   }
 }
