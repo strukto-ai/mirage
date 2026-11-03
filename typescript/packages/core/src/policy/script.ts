@@ -178,19 +178,19 @@ export function scriptContext(
 }
 
 /**
- * The program a runtime runs at one method: the source as written, and
- * when it defines a function named for the method at its top level
- * (`def pre_command(ctx)`, or `async def`), a call to it after, with the
- * context, printing what it returns as the answer.
+ * The program a runtime runs at one method: the source as written, then a
+ * call to the function it defines for the method at its top level
+ * (`def pre_command(ctx)`, or `async def`), with the context, printing
+ * what it returns as the answer.
  *
  * The call is appended, so the program's own lines keep their numbers in
- * a traceback, and a program without the function runs unedited. Mirrors
- * the Python `program_source`.
+ * a traceback. Throws a clause about "script" when the program defines no
+ * function for the method. Mirrors the Python `program_source`.
  */
 export function programSource(source: string, method: PolicyMethod): string {
   const name = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
   const found = new RegExp(`^(async[ \\t]+)?def[ \\t]+${name}[ \\t]*\\(`, 'm').exec(source)
-  if (found === null) return source
+  if (found === null) throw new Error(`script defines no ${name}(ctx)`)
   let call = `${name}(_mirage_json.loads(_mirage_os.environ["${CTX_ENV}"]))`
   if (found[1] !== undefined) call = `await ${call}`
   return (
@@ -201,9 +201,10 @@ export function programSource(source: string, method: PolicyMethod): string {
 }
 
 /**
- * The answer a policy program printed at one method.
+ * The answer a policy program's function returned at one method, as
+ * `programSource` printed it.
  *
- * Nothing (or `null`) is no opinion. Anything else is one JSON answer
+ * `null` (the function returned `None`) is no opinion. Anything else is one JSON answer
  * (`Answer`): `{"kind": "deny", "reason": ...}`, `{"kind": "ask",
  * "reason": ...}`, or at `preExecute` `{"kind": "route", "runtime": ...}`.
  * A deny or an ask without a reason carries the document's default one.
@@ -224,8 +225,8 @@ export function scriptAction(output: Uint8Array, method: PolicyMethod): Deny | A
   const name = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
   if (!answer.success) {
     throw new Error(
-      `script must return or print a JSON answer at ${name}, ` +
-        '{"kind": "deny" | "ask" | "route", ...}',
+      `script must return an answer at ${name}, ` +
+        '{"kind": "deny" | "ask" | "route", ...}, or None',
     )
   }
   const { kind, reason, runtime } = answer.data
@@ -273,17 +274,17 @@ export interface ScriptWiring {
  *
  * A program runs as any program does on its runtime: in the session's cwd,
  * with the context as JSON (`scriptContext`) in `CTX_ENV` and on stdin,
- * and its answer printed on stdout (`scriptAction`), never edited but for
- * the call to the function it defines for the method, whose return value
- * is that answer (`programSource`).
+ * and the call to the function it defines for the method appended
+ * (`programSource`), which prints what the function returns on stdout as
+ * its answer (`scriptAction`).
  * Beside `CTX_ENV` it is passed only its entry's own `env`, a pointer read
  * from the workspace's sources on the entry's first run and kept: the
  * session's variables are in the context, so none the agent sets changes
  * how the program starts,
  * and on pyodide it runs with `-P` (`PROGRAM_FLAGS`), so no file the agent
  * writes stands in for a module it imports. Every failure fails closed: a
- * program that exits non-zero, runs past the timeout, answers something
- * else, or names a runtime that cannot be built refuses the action with a
+ * program that defines no function for the method, exits non-zero, runs
+ * past the timeout, returns something else, or names a runtime that cannot be built refuses the action with a
  * reason naming the profile, and is logged. The workspace's `routePolicy`
  * program runs here too (`run`), outside any profile.
  *
@@ -498,6 +499,7 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
     payload: string,
     cwd: string,
   ): Promise<Deny | Ask | Route | null> {
+    const source = programSource(entry.script.source, method)
     let result: RunResult
     try {
       const engine = this.engine(entry)
@@ -511,7 +513,7 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
           return await runWithTimeout(
             engine.execute([], [], {
               flags: {
-                c: programSource(entry.script.source, method),
+                c: source,
                 ...PROGRAM_FLAGS.get(entry.runtime),
               },
               cwd: PathSpec.fromStrPath(cwd),

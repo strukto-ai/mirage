@@ -32,6 +32,7 @@ import { Policies } from './policies.ts'
 import { ScriptPolicy, programSource, scriptAction, scriptContext } from './script.ts'
 import {
   CommandWord,
+  VALIDITY,
   policyCaller,
   type CommandContext,
   type CommandResultContext,
@@ -160,9 +161,15 @@ function bytes(text: string): Uint8Array {
   return ENCODE.encode(text)
 }
 
+// A program defining every method's function: the runner calls the one for
+// its method, and a FakeProgram answers for it without running it.
+const SOURCE = Object.keys(VALIDITY)
+  .map((m) => `def ${m.replace(/[A-Z]/g, (l) => `_${l.toLowerCase()}`)}(ctx):\n    return None\n`)
+  .join('')
+
 function entry(
   runtime = 'monty',
-  source = 'SOURCE',
+  source = SOURCE,
   config: Record<string, unknown> = {},
 ): ProfileScript {
   return {
@@ -258,7 +265,7 @@ function line(): RouteContext {
 function policyWith(method: keyof ProfileScripts, ...engines: FakeProgram[]): ScriptPolicy {
   const queue = [...engines]
   built.factory = () => queue.shift() ?? engines[engines.length - 1]
-  const programs = engines.map((_, i) => entry('monty', `SOURCE ${String(i)}`, { slot: i }))
+  const programs = engines.map((_, i) => entry('monty', `${SOURCE}# ${String(i)}\n`, { slot: i }))
   return track(new ScriptPolicy(scripts({ [method]: programs })))
 }
 
@@ -332,9 +339,7 @@ describe('scriptAction', () => {
     '{"kind": "deny", "reason": "x", "policy": "Mine"}',
     '{"kind": "deny"}\n{"kind": "ask"}',
   ])('refuses anything else: %s', (printed) => {
-    expect(() => scriptAction(bytes(printed), 'preExecute')).toThrow(
-      'must return or print a JSON answer',
-    )
+    expect(() => scriptAction(bytes(printed), 'preExecute')).toThrow('must return an answer')
   })
 })
 
@@ -484,7 +489,7 @@ describe('ScriptPolicy', () => {
     expect(request.stdin).toEqual(bytes(payload))
     expect(request.env).toEqual({ [CTX_ENV]: payload })
     expect((JSON.parse(payload) as { env: Record<string, string> }).env.TEAM).toBe('core')
-    expect(request.flags).toEqual({ c: 'SOURCE 0' })
+    expect(request.flags).toEqual({ c: programSource(`${SOURCE}# 0\n`, 'preCommand') })
   })
 
   it("keeps the session's directory off a pyodide program's path", async () => {
@@ -492,7 +497,7 @@ describe('ScriptPolicy', () => {
     built.factory = () => engine
     const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('pyodide')] })))
     await policy.preCommand(ctx('cat', { session: sessionView('/data') }))
-    expect(engine.requests[0]?.flags).toEqual({ c: 'SOURCE', P: true })
+    expect(engine.requests[0]?.flags).toEqual({ c: programSource(SOURCE, 'preCommand'), P: true })
   })
 
   it('answers after the action too', async () => {
@@ -644,7 +649,7 @@ describe('ScriptPolicy', () => {
     const [action] = (await policy.preCommand(ctx())) ?? []
     expect(action?.kind).toBe('deny')
     expect(action !== undefined && 'reason' in action ? action.reason : '').toMatch(
-      /^profile 'release' policy must return or print a JSON answer at pre_command/,
+      /^profile 'release' policy must return an answer at pre_command/,
     )
   })
 
@@ -680,9 +685,9 @@ describe('ScriptPolicy', () => {
         scripts({
           preCommand: [
             entry('monty'),
-            entry('pyodide', 'b', { home: '/a' }),
-            entry('pyodide', 'c', { home: '/a', maxMemory: '1G' }),
-            entry('monty', 'd', { maxMemory: null }),
+            entry('pyodide', `${SOURCE}# b\n`, { home: '/a' }),
+            entry('pyodide', `${SOURCE}# c\n`, { home: '/a', maxMemory: '1G' }),
+            entry('monty', `${SOURCE}# d\n`, { maxMemory: null }),
           ],
         }),
       ),
@@ -697,7 +702,7 @@ describe('ScriptPolicy', () => {
   })
 
   it('runs one program and throws what went wrong', async () => {
-    const program = entry('monty', 'SOURCE 0', { slot: 0 })
+    const program = entry('monty', `${SOURCE}# 0\n`, { slot: 0 })
     const routing = policyWith(
       'preExecute',
       new FakeProgram(answer({ kind: 'route', runtime: 'x' })),
@@ -721,9 +726,9 @@ describe('ScriptPolicy', () => {
       new ScriptPolicy(
         scripts({
           preCommand: [
-            entry('pyodide', 'a', { home: '/a' }),
-            entry('pyodide', 'b', { home: '/a' }),
-            entry('pyodide', 'c', { home: '/b' }),
+            entry('pyodide', `${SOURCE}# a\n`, { home: '/a' }),
+            entry('pyodide', `${SOURCE}# b\n`, { home: '/a' }),
+            entry('pyodide', `${SOURCE}# c\n`, { home: '/b' }),
           ],
         }),
       ),
@@ -838,19 +843,14 @@ describe('ScriptPolicy', () => {
 // A program that asks about what an operand holds, not what it is called:
 // the shape a content policy takes when it is a program.
 const READER = `\
-import json
-import os
-
-ctx = json.loads(os.environ['${CTX_ENV}'])
-verdict = None
-for p in ctx['paths']:
-    try:
-        body = open(p).read()
-    except OSError:
-        continue
-    if 'payload' in body:
-        verdict = {'kind': 'ask', 'reason': 'sign-off on payload'}
-print(json.dumps(verdict))
+def pre_command(ctx):
+    for p in ctx['paths']:
+        try:
+            body = open(p).read()
+        except OSError:
+            continue
+        if 'payload' in body:
+            return {'kind': 'ask', 'reason': 'sign-off on payload'}
 `
 
 /**
@@ -892,13 +892,13 @@ function dispatchOver(files: Record<string, string>): DispatchFn {
 }
 
 describe('programSource', () => {
-  it("runs a program without the method's function as written", () => {
+  it("refuses a program without the method's function", () => {
     for (const source of [
       "print('x')",
       'def pre_vfs(ctx):\n    return None\n',
       'class Guard:\n    def pre_command(self, ctx):\n        return None\n',
     ]) {
-      expect(programSource(source, 'preCommand')).toBe(source)
+      expect(() => programSource(source, 'preCommand')).toThrow('defines no pre_command(ctx)')
     }
   })
 
@@ -939,28 +939,16 @@ describe('a policy program that returns its answer', () => {
     const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('monty', source)] })))
     const [action] = (await policy.preCommand(ctx())) ?? []
     expect(action?.kind === 'deny' ? action.reason : '').toMatch(
-      /^profile 'release' policy must return or print a JSON answer at pre_command/,
+      /^profile 'release' policy must return an answer at pre_command/,
     )
   }, 60_000)
 
-  it("awaits the host's functions from an async function", async () => {
-    const source = [
-      'async def pre_command(ctx):',
-      '    user = await lookup_user("root")',
-      '    if user["admin"]:',
-      '        return {"kind": "deny", "reason": "admin may not " + ctx["command"]}',
-    ].join('\n')
-    const policy = track(
-      new ScriptPolicy(scripts({ preCommand: [entry('monty', source)] }), null, {
-        externalLookup: {
-          lookup_user: (name: string) => Promise.resolve({ admin: name === 'root' }),
-        },
-      }),
-    )
-    expect(await policy.preCommand(ctx('rm'))).toEqual([
-      { kind: 'deny', reason: 'admin may not rm' },
+  it("fails closed on a program without the method's function", async () => {
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('monty', "print('x')")] })))
+    expect(await policy.preCommand(ctx())).toEqual([
+      { kind: 'deny', reason: "profile 'release' policy defines no pre_command(ctx)" },
     ])
-  }, 60_000)
+  })
 })
 
 describe('a policy program on monty', () => {
@@ -984,11 +972,12 @@ describe('a policy program on monty', () => {
 
 describe('ScriptPolicy env and external functions', () => {
   const CALLS_LOOKUP = [
-    'import json, os',
-    'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-    'user = await lookup_user(os.environ["WHO"])',
-    'if user["admin"]:',
-    '    print(json.dumps({"kind": "deny", "reason": "admin may not " + ctx["command"]}))',
+    'import os',
+    '',
+    'async def pre_command(ctx):',
+    '    user = await lookup_user(os.environ["WHO"])',
+    '    if user["admin"]:',
+    '        return {"kind": "deny", "reason": "admin may not " + ctx["command"]}',
   ].join('\n')
 
   function withEnv(base: ProfileScript, env: ProfileScript['env']): ProfileScript {
@@ -1089,9 +1078,9 @@ describe('ScriptPolicy env and external functions', () => {
 
   it('hands a function the dicts a program passes as plain objects', async () => {
     const source = [
-      'import json',
-      'said = await describe({"user": {"name": "root"}, "tags": [{"a": 1}]})',
-      'print(json.dumps({"kind": "deny", "reason": said}))',
+      'async def pre_command(ctx):',
+      '    said = await describe({"user": {"name": "root"}, "tags": [{"a": 1}]})',
+      '    return {"kind": "deny", "reason": said}',
     ].join('\n')
     const policy = track(
       new ScriptPolicy(scripts({ preCommand: [entry('monty', source)] }), null, {
@@ -1116,11 +1105,11 @@ describe('ScriptPolicy env and external functions', () => {
 
   it('raises in the program what a function throws', async () => {
     const source = [
-      'import json',
-      'try:',
-      '    await lookup_user("root")',
-      'except ValueError as exc:',
-      '    print(json.dumps({"kind": "ask", "reason": str(exc)}))',
+      'async def pre_command(ctx):',
+      '    try:',
+      '        await lookup_user("root")',
+      '    except ValueError as exc:',
+      '        return {"kind": "ask", "reason": str(exc)}',
     ].join('\n')
     const down = new Error('directory down')
     down.name = 'ValueError'
@@ -1247,11 +1236,13 @@ describe('ScriptPolicy env reads', () => {
     vi.stubEnv('POLICY_TOKEN', 'first')
     const engine = new FakeProgram()
     built.factory = () => engine
-    let programs: ProfileScripts = { preCommand: [{ ...entry('monty', 'ONE'), env: pointer }] }
+    let programs: ProfileScripts = {
+      preCommand: [{ ...entry('monty', `${SOURCE}# one\n`), env: pointer }],
+    }
     const policy = track(new ScriptPolicy({ scriptsOf: () => programs }))
     await policy.preCommand(ctx())
     vi.stubEnv('POLICY_TOKEN', 'second')
-    programs = { preCommand: [{ ...entry('monty', 'TWO'), env: pointer }] }
+    programs = { preCommand: [{ ...entry('monty', `${SOURCE}# two\n`), env: pointer }] }
     await policy.preCommand(ctx())
     expect(engine.requests.map((r) => r.env?.TOKEN)).toEqual(['first', 'second'])
   })

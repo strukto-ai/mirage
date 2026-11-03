@@ -53,7 +53,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'go-local' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "script": "def pre_execute(ctx):\n    if 'go-local' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
           "runtime": "monty"
         }
       },
@@ -161,7 +161,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif any(c['command'] == 'python3' for c in ctx['commands']):\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"monty\"}))\n",
+          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' for c in ctx['commands']):\n        return {\"kind\": \"route\", \"runtime\": \"monty\"}\n",
           "runtime": "monty"
         }
       },
@@ -254,7 +254,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"kind\": \"route\", \"runtime\": \"nope\"}))\n",
+          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"nope\"}\n",
           "runtime": "monty"
         }
       },
@@ -308,7 +308,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'magic' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "script": "def pre_execute(ctx):\n    if 'magic' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
           "runtime": "monty"
         }
       },
@@ -406,7 +406,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"kind\": \"route\", \"runtime\": \"monty\"}))\n",
+          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"monty\"}\n",
           "runtime": "monty"
         }
       },
@@ -433,7 +433,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"runtme\": \"monty\"}))\n",
+          "script": "def pre_execute(ctx):\n    return {\"runtme\": \"monty\"}\n",
           "runtime": "monty"
         }
       },
@@ -441,7 +441,7 @@
         {
           "command": "python3 -c \"print(1)\"",
           "expect": {
-            "throws_contains": "route_policy must return or print a JSON answer"
+            "throws_contains": "route_policy must return an answer"
           }
         }
       ]
@@ -500,7 +500,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
           "runtime": "monty"
         },
         "policies": [
@@ -543,7 +543,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nprint(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "script": "def pre_execute(ctx):\n    return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
           "runtime": "monty"
         },
         "policies": [
@@ -643,7 +643,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif any(c['command'] == 'python3' for c in ctx['commands']):\n    name = open('/ram/route.txt').read().strip()\n    print(json.dumps({\"kind\": \"route\", \"runtime\": name}))\n",
+          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' for c in ctx['commands']):\n        name = open('/ram/route.txt').read().strip()\n        return {\"kind\": \"route\", \"runtime\": name}\n",
           "runtime": "monty"
         }
       },
@@ -672,7 +672,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif any(c['command'] == 'python3' and c['env'].get('PLACE') == 'local' for c in ctx['commands']):\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "script": "def pre_execute(ctx):\n    if any(c['command'] == 'python3' and c['env'].get('PLACE') == 'local' for c in ctx['commands']):\n        return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
           "runtime": "monty"
         }
       },
@@ -708,7 +708,7 @@
           "workspace"
         ],
         "route_policy": {
-          "script": "1 / 0\n",
+          "script": "def pre_execute(ctx):\n    1 / 0\n",
           "runtime": "monty"
         }
       },

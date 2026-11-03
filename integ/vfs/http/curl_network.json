@@ -168,7 +168,7 @@
             "pre_network": [
               {
                 "script": {
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'curl':\n    print(json.dumps({'kind': 'deny', 'reason': 'no curl'}))\n",
+                  "source": "def pre_network(ctx):\n    if ctx['command'] == 'curl':\n        return {'kind': 'deny', 'reason': 'no curl'}\n",
                   "language": "python"
                 },
                 "runtime": "monty"
@@ -197,7 +197,7 @@
             "pre_network": [
               {
                 "script": {
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif 'offline' in ctx['line']:\n    print(json.dumps({'kind': 'deny', 'reason': 'the line is offline'}))\n",
+                  "source": "def pre_network(ctx):\n    if 'offline' in ctx['line']:\n        return {'kind': 'deny', 'reason': 'the line is offline'}\n",
                   "language": "python"
                 },
                 "runtime": "monty"
@@ -226,7 +226,7 @@
             "pre_network": [
               {
                 "script": {
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif '--location' in [w['text'] for w in ctx['words']]:\n    print(json.dumps({'kind': 'deny', 'reason': 'no redirects'}))\n",
+                  "source": "def pre_network(ctx):\n    if '--location' in [w['text'] for w in ctx['words']]:\n        return {'kind': 'deny', 'reason': 'no redirects'}\n",
                   "language": "python"
                 },
                 "runtime": "monty"
@@ -255,7 +255,7 @@
             "pre_network": [
               {
                 "script": {
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['address'] == '127.0.0.1' and ctx['port'] > 0:\n    print(json.dumps({'kind': 'deny', 'reason': 'no loopback'}))\n",
+                  "source": "def pre_network(ctx):\n    if ctx['address'] == '127.0.0.1' and ctx['port'] > 0:\n        return {'kind': 'deny', 'reason': 'no loopback'}\n",
                   "language": "python"
                 },
                 "runtime": "monty"
@@ -284,7 +284,7 @@
             "pre_network": [
               {
                 "script": {
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\n",
+                  "source": "def pre_network(ctx):\n    return None\n",
                   "language": "python"
                 },
                 "runtime": "monty"
@@ -318,7 +318,7 @@
             "pre_network": [
               {
                 "script": {
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif True:\n    print(json.dumps({'kind': 'deny', 'reason': 'program saw it'}))\n",
+                  "source": "def pre_network(ctx):\n    if True:\n        return {'kind': 'deny', 'reason': 'program saw it'}\n",
                   "language": "python"
                 },
                 "runtime": "monty"
@@ -347,7 +347,7 @@
             "post_network": [
               {
                 "script": {
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif True:\n    print(json.dumps({'kind': 'deny', 'reason': 'too late'}))\n",
+                  "source": "def post_network(ctx):\n    if True:\n        return {'kind': 'deny', 'reason': 'too late'}\n",
                   "language": "python"
                 },
                 "runtime": "monty"

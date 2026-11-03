@@ -142,13 +142,10 @@ function routedWorkspace(): Workspace {
 }
 
 const ROUTE_NODE = [
-  'import json',
-  'import os',
-  '',
-  'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-  'if any(c["command"] == "node" for c in ctx["commands"]):',
-  '    name = open("/route.txt").read().strip()',
-  '    print(json.dumps({"kind": "route", "runtime": name}))',
+  'def pre_execute(ctx):',
+  '    if any(c["command"] == "node" for c in ctx["commands"]):',
+  '        name = open("/route.txt").read().strip()',
+  '        return {"kind": "route", "runtime": name}',
   '',
 ].join('\n')
 
@@ -203,7 +200,10 @@ describe('routing ladder', () => {
         mode: MountMode.EXEC,
         runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
         routePolicy: {
-          script: new ScriptSource('while True:\n    pass\n', 'python'),
+          script: new ScriptSource(
+            'def pre_execute(ctx):\n    while True:\n        pass\n',
+            'python',
+          ),
           runtime: 'monty',
         },
       },

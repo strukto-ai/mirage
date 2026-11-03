@@ -448,7 +448,7 @@ export type ScriptMethod =
  * the admission rules, one per entry of a method's list, and run by
  * `ScriptPolicy` at that method with the context as JSON
  * (`scriptContext`) in `MIRAGE_POLICY_CTX` and on stdin; `scriptAction`
- * reads the answer it prints. `profile` is the profile's name, which
+ * reads the answer its function returns. `profile` is the profile's name, which
  * every refusal about its program prints; empty for a profile document
  * passed to `createSession` without a name. `env` is the variables the
  * program runs with beside `MIRAGE_POLICY_CTX`, a pointer still the

@@ -2135,13 +2135,10 @@ describe('command permissions end to end', () => {
 })
 
 /** A runtime that takes every line raw, recording what reached it. */
-const AFTER_ECHO = `import json
-import os
-
-ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
-if ctx['command'] == 'echo':
-    reason = 'no echo after ' + str(ctx['exit_code'])
-    print(json.dumps({'kind': 'deny', 'reason': reason}))
+const AFTER_ECHO = `
+def post_command(ctx):
+    if ctx['command'] == 'echo':
+        return {'kind': 'deny', 'reason': 'no echo after ' + str(ctx['exit_code'])}
 `
 
 /** A profile whose postCommand program refuses every echo once it ran. */

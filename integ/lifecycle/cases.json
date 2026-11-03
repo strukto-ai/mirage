@@ -1341,7 +1341,7 @@
               "pre_command": [
                 {
                   "script": {
-                    "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'echo':\n    print(json.dumps({'kind': 'deny', 'reason': 'python gate'}))\n",
+                    "source": "def pre_command(ctx):\n    if ctx['command'] == 'echo':\n        return {'kind': 'deny', 'reason': 'python gate'}\n",
                     "language": "python"
                   },
                   "runtime": "monty"
@@ -1376,7 +1376,7 @@
               "pre_command": [
                 {
                   "script": {
-                    "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'echo':\n    print(json.dumps({'kind': 'deny', 'reason': 'second gate'}))\n",
+                    "source": "def pre_command(ctx):\n    if ctx['command'] == 'echo':\n        return {'kind': 'deny', 'reason': 'second gate'}\n",
                     "language": "python"
                   },
                   "runtime": "monty"
@@ -1411,7 +1411,7 @@
               "pre_command": [
                 {
                   "script": {
-                    "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'echo':\n    print(json.dumps({'kind': 'deny', 'reason': 'python gate'}))\n",
+                    "source": "def pre_command(ctx):\n    if ctx['command'] == 'echo':\n        return {'kind': 'deny', 'reason': 'python gate'}\n",
                     "language": "python"
                   },
                   "runtime": "missing-lifecycle-engine"
@@ -1420,7 +1420,7 @@
               "pre_vfs": [
                 {
                   "script": {
-                    "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['path'] == '/work/data':\n    print(json.dumps({'kind': 'deny', 'reason': 'op gate'}))\n",
+                    "source": "def pre_vfs(ctx):\n    if ctx['path'] == '/work/data':\n        return {'kind': 'deny', 'reason': 'op gate'}\n",
                     "language": "python"
                   },
                   "runtime": "missing-lifecycle-engine"
@@ -1453,7 +1453,7 @@
               "pre_command": [
                 {
                   "script": {
-                    "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'echo':\n    print(json.dumps({'kind': 'deny', 'reason': 'python gate'}))\n",
+                    "source": "def pre_command(ctx):\n    if ctx['command'] == 'echo':\n        return {'kind': 'deny', 'reason': 'python gate'}\n",
                     "language": "python"
                   },
                   "runtime": "monty"
@@ -1481,7 +1481,7 @@
               "pre_vfs": [
                 {
                   "script": {
-                    "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['path'] == '/work/data':\n    print(json.dumps({'kind': 'deny', 'reason': 'op gate'}))\n",
+                    "source": "def pre_vfs(ctx):\n    if ctx['path'] == '/work/data':\n        return {'kind': 'deny', 'reason': 'op gate'}\n",
                     "language": "python"
                   },
                   "runtime": "monty"
@@ -1537,7 +1537,7 @@
               "pre_command": [
                 {
                   "script": {
-                    "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['command'] == 'echo':\n    print(json.dumps({'kind': 'deny', 'reason': 'second gate'}))\n",
+                    "source": "def pre_command(ctx):\n    if ctx['command'] == 'echo':\n        return {'kind': 'deny', 'reason': 'second gate'}\n",
                     "language": "python"
                   },
                   "runtime": "monty"

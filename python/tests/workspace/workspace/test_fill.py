@@ -2445,12 +2445,9 @@ async def test_a_bad_instance_config_fails_the_lines_that_read_it():
 # first is a session-write gate, and only for the sessions under its
 # profile.
 SESSION_GATE = """\
-import json
-import os
-
-ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
-if ctx['key'].startswith('AWS_'):
-    print(json.dumps({'kind': 'deny'}))
+def pre_session(ctx):
+    if ctx['key'].startswith('AWS_'):
+        return {'kind': 'deny'}
 """
 
 
@@ -2495,7 +2492,9 @@ async def test_a_profile_policy_away_from_the_session_view_keeps_the_masks():
     calls, fetch = counting_source({"TOKEN": "t0"})
     register_secrets("fake", FakeConfig, fetch)
     ws = _scripted_ws(
-        {"TOKEN": {"from": "fake", "ref": "r"}}, "pre_command", "pass\n"
+        {"TOKEN": {"from": "fake", "ref": "r"}},
+        "pre_command",
+        "def pre_command(ctx):\n    pass\n",
     )
     try:
         io = await ws.shell("TOKEN=local; printenv TOKEN")

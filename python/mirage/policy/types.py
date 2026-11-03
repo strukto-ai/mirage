@@ -577,7 +577,7 @@ class ProfileScript:
     one per entry of a method's list, and run by ``ScriptPolicy`` at
     that method with the context as JSON (``script_context``) in
     ``MIRAGE_POLICY_CTX`` and on stdin; ``script_action`` reads the
-    answer it prints.
+    answer its function returns.
 
     Args:
         profile (str): the profile's name, which every refusal about

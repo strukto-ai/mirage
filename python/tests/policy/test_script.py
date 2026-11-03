@@ -23,6 +23,7 @@ from mirage.policy.script import (
     script_context,
 )
 from mirage.policy.types import (
+    VALIDITY,
     Ask,
     CommandContext,
     CommandResultContext,
@@ -153,8 +154,15 @@ def _answer(**fields: str) -> bytes:
     return json.dumps(fields).encode()
 
 
+# A program defining every method's function: the runner calls the one
+# for its method, and a FakeProgram answers for it without running it.
+SOURCE = "".join(
+    f"def {method}(ctx):\n    return None\n" for method in VALIDITY
+)
+
+
 def _entry(
-    runtime: str = "monty", source: str = "SOURCE", config: dict | None = None
+    runtime: str = "monty", source: str = SOURCE, config: dict | None = None
 ) -> ProfileScript:
     return ProfileScript(
         profile="release",
@@ -322,7 +330,7 @@ def test_a_route_carries_the_reason_it_gives():
     ],
 )
 def test_anything_else_is_refused(printed):
-    with pytest.raises(ValueError, match="must return or print a JSON answer"):
+    with pytest.raises(ValueError, match="must return an answer"):
         script_action(printed, "pre_execute")
 
 
@@ -500,29 +508,30 @@ async def test_a_method_without_a_program_runs_nothing():
 
 
 @pytest.mark.asyncio
-async def test_a_program_runs_unedited_with_its_context_in_the_env_and_stdin():
+async def test_a_program_runs_with_its_context_in_the_env_and_stdin():
     engine = FakeProgram(_answer(kind="deny", reason="sealed"))
     policy = _policy("pre_command", engine)
     ctx = _ctx(session=_session(cwd="/"), vfs=_vfs())
     assert await policy.pre_command(ctx) == (Deny("sealed"),)
     [request] = engine.requests
-    assert request.flags["c"] == "SOURCE"
+    assert request.flags["c"] == program_source(SOURCE, "pre_command")
     assert request.cwd.virtual == "/"
     payload = request.env[CTX_ENV]
     assert json.loads(payload) == script_context(ctx)
     assert request.stdin == payload.encode()
     assert request.env == {CTX_ENV: payload}
     assert json.loads(payload)["env"]["TEAM"] == "core"
-    assert request.flags == {"c": "SOURCE"}
+    assert request.flags == {"c": program_source(SOURCE, "pre_command")}
 
 
-def test_a_program_without_the_methods_function_runs_as_written():
+def test_a_program_must_define_the_methods_function():
     for source in (
         "print('x')",
         "def pre_vfs(ctx):\n    return None\n",
         "class Guard:\n    def pre_command(self, ctx):\n        return None\n",
     ):
-        assert program_source(source, "pre_command") == source
+        with pytest.raises(ValueError, match=r"defines no pre_command\(ctx\)"):
+            program_source(source, "pre_command")
 
 
 def test_a_program_defining_the_methods_function_is_called_after():
@@ -565,6 +574,19 @@ async def test_a_monty_program_answers_with_what_its_function_returns():
 
 
 @pytest.mark.asyncio
+async def test_a_program_without_the_methods_function_fails_closed():
+    policy = ScriptPolicy(
+        Programs({"pre_command": (_entry(source="print('x')"),)})
+    )
+    assert await policy.pre_command(_ctx()) == (
+        Deny(
+            "profile 'release' policy defines no pre_command(ctx)",
+            failed=True,
+        ),
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_wrong_return_value_fails_closed():
     source = "def pre_command(ctx):\n    return 'deny'\n"
     policy = ScriptPolicy(Programs({"pre_command": (_entry(source=source),)}))
@@ -574,7 +596,7 @@ async def test_a_wrong_return_value_fails_closed():
         await policy.close()
     assert isinstance(action, Deny)
     assert action.reason.startswith(
-        "profile 'release' policy must return or print a JSON answer"
+        "profile 'release' policy must return an answer"
     )
 
 
@@ -583,7 +605,10 @@ async def test_a_program_on_wasi_keeps_the_sessions_directory_off_its_path():
     engine = FakeProgram()
     policy = _policy("pre_command", engine, entries=(_entry("wasi"),))
     await policy.pre_command(_ctx(session=_session(cwd="/data")))
-    assert engine.requests[0].flags == {"c": "SOURCE", "P": True}
+    assert engine.requests[0].flags == {
+        "c": program_source(SOURCE, "pre_command"),
+        "P": True,
+    }
 
 
 def _programs(method: str, *printed: bytes) -> ScriptPolicy:
@@ -742,8 +767,7 @@ async def test_a_wrong_answer_fails_closed():
     [action] = await policy.pre_command(_ctx()) or ()
     assert isinstance(action, Deny)
     assert action.reason.startswith(
-        "profile 'release' policy must return or print a JSON answer "
-        "at pre_command"
+        "profile 'release' policy must return an answer at pre_command"
     )
 
 
@@ -1077,11 +1101,12 @@ async def test_an_env_pointer_reads_the_workspaces_declared_sources(
 
 
 _CALLS_LOOKUP = """
-import json, os
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-user = await lookup_user(os.environ["WHO"])
-if user["admin"]:
-    print(json.dumps({"kind": "deny", "reason": "admin may not " + ctx["command"]}))
+import os
+
+async def pre_command(ctx):
+    user = await lookup_user(os.environ["WHO"])
+    if user["admin"]:
+        return {"kind": "deny", "reason": "admin may not " + ctx["command"]}
 """
 
 
@@ -1110,26 +1135,6 @@ async def test_a_monty_program_calls_the_hosts_functions():
         await policy.close()
 
 
-@pytest.mark.asyncio
-async def test_an_async_function_awaits_the_hosts_functions():
-    source = """
-async def pre_command(ctx):
-    user = await lookup_user("root")
-    if user["admin"]:
-        return {"kind": "deny", "reason": "admin may not " + ctx["command"]}
-"""
-    policy = ScriptPolicy(
-        Programs({"pre_command": (_entry(source=source),)}),
-        external_lookup={"lookup_user": _lookup_user},
-    )
-    try:
-        assert await policy.pre_command(_ctx(command="rm")) == (
-            Deny("admin may not rm"),
-        )
-    finally:
-        await policy.close()
-
-
 async def _describe(value):
     return json.dumps(value, separators=(",", ":"))
 
@@ -1137,9 +1142,9 @@ async def _describe(value):
 @pytest.mark.asyncio
 async def test_a_function_gets_the_dicts_a_program_passes_as_dicts():
     source = """
-import json
-said = await describe({"user": {"name": "root"}, "tags": [{"a": 1}]})
-print(json.dumps({"kind": "deny", "reason": said}))
+async def pre_command(ctx):
+    said = await describe({"user": {"name": "root"}, "tags": [{"a": 1}]})
+    return {"kind": "deny", "reason": said}
 """
     policy = ScriptPolicy(
         Programs({"pre_command": (_entry(source=source),)}),
@@ -1170,11 +1175,11 @@ async def test_a_monty_program_without_the_function_fails_closed():
 @pytest.mark.asyncio
 async def test_a_function_that_raises_raises_in_the_program():
     source = """
-import json
-try:
-    await lookup_user("root")
-except ValueError as exc:
-    print(json.dumps({"kind": "ask", "reason": str(exc)}))
+async def pre_command(ctx):
+    try:
+        await lookup_user("root")
+    except ValueError as exc:
+        return {"kind": "ask", "reason": str(exc)}
 """
     policy = ScriptPolicy(
         Programs({"pre_command": (_entry(source=source),)}),
@@ -1309,8 +1314,8 @@ async def test_first_runs_together_share_one_env_read(monkeypatch):
 async def test_two_programs_with_one_pointer_read_it_apart(monkeypatch):
     monkeypatch.setenv("POLICY_TOKEN", "first")
     pointer = {"TOKEN": SecretRef(provider="env", key="POLICY_TOKEN")}
-    one = dataclasses.replace(_entry(source="ONE"), env=pointer)
-    two = dataclasses.replace(_entry(source="TWO"), env=pointer)
+    one = dataclasses.replace(_entry(source=SOURCE + "# one"), env=pointer)
+    two = dataclasses.replace(_entry(source=SOURCE + "# two"), env=pointer)
     engine = FakeProgram()
     policy = ScriptPolicy(Programs({"pre_command": (one,)}))
     policy._engines[_key(one)] = (engine, asyncio.Lock())

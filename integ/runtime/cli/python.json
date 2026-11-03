@@ -229,7 +229,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'on-local' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "script": "def pre_execute(ctx):\n    if 'on-local' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"local\"}\n",
           "runtime": "monty"
         }
       },

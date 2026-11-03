@@ -67,17 +67,14 @@ async def test_anything_but_a_name_or_none_is_the_deployments_mistake(
 
 
 ROUTE_HEAVY = """
-import json
-import os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-if "heavy" in ctx["line"]:
-    print(json.dumps({"kind": "route", "runtime": "beta"}))
+def pre_execute(ctx):
+    if "heavy" in ctx["line"]:
+        return {"kind": "route", "runtime": "beta"}
 """
 
 
 @pytest.mark.asyncio
-async def test_a_program_prints_its_route_or_nothing():
+async def test_a_program_returns_its_route_or_none():
     policy = _route_policy(
         {"script": ScriptSource(ROUTE_HEAVY), "runtime": "monty"}
     )
@@ -89,8 +86,12 @@ async def test_a_program_prints_its_route_or_nothing():
 @pytest.mark.parametrize(
     ("source", "refusal"),
     [
-        ("1 / 0", "route_policy exited 1"),
-        ("print('beta')", "route_policy must return or print a JSON answer"),
+        ("x = 1", r"route_policy defines no pre_execute\(ctx\)"),
+        ("def pre_execute(ctx):\n    1 / 0", "route_policy exited 1"),
+        (
+            "def pre_execute(ctx):\n    return 'beta'",
+            "route_policy must return an answer",
+        ),
     ],
 )
 async def test_a_program_that_fails_is_the_deployments_mistake(
