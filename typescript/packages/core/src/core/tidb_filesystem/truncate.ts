@@ -35,15 +35,6 @@ async function pad(spool: ByteSpool, count: number): Promise<void> {
   }
 }
 
-async function withSpool<T>(fill: (spool: ByteSpool) => Promise<T>): Promise<T> {
-  const spool = new ByteSpool()
-  try {
-    return await fill(spool)
-  } finally {
-    await spool.close()
-  }
-}
-
 async function fileAt(accessor: TiDBFilesystemAccessor, path: PathSpec): Promise<FileStat | null> {
   let found: FileStat
   try {
@@ -80,23 +71,31 @@ export async function truncate(
   if (found !== null && length === size) return
   const remote = backendPath(accessor.config, path)
   if (found !== null && length > 0) {
-    const done =
-      length < size
-        ? await shrinkTo(accessor, remote, length)
-        : await withSpool(async (added) => {
-            await pad(added, length - size)
-            return appendTo(accessor, remote, added, size)
-          })
+    let done: boolean
+    if (length < size) {
+      done = await shrinkTo(accessor, remote, length)
+    } else {
+      const added = new ByteSpool()
+      try {
+        await pad(added, length - size)
+        done = await appendTo(accessor, remote, added, size)
+      } finally {
+        await added.close()
+      }
+    }
     if (done) {
       record('truncate', path.virtual, VFSName.TIDB_FILESYSTEM, 0, timer)
       return
     }
   }
   const kept = Math.min(size, length)
-  await withSpool(async (content) => {
+  const content = new ByteSpool()
+  try {
     if (kept > 0) await content.append(await read(accessor, path, 0, kept))
     await pad(content, length - kept)
     await write(accessor, path, content)
-  })
+  } finally {
+    await content.close()
+  }
   record('truncate', path.virtual, VFSName.TIDB_FILESYSTEM, 0, timer)
 }
