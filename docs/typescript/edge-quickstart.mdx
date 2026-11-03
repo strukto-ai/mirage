@@ -1,0 +1,109 @@
+---
+title: Edge Quickstart
+icon: cloud
+description: Run Mirage workspaces and the Mirage server API in a Cloudflare Worker with @struktoai/mirage-edge.
+keywords: ["Mirage edge", "@struktoai/mirage-edge", "Cloudflare Workers", "serverless terminal", "workerd"]
+---
+
+`@struktoai/mirage-edge` runs Mirage on a runtime with no Node and no threads, such as a Cloudflare Worker. A workspace runs in the Worker's own isolate: the shell, the commands built on Rust, and `python3` on [Monty](/typescript/runtime/python) in the same thread.
+
+## Install
+
+```bash
+npm install @struktoai/mirage-edge @struktoai/mirage-core
+npm install -D wrangler
+```
+
+The Worker needs the `nodejs_compat` flag:
+
+```toml wrangler.toml
+name = "mirage"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+```
+
+## Run a workspace
+
+```ts src/worker.ts
+import { useInProcessMonty } from '@struktoai/mirage-edge'
+import { MontyRuntime } from '@struktoai/mirage-core/runtime/python/monty/runtime'
+import { MountMode } from '@struktoai/mirage-core/types'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+
+useInProcessMonty({ maxSeconds: 10 })
+
+export default {
+  async fetch(request: Request): Promise<Response> {
+    const { command } = (await request.json()) as { command: string }
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: ['workspace', new MontyRuntime()], maxMemory: '32MB' },
+    )
+    try {
+      const result = await ws.shell(command)
+      return Response.json({ exit: result.exitCode, stdout: result.stdoutText })
+    } finally {
+      await ws.close()
+    }
+  },
+}
+```
+
+```bash
+npx wrangler dev
+curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
+```
+
+Import from the subpaths of `@struktoai/mirage-core`, as above, and not from its package root: the root also imports optional packages, such as Pyodide, that a Worker's bundle cannot resolve.
+
+`useInProcessMonty` runs Monty in the Worker's thread. `maxSeconds` stops a Python program that runs longer, so a loop that never ends fails with `TimeoutError` and leaves the Worker free for the next line.
+
+## Serve the server API
+
+`createApp` answers the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc) as the [server](/typescript/access/server) does, over the workspaces the isolate holds:
+
+```ts src/worker.ts
+import { createApp, useInProcessMonty } from '@struktoai/mirage-edge'
+
+useInProcessMonty({ maxSeconds: 10 })
+
+interface Env {
+  MIRAGE_TOKEN: string
+}
+
+let app: ReturnType<typeof createApp> | undefined
+
+export default {
+  fetch(request: Request, env: Env): Promise<Response> {
+    app ??= createApp({ auth: { mode: 'token', bearerToken: env.MIRAGE_TOKEN }, maxWorkspaces: 8 })
+    return app.fetch(request)
+  },
+}
+```
+
+```bash
+npx wrangler secret put MIRAGE_TOKEN
+curl -s localhost:8787/v1/workspaces -H "Authorization: Bearer $MIRAGE_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"id": "demo", "config": {"mounts": {"/": {"vfs": "ram"}}, "runtimes": ["workspace", "monty"]}}'
+curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAGE_TOKEN" \
+  -H 'content-type: application/json' -d '{"command": "python3 -c \"print(6 * 7)\""}'
+```
+
+| Option | Meaning |
+| --- | --- |
+| `auth` | A shared bearer token (`{ mode: 'token', bearerToken }`) or JWTs from an issuer (`{ mode: 'jwt', jwt }`), as the server [checks them](/home/access/http#configure-authentication). Required. |
+| `maxWorkspaces` | The most workspaces the isolate holds at once. A create past it answers 503. |
+| `maxSessions` | The most sessions each workspace holds. A new session past it answers 429. |
+| `policies` | The server's own [policies](/home/access/http#server-policies). |
+| `snapshotStore` | An `S3Config`: the store a snapshot request may name a key in. |
+
+## Limits
+
+- A Worker's isolate has 128 MB of memory and no disk. Set `max_memory` on each workspace so a large write fails with `Disk quota exceeded` before the isolate runs out.
+- Workspaces live in the isolate's memory. A request routed to another isolate does not see them, and they are gone when the isolate is evicted. `store.type` must be `ram`.
+- A config's mounts come from core's VFS table: `ram`, `github`, `gdrive`, `gdocs`, `gsheets`, `gslides`, `gcal`, `gmail`, `onedrive`, `sharepoint`, `box`, `airtable`, `linear`, `trello`, `langfuse`, `wandb`, `mem0`, `chroma`, `qdrant` and `dify`.
+- SSH, FUSE, policy and script files read by path, and runtimes or CLIs loaded by a `source:Class` reference are the Node server's alone.
+- A workspace's `network` setting is not enforced. The Worker's own outbound rules apply.
