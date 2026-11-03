@@ -30,7 +30,11 @@ from mirage.core.box.client import (
     box_upload_multipart,
     box_upload_session,
 )
-from mirage.core.box.constants import GONE_STATUS, LOST_STATUS
+from mirage.core.box.constants import (
+    GONE_STATUS,
+    LOST_STATUS,
+    UPLOAD_SESSION_MIN,
+)
 from mirage.errors.fs import enoent
 from mirage.errors.types import StaleWriteError
 from mirage.io.spool import ByteSpool
@@ -324,14 +328,15 @@ async def search_content(
 async def upload_new_file(
     tm: BoxTokenManager, parent_id: str, name: str, data: bytes | ByteSpool
 ) -> JsonValue:
+    size = data.size if isinstance(data, ByteSpool) else len(data)
+    if size >= UPLOAD_SESSION_MIN:
+        return await box_upload_session(
+            tm,
+            f"{tm.upload_base}/files/upload_sessions",
+            {"folder_id": parent_id, "file_name": name},
+            data,
+        )
     if isinstance(data, ByteSpool):
-        if data.size >= 20 * 1024 * 1024:
-            return await box_upload_session(
-                tm,
-                f"{tm.upload_base}/files/upload_sessions",
-                {"folder_id": parent_id, "file_name": name},
-                data,
-            )
         data = await data.read(0, data.size)
     return await box_upload_multipart(
         tm,
@@ -349,15 +354,16 @@ async def upload_file_version(
     data: bytes | ByteSpool,
     etag: str | None = None,
 ) -> JsonValue:
+    size = data.size if isinstance(data, ByteSpool) else len(data)
+    if size >= UPLOAD_SESSION_MIN:
+        return await box_upload_session(
+            tm,
+            f"{tm.upload_base}/files/{file_id}/upload_sessions",
+            {"file_name": name},
+            data,
+            etag,
+        )
     if isinstance(data, ByteSpool):
-        if data.size >= 20 * 1024 * 1024:
-            return await box_upload_session(
-                tm,
-                f"{tm.upload_base}/files/{file_id}/upload_sessions",
-                {"file_name": name},
-                data,
-                etag,
-            )
         data = await data.read(0, data.size)
     return await box_upload_multipart(
         tm,

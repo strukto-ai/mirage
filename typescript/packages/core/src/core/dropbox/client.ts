@@ -18,6 +18,8 @@ import {
   DROPBOX_TOKEN_URL,
   TOKEN_BUFFER_SECONDS,
   RESULT_HEADER,
+  SIMPLE_UPLOAD_MAX,
+  UPLOAD_CHUNK,
 } from './constants.ts'
 import { callerSignal } from '../../context/session_context.ts'
 import { type ApiResponse, apiRequest, loweredHeaders, stallTimeout } from '../api/client.ts'
@@ -160,6 +162,8 @@ export async function dropboxRpc(
  * The reply is the stored FileMetadata; it is not checked here, since the
  * upload has landed once the call returns and the writer's `uploadToken`
  * reads it without throwing.
+ *
+ * A payload past `SIMPLE_UPLOAD_MAX` goes through an upload session.
  */
 export async function dropboxUpload(
   tm: DropboxTokenManager,
@@ -167,10 +171,9 @@ export async function dropboxUpload(
   data: Uint8Array | ByteSpool,
   rev: string | null = null,
 ): Promise<unknown> {
-  if (data instanceof ByteSpool) {
-    if (data.size > 8 * 1024 * 1024) return dropboxUploadSession(tm, path, data, rev)
-    data = await data.read(0, data.size)
-  }
+  const size = data instanceof ByteSpool ? data.size : data.length
+  if (size > SIMPLE_UPLOAD_MAX) return dropboxUploadSession(tm, path, data, rev)
+  if (data instanceof ByteSpool) data = await data.read(0, data.size)
   const headers = await dropboxAuthHeaders(tm)
   const arg: Record<string, JsonValue> =
     rev === null
@@ -288,9 +291,10 @@ async function sessionRequest(
 async function dropboxUploadSession(
   tm: DropboxTokenManager,
   path: string,
-  spool: ByteSpool,
+  data: Uint8Array | ByteSpool,
   rev: string | null,
 ): Promise<unknown> {
+  const total = data instanceof ByteSpool ? data.size : data.length
   const opened = (await sessionRequest(tm, path, 'start', { close: false }, new Uint8Array())) as {
     session_id: string
   }
@@ -300,8 +304,11 @@ async function dropboxUploadSession(
     rev === null
       ? { path, mode: 'overwrite', mute: true }
       : { path, mode: { '.tag': 'update', update: rev }, mute: true, autorename: false }
-  while (offset < spool.size) {
-    const body = await spool.read(offset, 8 * 1024 * 1024)
+  while (offset < total) {
+    const body =
+      data instanceof ByteSpool
+        ? await data.read(offset, UPLOAD_CHUNK)
+        : data.slice(offset, offset + UPLOAD_CHUNK)
     await sessionRequest(
       tm,
       path,

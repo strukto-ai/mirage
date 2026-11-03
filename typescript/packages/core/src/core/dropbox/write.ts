@@ -30,10 +30,10 @@ import { dropboxUpload } from './client.ts'
 import { checkPath, dropboxPathOf } from './paths.ts'
 import { statFromEntry } from './readdir.ts'
 
-// Large spooled inputs use upload sessions, and a stream is spooled first, as
-// its size picks the upload; `signal` stops it. A held version costs one
-// get_metadata and goes out as the file's rev in `update` mode. Answers the
-// stored file's stat, null for a reply that names none.
+// A write past `SIMPLE_UPLOAD_MAX` uses an upload session, and a stream is
+// spooled first, as its size picks the upload; `signal` stops it. A held
+// version costs one get_metadata and goes out as the file's rev in `update`
+// mode. Answers the stored file's stat, null for a reply that names none.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,

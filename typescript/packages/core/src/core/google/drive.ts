@@ -28,6 +28,7 @@ import {
   googleResumable,
   googleSendBytes,
 } from './client.ts'
+import { SIMPLE_UPLOAD_MAX } from './constants.ts'
 
 // md5Checksum and headRevisionId are a file's token (driveFingerprint).
 const FIELDS =
@@ -473,7 +474,7 @@ export async function createFolder(
   })) as DriveFile
 }
 
-// Large spooled payloads use the resumable protocol.
+// A payload past `SIMPLE_UPLOAD_MAX` uses the resumable protocol.
 export async function uploadFile(
   tm: TokenManager,
   name: string,
@@ -481,19 +482,18 @@ export async function uploadFile(
   data: Uint8Array | ByteSpool,
   mimeType: string = DEFAULT_UPLOAD_MIME,
 ): Promise<DriveFile> {
-  if (data instanceof ByteSpool) {
-    if (data.size > 4 * 1024 * 1024)
-      return (await googleResumable(
-        tm,
-        'POST',
-        `${driveUploadBase(tm)}/files`,
-        { name, parents: [parentId] },
-        data,
-        mimeType,
-        { supportsAllDrives: 'true', fields: ITEM_FIELDS },
-      )) as DriveFile
-    data = await data.read(0, data.size)
-  }
+  const size = data instanceof ByteSpool ? data.size : data.length
+  if (size > SIMPLE_UPLOAD_MAX)
+    return (await googleResumable(
+      tm,
+      'POST',
+      `${driveUploadBase(tm)}/files`,
+      { name, parents: [parentId] },
+      data,
+      mimeType,
+      { supportsAllDrives: 'true', fields: ITEM_FIELDS },
+    )) as DriveFile
+  if (data instanceof ByteSpool) data = await data.read(0, data.size)
   const { body, contentType } = await multipartRelated(
     { name, parents: [parentId] },
     data,
@@ -507,25 +507,25 @@ export async function uploadFile(
   })) as DriveFile
 }
 
+// A payload past `SIMPLE_UPLOAD_MAX` uses the resumable protocol.
 export async function updateFileContent(
   tm: TokenManager,
   fileId: string,
   data: Uint8Array | ByteSpool,
   mimeType: string = DEFAULT_UPLOAD_MIME,
 ): Promise<DriveFile> {
-  if (data instanceof ByteSpool) {
-    if (data.size > 4 * 1024 * 1024)
-      return (await googleResumable(
-        tm,
-        'PATCH',
-        `${driveUploadBase(tm)}/files/${fileId}`,
-        {},
-        data,
-        mimeType,
-        { supportsAllDrives: 'true', fields: ITEM_FIELDS },
-      )) as DriveFile
-    data = await data.read(0, data.size)
-  }
+  const size = data instanceof ByteSpool ? data.size : data.length
+  if (size > SIMPLE_UPLOAD_MAX)
+    return (await googleResumable(
+      tm,
+      'PATCH',
+      `${driveUploadBase(tm)}/files/${fileId}`,
+      {},
+      data,
+      mimeType,
+      { supportsAllDrives: 'true', fields: ITEM_FIELDS },
+    )) as DriveFile
+  if (data instanceof ByteSpool) data = await data.read(0, data.size)
   const url = `${driveUploadBase(tm)}/files/${fileId}`
   return (await googleSendBytes(tm, 'PATCH', url, data, mimeType, {
     uploadType: 'media',

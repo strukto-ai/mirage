@@ -27,7 +27,9 @@ from mirage.core.dropbox.constants import (
     DROPBOX_CONTENT_BASE,
     DROPBOX_TOKEN_URL,
     RESULT_HEADER,
+    SIMPLE_UPLOAD_MAX,
     TOKEN_BUFFER_SECONDS,
+    UPLOAD_CHUNK,
 )
 from mirage.io.spool import ByteSpool
 from mirage.types import JsonValue
@@ -163,15 +165,18 @@ async def dropbox_upload(
     the upload has landed once the call returns and the writer's
     :func:`upload_token` reads it without raising.
 
+    A payload past ``SIMPLE_UPLOAD_MAX`` goes through an upload session.
+
     Args:
         tm (DropboxTokenManager): token manager.
         path (str): the Dropbox path to write.
-        data (bytes): file content.
+        data (bytes | ByteSpool): file content.
         rev (str | None): the revision the file must still be, or None.
     """
+    size = data.size if isinstance(data, ByteSpool) else len(data)
+    if size > SIMPLE_UPLOAD_MAX:
+        return await dropbox_upload_session(tm, path, data, rev)
     if isinstance(data, ByteSpool):
-        if data.size > 8 * 1024 * 1024:
-            return await dropbox_upload_session(tm, path, data, rev)
         data = await data.read(0, data.size)
     headers = await dropbox_auth_headers(tm)
     arg: dict[str, Any] = {"path": path, "mode": "overwrite", "mute": True}
@@ -287,16 +292,24 @@ async def _session_request(
 
 
 async def dropbox_upload_session(
-    tm: DropboxTokenManager, path: str, spool: ByteSpool, rev: str | None
+    tm: DropboxTokenManager,
+    path: str,
+    data: bytes | ByteSpool,
+    rev: str | None,
 ) -> JsonValue:
+    total = data.size if isinstance(data, ByteSpool) else len(data)
     opened = await _session_request(tm, path, "start", {"close": False}, b"")
     session_id = opened["session_id"]
     offset = 0
     commit: dict[str, Any] = {"path": path, "mode": "overwrite", "mute": True}
     if rev is not None:
         commit.update(mode={".tag": "update", "update": rev}, autorename=False)
-    while offset < spool.size:
-        body = await spool.read(offset, 8 * 1024 * 1024)
+    while offset < total:
+        body = (
+            await data.read(offset, UPLOAD_CHUNK)
+            if isinstance(data, ByteSpool)
+            else data[offset : offset + UPLOAD_CHUNK]
+        )
         await _session_request(
             tm,
             path,

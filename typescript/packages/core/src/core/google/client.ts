@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool } from '../../io/spool.ts'
 import type { ApiRequestOptions, ApiResponse, ErrorOf, RetryPolicy } from '../api/client.ts'
 import type { GoogleConfig } from './config.ts'
 import {
@@ -30,6 +30,7 @@ import {
   SLIDES_API_BASE,
   TOKEN_BUFFER_SECONDS,
   TOKEN_URL,
+  UPLOAD_CHUNK,
   WRITE_RETRY_STATUSES,
 } from './constants.ts'
 import { callerSignal } from '../../context/session_context.ts'
@@ -343,14 +344,15 @@ export async function googleResumable(
   method: 'POST' | 'PATCH',
   url: string,
   metadata: Record<string, unknown>,
-  spool: ByteSpool,
+  data: Uint8Array | ByteSpool,
   mimeType: string,
   params: Record<string, string>,
 ): Promise<unknown> {
+  const total = data instanceof ByteSpool ? data.size : data.length
   const location = await googleRequest(tm, method, url, {
     headers: {
       'X-Upload-Content-Type': mimeType,
-      'X-Upload-Content-Length': String(spool.size),
+      'X-Upload-Content-Length': String(total),
     },
     params: { ...params, uploadType: 'resumable' },
     json: metadata,
@@ -360,14 +362,17 @@ export async function googleResumable(
   if (typeof location !== 'string' || location === '')
     throw new Error('Drive upload session returned no Location')
   let offset = 0
-  while (offset < spool.size) {
-    const data = await spool.read(offset, 8 * 1024 * 1024)
+  while (offset < total) {
+    const chunk =
+      data instanceof ByteSpool
+        ? await data.read(offset, UPLOAD_CHUNK)
+        : data.slice(offset, offset + UPLOAD_CHUNK)
     const response = (await googleRequest(tm, 'PUT', location, {
       headers: {
         'Content-Type': mimeType,
-        'Content-Range': `bytes ${String(offset)}-${String(offset + data.length - 1)}/${String(spool.size)}`,
+        'Content-Range': `bytes ${String(offset)}-${String(offset + chunk.length - 1)}/${String(total)}`,
       },
-      body: data as unknown as BodyInit,
+      body: chunk as unknown as BodyInit,
       read: 'response',
     })) as ApiResponse
     if (response.status === 200 || response.status === 201) return response.data
@@ -375,7 +380,7 @@ export async function googleResumable(
       throw new Error(`Unexpected Drive upload status: ${String(response.status)}`)
     const acknowledged = response.headers.range ?? ''
     const next = acknowledged === '' ? 0 : Number(acknowledged.split('-').at(-1)) + 1
-    if (!Number.isSafeInteger(next) || next <= offset || next > offset + data.length)
+    if (!Number.isSafeInteger(next) || next <= offset || next > offset + chunk.length)
       throw new Error('Drive upload session made no progress')
     offset = next
   }

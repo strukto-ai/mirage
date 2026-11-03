@@ -37,7 +37,7 @@ from mirage.utils.upload import upload_stat
 async def write(
     accessor: DropboxAccessor, path: PathSpec, data: ByteSource | ByteSpool
 ) -> FileStat | None:
-    """Upload a body, using sessions for large spooled inputs.
+    """Upload a body, using a session past ``SIMPLE_UPLOAD_MAX``.
 
     A held version costs one get_metadata and goes out as the file's rev
     in ``update`` mode.

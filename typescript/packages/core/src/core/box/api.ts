@@ -32,7 +32,7 @@ import {
   boxUploadMultipart,
   boxUploadSession,
 } from './client.ts'
-import { GONE_STATUS, LOST_STATUS } from './constants.ts'
+import { GONE_STATUS, LOST_STATUS, UPLOAD_SESSION_MIN } from './constants.ts'
 
 /**
  * The refusal an `If-Match` request met (412 changed, 404 gone), null for any
@@ -308,16 +308,15 @@ export async function uploadNewFile(
   name: string,
   data: Uint8Array | ByteSpool,
 ): Promise<unknown> {
-  if (data instanceof ByteSpool) {
-    if (data.size >= 20 * 1024 * 1024)
-      return boxUploadSession(
-        tm,
-        `${tm.uploadBase}/files/upload_sessions`,
-        { folder_id: parentId, file_name: name },
-        data,
-      )
-    data = await data.read(0, data.size)
-  }
+  const size = data instanceof ByteSpool ? data.size : data.length
+  if (size >= UPLOAD_SESSION_MIN)
+    return boxUploadSession(
+      tm,
+      `${tm.uploadBase}/files/upload_sessions`,
+      { folder_id: parentId, file_name: name },
+      data,
+    )
+  if (data instanceof ByteSpool) data = await data.read(0, data.size)
   return boxUploadMultipart(
     tm,
     `${tm.uploadBase}/files/content`,
@@ -334,17 +333,16 @@ export async function uploadFileVersion(
   data: Uint8Array | ByteSpool,
   etag: string | null = null,
 ): Promise<unknown> {
-  if (data instanceof ByteSpool) {
-    if (data.size >= 20 * 1024 * 1024)
-      return boxUploadSession(
-        tm,
-        `${tm.uploadBase}/files/${fileId}/upload_sessions`,
-        { file_name: name },
-        data,
-        etag,
-      )
-    data = await data.read(0, data.size)
-  }
+  const size = data instanceof ByteSpool ? data.size : data.length
+  if (size >= UPLOAD_SESSION_MIN)
+    return boxUploadSession(
+      tm,
+      `${tm.uploadBase}/files/${fileId}/upload_sessions`,
+      { file_name: name },
+      data,
+      etag,
+    )
+  if (data instanceof ByteSpool) data = await data.read(0, data.size)
   return boxUploadMultipart(
     tm,
     `${tm.uploadBase}/files/${fileId}/content`,

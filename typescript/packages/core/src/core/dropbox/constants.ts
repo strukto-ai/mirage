@@ -18,6 +18,10 @@ export const DROPBOX_TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token'
 export const DROPBOX_API_BASE = 'https://api.dropboxapi.com/2'
 export const DROPBOX_CONTENT_BASE = 'https://content.dropboxapi.com/2'
 export const TOKEN_BUFFER_SECONDS = 300
+// files/upload stops near 150 MB; past this an upload goes through an upload
+// session, appended in chunks of this size.
+export const SIMPLE_UPLOAD_MAX = 8 * 1024 * 1024
+export const UPLOAD_CHUNK = 8 * 1024 * 1024
 // The download response header that names the file's metadata, and the
 // metadata field that is its content token.
 export const RESULT_HEADER = 'Dropbox-API-Result'
