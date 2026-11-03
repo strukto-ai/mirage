@@ -22,10 +22,6 @@ import core3 from './generated/monty.component.core3.wasm'
 import core4 from './generated/monty.component.core4.wasm'
 import core from './generated/monty.component.core.wasm'
 
-// Seconds one Python run may execute before monty raises `TimeoutError`:
-// the isolate has no thread to kill, so monty's own clock stops a loop.
-const MAX_SECONDS = 30
-
 const MODULES: Record<string, WebAssembly.Module> = {
   'monty.component.core.wasm': core,
   'monty.component.core2.wasm': core2,
@@ -36,8 +32,8 @@ const MODULES: Record<string, WebAssembly.Module> = {
 /**
  * A worker that is this isolate itself: monty's own dispatch loop answers
  * each message in turn, with every message copied as a thread boundary
- * would copy it. There is no thread to end, so a run is bounded by monty's
- * own time limit rather than by a kill.
+ * would copy it. There is no thread to end, so core holds a run to monty's
+ * own clock rather than to a kill.
  */
 function inProcessWorker(options: unknown): (signal?: AbortSignal) => Promise<unknown> {
   return (signal) => {
@@ -77,13 +73,7 @@ const MONTY: MontyModuleLike = {
         1,
       )
       return {
-        checkout: (checkout: Record<string, unknown> = {}) => {
-          const limits = (checkout.limits ?? {}) as Record<string, unknown>
-          return pool.checkout({
-            ...checkout,
-            limits: { maxFeedDurationSecs: MAX_SECONDS, ...limits },
-          })
-        },
+        checkout: (checkout: Record<string, unknown> = {}) => pool.checkout(checkout),
         close: () => pool.close(),
       }
     },

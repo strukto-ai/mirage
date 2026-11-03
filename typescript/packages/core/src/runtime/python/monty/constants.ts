@@ -27,6 +27,11 @@ export const MAX_URANDOM_BYTES = 1_048_576
 // reaches; the command limits bound a run instead.
 export const LIMITS = { maxSuspensions: 2 ** 31 - 1 }
 
+// The most seconds one run may hold a thread it shares with its host (a
+// pool the host provides, in an edge isolate), where no timer can stop it:
+// past this, or past its deadline if sooner, monty's own clock stops it.
+export const SHARED_THREAD_SECONDS = 30
+
 // How many workers the process's shared pool runs at once, across every
 // workspace: an idle worker holds about 9 MB, and a run past this many
 // waits for one to come back.

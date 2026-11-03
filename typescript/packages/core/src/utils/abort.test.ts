@@ -17,7 +17,9 @@ import {
   SignalStop,
   abortable,
   atDeadline,
+  boundDeadline,
   runCancellable,
+  runWithDeadline,
   makeAbortError,
   sleep,
   stopSignal,
@@ -199,6 +201,24 @@ describe('atDeadline', () => {
     cancel()
     await sleep(60)
     expect(fired).toBe(0)
+  })
+})
+
+describe('runWithDeadline', () => {
+  it('binds the earlier of a deadline and the one already bound', async () => {
+    const outer = vi.fn()
+    const inner = vi.fn()
+    expect(boundDeadline()).toBeNull()
+    await runWithDeadline(60, outer, async () => {
+      expect(boundDeadline()?.fire).toBe(outer)
+      await runWithDeadline(600, inner, () => {
+        expect(boundDeadline()?.fire).toBe(outer)
+      })
+      await runWithDeadline(1, inner, () => {
+        expect(boundDeadline()?.fire).toBe(inner)
+      })
+    })
+    expect(boundDeadline()).toBeNull()
   })
 })
 

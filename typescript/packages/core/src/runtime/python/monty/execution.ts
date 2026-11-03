@@ -17,16 +17,18 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { memoryRoom } from '../../../io/memory.ts'
 import type { StreamName } from '../../../io/types.ts'
 import { materialize } from '../../../io/types.ts'
+import { boundDeadline } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { boundSystemClock } from '../../../utils/clock.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import { mainFilename } from '../execution.ts'
-import { DEFAULT_PROG, LIMITS, POOL_WORKERS } from './constants.ts'
+import { DEFAULT_PROG, LIMITS, POOL_WORKERS, SHARED_THREAD_SECONDS } from './constants.ts'
 import { displayError } from './errors.ts'
 import { MontyFs } from './fs.ts'
 import {
   loadMontyModule,
+  sharesThread,
   type MontyModuleLike,
   type MontyPoolLike,
   type MontySessionLike,
@@ -165,11 +167,20 @@ export class MontyExecution {
     // from before the checkout, which waits while every worker of the shared
     // pool is busy.
     const interruption = this.installInterruption(ctx.signal, ctx.timeoutSeconds)
+    // A host that runs monty on its own thread fires no timer while a run
+    // holds it, so the run is held to monty's own clock: the deadline it
+    // runs under, or SHARED_THREAD_SECONDS if that is sooner. Past its
+    // deadline it fires the deadline itself, as the timer would have.
+    const shared = sharesThread()
+    const due = shared ? boundDeadline() : null
+    const left = due === null ? null : Math.max(due.at - performance.now(), 1) / 1000
+    const binds = left !== null && left <= SHARED_THREAD_SECONDS
     try {
       // A script is Monty's own script_name, which it keeps the last part of
       // for `__file__`, under the directory a feed starts in.
       const checkout = this.checkout(
         program.scriptPath === undefined ? undefined : mainFilename(program, ctx.cwd),
+        shared ? (binds ? left : SHARED_THREAD_SECONDS) : null,
       )
       const session = await Promise.race([checkout, interruption.promise])
       if (session === INTERRUPTED) {
@@ -189,13 +200,23 @@ export class MontyExecution {
         // kill ends the worker, not a host callback still at work (a scan
         // lists directory after directory), so the file calls stop too.
         const guestFiles = files?.withSignal(interruption.signal) ?? null
-        const run = this.feedOne(session, program, ctx, guestFiles, prints, externalLookup).then(
-          async (outcome) => {
-            await prints.end()
-            return outcome
-          },
-        )
+        const run = this.feedOne(
+          session,
+          program,
+          ctx,
+          guestFiles,
+          prints,
+          externalLookup,
+          binds,
+        ).then(async (outcome) => {
+          await prints.end()
+          return outcome
+        })
         const winner = await Promise.race([run, interruption.promise])
+        if (winner === null) {
+          due?.fire()
+          return this.interrupted(interruption, ctx)
+        }
         if (winner !== INTERRUPTED) {
           const [exitCode, note] = winner
           const [stdout, stderr] = prints.streams()
@@ -312,16 +333,20 @@ export class MontyExecution {
     return this.module
   }
 
-  private async checkout(scriptName?: string | null): Promise<MontySessionLike> {
+  private async checkout(
+    scriptName: string | null | undefined,
+    seconds: number | null,
+  ): Promise<MontySessionLike> {
     const pool = await this.ensurePool()
     const room = memoryRoom()
     const own = this.limits.maxMemory
+    const limits =
+      room === null
+        ? this.limits
+        : { ...this.limits, maxMemory: own === undefined ? room : Math.min(own, room) }
     return pool.checkout({
       ...(scriptName === undefined ? {} : { scriptName }),
-      limits:
-        room === null
-          ? this.limits
-          : { ...this.limits, maxMemory: own === undefined ? room : Math.min(own, room) },
+      limits: seconds === null ? limits : { ...limits, maxFeedDurationSecs: seconds },
       assertMessageAnnotations: false,
       // A workspace's system_time answers the wall clocks (MontyFs).
       osPolicy:
@@ -339,7 +364,8 @@ export class MontyExecution {
     files: RuntimeFiles | null,
     prints: Prints,
     externalLookup: Readonly<Record<string, (...args: never[]) => unknown>>,
-  ): Promise<[number, string]> {
+    atDeadline: boolean,
+  ): Promise<[number, string] | null> {
     const module = await this.loadModule()
     // Monty has no `sys.stdin`, so piped bytes ride in as a global the
     // same way argv does: raw bytes, null when nothing was piped.
@@ -362,6 +388,15 @@ export class MontyExecution {
         const inner = (caught as { exception?: { typeName: string; message: string } }).exception
         if (inner?.typeName === 'SystemExit') {
           return inner.message ? [1, inner.message + '\n'] : [0, '']
+        }
+        // Monty's own clock stopped the run at the deadline it was handed:
+        // null, for the run to fire that deadline.
+        if (
+          atDeadline &&
+          inner?.typeName === 'TimeoutError' &&
+          inner.message.startsWith('feed time limit exceeded')
+        ) {
+          return null
         }
         return [1, displayError(caught) + '\n']
       }
