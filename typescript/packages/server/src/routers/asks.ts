@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Outcome, Scope, type Decision } from '@struktoai/mirage-core/policy/index'
-import type { FastifyInstance } from 'fastify'
+import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 
 interface WsIdParams {
@@ -65,7 +65,7 @@ function toResponse(record: Decision): AskResponse {
 }
 
 export function registerAsksRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   deps: {
     registry: WorkspaceRegistry
   },

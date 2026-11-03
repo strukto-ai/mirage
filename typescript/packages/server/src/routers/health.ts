@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FastifyInstance } from 'fastify'
+import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 
 export function registerHealthRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   deps: {
     registry: WorkspaceRegistry
     startedAt: number

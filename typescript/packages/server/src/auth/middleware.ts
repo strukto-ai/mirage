@@ -27,6 +27,8 @@ declare module 'fastify' {
      * every workspace.
      */
     account: string | null
+    /** Aborted when the client goes away before its answer has finished. */
+    closed: AbortSignal
   }
 }
 

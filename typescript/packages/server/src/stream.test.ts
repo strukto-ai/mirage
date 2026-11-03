@@ -1,6 +1,3 @@
-import { EventEmitter } from 'node:events'
-import type { Readable } from 'node:stream'
-import type { FastifyReply } from 'fastify'
 import { expect, it, vi } from 'vitest'
 import { ExecutionTable } from './jobs.ts'
 import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
@@ -10,6 +7,7 @@ import { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { JobConsole } from '@struktoai/mirage-core/shell/console/job_console'
 import { MAX_FINISHED_JOBS } from './constants.ts'
+import type { RouteReply } from './routes.ts'
 import { UploadStdin } from './stdin.ts'
 import { PAYLOAD_SIZE, record, shellResponse } from './stream.ts'
 
@@ -38,28 +36,31 @@ async function failing(sink: JobConsole): Promise<ExecuteResult> {
   throw new Error('boom')
 }
 
-function replyFor(raw = new EventEmitter()): { reply: FastifyReply; body: () => Readable } {
-  let source: Readable | undefined
+function replyFor(): {
+  reply: RouteReply
+  body: () => ReadableStream<Uint8Array>
+  closed: AbortController
+} {
+  let source: ReadableStream<Uint8Array> | undefined
   const reply = {
-    raw,
-    log: { error: vi.fn(), debug: vi.fn() },
     header: vi.fn().mockReturnThis(),
     type: vi.fn().mockReturnThis(),
-    send: (body: Readable) => {
+    send: (body: ReadableStream<Uint8Array>) => {
       source = body
       return reply
     },
-  } as unknown as FastifyReply
+  } as unknown as RouteReply
   return {
     reply,
     body: () => {
       if (source === undefined) throw new Error('response did not send a stream')
       return source
     },
+    closed: new AbortController(),
   }
 }
 
-async function lines(body: Readable): Promise<Record<string, unknown>[]> {
+async function lines(body: ReadableStream<Uint8Array>): Promise<Record<string, unknown>[]> {
   const chunks: Buffer[] = []
   for await (const chunk of body) chunks.push(Buffer.from(chunk as Uint8Array))
   return Buffer.concat(chunks)
@@ -104,8 +105,8 @@ it('sends each event then the final record', async () => {
     },
     'session',
   )
-  const { reply, body } = replyFor()
-  shellResponse(execution, table, job, reply, Promise.resolve(undefined), undefined)
+  const { reply, body, closed } = replyFor()
+  shellResponse(execution, table, job, reply, closed.signal, Promise.resolve(undefined), undefined)
   const records = await lines(body())
   expect(
     records.slice(0, 2).map((r) => [r.stream, Buffer.from(r.data as string, 'base64').toString()]),
@@ -137,8 +138,8 @@ it('a line that fails while streaming still sends the final record', async () =>
     },
     'session',
   )
-  const { reply, body } = replyFor()
-  shellResponse(execution, table, job, reply, Promise.resolve(undefined), undefined)
+  const { reply, body, closed } = replyFor()
+  shellResponse(execution, table, job, reply, closed.signal, Promise.resolve(undefined), undefined)
   const records = await lines(body())
   expect(Buffer.from(records[0]?.data as string, 'base64').toString()).toBe('partial')
   expect(records.at(-1)).toMatchObject({ status: 'failed', error: 'Error: boom' })
@@ -189,20 +190,17 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
     'session',
   )
   await entered.wait
-  const raw = new EventEmitter()
-  let source: Readable | undefined
-  const log = { error: vi.fn(), debug: vi.fn() }
+  const closed = new AbortController()
+  let source: ReadableStream<Uint8Array> | undefined
   const reply = {
-    raw,
-    log,
     header: vi.fn().mockReturnThis(),
     type: vi.fn().mockReturnThis(),
-    send: (body: Readable) => {
+    send: (body: ReadableStream<Uint8Array>) => {
       source = body
       return reply
     },
-  } as unknown as FastifyReply
-  shellResponse(execution, table, job, reply, Promise.resolve(undefined), undefined)
+  } as unknown as RouteReply
+  shellResponse(execution, table, job, reply, closed.signal, Promise.resolve(undefined), undefined)
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   let ended = false
@@ -211,13 +209,12 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
   })().finally(() => {
     ended = true
   })
-  raw.emit('close')
+  closed.abort()
   await cleanup.wait
   await new Promise((resolve) => setTimeout(resolve, 0))
   expect(ended).toBe(false)
   release.release()
   await reading
-  expect(raw.listenerCount('close')).toBe(0)
   expect(table.get(job.id)?.status).toBe(ExecutionStatus.CANCELED)
   await table.close()
 })
@@ -235,19 +232,18 @@ it('the final record does not wait for stdin to end', async () => {
     'session',
   )
   await table.wait(job.id)
-  let source: Readable | undefined
+  let source: ReadableStream<Uint8Array> | undefined
+  const closed = new AbortController()
   const reply = {
-    raw: new EventEmitter(),
-    log: { error: vi.fn(), debug: vi.fn() },
     header: vi.fn().mockReturnThis(),
     type: vi.fn().mockReturnThis(),
-    send: (body: Readable) => {
+    send: (body: ReadableStream<Uint8Array>) => {
       source = body
       return reply
     },
-  } as unknown as FastifyReply
+  } as unknown as RouteReply
   const failed = uploaded.wait.then(() => undefined)
-  shellResponse(Promise.resolve(null), table, job, reply, failed, new UploadStdin())
+  shellResponse(Promise.resolve(null), table, job, reply, closed.signal, failed, new UploadStdin())
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
@@ -280,21 +276,19 @@ it('a hang-up after the final record ends the body', async () => {
     'session',
   )
   await table.wait(job.id)
-  const raw = new EventEmitter()
-  const log = { error: vi.fn(), debug: vi.fn() }
-  let source: Readable | undefined
+  const closed = new AbortController()
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  let source: ReadableStream<Uint8Array> | undefined
   const reply = {
-    raw,
-    log,
     header: vi.fn().mockReturnThis(),
     type: vi.fn().mockReturnThis(),
-    send: (body: Readable) => {
+    send: (body: ReadableStream<Uint8Array>) => {
       source = body
       return reply
     },
-  } as unknown as FastifyReply
+  } as unknown as RouteReply
   const failed = hangUp.wait.then(() => new Error('aborted'))
-  shellResponse(Promise.resolve(null), table, job, reply, failed, new UploadStdin())
+  shellResponse(Promise.resolve(null), table, job, reply, closed.signal, failed, new UploadStdin())
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
@@ -306,7 +300,7 @@ it('a hang-up after the final record ends the body', async () => {
   for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve))
   expect(records.join('')).toContain('"status":"done"')
   expect(ended).toBe(false)
-  raw.emit('close')
+  closed.abort()
   hangUp.release()
   await reading
   expect(
@@ -316,7 +310,8 @@ it('a hang-up after the final record ends the body', async () => {
       .split('\n')
       .map((line) => (JSON.parse(line) as { status: string }).status),
   ).toEqual(['done'])
-  expect(log.error).not.toHaveBeenCalled()
+  expect(error).not.toHaveBeenCalled()
+  error.mockRestore()
   expect(table.get(job.id)?.status).toBe(ExecutionStatus.DONE)
   await table.close()
 })
@@ -333,20 +328,19 @@ it('an upload that failed first fails the final record', async () => {
     'session',
   )
   await table.wait(job.id)
-  let source: Readable | undefined
+  let source: ReadableStream<Uint8Array> | undefined
+  const closed = new AbortController()
   const reply = {
-    raw: new EventEmitter(),
-    log: { error: vi.fn(), debug: vi.fn() },
     header: vi.fn().mockReturnThis(),
     type: vi.fn().mockReturnThis(),
-    send: (body: Readable) => {
+    send: (body: ReadableStream<Uint8Array>) => {
       source = body
       return reply
     },
-  } as unknown as FastifyReply
+  } as unknown as RouteReply
   const failed = Promise.resolve(new Error('bad multipart body'))
   await failed
-  shellResponse(Promise.resolve(null), table, job, reply, failed, undefined)
+  shellResponse(Promise.resolve(null), table, job, reply, closed.signal, failed, undefined)
   if (source === undefined) throw new Error('response did not send a stream')
   const records: string[] = []
   for await (const chunk of source) records.push(Buffer.from(chunk as Uint8Array).toString())
@@ -371,22 +365,21 @@ it('an upload failing while its cleanup runs fails the record', async () => {
     'session',
   )
   await table.wait(job.id)
-  let source: Readable | undefined
+  let source: ReadableStream<Uint8Array> | undefined
+  const closed = new AbortController()
   const reply = {
-    raw: new EventEmitter(),
-    log: { error: vi.fn(), debug: vi.fn() },
     header: vi.fn().mockReturnThis(),
     type: vi.fn().mockReturnThis(),
-    send: (body: Readable) => {
+    send: (body: ReadableStream<Uint8Array>) => {
       source = body
       return reply
     },
-  } as unknown as FastifyReply
+  } as unknown as RouteReply
   const stdin = new UploadStdin()
   stdin.discard = () => held.wait
   const error = new Error('stdin part too large')
   const failed = stdin.fail(error).then(() => error)
-  shellResponse(Promise.resolve(null), table, job, reply, failed, stdin)
+  shellResponse(Promise.resolve(null), table, job, reply, closed.signal, failed, stdin)
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
@@ -413,18 +406,17 @@ it('the final record survives its eviction', async () => {
     return { exit_code: 0 }
   }
   const job = table.submit('workspace', 'held', work, 'session')
-  let source: Readable | undefined
+  let source: ReadableStream<Uint8Array> | undefined
+  const closed = new AbortController()
   const reply = {
-    raw: new EventEmitter(),
-    log: { error: vi.fn(), debug: vi.fn() },
     header: vi.fn().mockReturnThis(),
     type: vi.fn().mockReturnThis(),
-    send: (body: Readable) => {
+    send: (body: ReadableStream<Uint8Array>) => {
       source = body
       return reply
     },
-  } as unknown as FastifyReply
-  shellResponse(Promise.resolve(null), table, job, reply, Promise.resolve(undefined), undefined)
+  } as unknown as RouteReply
+  shellResponse(Promise.resolve(null), table, job, reply, closed.signal, Promise.resolve(undefined), undefined)
   for (let i = 0; i < MAX_FINISHED_JOBS; i++) table.submit('workspace', 'other', work, 'session')
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source

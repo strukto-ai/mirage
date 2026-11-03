@@ -19,12 +19,11 @@ import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { FastifyInstance, FastifyReply } from 'fastify'
 import { Console } from 'node:console'
 import { stderr } from 'node:process'
-import { Readable } from 'node:stream'
 import { answered, CallArgsError, checked, customAnswer, failureToDict } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
+import { streamOf, type RouteApp, type RouteReply } from '../routes.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
 
 const logger = new Console({ stdout: stderr, stderr })
@@ -102,7 +101,7 @@ export function queryFlag(value: string | undefined, name: string): boolean {
  * the status, and the body carries the errno, the text and, for a policy's
  * refusal, its record. Mirrors Python's `failure`.
  */
-export function failure(reply: FastifyReply, err: unknown): FastifyReply {
+export function failure(reply: RouteReply, err: unknown): RouteReply {
   if (err instanceof HttpError) return reply.status(err.status).send({ detail: err.message })
   if (err instanceof CallArgsError) return reply.status(400).send({ detail: err.message })
   // A glob past its mount's walk_limit says so in words that carry
@@ -122,7 +121,7 @@ export function failure(reply: FastifyReply, err: unknown): FastifyReply {
  * raw. Mirrors Python's `vfs_route`.
  */
 export function registerVfsRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   deps: {
     registry: WorkspaceRegistry
   },
@@ -157,7 +156,7 @@ export function registerVfsRoutes(
             return await reply
               .type('application/octet-stream')
               .header('Cache-Control', 'no-store')
-              .send(Readable.from(source))
+              .send(streamOf(source))
           }
           body = await answered(session, call, args, explain)
         } catch (err) {

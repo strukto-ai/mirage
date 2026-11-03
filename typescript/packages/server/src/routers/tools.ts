@@ -17,7 +17,7 @@ import {
   fromJsonSchema,
   type JsonSchemaType,
 } from '@modelcontextprotocol/server'
-import type { FastifyInstance } from 'fastify'
+import type { RouteApp } from '../routes.ts'
 import type { McpEndpoint } from '../mcp/http.ts'
 import { TOOLS } from '../mcp/server.ts'
 
@@ -77,7 +77,7 @@ async function callTool(
  * MCP route's body limit, so an input MCP takes is one these take.
  */
 export function registerToolsRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   deps: {
     mcp: McpEndpoint
   },
@@ -87,11 +87,6 @@ export function registerToolsRoutes(
       `/v1/workspaces/:wsId/tools/${name}`,
       { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
       async (req, reply) => {
-        const abort = new AbortController()
-        const gone = (): void => {
-          if (!reply.raw.writableFinished) abort.abort()
-        }
-        reply.raw.once('close', gone)
         const { status, body } = await callTool(
           deps.mcp,
           req.params.wsId,
@@ -100,10 +95,8 @@ export function registerToolsRoutes(
           req.body,
           req.query.session_id ?? null,
           req.account,
-          abort.signal,
-        ).finally(() => {
-          reply.raw.off('close', gone)
-        })
+          req.closed,
+        )
         return reply.status(status).send(body)
       },
     )

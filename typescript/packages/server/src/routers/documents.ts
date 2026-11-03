@@ -14,7 +14,7 @@
 
 import { isFsError } from '@struktoai/mirage-core/errors/fs'
 import { PolicyError } from '@struktoai/mirage-core/policy/errors'
-import type { FastifyInstance } from 'fastify'
+import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 
 interface DocumentParams {
@@ -30,7 +30,7 @@ interface DocumentPath {
 }
 
 export function registerDocumentsRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   deps: {
     registry: WorkspaceRegistry
   },

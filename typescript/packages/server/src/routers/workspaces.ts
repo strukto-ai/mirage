@@ -43,7 +43,7 @@ import {
 } from '@struktoai/mirage-node'
 import { buildCliEntries } from '@struktoai/mirage-node/config'
 import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { buildOverrideMounts, cloneWorkspaceWithOverride } from '../clone.ts'
@@ -106,7 +106,7 @@ function parseLoadRequest(raw: unknown): LoadWorkspaceRequest {
  * @throws MultipartError 400 for a body without both parts, or with a
  *   `key`; 413 for an oversized request part.
  */
-async function readLoadBody(req: FastifyRequest): Promise<[LoadWorkspaceRequest, Uint8Array]> {
+async function readLoadBody(req: RouteRequest): Promise<[LoadWorkspaceRequest, Uint8Array]> {
   let name = ''
   const request: Uint8Array[] = []
   const tar: Uint8Array[] = []
@@ -172,7 +172,7 @@ function storeKey(account: string | null, key: string): string | null {
   return account === null ? relative : `${ACCOUNTS_DIR}/${quoteName(account)}/${relative}`
 }
 
-function noStore(reply: FastifyReply): FastifyReply {
+function noStore(reply: RouteReply): RouteReply {
   return reply.status(400).send({ detail: 'this server has no snapshot store' })
 }
 
@@ -199,15 +199,15 @@ async function hasState(stateRoot: string, id: string): Promise<boolean> {
  */
 async function admit(
   deps: WorkspaceRoutesDeps,
-  req: FastifyRequest,
-  reply: FastifyReply,
+  req: RouteRequest,
+  reply: RouteReply,
   config: unknown,
 ): Promise<{ detail: string } | null> {
   const deny = await deps.registry.refusal((config ?? {}) as Record<string, JsonValue>, req.account)
   return deny === null ? null : answer(reply, 403, { detail: deny.reason })
 }
 
-function answer<T>(reply: FastifyReply, status: number, body: T): T {
+function answer<T>(reply: RouteReply, status: number, body: T): T {
   void reply.status(status)
   return body
 }
@@ -222,8 +222,8 @@ function answer<T>(reply: FastifyReply, status: number, body: T): T {
  */
 async function claimed(
   deps: WorkspaceRoutesDeps,
-  req: FastifyRequest,
-  reply: FastifyReply,
+  req: RouteRequest,
+  reply: RouteReply,
   id: string,
   build: () => Promise<unknown>,
 ): Promise<unknown> {
@@ -260,8 +260,8 @@ async function claimed(
  */
 function building(
   deps: WorkspaceRoutesDeps,
-  req: FastifyRequest,
-  reply: FastifyReply,
+  req: RouteRequest,
+  reply: RouteReply,
   id: string,
   build: () => Promise<unknown>,
 ): Promise<unknown> {
@@ -284,7 +284,7 @@ function pastSessionCap(ws: Workspace, cap: number | null, holder: string): stri
 }
 
 /** Refuse an id that would name the state root, not a workspace. */
-function refuseDotId(reply: FastifyReply, id: string): FastifyReply {
+function refuseDotId(reply: RouteReply, id: string): RouteReply {
   return reply.status(400).send({ detail: `invalid workspace id: ${id}` })
 }
 
@@ -302,12 +302,12 @@ function configDigest(config: unknown): string {
   return createHash('sha256').update(canonical).digest('hex')
 }
 
-export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRoutesDeps): void {
+export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDeps): void {
   app.post<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>(
     '/v1/workspaces',
     async (
-      req: FastifyRequest<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>,
-      reply: FastifyReply,
+      req: RouteRequest<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>,
+      reply: RouteReply,
     ) => {
       const body = req.body
       const config: unknown = body.config

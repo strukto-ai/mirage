@@ -186,7 +186,7 @@ class Parts {
  *   one, or one that stops before its closing boundary.
  */
 export async function* partEvents(
-  source: AsyncIterable<Buffer>,
+  source: AsyncIterable<Uint8Array>,
   contentType: string,
 ): AsyncGenerator<PartEvent> {
   const boundary = headerParam(contentType, 'boundary')
@@ -194,6 +194,10 @@ export async function* partEvents(
     throw new MultipartError(400, 'multipart body without a boundary')
   }
   const parts = new Parts(boundary)
-  for await (const chunk of source) yield* parts.write(chunk)
+  for await (const chunk of source) {
+    yield* parts.write(
+      Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength),
+    )
+  }
   if (!parts.finished) throw new MultipartError(400, 'multipart body ended early')
 }
