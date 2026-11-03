@@ -10,7 +10,7 @@ The Dropbox VFS mounts a Dropbox account at some prefix such as
 `/2/files/list_folder` for directories, `/2/files/download` for content, and
 `/2/files/upload` / `create_folder_v2` / `delete_v2` / `move_v2` / `copy_v2`
 for writes. Files are served as raw bytes. Both `READ` and `WRITE` modes are
-supported; a write past 8 MiB goes through an upload session.
+supported.
 `rmdir` fails `ENOTEMPTY` on a non-empty folder instead of using the API's
 recursive delete; `rm -r` is the recursive path.
 
