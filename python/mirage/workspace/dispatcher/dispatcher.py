@@ -701,11 +701,15 @@ def _payload_bytes(result: Any, kwargs: Mapping[str, Any]) -> int:
     )
 
 
-def _settle_failed(rows: Iterable[OpRecord], failure: BaseException) -> None:
-    """Hand a call's failure to the rows it recorded before it raised:
-    one whose change may have landed is partial, any other failed.
+def _settle_failed(
+    op: str, rows: Iterable[OpRecord], failure: BaseException
+) -> None:
+    """Hand a call's failure to the rows of its own op it recorded before
+    it raised: one whose change may have landed is partial, any other
+    failed. A child transfer of another op that finished keeps its row.
 
     Args:
+        op (str): the dispatched op.
         rows (Iterable[OpRecord]): the rows the call recorded.
         failure (BaseException): what the call raised.
     """
@@ -716,13 +720,13 @@ def _settle_failed(rows: Iterable[OpRecord], failure: BaseException) -> None:
         else getattr(failure, "errno", None)
     )
     for row in rows:
-        if row.status is OpStatus.OK:
+        if row.op == op and row.status is OpStatus.OK:
             row.status = OpStatus.PARTIAL if row.changed else OpStatus.FAILED
             row.errno = code
 
 
 async def _settle_on_error(
-    source: AsyncIterator[bytes], rows: Iterable[OpRecord]
+    source: AsyncIterator[bytes], op: str, rows: Iterable[OpRecord]
 ) -> AsyncIterator[bytes]:
     """Pass a read through, settling the rows its backend recorded when
     a later pull raises. Primed with an empty chunk, so a close before
@@ -730,6 +734,7 @@ async def _settle_on_error(
 
     Args:
         source (AsyncIterator[bytes]): the already opened read.
+        op (str): the dispatched op.
         rows (Iterable[OpRecord]): the rows its backend recorded.
     """
     try:
@@ -737,7 +742,7 @@ async def _settle_on_error(
         async for chunk in source:
             yield chunk
     except Exception as exc:
-        _settle_failed(rows, exc)
+        _settle_failed(op, rows, exc)
         raise
     finally:
         await close_quietly(source)
@@ -1376,7 +1381,7 @@ class Dispatcher:
                     and not streaming
                     and rows
                 ):
-                    settled = _settle_on_error(answer, rows)
+                    settled = _settle_on_error(answer, name, rows)
                     await anext(settled)
                     answer = (
                         PipeStream(settled, answer.path, answer.end)
@@ -1389,7 +1394,7 @@ class Dispatcher:
                 raise
             finally:
                 if failure is not None:
-                    _settle_failed((*mine, *report.driver_rows), failure)
+                    _settle_failed(name, (*mine, *report.driver_rows), failure)
                 if (
                     not skip
                     and not streaming

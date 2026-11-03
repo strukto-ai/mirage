@@ -429,14 +429,15 @@ function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
  * since stamps a newer record. Mirrors Python's `_retracted`.
  */
 /**
- * Hand a call's failure to the rows it recorded before it raised: one whose
- * change may have landed is partial, any other failed. Mirrors Python's
+ * Hand a call's failure to the rows of its own op it recorded before it
+ * raised: one whose change may have landed is partial, any other failed. A
+ * child transfer of another op that finished keeps its row. Mirrors Python's
  * `_settle_failed`.
  */
-function settleFailed(rows: Iterable<OpRecord>, failure: unknown): void {
+function settleFailed(op: string, rows: Iterable<OpRecord>, failure: unknown): void {
   const condition = classify(failure)
   for (const row of rows) {
-    if (row.status !== 'ok') continue
+    if (row.op !== op || row.status !== 'ok') continue
     row.status = row.changed ? 'partial' : 'failed'
     row.errno = condition === null ? null : posixErrno(condition)
   }
@@ -449,6 +450,7 @@ function settleFailed(rows: Iterable<OpRecord>, failure: unknown): void {
  */
 async function* settleOnError(
   source: AsyncIterable<Uint8Array>,
+  op: string,
   rows: Iterable<OpRecord>,
 ): AsyncGenerator<Uint8Array> {
   const iterator = source[Symbol.asyncIterator]()
@@ -460,7 +462,7 @@ async function* settleOnError(
       yield next.value
     }
   } catch (err) {
-    settleFailed(rows, err)
+    settleFailed(op, rows, err)
     throw err
   } finally {
     await iterator.return?.()
@@ -1011,7 +1013,7 @@ export class Dispatcher {
           typeof result === 'object' &&
           Symbol.asyncIterator in result
         ) {
-          const settled = settleOnError(result as AsyncIterable<Uint8Array>, rows)
+          const settled = settleOnError(result as AsyncIterable<Uint8Array>, name, rows)
           await settled.next()
           answer =
             result instanceof PipeStream
@@ -1023,7 +1025,7 @@ export class Dispatcher {
         failure = err
         throw err
       } finally {
-        if (failure !== null) settleFailed([...mine, ...report.driverRows], failure)
+        if (failure !== null) settleFailed(name, [...mine, ...report.driverRows], failure)
         if (
           !skip &&
           !streaming &&

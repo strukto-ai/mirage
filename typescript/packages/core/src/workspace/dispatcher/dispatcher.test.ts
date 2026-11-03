@@ -3992,7 +3992,8 @@ it.each([false, true])(
 )
 
 class SettledThenLostRAM extends RAMVFS {
-  override async copy(_src: PathSpec, dst: PathSpec): Promise<void> {
+  override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    record('read', src.virtual, 'ram', 1, startOp())
     record('copy', dst.virtual, 'ram', 0, startOp())
     await Promise.resolve()
     throw Object.assign(new Error('lost'), { code: 'EIO' })
@@ -4026,6 +4027,19 @@ describe('a backend row of a call that raised', () => {
       expect((await ws.shell('cp /m/a /m/b')).exitCode).toBe(1)
       const rows = ws.records.slice(start).filter((r) => r.op === 'copy')
       expect(rows.map((r) => [r.status, r.changed, r.errno])).toEqual([['partial', true, 5]])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('leaves a finished read of the call as it was', async () => {
+    const ws = new Workspace({ '/m': new SettledThenLostRAM() }, { mode: MountMode.WRITE })
+    try {
+      await ws.vfs.write('/m/a', 'a')
+      const start = ws.records.length
+      expect((await ws.shell('cp /m/a /m/b')).exitCode).toBe(1)
+      const rows = ws.records.slice(start).filter((r) => r.op === 'read' && r.path === '/m/a')
+      expect(rows.map((r) => [r.status, r.errno])).toEqual([['ok', null]])
     } finally {
       await ws.close()
     }

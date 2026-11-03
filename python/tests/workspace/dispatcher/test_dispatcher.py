@@ -4171,6 +4171,7 @@ async def test_a_policy_refusing_reads_refuses_their_shortcuts():
 
 class _SettledThenLostRAM(RAMVFS):
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
+        record("read", src.virtual, "ram", 1, start_op())
         record("copy", dst.virtual, "ram", 0, start_op())
         raise OSError(errno.EIO, "lost", dst.virtual)
 
@@ -4200,6 +4201,23 @@ async def test_a_backend_row_takes_the_failure_of_the_call_that_raised():
         assert [(r.status, r.changed, r.errno) for r in rows] == [
             ("partial", True, errno.EIO)
         ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_finished_read_of_a_call_that_raised_stays_ok():
+    ws = Workspace({"/m": _SettledThenLostRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/m/a", b"a")
+        start = len(ws.vfs.records)
+        assert (await ws.shell("cp /m/a /m/b")).exit_code == 1
+        rows = [
+            r
+            for r in ws.vfs.records[start:]
+            if r.op == "read" and r.path == "/m/a"
+        ]
+        assert [(r.status, r.errno) for r in rows] == [("ok", None)]
     finally:
         await ws.close()
 
