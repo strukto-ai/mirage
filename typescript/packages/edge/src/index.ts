@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+export { inRequest } from '@struktoai/mirage-core/io/web/request'
 export { MountMode } from '@struktoai/mirage-core/types'
 export { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 export { createApp, type EdgeApp, type EdgeAppOptions } from './app.ts'

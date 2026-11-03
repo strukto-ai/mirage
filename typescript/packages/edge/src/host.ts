@@ -21,8 +21,10 @@ import {
 } from '@struktoai/mirage-core/config'
 import { watch } from '@struktoai/mirage-core/io/web/gateway'
 import { refuseUnseenAddresses, watchNetwork } from '@struktoai/mirage-core/io/web/network'
+import { withinRequest } from '@struktoai/mirage-core/io/web/request'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
+import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import {
   generationOf,
@@ -31,6 +33,7 @@ import {
 } from '@struktoai/mirage-core/workspace/record/types'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
+import type { ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
@@ -50,6 +53,34 @@ export class Workspace extends CoreWorkspace {
     this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()
     watch()
+  }
+
+  /**
+   * A line runs inside the request that asks for it, or as one of its own
+   * when a worker calls the workspace itself, so a socket a backend opened
+   * for an earlier request is not reused.
+   */
+  override shell(command: string, options: ExecuteOptions & { stream: true }): Promise<ShellExecution>
+  override shell(
+    command: string,
+    options?: ExecuteOptions & { stream?: false },
+  ): Promise<ExecuteResult>
+  override shell(
+    command: string,
+    options: ExecuteOptions,
+  ): Promise<ExecuteResult | ShellExecution>
+  override shell(
+    command: string,
+    options: ExecuteOptions = {},
+  ): Promise<ExecuteResult | ShellExecution> {
+    return withinRequest(() => super.shell(command, options))
+  }
+
+  /** A file op runs inside its request, as a line does. */
+  override dispatch(
+    ...args: Parameters<CoreWorkspace['dispatch']>
+  ): ReturnType<CoreWorkspace['dispatch']> {
+    return withinRequest(() => super.dispatch(...args))
   }
 }
 
