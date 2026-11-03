@@ -12,9 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  // The package's `#mirage-rs-wasm` import names the built file; the tests
+  // run the source, before any build.
+  resolve: {
+    alias: {
+      '#mirage-rs-wasm': fileURLToPath(new URL('./src/generated/mirage_rs.ts', import.meta.url)),
+    },
+  },
   test: {
     // Node 24's V8 tiers a wasm-to-JS import wrapper up after 1000 calls and
     // frees the old one from a process-wide cache. When a terminated worker

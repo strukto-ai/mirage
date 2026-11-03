@@ -53,18 +53,26 @@
       "types": "./dist/runtime/python/pyodide/runtime.d.ts",
       "import": "./dist/runtime/python/pyodide/runtime.js"
     },
+    "./mirage_rs.wasm": "./dist/generated/mirage_rs.wasm",
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
     },
     "./package.json": "./package.json"
   },
+  "imports": {
+    "#mirage-rs-wasm": {
+      "types": "./src/generated/mirage_rs.ts",
+      "workerd": "./dist/generated/mirage_rs.workerd.js",
+      "default": "./dist/generated/mirage_rs.js"
+    }
+  },
   "files": [
     "dist",
     "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
-    "build": "node scripts/clean.mjs && node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && tsc -p tsconfig.build.json",
+    "build": "node scripts/clean.mjs && node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && tsc -p tsconfig.build.json && node scripts/emit-workerd.mjs",
     "test": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && vitest run",
     "typecheck": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs && tsc --noEmit",
     "prepare": "node scripts/embed-runtime.mjs && node scripts/embed-rs.mjs && node scripts/embed-worker.mjs"

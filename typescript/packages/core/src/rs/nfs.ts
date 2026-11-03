@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import MIRAGE_RS_WASM from '../generated/mirage_rs.ts'
 import type { JsonValue } from '../types.ts'
-import { decodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
+import { compiledModule } from './stream.ts'
 
 interface Exports {
   readonly memory: WebAssembly.Memory
@@ -68,7 +67,7 @@ export class NFSEngine {
    * and `port` is the port the host listens on.
    */
   static async open(exportPath: string, generation: number, port: number): Promise<NFSEngine> {
-    const module = await WebAssembly.compile(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
+    const module = await compiledModule()
     const exports = new WebAssembly.Instance(module, {}).exports as unknown as Exports
     const config = encoder.encode(JSON.stringify({ export: exportPath, generation, port }))
     const ptr = exports.mirage_rs_args(config.length)
