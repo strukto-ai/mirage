@@ -335,7 +335,7 @@ export function recordStream(
   op: string,
   path: string,
   source: string,
-  options: RecordOptions = {},
+  options: Pick<RecordOptions, 'served' | 'fingerprint' | 'revision'> = {},
 ): OpRecord | null {
   const state = currentCaller().recording
   if (state === null) return null
@@ -346,8 +346,8 @@ export function recordStream(
     bytes: 0,
     timestamp: Math.floor(state.clock.now() * 1000),
     durationMs: 0,
-    ...options,
-    changed: options.changed ?? defaultChanged(op, options.status ?? 'ok'),
+    changed: defaultChanged(op, 'ok'),
+    served: options.served ?? 'backend',
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
     mountId: currentCaller().recording?.mountId ?? null,
