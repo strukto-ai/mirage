@@ -228,15 +228,34 @@ class MCPAccessor(Accessor):
         return {str(auth.name): token}
 
     @asynccontextmanager
-    async def session(self, shared: bool = False) -> AsyncIterator[Client]:
+    async def session(
+        self, shared: bool = False, deadline: float | None = None
+    ) -> AsyncIterator[Client]:
         """An initialized client, closed when the block ends.
 
         Args:
             shared (bool): hold every reply to one ``MAX_REPLY`` cap.
+            deadline (float | None): the loop time past which a
+                request, such as the one ending the session, gives up at
+                once.
         """
+        hooks: dict[str, list[Callable[..., Awaitable[None]]]] = {
+            "response": [reply_cap(shared)]
+        }
+        if deadline is not None:
+            end = deadline
+
+            async def bounded(request: httpx2.Request) -> None:
+                # Only a request sent past the deadline, the session's end, needs it.
+                if asyncio.get_running_loop().time() >= end:
+                    request.extensions["timeout"] = httpx2.Timeout(
+                        0.0
+                    ).as_dict()
+
+            hooks["request"] = [bounded]
         async with httpx2.AsyncClient(
             headers={"Accept-Encoding": "identity", **self.headers()},
-            event_hooks={"response": [reply_cap(shared)]},
+            event_hooks=hooks,
             # Outlasts discover plus a request, so a stall ends as the SDK's timeout.
             timeout=httpx2.Timeout(
                 CONNECT_TIMEOUT, read=DISCOVER_TIMEOUT_SECONDS + TIMEOUT + 1
@@ -254,10 +273,12 @@ class MCPAccessor(Accessor):
 
     async def list_tools(self) -> tuple[str, list[types.Tool]]:
         """The server's title and every tool it lists, page by page,
-        all its pages held to one reply cap and one ``TIMEOUT``."""
+        all its pages held to one reply cap and one ``TIMEOUT``, which
+        also bounds ending the session."""
+        deadline = asyncio.get_running_loop().time() + TIMEOUT
         async with (
-            asyncio.timeout(TIMEOUT),
-            self.session(shared=True) as client,
+            asyncio.timeout_at(deadline),
+            self.session(shared=True, deadline=deadline) as client,
         ):
             page = await client.list_tools()
             tools = list(page.tools)

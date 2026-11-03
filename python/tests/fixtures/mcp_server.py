@@ -89,6 +89,8 @@ class FakeMCP:
             as the next.
         page_delay (float): seconds each tool page waits before it
             answers.
+        hung_delete (bool): a DELETE, which ends an MCP session, is not
+            answered until this is cleared.
         down (bool): every request is answered 503.
         oversized (dict[str, str]): MCP methods answered with a body
             past the reply cap, of the content type each maps to.
@@ -110,6 +112,7 @@ class FakeMCP:
     pages: int | None = None
     repeating: bool = False
     page_delay: float = 0.0
+    hung_delete: bool = False
     down: bool = False
     oversized: dict[str, str] = field(default_factory=dict)
     encoding: str | None = None
@@ -277,6 +280,8 @@ def _guard(app: ASGIApp, fake: FakeMCP, legacy: bool) -> ASGIApp:
                 "accept-encoding": headers.get("accept-encoding", ""),
             }
         )
+        while fake.hung_delete and scope["method"] == "DELETE":
+            await anyio.sleep(0.05)
         if fake.down:
             await _answer(send, 503, b"down")
         elif (
@@ -334,5 +339,6 @@ async def served_mcp(
     try:
         yield fake
     finally:
+        fake.hung_delete = False
         server.should_exit = True
         await task
