@@ -15,24 +15,33 @@ import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseCommand } from '@struktoai/mirage-core/commands/spec/parser'
 import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
-import type * as CommitModule from '../../../../core/hf_hub/commit.ts'
+import type * as CommitModule from '@struktoai/mirage-core/core/hf_hub/commit'
 import { UsageError } from '@struktoai/mirage-core/commands/errors'
 import { Files } from '@struktoai/mirage-core/workspace/files'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import { yieldBytes } from '@struktoai/mirage-core/io/stream'
 import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
 import type { CommandSpec, FlagValue } from '@struktoai/mirage-core/commands/spec/types'
-import { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
-import type { HfConfig } from '../../../../core/hf_hub/config.ts'
-import { HfHubError } from '../../../../core/hf_hub/client.ts'
-import { Absence } from '../../../../core/hf_hub/repo.ts'
-import type * as RepoModule from '../../../../core/hf_hub/repo.ts'
-import type * as TreeModule from '../../../../core/hf_hub/tree.ts'
-import { HF } from './index.ts'
-import { createCmd, tagCreateCmd, tagDeleteCmd, tagListCmd } from './repo.ts'
-import { whoamiCmd } from './auth.ts'
-import { downloadCmd, refuseVariadic, selected } from './download.ts'
-import { inRepoBase, uploadCmd } from './upload.ts'
+import { HfAccountAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
+import type { HfConfig } from '@struktoai/mirage-core/core/hf_hub/config'
+import { HfHubError } from '@struktoai/mirage-core/core/hf_hub/client'
+import { Absence } from '@struktoai/mirage-core/core/hf_hub/repo'
+import type * as RepoModule from '@struktoai/mirage-core/core/hf_hub/repo'
+import type * as TreeModule from '@struktoai/mirage-core/core/hf_hub/tree'
+import { HF } from '@struktoai/mirage-core/commands/cli/builtin/hf/index'
+import {
+  createCmd,
+  tagCreateCmd,
+  tagDeleteCmd,
+  tagListCmd,
+} from '@struktoai/mirage-core/commands/cli/builtin/hf/repo'
+import { whoamiCmd } from '@struktoai/mirage-core/commands/cli/builtin/hf/auth'
+import {
+  downloadCmd,
+  refuseVariadic,
+  selected,
+} from '@struktoai/mirage-core/commands/cli/builtin/hf/download'
+import { inRepoBase, uploadCmd } from '@struktoai/mirage-core/commands/cli/builtin/hf/upload'
 
 const createRepoMock = vi.hoisted(() => vi.fn())
 const createTagMock = vi.hoisted(() => vi.fn())
@@ -43,26 +52,26 @@ const fetchTreeMock = vi.hoisted(() => vi.fn())
 const commitMock = vi.hoisted(() => vi.fn())
 const whoamiMock = vi.hoisted(() => vi.fn())
 
-vi.mock('../../../../core/hf_hub/repo.ts', async (orig) => ({
+vi.mock('@struktoai/mirage-core/core/hf_hub/repo', async (orig) => ({
   ...(await orig<typeof RepoModule>()),
   classifyAbsence: classifyAbsenceMock,
 }))
 
-vi.mock('../../../../core/hf_hub/tree.ts', async (orig) => ({
+vi.mock('@struktoai/mirage-core/core/hf_hub/tree', async (orig) => ({
   ...(await orig<typeof TreeModule>()),
   fetchTree: fetchTreeMock,
 }))
 
-vi.mock('../../../../core/hf_hub/commit.ts', async (orig) => ({
+vi.mock('@struktoai/mirage-core/core/hf_hub/commit', async (orig) => ({
   ...(await orig<typeof CommitModule>()),
   commit: commitMock,
 }))
 
-vi.mock('../../../../core/hf_hub/account.ts', () => ({
+vi.mock('@struktoai/mirage-core/core/hf_hub/account', () => ({
   whoami: whoamiMock,
 }))
 
-vi.mock('../../../../core/hf_hub/admin.ts', () => ({
+vi.mock('@struktoai/mirage-core/core/hf_hub/admin', () => ({
   createRepo: createRepoMock,
   createTag: createTagMock,
   deleteTag: deleteTagMock,

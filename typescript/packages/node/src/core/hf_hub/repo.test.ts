@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import * as client from './client.ts'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
 import { handle } from '../../../tests/core/hf_hub/_test_util.ts'
-import { classifyAbsence, headCommit, revisionUrl } from './repo.ts'
+import { classifyAbsence, headCommit, revisionUrl } from '@struktoai/mirage-core/core/hf_hub/repo'
 
 describe('headCommit', () => {
   it('reads the sha', async () => {

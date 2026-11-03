@@ -15,10 +15,10 @@
 import { ListingCheckStore } from '@struktoai/mirage-core/cache/index/ram'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
-import * as client from './client.ts'
-import * as repo from './repo.ts'
-import { stat } from './stat.ts'
+import type { HfHubAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
+import * as repo from '@struktoai/mirage-core/core/hf_hub/repo'
+import { stat } from '@struktoai/mirage-core/core/hf_hub/stat'
 import { codeOf, ps, rowAt, walking } from '../../../tests/core/hf_hub/_test_util.ts'
 
 beforeEach(() => {

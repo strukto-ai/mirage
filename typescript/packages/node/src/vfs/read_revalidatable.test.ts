@@ -51,8 +51,8 @@ import type { GridFSAccessor } from '../accessor/gridfs.ts'
 import type { HfBucketsAccessor } from '../accessor/hf_buckets.ts'
 import { fakeHfOperator } from '../../tests/core/hf_buckets/mock.ts'
 import { FakeHub, blobOid, serveHub, xetHash } from '../../tests/core/hf_hub/_test_util.ts'
-import { readdir as hfReaddir } from '../core/hf_hub/readdir.ts'
-import type { HfHubVFS } from './hf_hub/base.ts'
+import { readdir as hfReaddir } from '@struktoai/mirage-core/core/hf_hub/readdir'
+import type { HfHubVFS } from '@struktoai/mirage-core/vfs/hf_hub/base'
 import {
   DRIVE_ID,
   DRIVE_NAME,

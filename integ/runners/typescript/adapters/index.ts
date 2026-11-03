@@ -113,7 +113,7 @@ import {
   type WritePolicy,
 } from '@struktoai/mirage-node'
 import { configToWorkspaceArgs, loadWorkspaceConfig } from '@struktoai/mirage-node/config'
-import { commit as hubCommit } from '@struktoai/mirage-node/core/hf_hub/commit'
+import { commit as hubCommit } from '@struktoai/mirage-core/core/hf_hub/commit'
 import { ChromaClient } from 'chromadb'
 import { Binary, DBRef, Decimal128, Double, Long, MongoClient } from 'mongodb'
 import { randomBytes, randomUUID } from 'node:crypto'

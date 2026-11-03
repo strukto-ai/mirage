@@ -13,8 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { HfRepoConfig } from '../vfs/hf_buckets/config.ts'
-import { accountOf, HfAccountAccessor, HfHubAccessor, HfModelsAccessor } from './hf_hub.ts'
+import type { HfRepoConfig } from '@struktoai/mirage-core/vfs/hf_buckets/config'
+import {
+  accountOf,
+  HfAccountAccessor,
+  HfHubAccessor,
+  HfModelsAccessor,
+} from '@struktoai/mirage-core/accessor/hf_hub'
 
 function models(config: HfRepoConfig): HfModelsAccessor {
   return new HfModelsAccessor(accountOf(config), config)

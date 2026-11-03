@@ -71,23 +71,9 @@ const REGISTRY: Record<string, VFSFactory> = {
   },
   hf_buckets: async (config) => {
     const { HfBucketsVFS } = await import('./hf_buckets/hf_buckets.ts')
-    const { normalizeHfBucketsConfig } = await import('./hf_buckets/config.ts')
+    const { normalizeHfBucketsConfig } =
+      await import('@struktoai/mirage-core/vfs/hf_buckets/config')
     return new HfBucketsVFS(normalizeHfBucketsConfig(config))
-  },
-  hf_datasets: async (config) => {
-    const { HfDatasetsVFS } = await import('./hf_datasets/hf_datasets.ts')
-    const { normalizeHfRepoConfig } = await import('./hf_buckets/config.ts')
-    return new HfDatasetsVFS(normalizeHfRepoConfig(config))
-  },
-  hf_models: async (config) => {
-    const { HfModelsVFS } = await import('./hf_models/hf_models.ts')
-    const { normalizeHfRepoConfig } = await import('./hf_buckets/config.ts')
-    return new HfModelsVFS(normalizeHfRepoConfig(config))
-  },
-  hf_spaces: async (config) => {
-    const { HfSpacesVFS } = await import('./hf_spaces/hf_spaces.ts')
-    const { normalizeHfRepoConfig } = await import('./hf_buckets/config.ts')
-    return new HfSpacesVFS(normalizeHfRepoConfig(config))
   },
   mongodb: async (config) => {
     const { MongoDBVFS } = await import('./mongodb/mongodb.ts')

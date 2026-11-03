@@ -269,6 +269,21 @@ export const DIRECT_REGISTRY: Readonly<Record<string, VFSFactory>> = {
     const { PostgresConfig } = await import('./postgres/config.ts')
     return new PostgresVFS(parseConfigWithSchema(PostgresConfig, config))
   },
+  hf_datasets: async (config) => {
+    const { HfDatasetsVFS } = await import('./hf_datasets/hf_datasets.ts')
+    const { normalizeHfRepoConfig } = await import('./hf_buckets/config.ts')
+    return new HfDatasetsVFS(normalizeHfRepoConfig(config))
+  },
+  hf_models: async (config) => {
+    const { HfModelsVFS } = await import('./hf_models/hf_models.ts')
+    const { normalizeHfRepoConfig } = await import('./hf_buckets/config.ts')
+    return new HfModelsVFS(normalizeHfRepoConfig(config))
+  },
+  hf_spaces: async (config) => {
+    const { HfSpacesVFS } = await import('./hf_spaces/hf_spaces.ts')
+    const { normalizeHfRepoConfig } = await import('./hf_buckets/config.ts')
+    return new HfSpacesVFS(normalizeHfRepoConfig(config))
+  },
 }
 
 const CUSTOM: Record<string, VFSFactory> = {}
