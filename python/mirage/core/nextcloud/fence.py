@@ -1,3 +1,4 @@
+import logging
 from asyncio import sleep
 from datetime import datetime, timedelta
 from email.utils import format_datetime, parsedate_to_datetime
@@ -14,6 +15,8 @@ from mirage.core.nextcloud.set_attrs import mtime_patch
 from mirage.errors.fs import eacces, ebusy, enoent, enotempty, fs_error
 from mirage.errors.types import FsCondition
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 SURVEY = (
     b'<?xml version="1.0" encoding="utf-8"?>'
@@ -201,5 +204,10 @@ async def remove(
         raise ebusy(path)
     except Exception:
         if backdated is not None:
-            await retime(accessor, path, backdated[1], backdated[0])
+            try:
+                await retime(accessor, path, backdated[1], backdated[0])
+            except Exception:
+                logger.debug(
+                    "Could not restore Nextcloud mtime %s", path, exc_info=True
+                )
         raise

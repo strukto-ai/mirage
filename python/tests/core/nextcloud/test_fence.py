@@ -2,6 +2,7 @@ import asyncio
 import errno
 from email.utils import parsedate_to_datetime
 
+import httpx
 import pytest
 
 from mirage.core.nextcloud.fence import ATTEMPTS, FENCE, remove
@@ -139,6 +140,21 @@ async def test_a_failed_removal_puts_the_backdated_time_back(make_acc):
     assert excinfo.value.errno == errno.EBUSY
     assert folder.exists and folder.modified == original
     assert folder.methods()[-1] == "PROPPATCH"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_restore_keeps_the_removal_error(make_acc):
+    folder = FakeFolder("dir", age=-86400)
+    folder.before["PROPPATCH"] = lambda: setattr(folder, "locked", True)
+
+    def drop() -> None:
+        if folder.locked:
+            raise httpx.ConnectError("dropped")
+
+    folder.before["DELETE"] = lambda: folder.before.update(PROPPATCH=drop)
+    with removing(folder), pytest.raises(OSError) as excinfo:
+        await remove(make_acc(), DIR, empty=True)
+    assert excinfo.value.errno == errno.EBUSY
 
 
 @pytest.mark.asyncio

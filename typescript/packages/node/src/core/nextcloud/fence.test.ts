@@ -131,6 +131,20 @@ describe('nextcloud fenced removal', () => {
     expect(folder.methods().at(-1)).toBe('PROPPATCH')
   })
 
+  it('keeps the removal error when the restore fails', async () => {
+    const folder = new FakeFolder('dir', [], -86_400_000)
+    folder.before.set('PROPPATCH', () => {
+      folder.locked = true
+    })
+    folder.before.set('DELETE', () => {
+      folder.before.set('PROPPATCH', () => {
+        throw new TypeError('fetch failed')
+      })
+    })
+    vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    await expect(removing(folder)).rejects.toMatchObject({ code: 'EBUSY' })
+  })
+
   it('is busy when a future-dated collection cannot be backdated', async () => {
     const folder = new FakeFolder('dir', [], -86_400_000)
     folder.settable = false

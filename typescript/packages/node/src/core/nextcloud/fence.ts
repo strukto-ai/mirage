@@ -151,7 +151,13 @@ export async function remove(
     }
     throw ebusy(path)
   } catch (error) {
-    if (backdated !== null) await retime(accessor, path, backdated.stamp, backdated.original)
+    if (backdated !== null) {
+      try {
+        await retime(accessor, path, backdated.stamp, backdated.original)
+      } catch (restore) {
+        console.debug(`Could not restore Nextcloud mtime ${path.virtual}`, restore)
+      }
+    }
     throw error
   }
 }
