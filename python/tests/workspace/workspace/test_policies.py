@@ -1422,7 +1422,20 @@ class SealedRecursiveCache(Policy):
         return None
 
 
+class SealedRecursiveCacheDirectory(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if (
+            ctx.call.name == "readdir"
+            and ctx.path.virtual == "/data/src/cache"
+        ):
+            return Deny("sealed")
+        return None
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "policy_type", [SealedRecursiveCache, SealedRecursiveCacheDirectory]
+)
 @pytest.mark.parametrize(
     ("command", "exit_code"),
     [
@@ -1434,7 +1447,7 @@ class SealedRecursiveCache(Policy):
     ],
 )
 async def test_recursive_commands_enforce_coded_pre_vfs_policy(
-    command, exit_code
+    command, exit_code, policy_type
 ):
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -1444,7 +1457,7 @@ async def test_recursive_commands_enforce_coded_pre_vfs_policy(
         )
         await ws.vfs.write("/data/src/public.txt", b"public\n")
         ws.create_session("restricted")
-        ws.policies.add(SealedRecursiveCache())
+        ws.policies.add(policy_type())
 
         result = await ws.shell(command, session_id="restricted")
 
