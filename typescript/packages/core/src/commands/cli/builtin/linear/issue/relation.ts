@@ -132,7 +132,7 @@ export async function deleteRelation(
     (row) => row.type === payload.type && row.relatedIssue.id === payload.relatedIssueId,
   )
   if (relation === undefined) throw enoent(`relation ${source} ${kind} ${target}`)
-  if (!new FlagView(ctx.flags).asBool('yes'))
+  if (!new FlagView(ctx.flags, ctx.spec).asBool('yes'))
     throw new Error('--yes is required to delete a relation')
   await issueRelationDelete(accessor.transport, relation.id)
   return [jsonBytes(normalizeRelation(relation, issue.id)), new IOResult()]

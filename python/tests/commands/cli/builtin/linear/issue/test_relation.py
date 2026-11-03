@@ -9,6 +9,7 @@ from mirage import Workspace
 from mirage.commands.cli.builtin.linear import LINEAR
 from mirage.commands.cli.builtin.linear.issue import relation
 from mirage.commands.config import Context
+from mirage.commands.spec.types import CommandSpec
 from mirage.core.linear import client
 from mirage.core.linear.config import LinearConfig
 from mirage.errors.types import CommandTimeoutError
@@ -372,3 +373,24 @@ async def test_caller_cancellation_and_budget_timeout_propagate(
             await client.issue_relation_delete(None, "r1")
     assert caught.value is failure
     assert request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_binds_confirmation_to_resolved_spec(monkeypatch):
+    request = AsyncMock(
+        side_effect=[
+            {"issue": A},
+            {"issue": B},
+            page([ROW]),
+            {"issueRelationDelete": {"success": True}},
+        ]
+    )
+    monkeypatch.setattr(client, "graphql_request", request)
+    with pytest.raises(KeyError, match="not declared"):
+        await relation.delete_relation(
+            None,
+            [],
+            ["ENG-1", "blocks", "ENG-2"],
+            Context(flags={"yes": True}, spec=CommandSpec(name="delete")),
+        )
+    assert request.await_count == 3

@@ -150,7 +150,7 @@ async def delete_relation(
     )
     if relation is None:
         raise FileNotFoundError(f"relation {source} {kind.value} {target}")
-    if not FlagView(ctx.flags).as_bool("yes"):
+    if not FlagView(ctx.flags, ctx.spec).as_bool("yes"):
         raise ValueError("--yes is required to delete a relation")
     await issue_relation_delete(accessor, relation["id"])
     return json_bytes(normalize_relation(relation, issue["id"])), IOResult()
