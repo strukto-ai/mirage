@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-edge",
-  "version": "0.0.9-alpha.1",
+  "version": "0.0.9-alpha.2",
   "description": "Mirage for edge runtimes: hosts with web Request/Response and no Node or threads",
   "keywords": [
     "bash",
