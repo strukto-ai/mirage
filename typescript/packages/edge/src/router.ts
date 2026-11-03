@@ -24,7 +24,7 @@ import type {
 } from '@struktoai/mirage-server/routes'
 
 /** Fastify's default: the largest body a route reads unless it names its own. */
-export const BODY_LIMIT = 1024 * 1024
+const BODY_LIMIT = 1024 * 1024
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
 
 interface Route {

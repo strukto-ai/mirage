@@ -28,6 +28,7 @@ import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
+import './monty.ts'
 
 export class Workspace extends CoreWorkspace {
   /** A saved mount rebuilds through core's VFS registry. */

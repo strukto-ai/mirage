@@ -18,5 +18,8 @@ export default defineConfig({
   test: {
     testTimeout: 60_000,
     hookTimeout: 120_000,
+    // Each file starts a workerd of its own; a file's Python loop, which
+    // runs to monty's time limit, starves another's requests.
+    fileParallelism: false,
   },
 })

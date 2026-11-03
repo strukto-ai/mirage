@@ -12,12 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export {
-  inProcessMonty,
-  MAX_SECONDS,
-  useInProcessMonty,
-  type InProcessMontyOptions,
-} from './monty.ts'
+export { MountMode } from '@struktoai/mirage-core/types'
+export { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 export { createApp, type EdgeApp, type EdgeAppOptions } from './app.ts'
-export { HOST, Workspace } from './host.ts'
-export { BODY_LIMIT, WebRoutes } from './router.ts'
+export { Workspace } from './host.ts'

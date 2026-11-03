@@ -22,12 +22,9 @@ import core3 from './generated/monty.component.core3.wasm'
 import core4 from './generated/monty.component.core4.wasm'
 import core from './generated/monty.component.core.wasm'
 
-export const MAX_SECONDS = 30
-
-export interface InProcessMontyOptions {
-  /** Seconds one Python run may execute before monty raises `TimeoutError`. */
-  maxSeconds?: number
-}
+// Seconds one Python run may execute before monty raises `TimeoutError`:
+// the isolate has no thread to kill, so monty's own clock stops a loop.
+const MAX_SECONDS = 30
 
 const MODULES: Record<string, WebAssembly.Module> = {
   'monty.component.core.wasm': core,
@@ -68,39 +65,29 @@ function inProcessWorker(options: unknown): (signal?: AbortSignal) => Promise<un
   }
 }
 
-/**
- * Monty for a runtime with no worker threads: one pool whose single worker
- * runs in this isolate, each run limited to `maxSeconds` by monty itself.
- */
-export function inProcessMonty(options: InProcessMontyOptions = {}): MontyModuleLike {
-  const maxSeconds = options.maxSeconds ?? MAX_SECONDS
-  return {
-    ...(monty as unknown as MontyModuleLike),
-    Monty: {
-      async create(create: Record<string, unknown> = {}) {
-        const settings = { ...create, maxProcesses: 1 }
-        const pool = await monty.createWorkerPoolFromFactory(
-          inProcessWorker(monty.workerChannelOptions(settings)),
-          settings,
-          1,
-        )
-        return {
-          checkout: (checkout: Record<string, unknown> = {}) => {
-            const limits = (checkout.limits ?? {}) as Record<string, unknown>
-            return pool.checkout({
-              ...checkout,
-              limits: { maxFeedDurationSecs: maxSeconds, ...limits },
-            })
-          },
-          close: () => pool.close(),
-        }
-      },
+/** Monty with one pool whose single worker runs in this isolate. */
+const MONTY: MontyModuleLike = {
+  ...(monty as unknown as MontyModuleLike),
+  Monty: {
+    async create(create: Record<string, unknown> = {}) {
+      const settings = { ...create, maxProcesses: 1 }
+      const pool = await monty.createWorkerPoolFromFactory(
+        inProcessWorker(monty.workerChannelOptions(settings)),
+        settings,
+        1,
+      )
+      return {
+        checkout: (checkout: Record<string, unknown> = {}) => {
+          const limits = (checkout.limits ?? {}) as Record<string, unknown>
+          return pool.checkout({
+            ...checkout,
+            limits: { maxFeedDurationSecs: MAX_SECONDS, ...limits },
+          })
+        },
+        close: () => pool.close(),
+      }
     },
-  }
+  },
 }
 
-/** Run every `python3` in this isolate on in-process monty. */
-export function useInProcessMonty(options: InProcessMontyOptions = {}): void {
-  const module = inProcessMonty(options)
-  provideMontyModule(() => Promise.resolve(module))
-}
+provideMontyModule(() => Promise.resolve(MONTY))

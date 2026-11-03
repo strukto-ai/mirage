@@ -17,7 +17,7 @@ The examples below run on Cloudflare Workers.
 ## Install
 
 ```bash
-npm install @struktoai/mirage-edge @struktoai/mirage-core
+npm install @struktoai/mirage-edge
 npm install -D wrangler
 ```
 
@@ -31,20 +31,14 @@ compatibility_flags = ["nodejs_compat"]
 ## Run a workspace
 
 ```ts src/worker.ts
-import { useInProcessMonty } from '@struktoai/mirage-edge'
-import { MontyRuntime } from '@struktoai/mirage-core/runtime/python/monty/runtime'
-import { MountMode } from '@struktoai/mirage-core/types'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-
-useInProcessMonty({ maxSeconds: 10 })
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-edge'
 
 export default {
   async fetch(request: Request): Promise<Response> {
     const { command } = (await request.json()) as { command: string }
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: ['workspace', new MontyRuntime()], maxMemory: '32MB' },
+      { mode: MountMode.EXEC, runtimes: ['workspace', 'monty'], maxMemory: '32MB' },
     )
     try {
       const result = await ws.shell(command)
@@ -61,45 +55,39 @@ npx wrangler dev
 curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 ```
 
-Import from the subpaths of `@struktoai/mirage-core`, as above, and not from its package root: the root also imports optional packages, such as Pyodide, that an edge bundle cannot resolve.
+`python3` runs on Monty in the isolate's own thread. A run stops after 30 seconds with `TimeoutError`, so a loop that never ends leaves the isolate free for the next line.
 
-`useInProcessMonty` runs Monty in the isolate's own thread. `maxSeconds` stops a Python program that runs longer, so a loop that never ends fails with `TimeoutError` and leaves the isolate free for the next line.
+For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/registry`), not its package root: the root also imports optional packages, such as Pyodide, that an edge bundle cannot resolve.
 
 ## Serve the server API
 
 `createApp` answers the [HTTP](/home/access/http) routes, [MCP](/home/access/mcp) and [RPC](/home/access/rpc) as the [server](/typescript/access/server) does, over the workspaces the isolate holds:
 
 ```ts src/worker.ts
-import { createApp, useInProcessMonty } from '@struktoai/mirage-edge'
+import { createApp } from '@struktoai/mirage-edge'
 
-useInProcessMonty({ maxSeconds: 10 })
+export default createApp({ maxWorkspaces: 8 })
+```
 
-interface Env {
-  MIRAGE_TOKEN: string
-}
+It checks each request the way the server does, from the same `MIRAGE_AUTH_MODE`, `MIRAGE_AUTH_TOKEN` and `MIRAGE_JWT_*` [variables](/home/access/http#configure-authentication). Without a token or a JWT issuer it serves nothing, since an edge app's URL is public.
 
-let app: ReturnType<typeof createApp> | undefined
-
-export default {
-  fetch(request: Request, env: Env): Promise<Response> {
-    app ??= createApp({ auth: { mode: 'token', bearerToken: env.MIRAGE_TOKEN }, maxWorkspaces: 8 })
-    return app.fetch(request)
-  },
-}
+```toml wrangler.toml
+[vars]
+MIRAGE_AUTH_MODE = "token"
 ```
 
 ```bash
-npx wrangler secret put MIRAGE_TOKEN
-curl -s localhost:8787/v1/workspaces -H "Authorization: Bearer $MIRAGE_TOKEN" \
+npx wrangler secret put MIRAGE_AUTH_TOKEN
+curl -s localhost:8787/v1/workspaces -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"id": "demo", "config": {"mounts": {"/": {"vfs": "ram"}}, "runtimes": ["workspace", "monty"]}}'
-curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAGE_TOKEN" \
+curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
   -H 'content-type: application/json' -d '{"command": "python3 -c \"print(6 * 7)\""}'
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `auth` | A shared bearer token (`{ mode: 'token', bearerToken }`) or JWTs from an issuer (`{ mode: 'jwt', jwt }`), as the server [checks them](/home/access/http#configure-authentication). Required. |
+| `auth` | An `AuthConfig` in place of the env variables: `{ mode: 'token', bearerToken }`, or `{ mode: 'jwt', jwt }`. |
 | `maxWorkspaces` | The most workspaces the isolate holds at once. A create past it answers 503. |
 | `maxSessions` | The most sessions each workspace holds. A new session past it answers 429. |
 | `policies` | The server's own [policies](/home/access/http#server-policies). |

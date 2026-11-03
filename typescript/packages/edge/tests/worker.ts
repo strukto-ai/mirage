@@ -12,17 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MontyRuntime } from '@struktoai/mirage-core/runtime/python/monty/runtime'
-import { MountMode } from '@struktoai/mirage-core/types'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { createApp, useInProcessMonty } from '../src/index.ts'
+import { createApp, MountMode, RAMVFS, Workspace } from '../src/index.ts'
 
-useInProcessMonty({ maxSeconds: 2 })
-
-const TOKEN = 'edge-test-token'
-
-const app = createApp({ auth: { mode: 'token', bearerToken: TOKEN }, maxWorkspaces: 8 })
+const app = createApp({ maxWorkspaces: 8 })
 
 interface Run {
   readonly lines: readonly string[]
@@ -39,7 +31,7 @@ export default {
       { '/data': new RAMVFS(), '/tmp': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: ['workspace', new MontyRuntime()],
+        runtimes: ['workspace', 'monty'],
         ...(run.maxMemory !== undefined ? { maxMemory: run.maxMemory } : {}),
       },
     )

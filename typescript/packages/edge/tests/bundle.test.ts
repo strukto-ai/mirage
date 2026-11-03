@@ -28,7 +28,14 @@ beforeAll(() => {
   const wrangler = fileURLToPath(new URL('../node_modules/.bin/wrangler', import.meta.url))
   execFileSync(
     wrangler,
-    ['deploy', '--dry-run', '--outdir', outdir, '--config', fileURLToPath(new URL('./wrangler.toml', import.meta.url))],
+    [
+      'deploy',
+      '--dry-run',
+      '--outdir',
+      outdir,
+      '--config',
+      fileURLToPath(new URL('./wrangler.toml', import.meta.url)),
+    ],
     { stdio: 'pipe', env: { ...process.env, WRANGLER_SEND_METRICS: 'false' } },
   )
   files = new Map(
