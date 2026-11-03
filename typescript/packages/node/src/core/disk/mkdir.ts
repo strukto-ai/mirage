@@ -26,16 +26,9 @@ import { mkdirComponentError } from './dest.ts'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
-async function exists(path: string): Promise<boolean> {
-  return lstat(path).then(
-    () => true,
-    () => false,
-  )
-}
-
 async function firstMissing(path: string): Promise<string | null> {
   let missing: string | null = null
-  while (!(await exists(path))) {
+  while ((await lstat(path).catch(() => null)) === null) {
     missing = path
     if (dirname(path) === path) break
     path = dirname(path)
@@ -68,7 +61,8 @@ export async function mkdir(
     } finally {
       // Also when it threw: the chain may have made its first directories
       // before a later one failed.
-      const changed = failure === null || (missing !== null && (await exists(missing)))
+      const changed =
+        failure === null || (missing !== null && (await lstat(missing).catch(() => null)) !== null)
       const condition = classify(failure)
       record('mkdir', path.virtual, VFSName.DISK, 0, timer, {
         status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
