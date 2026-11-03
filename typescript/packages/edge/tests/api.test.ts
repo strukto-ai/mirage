@@ -156,6 +156,15 @@ describe('the server API in workerd', () => {
     expect(((await bad.json()) as { error: { code: number } }).error.code).toBe(-32700)
   })
 
+  it('runs python3 on the monty runtime a config names', async () => {
+    await call('POST', '/v1/workspaces', {
+      id: 'py',
+      config: { mounts: { '/': { vfs: 'ram' } }, mode: 'exec', runtimes: ['workspace', 'monty'] },
+    })
+    const ran = await shell('py', 'echo 4 > /n && python3 -c \'print(int(open("/n").read()) * 2)\'')
+    expect([ran.exit_code, ran.stdout]).toEqual([0, '8\n'])
+  })
+
   it('closes a workspace', async () => {
     await call('POST', '/v1/workspaces', {
       id: 'gone',

@@ -527,6 +527,7 @@
               "typescript/install",
               "typescript/quickstart",
               "typescript/browser-quickstart",
+              "typescript/edge-quickstart",
               "typescript/setup/fuse",
               "typescript/limitations"
             ]
