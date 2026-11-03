@@ -20,13 +20,13 @@ import { materialize, type IOResult } from '@struktoai/mirage-core/io/types'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { Files } from '@struktoai/mirage-core/workspace/files'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { EmailAccessor } from '../../../../accessor/email.ts'
-import type * as ClientModule from '../../../../core/email/client.ts'
-import type { fetchMessage } from '../../../../core/email/client.ts'
-import { fetchHeaders, listMessageUids } from '../../../../core/email/client.ts'
-import type { EmailConfig } from '../../../../core/email/config.ts'
-import { messageJsonBytes } from '../../../../core/email/render.ts'
-import { EmailVFS } from '../../../../vfs/email/email.ts'
+import { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
+import type * as ClientModule from '@struktoai/mirage-core/core/email/client'
+import type { fetchMessage } from '@struktoai/mirage-core/core/email/client'
+import { fetchHeaders, listMessageUids } from '@struktoai/mirage-core/core/email/client'
+import type { EmailConfig } from '@struktoai/mirage-core/core/email/config'
+import { messageJsonBytes } from '@struktoai/mirage-core/core/email/render'
+import { EmailVFS } from '@struktoai/mirage-core/vfs/email/email'
 import { Workspace } from '../../../../workspace.ts'
 import {
   build,
@@ -36,25 +36,33 @@ import {
   quoteText,
   splitAddresses,
   type Attachment,
-} from './builder.ts'
-import { forward } from './forward.ts'
-import { HIMALAYA } from './index.ts'
-import { listEnvelopes } from './list.ts'
-import { pageSlice, parseQuery, QueryError, sortHeaders, uidBudget } from './query.ts'
-import { read } from './read.ts'
-import { reply } from './reply.ts'
-import { searchEnvelopes } from './search.ts'
-import { send } from './send.ts'
+} from '@struktoai/mirage-core/commands/cli/builtin/himalaya/builder'
+import { forward } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/forward'
+import { HIMALAYA } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/index'
+import { listEnvelopes } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/list'
+import {
+  pageSlice,
+  parseQuery,
+  QueryError,
+  sortHeaders,
+  uidBudget,
+} from '@struktoai/mirage-core/commands/cli/builtin/himalaya/query'
+import { read } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/read'
+import { reply } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/reply'
+import { searchEnvelopes } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/search'
+import { send } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/send'
 
 const sendRawMock = vi.hoisted(() => vi.fn())
 const listFolderEntriesMock = vi.hoisted(() => vi.fn())
 const appendMock = vi.hoisted(() => vi.fn())
 
-vi.mock('./smtp.ts', () => ({ sendRaw: sendRawMock }))
+vi.mock('@struktoai/mirage-core/commands/cli/builtin/himalaya/smtp', () => ({
+  sendRaw: sendRawMock,
+}))
 
 // The real `quoteString` rides along: the query compiler spells its
 // patterns through it, and a stub would have to re-implement RFC 3501.
-vi.mock('../../../../core/email/client.ts', async (importOriginal) => ({
+vi.mock('@struktoai/mirage-core/core/email/client', async (importOriginal) => ({
   ...(await importOriginal<typeof ClientModule>()),
   listFolderEntries: listFolderEntriesMock,
   fetchRawMessage: vi.fn(() => Promise.resolve(new TextEncoder().encode('From: a@x\r\n\r\nbody'))),
@@ -444,9 +452,15 @@ describe('message builder', () => {
 describe('himalaya verbs', () => {
   it('compose writes MIME to stdout without sending', async () => {
     sendRawMock.mockClear()
-    const [out, io] = (await import('./compose.ts').then((m) =>
-      m.compose(ACCOUNT, [], [], context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' } })),
-    )) as [Uint8Array, IOResult]
+    const [out, io] =
+      (await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
+        m.compose(
+          ACCOUNT,
+          [],
+          [],
+          context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo' } }),
+        ),
+      )) as [Uint8Array, IOResult]
     expect(io.exitCode).toBe(0)
     expect(sendRawMock).not.toHaveBeenCalled()
     const text = decode(await materialize(out))
@@ -459,14 +473,15 @@ describe('himalaya verbs', () => {
   it('compose --send pushes the raw bytes through SMTP', async () => {
     sendRawMock.mockClear()
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
-    const [out] = (await import('./compose.ts').then((m) =>
-      m.compose(
-        ACCOUNT,
-        [],
-        [],
-        context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true } }),
-      ),
-    )) as [Uint8Array, IOResult]
+    const [out] =
+      (await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
+        m.compose(
+          ACCOUNT,
+          [],
+          [],
+          context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true } }),
+        ),
+      )) as [Uint8Array, IOResult]
     expect(decode(sendRawMock.mock.calls[0]?.[1] as Uint8Array)).toContain('Subject: Hi')
     expect(JSON.parse(decode(await materialize(out)))).toEqual({
       status: 'sent',
@@ -485,22 +500,23 @@ describe('himalaya verbs', () => {
       if (op !== 'read' || data === undefined) return Promise.reject(enoent(path))
       return Promise.resolve([data, { exitCode: 0 }]) as never
     })
-    const [out, io] = (await import('./compose.ts').then((m) =>
-      m.compose(
-        ACCOUNT,
-        [],
-        [],
-        context({
-          flags: {
-            to: 'a@b.com',
-            subject: 'files',
-            body: 'see attached',
-            attach: [PathSpec.fromStrPath('/scratch/note.txt')],
-          },
-          vfs,
-        }),
-      ),
-    )) as [Uint8Array, IOResult]
+    const [out, io] =
+      (await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
+        m.compose(
+          ACCOUNT,
+          [],
+          [],
+          context({
+            flags: {
+              to: 'a@b.com',
+              subject: 'files',
+              body: 'see attached',
+              attach: [PathSpec.fromStrPath('/scratch/note.txt')],
+            },
+            vfs,
+          }),
+        ),
+      )) as [Uint8Array, IOResult]
     expect(io.exitCode).toBe(0)
     const text = decode(await materialize(out))
     expect(text).toContain('Content-Type: multipart/mixed; boundary="')
@@ -511,7 +527,7 @@ describe('himalaya verbs', () => {
   it('compose --attach of a missing file names the path', async () => {
     const vfs = new Files((_op: string, path: PathSpec) => Promise.reject(enoent(path)))
     await expect(
-      import('./compose.ts').then((m) =>
+      import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
         m.compose(
           ACCOUNT,
           [],
@@ -531,7 +547,7 @@ describe('himalaya verbs', () => {
 
   it('compose --attach outside a workspace is refused', async () => {
     await expect(
-      import('./compose.ts').then((m) =>
+      import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then((m) =>
         m.compose(
           ACCOUNT,
           [],
@@ -630,7 +646,10 @@ describe('himalaya verbs', () => {
   it('compose --send files a copy too, and saveCopy off files none', async () => {
     sendRawMock.mockClear()
     sendRawMock.mockResolvedValue({ to: [{ name: '', email: 'a@b.com' }], subject: 'Hi' })
-    const compose = await import('./compose.ts').then((m) => m.compose)
+    const compose =
+      await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then(
+        (m) => m.compose,
+      )
     const ctx = context({ flags: { to: 'a@b.com', subject: 'Hi', body: 'yo', send: true } })
     await compose(ACCOUNT, [], [], ctx)
     expect(appendMock).toHaveBeenCalledTimes(1)
@@ -640,7 +659,10 @@ describe('himalaya verbs', () => {
 
   it('compose --save without --send files the message and sends nothing', async () => {
     sendRawMock.mockClear()
-    const compose = await import('./compose.ts').then((m) => m.compose)
+    const compose =
+      await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then(
+        (m) => m.compose,
+      )
     const [out, io] = (await compose(
       ACCOUNT,
       [],
@@ -662,7 +684,10 @@ describe('himalaya verbs', () => {
     // Nothing was sent, so there is no delivered message a retry could
     // duplicate: this one is an error, not a warning.
     appendMock.mockRejectedValue(new Error('Drafts: no such mailbox'))
-    const compose = await import('./compose.ts').then((m) => m.compose)
+    const compose =
+      await import('@struktoai/mirage-core/commands/cli/builtin/himalaya/compose').then(
+        (m) => m.compose,
+      )
     await expect(
       compose(ACCOUNT, [], [], context({ flags: { to: 'a@b.com', body: 'yo', save: 'Drafts' } })),
     ).rejects.toThrow('Drafts: no such mailbox')

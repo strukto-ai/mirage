@@ -15,19 +15,25 @@
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { NAME_MAX_BYTES, byteLength } from '@struktoai/mirage-core/utils/sanitize'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as ClientModule from './client.ts'
+import type * as ClientModule from '@struktoai/mirage-core/core/email/client'
 
-vi.mock('./client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
+vi.mock('@struktoai/mirage-core/core/email/client', async () => {
+  const actual = await vi.importActual<typeof ClientModule>(
+    '@struktoai/mirage-core/core/email/client',
+  )
   return { ...actual, listMessageUids: vi.fn(), fetchHeaders: vi.fn() }
 })
-vi.mock('./folders.ts', () => ({ listFolders: vi.fn() }))
+vi.mock('@struktoai/mirage-core/core/email/folders', () => ({ listFolders: vi.fn() }))
 
-import type { EmailAccessor } from '../../accessor/email.ts'
-import * as client from './client.ts'
-import * as folderList from './folders.ts'
-import { msgFilename } from './readdir.ts'
-import { buildSearchCriteria, buildVfsPath, filesContaining } from './search.ts'
+import type { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
+import * as client from '@struktoai/mirage-core/core/email/client'
+import * as folderList from '@struktoai/mirage-core/core/email/folders'
+import { msgFilename } from '@struktoai/mirage-core/core/email/readdir'
+import {
+  buildSearchCriteria,
+  buildVfsPath,
+  filesContaining,
+} from '@struktoai/mirage-core/core/email/search'
 
 const { parseSearchCriteria } = client
 const uids = vi.mocked(client.listMessageUids)

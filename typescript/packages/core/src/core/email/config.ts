@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
-import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
-import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '../api/config.ts'
+import type { ConfigOf } from '../../vfs/secrets.ts'
+import { secretStr, z } from '../../vfs/secrets.ts'
 
 // Doubles as the himalaya CLI's configModel: parse applies the same
 // defaults buildEmailConfig fills in, and secretStr marks the password

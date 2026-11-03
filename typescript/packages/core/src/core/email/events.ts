@@ -12,13 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import {
-  FileChangeKind,
-  type FileEvent,
-  type JsonValue,
-  type PathSpec,
-} from '@struktoai/mirage-core/types'
-import { eventAt, textField } from '@struktoai/mirage-core/events/index'
+import { FileChangeKind, type FileEvent, type JsonValue, type PathSpec } from '../../types.ts'
+import { eventAt, textField } from '../../events/index.ts'
 
 // The untagged IDLE responses that change what a mailbox holds or shows.
 const MAILBOX_CHANGES: ReadonlySet<string> = new Set(['EXISTS', 'EXPUNGE', 'FETCH', 'VANISHED'])

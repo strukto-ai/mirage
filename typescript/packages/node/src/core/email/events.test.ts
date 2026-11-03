@@ -14,7 +14,7 @@
 
 import { FileChangeKind, PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
-import { EmailEventHook } from './events.ts'
+import { EmailEventHook } from '@struktoai/mirage-core/core/email/events'
 
 const ROOT = new PathSpec({ virtual: '/mail', directory: '/mail', vfsPath: '' })
 

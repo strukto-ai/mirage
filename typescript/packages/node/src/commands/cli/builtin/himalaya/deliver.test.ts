@@ -13,13 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { EmailAccessor } from '../../../../accessor/email.ts'
-import type { EmailConfig } from '../../../../core/email/config.ts'
-import { deliver, resolveSentFolder, saveSentCopy } from './deliver.ts'
+import { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
+import type { EmailConfig } from '@struktoai/mirage-core/core/email/config'
+import {
+  deliver,
+  resolveSentFolder,
+  saveSentCopy,
+} from '@struktoai/mirage-core/commands/cli/builtin/himalaya/deliver'
 
 const sendRawMock = vi.hoisted(() => vi.fn())
 
-vi.mock('./smtp.ts', () => ({ sendRaw: sendRawMock }))
+vi.mock('@struktoai/mirage-core/commands/cli/builtin/himalaya/smtp', () => ({
+  sendRaw: sendRawMock,
+}))
 
 const RAW = new TextEncoder().encode('From: me@x\r\nTo: a@b.com\r\nSubject: Hi\r\n\r\nyo')
 

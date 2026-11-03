@@ -168,9 +168,9 @@ export { GSlidesVFS } from '@struktoai/mirage-core/vfs/gslides/gslides'
 export type { LangfuseConfig } from '@struktoai/mirage-core/vfs/langfuse/config'
 export { LangfuseVFS } from '@struktoai/mirage-core/vfs/langfuse/langfuse'
 export type { Mem0Config } from '@struktoai/mirage-core/vfs/mem0/config'
-export { EmailAccessor } from './accessor/email.ts'
+export { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
 export { HF } from '@struktoai/mirage-core/commands/cli/builtin/hf/index'
-export { HIMALAYA } from './commands/cli/builtin/himalaya/index.ts'
+export { HIMALAYA } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/index'
 export {
   absolutizeScripts,
   checkWorkspaceConfig,
@@ -201,8 +201,12 @@ export type { SSHRuntimeConfig } from './runtime/sandbox/ssh/config.ts'
 export { SSHRuntime } from './runtime/sandbox/ssh/runtime.ts'
 export { isModulePath, loadAttr, MODULE_SUFFIXES, splitRef } from './utils/loader.ts'
 export type { DropboxConfig } from '@struktoai/mirage-core/vfs/direct/dropbox'
-export { EmailVFS } from './vfs/email/email.ts'
-export { buildEmailConfig, type EmailConfig, type EmailConfigInput } from './vfs/email/index.ts'
+export { EmailVFS } from '@struktoai/mirage-core/vfs/email/email'
+export {
+  buildEmailConfig,
+  type EmailConfig,
+  type EmailConfigInput,
+} from '@struktoai/mirage-core/vfs/email/index'
 export { JaegerVFS } from '@struktoai/mirage-core/vfs/direct/jaeger'
 export { buildVfs, knownVfsNames, registerVfs, type VFSFactory } from './vfs/registry.ts'
 

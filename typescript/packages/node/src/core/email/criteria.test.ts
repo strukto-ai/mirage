@@ -22,7 +22,7 @@ import {
   lockMailbox,
   parseSearchCriteria,
   quoteString,
-} from './client.ts'
+} from '@struktoai/mirage-core/core/email/client'
 
 // The IMAP criteria string is the cross-language contract: python hands
 // it straight to imaplib, node has to rebuild imapflow's search object

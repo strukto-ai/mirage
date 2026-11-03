@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { compactJsonBytes } from '@struktoai/mirage-core/core/render/json'
+import { compactJsonBytes } from '../render/json.ts'
 import type { fetchMessage } from './client.ts'
 
 const encoder = new TextEncoder()

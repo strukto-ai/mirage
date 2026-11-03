@@ -12,14 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { FlagView } from '../../../spec/index.ts'
+import { IOResult } from '../../../../io/types.ts'
+import type { ByteSource } from '../../../../io/types.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
-import { fetchMessage } from '../../../../core/email/client.ts'
-import { firstText, route } from './util.ts'
+import { fetchMessage, fetchRawMessage } from '../../../../core/email/client.ts'
+import { messageJsonBytes } from '../../../../core/email/render.ts'
+import { firstText } from './util.ts'
 
-export async function reply(
+export async function read(
   accessor: EmailAccessor,
   _paths: PathSpec[],
   texts: string[],
@@ -28,17 +31,13 @@ export async function reply(
   const fl = new FlagView(ctx.flags)
   const uid = firstText(texts, 'message id')
   const mailbox = fl.asStr('mailbox', 'INBOX')
-  const original = await fetchMessage(accessor, mailbox, uid)
-  return route(
-    accessor,
-    fl,
-    ctx.stdin,
-    {
-      message: original,
-      mode: 'reply',
-      postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
-      quoteHeadline: fl.asStr('quote_headline') ?? '',
-    },
-    ctx.vfs,
-  )
+  if (fl.asBool('raw')) {
+    const raw: ByteSource = await fetchRawMessage(accessor, mailbox, uid)
+    return [raw, new IOResult()]
+  }
+  const processed = await fetchMessage(accessor, mailbox, uid)
+  // The same renderer the mount serves, so `message read` and `cat`
+  // of the .email.json cannot drift apart.
+  const out: ByteSource = messageJsonBytes(processed)
+  return [out, new IOResult()]
 }

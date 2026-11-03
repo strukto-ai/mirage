@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { registerCliSpec } from '@struktoai/mirage-core/commands/cli/specs'
-import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
-import { Argument } from '@struktoai/mirage-core/commands/spec/index'
-import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
+import { CLI, CLIHandler } from '../../types.ts'
+import { Argument } from '../../../spec/index.ts'
+import { CommandSpec } from '../../../spec/types.ts'
 import { EmailAccessor } from '../../../../accessor/email.ts'
 import { EmailConfig } from '../../../../core/email/config.ts'
 import { compose } from './compose.ts'
@@ -166,5 +165,3 @@ export const HIMALAYA = new CLI({
   configModel: EmailConfig,
   accessor: (config) => new EmailAccessor(config as EmailConfig),
 })
-
-registerCliSpec(HIMALAYA)

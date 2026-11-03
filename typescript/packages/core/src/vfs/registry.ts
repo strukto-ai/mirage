@@ -284,6 +284,11 @@ export const DIRECT_REGISTRY: Readonly<Record<string, VFSFactory>> = {
     const { normalizeHfRepoConfig } = await import('./hf_buckets/config.ts')
     return new HfSpacesVFS(normalizeHfRepoConfig(config))
   },
+  email: async (config) => {
+    const { EmailVFS } = await import('./email/email.ts')
+    const { EmailConfig } = await import('../core/email/config.ts')
+    return new EmailVFS(parseConfigWithSchema(EmailConfig, config))
+  },
 }
 
 const CUSTOM: Record<string, VFSFactory> = {}

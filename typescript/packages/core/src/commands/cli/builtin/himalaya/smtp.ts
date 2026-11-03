@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
-import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+import { DEFAULT_TIMEOUT } from '../../../../core/api/constants.ts'
+import { loadOptionalPeer } from '../../../../utils/optional_peer.ts'
 import type * as Nodemailer from 'nodemailer'
 import type { fromParsed } from '../../../../core/email/_parse.ts'
 import { parseRfc822 } from '../../../../core/email/_parse.ts'
