@@ -146,6 +146,13 @@ export function treeHasAction(node: PredNode): boolean {
   return false
 }
 
+export function treeHasTime(node: PredNode): boolean {
+  if (node.op === 'mtime') return true
+  if (node.op === 'not') return treeHasTime(node.kid)
+  if (node.op === 'and' || node.op === 'or') return node.kids.some(treeHasTime)
+  return false
+}
+
 export function treeHasPrune(node: PredNode): boolean {
   if (node.op === 'prune') return true
   if (node.op === 'not') return treeHasPrune(node.kid)
@@ -195,12 +202,12 @@ function pruneNodes(node: PredNode): Extract<PredNode, { op: 'prune' }>[] {
   return []
 }
 
-// The tree with every time test false, sharing the prune ledgers. A
-// directory that reports no mtime passes no time test, the way the flat
-// window admits no such row, so the prunes it reaches are the ones reachable
+// The tree with every time test false, sharing the prune ledgers. An entry
+// that reports no mtime once asked passes no time test, the way the flat
+// window admits no such row, so it matches and reaches the prunes it would
 // with every test false. The prune nodes are the original objects, so what
 // this copy records lands on the tree.
-function timeTestsFailing(node: PredNode): PredNode {
+export function timeTestsFailing(node: PredNode): PredNode {
   switch (node.op) {
     case 'mtime':
       return { op: 'not', kid: { op: 'true' } }
@@ -329,6 +336,7 @@ export function emitStartPath(
     kind: opts.kind,
     depth: 0,
     isEmpty: opts.isEmpty ?? null,
+    mtime: opts.mtime ?? null,
   }
   if (!keep(entry, opts.tree, opts.minDepth)) return
   if (

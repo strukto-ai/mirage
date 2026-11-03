@@ -63,10 +63,11 @@ class FindExpr:
     (depth, size, mtime) and the actions are global to the expression,
     because a native find op evaluates the tree and the executor applies
     the actions to what came back. A time test also sits in the tree as an
-    ``Mtime`` node, for its position alone: a ``-prune`` after it fires
-    only where the test holds. ``newer`` holds ``-newer`` reference
-    operands as typed, which the executor resolves against the dispatcher
-    before it binds the expression.
+    ``Mtime`` node: only one in the top-level ``-a`` chain narrows the
+    time window, and the tree decides the rest per entry, as it decides
+    where a ``-prune`` after one fires. ``newer`` holds ``-newer``
+    reference operands as typed, which the executor resolves against the
+    dispatcher before it binds the expression.
 
     Args:
         tree (PredNode): the predicate tree.
@@ -252,45 +253,26 @@ def mtime_bounds(
 def _merge(
     window: tuple[float | None, float | None] | None,
     bounds: tuple[float | None, float | None],
-    fold: str,
 ) -> tuple[float | None, float | None]:
-    """Fold one time test into the expression's single window.
+    """Intersect one top-level time test with the expression's window.
 
-    The flat window cannot evaluate a time test per predicate node, so
-    repeated ones fold by where they sit. In the top-level ``-a`` chain
-    every test must hold, so the windows intersect: ``-newer old -newer
-    new`` keeps only what is newer than both, and ``-mtime +2 -mtime -1``
-    keeps nothing, as GNU answers. Under ``-o``, ``!`` or parentheses the
-    window cannot be exact, so they widen to the union: the tautology
-    ``-mtime +0 -o -mtime -1`` imposes no bounds instead of last-wins
-    dropping everything (documented divergence from GNU: such a window
-    over-matches).
+    Every test in the top-level ``-a`` chain must hold, so the windows
+    intersect: ``-newer old -newer new`` keeps only what is newer than
+    both, and ``-mtime +2 -mtime -1`` keeps nothing, as GNU answers. A
+    test under ``-o`` or ``!`` need not hold for a match, so it never
+    reaches here; its ``Mtime`` node decides it per entry.
 
     Args:
         window (tuple[float | None, float | None] | None): the window so
             far, None before the first test.
         bounds (tuple[float | None, float | None]): this test's bounds.
-        fold (str): ``all`` to intersect, ``any`` to widen.
     """
     if window is None:
         return bounds
     (old_lo, old_hi), (lo, hi) = window, bounds
-    if fold == "all":
-        return (
-            lo
-            if old_lo is None
-            else old_lo
-            if lo is None
-            else max(old_lo, lo),
-            hi
-            if old_hi is None
-            else old_hi
-            if hi is None
-            else min(old_hi, hi),
-        )
     return (
-        None if old_lo is None or lo is None else min(old_lo, lo),
-        None if old_hi is None or hi is None else max(old_hi, hi),
+        lo if old_lo is None else old_lo if lo is None else max(old_lo, lo),
+        hi if old_hi is None else old_hi if hi is None else min(old_hi, hi),
     )
 
 
@@ -347,7 +329,9 @@ class _Binding:
     window: tuple[float | None, float | None] | None = None
 
 
-def _node(raw: dict[str, JsonValue], binding: _Binding) -> PredNode:
+def _node(
+    raw: dict[str, JsonValue], binding: _Binding, top: bool = True
+) -> PredNode:
     op = _str(raw["op"])
     if op == "name":
         return Name(text_view(_str(raw["pattern"])), _flag(raw["icase"]))
@@ -362,19 +346,22 @@ def _node(raw: dict[str, JsonValue], binding: _Binding) -> PredNode:
     if op == "prune":
         return Prune()
     if op == "not":
-        return Not(_node(_object(raw["kid"]), binding))
+        return Not(_node(_object(raw["kid"]), binding, False))
     if op in ("and", "or"):
-        kids = [_node(_object(kid), binding) for kid in _array(raw["kids"])]
+        # Only a test every match must pass is in the top-level -a chain.
+        top = top and op == "and"
+        kids = [
+            _node(_object(kid), binding, top) for kid in _array(raw["kids"])
+        ]
         return And(kids) if op == "and" else Or(kids)
     if op == "action":
         return Action(_action_kind(_str(raw["kind"])), _flag(raw["batch"]))
-    return _time_node(op, raw, binding)
+    return _time_node(op, raw, binding, top)
 
 
 def _time_node(
-    op: str, raw: dict[str, JsonValue], binding: _Binding
+    op: str, raw: dict[str, JsonValue], binding: _Binding, top: bool
 ) -> PredNode:
-    fold = _str(raw["fold"])
     if op == "mtime":
         bounds = mtime_bounds(
             _str(raw["cmp"]), _float(raw["days"]), binding.now
@@ -389,7 +376,8 @@ def _time_node(
         if index >= len(binding.refs):
             return TrueNode()
         bounds = (strictly_after(binding.refs[index]), None)
-    binding.window = _merge(binding.window, bounds, fold)
+    if top:
+        binding.window = _merge(binding.window, bounds)
     return Mtime(*bounds)
 
 

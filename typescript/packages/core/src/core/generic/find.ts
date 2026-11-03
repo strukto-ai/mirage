@@ -32,6 +32,8 @@ import {
   treeHasAction,
   treeHasEmpty,
   treeHasPrune,
+  treeHasTime,
+  timeTestsFailing,
 } from './find_eval.ts'
 import { type FindEntry, type PredNode, type PrintfKind } from './types.ts'
 
@@ -286,7 +288,9 @@ export async function walkFind(
   const results: string[] = []
   const tree = bindTree(argsToTree(options), '', path.virtual, path.rawPath)
   const needSize = options.minSize != null || options.maxSize != null
-  const needMtime = options.mtimeMin != null || options.mtimeMax != null
+  const windowed = options.mtimeMin != null || options.mtimeMax != null
+  const needMtime = windowed || treeHasTime(tree)
+  const failing = timeTestsFailing(tree)
   const learned = new Map<string, number | null>()
   collected.sort((a, b) => compareCodePoints(a.path, b.path))
   for (const entry of collected) {
@@ -314,7 +318,8 @@ export async function walkFind(
       isEmpty,
       mtime: learned.get(key) ?? null,
     }
-    if (!keep(findEntry, tree, options.minDepth, acts)) continue
+    const judged = needMtime && findEntry.mtime === null ? failing : tree
+    if (!keep(findEntry, judged, options.minDepth, acts)) continue
     if (needSize && entry.file && st === null) {
       st = await statEntry(deps, entry.path)
       if (st === null) continue
@@ -324,7 +329,7 @@ export async function walkFind(
       if (options.minSize != null && size < options.minSize) continue
       if (options.maxSize != null && size > options.maxSize) continue
     }
-    if (needMtime && st !== null) {
+    if (windowed && st !== null) {
       const mt = modifiedTs(st.modified)
       if (mt === null) continue
       if (options.mtimeMin != null && mt < options.mtimeMin) continue

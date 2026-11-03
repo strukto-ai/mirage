@@ -208,10 +208,56 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf hi > /data/mtplus.txt; find /data -name mtplus.txt -mtime +0; echo code=$?; find /data -name mtplus.txt -mtime 0; rm /data/mtplus.txt",
+      "command": "printf hi > /data/mtplus.txt; find /data -name mtplus.txt -mtime +0; echo code=$?; rm /data/mtplus.txt",
       "expect": {
         "exit": 0,
-        "stdout": "code=0\n/data/mtplus.txt\n",
+        "stdout": "code=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime_test_under_or_or_not_decides_per_entry",
+      "seq": 502183,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "printf hi > /data/mtor.txt; find /data/mtor.txt -mtime +0 -o -name mtor.txt; find /data -name mtor.txt ! -mtime +0; find /data -name mtor.txt \\( -mtime +0 \\); echo code=$?; rm /data/mtor.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mtor.txt\n/data/mtor.txt\ncode=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime_zero_lists_a_fresh_file",
+      "seq": 502184,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "printf hi > /data/mtzero.txt; find /data -name mtzero.txt -mtime 0; rm /data/mtzero.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mtzero.txt\n",
         "stderr": ""
       }
     }

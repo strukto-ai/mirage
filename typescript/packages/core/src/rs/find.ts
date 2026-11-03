@@ -34,8 +34,9 @@ type Obj = Readonly<Record<string, JsonValue>>
  * `tree`; the windows (depth, size, mtime) and the actions are global to
  * the expression, because a native find op evaluates the tree and the
  * executor applies the actions to what came back. A time test also sits in
- * the tree as an `mtime` node, for its position alone: a `-prune` after it
- * fires only where the test holds. `newer` holds `-newer` reference
+ * the tree as an `mtime` node: only one in the top-level `-a` chain narrows
+ * the time window, and the tree decides the rest per entry, as it decides
+ * where a `-prune` after one fires. `newer` holds `-newer` reference
  * operands as typed, which the executor resolves against the dispatcher
  * before it binds the expression. `actions` are in the order written, since
  * GNU runs actions per position; `depthFirst` is GNU's `-depth`, which
@@ -179,28 +180,18 @@ export function mtimeBounds(cmp: string, days: number, now: number): Bounds {
   return [now - (days + 1) * DAY, now - days * DAY]
 }
 
-// Fold one time test into the expression's single window. The flat window
-// cannot evaluate a time test per predicate node, so repeated ones fold by
-// where they sit. In the top-level `-a` chain every test must hold, so the
-// windows intersect: `-newer old -newer new` keeps only what is newer than
-// both, and `-mtime +2 -mtime -1` keeps nothing, as GNU answers. Under
-// `-o`, `!` or parentheses the window cannot be exact, so they widen to the
-// union: the tautology `-mtime +0 -o -mtime -1` imposes no bounds instead
-// of last-wins dropping everything (documented divergence from GNU: such a
-// window over-matches).
-function merge(window: Bounds | null, bounds: Bounds, fold: string): Bounds {
+// Intersect one top-level time test with the expression's window. Every test
+// in the top-level `-a` chain must hold, so the windows intersect: `-newer old
+// -newer new` keeps only what is newer than both, and `-mtime +2 -mtime -1`
+// keeps nothing, as GNU answers. A test under `-o` or `!` need not hold for a
+// match, so it never reaches here; its `mtime` node decides it per entry.
+function merge(window: Bounds | null, bounds: Bounds): Bounds {
   if (window === null) return bounds
   const [oldLo, oldHi] = window
   const [lo, hi] = bounds
-  if (fold === 'all') {
-    return [
-      oldLo === null ? lo : lo === null ? oldLo : Math.max(oldLo, lo),
-      oldHi === null ? hi : hi === null ? oldHi : Math.min(oldHi, hi),
-    ]
-  }
   return [
-    oldLo === null || lo === null ? null : Math.min(oldLo, lo),
-    oldHi === null || hi === null ? null : Math.max(oldHi, hi),
+    oldLo === null ? lo : lo === null ? oldLo : Math.max(oldLo, lo),
+    oldHi === null ? hi : hi === null ? oldHi : Math.min(oldHi, hi),
   ]
 }
 
@@ -241,7 +232,7 @@ interface Binding {
   window: Bounds | null
 }
 
-function node(raw: Obj, binding: Binding): PredNode {
+function node(raw: Obj, binding: Binding, top = true): PredNode {
   const op = str(raw.op)
   switch (op) {
     case 'name':
@@ -257,22 +248,22 @@ function node(raw: Obj, binding: Binding): PredNode {
     case 'prune':
       return { op: 'prune', pruned: [], pending: [] }
     case 'not':
-      return { op: 'not', kid: node(object(raw.kid), binding) }
+      return { op: 'not', kid: node(object(raw.kid), binding, false) }
+    // Only a test every match must pass is in the top-level -a chain.
     case 'and':
-      return { op: 'and', kids: array(raw.kids).map((kid) => node(object(kid), binding)) }
+      return { op: 'and', kids: array(raw.kids).map((kid) => node(object(kid), binding, top)) }
     case 'or':
-      return { op: 'or', kids: array(raw.kids).map((kid) => node(object(kid), binding)) }
+      return { op: 'or', kids: array(raw.kids).map((kid) => node(object(kid), binding, false)) }
     case 'action': {
       const kind = actionKind(str(raw.kind))
       return flag(raw.batch) ? { op: 'action', kind, batch: true } : { op: 'action', kind }
     }
     default:
-      return timeNode(op, raw, binding)
+      return timeNode(op, raw, binding, top)
   }
 }
 
-function timeNode(op: string, raw: Obj, binding: Binding): PredNode {
-  const fold = str(raw.fold)
+function timeNode(op: string, raw: Obj, binding: Binding, top: boolean): PredNode {
   let bounds: Bounds
   if (op === 'mtime') {
     bounds = mtimeBounds(str(raw.cmp), float(raw.days), binding.now)
@@ -283,7 +274,7 @@ function timeNode(op: string, raw: Obj, binding: Binding): PredNode {
     if (ref === undefined) return { op: 'true' }
     bounds = [strictlyAfter(ref), null]
   }
-  binding.window = merge(binding.window, bounds, fold)
+  if (top) binding.window = merge(binding.window, bounds)
   return { op: 'mtime', lo: bounds[0], hi: bounds[1] }
 }
 

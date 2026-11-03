@@ -28,6 +28,7 @@ from mirage.context import (
     reset_program_invocation,
     set_program_invocation,
 )
+from mirage.core.generic import find_eval
 from mirage.errors.classify import is_entry_error
 from mirage.errors.fs import enoent, strerror_of
 from mirage.errors.posix import posix_phrase
@@ -385,6 +386,7 @@ def _tests_stat(expr: FindExpr) -> bool:
         or expr.max_size is not None
         or expr.mtime_min is not None
         or expr.mtime_max is not None
+        or find_eval.tree_has_time(expr.tree)
         or expr.uses_empty
         or bool(expr.newer)
     )

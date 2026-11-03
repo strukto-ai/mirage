@@ -64,6 +64,22 @@ describe('system_time', () => {
     expect(await out(ws, 'find /data/a -mtime 1')).toBe('/data/a\n')
   })
 
+  it('decides a find time test under -o or ! per entry', async () => {
+    const clock = new ManualClock(1_000_000)
+    const ws = started('2026-03-02T09:00:00Z', clock)
+    await ws.shell('touch /data/keep; mkdir /data/d')
+    clock.advance(3600)
+    expect(await out(ws, 'find /data/keep -mtime +0 -o -name keep')).toBe('/data/keep\n')
+    expect(await out(ws, 'find /data/keep -mtime +1 -o -name keep')).toBe('/data/keep\n')
+    expect(await out(ws, 'find /data/keep ! -mtime +0')).toBe('/data/keep\n')
+    expect(await out(ws, 'find /data/keep \\( -mtime +0 \\)')).toBe('')
+    expect(await out(ws, 'find /data -name keep ! -mtime +0')).toBe('/data/keep\n')
+    expect(await out(ws, 'find /data -name keep \\( -mtime +0 \\)')).toBe('')
+    expect(await out(ws, 'find /data/d -mtime +0 -o -name x')).toBe('')
+    expect(await out(ws, 'find /data/d ! -mtime +0')).toBe('/data/d\n')
+    expect(await out(ws, 'find /data -mtime +0 -o -name x')).toBe('')
+  })
+
   it('stamps copies and processes', async () => {
     const ws = started('2026-03-02T09:00:00Z')
     const line =

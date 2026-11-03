@@ -21,6 +21,8 @@ import {
   printfKind,
   settlePendingPrunes,
   startBasename,
+  timeTestsFailing,
+  treeHasTime,
   unrespellRaw,
 } from '../../../core/generic/find_eval.ts'
 import { type PredNode } from '../../../core/generic/types.ts'
@@ -134,22 +136,27 @@ function startPointResults(
   mtimeMax: number | null,
 ): string[] {
   const results: string[] = []
+  let ts: number | null = null
   if (mtimeMin !== null || mtimeMax !== null) {
-    const ts = modifiedTs(start.modified ?? null)
+    ts = modifiedTs(start.modified ?? null)
     if (ts === null || Number.isNaN(ts)) return results
     if (mtimeMin !== null && ts < mtimeMin) return results
     if (mtimeMax !== null && ts > mtimeMax) return results
+  } else if (treeHasTime(tree)) {
+    ts = modifiedTs(start.modified ?? null)
   }
+  const judged = ts === null && treeHasTime(tree) ? timeTestsFailing(tree) : tree
   emitStartPath(results, rstripSlash(root.virtual) || '/', startBasename(root.virtual), {
     kind: printfKind(start),
     isEmpty: usesEmpty && printfKind(start) === 'f' ? start.size === 0 : usesEmpty ? false : null,
     exists: true,
-    tree,
+    tree: judged,
     maxDepth: options.maxDepth ?? null,
     minDepth: options.minDepth ?? null,
     size: start.size ?? null,
     minSize: options.minSize ?? null,
     maxSize: options.maxSize ?? null,
+    mtime: ts,
   })
   return results
 }
@@ -162,15 +169,17 @@ function startPointResults(
 // the backend only has to answer for descendants (see withRootRow for why
 // the backend's own row is dropped).
 //
-// -mtime is deliberately not applied here: the caller either filters every
-// row against namespace-aware times afterwards, or pushed the window into
-// the backend, and re-testing it against the probe's own stat would drop
-// rows a touch had just matched.
+// The -mtime window is deliberately not applied here: the caller either
+// filters every row against namespace-aware times afterwards, or pushed the
+// window into the backend, and re-testing it against the probe's own stat
+// would drop rows a touch had just matched. `mtime` answers the tree's own
+// time tests.
 function rootDirResults(
   root: PathSpec,
   options: FindOptions,
   tree: PredNode,
   isEmpty: boolean | null,
+  mtime: number | null = null,
 ): string[] {
   const results: string[] = []
   emitStartPath(results, rstripSlash(root.virtual) || '/', startBasename(root.virtual), {
@@ -182,6 +191,7 @@ function rootDirResults(
     minDepth: options.minDepth ?? null,
     minSize: options.minSize ?? null,
     maxSize: options.maxSize ?? null,
+    mtime,
   })
   return results
 }
@@ -402,6 +412,7 @@ export function findGeneric(
         }
       }
       let startIsDir = false
+      let startFile: FileStat | null = null
       if (startStat !== undefined && !rootIsLink) {
         let start: FileStat | null
         try {
@@ -451,14 +462,17 @@ export function findGeneric(
           continue
         }
         startIsDir = true
+        startFile = start
       }
       // The directory row is known before any native op fetches descendants.
       // Yielding it first lets a closed pipe prevent that remote traversal.
       const usesEmptyEarly = expr !== null ? expr.usesEmpty : emptyFlag
+      const timed = treeHasTime(tree)
       let first: string[] = []
       if (
         startIsDir &&
         !usesEmptyEarly &&
+        !timed &&
         !(pushMtime && (effMtimeMin !== null || effMtimeMax !== null))
       ) {
         const rootRows =
@@ -527,10 +541,21 @@ export function findGeneric(
       let rows = rootMatches
       if (startIsDir && !mtimePushed && canProbe) {
         const rootEmpty = usesEmpty && dirEmpty !== undefined ? await dirEmpty(root) : null
+        const rootMtime = !timed
+          ? null
+          : stat !== undefined
+            ? await rowMtime(stat, rootKey)
+            : modifiedTs(startFile?.modified ?? null)
         rows = withRootRow(
           rootMatches,
           root.virtual === '/' ? '/' : rstripSlash(root.virtual),
-          rootDirResults(root, rootOptions, argsToTree(rootOptions), rootEmpty),
+          rootDirResults(
+            root,
+            rootOptions,
+            timed && rootMtime === null ? timeTestsFailing(tree) : argsToTree(rootOptions),
+            rootEmpty,
+            rootMtime,
+          ),
         )
       }
       const filtered =

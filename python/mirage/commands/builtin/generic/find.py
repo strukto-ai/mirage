@@ -335,6 +335,7 @@ def start_point_results(
         tree (PredNode): the predicate tree bound to the start point.
     """
     results: list[str] = []
+    ts = None
     if args.mtime_min is not None or args.mtime_max is not None:
         ts = modified_ts(start.modified)
         if ts is None:
@@ -343,6 +344,10 @@ def start_point_results(
             return results
         if args.mtime_max is not None and ts > args.mtime_max:
             return results
+    elif find_eval.tree_has_time(tree):
+        ts = modified_ts(start.modified)
+        if ts is None:
+            tree = find_eval.time_tests_failing(tree)
     empty = None
     if args.empty:
         # GNU -empty matches only a size-0 regular file here; a device
@@ -361,6 +366,7 @@ def start_point_results(
         size=start.size,
         min_size=args.min_size,
         max_size=args.max_size,
+        mtime=ts,
     )
     return results
 
@@ -433,6 +439,8 @@ async def early_root(
     tree = find_eval.bind_tree(
         find_eval.args_to_tree(args), "", search.virtual, search.raw_path
     )
+    if find_eval.tree_has_time(tree):
+        return []
     rows = root_dir_results(search, args, tree, is_empty=None)
     return respell_raw(rows, search.virtual, search.raw_path)
 
