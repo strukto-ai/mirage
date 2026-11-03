@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import posixpath
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -32,7 +31,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     pathspec_selects,
     repo_relative,
 )
-from mirage.commands.cli.builtin.git.render import quote_path
+from mirage.commands.cli.builtin.git.render import quote_path, relative_path
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
 from mirage.commands.cli.builtin.git.seen import place_named, shown_entries
@@ -381,7 +380,7 @@ async def grep(
                 data = await read_optional(ctx.vfs, target)
                 if data is None:
                     continue
-            label = posixpath.relpath(relative or revision, prefix or ".")
+            label = relative_path(relative or revision, prefix)
             if not flags.nul:
                 label = quote_path(label, False, fully)
             if revision and relative:

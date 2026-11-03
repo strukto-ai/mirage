@@ -908,8 +908,9 @@ async def test_every_part_git_rejects_is_refused(
 
 @pytest.mark.asyncio
 async def test_history_still_reads_a_branch_naming_such_paths(
-    git_rw, repo_path: Path
+    git_rw, repo_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    monkeypatch.chdir("/")
     branch_with_paths(repo_path, "odd", INVALID)
     code, out, _err = await run(git_rw, "log --format=%s -1 odd")
     assert (code, out) == (0, b"odd\n")
