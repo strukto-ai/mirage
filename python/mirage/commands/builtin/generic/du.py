@@ -3,7 +3,11 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 
-from mirage.commands.builtin.utils.formatting import scaled_size
+from mirage.commands.builtin.utils.formatting import (
+    BlockSize,
+    block_size_of,
+    scaled_size,
+)
 from mirage.commands.builtin.utils.links import mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_stat_path
@@ -38,6 +42,7 @@ class DuFlags:
         s (bool): -s, one total per operand and no subtree lines.
         a (bool): -a, list files as well as directories.
         h (bool): -h, human-readable sizes.
+        block_size (BlockSize | None): explicit unit, or None for bytes/-h.
         c (bool): -c, append a grand total.
         S (bool): -S/--separate-dirs, directories exclude subdirectory sizes.
         max_depth (int | None): --max-depth/-d, deepest level to print.
@@ -48,6 +53,7 @@ class DuFlags:
     s: bool = False
     a: bool = False
     h: bool = False
+    block_size: BlockSize | None = None
     c: bool = False
     S: bool = False
     max_depth: int | None = None
@@ -88,7 +94,19 @@ def parse_flags(ctx: Context) -> DuFlags | IOResult:
     """
     fl = FlagView(ctx.flags, spec=SPECS["du"])
     try:
-        values = scan("du", fl.texts("max_depth", "s", "a"))
+        values = scan(
+            "du",
+            fl.texts(
+                "max_depth",
+                "summarize",
+                "all",
+                "human_readable",
+                "bytes",
+                "k",
+                "m",
+                "block_size",
+            ),
+        )
     except StreamRefusal as refusal:
         return refused(refusal)
     depth = values["max_depth"]
@@ -96,10 +114,11 @@ def parse_flags(ctx: Context) -> DuFlags | IOResult:
     assert depth is None or isinstance(depth, int)
     assert warning is None or isinstance(warning, str)
     return DuFlags(
-        s=fl.as_bool("s"),
-        a=fl.as_bool("a"),
-        h=fl.as_bool("h"),
-        c=fl.as_bool("c"),
+        s=fl.as_bool("summarize"),
+        a=fl.as_bool("all"),
+        h=fl.as_bool("human_readable"),
+        block_size=block_size_of(values["block_size"]),
+        c=fl.as_bool("total"),
         S=fl.as_bool("separate_dirs"),
         max_depth=depth,
         warning=warning,
@@ -277,8 +296,8 @@ async def du_has_content(
         return False
 
 
-def _line(size: int, human: bool, label: str) -> str:
-    return scaled_size(size, None, human) + "\t" + label
+def _line(size: int, flags: DuFlags, label: str) -> str:
+    return scaled_size(size, flags.block_size, flags.h) + "\t" + label
 
 
 def _norm(path: str) -> str:
@@ -494,7 +513,7 @@ async def _du_one(
         # rule likewise, since the walk is where a refused directory is
         # reported. Per operand: a hide elsewhere keeps this total.
         total = await compute_size(path)
-        return [_line(total, flags.h, label)], total, None
+        return [_line(total, flags, label)], total, None
 
     entries, total = await compute_entries(path)
     root_key = _norm(path.virtual)
@@ -518,7 +537,7 @@ async def _du_one(
         # would report twice.
         total = await compute_size(path)
         return (
-            [_line(total, flags.h, label)],
+            [_line(total, flags, label)],
             total,
             [PathRecord(path, run)] if total == 0 else None,
         )
@@ -540,13 +559,13 @@ async def _du_one(
     # -S to directories, so a file operand keeps its own size in both
     # its row and the grand total.
     if len(virtual) == 1 and _norm(virtual[0][0]) == root_key:
-        return [_line(virtual[0][1], flags.h, label)], total, records
+        return [_line(virtual[0][1], flags, label)], total, records
     # -S changes what the operand's own row counts, not what the operand
     # contributes to -c: GNU's grand total stays recursive (coreutils
     # 9.7, `du -bSc dir` prints `3 dir` then `6 total`).
     own = separate_total(virtual, path.virtual) if flags.S else total
     if flags.s:
-        return [_line(own, flags.h, label)], total, records
+        return [_line(own, flags, label)], total, records
 
     rows = rollup(
         virtual,
@@ -557,10 +576,8 @@ async def _du_one(
         separate_dirs=flags.S,
     )
     shown = respell_raw([node for node, _ in rows], path.virtual, label)
-    lines = [
-        _line(size, flags.h, name) for name, (_, size) in zip(shown, rows)
-    ]
-    lines.append(_line(own, flags.h, label))
+    lines = [_line(size, flags, name) for name, (_, size) in zip(shown, rows)]
+    lines.append(_line(own, flags, label))
     return lines, total, records
 
 
@@ -638,7 +655,7 @@ async def du(
     # GNU still prints the grand total when every operand failed ("0
     # total"), so this stays outside the loop guard.
     if flags.c:
-        lines.append(_line(sum(totals), flags.h, "total"))
+        lines.append(_line(sum(totals), flags, "total"))
 
     notes = [flags.warning] if flags.warning else []
     notes.extend(
@@ -711,6 +728,13 @@ async def du_generic(
     (0 for a target short enough to live in the inode); mirage counts
     bytes throughout.
 
+    Deliberate divergence: --exclude remains refused. GNU 9.7 prunes matched
+    operands before stat and matched directories before traversal. Backend
+    size shortcuts and separately scheduled descendant mounts do not share a
+    pruning contract, so filtering measured rows would still read excluded
+    paths and report their failures. --apparent-size preserves the existing
+    apparent-byte measurement; only explicit unit options change its scale.
+
     Args:
         paths (list[PathSpec]): The operands as parsed, possibly empty.
         texts (list[str]): Non-path words, unused by du.
@@ -774,7 +798,8 @@ def facts(fl: FlagView, operands: Sequence[str | PathSpec]) -> LineFacts:
     return LineFacts(
         follows=(
             Follow.LAST
-            if fl.typed_order("L", "P")[-1:] == ["L"]
+            if fl.typed_order("dereference", "no_dereference")[-1:]
+            == ["dereference"]
             else Follow.NONE
         ),
         walks=not fl.as_bool("one_file_system"),

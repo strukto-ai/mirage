@@ -36,6 +36,7 @@ import type { ChildMounts, LinkView, MountView, StatPath } from '../../../view/t
 import {
   STAT_FAILED_KEY,
   type BlockSize,
+  blockSizeOf,
   type LsColumns,
   formatLsLong,
   lsName,
@@ -903,22 +904,6 @@ function oneOf<T extends string>(
     throw new Error(`ls: mirage-rs read ${what} as ${JSON.stringify(value)}`)
   }
   return found
-}
-
-// The size scale mirage-rs answered, checked for its shape.
-function blockSizeOf(raw: JsonValue | undefined): BlockSize | null {
-  if (raw === null) return null
-  if (typeof raw === 'object' && !Array.isArray(raw)) {
-    const { divisor, suffix, human_base: base } = raw
-    if (
-      typeof divisor === 'string' &&
-      typeof suffix === 'string' &&
-      (base === null || typeof base === 'number')
-    ) {
-      return { divisor: Number(divisor), suffix, humanBase: base }
-    }
-  }
-  throw new Error(`ls: mirage-rs read --block-size as ${JSON.stringify(raw)}`)
 }
 
 // The typed options as the scan reads them: a switch empty, except the bare

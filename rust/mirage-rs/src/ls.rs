@@ -10,7 +10,6 @@
 
 use serde_json::{Value as Json, json};
 
-use crate::number::BLANKS;
 use crate::scan::{Typed, Values, unknown};
 use crate::word::{self, Choice};
 use crate::{StreamError, byte_text};
@@ -45,10 +44,6 @@ const TIME_STYLES_LISTED: &str = "Valid arguments are:\n  - [posix-]full-iso\n  
      - +FORMAT (e.g., +%H:%M) for a 'date'-style format\n\
      Try 'ls --help' for more information.";
 
-/// `--block-size`'s unit letters, each the next power of 1024; only the
-/// first four also in lower case.
-const UNITS: &[u8] = b"KMGTPEZY";
-
 pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     let mut sort = Json::Null;
     let mut time = "mtime";
@@ -80,7 +75,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
             }
             "p" => indicator = "slash",
             "file_type" => indicator = "file-type",
-            "block_size" => block = block_size(raw)?,
+            "block_size" => block = crate::block_size::parse(raw, "ls", "--block-size", 2, false)?,
             "human_readable" => block = Json::Null,
             "time_style" => time_style = Some(raw),
             _ => return Err(unknown("ls", name)),
@@ -118,96 +113,6 @@ fn style(raw: &[u8]) -> Result<String, StreamError> {
             );
             StreamError::refusal(refused.as_bytes(), 2)
         })
-}
-
-/// `--block-size=SIZE`: `human-readable` or `si`, or an optional count
-/// read as `strtoumax` reads a decimal one, then an optional unit letter,
-/// `B` after it making it decimal and `iB` keeping it binary. A unit
-/// alone is echoed after each size. A suffix failure outranks a size past
-/// `u64`, which outranks a zero size; each exits 2 and quotes the word
-/// unescaped. Deliberately decimal where `strtoumax` reads `0x` and `0`
-/// prefixes as hexadecimal and octal.
-fn block_size(raw: &[u8]) -> Result<Json, StreamError> {
-    let refuse = |before: &str, after: &str| {
-        let mut shown = before.as_bytes().to_vec();
-        shown.push(b'\'');
-        shown.extend_from_slice(raw);
-        shown.push(b'\'');
-        shown.extend_from_slice(after.as_bytes());
-        Err(StreamError::refusal(&shown, 2))
-    };
-    let invalid = || refuse("ls: invalid --block-size argument ", "");
-    let suffix = || refuse("ls: invalid suffix in --block-size argument ", "");
-    match raw {
-        b"human-readable" => return Ok(scale(1024, "", Some(1024))),
-        b"si" => return Ok(scale(1000, "", Some(1000))),
-        _ => {}
-    }
-    let start = raw
-        .iter()
-        .position(|b| !BLANKS.contains(b))
-        .unwrap_or(raw.len());
-    let body = raw[start..].strip_prefix(b"+").unwrap_or(&raw[start..]);
-    if body.len() != raw.len() && !body.first().is_some_and(u8::is_ascii_digit) {
-        return invalid();
-    }
-    let digits = body.iter().take_while(|b| b.is_ascii_digit()).count();
-    let (count, unit) = body.split_at(digits);
-    let power = |letter: u8| {
-        let upper = letter.to_ascii_uppercase();
-        let lower_ok = b"kmgt".contains(&letter) || letter.is_ascii_uppercase();
-        UNITS
-            .iter()
-            .position(|&unit| unit == upper)
-            .filter(|_| lower_ok)
-            .map(|at| (upper, at as u32 + 1))
-    };
-    if count.is_empty() && unit.first().copied().and_then(power).is_none() {
-        return invalid();
-    }
-    let count = if count.is_empty() {
-        1u128
-    } else {
-        count
-            .iter()
-            .try_fold(0u128, |n, &b| {
-                n.checked_mul(10)?.checked_add(u128::from(b - b'0'))
-            })
-            .unwrap_or(u128::MAX)
-    };
-    let (factor, shown) = match unit {
-        [] => (1u128, String::new()),
-        [letter, rest @ ..] => {
-            let Some((upper, power)) = power(*letter) else {
-                return suffix();
-            };
-            let upper = char::from(upper);
-            match rest {
-                b"" => (1024u128.pow(power), upper.to_string()),
-                b"B" => {
-                    let lead = if upper == 'K' { 'k' } else { upper };
-                    (1000u128.pow(power), format!("{lead}B"))
-                }
-                b"iB" => (1024u128.pow(power), format!("{upper}iB")),
-                _ => return suffix(),
-            }
-        }
-    };
-    let Some(divisor) = count
-        .checked_mul(factor)
-        .filter(|&n| n <= u128::from(u64::MAX))
-    else {
-        return refuse("ls: --block-size argument ", " too large");
-    };
-    if divisor == 0 {
-        return invalid();
-    }
-    let shown = if digits == 0 { shown } else { String::new() };
-    Ok(scale(divisor, &shown, None))
-}
-
-fn scale(divisor: u128, suffix: &str, human_base: Option<u32>) -> Json {
-    json!({"divisor": divisor.to_string(), "suffix": suffix, "human_base": human_base})
 }
 
 #[cfg(test)]

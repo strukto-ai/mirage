@@ -45,7 +45,7 @@ from mirage.workspace.files import Files
 
 # The flags that shape only the rendering: every mount measures without
 # them, and the line renders once.
-RENDERING = frozenset({"s", "max_depth"})
+RENDERING = frozenset({"summarize", "max_depth"})
 
 
 async def run_du(

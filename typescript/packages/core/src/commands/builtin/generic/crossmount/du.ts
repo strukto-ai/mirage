@@ -33,7 +33,7 @@ import { mountView } from '../../utils/links.ts'
 
 // The flags that shape only the rendering: every mount measures without them,
 // and the line renders once.
-export const RENDERING: ReadonlySet<string> = new Set(['s', 'max_depth'])
+export const RENDERING: ReadonlySet<string> = new Set(['summarize', 'max_depth'])
 
 /**
  * Render du over operands spanning mounts from each mount's own du.

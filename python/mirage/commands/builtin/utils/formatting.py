@@ -30,6 +30,7 @@ from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
     FileType,
+    JsonValue,
     LsTimeKind,
 )
 from mirage.utils.clock import system_now
@@ -92,6 +93,27 @@ class LsColumns:
 
 
 DEFAULT_COLUMNS = LsColumns()
+
+
+def block_size_of(raw: JsonValue) -> BlockSize | None:
+    """The size scale mirage-rs answered, checked for its shape.
+
+    Args:
+        raw (JsonValue): the ``block_size`` value of the scan.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        divisor = raw.get("divisor")
+        suffix = raw.get("suffix")
+        base = raw.get("human_base")
+        if (
+            isinstance(divisor, str)
+            and isinstance(suffix, str)
+            and (base is None or type(base) is int)
+        ):
+            return BlockSize(int(divisor), suffix, base)
+    raise TypeError(f"mirage-rs read block size as {raw!r}")
 
 
 def scaled_size(n: int, block: BlockSize | None, human: bool) -> str:
