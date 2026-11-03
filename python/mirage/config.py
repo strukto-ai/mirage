@@ -14,6 +14,7 @@
 
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -28,14 +29,19 @@ from pydantic import (
 
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index.config import IndexConfig, RedisIndexConfig
+from mirage.commands.cli import mcp
+from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
 from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.io.config import IOConfig
 from mirage.io.network import (
     NetworkRule,
     NetworkSetting,
+    narrowed,
+    network_bound,
     network_layer,
     network_routes,
+    run_with_network,
 )
 from mirage.policy.constants import METHODS
 from mirage.policy.profile import (
@@ -786,7 +792,9 @@ class WorkspaceConfig(BaseModel):
             raise ValueError(f"unknown profile {self.profile!r}")
         return self
 
-    def to_workspace_kwargs(self) -> dict[str, Any]:
+    def to_workspace_kwargs(
+        self, mcp_clis: Mapping[str, CLI] | None = None
+    ) -> dict[str, Any]:
         """Produce kwargs ready to splat into ``Workspace(**kwargs)``.
 
         Synchronous, and must stay that way: this is the YAML loader, and
@@ -795,6 +803,13 @@ class WorkspaceConfig(BaseModel):
         instead of moving that cost into construction; see
         ``build_vfs`` for the full rule. Deliberately diverges from
         the TypeScript ``configToWorkspaceArgs``, which is async.
+
+        Args:
+            mcp_clis (Mapping[str, CLI] | None): the CLI each
+                ``cli: mcp`` entry became, from :func:`build_mcp_clis`.
+
+        Raises:
+            ValueError: a ``cli: mcp`` entry has no built CLI.
 
         Returns:
             dict[str, Any]: VFS instances, cache config, and
@@ -873,8 +888,24 @@ class WorkspaceConfig(BaseModel):
             kwargs["secrets"] = self.secrets
 
         if self.clis is not None:
+            built = mcp_clis or {}
+            missing = [
+                name
+                for name, block in self.clis.items()
+                if block.cli == MCP_CLI and name not in built
+            ]
+            if missing:
+                raise ValueError(
+                    f"clis entries {missing!r} are built from their MCP "
+                    "server: pass mcp_clis=await build_mcp_clis(config)"
+                )
             kwargs["clis"] = {
-                name: (_cli_entry(name, block), dict(block.config))
+                name: (
+                    built[name]
+                    if block.cli == MCP_CLI
+                    else _cli_entry(name, block),
+                    dict(block.config),
+                )
                 for name, block in self.clis.items()
             }
         return kwargs
@@ -1039,6 +1070,37 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
             for name, block in config.clis.items()
         }
     return config.model_copy(update=update)
+
+
+async def build_mcp_clis(config: "WorkspaceConfig") -> dict[str, CLI]:
+    """The CLI each ``cli: mcp`` entry becomes, read from its server.
+
+    The second async step of the YAML loader, after
+    :func:`resolve_secrets`: an MCP CLI's subcommands are the server's
+    tools, so building one lists them over the network, held to the
+    config's ``network`` and any rule already bound. Mirrors the
+    TypeScript ``configToWorkspaceArgs``.
+
+    Args:
+        config (WorkspaceConfig): a config whose pointers are resolved.
+
+    Raises:
+        ValidationError: an entry's config is not an MCPConfig.
+        MCPToolsError: a server could not be listed, its network refused
+            it, or its tools cannot be made into a CLI.
+    """
+    blocks = {
+        name: block
+        for name, block in (config.clis or {}).items()
+        if block.cli == MCP_CLI
+    }
+    if not blocks:
+        return {}
+    rule = narrowed(network_bound(), config.network)
+    return {
+        name: await run_with_network(rule, mcp.mcp_cli(block.config))
+        for name, block in blocks.items()
+    }
 
 
 def load_config(

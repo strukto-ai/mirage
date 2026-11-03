@@ -78,3 +78,12 @@ describe('cli spec registry', () => {
     }
   })
 })
+
+describe('the mcp name', () => {
+  it('is reserved for MCP servers', () => {
+    expect(() => {
+      registerCliSpec(tree('mcp'))
+    }).toThrow(/reserved/)
+    expect(() => cliSpecFor('mcp')).toThrow(/mcpCli/)
+  })
+})

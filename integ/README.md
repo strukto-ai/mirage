@@ -19,7 +19,9 @@ implementations cannot drift apart.
   each from `ci/fakes.json`, and announces one `NAME_URL=...` line per arm.
   Some fakes carry a selftest (`pnpm run <name>:selftest`; the list is the
   `*:selftest` scripts in `package.json`); linear and trello have none, and
-  the battery is what exercises them.
+  the battery is what exercises them. `server/mcp/main.ts` is a stateless
+  streamable-HTTP MCP server for the `cli-mcp` target (built in code) and
+  `cli-mcp-yaml` (built through the YAML loader), shared by both hosts.
 - `access/`: every way into a workspace (in-app, HTTP, the CLI, MCP over
   HTTP and `mirage mcp`, RPC over HTTP and `mirage rpc`, SSH) under every
   deployment (`dev`, the CLI's own daemon; `token` and `jwt`, the server as a

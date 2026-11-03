@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import Mapping
 from unittest.mock import AsyncMock
 
@@ -19,6 +20,7 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.commands.cli.builtin.search import SEARCH
+from mirage.commands.cli.mcp import MCPSource, MCPTool, build_cli
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import Argument, CommandSpec
@@ -708,3 +710,62 @@ async def test_vfs_md_counts_rm_r_on_a_file_where_only_unlink_works():
     )
     assert row(await ws.vfs_md(), "", "/m").endswith(", write")
     assert (await ws.shell("rm -r /m/f")).exit_code == 0
+
+
+def _issue_tool(i: int) -> MCPTool:
+    fields = {
+        f"field_{k}": {
+            "type": "string",
+            "description": f"The {k}th field of the issue, as the API spells it.",
+        }
+        for k in range(6)
+    }
+    return MCPTool(
+        name=f"issue_action_{i}",
+        description=f"Do action {i} on an issue.\nWhen to use action {i}.",
+        input_schema={"type": "object", "properties": fields},
+        annotations={"readOnlyHint": i % 2 == 0},
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_mcp_cli_costs_the_skill_about_its_tool_list():
+    tools = tuple(_issue_tool(i) for i in range(20))
+    listed = json.dumps(
+        [
+            {
+                "name": t.name,
+                "description": t.description,
+                "inputSchema": t.input_schema,
+                "annotations": t.annotations,
+            }
+            for t in tools
+        ],
+        separators=(",", ":"),
+    )
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    ws.register_cli(
+        "fx",
+        build_cli(MCPSource(title="Issues", tools=tools)),
+        {"url": "http://x/mcp", "auth": {"type": "bearer", "token": "s3cr3t"}},
+    )
+    skill = await ws.skill_md()
+    assert len(skill.encode()) <= 1.35 * len(listed.encode())
+    assert "s3cr3t" not in skill
+
+
+@pytest.mark.asyncio
+async def test_the_skill_names_only_the_mcp_tools_a_profile_allows():
+    tools = tuple(_issue_tool(i) for i in range(3))
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"default": {"commands": {"deny": ["fx issue-action-1"]}}},
+    )
+    ws.register_cli(
+        "fx",
+        build_cli(MCPSource(title="Issues", tools=tools)),
+        {"url": "http://x/mcp"},
+    )
+    skill = await ws.skill_md()
+    assert "fx issue-action-0" in skill
+    assert "issue-action-1" not in skill

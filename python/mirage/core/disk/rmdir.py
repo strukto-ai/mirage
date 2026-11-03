@@ -17,6 +17,7 @@ import aiofiles.os
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -25,5 +26,16 @@ async def rmdir(
     path_spec: PathSpec,
 ) -> None:
     p = await resolve_inside(accessor.root, path_spec)
-    with disk_errors(path_spec.virtual):
-        await aiofiles.os.rmdir(p)
+    timer = start_op()
+    done = True
+    try:
+        with disk_errors(path_spec.virtual):
+            await aiofiles.os.rmdir(p)
+    except OSError:
+        done = False
+        raise
+    finally:
+        # A refused rmdir(2) removed nothing; a cancelled wait may not have
+        # stopped the worker's.
+        if done:
+            record("rmdir", path_spec.virtual, "disk", 0, timer)

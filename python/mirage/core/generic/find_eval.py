@@ -197,6 +197,16 @@ def tree_has_action(node: PredNode) -> bool:
     return False
 
 
+def tree_has_time(node: PredNode) -> bool:
+    if isinstance(node, Mtime):
+        return True
+    if isinstance(node, Not):
+        return tree_has_time(node.kid)
+    if isinstance(node, (And, Or)):
+        return any(tree_has_time(kid) for kid in node.kids)
+    return False
+
+
 def tree_has_prune(node: PredNode) -> bool:
     if isinstance(node, Prune):
         return True
@@ -269,13 +279,13 @@ def _prune_nodes(node: PredNode) -> list[Prune]:
     return []
 
 
-def _time_tests_failing(node: PredNode) -> PredNode:
+def time_tests_failing(node: PredNode) -> PredNode:
     """The tree with every time test false, sharing the prune ledgers.
 
-    A directory that reports no mtime passes no time test, the way the
-    flat window admits no such row, so the prunes it reaches are the
-    ones reachable with every test false. The ``Prune`` nodes are the
-    original objects, so what this copy records lands on the tree.
+    An entry that reports no mtime once asked passes no time test, the
+    way the flat window admits no such row, so it matches and reaches
+    the prunes it would with every test false. The ``Prune`` nodes are
+    the original objects, so what this copy records lands on the tree.
 
     Args:
         node (PredNode): the predicate tree.
@@ -283,11 +293,11 @@ def _time_tests_failing(node: PredNode) -> PredNode:
     if isinstance(node, Mtime):
         return Not(TrueNode())
     if isinstance(node, Not):
-        return Not(_time_tests_failing(node.kid))
+        return Not(time_tests_failing(node.kid))
     if isinstance(node, And):
-        return And([_time_tests_failing(kid) for kid in node.kids])
+        return And([time_tests_failing(kid) for kid in node.kids])
     if isinstance(node, Or):
-        return Or([_time_tests_failing(kid) for kid in node.kids])
+        return Or([time_tests_failing(kid) for kid in node.kids])
     return node
 
 
@@ -317,7 +327,7 @@ def settle_prunes(node: PredNode, mtimes: Mapping[str, float | None]) -> None:
         prune.pending[:] = still
     for key, entry in decided.items():
         mtime = mtimes[key]
-        tree = node if mtime is not None else _time_tests_failing(node)
+        tree = node if mtime is not None else time_tests_failing(node)
         evaluate(tree, replace(entry, mtime=mtime), Effects())
 
 
@@ -409,6 +419,7 @@ def emit_start_path(
     size: int | None = None,
     min_size: int | None = None,
     max_size: int | None = None,
+    mtime: float | None = None,
 ) -> None:
     """Append the search start path to results when it matches.
 
@@ -438,13 +449,20 @@ def emit_start_path(
         size (int | None): Start path size in bytes when it is a file.
         min_size (int | None): ``-size +`` lower bound in bytes.
         max_size (int | None): ``-size -`` upper bound in bytes.
+        mtime (float | None): Start path epoch-second mtime for the
+            tree's time tests; None if unknown.
     """
     if not exists:
         return
     if maxdepth is not None and maxdepth < 0:
         return
     entry = FindEntry(
-        key=start_key, name=start_name, kind=kind, depth=0, is_empty=is_empty
+        key=start_key,
+        name=start_name,
+        kind=kind,
+        depth=0,
+        is_empty=is_empty,
+        mtime=mtime,
     )
     if not keep(entry, tree, mindepth):
         return

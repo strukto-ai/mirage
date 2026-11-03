@@ -77,6 +77,7 @@ import {
   LINEAR,
   LinearVFS,
   Mem0VFS,
+  mcpCli,
   MinIOVFS,
   MongoDBVFS,
   MountMode,
@@ -111,6 +112,7 @@ import {
   type BaseVFS,
   type WritePolicy,
 } from '@struktoai/mirage-node'
+import { configToWorkspaceArgs, loadWorkspaceConfig } from '@struktoai/mirage-node/config'
 import { commit as hubCommit } from '@struktoai/mirage-node/core/hf_hub/commit'
 import { ChromaClient } from 'chromadb'
 import { Binary, DBRef, Decimal128, Double, Long, MongoClient } from 'mongodb'
@@ -295,6 +297,29 @@ function installLocalClis(
   if (target.clis?.includes('scope-probe') === true) ws.registerCli('scope-probe', COMMAND_CLI)
 }
 
+/**
+ * Install a `mcp` target's CLIs from the shared fake MCP server, whose tool
+ * list is read once, when the target opens.
+ */
+async function installMcpClis(ws: Workspace, target: Target): Promise<void> {
+  const url = process.env.MCP_URL
+  if (!url) throw new Error('mcp target requires MCP_URL')
+  if (target.cli_door === 'yaml') {
+    const auth = { type: 'header', name: 'X-Api-Key', token: 'integ-token' }
+    const clis = Object.fromEntries(
+      (target.clis ?? []).map((name) => [name, { cli: 'mcp', config: { url, auth } }]),
+    )
+    const { options } = await configToWorkspaceArgs(loadWorkspaceConfig({ mounts: {}, clis }))
+    for (const [name, [cli, config]] of Object.entries(options.clis ?? {})) {
+      ws.registerCli(name, cli, config)
+    }
+    return
+  }
+  const config = { url, auth: { type: 'bearer', token: 'integ-token' } }
+  const cli = await mcpCli(config)
+  for (const name of target.clis ?? []) ws.registerCli(name, cli, config)
+}
+
 // Where a target declares jobs: {type: 'redis'}, its job lists and
 // consoles ride REDIS_URL under this open's own key prefix and every
 // other plane stays in memory. Only the ram opener consults this
@@ -398,6 +423,7 @@ async function openRam(target: Target, options?: OpenOptions): Promise<Open> {
     ...permissionOptions(target),
   })
   installLocalClis(ws, target)
+  if (target.service === 'mcp') await installMcpClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     // Battery keys must not accumulate in the shared redis db.

@@ -134,6 +134,15 @@ describe('appendTo', () => {
     expect(drive9.uploads.size).toBe(0)
   })
 
+  it('aborts the upload when the file is another size', async () => {
+    const data = new Uint8Array(70_000).fill(120)
+    drive9.files.set('/root/big.bin', data)
+    expect(await appendTo(accessor, '/root/big.bin', new Uint8Array(40_000), 60_000)).toBe(false)
+    expect(drive9.files.get('/root/big.bin')).toEqual(data)
+    expect(drive9.count('PUT', '/s3/upload')).toBe(0)
+    expect(drive9.uploads.size).toBe(0)
+  })
+
   it('aborts the upload when a part fails', async () => {
     drive9.partSize = 25_000
     drive9.files.set('/root/big.bin', new Uint8Array(60_000))

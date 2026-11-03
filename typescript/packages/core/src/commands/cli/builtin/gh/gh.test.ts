@@ -145,6 +145,7 @@ describe('gh tree', () => {
       'edit',
       'merge',
       'close',
+      'reopen',
       'comment',
       'diff',
       'checks',

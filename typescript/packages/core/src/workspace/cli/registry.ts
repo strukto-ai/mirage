@@ -62,17 +62,13 @@ export class CLIRegistry {
   ) {}
 
   /**
-   * Install a CLI under a head word. The name must be a single word and
-   * must not collide with another installed CLI, a shell builtin, or a
-   * general command (a runtime capture of the same name is fine: the
-   * policy steers per line).
+   * Refuse a head word no CLI may be installed under: not a single word,
+   * or one that collides with a shell builtin, a keyword or a general
+   * command. Mirrors Python's `CLIRegistry.check_name`.
    */
-  install(name: string, spec: CLI, config: Record<string, unknown> | null = null): CLIInstall {
+  checkName(name: string): void {
     if (name === '' || /\s/.test(name)) {
       throw new Error(`CLI name '${name}' must be a single word`)
-    }
-    if (this.installs.has(name)) {
-      throw new Error(`CLI name '${name}' is already installed`)
     }
     if (SHELL_NAMES.has(name) || JOB_BUILTINS.has(name)) {
       throw new Error(`CLI name '${name}' collides with a shell builtin`)
@@ -85,6 +81,19 @@ export class CLIRegistry {
     if (NAMESPACE_COMMANDS.has(name) || name in BUILTIN_SPECS) {
       throw new Error(`CLI name '${name}' collides with a general command`)
     }
+  }
+
+  /**
+   * Install a CLI under a head word. The name must be a single word and
+   * must not collide with another installed CLI, a shell builtin, or a
+   * general command (a runtime capture of the same name is fine: the
+   * policy steers per line).
+   */
+  install(name: string, spec: CLI, config: Record<string, unknown> | null = null): CLIInstall {
+    if (this.installs.has(name)) {
+      throw new Error(`CLI name '${name}' is already installed`)
+    }
+    this.checkName(name)
     const validated = this.validateConfig(name, spec, config)
     const accessor = spec.accessor(validated)
     accessor.join?.([...this.peers(), ...[...this.installs.values()].map((i) => i.accessor)])

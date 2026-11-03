@@ -17,6 +17,7 @@ import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.utils import resolve_inside
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -26,4 +27,20 @@ async def rename(
     root = accessor.root
     src = await resolve_inside(root, src_spec)
     dst = await resolve_inside(root, dst_spec)
-    await aiofiles.os.rename(src, dst)
+    # Named as the object stores name it: a moved directory took its
+    # subtree, which only "rename_prefix" retracts. Asked before the move,
+    # so nothing awaits between the move and its records.
+    op = "rename_prefix" if await aiofiles.os.path.isdir(src) else "rename"
+    timer = start_op()
+    done = True
+    try:
+        await aiofiles.os.rename(src, dst)
+    except OSError:
+        done = False
+        raise
+    finally:
+        # A refused rename(2) moved nothing; a cancelled wait may not have
+        # stopped the worker's.
+        if done:
+            record(op, src_spec.virtual, "disk", 0, timer)
+            record(op, dst_spec.virtual, "disk", 0, timer)

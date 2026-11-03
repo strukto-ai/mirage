@@ -26,6 +26,7 @@ from mirage.core.tidb_filesystem.rm import rm_recursive as _rm_r
 from mirage.core.tidb_filesystem.rmdir import rmdir as _rmdir
 from mirage.core.tidb_filesystem.stat import stat as _stat
 from mirage.core.tidb_filesystem.stream import read_stream as _read_stream
+from mirage.core.tidb_filesystem.truncate import truncate as _truncate
 from mirage.core.tidb_filesystem.unlink import unlink as _unlink
 from mirage.core.tidb_filesystem.write import write as _write
 from mirage.io.types import ByteSource
@@ -73,6 +74,11 @@ class TiDBFilesystemVFS(BaseVFS):
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
         await _append(self.accessor, path, data)
+
+    async def truncate(
+        self, path: PathSpec, length: int, no_create: bool = False
+    ) -> None:
+        await _truncate(self.accessor, path, length, no_create)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

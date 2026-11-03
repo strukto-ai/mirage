@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RedirectResult } from '../../context/session_context.ts'
+import { currentCaller, type RedirectResult, runWithCaller } from '../../context/session_context.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { asyncChain } from '../../io/stream.ts'
+import { activeRecords } from '../../observe/context.ts'
 import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
@@ -54,6 +55,7 @@ import {
 } from '../executor/statement.ts'
 import { errTrapArmed, runErrTrap, runExitTrap } from '../executor/traps.ts'
 import type { ExecuteFn } from '../expand/types.ts'
+import type { LineHistory } from '../history/line.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
@@ -185,6 +187,10 @@ async function runProgram(
   const reader = (node.parent ?? null) === null ? executeFn : null
   const refused = reader !== null ? refusedRow(node) : null
   const parsed = reader !== null ? parseState(session) : null
+  // A typed line bash's reader reads as several commands is recorded a
+  // command at a time, as its root reaches each.
+  const history = currentCaller().history
+  const reading = history?.reads(node) === true ? history : null
   let lastRow = -1
 
   let i = 0
@@ -207,6 +213,7 @@ async function runProgram(
       continue
     }
     if (session.shellOptions.noexec === true) break
+    if (reading !== null) await reading.reach(child, session, activeRecords() ?? [])
     if (!reread && startRow > echoedRow) {
       const first = echoedRow + 1
       const last = child.endPosition?.row ?? startRow
@@ -282,7 +289,7 @@ async function runProgram(
       let s: ByteSource | null
       ;[s, io, lastExec] = await recording(recorder, () =>
         reread
-          ? readOn(reader, node, child, session, childStdin, recorder, callStack)
+          ? readOn(reader, node, child, session, childStdin, recorder, callStack, reading)
           : recurse(child, context, childStdin, callStack, { sink: recorder }),
       )
       ran.push(lastExec)
@@ -384,6 +391,7 @@ async function runProgram(
     }
     if (reread) break
   }
+  if (reading !== null && i >= children.length) reading.read()
 
   // Statements run in turn are one `;` node, so the line's tree keeps every
   // command's result; what a caller reads of the program's own node (its
@@ -544,16 +552,24 @@ async function readOn(
   stdin: ByteSource | null,
   sink: JobConsole | null,
   callStack: CallStack | null,
+  reading: LineHistory | null,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   const original = node.sourceText ?? node.text
   const at = node.offsets?.[child.startIndex ?? 0] ?? 0
   const rest = original.slice(at)
   const rows = original.slice(0, at).split('\n').length - 1
-  const io = await executeFn('\n'.repeat(rows) + rest, {
-    sessionId: session.sessionId,
-    stdin,
-    ...(sink === null ? {} : { sink }),
-    ...(callStack === null ? {} : { callStack }),
-  })
+  const run = (): Promise<IOResult> =>
+    executeFn('\n'.repeat(rows) + rest, {
+      sessionId: session.sessionId,
+      stdin,
+      ...(sink === null ? {} : { sink }),
+      ...(callStack === null ? {} : { callStack }),
+    })
+  // The root the rest is read as takes the line's history over through
+  // this call alone, never a job's root that runs meanwhile.
+  const io =
+    reading === null
+      ? await run()
+      : await runWithCaller({ ...currentCaller(), history: reading.readOn(at - rows) }, run)
   return [io.stdout, io, new ExecutionNode({ command: rest, exitCode: io.exitCode })]
 }

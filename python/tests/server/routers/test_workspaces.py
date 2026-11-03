@@ -50,10 +50,12 @@ from mirage.server.auth.config import AuthConfig, JWTConfig
 from mirage.server.env import ENV_HOME
 from mirage.server.registry import WorkspaceRegistry
 from mirage.server.routers import workspaces as workspaces_router
+from mirage.types import JsonValue
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.tar_io import write_tar
 from mirage.workspace.snapshot.utils import BLOB_REF_KEY
+from tests.fixtures.mcp_server import TOKEN, TOOLS, served_mcp
 
 
 class HeldSourceConfig(BaseModel):
@@ -1869,3 +1871,210 @@ def _runner_threads() -> set[threading.Thread]:
 
 def _cancelled(*args, **kwargs):
     raise asyncio.CancelledError()
+
+
+def _mcp_entry(url: str, token: JsonValue = TOKEN) -> dict[str, JsonValue]:
+    return {
+        "cli": "mcp",
+        "config": {"url": url, "auth": {"type": "bearer", "token": token}},
+    }
+
+
+async def _mcp_workspace(client: AsyncClient, network: bool = True) -> str:
+    body = _minimal_config()
+    body["config"]["network"] = network
+    return (await client.post("/v1/workspaces", json=body)).json()["id"]
+
+
+async def _run(client: AsyncClient, wid: str, line: str) -> dict:
+    r = await client.post(
+        f"/v1/workspaces/{wid}/shell", json={"command": line}
+    )
+    return r.json()
+
+
+@pytest.mark.asyncio
+async def test_put_installs_refuses_a_taken_name_and_delete_removes(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with (
+        served_mcp() as fake,
+        served_mcp(tools=TOOLS[:1]) as small,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        wid = await _mcp_workspace(client)
+        route = f"/v1/workspaces/{wid}/clis/fx"
+        r = await client.put(route, json=_mcp_entry(fake.url))
+        assert (r.status_code, r.json()) == (200, {"name": "fx"})
+        r = await client.put(route, json=_mcp_entry(small.url))
+        assert (r.status_code, r.json()) == (
+            409,
+            {"detail": "CLI name 'fx' is already installed"},
+        )
+        assert small.requests == []
+        assert (await _run(client, wid, "fx echo-args"))["stdout"] == "{}\n"
+        assert (await client.delete(route)).status_code == 200
+        assert (await _run(client, wid, "fx list-items"))["exit_code"] == 127
+        assert (
+            await client.put(route, json=_mcp_entry(small.url))
+        ).status_code == 200
+        listed = await _run(client, wid, "fx list-items")
+        assert listed["stdout"] == "apple\nbanana\n"
+        assert (await _run(client, wid, "fx echo-args"))["exit_code"] == 1
+        assert (await client.delete(route)).status_code == 200
+        assert (await client.delete(route)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_put_refuses_what_is_not_an_mcp_cli_before_any_request(
+    tmp_path,
+):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with (
+        served_mcp() as fake,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        wid = await _mcp_workspace(client)
+        base = f"/v1/workspaces/{wid}/clis"
+        bad_auth = _mcp_entry(fake.url)
+        bad_auth["config"]["auth"]["extra"] = 1
+        refused = [
+            await client.put(f"{base}/sl", json={"cli": "slack"}),
+            await client.put(f"{base}/pg", json={"script": "pager.py"}),
+            await client.put(f"{base}/ls", json=_mcp_entry(fake.url)),
+            await client.put(f"{base}/fx", json=bad_auth),
+            await client.put(
+                f"{base}/fx", json={**_mcp_entry(fake.url), "nope": 1}
+            ),
+        ]
+        assert [r.status_code for r in refused] == [422] * 5
+        assert fake.requests == []
+        body = _minimal_config()
+        body["config"]["clis"] = {"lin": {"cli": "linear"}}
+        body["config"]["clis"]["lin"]["config"] = {"api_key": "k"}
+        lin = (await client.post("/v1/workspaces", json=body)).json()["id"]
+        r = await client.put(
+            f"/v1/workspaces/{lin}/clis/lin", json=_mcp_entry(fake.url)
+        )
+        assert r.status_code == 409
+        assert (
+            await client.delete(f"/v1/workspaces/{lin}/clis/lin")
+        ).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_two_puts_at_once_leave_one_cli_installed(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with (
+        served_mcp() as fake,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        wid = await _mcp_workspace(client)
+        route = f"/v1/workspaces/{wid}/clis/fx"
+        answers = await asyncio.gather(
+            client.put(route, json=_mcp_entry(fake.url)),
+            client.put(route, json=_mcp_entry(fake.url)),
+        )
+        assert sorted(r.status_code for r in answers) == [200, 409]
+        assert (await _run(client, wid, "fx list-items"))["exit_code"] == 0
+
+
+@pytest.mark.asyncio
+async def test_two_deletes_at_once_answer_200_and_404(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with (
+        served_mcp() as fake,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        wid = await _mcp_workspace(client)
+        route = f"/v1/workspaces/{wid}/clis/fx"
+        assert (
+            await client.put(route, json=_mcp_entry(fake.url))
+        ).status_code == 200
+        answers = await asyncio.gather(
+            client.delete(route), client.delete(route)
+        )
+        assert sorted(r.status_code for r in answers) == [200, 404]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_put_leaves_the_name_free(tmp_path, monkeypatch):
+    monkeypatch.setenv("FX_TOKEN", TOKEN)
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with (
+        served_mcp() as fake,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        wid = await _mcp_workspace(client)
+        route = f"/v1/workspaces/{wid}/clis/fx"
+        r = await client.put(route, json=_mcp_entry("http://127.0.0.1:9/mcp"))
+        assert r.status_code == 422
+        pointer = {"from": "env", "key": "FX_TOKEN"}
+        r = await client.put(route, json=_mcp_entry(fake.url, pointer))
+        assert r.status_code == 200
+        listed = await _run(client, wid, "fx list-items")
+        assert listed["stdout"] == "apple\nbanana\n"
+
+
+class NoMCP(Policy):
+    async def pre_workspace(self, ctx: WorkspaceContext) -> Deny | None:
+        clis = ctx.config.get("clis") or {}
+        assert isinstance(clis, dict)
+        if any(
+            isinstance(entry, dict) and entry.get("cli") == "mcp"
+            for entry in clis.values()
+        ):
+            return Deny("no MCP servers")
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal", ["policy", "network"])
+async def test_a_refused_put_never_reaches_the_server(tmp_path, refusal):
+    policies = [NoMCP()] if refusal == "policy" else []
+    app = build_app(
+        idle_grace_seconds=10.0,
+        state_root=tmp_path / "state",
+        policies=policies,
+    )
+    async with (
+        served_mcp() as fake,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        wid = await _mcp_workspace(client, network=refusal != "network")
+        r = await client.put(
+            f"/v1/workspaces/{wid}/clis/fx", json=_mcp_entry(fake.url)
+        )
+        assert r.status_code == (403 if refusal == "policy" else 422)
+        assert fake.requests == []
+
+
+@pytest.mark.asyncio
+async def test_a_create_outside_its_network_never_reaches_the_server(
+    tmp_path,
+):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with (
+        served_mcp() as fake,
+        AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client,
+    ):
+        body = _minimal_config()
+        body["config"]["network"] = False
+        body["config"]["clis"] = {"fx": _mcp_entry(fake.url)}
+        r = await client.post("/v1/workspaces", json=body)
+        assert r.status_code == 400
+        assert "cannot list the server's tools" in r.json()["detail"]
+        assert fake.requests == []

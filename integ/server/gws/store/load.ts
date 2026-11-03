@@ -138,6 +138,7 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
     headers,
     messageLabels,
     attachments,
+    drafts,
     calendars,
     events,
     forms,
@@ -165,6 +166,7 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
     db.messageHeader.findMany({ where, orderBy: seq }),
     db.messageLabel.findMany({ where, orderBy: seq }),
     db.attachment.findMany({ where, orderBy: seq }),
+    db.draft.findMany({ where, orderBy: seq }),
     db.calendar.findMany({ where, orderBy: seq }),
     db.event.findMany({ where, orderBy: seq }),
     db.form.findMany({ where }),
@@ -300,6 +302,7 @@ export async function loadState(db: C, tenant: string, epochMs?: number): Promis
     }
     st.messages.set(msg.id, msg)
   }
+  for (const row of drafts) st.drafts.set(row.id, { id: row.id, messageId: row.messageId })
 
   for (const row of calendars) {
     st.calendars.set(row.id, {

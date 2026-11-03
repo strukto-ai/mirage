@@ -27,6 +27,7 @@ import {
   settlePrunes,
   treeHasAction,
   treeHasPrune,
+  treeHasTime,
   unrespellRaw,
   withoutPrune,
 } from './find_eval.ts'
@@ -368,6 +369,16 @@ describe('actions and -prune', () => {
         ],
       }),
     ).toBe(false)
+    expect(
+      treeHasTime({
+        op: 'and',
+        kids: [
+          { op: 'path', pattern: 'x' },
+          { op: 'not', kid: { op: 'mtime', lo: null, hi: 1 } },
+        ],
+      }),
+    ).toBe(true)
+    expect(treeHasTime(tree)).toBe(false)
   })
 })
 

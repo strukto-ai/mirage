@@ -43,10 +43,9 @@ from mirage.io.memory import MemoryBudget
 from mirage.io.network import (
     NetworkRule,
     NetworkSetting,
-    merge_routes,
+    narrowed,
     network_layer,
     network_routes,
-    watch_network,
 )
 from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
@@ -194,7 +193,9 @@ class MountRegistry:
         self.system_clock: Clock | None = None
         # The rule each profile's ``network`` narrows it to, by the layer
         # it adds, with the rule it narrowed.
-        self._networks: dict[str, tuple[NetworkRule | None, NetworkRule]] = {}
+        self._networks: dict[
+            str, tuple[NetworkRule | None, NetworkRule | None]
+        ] = {}
         # Why a command that SOME runtime class captures has no live
         # binding: default-world entries that failed to build (missing
         # extra) record their construction error per captured command,
@@ -311,17 +312,10 @@ class MountRegistry:
         key = json.dumps([layer, routes], sort_keys=True)
         held = self._networks.get(key)
         if held is None or held[0] is not self.network:
-            base = self.network
-            rule = NetworkRule(
-                [
-                    *(base.layers if base is not None else ()),
-                    *(() if layer is None else (layer,)),
-                ],
-                base is not None and base.metadata,
-                merge_routes(base.routes if base is not None else {}, routes),
+            held = (
+                self.network,
+                narrowed(self.network, True if setting is None else setting),
             )
-            watch_network()
-            held = (base, rule)
             self._networks[key] = held
         return held[1]
 

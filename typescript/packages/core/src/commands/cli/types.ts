@@ -19,6 +19,7 @@ import type { Limit, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { CommandFnResult, Context } from '../config.ts'
 import { compileSpec } from '../spec/compile.ts'
+import type { MCPSource } from './mcp/types.ts'
 import { CommandSpec, type CommandSpecInit, type FlagValue } from '../spec/types.ts'
 
 /** A leaf callback: the install's accessor, the operands and the `Context` a command gets. */
@@ -67,6 +68,8 @@ export class CLI {
   readonly accessor: CLIAccessorFn
   readonly script: ScriptSource | null
   readonly runtime: string | null
+  /** The MCP tool list the tree was built from, so a snapshot rebuilds it without the server. */
+  readonly mcp: MCPSource | null
 
   constructor(init: {
     spec: CommandSpec
@@ -76,10 +79,12 @@ export class CLI {
     accessor?: CLIAccessorFn
     script?: ScriptSource | null
     runtime?: string | null
+    mcp?: MCPSource | null
   }) {
     this.spec = init.spec
     this.script = init.script ?? null
     this.runtime = init.runtime ?? null
+    this.mcp = init.mcp ?? null
     this.configModel = init.configModel ?? null
     this.accessor = init.accessor ?? noopAccessor
     const handlers = { ...init.handlers }
@@ -98,6 +103,9 @@ export class CLI {
 
 function validateCli(cli: CLI): void {
   const name = cli.spec.name
+  if (cli.script !== null && cli.mcp !== null) {
+    throw new Error(`cli '${name}': an MCP tree takes no script`)
+  }
   if (cli.script !== null) {
     if (cli.spec.subcommands.length > 0) {
       throw new Error(`cli '${name}': a script serves the whole program`)
