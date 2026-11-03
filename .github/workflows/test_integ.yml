@@ -398,6 +398,38 @@ jobs:
         working-directory: integ
         run: pnpm exec tsx hosting/run.ts --mounts
 
+  integ-edge:
+    needs: [changes, typescript-build]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
+    name: integ-edge
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: '24'
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          name: integ-typescript-dist
+          path: typescript/packages
+      - name: Generate the fakes' clients
+        working-directory: integ
+        env:
+          INTEG_DB_URL: file:/tmp/mirage-edge-schema.db
+        run: |
+          for schema in hf_hub mail slack linear; do
+            pnpm exec prisma generate --schema "prisma/$schema.prisma"
+          done
+      # The corpus's hf, email, slack and linear targets on an edge worker
+      # (workerd under wrangler dev), each line over the server API.
+      - name: Run the corpus on the edge host
+        working-directory: integ
+        run: pnpm exec tsx edge/run.ts
+
   integ:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}
