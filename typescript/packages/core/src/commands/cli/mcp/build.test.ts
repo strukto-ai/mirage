@@ -199,6 +199,26 @@ describe('mcpCli', () => {
     }
   })
 
+  it('ends a listing by its deadline when the session end hangs', async () => {
+    const fake = await servedMcp()
+    try {
+      limits.timeout = 1
+      fake.pages = 5
+      fake.pageDelay = 400
+      fake.hungDelete = true
+      const started = Date.now()
+      const error: unknown = await mcpCli(bearerConfig(fake)).then(
+        () => null,
+        (e: unknown) => e,
+      )
+      const elapsed = Date.now() - started
+      expect((error as Error).message).toBe("cannot list the server's tools: MCP server timed out")
+      expect(elapsed).toBeLessThan(1800)
+    } finally {
+      await fake.close()
+    }
+  })
+
   it('never repeats the token when a listing is refused', async () => {
     const fake = await servedMcp()
     try {

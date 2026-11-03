@@ -72,6 +72,8 @@ export interface FakeMCP {
   pages: number | null
   /** Milliseconds each tool page waits before it answers. */
   pageDelay: number
+  /** A DELETE, which ends an MCP session, is never answered. */
+  hungDelete: boolean
   /** Requests are never answered. */
   stalling: boolean
   /** Every request is answered 503. */
@@ -205,6 +207,7 @@ export async function servedMcp(tools: Tool[] = TOOLS): Promise<FakeMCP> {
     expired: new Set(),
     pages: null,
     pageDelay: 0,
+    hungDelete: false,
     stalling: false,
     down: false,
     oversized: {},
@@ -246,6 +249,7 @@ export async function servedMcp(tools: Tool[] = TOOLS): Promise<FakeMCP> {
     }
     fake.requests.push(entry)
     if (fake.stalling) return
+    if (fake.hungDelete && req.method === 'DELETE') return
     if (fake.down) {
       res.writeHead(503).end('down')
       return

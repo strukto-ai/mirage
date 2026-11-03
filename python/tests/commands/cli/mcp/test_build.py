@@ -14,6 +14,7 @@
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from mcp import types
@@ -179,6 +180,42 @@ async def test_a_tool_listing_has_one_deadline_across_its_pages(monkeypatch):
     assert str(caught.value) == (
         "cannot list the server's tools: MCP server timed out"
     )
+
+
+HUNG_SESSION_END = """
+import asyncio, time
+import mirage.accessor.mcp as accessor
+from mirage.commands.cli.mcp import MCPToolsError, mcp_cli
+from tests.fixtures.mcp_server import served_mcp
+
+async def main():
+    accessor.TIMEOUT = 1.0
+    async with served_mcp(legacy=True) as fake:
+        fake.pages, fake.page_delay, fake.hung_delete = 5, 0.4, True
+        started = time.monotonic()
+        try:
+            await mcp_cli(fake.bearer_config())
+        except MCPToolsError as error:
+            print(error)
+        print(time.monotonic() - started)
+
+asyncio.run(main())
+"""
+
+
+def test_a_listing_ends_by_its_deadline_when_the_session_end_hangs():
+    # A legacy fake cut off mid-listing breaks later fakes in its process.
+    out = subprocess.run(
+        [sys.executable, "-c", HUNG_SESSION_END],
+        cwd=Path(__file__).parents[4],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    message, elapsed = out.stdout.strip().splitlines()
+    assert message == "cannot list the server's tools: MCP server timed out"
+    assert float(elapsed) < 1.8
 
 
 @pytest.mark.asyncio

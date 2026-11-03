@@ -171,20 +171,24 @@ export class MCPAccessor extends Accessor {
   }
 
   /**
-   * End the server's MCP session, waiting at most the call timeout, then close
-   * the client, which aborts a session end still in flight.
+   * End the server's MCP session, waiting at most the call timeout and never
+   * past `signal`, then close the client, which aborts a session end still in
+   * flight.
    */
-  private async shut(client: Client): Promise<void> {
+  private async shut(client: Client, signal?: AbortSignal): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      await Promise.race([
-        (client.transport as StreamableHTTPClientTransport | undefined)?.terminateSession(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => {
-            reject(new Error('the server did not end the session in time'))
-          }, TIMEOUT * 1000)
-        }),
-      ])
+      await abortable(
+        Promise.race([
+          (client.transport as StreamableHTTPClientTransport | undefined)?.terminateSession(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error('the server did not end the session in time'))
+            }, TIMEOUT * 1000)
+          }),
+        ]),
+        signal,
+      )
     } catch (error) {
       logger.debug?.(`MCP session end failed: ${String(error)}`)
     } finally {
@@ -207,7 +211,10 @@ export class MCPAccessor extends Accessor {
     return done
   }
 
-  /** Run `use` on an initialized client, closed when it settles; `shared` holds every reply to one cap. */
+  /**
+   * Run `use` on an initialized client, closed when it settles; `signal` also
+   * bounds ending the session, and `shared` holds every reply to one cap.
+   */
   async session<T>(
     use: (client: Client) => Promise<T>,
     signal?: AbortSignal,
@@ -217,7 +224,7 @@ export class MCPAccessor extends Accessor {
     try {
       return await use(client)
     } finally {
-      await this.shut(client)
+      await this.shut(client, signal)
     }
   }
 
