@@ -406,12 +406,12 @@ def removing(folder: FakeFolder) -> AbstractContextManager[FakeFolder]:
     Args:
         folder (FakeFolder): the folder answering them.
     """
-    return patch("mirage.core.nextcloud.fence.dav_request", new=folder)
+    return patch("mirage.core.nextcloud.rm.dav_request", new=folder)
 
 
 @pytest.fixture
 def waits():
     with patch(
-        "mirage.core.nextcloud.fence.sleep", new_callable=AsyncMock
+        "mirage.core.nextcloud.rm.sleep", new_callable=AsyncMock
     ) as wait:
         yield wait

@@ -1,5 +1,5 @@
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.core.nextcloud.fence import remove
+from mirage.core.nextcloud.rm import remove
 from mirage.types import PathSpec
 
 
