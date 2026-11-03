@@ -15,6 +15,7 @@ NPM_PACKAGES = (
     "cli",
     "core",
     "dsh",
+    "edge",
     "langchain",
     "mastra",
     "node",

@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-opencode",
-  "version": "0.0.8",
+  "version": "0.0.9-alpha.1",
   "description": "Native Mirage filesystem tools for OpenCode",
   "keywords": [
     "mirage",
