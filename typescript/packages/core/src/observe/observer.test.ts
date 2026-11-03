@@ -12,13 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { trace, SpanStatusCode } from '@opentelemetry/api'
 import {
-  trace,
-  type Span,
-  type SpanOptions,
-  type Tracer,
-  type TracerProvider,
-} from '@opentelemetry/api'
+  BasicTracerProvider,
+  SimpleSpanProcessor,
+  InMemorySpanExporter,
+} from '@opentelemetry/sdk-trace-base'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import { ManualClock } from '../utils/clock.ts'
@@ -416,69 +415,74 @@ describe('a damaged history file', () => {
     expect((await o.sessionCommandEvents(long)).map((e) => e.command)).toEqual(['echo 50'])
   })
 
-  it('sends a finished line as a span over its vfs calls', async () => {
-    const spans: { name: string; options: SpanOptions; parent: Span | undefined; end?: unknown }[] =
-      []
-    const fake: Tracer = {
-      startSpan(name, options = {}, ctx) {
-        const seen: (typeof spans)[number] = {
-          name,
-          options,
-          parent: ctx === undefined ? undefined : trace.getSpan(ctx),
-        }
-        spans.push(seen)
-        return {
-          isRecording: () => true,
-          end: (time?: unknown) => {
-            seen.end = time
-          },
-          spanContext: () => ({
-            traceId: '1'.repeat(32),
-            spanId: String(spans.length).repeat(16),
-            traceFlags: 1,
-          }),
-        } as unknown as Span
-      },
-      startActiveSpan: () => {
-        throw new Error('unused')
-      },
-    }
-    const provider: TracerProvider = { getTracer: () => fake }
-    trace.setGlobalTracerProvider(provider)
-    const clock = new ManualClock(NEW_YEAR)
-    const o = new Observer(new RAMObserverStore(), clock, 'w')
-    const start = NEW_YEAR * 1000
-    const rec = new OpRecord({
-      op: 'read',
-      path: '/d/a',
-      source: 's3',
-      bytes: 6,
-      timestamp: start + 5,
-      durationMs: 12,
-    })
-    await o.logCommand('cat /d/a', 's1', undefined, 'L')
-    clock.advance(1)
-    await o.logResult(new IOResult({ exitCode: 1 }), [rec], 's1', undefined, 'L')
-    const [line, call] = spans
-    expect([line?.name, line?.options.attributes, line?.options.startTime, line?.end]).toEqual([
-      'command',
-      {
-        'mirage.session.id': 's1',
-        'mirage.command': 'cat /d/a',
-        'mirage.exit_code': 1,
-        'mirage.workspace.id': 'w',
-      },
-      start,
-      start + 1000,
-    ])
-    expect([call?.name, call?.options.attributes, call?.options.startTime, call?.end]).toEqual([
-      'vfs.read',
-      { 'mirage.vfs.path': '/d/a', 'mirage.vfs.source': 's3', 'mirage.vfs.bytes': 6 },
-      start - 7,
-      start + 5,
-    ])
-    expect(call?.parent).toBeDefined()
-  })
+  it.each(['ok', 'failed', 'partial'] as const)(
+    'exports %s child spans through an in-memory exporter',
+    async (status) => {
+      const exporter = new InMemorySpanExporter()
+      const provider = new BasicTracerProvider({
+        spanProcessors: [new SimpleSpanProcessor(exporter)],
+      })
+      trace.setGlobalTracerProvider(provider)
+      try {
+        const clock = new ManualClock(NEW_YEAR)
+        const observer = new Observer(new RAMObserverStore(), clock, 'w')
+        const start = NEW_YEAR * 1000
+        const rec = new OpRecord({
+          op: 'read',
+          path: '/d/a',
+          source: 's3',
+          bytes: 6,
+          timestamp: start + 5,
+          durationMs: 12,
+          status,
+          changed: status === 'partial',
+          served: 'cache',
+          errno: status === 'ok' ? null : 13,
+        })
+        await observer.logCommand('cat /d/a', 's1', undefined, 'L')
+        clock.advance(1)
+        await observer.logResult(
+          new IOResult({ exitCode: status === 'ok' ? 0 : 1 }),
+          [rec],
+          's1',
+          undefined,
+          'L',
+        )
+        await provider.forceFlush()
+        const spans = exporter.getFinishedSpans()
+        const child = spans.find((span) => span.name === 'vfs.read')
+        const parent = spans.find((span) => span.name === 'command')
+        expect(child).toBeDefined()
+        expect(parent).toBeDefined()
+        expect(child?.attributes).toEqual({
+          'mirage.vfs.path': '/d/a',
+          'mirage.vfs.source': 's3',
+          'mirage.vfs.bytes': 6,
+          'mirage.vfs.status': status,
+          'mirage.vfs.changed': status === 'partial',
+          'mirage.vfs.served': 'cache',
+          ...(status === 'ok' ? {} : { 'mirage.vfs.errno': 13, 'error.type': 'EACCES' }),
+        })
+        expect(child?.status.code).toBe(
+          status === 'ok' ? SpanStatusCode.UNSET : SpanStatusCode.ERROR,
+        )
+        expect(child?.parentSpanContext?.spanId).toBe(parent?.spanContext().spanId)
+        expect(parent?.attributes).toEqual({
+          'mirage.session.id': 's1',
+          'mirage.command': 'cat /d/a',
+          'mirage.exit_code': status === 'ok' ? 0 : 1,
+          'mirage.workspace.id': 'w',
+        })
+        expect(child?.startTime).toEqual([NEW_YEAR - 1, 993_000_000])
+        expect(child?.endTime).toEqual([NEW_YEAR, 5_000_000])
+        expect(parent?.startTime).toEqual([NEW_YEAR, 0])
+        expect(parent?.endTime).toEqual([NEW_YEAR + 1, 0])
+      } finally {
+        trace.disable()
+        await provider.shutdown()
+      }
+    },
+  )
 
   it('lists lines in the order they ended, each ended once', async () => {
     const clock = new ManualClock(NEW_YEAR)

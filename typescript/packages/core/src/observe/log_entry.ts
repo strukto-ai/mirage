@@ -40,6 +40,10 @@ export interface LogEntryInit {
   stdout?: string
   stderr?: string
   offset?: number
+  status?: OpRecord['status']
+  errno?: number | null
+  changed?: boolean
+  served?: OpRecord['served']
 }
 
 /**
@@ -66,6 +70,10 @@ export class LogEntry {
   readonly stdout: string | undefined
   readonly stderr: string | undefined
   readonly offset: number | undefined
+  readonly status: OpRecord['status'] | undefined
+  readonly errno: number | null | undefined
+  readonly changed: boolean | undefined
+  readonly served: OpRecord['served'] | undefined
 
   constructor(init: LogEntryInit) {
     this.type = init.type
@@ -84,6 +92,10 @@ export class LogEntry {
     this.stdout = init.stdout
     this.stderr = init.stderr
     this.offset = init.offset
+    this.status = init.status
+    this.errno = init.errno
+    this.changed = init.changed
+    this.served = init.served
   }
 
   static fromOpRecord(rec: OpRecord, session: string, cwd?: string, parent?: string): LogEntry {
@@ -96,6 +108,10 @@ export class LogEntry {
       source: rec.source,
       bytes: rec.bytes,
       durationMs: rec.durationMs,
+      status: rec.status,
+      errno: rec.errno,
+      changed: rec.changed,
+      served: rec.served,
     }
     if (cwd !== undefined) init.cwd = cwd
     if (parent !== undefined) init.parent = parent
@@ -121,6 +137,10 @@ export class LogEntry {
     if (this.stdout !== undefined) obj.stdout = this.stdout
     if (this.stderr !== undefined) obj.stderr = this.stderr
     if (this.offset !== undefined) obj.offset = this.offset
+    if (this.status !== undefined) obj.status = this.status
+    if (this.errno != null) obj.errno = this.errno
+    if (this.changed !== undefined) obj.changed = this.changed
+    if (this.served !== undefined) obj.served = this.served
     return JSON.stringify(obj)
   }
 }

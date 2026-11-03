@@ -107,3 +107,22 @@ describe('LogEntry.toJsonLine', () => {
     expect(parsed).not.toHaveProperty('cwd')
   })
 })
+
+it('serializes an operation outcome in its VFS entry', () => {
+  const rec = new OpRecord({
+    op: 'unlink',
+    path: '/m/a',
+    source: 'ram',
+    bytes: 0,
+    timestamp: 1,
+    durationMs: 0,
+    status: 'failed',
+    errno: 13,
+  })
+  expect(JSON.parse(LogEntry.fromOpRecord(rec, 's').toJsonLine())).toMatchObject({
+    status: 'failed',
+    errno: 13,
+    changed: false,
+    served: 'backend',
+  })
+})
