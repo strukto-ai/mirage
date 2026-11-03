@@ -10,7 +10,7 @@ import { toHex } from '../../../../utils/hex.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GITLINK, GITLINK_MODE } from './constants.ts'
-import { GitError } from './errors.ts'
+import { EmptyTreeNameError, GitError } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { readFile, readNames, readOptional, readRange, statOf } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
@@ -178,7 +178,7 @@ export async function fsck(
       edges.set(oid, links)
       for (const link of links) referenced.add(link)
     } catch (err) {
-      broken.add(oid)
+      if (err instanceof EmptyTreeNameError) broken.add(oid)
       errors.push(`error: object ${oid}: ${err instanceof Error ? err.message : String(err)}\n`)
     }
   }

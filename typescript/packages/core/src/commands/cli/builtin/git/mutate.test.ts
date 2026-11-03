@@ -3696,6 +3696,8 @@ describe('a tree entry with an empty name', () => {
     ['root', 'show odd^{tree}'],
     ['root', 'rev-parse odd:a.txt'],
     ['root', 'show odd:a.txt'],
+    ['root', 'restore --source odd a.txt'],
+    ['root', 'diff-tree odd'],
     ['nested', 'ls-tree -r odd'],
     ['nested', 'ls-tree odd sub/'],
     ['nested', 'cat-file -p odd:sub'],
@@ -3713,7 +3715,7 @@ describe('a tree entry with an empty name', () => {
         'grep x odd',
         'checkout odd',
         'switch odd',
-        'restore --source odd a.txt',
+        'restore --source odd .',
       ].map((line) => [shape, line]),
     ),
   ])('is fatal to %s: %s', async (shape, line) => {
@@ -3750,6 +3752,7 @@ describe('a tree entry with an empty name', () => {
     ['nested', 'ls-tree odd'],
     ['nested', 'cat-file -p odd^{tree}'],
     ['nested', 'rev-parse odd:a.txt'],
+    ['nested', 'diff-tree odd'],
   ])('lets %s: %s read on', async (shape, line) => {
     const h = await harness((repo) => {
       branchWithPaths(repo, 'odd', EMPTY_NAMED[shape] ?? {})

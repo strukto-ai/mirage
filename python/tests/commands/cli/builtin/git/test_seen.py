@@ -41,6 +41,7 @@ from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (
     REPO,
+    branch_with_paths,
     commit_file,
     repo_context,
 )
@@ -377,6 +378,22 @@ async def test_staged_content_answers_to_the_rules(history: Path):
         1,
         "",
         "git diff: /repo/new.txt: Permission denied\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_raw_tree_bytes_are_read_whole_whatever_an_entry_is_named(
+    history: Path,
+):
+    branch_with_paths(history, "odd", {"/x.txt": b"x\n", "ok.txt": b"o\n"})
+    code, raw, err = await raw_shell(
+        history, "git cat-file tree odd^{tree}", "veiled"
+    )
+    assert (code, err) == (0, b"")
+    assert await shell(history, "git cat-file -s odd^{tree}", "veiled") == (
+        0,
+        f"{len(raw)}\n",
+        "",
     )
 
 
