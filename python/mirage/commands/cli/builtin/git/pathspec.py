@@ -29,6 +29,8 @@ from mirage.workspace.files import reader_of
 T = TypeVar("T")
 
 MAGIC = ":"
+TOP = ":/"
+EXCLUDE = ("!", "^")
 SLASH = "/"
 
 
@@ -50,23 +52,51 @@ def absolute_operand(start: str, operand: str) -> str:
     return posixpath.normpath(posixpath.join(start, operand))
 
 
-def repo_relative(location: RepoLocation, start: str, operand: str) -> str:
+def top_path(operand: str) -> str | None:
+    """The root-relative path a top-magic operand names, None for any
+    other operand.
+
+    git's short magic ``:/`` reads the rest from the work tree root, an
+    optional ``:`` ending the magic; ``:/!`` and ``:/^`` add exclusion,
+    which this build lacks. Pinned against git 2.51.2.
+
+    Args:
+        operand (str): the operand as the user spelled it.
+    """
+    if not operand.startswith(TOP):
+        return None
+    rest = operand[len(TOP) :]
+    if rest.startswith(EXCLUDE):
+        return None
+    return rest.removeprefix(MAGIC).lstrip(SLASH)
+
+
+def repo_relative(
+    location: RepoLocation, start: str, operand: str, magic: bool = True
+) -> str:
     """A path operand as a repository-relative path.
 
     Empty string for the working tree root itself, which is what
     ``git add .`` from the top resolves to and means "everything".
     Git uses the work tree as the base when invoked from outside it,
-    as is possible with --git-dir and --work-tree.
+    as is possible with --git-dir and --work-tree. A pathspec's top
+    magic (``:/``) names a path from the root; ``mv`` reads its operands
+    as plain paths, so it turns magic off.
 
     Args:
         location (RepoLocation): the discovered repository.
         start (str): absolute virtual path git is running in.
         operand (str): the operand as the user spelled it.
+        magic (bool): whether a ``:/`` prefix is top magic.
     """
     root = location.worktree.virtual.rstrip("/") or "/"
     prefix = root if root.endswith("/") else f"{root}/"
-    base = start if start == root or start.startswith(prefix) else root
-    absolute = absolute_operand(base, operand)
+    top = top_path(operand) if magic else None
+    if top is not None:
+        absolute = absolute_operand(root, top or ".")
+    else:
+        base = start if start == root or start.startswith(prefix) else root
+        absolute = absolute_operand(base, operand)
     if absolute == root:
         return ""
     if not absolute.startswith(prefix):
@@ -112,8 +142,9 @@ def pathspec_patterns(
 
     A trailing slash survives, because ``docs/`` names only what lies
     under a directory where ``docs`` also names a file of that name. An
-    empty operand is git's own refusal, and magic (``:(top)``, ``:!``)
-    is refused as unsupported rather than matched as a path.
+    empty operand is git's own refusal, and magic other than ``:/``
+    (``:(top)``, ``:!``) is refused as unsupported rather than matched
+    as a path.
 
     Args:
         location (RepoLocation): the discovered repository.
@@ -124,7 +155,7 @@ def pathspec_patterns(
     for operand in operands:
         if not operand:
             raise EmptyPathspecError()
-        if operand.startswith(MAGIC):
+        if operand.startswith(MAGIC) and top_path(operand) is None:
             raise UnsupportedPathspecError(operand)
         pattern = repo_relative(location, start, operand)
         if pattern and operand.endswith(SLASH):

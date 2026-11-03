@@ -15,7 +15,7 @@
 import { PathSpec } from '../../../../types.ts'
 import { describe, expect, it } from 'vitest'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
-import { pathspecPatterns, pathspecSelects, patternRoots } from './pathspec.ts'
+import { pathspecPatterns, pathspecSelects, patternRoots, repoRelative } from './pathspec.ts'
 import type { RepoLocation } from './types.ts'
 
 const LOCATION: RepoLocation = {
@@ -38,9 +38,32 @@ it.each([
 })
 
 it.each([
+  [':/', ''],
+  [':/a.txt', 'a.txt'],
+  [':/docs/notes.md', 'docs/notes.md'],
+  [':/:a.txt', 'a.txt'],
+])('reads top magic %j from the root', (operand, relative) => {
+  expect(repoRelative(LOCATION, '/repo/docs', operand)).toBe(relative)
+})
+
+it('keeps a colon in the path without magic', () => {
+  expect(repoRelative(LOCATION, '/repo', ':/a.txt', false)).toBe(':/a.txt')
+})
+
+it('reads top magic as a pattern from the root', () => {
+  expect(pathspecPatterns(LOCATION, '/repo/docs', [':/', ':/docs/', ':/*.md'])).toEqual([
+    '',
+    'docs/',
+    '*.md',
+  ])
+})
+
+it.each([
   ['', EmptyPathspecError],
   [':(top)a.txt', UnsupportedPathspecError],
   [':!a.txt', UnsupportedPathspecError],
+  [':/!a.txt', UnsupportedPathspecError],
+  [':/^a.txt', UnsupportedPathspecError],
   ['/elsewhere/a.txt', OutsideRepositoryError],
 ])('refuses %j', (operand, error) => {
   expect(() => pathspecPatterns(LOCATION, '/repo', [operand])).toThrow(error)
