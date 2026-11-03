@@ -81,7 +81,8 @@ function retire(exports: Exports, trapped: boolean): void {
  * The compiled module, for the page to hand the workers it starts without a
  * copy. `#mirage-rs-wasm` is the module itself where the host's bundler loads
  * `.wasm` files (the `workerd` condition: no code is compiled at run time)
- * and its bytes as base64 everywhere else.
+ * or the host reads it from beside the package (`node`), and its bytes as
+ * base64 everywhere else.
  */
 export function compiledModule(): Promise<WebAssembly.Module> {
   const source: string | WebAssembly.Module = MIRAGE_RS_WASM

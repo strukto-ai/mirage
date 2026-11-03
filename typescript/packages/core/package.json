@@ -64,6 +64,7 @@
     "#mirage-rs-wasm": {
       "types": "./src/generated/mirage_rs.ts",
       "workerd": "./dist/generated/mirage_rs.workerd.js",
+      "node": "./dist/generated/mirage_rs.node.js",
       "default": "./dist/generated/mirage_rs.js"
     }
   },
