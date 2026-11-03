@@ -18,7 +18,7 @@ import { registerApi } from '@struktoai/mirage-server/api'
 import { AuthMode, resolveAuthConfig, type AuthConfig } from '@struktoai/mirage-server/auth/config'
 import { authenticator, PUBLIC_PATHS } from '@struktoai/mirage-server/auth/middleware'
 import { WorkspaceRegistry } from '@struktoai/mirage-server/registry'
-import { HOST } from './host.ts'
+import { edgeHost, RAMRecordClient } from './host.ts'
 import { WebRoutes } from './router.ts'
 
 interface Served {
@@ -82,6 +82,7 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
     }
     const registry = new WorkspaceRegistry({
       accountsRequired: auth.mode === AuthMode.Jwt,
+      owners: new RAMRecordClient(),
       ...(options.maxWorkspaces !== undefined ? { maxWorkspaces: options.maxWorkspaces } : {}),
       ...(options.maxSessions !== undefined ? { maxSessions: options.maxSessions } : {}),
       policies: options.policies ?? [],
@@ -89,7 +90,7 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
     const routes = new WebRoutes()
     const mcp = registerApi(routes, {
       registry,
-      host: HOST,
+      host: edgeHost(),
       auth,
       startedAt: Date.now() / 1000,
       exit: () => undefined,
@@ -98,20 +99,37 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
     served = { check, registry, routes, mcp }
     return served
   }
+  // The requests still being answered, which close lets finish first, as
+  // the Node server's close waits for its open requests.
+  const answering = new Set<Promise<Response>>()
+  const answer = async (request: Request): Promise<Response> => {
+    const { check, routes } = serve()
+    let account: string | null = null
+    if (!PUBLIC_PATHS.has(new URL(request.url).pathname)) {
+      const verdict = await check(request.headers.get('authorization') ?? undefined)
+      if (typeof verdict === 'string') return unauthorized(verdict)
+      account = verdict.account
+    }
+    return routes.fetch(request, account)
+  }
   return {
-    async fetch(request) {
-      const { check, routes } = serve()
-      let account: string | null = null
-      if (!PUBLIC_PATHS.has(new URL(request.url).pathname)) {
-        const answer = await check(request.headers.get('authorization') ?? undefined)
-        if (typeof answer === 'string') return unauthorized(answer)
-        account = answer.account
+    fetch(request) {
+      const response = answer(request)
+      const settle = (): void => {
+        answering.delete(response)
       }
-      return routes.fetch(request, account)
+      answering.add(response)
+      response.then(settle, settle)
+      return response
     },
     async close() {
       if (served === null) return
       const { mcp, registry } = served
+      // New workspaces and lines are refused from here; the running lines
+      // are cancelled, and every request still open settles before the
+      // workspaces close.
+      await registry.drain(0)
+      await Promise.allSettled([...answering])
       try {
         await mcp.close()
         await registry.jobs.close()

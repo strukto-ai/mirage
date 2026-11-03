@@ -25,7 +25,7 @@ npm install -D wrangler
 name = "mirage"
 main = "src/worker.ts"
 compatibility_date = "2026-10-01"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
 ```
 
 ## Run a workspace
@@ -68,6 +68,8 @@ import { createApp } from '@struktoai/mirage-edge'
 
 export default createApp({ maxWorkspaces: 8 })
 ```
+
+A workspace outlives the request that created it, so a later request finishes work an earlier one started; `no_handle_cross_request_promise_resolution` above lets it.
 
 It checks each request the way the server does, from the same `MIRAGE_AUTH_MODE`, `MIRAGE_AUTH_TOKEN` and `MIRAGE_JWT_*` [variables](/home/access/http#configure-authentication). Without a token or a JWT issuer it serves nothing, since an edge app's URL is public.
 
