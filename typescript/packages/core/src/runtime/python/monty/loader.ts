@@ -73,6 +73,11 @@ export function provideMontyModule(load: () => Promise<MontyModuleLike>): void {
   provided = load
 }
 
+/** Whether runs share the host's own thread: the host provided monty. */
+export function sharesThread(): boolean {
+  return provided !== undefined
+}
+
 /** Import the optional engine package, failing loud when it is absent. */
 export async function loadMontyModule(): Promise<MontyModuleLike> {
   if (provided !== undefined) return provided()

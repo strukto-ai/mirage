@@ -116,7 +116,11 @@
   "utils/abort": {
    "typescript_only": {
     "SignalStop": "Python's timeout cancels its run and joins it whole; a JavaScript promise cannot be cancelled, so a stop that names a signal carries it as the abort reason, for the line and the handler to give the stopped run a stop's grace.",
-    "stopSignal": "Python's timeout cancels its run and joins it whole; a JavaScript promise cannot be cancelled, so a stop that names a signal carries it as the abort reason, for the line and the handler to give the stopped run a stop's grace."
+    "stopSignal": "Python's timeout cancels its run and joins it whole; a JavaScript promise cannot be cancelled, so a stop that names a signal carries it as the abort reason, for the line and the handler to give the stopped run a stop's grace.",
+    "Deadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
+    "deadlines": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
+    "runWithDeadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit.",
+    "boundDeadline": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit."
    }
   },
   "commands/builtin/generic/diff": {
@@ -1203,7 +1207,13 @@
   "runtime/python/monty/loader": {
    "typescript_only": {
     "provideMontyModule": "A host with no worker threads (an edge runtime) hands TypeScript an in-process monty pool; Python imports pydantic_monty natively and starts its own workers.",
-    "provided": "The host's monty loader that provideMontyModule sets; Python has no such hook."
+    "provided": "The host's monty loader that provideMontyModule sets; Python has no such hook.",
+    "sharesThread": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit."
+   }
+  },
+  "runtime/python/monty/constants": {
+   "typescript_only": {
+    "SHARED_THREAD_SECONDS": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit."
    }
   }
  }

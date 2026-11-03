@@ -18,11 +18,12 @@ import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
-import { POOL_WORKERS } from './constants.ts'
+import { runWithDeadline } from '../../../utils/abort.ts'
+import { POOL_WORKERS, SHARED_THREAD_SECONDS } from './constants.ts'
 import { MontyExecution } from './execution.ts'
 import type * as loader from './loader.ts'
 
-const fake = vi.hoisted(() => ({ module: null as unknown }))
+const fake = vi.hoisted(() => ({ module: null as unknown, shared: false }))
 
 vi.mock('./loader.ts', async (importOriginal) => {
   const original = await importOriginal<typeof loader>()
@@ -32,6 +33,7 @@ vi.mock('./loader.ts', async (importOriginal) => {
       fake.module === null
         ? original.loadMontyModule()
         : Promise.resolve(fake.module as loader.MontyModuleLike),
+    sharesThread: () => fake.shared,
   }
 })
 
@@ -148,6 +150,60 @@ describe('MontyExecution.run', () => {
         expect(late.close).toHaveBeenCalledTimes(1)
       })
     } finally {
+      await execution.close()
+    }
+  })
+
+  it("holds a run on the host's thread to its deadline, or the cap if sooner", async () => {
+    class RuntimeError extends Error {
+      constructor(readonly exception: { typeName: string; message: string }) {
+        super(exception.message)
+      }
+    }
+    const limits: (number | undefined)[] = []
+    fake.module = {
+      MontyRuntimeError: RuntimeError,
+      MontySyntaxError: class extends Error {},
+      MontyCrashedError: class extends Error {},
+    }
+    const execution = new MontyExecution()
+    vi.spyOn(execution as unknown as PoolHooks, 'loadPool').mockResolvedValue({
+      checkout: (options: { limits: { maxFeedDurationSecs?: number } }) => {
+        limits.push(options.limits.maxFeedDurationSecs)
+        return Promise.resolve({
+          workerPid: undefined,
+          feedRun: () =>
+            Promise.reject(
+              new RuntimeError({
+                typeName: 'TimeoutError',
+                message: 'feed time limit exceeded: 2s',
+              }),
+            ),
+          close: () => Promise.resolve(),
+        })
+      },
+      close: () => Promise.resolve(),
+    })
+    const loop = { code: 'while True: pass\n', args: [], stdin: null }
+    const ctx = { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/') }
+    const fired = vi.fn()
+    try {
+      fake.shared = true
+      const stopped = await runWithDeadline(2, fired, () => execution.run(loop, ctx, null))
+      expect([stopped.exitCode, fired.mock.calls.length]).toEqual([1, 1])
+      expect(limits[0]).toBeGreaterThan(1.9)
+      expect(limits[0]).toBeLessThanOrEqual(2)
+      const capped = await runWithDeadline(600, fired, () => execution.run(loop, ctx, null))
+      expect([capped.exitCode, fired.mock.calls.length]).toEqual([1, 1])
+      expect(new TextDecoder().decode(capped.stderr ?? new Uint8Array())).toContain('time limit')
+      expect(limits[1]).toBe(SHARED_THREAD_SECONDS)
+      fake.shared = false
+      await runWithDeadline(2, fired, () => execution.run(loop, ctx, null))
+      expect(limits[2]).toBeUndefined()
+      expect(fired).toHaveBeenCalledTimes(1)
+    } finally {
+      fake.shared = false
+      fake.module = null
       await execution.close()
     }
   })

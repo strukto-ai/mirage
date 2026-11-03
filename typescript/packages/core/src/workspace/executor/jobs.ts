@@ -52,7 +52,7 @@ import { commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { type JsonValue, PathSpec, type Refusal } from '../../types.ts'
-import { abortable, atDeadline } from '../../utils/abort.ts'
+import { abortable, atDeadline, runWithDeadline } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
 import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
@@ -355,15 +355,14 @@ export async function handleBackground(
     }
     const body = async (): Promise<[IOResult, ExecutionNode]> => {
       const seconds = childEvaluation.frame.lineTimeout
-      const disarm =
-        seconds !== null && seconds > 0
-          ? atDeadline(seconds, () => {
-              expiry.abort(new CommandTimeoutError(LINE_NAME, seconds))
-            })
-          : undefined
+      const limit = seconds !== null && seconds > 0 ? seconds : null
+      const expire = (): void => {
+        if (limit !== null) expiry.abort(new CommandTimeoutError(LINE_NAME, limit))
+      }
+      const disarm = limit === null ? undefined : atDeadline(limit, expire)
       let result: [IOResult, ExecutionNode]
       try {
-        result = await run()
+        result = await (limit === null ? run() : runWithDeadline(limit, expire, run))
       } catch (err) {
         // Past its own limit, or stopped by a command's own timeout, the job
         // answers as a line does, 124 and the message; a killed job ends as

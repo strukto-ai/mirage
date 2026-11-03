@@ -55,6 +55,7 @@ import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
 import {
   atDeadline,
+  runWithDeadline,
   hasAborted,
   makeAbortError,
   mergeSignals,
@@ -1280,12 +1281,11 @@ async function runParsedLine(
       const left =
         deadline === null ? 0 : deadline.seconds - (performance.now() - deadline.start) / 1000
       if (deadline !== null && left <= 0) deadline.expiry.abort()
-      const disarm =
-        deadline === null || left <= 0
-          ? undefined
-          : atDeadline(left, () => {
-              deadline.expiry.abort()
-            })
+      const expire = (): void => {
+        deadline?.expiry.abort()
+      }
+      const timed = deadline !== null && left > 0
+      const disarm = timed ? atDeadline(left, expire) : undefined
       try {
         // The one cancellation seam, the twin of Python's run_cancellable:
         // a responsive tree unwinds at its checkpoints and reports its own
@@ -1297,26 +1297,30 @@ async function runParsedLine(
         // max_memory has left, a nested line's too, every connection it
         // opens must clear the workspace's network, and it reads the
         // workspace's system clock.
-        const running = runWithEgress(
-          env.registry.networkOf(context.session.network),
-          env.registry.policies,
-          () =>
-            runWithMemory(env.registry.memory, () =>
-              runWithSystemClock(env.registry.systemClock, async () =>
-                runCommandTree(
-                  deadline === null ? deps : { ...deps, signal: deadline.signal },
-                  rootNode,
-                  context,
-                  stdin,
-                  false,
-                  options.callStack ?? null,
-                  (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
-                    ? env.router.context(command, context.session, await judged())
-                    : null,
+        const tree = (): Promise<[ByteSource | null, IOResult, ExecutionNode]> =>
+          runWithEgress(
+            env.registry.networkOf(context.session.network),
+            env.registry.policies,
+            () =>
+              runWithMemory(env.registry.memory, () =>
+                runWithSystemClock(env.registry.systemClock, async () =>
+                  runCommandTree(
+                    deadline === null ? deps : { ...deps, signal: deadline.signal },
+                    rootNode,
+                    context,
+                    stdin,
+                    false,
+                    options.callStack ?? null,
+                    (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
+                      ? env.router.context(command, context.session, await judged())
+                      : null,
+                  ),
                 ),
               ),
-            ),
-          context.session.sessionId,
+            context.session.sessionId,
+          )
+        const running = Promise.resolve(
+          timed ? runWithDeadline(left, expire, tree) : tree(),
         ).finally(release)
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.

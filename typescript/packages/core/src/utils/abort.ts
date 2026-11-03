@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { createAsyncContext } from './async_context.ts'
+
 /**
  * The one error an aborted invocation rejects with. A signal's own reason
  * rides along as `cause` (a caller's `abort(x)`, a timeout's TimeoutError)
@@ -82,6 +84,36 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     arm()
     signal?.addEventListener('abort', onAbort, { once: true })
   })
+}
+
+/** A deadline a call runs under: when it falls on `performance.now()`'s clock, and what stops the call there. */
+export interface Deadline {
+  readonly at: number
+  readonly fire: () => void
+}
+
+const deadlines = createAsyncContext<Deadline>()
+
+/**
+ * Run `fn` under the deadline `seconds` from now that `fire` stops. The
+ * timer `atDeadline` arms is what stops it; a guest that holds the thread
+ * the timer needs (monty in an edge isolate) reads it through
+ * `boundDeadline` and stops itself there. The earlier of it and a deadline
+ * already bound is the one bound.
+ */
+export function runWithDeadline<R>(
+  seconds: number,
+  fire: () => void,
+  fn: () => R | Promise<R>,
+): R | Promise<R> {
+  const deadline = { at: performance.now() + seconds * 1000, fire }
+  const outer = deadlines.getStore()
+  return deadlines.run(outer !== undefined && outer.at <= deadline.at ? outer : deadline, fn)
+}
+
+/** The deadline the running call is under, null for none. */
+export function boundDeadline(): Deadline | null {
+  return deadlines.getStore() ?? null
 }
 
 /**

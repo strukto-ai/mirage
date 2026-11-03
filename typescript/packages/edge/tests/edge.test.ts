@@ -26,10 +26,18 @@ interface Result {
 
 let worker: Unstable_DevWorker
 
-async function run(lines: readonly string[], maxMemory?: string): Promise<Result[]> {
+async function run(
+  lines: readonly string[],
+  maxMemory?: string,
+  lineSeconds?: number,
+): Promise<Result[]> {
   const response = await worker.fetch('http://edge.test/run', {
     method: 'POST',
-    body: JSON.stringify({ lines, ...(maxMemory !== undefined ? { maxMemory } : {}) }),
+    body: JSON.stringify({
+      lines,
+      ...(maxMemory !== undefined ? { maxMemory } : {}),
+      ...(lineSeconds !== undefined ? { lineSeconds } : {}),
+    }),
   })
   expect(response.status).toBe(200)
   return (await response.json()) as Result[]
@@ -78,6 +86,18 @@ describe('mirage in workerd', () => {
     expect(loop?.stderr).toContain('TimeoutError')
     expect(next?.stdout).toBe('2\n')
   }, 90_000)
+
+  it("stops a busy python3 loop at its line's deadline, sooner than the cap", async () => {
+    const started = Date.now()
+    const [loop, next] = await run(
+      ["python3 -c 'while True: pass'", "python3 -c 'print(1 + 1)'"],
+      undefined,
+      2,
+    )
+    expect(loop?.exit).toBe(124)
+    expect(next?.stdout).toBe('2\n')
+    expect(Date.now() - started).toBeLessThan(20_000)
+  }, 60_000)
 
   it("follows a client's redirect hop by hop under the workspace's rule", async () => {
     const server: Server = createServer((req, res) => {

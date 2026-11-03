@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
+import { Limit } from '@struktoai/mirage-core/types'
 import { createApp, MountMode, RAMVFS, Workspace } from '../src/index.ts'
 
 const app = createApp({ maxWorkspaces: 32 })
@@ -20,6 +21,7 @@ const app = createApp({ maxWorkspaces: 32 })
 interface Run {
   readonly lines: readonly string[]
   readonly maxMemory?: string
+  readonly lineSeconds?: number
 }
 
 interface Follow {
@@ -55,6 +57,9 @@ export default {
         mode: MountMode.EXEC,
         runtimes: ['workspace', 'monty'],
         ...(run.maxMemory !== undefined ? { maxMemory: run.maxMemory } : {}),
+        ...(run.lineSeconds !== undefined
+          ? { commandLimits: { '@line': new Limit({ timeoutSeconds: run.lineSeconds }) } }
+          : {}),
       },
     )
     try {

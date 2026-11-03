@@ -55,7 +55,7 @@ npx wrangler dev
 curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 ```
 
-`python3` runs on Monty in the isolate's own thread. A run stops after 30 seconds with `TimeoutError`, so a loop that never ends leaves the isolate free for the next line.
+`python3` runs on Monty in the isolate's own thread, where no timer can interrupt it, so Monty's own clock stops a run: at the line's time limit, which ends the line with exit 124, or after 30 seconds with `TimeoutError` if that comes first. A loop that never ends leaves the isolate free for the next line.
 
 For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/registry`), not its package root: the root also imports optional packages, such as Pyodide, that an edge bundle cannot resolve.
 
