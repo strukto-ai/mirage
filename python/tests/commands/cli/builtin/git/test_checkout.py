@@ -25,12 +25,14 @@ from mirage.commands.cli.builtin.git.checkout import (
     _blocked_descendants,
     _conflicts,
 )
+from mirage.commands.cli.builtin.git.constants import GITLINK, SYMLINK
 from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (
     AUTHOR,
     branch_with_gitlink,
+    branch_with_paths,
     commit_gitlink,
     conflict_index,
 )
@@ -828,3 +830,88 @@ async def test_a_gitlink_directory_that_is_not_empty_is_kept_with_a_warning(
     assert (repo_path / "sub" / "keep.txt").read_text(
         encoding="utf-8"
     ) == "keep\n"
+
+
+INVALID = {
+    "../above.txt": b"above\n",
+    "sub/.git/config": b"[core]\n",
+    "a.txt": b"one changed\n",
+}
+
+
+@pytest.mark.asyncio
+async def test_a_branch_naming_paths_git_rejects_is_refused_whole(
+    git_parent, repo_path: Path
+):
+    branch_with_paths(repo_path, "odd", INVALID)
+    before = (repo_path / "a.txt").read_bytes()
+    result = await git_parent.shell("cd /w/work && git checkout odd")
+    assert (result.exit_code, result.stderr) == (
+        1,
+        b"error: invalid path '../above.txt'\n"
+        b"error: invalid path 'sub/.git/config'\n",
+    )
+    assert not (repo_path.parent / "above.txt").exists()
+    assert not (repo_path / "sub").exists()
+    assert (repo_path / "a.txt").read_bytes() == before
+    assert (repo_path / "b.txt").exists()
+    assert head_ref(repo_path) == b"ref: refs/heads/main"
+    ls = await git_parent.shell("git -C /w/work ls-files")
+    assert ls.stdout == b"a.txt\nb.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_path_both_branches_hold_unchanged_is_left_alone(
+    git_rw, repo_path: Path
+):
+    held = {
+        "a.txt": (repo_path / "a.txt").read_bytes(),
+        "sub/.git/config": b"[core]\n",
+    }
+    branch_with_paths(repo_path, "bad1", held)
+    with Repo(str(repo_path)) as repo:
+        repo.refs.set_symbolic_ref(b"HEAD", b"refs/heads/bad1")
+    branch_with_paths(repo_path, "bad2", {**held, "new.txt": b"n\n"})
+    assert await run(git_rw, "switch bad2") == (
+        0,
+        b"A\tb.txt\nD\tsub/.git/config\n",
+        b"Switched to branch 'bad2'\n",
+    )
+    assert (repo_path / "new.txt").read_bytes() == b"n\n"
+    assert not (repo_path / "sub").exists()
+
+
+@pytest.mark.parametrize(
+    "path,mode",
+    [
+        (".git/config", MODE),
+        (".GiT/config", MODE),
+        ("./a.txt", MODE),
+        ("deep/../a.txt", MODE),
+        ("..", GITLINK),
+        ("sub/.git", GITLINK),
+        ("git~1/config", MODE),
+        (".gitmodules", SYMLINK),
+    ],
+)
+@pytest.mark.asyncio
+async def test_every_part_git_rejects_is_refused(
+    git_rw, repo_path: Path, path: str, mode: int
+):
+    branch_with_paths(repo_path, "odd", {path: b"x\n"}, {path: mode})
+    config = (repo_path / ".git" / "config").read_bytes()
+    code, _out, err = await run(git_rw, "checkout odd")
+    assert (code, err) == (1, f"error: invalid path '{path}'\n".encode())
+    assert (repo_path / ".git" / "config").read_bytes() == config
+    assert head_ref(repo_path) == b"ref: refs/heads/main"
+
+
+@pytest.mark.asyncio
+async def test_history_still_reads_a_branch_naming_such_paths(
+    git_rw, repo_path: Path
+):
+    branch_with_paths(repo_path, "odd", INVALID)
+    code, out, _err = await run(git_rw, "log --format=%s -1 odd")
+    assert (code, out) == (0, b"odd\n")
+    code, out, _err = await run(git_rw, "ls-tree -r --name-only odd")
+    assert (code, out) == (0, b"../above.txt\na.txt\nsub/.git/config\n")

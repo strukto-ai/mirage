@@ -46,6 +46,7 @@ from mirage.commands.cli.builtin.git.errors import (
     DetachWithCreateError,
     GitError,
     InvalidBranchNameError,
+    InvalidPathError,
     InvalidReferenceError,
     PathsWithBranchError,
     RefLockError,
@@ -106,7 +107,12 @@ from mirage.commands.cli.builtin.git.revparse import (
     resolve_commit,
 )
 from mirage.commands.cli.builtin.git.session import index_locked, opened
-from mirage.commands.cli.builtin.git.tree import Tree, commit_entries, contents
+from mirage.commands.cli.builtin.git.tree import (
+    Tree,
+    commit_entries,
+    contents,
+    valid_path,
+)
 from mirage.commands.cli.builtin.git.types import (
     HeadRef,
     RepoLocation,
@@ -365,6 +371,14 @@ async def switch_to(
     state = await read_index(vfs, location.gitdir)
     state.conflicts.clear()
     changed = sorted(_written(before, after))
+    # Every path git refuses to check out is named before anything is written.
+    invalid = []
+    for path in changed:
+        name = path.decode("utf-8", errors="replace")
+        if not valid_path(name, after[path][0]):
+            invalid.append(name)
+    if invalid:
+        raise InvalidPathError(invalid)
     # A gitlink is not written into the working tree at all, so it is
     # neither read as a blob nor allowed to clear what stands at the
     # name; keep_gitlink is the whole of what the entry asks for.
