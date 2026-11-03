@@ -222,6 +222,15 @@ describe('the server API in workerd', () => {
     expect(fetched.exit_code).toBe(7)
   })
 
+  it('refuses a rule that denies an address the isolate never sees', async () => {
+    const created = await call('POST', '/v1/workspaces', {
+      id: 'ranged',
+      config: { mounts: { '/': { vfs: 'ram' } }, network: { denied_domains: ['10.0.0.0/8'] } },
+    })
+    expect(created.status).toBe(400)
+    expect(created.text).toContain('cannot deny 10.0.0.0/8')
+  })
+
   it('asks a Python pre_network program before a line connects', async () => {
     const guard = [
       'import json, os',

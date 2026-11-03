@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { unstable_dev, type Unstable_DevWorker } from 'wrangler'
@@ -76,6 +78,30 @@ describe('mirage in workerd', () => {
     expect(loop?.stderr).toContain('TimeoutError')
     expect(next?.stdout).toBe('2\n')
   }, 90_000)
+
+  it("follows a client's redirect hop by hop under the workspace's rule", async () => {
+    const server: Server = createServer((req, res) => {
+      const { port } = server.address() as AddressInfo
+      const to = { '/r': '/f', '/away': `http://localhost:${String(port)}/f` }[req.url ?? '']
+      res.writeHead(to === undefined ? 200 : 302, to === undefined ? {} : { location: to })
+      res.end(to === undefined ? 'file' : '')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`
+    const fetched = async (path: string): Promise<unknown> => {
+      const response = await worker.fetch('http://edge.test/follow', {
+        method: 'POST',
+        body: JSON.stringify({ url: `${base}${path}`, allowed: ['127.0.0.1'] }),
+      })
+      return response.json()
+    }
+    try {
+      expect(await fetched('/r')).toEqual({ status: 200, body: 'file' })
+      expect(await fetched('/away')).toEqual({ error: 'TypeError: Failed to fetch' })
+    } finally {
+      server.close()
+    }
+  })
 
   it('refuses a write past max_memory', async () => {
     const [fill, after] = await run(['seq 1 10000000 > /tmp/big', 'echo ok'], '8MB')

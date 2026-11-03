@@ -177,16 +177,6 @@ async function hasState(host: ServerHost, id: string): Promise<boolean> {
   }
 }
 
-/** Delete what a failed create wrote under `id` in the server's state root. */
-async function dropState(host: ServerHost, id: string): Promise<void> {
-  const store = host.stateStore()
-  try {
-    await store.drop(id)
-  } finally {
-    await store.close()
-  }
-}
-
 /**
  * Set `reply`'s status and hand back `body` unsent. Code that holds an id
  * answers this way, so the route sends only once the id is released and a
@@ -216,10 +206,13 @@ function answer<T>(reply: RouteReply, status: number, body: T): T {
 /**
  * Run a create's `build` under the caller's claim on `id`, or answer 409
  * when the id is not theirs to create, and 503 before anything is built
- * when the server is at its `maxWorkspaces`. A claim this create made is released,
- * with the state the build saved, when the build answers anything but
- * success or throws, so a failed create leaves the id free; one the
- * account already held (its own closed or stored workspace) stays.
+ * when the server is at its `maxWorkspaces`. A claim this create made is released
+ * when the build answers anything but success or throws before saving any
+ * state, so a failed create leaves the id free. Once state is saved the
+ * claim stays with it, as for the account's own closed workspace: the
+ * account can create the id again, and no state is deleted that another
+ * server sharing the state root may be using. One the account already
+ * held stays.
  */
 async function claimed(
   deps: WorkspaceRoutesDeps,
@@ -249,8 +242,7 @@ async function claimed(
     built = reply.statusCode < 300
     return answer
   } finally {
-    if (!built && claim === Claim.New) {
-      await dropState(deps.host, id)
+    if (!built && claim === Claim.New && !(await hasState(deps.host, id))) {
       await deps.registry.release(id)
     }
   }
