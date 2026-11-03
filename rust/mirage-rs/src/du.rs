@@ -65,7 +65,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
 /// A depth: a sign, then a base-0 number filling the word, within `i64`.
 fn depth(raw: &[u8]) -> Option<i64> {
     let parts = number::parts(raw, true);
-    let value = parts
+    parts
         .value()
         .filter(|_| parts.whole() && !raw.first().is_some_and(|b| BLANKS.contains(b)))
         .and_then(|magnitude| i128::try_from(magnitude).ok())
@@ -76,8 +76,7 @@ fn depth(raw: &[u8]) -> Option<i64> {
                 magnitude
             }
         })
-        .and_then(|value| i64::try_from(value).ok());
-    value
+        .and_then(|value| i64::try_from(value).ok())
 }
 
 fn usage(line: &str) -> StreamError {
