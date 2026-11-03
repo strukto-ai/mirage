@@ -17,6 +17,7 @@ import contextlib
 import dataclasses
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from enum import Enum
 from typing import Any
@@ -195,6 +196,34 @@ def script_context(
     return data
 
 
+def program_source(source: str, method: str) -> str:
+    """The program a runtime runs at one method: the source as written,
+    and when it defines a function named for the method at its top level
+    (``def pre_command(ctx)``, or ``async def``), a call to it after,
+    with the context, printing what it returns as the answer.
+
+    The call is appended, so the program's own lines keep their numbers
+    in a traceback, and a program without the function runs unedited.
+
+    Args:
+        source (str): the program.
+        method (str): the method it answers at.
+    """
+    found = re.search(
+        rf"^(async[ \t]+)?def[ \t]+{method}[ \t]*\(", source, re.MULTILINE
+    )
+    if found is None:
+        return source
+    call = f'{method}(_mirage_json.loads(_mirage_os.environ["{CTX_ENV}"]))'
+    if found.group(1):
+        call = f"await {call}"
+    return (
+        f"{source}\n"
+        "import json as _mirage_json, os as _mirage_os\n"
+        f"print(_mirage_json.dumps({call}))\n"
+    )
+
+
 def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
     """The answer a policy program printed at one method.
 
@@ -221,7 +250,7 @@ def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
         answer = Answer.model_validate_json(text)
     except ValidationError as exc:
         raise ValueError(
-            f"script must print a JSON answer at {method}, "
+            f"script must return or print a JSON answer at {method}, "
             f'{{"kind": "deny" | "ask" | "route", ...}}'
         ) from exc
     if answer.kind not in VALIDITY[method]:
@@ -251,17 +280,18 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     ``SessionScriptsQuery`` by the session id the entry point put in the
     context.
 
-    A program runs as any program does on its runtime: never edited,
-    in the session's cwd, with the context as JSON (``script_context``)
-    in ``CTX_ENV`` and on stdin, and its answer printed on stdout
-    (``script_action``). Beside ``CTX_ENV`` it is passed only its
-    entry's own ``env``, a pointer read from the workspace's sources on
-    the entry's first run and kept: the session's variables are in the
-    context, so none the agent sets changes how the program starts, and
-    on wasi it runs with
+    A program runs as any program does on its runtime: in the session's
+    cwd, with the context as JSON (``script_context``) in ``CTX_ENV``
+    and on stdin, and its answer printed on stdout (``script_action``),
+    never edited but for the call to the function it defines for the
+    method, whose return value is that answer (``program_source``).
+    Beside ``CTX_ENV`` it is passed only its entry's own ``env``, a
+    pointer read from the workspace's sources on the entry's first run
+    and kept: the session's variables are in the context, so none the
+    agent sets changes how the program starts, and on wasi it runs with
     ``-P`` (``PROGRAM_FLAGS``), so no file the agent writes stands in
     for a module it imports. Every failure fails closed: a program that
-    exits non-zero, runs past the timeout, prints something else, or
+    exits non-zero, runs past the timeout, answers something else, or
     names a runtime that cannot be built refuses the action with a
     reason naming the profile, and is logged. The workspace's
     ``route_policy`` program runs here too (``run``), outside any
@@ -528,7 +558,9 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                         [],
                         Context(
                             flags={
-                                "c": entry.script.source,
+                                "c": program_source(
+                                    entry.script.source, method
+                                ),
                                 **PROGRAM_FLAGS.get(entry.runtime, {}),
                             },
                             cwd=PathSpec.from_str_path(cwd),

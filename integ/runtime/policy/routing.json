@@ -441,7 +441,7 @@
         {
           "command": "python3 -c \"print(1)\"",
           "expect": {
-            "throws_contains": "route_policy must print a JSON answer"
+            "throws_contains": "route_policy must return or print a JSON answer"
           }
         }
       ]

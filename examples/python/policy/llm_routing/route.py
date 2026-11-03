@@ -1,6 +1,3 @@
-import json
-import os
-
 TASK = (
     "Pick the runtime that can run the Python code in this line, monty "
     "when it can."
@@ -17,7 +14,8 @@ RUNTIMES = {
     ),
 }
 
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-if any(c["command"] == "python3" for c in ctx["commands"]):
-    choice = await parse_runtime(TASK, RUNTIMES, ctx["line"])
-    print(json.dumps({"kind": "route", **choice}))
+
+async def pre_execute(ctx):
+    if any(c["command"] == "python3" for c in ctx["commands"]):
+        choice = await parse_runtime(TASK, RUNTIMES, ctx["line"])
+        return {"kind": "route", **choice}

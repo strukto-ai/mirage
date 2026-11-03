@@ -29,7 +29,7 @@ import type { VfsCall } from '../vfs/types.ts'
 import { registerSecrets } from '../secrets/registry.ts'
 import { CTX_ENV, DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import { Policies } from './policies.ts'
-import { ScriptPolicy, scriptAction, scriptContext } from './script.ts'
+import { ScriptPolicy, programSource, scriptAction, scriptContext } from './script.ts'
 import {
   CommandWord,
   policyCaller,
@@ -332,7 +332,9 @@ describe('scriptAction', () => {
     '{"kind": "deny", "reason": "x", "policy": "Mine"}',
     '{"kind": "deny"}\n{"kind": "ask"}',
   ])('refuses anything else: %s', (printed) => {
-    expect(() => scriptAction(bytes(printed), 'preExecute')).toThrow('must print a JSON answer')
+    expect(() => scriptAction(bytes(printed), 'preExecute')).toThrow(
+      'must return or print a JSON answer',
+    )
   })
 })
 
@@ -642,7 +644,7 @@ describe('ScriptPolicy', () => {
     const [action] = (await policy.preCommand(ctx())) ?? []
     expect(action?.kind).toBe('deny')
     expect(action !== undefined && 'reason' in action ? action.reason : '').toMatch(
-      /^profile 'release' policy must print a JSON answer at pre_command/,
+      /^profile 'release' policy must return or print a JSON answer at pre_command/,
     )
   })
 
@@ -888,6 +890,78 @@ function dispatchOver(files: Record<string, string>): DispatchFn {
     return Promise.reject(Object.assign(new Error(`${op} ${path}`), { code: 'EROFS' }))
   }
 }
+
+describe('programSource', () => {
+  it("runs a program without the method's function as written", () => {
+    for (const source of [
+      "print('x')",
+      'def pre_vfs(ctx):\n    return None\n',
+      'class Guard:\n    def pre_command(self, ctx):\n        return None\n',
+    ]) {
+      expect(programSource(source, 'preCommand')).toBe(source)
+    }
+  })
+
+  it("calls the method's function after the program", () => {
+    const source = 'def pre_command(ctx):\n    return None'
+    expect(programSource(source, 'preCommand')).toBe(
+      `${source}\n` +
+        'import json as _mirage_json, os as _mirage_os\n' +
+        `print(_mirage_json.dumps(pre_command(_mirage_json.loads(_mirage_os.environ["${CTX_ENV}"]))))\n`,
+    )
+  })
+
+  it('awaits an async function', () => {
+    const source = 'async def pre_command(ctx):\n    return None\n'
+    expect(programSource(source, 'preCommand')).toMatch(
+      /print\(_mirage_json\.dumps\(await pre_command\(/,
+    )
+  })
+})
+
+describe('a policy program that returns its answer', () => {
+  const RETURNS = [
+    'def pre_command(ctx):',
+    '    if ctx["command"] == "rm":',
+    '        return {"kind": "deny", "reason": "deletes are disabled"}',
+  ].join('\n')
+
+  it('answers with what its function returns on monty', async () => {
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('monty', RETURNS)] })))
+    expect(await policy.preCommand(ctx('rm'))).toEqual([
+      { kind: 'deny', reason: 'deletes are disabled' },
+    ])
+    expect(await policy.preCommand(ctx('cat'))).toBeNull()
+  }, 60_000)
+
+  it('fails closed on a return value that is no answer', async () => {
+    const source = "def pre_command(ctx):\n    return 'deny'\n"
+    const policy = track(new ScriptPolicy(scripts({ preCommand: [entry('monty', source)] })))
+    const [action] = (await policy.preCommand(ctx())) ?? []
+    expect(action?.kind === 'deny' ? action.reason : '').toMatch(
+      /^profile 'release' policy must return or print a JSON answer at pre_command/,
+    )
+  }, 60_000)
+
+  it("awaits the host's functions from an async function", async () => {
+    const source = [
+      'async def pre_command(ctx):',
+      '    user = await lookup_user("root")',
+      '    if user["admin"]:',
+      '        return {"kind": "deny", "reason": "admin may not " + ctx["command"]}',
+    ].join('\n')
+    const policy = track(
+      new ScriptPolicy(scripts({ preCommand: [entry('monty', source)] }), null, {
+        externalLookup: {
+          lookup_user: (name: string) => Promise.resolve({ admin: name === 'root' }),
+        },
+      }),
+    )
+    expect(await policy.preCommand(ctx('rm'))).toEqual([
+      { kind: 'deny', reason: 'admin may not rm' },
+    ])
+  }, 60_000)
+})
 
 describe('a policy program on monty', () => {
   it('reads the workspace through the entry points it is wired to', async () => {

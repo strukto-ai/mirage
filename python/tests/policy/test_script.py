@@ -18,6 +18,7 @@ from mirage.policy.constants import (
 from mirage.policy.policies import Policies
 from mirage.policy.script import (
     ScriptPolicy,
+    program_source,
     script_action,
     script_context,
 )
@@ -321,7 +322,7 @@ def test_a_route_carries_the_reason_it_gives():
     ],
 )
 def test_anything_else_is_refused(printed):
-    with pytest.raises(ValueError, match="must print a JSON answer"):
+    with pytest.raises(ValueError, match="must return or print a JSON answer"):
         script_action(printed, "pre_execute")
 
 
@@ -515,6 +516,68 @@ async def test_a_program_runs_unedited_with_its_context_in_the_env_and_stdin():
     assert request.flags == {"c": "SOURCE"}
 
 
+def test_a_program_without_the_methods_function_runs_as_written():
+    for source in (
+        "print('x')",
+        "def pre_vfs(ctx):\n    return None\n",
+        "class Guard:\n    def pre_command(self, ctx):\n        return None\n",
+    ):
+        assert program_source(source, "pre_command") == source
+
+
+def test_a_program_defining_the_methods_function_is_called_after():
+    source = "def pre_command(ctx):\n    return None"
+    assert program_source(source, "pre_command") == (
+        f"{source}\n"
+        "import json as _mirage_json, os as _mirage_os\n"
+        "print(_mirage_json.dumps(pre_command("
+        f'_mirage_json.loads(_mirage_os.environ["{CTX_ENV}"]))))\n'
+    )
+
+
+def test_an_async_function_is_awaited():
+    source = "async def pre_command(ctx):\n    return None\n"
+    assert program_source(source, "pre_command").endswith(
+        "print(_mirage_json.dumps(await pre_command("
+        f'_mirage_json.loads(_mirage_os.environ["{CTX_ENV}"]))))\n'
+    )
+
+
+_RETURNS = """
+def pre_command(ctx):
+    if ctx["command"] == "rm":
+        return {"kind": "deny", "reason": "deletes are disabled"}
+"""
+
+
+@pytest.mark.asyncio
+async def test_a_monty_program_answers_with_what_its_function_returns():
+    policy = ScriptPolicy(
+        Programs({"pre_command": (_entry(source=_RETURNS),)})
+    )
+    try:
+        assert await policy.pre_command(_ctx(command="rm")) == (
+            Deny("deletes are disabled"),
+        )
+        assert await policy.pre_command(_ctx(command="cat")) is None
+    finally:
+        await policy.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_return_value_fails_closed():
+    source = "def pre_command(ctx):\n    return 'deny'\n"
+    policy = ScriptPolicy(Programs({"pre_command": (_entry(source=source),)}))
+    try:
+        [action] = await policy.pre_command(_ctx()) or ()
+    finally:
+        await policy.close()
+    assert isinstance(action, Deny)
+    assert action.reason.startswith(
+        "profile 'release' policy must return or print a JSON answer"
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_program_on_wasi_keeps_the_sessions_directory_off_its_path():
     engine = FakeProgram()
@@ -679,7 +742,8 @@ async def test_a_wrong_answer_fails_closed():
     [action] = await policy.pre_command(_ctx()) or ()
     assert isinstance(action, Deny)
     assert action.reason.startswith(
-        "profile 'release' policy must print a JSON answer at pre_command"
+        "profile 'release' policy must return or print a JSON answer "
+        "at pre_command"
     )
 
 
@@ -1036,6 +1100,26 @@ async def test_a_monty_program_calls_the_hosts_functions():
     )
     policy = ScriptPolicy(
         Programs({"pre_command": (entry,)}),
+        external_lookup={"lookup_user": _lookup_user},
+    )
+    try:
+        assert await policy.pre_command(_ctx(command="rm")) == (
+            Deny("admin may not rm"),
+        )
+    finally:
+        await policy.close()
+
+
+@pytest.mark.asyncio
+async def test_an_async_function_awaits_the_hosts_functions():
+    source = """
+async def pre_command(ctx):
+    user = await lookup_user("root")
+    if user["admin"]:
+        return {"kind": "deny", "reason": "admin may not " + ctx["command"]}
+"""
+    policy = ScriptPolicy(
+        Programs({"pre_command": (_entry(source=source),)}),
         external_lookup={"lookup_user": _lookup_user},
     )
     try:

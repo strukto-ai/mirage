@@ -52,35 +52,29 @@ class OperatorOwnsCredentials(Policy):
 
 
 # The reviewer's programs: python source, run on monty, one for each
-# method it has an opinion at. Each reads its context as JSON, the same
-# fields a coded policy reads, and prints its answer: nothing for no
-# opinion, {"kind": "deny", "reason": ...} to refuse. ``open()`` reads
+# method it has an opinion at. Each defines a function named for that
+# method, which takes the same fields a coded policy reads and returns
+# its answer: None for no opinion, {"kind": "deny", "reason": ...} to
+# refuse. ``open()`` reads
 # through the workspace as the session, so the command program can judge
 # what a file holds, not only what it is called.
 MARKED = ScriptSource("""
-import json
-import os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-
 def contents(path):
     try:
         return open(path).read()
     except OSError:
         return ""
 
-if any("marker" in contents(path) for path in ctx["paths"]):
-    reason = "marked files are not read by " + ctx["profile"]
-    print(json.dumps({"kind": "deny", "reason": reason}))
+def pre_command(ctx):
+    if any("marker" in contents(path) for path in ctx["paths"]):
+        reason = "marked files are not read by " + ctx["profile"]
+        return {"kind": "deny", "reason": reason}
 """)
 
 COLD = ScriptSource("""
-import json
-import os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-if ctx["write"] and ctx["path"].startswith("/scratch/cold/"):
-    print(json.dumps({"kind": "deny", "reason": "the cold store is frozen"}))
+def pre_vfs(ctx):
+    if ctx["write"] and ctx["path"].startswith("/scratch/cold/"):
+        return {"kind": "deny", "reason": "the cold store is frozen"}
 """)
 
 SEED = [
