@@ -77,7 +77,9 @@ function langfuseError(response: Response, text: string): LangfuseApiError {
 }
 
 export class HttpLangfuseTransport implements LangfuseTransport {
-  protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
+  // Read on each call, so a client built before the host wraps fetch still
+  // sends through the wrapper that judges its network rule and policies.
+  protected readonly fetch: typeof fetch = (input, init) => globalThis.fetch(input, init)
   private readonly host: string
   private readonly auth: string
   private readonly timeout: number | undefined

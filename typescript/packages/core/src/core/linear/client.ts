@@ -85,7 +85,9 @@ function errorOf(response: Response, text: string): LinearApiError {
 }
 
 export class HttpLinearTransport implements LinearTransport {
-  protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
+  // Read on each call, so a client built before the host wraps fetch still
+  // sends through the wrapper that judges its network rule and policies.
+  protected readonly fetch: typeof fetch = (input, init) => globalThis.fetch(input, init)
   private readonly apiKey: string
   private readonly baseUrl: string
   private readonly timeout: number | undefined
