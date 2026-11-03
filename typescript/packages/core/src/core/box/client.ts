@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSpool } from '../../io/spool.ts'
+import { sizeOf, sliceOf } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { Sha1 } from '../../utils/hash.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
@@ -383,10 +384,11 @@ export async function boxUploadSession(
   tm: BoxTokenManager,
   url: string,
   metadata: Record<string, unknown>,
-  spool: ByteSpool,
+  data: Uint8Array | ByteSpool,
   etag: string | null = null,
 ): Promise<unknown> {
-  const created = (await boxPostJson(tm, url, { ...metadata, file_size: spool.size })) as {
+  const total = sizeOf(data)
+  const created = (await boxPostJson(tm, url, { ...metadata, file_size: total })) as {
     session_endpoints: { upload_part: string; commit: string; abort: string }
     part_size: number
   }
@@ -397,10 +399,10 @@ export async function boxUploadSession(
   try {
     if (!Number.isSafeInteger(partSize) || partSize <= 0 || partSize > 64 * 1024 * 1024)
       throw new Error('Invalid Box upload part size')
-    for (let offset = 0; offset < spool.size; offset += partSize) {
-      const data = await spool.read(offset, partSize)
+    for (let offset = 0; offset < total; offset += partSize) {
+      const part = await sliceOf(data, offset, partSize)
       const partDigest = new Sha1()
-      for await (const chunk of chunks(data)) {
+      for await (const chunk of chunks(part)) {
         digest.update(chunk)
         partDigest.update(chunk)
       }
@@ -411,9 +413,9 @@ export async function boxUploadSession(
           ...(await boxAuthHeaders(tm)),
           'Content-Type': 'application/octet-stream',
           Digest: digestHeader(partDigest),
-          'Content-Range': `bytes ${String(offset)}-${String(offset + data.length - 1)}/${String(spool.size)}`,
+          'Content-Range': `bytes ${String(offset)}-${String(offset + part.length - 1)}/${String(total)}`,
         },
-        body: data as unknown as BodyInit,
+        body: part as unknown as BodyInit,
       })) as { part: unknown }
       parts.push(response.part)
     }

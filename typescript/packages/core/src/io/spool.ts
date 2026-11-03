@@ -254,6 +254,20 @@ export class ByteSpool {
   }
 }
 
+/** The byte length of a payload held whole or in a spool. Mirrors Python's size_of. */
+export function sizeOf(data: Uint8Array | ByteSpool): number {
+  return data instanceof ByteSpool ? data.size : data.byteLength
+}
+
+/** `size` bytes of a payload from `start`, fewer at its end. Mirrors Python's slice_of. */
+export async function sliceOf(
+  data: Uint8Array | ByteSpool,
+  start: number,
+  size: number,
+): Promise<Uint8Array> {
+  return data instanceof ByteSpool ? data.read(start, size) : data.slice(start, start + size)
+}
+
 /**
  * Hold `source` in a spool: its bytes when they fit in memory, a stream that
  * owns the spool past that, null when it is empty. Mirrors Python's spooled.

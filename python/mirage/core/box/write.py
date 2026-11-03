@@ -33,7 +33,7 @@ from mirage.core.box.resolve import (
     path_parts,
 )
 from mirage.errors.fs import eisdir
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
@@ -189,7 +189,7 @@ async def upload_prepared(
         "write",
         path.virtual,
         "box",
-        data.size if isinstance(data, ByteSpool) else len(data),
+        size_of(data),
         timer,
         fingerprint=token,
     )

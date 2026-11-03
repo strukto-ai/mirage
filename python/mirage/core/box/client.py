@@ -32,7 +32,7 @@ from mirage.core.box.constants import (
     TOKEN_BUFFER_SECONDS,
 )
 from mirage.io.cooperative import chunks
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of, slice_of
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.box.config import BoxConfig
@@ -404,12 +404,11 @@ async def box_upload_session(
     tm: BoxTokenManager,
     url: str,
     metadata: dict[str, Any],
-    spool: ByteSpool,
+    data: bytes | ByteSpool,
     etag: str | None = None,
 ) -> JsonValue:
-    created = await box_post_json(
-        tm, url, {**metadata, "file_size": spool.size}
-    )
+    total = size_of(data)
+    created = await box_post_json(tm, url, {**metadata, "file_size": total})
     endpoints = created["session_endpoints"]
     part_size = created["part_size"]
     parts: list[dict[str, Any]] = []
@@ -421,10 +420,10 @@ async def box_upload_session(
             or part_size > 64 * 1024 * 1024
         ):
             raise RuntimeError("Invalid Box upload part size")
-        for offset in range(0, spool.size, part_size):
-            data = await spool.read(offset, part_size)
+        for offset in range(0, total, part_size):
+            part = await slice_of(data, offset, part_size)
             part_hash = hashlib.sha1()
-            async for chunk in chunks(data):
+            async for chunk in chunks(part):
                 digest.update(chunk)
                 part_hash.update(chunk)
             part_digest = base64.b64encode(part_hash.digest()).decode()
@@ -437,10 +436,10 @@ async def box_upload_session(
                     "Content-Type": "application/octet-stream",
                     "Digest": f"sha={part_digest}",
                     "Content-Range": (
-                        f"bytes {offset}-{offset + len(data) - 1}/{spool.size}"
+                        f"bytes {offset}-{offset + len(part) - 1}/{total}"
                     ),
                 },
-                data=data,
+                data=part,
                 session=tm.pool,
             )
             parts.append(response["part"])

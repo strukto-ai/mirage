@@ -15,7 +15,7 @@
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { eacces, eisdir } from '../../errors/fs.ts'
 import { chunks } from '../../io/cooperative.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool, sizeOf } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
@@ -66,14 +66,7 @@ export const write = eaccesOnDenied(async function writeImpl(
     reply = await drive.uploadFile(basename, parentId, data)
   }
   const token = uploadToken(reply, statFromItem, path.virtual)
-  record(
-    'write',
-    path.virtual,
-    'gdrive',
-    data instanceof ByteSpool ? data.size : data.length,
-    timer,
-    { fingerprint: token },
-  )
+  record('write', path.virtual, 'gdrive', sizeOf(data), timer, { fingerprint: token })
   const item: unknown = reply
   return typeof item === 'object' && item !== null ? statFromItem(reply) : null
 })

@@ -16,7 +16,7 @@ from mirage.accessor.tidb_filesystem import TiDBFilesystemAccessor
 from mirage.core.tidb_filesystem.client import upload
 from mirage.core.tidb_filesystem.dest import check_write_target, kinds_of
 from mirage.core.tidb_filesystem.path import backend_path
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -53,5 +53,5 @@ async def write(
     kinds = await kinds_of(accessor, [*ancestors(key), key])
     check_write_target(kinds, path, key)
     await upload(accessor, backend_path(accessor.config, path), data)
-    size = data.size if isinstance(data, ByteSpool) else len(data)
+    size = size_of(data)
     record("write", path.virtual, "tidb_filesystem", size, timer)
