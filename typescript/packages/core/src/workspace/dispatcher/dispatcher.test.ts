@@ -4043,3 +4043,40 @@ describe('a backend row of a call that raised', () => {
     }
   })
 })
+
+class RecordsAtCloseRAM extends RAMVFS {
+  override read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset !== 0 || size !== null) return super.read(path, handed, offset, size)
+    return this.closing(path)
+  }
+
+  private async *closing(path: PathSpec): AsyncIterable<Uint8Array> {
+    const timer = startOp()
+    try {
+      await Promise.resolve()
+      yield new TextEncoder().encode('ab')
+    } finally {
+      record('read', path.virtual, 'ram', 2, timer)
+    }
+  }
+}
+
+it('a read its backend records at close is one row', async () => {
+  const ws = new Workspace({ '/m': new RecordsAtCloseRAM() }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/m/a', 'ab')
+    ws.records.length = 0
+    const io = await ws.shell('cat /m/a')
+    expect(io.stdoutText).toBe('ab')
+    const rows = ws.records.filter((r) => r.op === 'read')
+    expect(rows.map((r) => [r.bytes, r.served])).toEqual([[2, 'backend']])
+    expect(ws.networkBytes).toBe(2)
+  } finally {
+    await ws.close()
+  }
+})

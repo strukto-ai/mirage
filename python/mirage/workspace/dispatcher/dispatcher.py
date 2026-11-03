@@ -743,6 +743,22 @@ async def _settle_on_error(
         await close_quietly(source)
 
 
+def _forward(parent: Caller, row: OpRecord) -> None:
+    """Hand ``row`` to the line and the commands ``parent`` records for.
+
+    Args:
+        parent (Caller): the caller the row is the work of.
+        row (OpRecord): a row recorded apart from it.
+    """
+    if parent.recorder is not None:
+        parent.recorder.sink.append(row)
+    if parent.command_sink is not None:
+        command, mine = parent.command_sink
+        mine.append(row)
+        if command is not None and command is not mine:
+            command.append(row)
+
+
 def _retracted(virtual: str) -> bool:
     """Whether the running line's newest word on ``virtual`` is that a
     change it made took the path's version (a copy, a move, a removal).
@@ -1343,7 +1359,9 @@ class Dispatcher:
                         rec.mount_id = (
                             mount.mount_id if mount is not None else None
                         )
-                        observed = self._record_stream(answer, rec, timer)
+                        observed = self._record_stream(
+                            answer, rec, timer, report.stream_records or []
+                        )
                         await anext(observed)
                         answer = (
                             PipeStream(observed, answer.path, answer.end)
@@ -1438,6 +1456,7 @@ class Dispatcher:
         source: AsyncIterator[bytes],
         rec: OpRecord | None,
         timer: OpTimer,
+        rows: list[OpRecord],
     ) -> AsyncIterator[bytes]:
         """Count a read while collecting a driver's late row separately.
 
@@ -1445,6 +1464,8 @@ class Dispatcher:
             source (AsyncIterator[bytes]): The already opened read.
             rec (OpRecord | None): Its default row, appended at open.
             timer (OpTimer): The dispatcher's timer.
+            rows (list[OpRecord]): Where the stream, pulled as the caller
+                it was opened by, records its late rows.
         """
         parent = current_caller()
         driver = fresh_recorder(clock=timer.clock)
@@ -1480,7 +1501,7 @@ class Dispatcher:
                 await close_quietly(source)
             finally:
                 reset_caller(token)
-            for row in driver.sink:
+            for row in (*driver.sink, *rows):
                 if (
                     rec is not None
                     and row.op == rec.op
@@ -1492,13 +1513,7 @@ class Dispatcher:
                     if row.status != OpStatus.OK:
                         rec.status, rec.errno = row.status, row.errno
                 else:
-                    if parent.recorder is not None:
-                        parent.recorder.sink.append(row)
-                    if parent.command_sink is not None:
-                        command, mine = parent.command_sink
-                        mine.append(row)
-                        if command is not None and command is not mine:
-                            command.append(row)
+                    _forward(parent, row)
             if rec is not None:
                 rec.duration_ms = timer.elapsed_ms
 
@@ -3040,24 +3055,48 @@ class Dispatcher:
             mount (MountEntry): the mount serving its path.
             filler (CacheManager | None): the manager a cold read fills.
         """
-        with command_records() as records:
+        # Opened as a caller recording into its own list: the stream
+        # records as that caller however late it is pulled, so a row it
+        # adds past its first chunk reaches the dispatcher's default row
+        # instead of the line beside it.
+        parent = current_caller()
+        recorder = (
+            fresh_recorder(clock=parent.recorder.clock)
+            if parent.recorder is not None
+            else None
+        )
+        records = recorder.sink if recorder is not None else []
+        token = bind_caller(
+            parent.changed({"recorder": recorder, "command_sink": None})
+        )
+        try:
             stream = mount.read_stream(call.path.virtual)
+        finally:
+            reset_caller(token)
         call.read_records = records
-        pipe = mount.live_pipe(call.path.virtual)
-        if pipe is not None:
-            live = PipeStream(
-                await _primed(stream, call.report, pull=False), call.path, pipe
-            )
-            pipe.readers.add(live)
-            return live
-        if filler is not None:
-            stream = filler.fill_stream(
-                call.path,
-                stream,
-                records,
-                keep=lambda: not call.renders_read(mount),
-            )
-        return await _primed(stream, call.report)
+        if call.report is not None:
+            call.report.stream_records = records
+        try:
+            pipe = mount.live_pipe(call.path.virtual)
+            if pipe is not None:
+                live = PipeStream(
+                    await _primed(stream, call.report, pull=False),
+                    call.path,
+                    pipe,
+                )
+                pipe.readers.add(live)
+                return live
+            if filler is not None:
+                stream = filler.fill_stream(
+                    call.path,
+                    stream,
+                    records,
+                    keep=lambda: not call.renders_read(mount),
+                )
+            return await _primed(stream, call.report)
+        finally:
+            for row in records:
+                _forward(parent, row)
 
     async def _serial_write(self, call: _Call, mount: MountEntry) -> Any:
         """Run a write with its names held, one writer at a time per name.

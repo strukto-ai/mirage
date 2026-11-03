@@ -4216,3 +4216,34 @@ async def test_a_streamed_backend_row_takes_the_failure_of_a_later_pull():
         ]
     finally:
         await ws.close()
+
+
+class _RecordsAtCloseRAM(RAMVFS):
+    def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> Any:
+        if offset or size is not None:
+            return super().read(path, offset, size)
+        return self._closing(path)
+
+    async def _closing(self, path: PathSpec) -> AsyncIterator[bytes]:
+        timer = start_op()
+        try:
+            yield b"ab"
+        finally:
+            record("read", path.virtual, "ram", 2, timer)
+
+
+@pytest.mark.asyncio
+async def test_a_read_its_backend_records_at_close_is_one_row():
+    ws = Workspace({"/m": _RecordsAtCloseRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/m/a", b"ab")
+        ws.vfs.records.clear()
+        io = await ws.shell("cat /m/a")
+        assert await io.stdout_str() == "ab"
+        rows = [r for r in ws.vfs.records if r.op == "read"]
+        assert [(r.bytes, r.served) for r in rows] == [(2, "backend")]
+        assert ws.vfs.network_bytes == 2
+    finally:
+        await ws.close()

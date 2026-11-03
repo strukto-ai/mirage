@@ -467,6 +467,16 @@ async function* settleOnError(
   }
 }
 
+/** Hand `row` to the line and the commands `parent` records for. Mirrors Python's `_forward`. */
+function forward(parent: Caller, row: OpRecord): void {
+  parent.recording?.records.push(row)
+  const held = parent.commandSink
+  if (held !== null) {
+    held[1].push(row)
+    if (held[0] !== null && held[0] !== held[1]) held[0].push(row)
+  }
+}
+
 function retracted(virtual: string): boolean {
   const records = activeRecords()
   if (records === undefined) return false
@@ -1102,12 +1112,7 @@ export class Dispatcher {
             rec.errno = row.errno
           }
         } else {
-          parent.recording?.records.push(row)
-          const held = parent.commandSink
-          if (held !== null) {
-            held[1].push(row)
-            if (held[0] !== null && held[0] !== held[1]) held[0].push(row)
-          }
+          forward(parent, row)
         }
       }
       if (rec !== null) rec.durationMs = timer.elapsedMs
@@ -2349,12 +2354,7 @@ export class Dispatcher {
     try {
       return await primed(stream, call.report)
     } finally {
-      parent.recording?.records.push(...records)
-      const held = parent.commandSink
-      if (held !== null) {
-        held[1].push(...records)
-        if (held[0] !== null && held[0] !== held[1]) held[0].push(...records)
-      }
+      for (const row of records) forward(parent, row)
     }
   }
 
