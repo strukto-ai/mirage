@@ -424,7 +424,7 @@ jobs:
       - name: Bundle edge's Monty runtime
         working-directory: typescript/packages/edge
         run: node scripts/bundle-monty.mjs
-      # The corpus's hf, email, slack and linear targets on an edge worker
+      # The corpus's targets for every built-in CLI on an edge worker
       # (workerd under wrangler dev), each line over the server API.
       - name: Run the corpus on the edge host
         working-directory: integ
