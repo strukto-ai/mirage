@@ -22,10 +22,10 @@ import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { vi } from 'vitest'
-import { accountOf, HfHubAccessor } from '../../../src/accessor/hf_hub.ts'
-import type { HfRepoConfig } from '../../../src/vfs/hf_buckets/config.ts'
-import * as client from '../../../src/core/hf_hub/client.ts'
-import { readdir } from '../../../src/core/hf_hub/readdir.ts'
+import { accountOf, HfHubAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
+import type { HfRepoConfig } from '@struktoai/mirage-core/vfs/hf_buckets/config'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
+import { readdir } from '@struktoai/mirage-core/core/hf_hub/readdir'
 
 // The Hub answers these to a paths-info body it cannot read as JSON, which is
 // what an untyped fetch body is (measured against huggingface.co, 2026-09-24).

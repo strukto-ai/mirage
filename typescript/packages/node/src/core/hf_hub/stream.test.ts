@@ -15,11 +15,11 @@
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
-import * as client from './client.ts'
+import type { HfAccountAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
 import { handle } from '../../../tests/core/hf_hub/_test_util.ts'
-import { readStream } from './stream.ts'
-import { parseEntry, rowOf } from './tree.ts'
+import { readStream } from '@struktoai/mirage-core/core/hf_hub/stream'
+import { parseEntry, rowOf } from '@struktoai/mirage-core/core/hf_hub/tree'
 
 const PATH = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
 // The row the listing of /m/m names for k.txt.

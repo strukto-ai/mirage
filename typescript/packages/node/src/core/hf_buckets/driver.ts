@@ -25,7 +25,7 @@ import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Metadata, Operator } from 'opendal'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { SCOPE_ERROR } from './constants.ts'
-import { HfHubError } from '../hf_hub/client.ts'
+import { HfHubError } from '@struktoai/mirage-core/core/hf_hub/client'
 import { fetchRow } from './hub.ts'
 
 /**

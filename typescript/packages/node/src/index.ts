@@ -99,14 +99,14 @@ export {
   redactHfRepoConfig,
   type HfBucketsConfig,
   type HfRepoConfig,
-} from './vfs/hf_buckets/config.ts'
+} from '@struktoai/mirage-core/vfs/hf_buckets/config'
 export { HfBucketsVFS } from './vfs/hf_buckets/hf_buckets.ts'
-export type { HfDatasetsConfig } from './vfs/hf_datasets/config.ts'
-export { HfDatasetsVFS } from './vfs/hf_datasets/hf_datasets.ts'
-export type { HfModelsConfig } from './vfs/hf_models/config.ts'
-export { HfModelsVFS } from './vfs/hf_models/hf_models.ts'
-export type { HfSpacesConfig } from './vfs/hf_spaces/config.ts'
-export { HfSpacesVFS } from './vfs/hf_spaces/hf_spaces.ts'
+export type { HfDatasetsConfig } from '@struktoai/mirage-core/vfs/hf_datasets/config'
+export { HfDatasetsVFS } from '@struktoai/mirage-core/vfs/hf_datasets/hf_datasets'
+export type { HfModelsConfig } from '@struktoai/mirage-core/vfs/hf_models/config'
+export { HfModelsVFS } from '@struktoai/mirage-core/vfs/hf_models/hf_models'
+export type { HfSpacesConfig } from '@struktoai/mirage-core/vfs/hf_spaces/config'
+export { HfSpacesVFS } from '@struktoai/mirage-core/vfs/hf_spaces/hf_spaces'
 export { LanceDBVFS, type LanceDBVFSOptions } from './vfs/lancedb/lancedb.ts'
 export { LanceDBStore } from './vfs/lancedb/store.ts'
 export { MinIOConfig } from '@struktoai/mirage-core/vfs/minio/config'
@@ -169,7 +169,7 @@ export type { LangfuseConfig } from '@struktoai/mirage-core/vfs/langfuse/config'
 export { LangfuseVFS } from '@struktoai/mirage-core/vfs/langfuse/langfuse'
 export type { Mem0Config } from '@struktoai/mirage-core/vfs/mem0/config'
 export { EmailAccessor } from './accessor/email.ts'
-export { HF } from './commands/cli/builtin/hf/index.ts'
+export { HF } from '@struktoai/mirage-core/commands/cli/builtin/hf/index'
 export { HIMALAYA } from './commands/cli/builtin/himalaya/index.ts'
 export {
   absolutizeScripts,

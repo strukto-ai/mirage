@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import { fakeHfOperator, installFakeOperator } from '../../../tests/core/hf_buckets/mock.ts'
 import { HfBucketsVFS } from '../hf_buckets/hf_buckets.ts'
-import { HfModelsVFS } from './hf_models.ts'
+import { HfModelsVFS } from '@struktoai/mirage-core/vfs/hf_models/hf_models'
 
 // No find or du op: the Hub's listing is recursive, so one paged fetch is
 // the whole tree and the generic walk over it costs no requests. A native op

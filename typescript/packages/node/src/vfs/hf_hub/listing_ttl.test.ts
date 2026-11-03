@@ -17,7 +17,7 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ExpiredOnArrival, FakeHub, serveHub } from '../../../tests/core/hf_hub/_test_util.ts'
-import * as tree from '../../core/hf_hub/tree.ts'
+import * as tree from '@struktoai/mirage-core/core/hf_hub/tree'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 

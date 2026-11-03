@@ -14,7 +14,12 @@
 
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { HfHubError, quotePath, etagValue, hubPost } from '../hf_hub/client.ts'
+import {
+  HfHubError,
+  quotePath,
+  etagValue,
+  hubPost,
+} from '@struktoai/mirage-core/core/hf_hub/client'
 
 type Row = Record<string, unknown>
 

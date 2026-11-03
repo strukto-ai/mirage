@@ -19,7 +19,7 @@ import {
   normalizeHfRepoConfig,
   redactHfBucketsConfig,
   redactHfRepoConfig,
-} from './config.ts'
+} from '@struktoai/mirage-core/vfs/hf_buckets/config'
 
 describe('normalizeHfBucketsConfig', () => {
   it('accepts namespace/name buckets and renames snake_case fields', () => {

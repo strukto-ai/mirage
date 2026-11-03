@@ -13,10 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { HfAccountAccessor } from '../../accessor/hf_hub.ts'
-import { createRepo, createTag, deleteTag, splitRepoId } from './admin.ts'
-import * as client from './client.ts'
-import { API_BASE } from './constants.ts'
+import { HfAccountAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
+import {
+  createRepo,
+  createTag,
+  deleteTag,
+  splitRepoId,
+} from '@struktoai/mirage-core/core/hf_hub/admin'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
+import { API_BASE } from '@struktoai/mirage-core/core/hf_hub/constants'
 
 const ACCOUNT = new HfAccountAccessor({ token: 't', endpoint: API_BASE })
 

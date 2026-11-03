@@ -15,10 +15,10 @@
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import * as client from './client.ts'
-import { read, rowToken } from './read.ts'
-import * as repo from './repo.ts'
-import { parseEntry, rowOf } from './tree.ts'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
+import { read, rowToken } from '@struktoai/mirage-core/core/hf_hub/read'
+import * as repo from '@struktoai/mirage-core/core/hf_hub/repo'
+import { parseEntry, rowOf } from '@struktoai/mirage-core/core/hf_hub/tree'
 import { codeOf, handle, ps, rowAt, walking } from '../../../tests/core/hf_hub/_test_util.ts'
 
 const PATH = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })

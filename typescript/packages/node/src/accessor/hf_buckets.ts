@@ -18,8 +18,8 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
-import { HF_ENDPOINT, type HfBucketsConfig } from '../vfs/hf_buckets/config.ts'
-import { accountOf, type HfAccountAccessor } from './hf_hub.ts'
+import { HF_ENDPOINT, type HfBucketsConfig } from '@struktoai/mirage-core/vfs/hf_buckets/config'
+import { accountOf, type HfAccountAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
 
 /**
  * A mount onto one Hugging Face bucket.

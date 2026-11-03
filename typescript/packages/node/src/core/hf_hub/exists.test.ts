@@ -14,10 +14,10 @@
 
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
-import * as client from './client.ts'
-import { exists } from './exists.ts'
-import * as repo from './repo.ts'
+import type { HfHubAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
+import { exists } from '@struktoai/mirage-core/core/hf_hub/exists'
+import * as repo from '@struktoai/mirage-core/core/hf_hub/repo'
 import { codeOf, ps, rowAt, walking } from '../../../tests/core/hf_hub/_test_util.ts'
 
 beforeEach(() => {

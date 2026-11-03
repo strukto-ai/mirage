@@ -18,6 +18,7 @@ import { DISCORD } from './builtin/discord/index.ts'
 import { GH } from './builtin/gh/index.ts'
 import { GIT } from './builtin/git/index.ts'
 import { GWS } from './builtin/gws/index.ts'
+import { HF } from './builtin/hf/index.ts'
 import { LINEAR } from './builtin/linear/index.ts'
 import { NTN } from './builtin/ntn/index.ts'
 import { SEARCH } from './builtin/search/index.ts'
@@ -34,7 +35,7 @@ import { NAME as MCP_CLI } from './mcp/constants.ts'
 // packages add theirs through registerCliSpec from their entry point,
 // and user programs do the same before the workspace loads.
 const CLI_SPECS = new Map<string, CLI>(
-  [AIRTABLE, DISCORD, GH, GIT, GWS, LINEAR, NTN, SEARCH, SLACK, TRELLO].map((spec) => [
+  [AIRTABLE, DISCORD, GH, GIT, GWS, HF, LINEAR, NTN, SEARCH, SLACK, TRELLO].map((spec) => [
     spec.spec.name,
     spec,
   ]),

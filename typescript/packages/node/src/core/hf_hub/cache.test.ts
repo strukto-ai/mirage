@@ -23,8 +23,8 @@ import {
   repoFolderName,
   snapshotDir,
   snapshotPath,
-} from './cache.ts'
-import type { TreeEntry } from './tree_entry.ts'
+} from '@struktoai/mirage-core/core/hf_hub/cache'
+import type { TreeEntry } from '@struktoai/mirage-core/core/hf_hub/tree_entry'
 
 function entry(path: string, oid = 'oid1', lfsOid = ''): TreeEntry {
   return {

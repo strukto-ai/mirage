@@ -16,21 +16,21 @@ import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it, vi } from 'vitest'
 import { Files } from '@struktoai/mirage-core/workspace/files'
 import { materialize } from '@struktoai/mirage-core/io/types'
-import { HfAccountAccessor } from '../../../../accessor/hf_hub.ts'
-import type * as ClientModule from '../../../../core/hf_hub/client.ts'
-import { parseEntry } from '../../../../core/hf_hub/tree.ts'
-import type * as TreeModule from '../../../../core/hf_hub/tree.ts'
-import { downloadCmd, ensureDir } from './download.ts'
+import { HfAccountAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
+import type * as ClientModule from '@struktoai/mirage-core/core/hf_hub/client'
+import { parseEntry } from '@struktoai/mirage-core/core/hf_hub/tree'
+import type * as TreeModule from '@struktoai/mirage-core/core/hf_hub/tree'
+import { downloadCmd, ensureDir } from '@struktoai/mirage-core/commands/cli/builtin/hf/download'
 
 const hubBytesMock = vi.hoisted(() => vi.fn())
 const fetchTreeMock = vi.hoisted(() => vi.fn())
 
-vi.mock('../../../../core/hf_hub/client.ts', async (orig) => ({
+vi.mock('@struktoai/mirage-core/core/hf_hub/client', async (orig) => ({
   ...(await orig<typeof ClientModule>()),
   hubBytes: hubBytesMock,
 }))
 
-vi.mock('../../../../core/hf_hub/tree.ts', async (orig) => ({
+vi.mock('@struktoai/mirage-core/core/hf_hub/tree', async (orig) => ({
   ...(await orig<typeof TreeModule>()),
   fetchTree: fetchTreeMock,
 }))

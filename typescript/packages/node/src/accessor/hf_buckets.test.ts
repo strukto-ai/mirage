@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { HF_ENDPOINT } from '../vfs/hf_buckets/config.ts'
+import { HF_ENDPOINT } from '@struktoai/mirage-core/vfs/hf_buckets/config'
 import { HfBucketsAccessor } from './hf_buckets.ts'
 
 describe('HfBucketsAccessor', () => {

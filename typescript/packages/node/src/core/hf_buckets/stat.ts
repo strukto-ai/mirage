@@ -14,7 +14,7 @@
 import { makeStat } from '@struktoai/mirage-core/core/object_store/stat'
 import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { refusalsDenied } from '../hf_hub/lookup.ts'
+import { refusalsDenied } from '@struktoai/mirage-core/core/hf_hub/lookup'
 import { DRIVER } from './driver.ts'
 
 const kitStat = makeStat(DRIVER)

@@ -14,10 +14,10 @@
 
 import type { FileStat } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { checksum } from './checksum.ts'
-import * as client from './client.ts'
+import { checksum } from '@struktoai/mirage-core/core/hf_hub/checksum'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
 import { codeOf, handle, ps } from '../../../tests/core/hf_hub/_test_util.ts'
-import { parseEntry, rowOf } from './tree.ts'
+import { parseEntry, rowOf } from '@struktoai/mirage-core/core/hf_hub/tree'
 
 const SHA = 'a'.repeat(64)
 const LFS = { oid: SHA, size: 7, pointerSize: 135 }
