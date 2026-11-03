@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { context, trace, type Attributes, type Tracer } from '@opentelemetry/api'
+import { context, trace, SpanStatusCode, type Attributes, type Tracer } from '@opentelemetry/api'
+import { POSIX } from '../errors/posix.ts'
+import type { FsCondition } from '../errors/types.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
@@ -52,6 +54,11 @@ const KNOWN_EVENTS = new Set<string>([
 const NAME_LIMIT = 200
 
 const TRACER_NAME = 'mirage.observe'
+
+function errnoName(errno: number): string {
+  const found = (Object.keys(POSIX) as FsCondition[]).find((name) => POSIX[name].errno === errno)
+  return found ?? String(errno)
+}
 
 /**
  * Set to `false` or `0` to keep what lines touched out of their spans:
@@ -173,10 +180,19 @@ function traceLine(
             'mirage.vfs.bytes': rec.bytes,
             'mirage.vfs.timestamp': rec.timestamp,
             'mirage.vfs.duration_ms': rec.durationMs,
+            'mirage.vfs.status': rec.status,
+            'mirage.vfs.changed': rec.changed,
+            'mirage.vfs.served': rec.served,
           },
         },
         parent,
       )
+      if (rec.errno !== null) {
+        call.setAttribute('mirage.vfs.errno', rec.errno)
+        call.setAttribute('error.type', errnoName(rec.errno))
+      }
+      if (rec.status === 'failed' || rec.status === 'partial')
+        call.setStatus({ code: SpanStatusCode.ERROR })
       call.end(rec.timestamp)
     }
   }

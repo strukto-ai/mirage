@@ -92,7 +92,7 @@ the backend: OTLP to Datadog, Honeycomb, Grafana, Langfuse and others.
 | Span | Attributes |
 | --- | --- |
 | `command` | `mirage.workspace.id`, `mirage.session.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr` |
-| `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
+| `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms`, `mirage.vfs.status`, `mirage.vfs.changed`, `mirage.vfs.served`, and on a failure `mirage.vfs.errno` and `error.type` |
 
 `mirage.cwd` is where the line started. `mirage.stdout` and `mirage.stderr`
 are the start of its output, as UTF-8 text of at most 16 KiB each by
@@ -110,6 +110,11 @@ To keep what lines touch out of the traces, set
 `MIRAGE_TRACE_CAPTURE_CONTENT=false`: `command` spans then carry no output and
 no `vfs.<call>` spans are sent. The history keeps the first 4096 characters of
 each output either way.
+
+A `vfs.<call>` span whose call failed, or failed after changing something, has
+error status, and `error.type` names its errno (`EACCES`). Only disk `cp`,
+`mkdir -p` and `rm -r` record a failed call so far; elsewhere a failed call
+leaves no span.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

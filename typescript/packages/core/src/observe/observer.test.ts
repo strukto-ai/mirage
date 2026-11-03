@@ -13,10 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  SpanStatusCode,
   trace,
+  type AttributeValue,
   type Attributes,
+  type Context,
   type Span,
   type SpanOptions,
+  type SpanStatus,
   type Tracer,
   type TracerProvider,
 } from '@opentelemetry/api'
@@ -527,6 +531,9 @@ describe('a damaged history file', () => {
         'mirage.vfs.bytes': 6,
         'mirage.vfs.timestamp': start + 5,
         'mirage.vfs.duration_ms': 12,
+        'mirage.vfs.status': 'ok',
+        'mirage.vfs.changed': false,
+        'mirage.vfs.served': 'backend',
       },
       start - 7,
       start + 5,
@@ -642,6 +649,70 @@ describe('a damaged history file', () => {
     // The history itself still keeps the output.
     const results = (await o.events()).filter((e) => e.type === 'result')
     expect(results.map((e) => e.stdout)).toEqual(['secret\n'])
+  })
+
+  it.each(['ok', 'failed', 'partial'] as const)('sends a %s vfs call with its outcome', async (status) => {
+    interface Seen {
+      name: string
+      attributes: Attributes
+      code?: SpanStatusCode
+      parent: Span | undefined
+    }
+    const spans: Seen[] = []
+    const fake = {
+      startSpan(name: string, options: SpanOptions = {}, ctx?: Context) {
+        const seen: Seen = {
+          name,
+          attributes: { ...options.attributes },
+          parent: ctx === undefined ? undefined : trace.getSpan(ctx),
+        }
+        spans.push(seen)
+        return {
+          isRecording: () => true,
+          end: () => undefined,
+          setAttribute: (key: string, value: AttributeValue) => {
+            seen.attributes[key] = value
+          },
+          setStatus: (state: SpanStatus) => {
+            seen.code = state.code
+          },
+          spanContext: () => ({ traceId: '1'.repeat(32), spanId: '2'.repeat(16), traceFlags: 1 }),
+        } as unknown as Span
+      },
+    } as unknown as Tracer
+    trace.setGlobalTracerProvider({ getTracer: () => fake })
+    const clock = new ManualClock(NEW_YEAR)
+    const o = new Observer(new RAMObserverStore(), clock, 'w')
+    const start = NEW_YEAR * 1000
+    const rec = new OpRecord({
+      op: 'read',
+      path: '/d/a',
+      source: 's3',
+      bytes: 6,
+      timestamp: start + 5,
+      durationMs: 12,
+      status,
+      changed: status === 'partial',
+      served: 'cache',
+      errno: status === 'ok' ? null : 13,
+    })
+    await o.logCommand('cat /d/a', 's1', '/d', 'L')
+    clock.advance(1)
+    await o.logResult(new IOResult({ exitCode: status === 'ok' ? 0 : 1 }), [rec], 's1', '/d', 'L')
+    const call = spans.find((span) => span.name === 'vfs.read')
+    expect(call?.attributes).toEqual({
+      'mirage.vfs.path': '/d/a',
+      'mirage.vfs.source': 's3',
+      'mirage.vfs.bytes': 6,
+      'mirage.vfs.timestamp': start + 5,
+      'mirage.vfs.duration_ms': 12,
+      'mirage.vfs.status': status,
+      'mirage.vfs.changed': status === 'partial',
+      'mirage.vfs.served': 'cache',
+      ...(status === 'ok' ? {} : { 'mirage.vfs.errno': 13, 'error.type': 'EACCES' }),
+    })
+    expect(call?.code).toBe(status === 'ok' ? undefined : SpanStatusCode.ERROR)
+    expect(call?.parent).toBeDefined()
   })
 
   it('lists lines in the order they ended, each ended once', async () => {
