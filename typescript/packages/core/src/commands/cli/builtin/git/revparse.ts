@@ -362,16 +362,16 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
     rooted(repo, tree)
     holder = { oid: tree, type: TREE }
   }
-  // Every tree the path passes through has its entries read, as git reads them.
-  let through = holder.type === TREE ? holder.oid : null
-  for (const part of path.split('/').filter(Boolean)) {
-    if (through === null) break
-    const { tree } = await git.readTree({ ...repoArgs(repo), oid: through })
-    const entry = decoded(tree).find((item) => item.path === part)
-    through = entry?.type === TREE ? entry.oid : null
-  }
   let found: GitObject
   try {
+    // Every tree the path passes through has its entries read, as git reads them.
+    let through = holder.type === TREE ? holder.oid : null
+    for (const part of path.split('/').filter(Boolean)) {
+      if (through === null) break
+      const { tree } = await git.readTree({ ...repoArgs(repo), oid: through })
+      const entry = decoded(tree).find((item) => item.path === part)
+      through = entry?.type === TREE ? entry.oid : null
+    }
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const read = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
     found = { oid: read.oid, type: read.type }

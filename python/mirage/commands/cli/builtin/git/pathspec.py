@@ -56,19 +56,20 @@ def top_path(operand: str) -> str | None:
     """The root-relative path a top-magic operand names, None for any
     other operand.
 
-    git's short magic ``:/`` reads the rest from the work tree root, an
-    optional ``:`` ending the magic; ``:/!`` and ``:/^`` add exclusion,
-    which this build lacks. Pinned against git 2.51.2.
+    git's short magic ``:/`` reads the rest from the work tree root; a
+    ``:`` ends the magic and keeps what follows as typed, so a path
+    still starting with ``/`` names nothing. ``:/!`` and ``:/^`` add
+    exclusion, which this build lacks. Pinned against git 2.51.2.
 
     Args:
         operand (str): the operand as the user spelled it.
     """
     if not operand.startswith(TOP):
         return None
-    rest = operand[len(TOP) :]
+    rest = operand[len(TOP) :].lstrip(SLASH)
     if rest.startswith(EXCLUDE):
         return None
-    return rest.removeprefix(MAGIC).lstrip(SLASH)
+    return rest.removeprefix(MAGIC)
 
 
 def repo_relative(
@@ -92,6 +93,8 @@ def repo_relative(
     root = location.worktree.virtual.rstrip("/") or "/"
     prefix = root if root.endswith("/") else f"{root}/"
     top = top_path(operand) if magic else None
+    if top is not None and top.startswith(SLASH):
+        return top
     if top is not None:
         absolute = absolute_operand(root, top or ".")
     else:
