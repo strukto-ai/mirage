@@ -231,7 +231,7 @@ async def test_a_directory_no_file_points_at_still_gets_its_row():
     sealed = _Mount(readdir=_sealed_readdir, stat=_sealed_stat)
     assert await _du(sealed, ["/db"]) == (rows, 1, notes)
     everything = "3\t/db/a.txt\n" + rows
-    assert await _du(sealed, ["/db"], a=True) == (everything, 1, notes)
+    assert await _du(sealed, ["/db"], all=True) == (everything, 1, notes)
 
 
 LINKED = FileStat(name="f", type=FileType.FILE, size=6)
@@ -283,7 +283,9 @@ async def test_du_L_counts_a_link_whose_file_only_it_reaches():
     mount = _Mount(
         readdir=_unlisted_readdir, stat=_unlisted_stat, followed=_linked
     )
-    out, code, err = await _du(mount, ["/db"], _OneLink(), a=True, L=True)
+    out, code, err = await _du(
+        mount, ["/db"], _OneLink(), all=True, dereference=True
+    )
     assert out == "6\t/db/link\n0\t/db/private\n6\t/db\n"
     assert (code, err) == (
         1,

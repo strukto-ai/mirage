@@ -85,11 +85,11 @@ it.each([
   ['/', {}, '150\t/docs\n0\t/vendor\n159\t/\n'],
   [
     '/',
-    { a: true },
+    { all: true },
     '2\t/Banana.md\n100\t/docs/a.md\n50\t/docs/b.md\n0\t/docs/c.md\n150\t/docs\n7\t/readme.txt\n0\t/vendor\n159\t/\n',
   ],
-  ['/docs', { s: true }, '150\t/docs\n'],
-  ['/readme.txt', { a: true }, '7\t/readme.txt\n'],
+  ['/docs', { summarize: true }, '150\t/docs\n'],
+  ['/readme.txt', { all: true }, '7\t/readme.txt\n'],
 ])('du %s %o sums the tree it reads once', async (operand, flags, expected) => {
   const accessor = new GitHubAccessor({
     account: new GitHubAccount({ token: 't' }, {

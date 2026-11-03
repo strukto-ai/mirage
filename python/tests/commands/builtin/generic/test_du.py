@@ -75,7 +75,7 @@ async def test_backend_error_on_the_content_probe_reads_as_missing():
     out, io = await du_generic(
         [_spec("/data/nosuch", "nosuch")],
         [],
-        Context(flags={"c": True}),
+        Context(flags={"total": True}),
         lambda targets: _ok(list(targets)),
         stat,
         compute_size,
@@ -263,3 +263,100 @@ async def test_du_names_a_directory_the_walk_could_not_open():
         b"du: cannot read directory 't/sealed': Permission denied\n"
     )
     assert out.exit_code == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "options,expected",
+    [
+        ("-b", "6"),
+        ("--bytes", "6"),
+        ("--apparent-size", "6"),
+        ("-k", "1"),
+        ("-m", "1"),
+        ("-B1", "6"),
+        ("--block-size=K", "1K"),
+        ("-BKB", "1kB"),
+        ("-BKiB", "1KiB"),
+        ("-b -k", "1"),
+        ("-k -b", "6"),
+        ("-k -b -k", "1"),
+        ("-bkb", "6"),
+        ("-B1 -h -B1024", "1"),
+        ("-k --human-readable", "6"),
+        ("--summarize --bytes", "6"),
+        ("--dereference --no-dereference --bytes", "6"),
+    ],
+)
+async def test_du_gnu_units_and_long_aliases(options, expected):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("printf abcdef > /data/f")
+        result = await ws.shell(f"du {options} /data/f")
+        assert result.exit_code == 0
+        assert await result.stderr_str() == ""
+        assert await result.stdout_str() == f"{expected}\t/data/f\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_rounds_rows_after_summing_and_keeps_byte_records():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "mkdir /data/d; printf a > /data/d/a; printf b > /data/d/b"
+        )
+        result = await ws.shell("du --all --total -B4 /data/d")
+        assert result.exit_code == 0
+        assert await result.stdout_str() == (
+            "1\t/data/d/a\n1\t/data/d/b\n1\t/data/d\n1\ttotal\n"
+        )
+        for size, count in [(0, 0), (1024, 1), (1025, 2)]:
+            await ws.shell(
+                f"printf '%{size}s' x > /data/f" if size else ": > /data/f"
+            )
+            result = await ws.shell("du -k /data/f")
+            assert await result.stdout_str() == f"{count}\t/data/f\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_orders_human_units_and_validates_each_block_size():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("printf '%1025s' x > /data/f")
+        for options, expected in [
+            ("-k -h", "1.1K"),
+            ("-h -k", "2"),
+            ("-B0x10", "65"),
+            ("-B010", "129"),
+        ]:
+            result = await ws.shell(f"du {options} /data/f")
+            assert result.exit_code == 0
+            assert await result.stdout_str() == f"{expected}\t/data/f\n"
+        result = await ws.shell("du -B0 -b /data/f")
+        assert result.exit_code == 1
+        assert await result.stderr_str() == "du: invalid -B argument '0'\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_du_long_link_aliases_keep_last_option_order():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "printf abcdef > /data/target; ln -s /data/target /data/link"
+        )
+        for options, expected in [
+            ("--no-dereference --dereference", "6"),
+            ("--dereference --no-dereference", "12"),
+            ("-L --no-dereference --dereference", "6"),
+        ]:
+            result = await ws.shell(f"du --bytes {options} /data/link")
+            assert result.exit_code == 0
+            assert await result.stdout_str() == f"{expected}\t/data/link\n"
+    finally:
+        await ws.close()

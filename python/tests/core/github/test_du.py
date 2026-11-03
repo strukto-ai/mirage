@@ -54,12 +54,12 @@ async def _unlisted(path):
         ("/", {}, "150\t/docs\n0\t/vendor\n159\t/\n"),
         (
             "/",
-            {"a": True},
+            {"all": True},
             "2\t/Banana.md\n100\t/docs/a.md\n50\t/docs/b.md\n"
             "0\t/docs/c.md\n150\t/docs\n7\t/readme.txt\n0\t/vendor\n159\t/\n",
         ),
-        ("/docs", {"s": True}, "150\t/docs\n"),
-        ("/readme.txt", {"a": True}, "7\t/readme.txt\n"),
+        ("/docs", {"summarize": True}, "150\t/docs\n"),
+        ("/readme.txt", {"all": True}, "7\t/readme.txt\n"),
     ],
 )
 async def test_du_sums_the_tree_it_reads_once(

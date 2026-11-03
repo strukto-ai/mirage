@@ -1,0 +1,434 @@
+{
+  "cases": [
+    {
+      "id": "du_apparent_bytes_aliases",
+      "seq": 110000011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -b /data/a.txt; du --bytes /data/a.txt; du --apparent-size /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24\t/data/a.txt\n24\t/data/a.txt\n24\t/data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "bytes",
+        "apparent-size"
+      ]
+    },
+    {
+      "id": "du_last_unit_wins_including_repeated_short_flags",
+      "seq": 110000012,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -bk /data/a.txt; du -kb /data/a.txt; du -kbk /data/a.txt; du -bkb /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\t/data/a.txt\n24\t/data/a.txt\n1\t/data/a.txt\n24\t/data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "b",
+        "k"
+      ]
+    },
+    {
+      "id": "du_explicit_block_sizes_and_suffixes",
+      "seq": 110000013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -B1 /data/a.txt; du --block-size=10 /data/a.txt; du -BK /data/a.txt; du -BKB /data/a.txt; du -BKiB /data/a.txt; du -m /data/a.txt; du -Bhuman-readable /data/a.txt; du -Bsi /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "24\t/data/a.txt\n3\t/data/a.txt\n1K\t/data/a.txt\n1kB\t/data/a.txt\n1KiB\t/data/a.txt\n1\t/data/a.txt\n24\t/data/a.txt\n24\t/data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "B",
+        "block-size",
+        "m"
+      ]
+    },
+    {
+      "id": "du_rounds_after_summing_total",
+      "seq": 110000014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du --total -k /data/sub/nested.txt /data/sub/deep/deeper.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\t/data/sub/nested.txt\n1\t/data/sub/deep/deeper.txt\n1\ttotal\n",
+        "stderr": ""
+      },
+      "flags": [
+        "total",
+        "k"
+      ]
+    },
+    {
+      "id": "du_gnu_long_output_aliases",
+      "seq": 110000015,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/du_alias/deep && printf 12345 > /data/du_alias/deep/deeper.txt && printf 123456789012345 > /data/du_alias/nested.txt && du --all --bytes /data/du_alias; du --summarize --total --bytes /data/du_alias; du --human-readable --apparent-size /data/a.txt; rm -r /data/du_alias",
+      "expect": {
+        "exit": 0,
+        "stdout": "5\t/data/du_alias/deep/deeper.txt\n5\t/data/du_alias/deep\n15\t/data/du_alias/nested.txt\n20\t/data/du_alias\n20\t/data/du_alias\n20\ttotal\n24\t/data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "all",
+        "bytes",
+        "summarize",
+        "total",
+        "human-readable",
+        "apparent-size"
+      ]
+    },
+    {
+      "id": "du_A_remains_refused",
+      "seq": 110000016,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -A /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: invalid option -- 'A'\nTry 'du --help' for more information.\n"
+      },
+      "flags": [
+        "A"
+      ]
+    },
+    {
+      "id": "du_exclude_remains_a_documented_divergence",
+      "seq": 110000017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du --exclude=x /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: unrecognized option '--exclude=x'\nTry 'du --help' for more information.\n"
+      },
+      "flags": [
+        "exclude"
+      ]
+    },
+    {
+      "id": "du_validates_each_block_size_before_later_unit",
+      "seq": 110000018,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -B0 -b /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: invalid -B argument '0'\n"
+      },
+      "flags": [
+        "B",
+        "b"
+      ]
+    },
+    {
+      "id": "du_block_size_base_zero",
+      "seq": 110000019,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -B010 /data/a.txt; du -B0x10 /data/a.txt; du -B0b10 /data/a.txt; du -B0B10K /data/a.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\t/data/a.txt\n2\t/data/a.txt\n12\t/data/a.txt\n1\t/data/a.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "B"
+      ]
+    },
+    {
+      "id": "du_rejects_malformed_block_count",
+      "seq": 110000020,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -B08 /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: invalid -B argument '08'\n"
+      },
+      "flags": [
+        "B"
+      ]
+    },
+    {
+      "id": "du_depth_error_precedes_later_block_error",
+      "seq": 110000021,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "du -d bad -B0 /data/a.txt",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "du: invalid maximum depth 'bad'\ndu: invalid -B argument '0'\n"
+      },
+      "flags": [
+        "B"
+      ]
+    }
+  ]
+}
