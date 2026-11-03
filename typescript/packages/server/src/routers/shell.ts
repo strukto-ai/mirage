@@ -16,7 +16,7 @@ import { ExecutionStatus, type ExecutionRecord } from '@struktoai/mirage-core/ex
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
 import { Buffer } from 'node:buffer'
 import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import type { ExecutionTable } from '../jobs.ts'
@@ -86,7 +86,7 @@ async function readPart(
  * begins, or the body ends without one; a `stdin` part then goes to the
  * line as it arrives.
  */
-async function readShellBody(req: FastifyRequest, capacity: number): Promise<ShellUpload> {
+async function readShellBody(req: RouteRequest, capacity: number): Promise<ShellUpload> {
   const contentType = req.headers['content-type'] ?? ''
   if (!contentType.startsWith('multipart/')) {
     return {
@@ -131,7 +131,7 @@ async function readShellBody(req: FastifyRequest, capacity: number): Promise<She
           await stdin.discard()
           const error = await failed
           if (error instanceof MultipartError) throw error
-          if (error !== undefined) req.log.debug({ err: error }, 'shell upload ended early')
+          if (error !== undefined) console.debug('shell upload ended early', error)
         },
       }
     }
@@ -162,20 +162,20 @@ async function readShellBody(req: FastifyRequest, capacity: number): Promise<She
 async function waitAttended(
   jobs: ExecutionTable,
   jobId: string,
-  reply: FastifyReply,
+  closed: AbortSignal,
   upload: Promise<unknown>,
 ): Promise<ExecutionRecord> {
   const gone = (): void => {
-    if (!reply.raw.writableFinished) jobs.cancel(jobId)
+    jobs.cancel(jobId)
   }
   void upload.then((error) => {
     if (error !== undefined) gone()
   })
-  reply.raw.once('close', gone)
+  closed.addEventListener('abort', gone, { once: true })
   try {
     return await jobs.wait(jobId)
   } finally {
-    reply.raw.off('close', gone)
+    closed.removeEventListener('abort', gone)
   }
 }
 
@@ -183,7 +183,7 @@ async function waitAttended(
  * Answer a refused shell body. The rest of a refused multipart body is
  * left unread, so the connection closes after the answer.
  */
-function refuse(req: FastifyRequest, reply: FastifyReply, error: unknown): FastifyReply {
+function refuse(req: RouteRequest, reply: RouteReply, error: unknown): RouteReply {
   if (req.headers['content-type']?.startsWith('multipart/') === true) {
     reply.header('connection', 'close')
   }
@@ -210,10 +210,10 @@ interface ShellQuery {
  * `_explained`.
  */
 async function explained(
-  req: FastifyRequest<{ Params: ShellParams; Body: ShellRequest; Querystring: ShellQuery }>,
-  reply: FastifyReply,
+  req: RouteRequest<{ Params: ShellParams; Body: ShellRequest; Querystring: ShellQuery }>,
+  reply: RouteReply,
   deps: ShellRoutesDeps,
-): Promise<FastifyReply> {
+): Promise<RouteReply> {
   let said: ShellExplanation
   try {
     const entry = requireEntry(deps.registry, req.params.wsId, req.account)
@@ -233,7 +233,7 @@ async function explained(
   return reply.send(explanationToDict(said))
 }
 
-export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps): void {
+export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void {
   app.post<{ Params: ShellParams; Body: ShellRequest; Querystring: ShellQuery }>(
     '/v1/workspaces/:wsId/shell',
     async (req, reply) => {
@@ -311,8 +311,10 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
         },
         sessionId,
       )
-      if (streaming) return shellResponse(execution, deps.jobs, job, reply, upload.failed, stdin)
-      job = await waitAttended(deps.jobs, job.id, reply, upload.failed)
+      if (streaming) {
+        return shellResponse(execution, deps.jobs, job, reply, req.closed, upload.failed, stdin)
+      }
+      job = await waitAttended(deps.jobs, job.id, req.closed, upload.failed)
       try {
         await upload.finish()
       } catch (error) {

@@ -1,11 +1,10 @@
 import { Buffer } from 'node:buffer'
-import { Readable } from 'node:stream'
-import type { FastifyReply } from 'fastify'
 import { CHUNK_SIZE } from '@struktoai/mirage-core/io/cooperative'
 import type { StreamName } from '@struktoai/mirage-core/io/types'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import type { ExecutionTable } from './jobs.ts'
 import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
+import { streamOf, type RouteReply } from './routes.ts'
 import { UploadStdin } from './stdin.ts'
 
 export const PAYLOAD_SIZE = CHUNK_SIZE / 2
@@ -38,14 +37,15 @@ export function shellResponse(
   execution: Promise<ShellExecution | null>,
   jobs: ExecutionTable,
   job: ExecutionRecord,
-  reply: FastifyReply,
+  reply: RouteReply,
+  closed: AbortSignal,
   failed: Promise<unknown>,
   stdin: UploadStdin | Uint8Array | undefined,
-): FastifyReply {
+): RouteReply {
   const finished = jobs.wait(job.id)
   const completed = jobs.drain(job.id).then(() => finished)
   void completed.catch((error: unknown) => {
-    reply.log.error(error, 'streamed shell completion failed')
+    console.error('streamed shell completion failed', error)
   })
   let shell: ShellExecution | null = null
   void execution.then((opened) => {
@@ -58,15 +58,15 @@ export function shellResponse(
     void shell?.close()
     if (stdin instanceof UploadStdin)
       void stdin.discard().catch((error: unknown) => {
-        reply.log.error(error, 'stdin cleanup failed')
+        console.error('stdin cleanup failed', error)
       })
   }
-  reply.raw.once('close', disconnected)
+  closed.addEventListener('abort', disconnected, { once: true })
   let uploadError: unknown
   void failed.then((error) => {
     uploadError = error
     if (error !== undefined) {
-      reply.log.debug(error, 'streamed shell upload failed')
+      console.debug('streamed shell upload failed', error)
       disconnected()
     }
   })
@@ -79,7 +79,7 @@ export function shellResponse(
         } catch (error) {
           // The line failed or was stopped: its status says so in the
           // final record.
-          reply.log.debug(error, 'streamed shell output ended')
+          console.debug('streamed shell output ended', error)
         }
       }
       const result = await completed
@@ -105,12 +105,12 @@ export function shellResponse(
         await jobs.drain(job.id)
       } finally {
         await (await execution)?.close()
-        reply.raw.off('close', disconnected)
+        closed.removeEventListener('abort', disconnected)
       }
     }
   }
   return reply
     .header('connection', 'close')
     .type('application/x-ndjson')
-    .send(Readable.from(body(), { objectMode: false, highWaterMark: CHUNK_SIZE }))
+    .send(streamOf(body()))
 }

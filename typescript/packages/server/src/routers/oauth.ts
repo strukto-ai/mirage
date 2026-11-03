@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FastifyInstance } from 'fastify'
+import type { RouteApp } from '../routes.ts'
 import { PROTECTED_RESOURCE_PATH, type AuthConfig } from '../auth/config.ts'
 
 /**
@@ -22,7 +22,7 @@ import { PROTECTED_RESOURCE_PATH, type AuthConfig } from '../auth/config.ts'
  * knows it needs none.
  */
 export function registerOAuthRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   deps: {
     auth: AuthConfig
   },

@@ -15,9 +15,7 @@
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { MountMode } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { loadProfilePolicy } from '@struktoai/mirage-node'
-import type { FastifyInstance } from 'fastify'
-import { randomBytes } from 'node:crypto'
+import type { RouteApp } from '../routes.ts'
 import { refused } from '../metrics.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 
@@ -47,9 +45,14 @@ interface CreateSessionRequest {
 }
 
 export function registerSessionsRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   deps: {
     registry: WorkspaceRegistry
+    /**
+     * A profile with its path-form policy programs read in: the host's to
+     * answer, since a path names a file on the host's disk.
+     */
+    loadProfile: (profile: SessionProfile) => SessionProfile
   },
 ): void {
   app.post<{ Params: WsIdParams; Body: CreateSessionRequest }>(
@@ -59,7 +62,9 @@ export function registerSessionsRoutes(
       if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
-      const sid = req.body.session_id ?? `sess_${randomBytes(6).toString('hex')}`
+      const sid =
+        req.body.session_id ??
+        `sess_${Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
       const ws = deps.registry.get(wsId).runner.ws
       await ws.ensureSessionsLoaded()
       const held = ws.listSessions()
@@ -128,7 +133,7 @@ export function registerSessionsRoutes(
         const profile =
           typeof asked === 'string' || asked === null
             ? asked
-            : loadProfilePolicy(SessionProfile(asked))
+            : deps.loadProfile(SessionProfile(asked))
         const session = await ws.setSessionProfile(req.params.sessionId, profile)
         return { session_id: session.sessionId, cwd: session.cwd }
       } catch (err) {

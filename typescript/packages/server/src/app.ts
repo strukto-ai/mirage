@@ -53,6 +53,8 @@ import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { resolveSSHConfig, type SSHConfig } from './ssh/config.ts'
 import type { SSHEndpoint } from './ssh/types.ts'
 import websocket from '@fastify/websocket'
+import { fastifyRoutes } from './routes.ts'
+import { loadProfilePolicy } from '@struktoai/mirage-node'
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
@@ -169,7 +171,13 @@ export function buildApp(options: BuildAppOptions = {}) {
     return503OnClosing: false,
   })
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
+  app.decorateRequest('closed', null as never)
   app.addHook('onRequest', (request, reply, done) => {
+    const gone = new AbortController()
+    reply.raw.once('close', () => {
+      if (!reply.raw.writableFinished) gone.abort()
+    })
+    request.closed = gone.signal
     const { host, origin, 'sec-fetch-site': fetchSite } = request.headers
     if (!isHostAllowed(host, allowedHosts)) {
       console.warn(
@@ -193,17 +201,18 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
   })
-  registerHealthRoutes(app, { registry, startedAt, exit: exitFn })
-  registerOAuthRoutes(app, { auth: authConfig })
-  registerWorkspacesRoutes(app, { registry, stateRoot, snapshotStore: options.snapshotStore })
-  registerSessionsRoutes(app, { registry })
-  registerDocumentsRoutes(app, { registry })
-  registerAsksRoutes(app, { registry })
-  registerShellRoutes(app, { registry, jobs })
+  const routes = fastifyRoutes(app)
+  registerHealthRoutes(routes, { registry, startedAt, exit: exitFn })
+  registerOAuthRoutes(routes, { auth: authConfig })
+  registerWorkspacesRoutes(routes, { registry, stateRoot, snapshotStore: options.snapshotStore })
+  registerSessionsRoutes(routes, { registry, loadProfile: loadProfilePolicy })
+  registerDocumentsRoutes(routes, { registry })
+  registerAsksRoutes(routes, { registry })
+  registerShellRoutes(routes, { registry, jobs })
   const mcp = registerMcpRoutes(app, registry, jobs)
   registerRpcRoutes(app, registry, jobs, mcp)
-  registerToolsRoutes(app, { mcp })
-  registerVfsRoutes(app, { registry })
+  registerToolsRoutes(routes, { mcp })
+  registerVfsRoutes(routes, { registry })
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,
