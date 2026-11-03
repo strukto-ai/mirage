@@ -118,8 +118,10 @@ export interface SlackTransport {
 }
 
 export abstract class HttpSlackTransport implements SlackTransport {
-  // Indirection so tests can inject a fake fetch without subclass plumbing.
-  protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
+  // Indirection so tests can inject a fake fetch without subclass plumbing,
+  // read on each call so a client built before the host wraps fetch still
+  // sends through the wrapper that judges its network rule and policies.
+  protected readonly fetch: typeof fetch = (input, init) => globalThis.fetch(input, init)
 
   constructor(protected readonly timeout?: number) {}
 

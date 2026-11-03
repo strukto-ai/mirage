@@ -64,7 +64,9 @@ function errorOf(response: Response, text: string): JaegerApiError {
 }
 
 export class HttpJaegerTransport implements JaegerTransport {
-  protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
+  // Read on each call, so a client built before the host wraps fetch still
+  // sends through the wrapper that judges its network rule and policies.
+  protected readonly fetch: typeof fetch = (input, init) => globalThis.fetch(input, init)
   private readonly host: string
   private readonly timeout: number | undefined
 

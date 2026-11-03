@@ -307,7 +307,9 @@ function restCallFor(name: string, args: Record<string, unknown>): RestCall {
 }
 
 export class HttpNotionTransport implements NotionTransport {
-  protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
+  // Read on each call, so a client built before the host wraps fetch still
+  // sends through the wrapper that judges its network rule and policies.
+  protected readonly fetch: typeof fetch = (input, init) => globalThis.fetch(input, init)
   private readonly apiKey: string
   private readonly baseUrl: string
   private readonly apiVersion: string

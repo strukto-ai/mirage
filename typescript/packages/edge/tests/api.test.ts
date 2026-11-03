@@ -390,6 +390,26 @@ describe('the server API in workerd', () => {
     },
   )
 
+  it("holds a database's socket to the network rule", async () => {
+    const created = await call('POST', '/v1/workspaces', {
+      id: 'sockets',
+      config: {
+        mounts: {
+          '/': { vfs: 'ram' },
+          '/pg': { vfs: 'postgres', config: { dsn: 'postgres://u:p@db.test:5432/x' } },
+        },
+        network: { denied_domains: ['db.test'] },
+      },
+    })
+    expect(created.status).toBe(201)
+    const answer = await call('POST', '/v1/workspaces/sockets/shell', {
+      command: 'ls /pg/public/tables',
+    })
+    const { exit_code, stderr } = answer.json as { exit_code: number; stderr: string }
+    expect(exit_code).not.toBe(0)
+    expect(stderr).toContain('Permission denied')
+  })
+
   it('runs an MCP server as a CLI, its client kept across requests', async () => {
     const seen: string[] = []
     const server: Server = createServer((req, res) => {

@@ -163,4 +163,20 @@ describe('HttpSlackTransport', () => {
 
     expect(observedHeaders).toEqual(['Bearer search-token', 'Bearer main-token'])
   })
+
+  it('sends through a fetch the host wraps after the transport is built', async () => {
+    const t = new NodeSlackTransport('main-token')
+    const original = globalThis.fetch
+    const seen: string[] = []
+    globalThis.fetch = (url) => {
+      seen.push(url instanceof Request ? url.url : url.toString())
+      return Promise.resolve(jsonResponse({ ok: true }))
+    }
+    try {
+      await t.call('conversations.list')
+    } finally {
+      globalThis.fetch = original
+    }
+    expect(seen).toEqual(['https://slack.com/api/conversations.list'])
+  })
 })
