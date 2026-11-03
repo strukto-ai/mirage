@@ -416,14 +416,14 @@ jobs:
         with:
           name: integ-typescript-dist
           path: typescript/packages
-      - name: Generate the fakes' clients
+      # The launcher imports every fake, so every fake's client is generated.
+      - name: Generate integ Prisma clients
         working-directory: integ
-        env:
-          INTEG_DB_URL: file:/tmp/mirage-edge-schema.db
-        run: |
-          for schema in hf_hub mail slack linear; do
-            pnpm exec prisma generate --schema "prisma/$schema.prisma"
-          done
+        run: pnpm run prisma:clients
+      # The test worker runs edge's source, whose Monty bundle is generated.
+      - name: Bundle edge's Monty runtime
+        working-directory: typescript/packages/edge
+        run: node scripts/bundle-monty.mjs
       # The corpus's hf, email, slack and linear targets on an edge worker
       # (workerd under wrangler dev), each line over the server API.
       - name: Run the corpus on the edge host

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { DEFAULT_TIMEOUT } from '../../../../core/api/constants.ts'
-import { loadOptionalPeer } from '../../../../utils/optional_peer.ts'
+import { judgeSocket } from '../../../../io/web/network.ts'
+import { missingPeer } from '../../../../utils/optional_peer.ts'
 import type * as Nodemailer from 'nodemailer'
 import type { fromParsed } from '../../../../core/email/_parse.ts'
 import { parseRfc822 } from '../../../../core/email/_parse.ts'
@@ -26,10 +27,9 @@ const transporterCache = new WeakMap<EmailConfig, Nodemailer.Transporter>()
 async function getTransporter(config: EmailConfig): Promise<Nodemailer.Transporter> {
   const existing = transporterCache.get(config)
   if (existing !== undefined) return existing
-  const mod = await loadOptionalPeer(
-    () => import('nodemailer') as unknown as Promise<typeof Nodemailer>,
-    { feature: 'himalaya message send', packageName: 'nodemailer' },
-  )
+  const mod = (await import('nodemailer').catch(
+    missingPeer({ feature: 'himalaya message send', packageName: 'nodemailer' }),
+  )) as unknown as typeof Nodemailer
   // Port 465 speaks TLS from its first byte (RFC 8314's implicit TLS);
   // with secure false nodemailer connects in plaintext and upgrades when
   // the server advertises STARTTLS. Mirrors Python's send_raw.
@@ -59,6 +59,9 @@ export async function sendRaw(
   config: EmailConfig,
   raw: Uint8Array,
 ): Promise<ReturnType<typeof fromParsed>> {
+  // An edge isolate opens the socket past its fetch guard, so the network
+  // rule is asked here; elsewhere this is a no-op.
+  judgeSocket(config.smtpHost, config.smtpPort)
   const transporter = await getTransporter(config)
   const parsed = await parseRfc822(raw)
   const recipients = [
