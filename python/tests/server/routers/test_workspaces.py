@@ -14,16 +14,19 @@
 
 import asyncio
 import bz2
+import errno
 import gzip
 import io
 import json
 import lzma
 import os
+import shutil
 import tarfile
 import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 
 import boto3
 import jwt as pyjwt
@@ -1781,6 +1784,55 @@ async def test_history_reads_what_the_workspace_ran():
             await client.get("/v1/workspaces/nope/history")
         ).status_code == 404
     await app.state.registry.close_all()
+
+
+def _fills_then_fails(src, dst):
+    Path(dst).write_bytes(b"half")
+    raise OSError(errno.ENOSPC, "No space left on device")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
+@pytest.mark.parametrize(
+    ("outcome", "changed", "number"),
+    [("failed", False, 13), ("partial", True, 28)],
+)
+@pytest.mark.asyncio
+async def test_history_reads_a_failed_disk_cp(
+    tmp_path, monkeypatch, outcome, changed, number
+):
+    (tmp_path / "a.txt").write_bytes(b"hello\n")
+    (tmp_path / "ro").mkdir()
+    os.chmod(tmp_path / "ro", 0o500)
+    dst = "/ro/c.txt"
+    if outcome == "partial":
+        monkeypatch.setattr(shutil, "copyfile", _fills_then_fails)
+        dst = "/c.txt"
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    block = {"vfs": "disk", "mode": "WRITE", "config": {"root": str(tmp_path)}}
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            r = await client.post(
+                "/v1/workspaces", json={"config": {"mounts": {"/": block}}}
+            )
+            wid = r.json()["id"]
+            r = await client.post(
+                f"/v1/workspaces/{wid}/shell",
+                json={"command": f"cp /a.txt {dst}"},
+            )
+            assert r.status_code == 200, r.text
+            r = await client.get(
+                f"/v1/workspaces/{wid}/history", params={"vfs": "true"}
+            )
+            copies = [e for e in r.json() if e.get("vfs") == "copy"]
+            assert [
+                (e["path"], e["status"], e["errno"], e["changed"])
+                for e in copies
+            ] == [(dst, outcome, number, changed)]
+    finally:
+        os.chmod(tmp_path / "ro", 0o700)
+        await app.state.registry.close_all()
 
 
 @pytest.mark.asyncio
