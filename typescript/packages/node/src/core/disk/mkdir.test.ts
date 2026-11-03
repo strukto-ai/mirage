@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFile, stat, writeFile } from 'node:fs/promises'
+import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
@@ -76,5 +77,27 @@ describe('core/disk/mkdir', () => {
   it('-p onto a plain file target is EEXIST', async () => {
     await writeFile(join(root, 'a.txt'), 'hi')
     await expect(mkdir(accessor, spec('/a.txt'), true)).rejects.toMatchObject({ code: 'EEXIST' })
+  })
+})
+
+describe('core/disk/mkdir parents rows', () => {
+  it('records a failed row when it made nothing', async () => {
+    await writeFile(join(root, 'a.txt'), 'a')
+    const [, records] = await runWithRecording(async () => {
+      await expect(mkdir(accessor, spec('/a.txt/z'), true)).rejects.toMatchObject({
+        code: 'ENOTDIR',
+      })
+    })
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ status: 'failed', changed: false, errno: 20 })
+  })
+
+  it('records partial once it made a directory', async () => {
+    const [, records] = await runWithRecording(async () => {
+      await expect(mkdir(accessor, spec(`/x/${'n'.repeat(300)}`), true)).rejects.toThrow()
+    })
+    expect((await stat(join(root, 'x'))).isDirectory()).toBe(true)
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ status: 'partial', changed: true })
   })
 })

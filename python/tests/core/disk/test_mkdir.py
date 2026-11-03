@@ -12,10 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import errno
+
+import aiofiles.os
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.mkdir import mkdir
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
 
@@ -86,3 +91,62 @@ async def test_mkdir_missing_parent_reports_the_virtual_path(tmp_path):
     with pytest.raises(FileNotFoundError) as excinfo:
         await mkdir(accessor, spec("/nodir/sub"))
     assert str(tmp_path) not in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_mkdir_parents_that_made_nothing_records_a_failed_row(tmp_path):
+    (tmp_path / "a.txt").write_bytes(b"a")
+    scope = RecordingScope()
+    try:
+        with pytest.raises(NotADirectoryError):
+            await mkdir(DiskAccessor(tmp_path), spec("/a.txt/z"), parents=True)
+    finally:
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed, row.errno) == (
+        "failed",
+        False,
+        errno.ENOTDIR,
+    )
+
+
+@pytest.mark.asyncio
+async def test_mkdir_parents_records_partial_once_it_made_a_directory(
+    tmp_path,
+):
+    scope = RecordingScope()
+    try:
+        with pytest.raises(OSError):
+            await mkdir(
+                DiskAccessor(tmp_path), spec(f"/x/{'n' * 300}"), parents=True
+            )
+    finally:
+        scope.close()
+    assert (tmp_path / "x").is_dir()
+    [row] = scope.records
+    assert (row.status, row.changed) == ("partial", True)
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_mkdir_parents_records_partial_without_probing(
+    tmp_path, monkeypatch
+):
+    accessor = DiskAccessor(tmp_path)
+    entered = asyncio.Event()
+
+    async def stalled(path, exist_ok=False):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(aiofiles.os, "makedirs", stalled)
+    scope = RecordingScope()
+    try:
+        task = asyncio.create_task(mkdir(accessor, spec("/a/b"), parents=True))
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed) == ("partial", True)

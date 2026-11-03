@@ -12,12 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import * as fs from 'node:fs/promises'
+import type * as fsModule from 'node:fs/promises'
+import { vi } from 'vitest'
+import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { copy } from './copy.ts'
+
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof fsModule>()
+  return { ...actual, copyFile: vi.fn(actual.copyFile) }
+})
 
 let root: string
 let accessor: DiskAccessor
@@ -101,4 +110,35 @@ describe('core/disk/copy', () => {
       code: 'ENOENT',
     })
   })
+})
+
+it('records a partial copy when copying throws after writing bytes', async () => {
+  const copyFile = vi.mocked(fs.copyFile).mockImplementationOnce(async (_src, dst) => {
+    await writeFile(dst, 'partial')
+    throw Object.assign(new Error('denied'), { code: 'EACCES', errno: 13 })
+  })
+  try {
+    await writeFile(join(root, 'src'), 'content')
+    const [, records] = await runWithRecording(async () => {
+      await expect(copy(accessor, spec('/src'), spec('/dst'))).rejects.toMatchObject({
+        code: 'EACCES',
+      })
+    })
+    expect(await readFile(join(root, 'dst'), 'utf8')).toBe('partial')
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ status: 'partial', changed: true, errno: 13 })
+  } finally {
+    copyFile.mockRestore()
+  }
+})
+
+it('records a failed copy when copying wrote nothing', async () => {
+  await writeFile(join(root, 'src'), 'content')
+  const [, records] = await runWithRecording(async () => {
+    await expect(copy(accessor, spec('/src'), spec('/a/b/dst'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+  expect(records).toHaveLength(1)
+  expect(records[0]).toMatchObject({ status: 'failed', changed: false, errno: 2 })
 })

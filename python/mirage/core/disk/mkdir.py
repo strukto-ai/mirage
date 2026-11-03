@@ -12,6 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import logging
+import os
+from pathlib import Path
+
 import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
@@ -19,8 +24,26 @@ from mirage.core.disk.dest import mkdir_component_error
 from mirage.core.disk.errors import disk_error, disk_errors
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record, start_op
+from mirage.observe.record import OpStatus
 from mirage.types import PathSpec
 from mirage.utils.path import norm
+
+logger = logging.getLogger(__name__)
+
+
+def _first_missing(path: Path) -> Path | None:
+    missing = None
+    while True:
+        try:
+            os.lstat(path)
+            break
+        except OSError as exc:
+            logger.debug("mkdir -p ancestor %s missing: %s", path, exc)
+        missing = path
+        if path.parent == path:
+            break
+        path = path.parent
+    return missing
 
 
 async def mkdir(
@@ -33,9 +56,12 @@ async def mkdir(
     if parents:
         # Not `disk_errors`: that restamps every OSError against the
         # operand, which would undo the component naming below.
+        missing = await asyncio.to_thread(_first_missing, p)
+        failure: BaseException | None = None
         try:
             await aiofiles.os.makedirs(p, exist_ok=True)
         except NotADirectoryError as exc:
+            failure = exc
             # The kernel names the whole path; GNU names the component it
             # tripped on, so the chain is walked only now that it is known
             # to be broken. A failure the walk cannot explain keeps the
@@ -43,11 +69,34 @@ async def mkdir(
             named = await mkdir_component_error(root, path_spec, norm(path))
             raise (named or disk_error(exc, path_spec.virtual)) from exc
         except OSError as exc:
+            failure = exc
             raise disk_error(exc, path_spec.virtual) from exc
+        except BaseException as exc:
+            failure = exc
+            raise
         finally:
             # Also when it raised: the chain may have made its first
-            # directories before a later one failed.
-            record("mkdir", path_spec.virtual, "disk", 0, timer)
+            # directories before a later one failed. A cancelled wait
+            # leaves its worker running, so only makedirs' own error is
+            # probed; anything else may still make the chain.
+            changed = (
+                not isinstance(failure, OSError)
+                or await asyncio.to_thread(_first_missing, p) != missing
+            )
+            record(
+                "mkdir",
+                path_spec.virtual,
+                "disk",
+                0,
+                timer,
+                status=OpStatus.OK
+                if failure is None
+                else OpStatus.PARTIAL
+                if changed
+                else OpStatus.FAILED,
+                errno=getattr(failure, "errno", None),
+                changed=changed,
+            )
         return
     # An existing target is EEXIST, not success: only -p is idempotent.
     done = True

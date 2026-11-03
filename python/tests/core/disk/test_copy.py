@@ -12,12 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import errno
 import os
+import shutil
+import threading
 
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.copy import copy
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
 
@@ -47,6 +52,26 @@ async def test_copy_does_not_create_the_destination_parent(accessor):
             PathSpec.from_str_path("/a/b/dst"),
         )
     assert not (accessor.root / "a").exists()
+
+
+@pytest.mark.asyncio
+async def test_copy_that_wrote_nothing_records_a_failed_row(accessor):
+    scope = RecordingScope()
+    try:
+        with pytest.raises(FileNotFoundError):
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/a/b/dst"),
+            )
+    finally:
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed, row.errno) == (
+        "failed",
+        False,
+        errno.ENOENT,
+    )
 
 
 @pytest.mark.asyncio
@@ -122,3 +147,65 @@ async def test_copy_never_leaks_the_host_path(accessor):
                 PathSpec.from_str_path(dst),
             )
         assert str(accessor.root) not in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_copy_records_partial_after_bytes_were_written(
+    accessor, monkeypatch
+):
+    (accessor.root / "src").write_bytes(b"content")
+
+    def fail_metadata(src, dst):
+        raise OSError(errno.EACCES, "denied")
+
+    monkeypatch.setattr(shutil, "copystat", fail_metadata)
+    scope = RecordingScope()
+    try:
+        with pytest.raises(OSError):
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/dst"),
+            )
+    finally:
+        scope.close()
+    assert (accessor.root / "dst").read_bytes() == b"content"
+    assert len(scope.records) == 1
+    row = scope.records[0]
+    assert (row.status, row.changed, row.errno) == (
+        "partial",
+        True,
+        errno.EACCES,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_copy_records_partial_without_probing(
+    accessor, monkeypatch
+):
+    (accessor.root / "src").write_bytes(b"content")
+    entered, release = threading.Event(), threading.Event()
+
+    def stalled(src, dst):
+        entered.set()
+        release.wait()
+
+    monkeypatch.setattr(shutil, "copyfile", stalled)
+    scope = RecordingScope()
+    try:
+        task = asyncio.create_task(
+            copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/dst"),
+            )
+        )
+        await asyncio.to_thread(entered.wait)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed) == ("partial", True)
