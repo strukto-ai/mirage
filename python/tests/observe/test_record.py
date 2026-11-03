@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.observe import OpRecord
-from mirage.observe.record import RecordIndex
+from mirage.observe.record import MUTATION_OPS, OpStatus, RecordIndex
 from mirage.workspace.types import ExecutionNode
 
 
@@ -137,13 +137,23 @@ def test_internal_mount_identity_is_not_serialized():
         "duration_ms",
         "fingerprint",
         "revision",
+        "status",
+        "errno",
+        "changed",
+        "served",
     }
     assert ExecutionNode(records=[record]).to_dict()["records"] == [fields]
 
 
 def _op(op: str, path: str) -> OpRecord:
     return OpRecord(
-        op=op, path=path, source="s3", bytes=0, timestamp=0, duration_ms=0
+        op=op,
+        path=path,
+        source="s3",
+        bytes=0,
+        timestamp=0,
+        duration_ms=0,
+        changed=op in MUTATION_OPS,
     )
 
 
@@ -189,3 +199,20 @@ def test_the_index_reads_each_record_once():
     index.newest_version("/a")
     records[0] = _op("read", "/b")
     assert index.newest_version("/b") is None
+
+
+def test_failed_mutation_preserves_the_read_version():
+    read = _op("read", "/a")
+    failed = OpRecord(
+        "unlink", "/a", "ram", 0, 1, 0, status=OpStatus.FAILED, errno=13
+    )
+    assert failed.changed is False
+    assert RecordIndex([read, failed]).newest_version("/a") is read
+    assert failed.to_dict()["status"] == "failed"
+
+
+def test_a_row_states_its_own_effect_and_server():
+    assert OpRecord("write", "/a", "s3", 0, 1, 0).changed is False
+    read = OpRecord("read", "/a", "ram", 3, 1, 0)
+    assert read.changed is False
+    assert read.served == "backend"

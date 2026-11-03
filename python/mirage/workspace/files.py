@@ -36,9 +36,9 @@ from mirage.observe.context import (
     fresh_recorder,
     record,
 )
-from mirage.observe.record import OpRecord, Recorder
+from mirage.observe.record import OpRecord, OpServed, Recorder
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec, VFSName
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.path import owner_prefix
 from mirage.view.types import FollowOperands, SessionBind
@@ -475,8 +475,8 @@ class Files:
 
         The dispatcher names the server when it was not the owning mount (a
         warm cache hit, a synthetic namespace answer): neither moved
-        bytes over the network, and "ram" is what ``OpRecord.is_cache``
-        reads. It names the moved bytes when the delivered result no
+        bytes over the network, so the source is "ram", and the report's
+        answerer is the row's ``served``. It names the moved bytes when the delivered result no
         longer measures them, because a cap truncated it or a refusal
         withheld it entirely.
 
@@ -503,6 +503,7 @@ class Files:
             report.source or owner.resource_type,
             moved if moved is not None else _payload_bytes(answer, kwargs),
             timer,
+            served=report.answerer or OpServed.BACKEND,
         )
 
     def _hand_over(
@@ -1125,13 +1126,20 @@ class WorkspaceFiles(Files):
 
     @property
     def network_bytes(self) -> int:
-        """Total bytes transferred over the network."""
-        return sum(r.bytes for r in self.records if not r.is_cache)
+        """Total bytes a backend moved, past a RAM mount, which crosses
+        no network."""
+        return sum(
+            r.bytes
+            for r in self.records
+            if r.served == OpServed.BACKEND and r.source != VFSName.RAM
+        )
 
     @property
     def cache_bytes(self) -> int:
-        """Total bytes served from cache."""
-        return sum(r.bytes for r in self.records if r.is_cache)
+        """Total bytes a warm file cache served."""
+        return sum(
+            r.bytes for r in self.records if r.served == OpServed.CACHE
+        )
 
     def is_mounted(self, path: str) -> bool:
         """Check if a path is under a mount someone made.

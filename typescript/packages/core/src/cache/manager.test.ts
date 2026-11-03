@@ -1047,6 +1047,7 @@ describe('version lookups in one line', () => {
             timestamp: 0,
             durationMs: 0,
             fingerprint: `v${String(i)}`,
+            changed: true,
           }),
         )
         expect(await manager.readVersions([path])).toEqual([`v${String(i)}`])

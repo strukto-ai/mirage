@@ -32,6 +32,7 @@ from mirage.observe.context import (
     start_op,
     with_mount_context,
 )
+from mirage.observe.record import OpStatus
 from mirage.types import PathSpec
 from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
@@ -398,7 +399,7 @@ async def _dispatch_recording_read(
     finally:
         scope.close()
         await ws.close()
-    return [r.path for r in scope.records]
+    return [r.path for r in scope.records if r.op == "read"]
 
 
 @pytest.mark.asyncio
@@ -489,3 +490,24 @@ def test_stream_completion_is_pending_and_not_serialized():
         assert "complete" not in rec.to_dict()
     finally:
         scope.close()
+
+
+@pytest.mark.parametrize(
+    "op, status, changed",
+    [
+        ("read", OpStatus.OK, False),
+        ("write", OpStatus.OK, True),
+        ("write", OpStatus.FAILED, False),
+    ],
+    ids=["a read", "a mutation", "a failed mutation"],
+)
+def test_a_writer_that_leaves_changed_unsaid_gets_the_helper_default(
+    op, status, changed
+):
+    scope = RecordingScope()
+    try:
+        record(op, "/a.txt", "s3", 0, start_op(), status=status)
+    finally:
+        scope.close()
+    [row] = scope.records
+    assert row.changed is changed

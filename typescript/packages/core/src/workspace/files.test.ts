@@ -740,7 +740,7 @@ describe('Files goes through the dispatcher', () => {
     await runWithSession(session, async () => {
       ws.records.length = 0
       expect(await ws.vfs.readdir('/m/inner')).toEqual(['/m/inner/deep'])
-      expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
+      expect(ws.records.map((r) => [r.source, r.served])).toEqual([['ram', 'namespace']])
     })
   })
 
@@ -757,7 +757,7 @@ describe('Files goes through the dispatcher', () => {
     await runWithSession(session, async () => {
       ws.records.length = 0
       await expect(ws.vfs.readdir('/m/inner')).rejects.toThrow(PolicyDenied)
-      expect(ws.records.map((r) => [r.source, r.isCache])).toEqual([['ram', true]])
+      expect(ws.records.map((r) => [r.source, r.served])).toEqual([['ram', 'namespace']])
     })
   })
 
@@ -962,7 +962,7 @@ describe('Files accounting survives the delegation', () => {
     await expect(ws.vfs.read('/m/a.txt')).rejects.toThrow(PolicyDenied)
     const read = ws.records.find((r) => r.op === 'read')
     expect(read?.source).toBe('ram')
-    expect(read?.isCache).toBe(true)
+    expect(read?.served).toBe('cache')
     expect(ws.networkBytes).toBe(0)
   })
 

@@ -26,8 +26,11 @@ from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     LostPaths,
     OpRecord,
+    OpServed,
+    OpStatus,
     Recorder,
     RecordIndex,
+    default_changed,
 )
 from mirage.types import PathSpec
 from mirage.utils.clock import Clock, SystemClock
@@ -348,6 +351,11 @@ def finish_record(
     timer: OpTimer,
     fingerprint: str | None = None,
     revision: str | None = None,
+    *,
+    status: OpStatus = OpStatus.OK,
+    errno: int | None = None,
+    changed: bool | None = None,
+    served: OpServed = OpServed.BACKEND,
 ) -> OpRecord:
     """Close ``timer`` and build the finished record.
 
@@ -364,6 +372,12 @@ def finish_record(
             the backend (ETag, md5). Used for drift detection at replay.
         revision (str | None): Stable revision handle returned by the
             backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
+        status (OpStatus): whether the op succeeded, failed or partly
+            changed state.
+        errno (int | None): the failure's POSIX errno, when known.
+        changed (bool | None): whether state changed; None states the
+            writer default, ``default_changed``.
+        served (OpServed): the layer that answered.
     """
     elapsed = timer.elapsed_ms
     recorder = current_caller().recorder
@@ -376,6 +390,12 @@ def finish_record(
         duration_ms=elapsed,
         fingerprint=fingerprint,
         revision=revision,
+        status=status,
+        errno=errno,
+        changed=changed
+        if changed is not None
+        else default_changed(op, status),
+        served=served,
         mount_id=recorder.mount_id if recorder is not None else None,
         execution_id=current_execution_id(),
     )
@@ -405,6 +425,11 @@ def record(
     timer: OpTimer,
     fingerprint: str | None = None,
     revision: str | None = None,
+    *,
+    status: OpStatus = OpStatus.OK,
+    errno: int | None = None,
+    changed: bool | None = None,
+    served: OpServed = OpServed.BACKEND,
 ) -> None:
     """Record a byte transfer event. No-op if no recording context is active.
 
@@ -420,6 +445,12 @@ def record(
         revision (str | None): Stable revision handle returned by the
             backend (S3 ``VersionId``, Drive ``revisionId``, Git SHA).
             Used to pin replay reads to the exact recorded version.
+        status (OpStatus): whether the op succeeded, failed or partly
+            changed state.
+        errno (int | None): the failure's POSIX errno, when known.
+        changed (bool | None): whether state changed; None states the
+            writer default, ``default_changed``.
+        served (OpServed): the layer that answered.
     """
     rec = current_caller().recorder
     if rec is None:
@@ -432,6 +463,10 @@ def record(
         timer,
         fingerprint=fingerprint,
         revision=revision,
+        status=status,
+        errno=errno,
+        changed=changed,
+        served=served,
     )
     rec.sink.append(op_rec)
     _charge(op_rec)
@@ -443,6 +478,8 @@ def record_stream(
     source: str,
     fingerprint: str | None = None,
     revision: str | None = None,
+    *,
+    served: OpServed = OpServed.BACKEND,
 ) -> OpRecord | None:
     """Start recording a streaming transfer. Returns a mutable OpRecord.
 
@@ -465,6 +502,7 @@ def record_stream(
             also set ``rec.fingerprint`` later.
         revision (str | None): Initial revision; the caller can also set
             ``rec.revision`` later.
+        served (OpServed): the layer that answered.
 
     Returns:
         OpRecord | None: Mutable record, or None if not recording.
@@ -481,6 +519,8 @@ def record_stream(
         duration_ms=0,
         fingerprint=fingerprint,
         revision=revision,
+        changed=default_changed(op, OpStatus.OK),
+        served=served,
         mount_id=rec.mount_id,
         execution_id=current_execution_id(),
     )

@@ -89,6 +89,7 @@ from mirage.observe.record import (
     RETRACT_FINGERPRINT_OPS,
     WRITE_FINGERPRINT_OPS,
     OpRecord,
+    OpServed,
 )
 from mirage.policy.boundary import Boundary
 from mirage.policy.builtin.output_cap import walk_bound
@@ -2267,7 +2268,9 @@ class Dispatcher:
         else:
             boundary = await self._admit(call, mount, mark)
         _memory_answered(
-            call.report, len(held) if isinstance(held, bytes) else 0
+            call.report,
+            len(held) if isinstance(held, bytes) else 0,
+            OpServed.CACHE,
         )
         return await boundary.complete(mark, call.path, call.write, held)
 
@@ -2326,7 +2329,7 @@ class Dispatcher:
         # leaves the caller able to tell: without the stamp a refused
         # warm read is recorded against the backend and counted as
         # traffic that never happened.
-        _memory_answered(call.report, len(served))
+        _memory_answered(call.report, len(served), OpServed.CACHE)
         result = await boundary.complete(mark, call.path, call.write, served)
         if (
             mount.write is WritePolicy.CONDITIONAL
@@ -2340,6 +2343,7 @@ class Dispatcher:
                     len(served),
                     start_op(),
                     fingerprint=held[1] if held is not None else None,
+                    served=OpServed.CACHE,
                 )
             ]
             if call.stream:
@@ -2474,6 +2478,8 @@ class Dispatcher:
                         mount, call.path.virtual
                     )
                 probed = _probed(call, mount)
+                if probed is not None and call.report is not None:
+                    call.report.answerer = OpServed.INDEX
                 result = (
                     probed
                     if probed is not None
@@ -2482,6 +2488,7 @@ class Dispatcher:
                         call.path
                         if call.name == "readdir"
                         else call.path.virtual,
+                        report=call.report,
                         **kwargs,
                     )
                 )
@@ -3664,6 +3671,7 @@ class Dispatcher:
             VFSName.RAM.value,
             len(encode_text(target)),
             timer,
+            served=OpServed.NAMESPACE,
         )
         _memory_answered(report)
         return await boundary.complete(mark, path, write, result)
@@ -3995,6 +4003,7 @@ class Dispatcher:
             VFSName.RAM.value,
             len(result) if isinstance(result, bytes) else 0,
             timer,
+            served=OpServed.NAMESPACE,
         )
         if report is not None:
             report.served(None, None)
@@ -4132,7 +4141,14 @@ class Dispatcher:
             if (value := kwargs.get(key)) is not None
         }
         await self._write_overlay(path.virtual, overlay)
-        record("setattr", path.virtual, VFSName.RAM.value, 0, timer)
+        record(
+            "setattr",
+            path.virtual,
+            VFSName.RAM.value,
+            0,
+            timer,
+            served=OpServed.NAMESPACE,
+        )
         return overlay
 
     async def _write_overlay(

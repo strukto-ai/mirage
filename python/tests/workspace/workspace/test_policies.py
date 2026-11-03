@@ -373,7 +373,7 @@ async def test_a_denied_warm_read_is_not_counted_as_network_traffic():
             await ws.vfs.read("/data/prod/x.txt")
         rec = ws.vfs.records[-1]
         assert rec.source == "ram"
-        assert rec.is_cache is True
+        assert rec.served == "cache"
         assert ws.vfs.network_bytes == 0
     finally:
         await ws.close()

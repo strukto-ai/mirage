@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpRecord, RecordIndex } from './record.ts'
+import { MUTATION_OPS, OpRecord, RecordIndex } from './record.ts'
 import { ExecutionNode } from '../workspace/types.ts'
 
 describe('OpRecord', () => {
@@ -38,7 +38,7 @@ describe('OpRecord', () => {
     expect(r.durationMs).toBe(50)
   })
 
-  it('isCache is true only when source is "ram"', () => {
+  it('a RAM read is served by its backend', () => {
     const r = new OpRecord({
       op: 'read',
       path: '/x',
@@ -47,10 +47,11 @@ describe('OpRecord', () => {
       timestamp: 0,
       durationMs: 0,
     })
-    expect(r.isCache).toBe(true)
+    expect(r.served).toBe('backend')
+    expect(r.changed).toBe(false)
   })
 
-  it('isCache is false for non-ram sources', () => {
+  it('a remote read defaults to backend', () => {
     const r = new OpRecord({
       op: 'read',
       path: '/x',
@@ -59,7 +60,7 @@ describe('OpRecord', () => {
       timestamp: 0,
       durationMs: 0,
     })
-    expect(r.isCache).toBe(false)
+    expect(r.served).toBe('backend')
   })
 
   it('accepts zero-byte records (e.g. stat ops)', () => {
@@ -97,6 +98,10 @@ describe('OpRecord', () => {
         'op',
         'path',
         'revision',
+        'status',
+        'errno',
+        'changed',
+        'served',
         'source',
         'timestamp',
       ].sort(),
@@ -134,7 +139,15 @@ describe('ExecutionNode records', () => {
 
 describe('RecordIndex.newestVersion', () => {
   const op = (name: string, path: string): OpRecord =>
-    new OpRecord({ op: name, path, source: 's3', bytes: 0, timestamp: 0, durationMs: 0 })
+    new OpRecord({
+      op: name,
+      path,
+      source: 's3',
+      bytes: 0,
+      timestamp: 0,
+      durationMs: 0,
+      changed: MUTATION_OPS.has(name),
+    })
   it.each([
     ['a read', [['read', '/a']], '/a', 0],
     [
@@ -217,5 +230,34 @@ describe('RecordIndex.newestVersion', () => {
     index.newestVersion('/a')
     records[0] = op('read', '/b')
     expect(index.newestVersion('/b')).toBeNull()
+  })
+})
+
+it('a failed mutation preserves the read version', () => {
+  const read = new OpRecord({
+    op: 'read',
+    path: '/a',
+    source: 'ram',
+    bytes: 3,
+    timestamp: 0,
+    durationMs: 0,
+  })
+  const failed = new OpRecord({
+    op: 'unlink',
+    path: '/a',
+    source: 'ram',
+    bytes: 0,
+    timestamp: 1,
+    durationMs: 0,
+    status: 'failed',
+    errno: 13,
+  })
+  expect(failed.changed).toBe(false)
+  expect(new RecordIndex([read, failed]).newestVersion('/a')).toBe(read)
+  expect(failed.toDict()).toMatchObject({
+    status: 'failed',
+    errno: 13,
+    changed: false,
+    served: 'backend',
   })
 })

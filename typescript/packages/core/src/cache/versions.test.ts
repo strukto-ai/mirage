@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { OwnRead } from './types.ts'
 import { VersionHistory, VersionScope } from './versions.ts'
-import { OpRecord } from '../observe/record.ts'
+import { MUTATION_OPS, OpRecord } from '../observe/record.ts'
 import { SessionState } from '../workspace/session/session.ts'
 
 function record(op = 'read', fingerprint: string | null = 'v1'): OpRecord {
@@ -27,6 +27,7 @@ function record(op = 'read', fingerprint: string | null = 'v1'): OpRecord {
     timestamp: 0,
     durationMs: 0,
     fingerprint,
+    changed: MUTATION_OPS.has(op),
   })
 }
 

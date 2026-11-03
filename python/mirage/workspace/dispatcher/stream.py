@@ -20,28 +20,33 @@ from mirage.cache.lock import KeyHold
 from mirage.io import OpReport
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
+from mirage.observe.record import OpServed
 from mirage.types import VFSName
 
 
 def _memory_answered(
-    report: OpReport | None, moved: int | None = None
+    report: OpReport | None,
+    moved: int | None = None,
+    served: OpServed = OpServed.NAMESPACE,
 ) -> None:
     """Stamp the caller's report: memory answered, no backend ran.
 
     Fires at the moment a warm file-cache hit or a synthetic namespace
     answer is in hand, before the post gate and any output cap, so
-    whatever those raise cannot erase the fact. The value is
-    ``VFSName.RAM``, which is how a record says "this never
-    crossed the network": ``OpRecord.is_cache`` is defined as that
-    string, and every network/cache total derives from it.
+    whatever those raise cannot erase the fact. The source is
+    ``VFSName.RAM``, which is how a record says "this never crossed the
+    network", and ``served`` names the layer that answered.
 
     Args:
         report (OpReport | None): the caller's report, None when the
             caller does not observe ops.
         moved (int | None): bytes memory served, None when the result
             is the measure.
+        served (OpServed): the layer that answered, a warm file cache
+            or the namespace.
     """
     if report is not None:
+        report.answerer = served
         report.served(VFSName.RAM.value, moved)
 
 

@@ -228,6 +228,8 @@ def capture_fingerprints(
     # retraction can otherwise sit before the write it retracts. The
     # sort is stable, so same-millisecond records keep their order.
     for rec in sorted(records, key=lambda r: r.timestamp):
+        if not rec.settles:
+            continue
         if rec.op in RETRACT_FINGERPRINT_OPS:
             # Resolved to bound the sweep, never to gate the drop: a
             # retraction whose mount has since gone still applies.

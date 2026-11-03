@@ -1171,6 +1171,7 @@ async def test_a_line_is_indexed_a_bounded_number_of_times(monkeypatch):
                     timestamp=0,
                     duration_ms=0,
                     fingerprint=f"v{i}",
+                    changed=True,
                 )
             )
             assert await manager.read_versions([path]) == [f"v{i}"]
