@@ -1,25 +1,7 @@
-const computations: Record<string, () => Promise<unknown>> = {
-  diffDispatch: async () => (await import('../rs/diff_worker.ts')).diffDispatch,
-}
+import { type ComputationRequest as Request, type Computations, execute } from './computations.ts'
 
-interface Request {
-  name: string
-  args: unknown[]
-  /** The mirage-rs module the page compiled, which the browser bundle leaves out. */
-  wasm?: WebAssembly.Module
-}
-
-async function execute(request: Request): Promise<{ ok: boolean; value: unknown }> {
-  try {
-    if (request.wasm !== undefined) (await import('../rs/stream.ts')).adoptModule(request.wasm)
-    const load = computations[request.name]
-    const fn = (await load?.()) as ((...args: unknown[]) => unknown) | undefined
-    if (fn === undefined) throw new Error(`No computation named ${request.name}`)
-    return { ok: true, value: await fn(...request.args) }
-  } catch (error) {
-    return { ok: false, value: error }
-  }
-}
+// A thread is one worker, so its computations are the module's own.
+const made: Computations = new Map()
 
 // Replies keep arrival order even while a computation's module still loads.
 const node = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node
@@ -28,7 +10,7 @@ if (node !== undefined) {
   let replies = Promise.resolve()
   parentPort?.on('message', (request: Request) => {
     replies = replies.then(async () => {
-      parentPort.postMessage(await execute(request))
+      parentPort.postMessage(await execute(request, made))
     })
   })
 } else {
@@ -39,7 +21,7 @@ if (node !== undefined) {
   let replies = Promise.resolve()
   scope.onmessage = (event) => {
     replies = replies.then(async () => {
-      scope.postMessage(await execute(event.data))
+      scope.postMessage(await execute(event.data, made))
     })
   }
 }
