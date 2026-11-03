@@ -16,3 +16,9 @@
 export const TIMEOUT = 300
 /** Pages of tools read before the listing is refused. */
 export const MAX_PAGES = 64
+/** Bytes one MCP reply may carry, and a whole tool listing across its pages. */
+export const MAX_REPLY = 16 * 1024 * 1024
+/** Tools one MCP server may list. */
+export const MAX_TOOLS = 1024
+export const REPLY_TOO_LARGE = `MCP server reply exceeds ${String(MAX_REPLY)} bytes`
+export const REPLY_ENCODING = 'MCP server reply uses an encoding the client cannot read'

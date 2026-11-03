@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Tool } from '@modelcontextprotocol/client'
-import { MCPAccessor } from '../../../accessor/mcp.ts'
+import { MCPAccessor, refusal } from '../../../accessor/mcp.ts'
 import { MCPConfig, parseMCPConfig } from '../../../core/mcp/config.ts'
+import { MAX_TOOLS } from '../../../core/mcp/constants.ts'
 import { compactJsonText } from '../../../core/render/json.ts'
 import type { JsonValue } from '../../../types.ts'
 import { Argument, CommandSpec } from '../../spec/types.ts'
@@ -25,11 +26,15 @@ import { MCPToolsError } from './errors.ts'
 import type { MCPSource, MCPTool } from './types.ts'
 
 /**
- * Refuse a tool list no CLI can be made from: no tools, a name that reads
- * as an option, or two names that become the same subcommand.
+ * Refuse a tool list no CLI can be made from: no tools, more than
+ * `MAX_TOOLS`, a name that reads as an option, or two names that become the
+ * same subcommand.
  */
 export function checkNames(tools: readonly MCPTool[]): void {
   if (tools.length === 0) throw new MCPToolsError('the server lists no tools')
+  if (tools.length > MAX_TOOLS) {
+    throw new MCPToolsError(`the server lists more than ${String(MAX_TOOLS)} tools`)
+  }
   const seen = new Map<string, string>()
   for (const tool of tools) {
     const command = commandName(tool.name)
@@ -97,9 +102,8 @@ export async function mcpCli(config: MCPConfig | Record<string, unknown>): Promi
   try {
     listed = await new MCPAccessor(validated).listTools()
   } catch (error) {
-    throw new MCPToolsError(`cannot list the server's tools: ${causes(error).join('; ')}`, {
-      cause: error,
-    })
+    const reason = refusal(error) ?? causes(error).join('; ')
+    throw new MCPToolsError(`cannot list the server's tools: ${reason}`, { cause: error })
   }
   const [title, tools] = listed
   return buildCli({

@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { bearerConfig, servedMcp, TITLE, TOKEN } from '../../../../tests/fixtures/mcp_server.ts'
 import { MCPConfig } from '../../../core/mcp/config.ts'
+import { MAX_REPLY, MAX_TOOLS } from '../../../core/mcp/constants.ts'
 import { buildCli, mcpCli, MCPToolsError, type MCPSource, type MCPTool } from './index.ts'
 
 const SCHEMA = {
@@ -77,6 +78,57 @@ describe('buildCli', () => {
     const source = { title: 't', tools: names.map((n) => tool(n)) }
     expect(() => buildCli(source)).toThrow(MCPToolsError)
     expect(() => buildCli(source)).toThrow(wording)
+  })
+})
+
+describe('a tool list past a cap', () => {
+  it('refuses more tools than the cap', () => {
+    const names = Array.from({ length: MAX_TOOLS + 1 }, (_, i) => `t${String(i)}`)
+    expect(
+      Object.keys(buildCli({ title: 't', tools: names.slice(1).map((n) => tool(n)) }).handlers),
+    ).toHaveLength(MAX_TOOLS)
+    expect(() => buildCli({ title: 't', tools: names.map((n) => tool(n)) })).toThrow(
+      new MCPToolsError(`the server lists more than ${String(MAX_TOOLS)} tools`),
+    )
+  })
+
+  it.each(['application/json', 'text/event-stream'])(
+    'refuses a listing past the reply cap as %s',
+    async (contentType) => {
+      const fake = await servedMcp()
+      try {
+        fake.oversized['tools/list'] = contentType
+        const error: unknown = await mcpCli(bearerConfig(fake)).catch((e: unknown) => e)
+        expect(error).toBeInstanceOf(MCPToolsError)
+        expect((error as Error).message).toBe(
+          `cannot list the server's tools: MCP server reply exceeds ${String(MAX_REPLY)} bytes`,
+        )
+      } finally {
+        await fake.close()
+      }
+    },
+  )
+
+  it('holds every page of a listing to one reply cap', async () => {
+    const third = 'x'.repeat(Math.floor(MAX_REPLY / 3))
+    const tools = [0, 1, 2].map((i) => ({
+      name: `t${String(i)}`,
+      description: third,
+      inputSchema: { type: 'object' as const },
+    }))
+    const two = await servedMcp(tools.slice(0, 2))
+    const three = await servedMcp(tools)
+    try {
+      expect(Object.keys((await mcpCli(bearerConfig(two))).handlers)).toHaveLength(2)
+      const error: unknown = await mcpCli(bearerConfig(three)).then(
+        () => null,
+        (e: unknown) => e,
+      )
+      expect(error instanceof MCPToolsError && error.message.includes('reply exceeds')).toBe(true)
+    } finally {
+      await two.close()
+      await three.close()
+    }
   })
 })
 

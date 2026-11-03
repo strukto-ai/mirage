@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { randomUUID } from 'node:crypto'
-import { createServer } from 'node:http'
+import { createServer, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { gzipSync } from 'node:zlib'
 import {
   McpServer,
   ProtocolError,
@@ -22,6 +23,7 @@ import {
   type Tool,
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server'
+import { MAX_REPLY } from '../../src/core/mcp/constants.ts'
 
 export const TOKEN = 'fixture-token'
 export const API_KEY = 'fixture-key'
@@ -72,6 +74,12 @@ export interface FakeMCP {
   stalling: boolean
   /** Every request is answered 503. */
   down: boolean
+  /** JSON-RPC methods answered with a body past the reply cap, of the content type each maps to. */
+  oversized: Record<string, string>
+  /** `tools/call` is answered with the text `inflated`, gzip-compressed and labelled with this content encoding. */
+  encoding: string | null
+  /** Bytes of `_meta` padding in that answer, which no rendering prints. */
+  padding: number
   close: () => Promise<void>
 }
 
@@ -158,6 +166,25 @@ function mcpServer(fake: FakeMCP, tools: Tool[]): McpServer {
   return server
 }
 
+/** Answer with a body past the reply cap, in 1 MiB chunks, as one unfinished SSE event for SSE. */
+function flood(res: ServerResponse, contentType: string): void {
+  res.writeHead(200, { 'content-type': contentType })
+  res.write('event: message\ndata: ')
+  const chunk = Buffer.alloc(1024 * 1024, 'x')
+  let left = Math.floor(MAX_REPLY / chunk.length) + 1
+  const more = (): void => {
+    while (left > 0) {
+      left -= 1
+      if (!res.write(chunk)) {
+        res.once('drain', more)
+        return
+      }
+    }
+    res.end('\n\n')
+  }
+  more()
+}
+
 /**
  * Serve the fixture MCP server over streamable HTTP on a free port.
  *
@@ -176,6 +203,9 @@ export async function servedMcp(tools: Tool[] = TOOLS): Promise<FakeMCP> {
     pages: null,
     stalling: false,
     down: false,
+    oversized: {},
+    encoding: null,
+    padding: 0,
     close: () => Promise.resolve(),
   }
   const sessions = new Map<string, WebStandardStreamableHTTPServerTransport>()
@@ -229,6 +259,26 @@ export async function servedMcp(tools: Tool[] = TOOLS): Promise<FakeMCP> {
       }
       if (fake.expired.has(session)) {
         res.writeHead(404).end('expired')
+        return
+      }
+      const oversized = fake.oversized[entry.rpc]
+      if (oversized !== undefined) {
+        flood(res, oversized)
+        return
+      }
+      if (fake.encoding !== null && entry.rpc === 'tools/call') {
+        const { id } = JSON.parse(Buffer.concat(chunks).toString()) as { id: number }
+        const reply = {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            content: [{ type: 'text', text: 'inflated' }],
+            _meta: { padding: 'x'.repeat(fake.padding) },
+          },
+        }
+        res
+          .writeHead(200, { 'content-type': 'application/json', 'content-encoding': fake.encoding })
+          .end(gzipSync(JSON.stringify(reply)))
         return
       }
       const gone = new AbortController()

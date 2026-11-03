@@ -15,11 +15,18 @@
 import type {
   CallToolResult,
   Client,
+  FetchLike,
   StreamableHTTPClientTransport,
   Tool,
 } from '@modelcontextprotocol/client'
 import type { MCPConfig } from '../core/mcp/config.ts'
-import { MAX_PAGES, TIMEOUT } from '../core/mcp/constants.ts'
+import {
+  MAX_PAGES,
+  MAX_REPLY,
+  REPLY_ENCODING,
+  REPLY_TOO_LARGE,
+  TIMEOUT,
+} from '../core/mcp/constants.ts'
 import type { JsonValue } from '../types.ts'
 import { abortable } from '../utils/abort.ts'
 import { VERSION } from '../version.ts'
@@ -45,6 +52,72 @@ export async function answered(error: unknown): Promise<boolean> {
 export async function timedOut(error: unknown): Promise<boolean> {
   const { SdkError, SdkErrorCode } = await import('@modelcontextprotocol/client')
   return error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout
+}
+
+/**
+ * Which reply refusal a call failed with, `REPLY_TOO_LARGE` or
+ * `REPLY_ENCODING`, found through any aggregate error; undefined for any
+ * other failure. Mirrors Python's `refusal`.
+ */
+export function refusal(error: unknown): string | undefined {
+  if (error instanceof AggregateError) {
+    return error.errors.map(refusal).find((reason) => reason !== undefined)
+  }
+  if (!(error instanceof Error)) return undefined
+  return [REPLY_TOO_LARGE, REPLY_ENCODING].find((reason) => error.message.includes(reason))
+}
+
+/**
+ * A fetch that cuts each response body at `MAX_REPLY` bytes, or every body
+ * together when `shared`, as a listing's pages share one cap. Past the cap
+ * an SSE answer to a request ends with that request's JSON-RPC error, since
+ * the SDK leaves a request whose stream broke unanswered until the timeout;
+ * any other body fails. fetch inflates a body before it is counted. Mirrors
+ * Python's `reply_cap`, whose SDK answers a broken stream itself.
+ */
+export function replyCap(shared: boolean): FetchLike {
+  const listing = { left: MAX_REPLY }
+  return async (url, init) => {
+    const response = await fetch(url, init)
+    if (response.body === null) return response
+    const left = shared ? listing : { left: MAX_REPLY }
+    const sse = (response.headers.get('content-type') ?? '')
+      .toLowerCase()
+      .startsWith('text/event-stream')
+    const request =
+      typeof init?.body === 'string' ? (JSON.parse(init.body) as { id?: unknown }) : {}
+    const { INTERNAL_ERROR } = await import('@modelcontextprotocol/client')
+    const refusal =
+      sse && request.id !== undefined
+        ? new TextEncoder().encode(
+            `\n\nevent: message\ndata: ${JSON.stringify({
+              jsonrpc: '2.0',
+              id: request.id,
+              error: { code: INTERNAL_ERROR, message: REPLY_TOO_LARGE },
+            })}\n\n`,
+          )
+        : null
+    const body = response.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          left.left -= chunk.byteLength
+          if (left.left >= 0) {
+            controller.enqueue(chunk)
+          } else if (refusal === null) {
+            controller.error(new Error(REPLY_TOO_LARGE))
+          } else {
+            controller.enqueue(refusal)
+            controller.terminate()
+          }
+        },
+      }),
+    )
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    })
+  }
 }
 
 /**
@@ -76,11 +149,12 @@ export class MCPAccessor extends Accessor {
     return { [auth.name ?? '']: auth.token }
   }
 
-  /** An initialized client, which the caller closes. */
-  async connect(signal?: AbortSignal): Promise<Client> {
+  /** An initialized client, which the caller closes; `shared` holds every reply to one cap. */
+  async connect(signal?: AbortSignal, shared = false): Promise<Client> {
     const { Client, StreamableHTTPClientTransport } = await import('@modelcontextprotocol/client')
     const transport = new StreamableHTTPClientTransport(new URL(this.config.url), {
       requestInit: { headers: this.headers() },
+      fetch: replyCap(shared),
     })
     const client = new Client({ name: 'mirage', version: VERSION }, { listMaxPages: MAX_PAGES })
     try {
@@ -129,9 +203,13 @@ export class MCPAccessor extends Accessor {
     return done
   }
 
-  /** Run `use` on an initialized client, closed when it settles. */
-  async session<T>(use: (client: Client) => Promise<T>, signal?: AbortSignal): Promise<T> {
-    const client = await this.connect(signal)
+  /** Run `use` on an initialized client, closed when it settles; `shared` holds every reply to one cap. */
+  async session<T>(
+    use: (client: Client) => Promise<T>,
+    signal?: AbortSignal,
+    shared = false,
+  ): Promise<T> {
+    const client = await this.connect(signal, shared)
     try {
       return await use(client)
     } finally {
@@ -171,14 +249,18 @@ export class MCPAccessor extends Accessor {
     if (this.dropped.delete(opening)) void this.shutting(opening)
   }
 
-  /** The server's title and every tool it lists; the SDK reads every page. */
+  /** The server's title and every tool it lists; the SDK reads every page, all held to one reply cap. */
   async listTools(): Promise<[string, Tool[]]> {
-    return this.session(async (client) => {
-      const { tools } = await client.listTools({}, { timeout: TIMEOUT * 1000 })
-      const info = client.getServerVersion()
-      if (info === undefined) return ['', tools]
-      return [info.title === undefined || info.title === '' ? info.name : info.title, tools]
-    })
+    return this.session(
+      async (client) => {
+        const { tools } = await client.listTools({}, { timeout: TIMEOUT * 1000 })
+        const info = client.getServerVersion()
+        if (info === undefined) return ['', tools]
+        return [info.title === undefined || info.title === '' ? info.name : info.title, tools]
+      },
+      undefined,
+      true,
+    )
   }
 
   /** Call one tool on the kept client, abandoned when `signal` aborts. */

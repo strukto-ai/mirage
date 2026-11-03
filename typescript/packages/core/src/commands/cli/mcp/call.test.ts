@@ -21,6 +21,7 @@ import {
   TOKEN,
 } from '../../../../tests/fixtures/mcp_server.ts'
 import type * as constants from '../../../core/mcp/constants.ts'
+import { MAX_REPLY } from '../../../core/mcp/constants.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { render } from './call.ts'
@@ -135,6 +136,45 @@ describe('an MCP tool call', () => {
     fake.stalling = true
     const result = await ws.shell('fx list-items')
     expect([result.exitCode, result.stderrText]).toEqual([1, 'list-items: MCP server timed out\n'])
+  })
+})
+
+describe('a reply past the cap', () => {
+  it.each(['application/json', 'text/event-stream'])(
+    'exits 1 and says so for %s, and the next call answers',
+    async (contentType) => {
+      const { ws, fake } = await installed()
+      limits.timeout = 20
+      fake.oversized['tools/call'] = contentType
+      const result = await ws.shell('fx list-items')
+      delete fake.oversized['tools/call']
+      const after = await ws.shell('fx list-items')
+      expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([
+        1,
+        '',
+        `list-items: MCP server reply exceeds ${String(MAX_REPLY)} bytes\n`,
+      ])
+      expect(after.stdoutText).toBe('apple\nbanana\n')
+    },
+  )
+
+  it('reads a compressed reply', async () => {
+    const { ws, fake } = await installed()
+    fake.encoding = 'gzip'
+    const result = await ws.shell('fx list-items')
+    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([0, 'inflated\n', ''])
+  })
+
+  it('holds a compressed reply to the cap once inflated', async () => {
+    const { ws, fake } = await installed()
+    fake.encoding = 'gzip'
+    fake.padding = MAX_REPLY
+    const result = await ws.shell('fx list-items')
+    expect([result.exitCode, result.stdoutText, result.stderrText]).toEqual([
+      1,
+      '',
+      `list-items: MCP server reply exceeds ${String(MAX_REPLY)} bytes\n`,
+    ])
   })
 })
 

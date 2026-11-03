@@ -10,7 +10,7 @@
       "command": "items --help",
       "expect": {
         "exit": 0,
-        "stdout": "usage: items [-h] {list-items,add-item,fail-always,echo-args} ...\n\nInteg Items\n\ncommands:\n  list-items   List the items.\n  add-item     Add an item.\n  fail-always  Always fails.\n  echo-args    Echo the arguments back.\n\noptions:\n  -h, --help  Show this help and exit\n",
+        "stdout": "usage: items [-h] {list-items,add-item,fail-always,echo-args,repeat-x} ...\n\nInteg Items\n\ncommands:\n  list-items   List the items.\n  add-item     Add an item.\n  fail-always  Always fails.\n  echo-args    Echo the arguments back.\n  repeat-x     Answer with x repeated count times.\n\noptions:\n  -h, --help  Show this help and exit\n",
         "stderr": ""
       }
     },
@@ -223,6 +223,19 @@
         "exit": 0,
         "stdout": "apple\nbanana\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "mcp_reply_past_the_cap_is_refused",
+      "seq": 571017,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items repeat-x '{\"count\": 17000000}'",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "repeat-x: MCP server reply exceeds 16777216 bytes\n"
       }
     }
   ]

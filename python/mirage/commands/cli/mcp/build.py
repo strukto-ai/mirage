@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Mapping, Sequence
 
-from mirage.accessor.mcp import MCPAccessor
+from mirage.accessor.mcp import MCPAccessor, refusal
 from mirage.commands.cli.mcp.call import call_tool, causes, command_name
 from mirage.commands.cli.mcp.constants import NAME
 from mirage.commands.cli.mcp.errors import MCPToolsError
@@ -23,6 +23,7 @@ from mirage.commands.cli.mcp.types import MCPSource, MCPTool
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.mcp.config import MCPConfig
+from mirage.core.mcp.constants import MAX_TOOLS
 from mirage.core.render.json import compact_json_text
 from mirage.types import JsonValue
 
@@ -34,11 +35,14 @@ def check_names(tools: Sequence[MCPTool]) -> None:
         tools (Sequence[MCPTool]): the server's tools.
 
     Raises:
-        MCPToolsError: no tools, a name that reads as an option, or two
-            names that become the same subcommand.
+        MCPToolsError: no tools, more than ``MAX_TOOLS``, a name that
+            reads as an option, or two names that become the same
+            subcommand.
     """
     if not tools:
         raise MCPToolsError("the server lists no tools")
+    if len(tools) > MAX_TOOLS:
+        raise MCPToolsError(f"the server lists more than {MAX_TOOLS} tools")
     seen: dict[str, str] = {}
     for tool in tools:
         command = command_name(tool.name)
@@ -121,7 +125,7 @@ async def mcp_cli(config: MCPConfig | Mapping[str, JsonValue]) -> CLI:
     try:
         title, tools = await MCPAccessor(validated).list_tools()
     except Exception as error:
-        reason = "; ".join(causes(error))
+        reason = refusal(error) or "; ".join(causes(error))
         raise MCPToolsError(
             f"cannot list the server's tools: {reason}"
         ) from error
