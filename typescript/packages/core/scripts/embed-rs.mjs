@@ -57,3 +57,4 @@ writeFileSync(
   new URL('mirage_rs.ts', output),
   `export default ${JSON.stringify(wasm.toString('base64'))} as string\n`,
 )
+writeFileSync(new URL('mirage_rs.wasm', output), wasm)

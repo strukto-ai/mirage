@@ -44,7 +44,7 @@ for (const [name, entry] of Object.entries(workers)) {
       {
         name: 'without-mirage-rs',
         setup(context) {
-          context.onResolve({ filter: /generated\/mirage_rs/ }, () => ({
+          context.onResolve({ filter: /^#mirage-rs-wasm$|generated\/mirage_rs/ }, () => ({
             path: 'mirage_rs',
             namespace: 'without-mirage-rs',
           }))

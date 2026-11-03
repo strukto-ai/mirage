@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import MIRAGE_RS_WASM from '../generated/mirage_rs.ts'
+import MIRAGE_RS_WASM from '#mirage-rs-wasm'
 import { chunks } from '../io/cooperative.ts'
 import { SEALED } from '../io/pipe.ts'
 import type { util } from 'zod'
@@ -77,20 +77,35 @@ function retire(exports: Exports, trapped: boolean): void {
   movables.delete(exports)
 }
 
-/** The compiled module, for the page to hand the workers it starts without a copy. */
+/**
+ * The compiled module, for the page to hand the workers it starts without a
+ * copy. `#mirage-rs-wasm` is the module itself where the host's bundler loads
+ * `.wasm` files (the `workerd` condition: no code is compiled at run time)
+ * and its bytes as base64 everywhere else.
+ */
 export function compiledModule(): Promise<WebAssembly.Module> {
-  compiled ??= WebAssembly.compile(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
+  const source: string | WebAssembly.Module = MIRAGE_RS_WASM
+  compiled ??=
+    typeof source === 'string'
+      ? WebAssembly.compile(decodeBase64(source) as BufferSource)
+      : Promise.resolve(source)
   return compiled
 }
 
 /** The compiled module, compiled now if no one has yet, for a caller that cannot wait. */
 export function moduleSync(): WebAssembly.Module {
-  compiledSync ??= new WebAssembly.Module(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
+  const source: string | WebAssembly.Module = MIRAGE_RS_WASM
+  compiledSync ??=
+    typeof source === 'string' ? new WebAssembly.Module(decodeBase64(source) as BufferSource) : source
   compiled ??= Promise.resolve(compiledSync)
   return compiledSync
 }
 
-/** Run on the module the page compiled: a browser worker's bundle leaves the bytes out. */
+/**
+ * Run on a module the host compiled: a browser worker's bundle leaves the
+ * bytes out, and a runtime that refuses to compile code at run time hands
+ * in the `.wasm` its bundler loaded (`@struktoai/mirage-core/mirage_rs.wasm`).
+ */
 export function adoptModule(module: WebAssembly.Module): void {
   compiledSync ??= module
   compiled ??= Promise.resolve(module)
