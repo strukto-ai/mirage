@@ -98,14 +98,29 @@ async def _has_state(request: Request, workspace_id: str) -> bool:
         await store.close()
 
 
+async def _drop_state(request: Request, workspace_id: str) -> None:
+    """Delete what a failed create wrote under ``workspace_id``.
+
+    Args:
+        request (Request): the request, for the app's state root.
+        workspace_id (str): the id whose state is deleted.
+    """
+    store = DiskWorkspaceStateStore(str(request.app.state.state_root))
+    try:
+        await store.drop(workspace_id)
+    finally:
+        await store.close()
+
+
 @asynccontextmanager
 async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
     """Hold the caller's claim on ``workspace_id`` while it is built.
 
     A server at its ``max_workspaces`` answers 503 before anything is
-    built. A claim this create made is released when the build fails, so
-    a failed create leaves the id free; one the account already held (its
-    own closed or stored workspace) stays.
+    built. A claim this create made is released, with the state the build
+    saved, when the build fails, so a failed create leaves the id free;
+    one the account already held (its own closed or stored workspace)
+    stays.
 
     Args:
         request (Request): the creating request.
@@ -133,6 +148,7 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
         yield
     except BaseException:
         if claim is Claim.NEW:
+            await _drop_state(request, workspace_id)
             await registry.release(workspace_id)
         raise
 
