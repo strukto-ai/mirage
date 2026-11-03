@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import gzip
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -31,7 +32,11 @@ from mirage.accessor.mcp import (
 )
 from mirage.commands.cli.mcp import build_cli, mcp_cli
 from mirage.core.mcp.config import MCPConfig
-from mirage.core.mcp.constants import REPLY_ENCODING, REPLY_TOO_LARGE
+from mirage.core.mcp.constants import (
+    MAX_REPLY,
+    REPLY_ENCODING,
+    REPLY_TOO_LARGE,
+)
 from mirage.policy import Deny, NetworkContext, Policy
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
@@ -231,6 +236,32 @@ async def test_a_capped_stream_refuses_the_first_byte_past_its_cap():
     )
     with pytest.raises(httpx2.StreamError, match=REPLY_TOO_LARGE):
         _ = [chunk async for chunk in stream]
+
+
+class _Chunks(httpx2.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self.chunks:
+            yield chunk
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "split", [False, True], ids=["one-chunk", "later-chunk"]
+)
+async def test_a_capped_stream_refuses_bytes_after_a_compressed_body(split):
+    body = gzip.compress(b"x" * 196608)
+    chunks = [body, b"JUNK"] if split else [body + b"JUNK"]
+    stream = CappedStream(
+        _Chunks(chunks), [MAX_REPLY], httpx2.StreamError, "gzip"
+    )
+    read = 0
+    with pytest.raises(httpx2.StreamError, match=REPLY_ENCODING):
+        async for _ in stream:
+            read += 1
+            assert read < 16
 
 
 @pytest.mark.asyncio

@@ -97,8 +97,9 @@ class FakeMCP:
             content encoding, whatever the client accepts.
         padding (int): bytes of ``_meta`` padding in that answer, which
             no rendering prints.
-        damage (str | None): ``truncated`` or ``garbled`` spoils that
-            answer's compressed body.
+        damage (str | None): ``truncated``, ``garbled`` or ``trailing``
+            (bytes after the end) spoils that answer's compressed body,
+            sent as one chunk.
     """
 
     url: str
@@ -238,6 +239,8 @@ async def _encoded(fake: FakeMCP, receive: Receive, send: Send) -> None:
         packed = packed[: len(packed) // 2]
     elif fake.damage == "garbled":
         packed = packed[:10] + b"\xff" * 32
+    elif fake.damage == "trailing":
+        packed += b"JUNK"
     await send(
         {
             "type": "http.response.start",

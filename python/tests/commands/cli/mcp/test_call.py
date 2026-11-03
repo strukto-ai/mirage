@@ -231,6 +231,18 @@ async def test_a_reply_the_client_cannot_inflate_exits_1(encoding, damage):
     )
 
 
+@pytest.mark.asyncio
+async def test_bytes_after_a_compressed_reply_ends_exit_1():
+    async with installed() as (ws, fake):
+        fake.encoding, fake.damage, fake.padding = "gzip", "trailing", 196608
+        result = await asyncio.wait_for(ws.shell("fx list-items"), 10)
+    assert (result.exit_code, result.stdout, result.stderr) == (
+        1,
+        b"",
+        f"list-items: {REPLY_ENCODING}\n".encode(),
+    )
+
+
 def _text(text: str) -> types.TextContent:
     return types.TextContent(type="text", text=text)
 
