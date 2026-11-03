@@ -1888,8 +1888,11 @@ async function openSsh(target: Target, options?: OpenOptions): Promise<Open> {
   const opened = openWorkspaces(build, options)
   const cleanup = async (): Promise<void> => {
     await opened.closeAll()
-    await adminExec(admin, `rm -rf /admin/${base}`)
-    await admin.close()
+    try {
+      await adminVfs.rmR(PathSpec.fromStrPath(`/${base}`))
+    } finally {
+      await admin.close()
+    }
   }
   return { ws: opened.ws, shadow: opened.shadow, cleanup }
 }
@@ -1907,14 +1910,10 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
     )
   }
   const base = `/mirage-integ-${runId()}`
-  const admin = new Workspace(
-    {
-      '/admin': await TiDBFilesystemVFS.create(
-        parseConfigWithSchema(TiDBFilesystemConfig, { host, token }),
-      ),
-    },
-    { mode: MountMode.WRITE },
+  const adminVfs = await TiDBFilesystemVFS.create(
+    parseConfigWithSchema(TiDBFilesystemConfig, { host, token }),
   )
+  const admin = new Workspace({ '/admin': adminVfs }, { mode: MountMode.WRITE })
   const paths = target.mounts.map((m) => `/admin${base}/${String(m.root)}`).join(' ')
   await adminExec(admin, `mkdir -p ${paths}`)
   const mounts: Record<string, TiDBFilesystemVFS> = {}
@@ -1930,8 +1929,11 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
   const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   const cleanup = async (): Promise<void> => {
     await ws.close()
-    await adminExec(admin, `rm -rf /admin${base}`)
-    await admin.close()
+    try {
+      await adminVfs.rmR(PathSpec.fromStrPath(base))
+    } finally {
+      await admin.close()
+    }
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }

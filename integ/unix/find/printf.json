@@ -222,7 +222,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -maxdepth 1 -name nomatch -printf '%z'",
+      "command": "find /data -maxdepth 0 -name nomatch -printf '%z'",
       "expect": {
         "exit": 0,
         "stdout": "",
