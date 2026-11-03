@@ -659,7 +659,9 @@
     "build_mcp_clis": "Python's to_workspace_kwargs is sync, so the MCP servers a config names are listed in this separate async step after resolve_secrets; the TypeScript buildCliEntries is async and awaits mcpCli inline."
    },
    "typescript_only": {
-    "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same entry point."
+    "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same entry point.",
+    "ConfigHost": "TypeScript runs the config loader on more than one host: Node reads scripts and code references from disk and builds its own stores, a Cloudflare Worker has no disk. Python's loader runs on one host and reads files itself.",
+    "HOST": "Node's ConfigHost: what the shared loader in @struktoai/mirage-core/config reads from Node (files, module references, its VFS table and stores). Python has one loader and no host to bind."
    }
   },
   "server/routers/documents": {
