@@ -91,7 +91,11 @@
     "vitest": "^4.1.12",
     "e2b": "^2.62.0",
     "pg": "^8.13.0",
-    "@types/pg": "^8.11.0"
+    "@types/pg": "^8.11.0",
+    "imapflow": "^2.10.0",
+    "mailparser": "^3.12.4",
+    "nodemailer": "^10.1.4",
+    "@types/nodemailer": "^8.0.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",
@@ -113,7 +117,10 @@
     "pyodide": "^0.29.0 || ^314.0.0",
     "redis": "^5.0.0",
     "e2b": "^2.62.0",
-    "pg": "^8.13.0"
+    "pg": "^8.13.0",
+    "imapflow": "^2.10.0",
+    "mailparser": "^3.12.4",
+    "nodemailer": "^10.1.4"
   },
   "peerDependenciesMeta": {
     "@qdrant/js-client-rest": {
@@ -135,6 +142,15 @@
       "optional": true
     },
     "pg": {
+      "optional": true
+    },
+    "imapflow": {
+      "optional": true
+    },
+    "mailparser": {
+      "optional": true
+    },
+    "nodemailer": {
       "optional": true
     }
   }

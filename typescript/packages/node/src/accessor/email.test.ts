@@ -14,7 +14,7 @@
 
 import net from 'node:net'
 import { expect, it } from 'vitest'
-import { EmailAccessor } from './email.ts'
+import { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
 
 // An IMAP server that answers every command and keeps its sockets, so the test
 // resets them once the client is connected: the uncaught `error` event that

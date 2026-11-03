@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeReaddir, type Listed } from '@struktoai/mirage-core/core/hierarchy/readdir'
-import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
-import { entryStat } from '@struktoai/mirage-core/core/hierarchy/stat'
-import { ContentType, DirListing, FileStat, FileType } from '@struktoai/mirage-core/types'
-import { byteLength, NAME_MAX_BYTES, sanitizeLabel } from '@struktoai/mirage-core/utils/sanitize'
-import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { makeReaddir, type Listed } from '../hierarchy/readdir.ts'
+import type { ScopeMatch } from '../hierarchy/scope.ts'
+import { entryStat } from '../hierarchy/stat.ts'
+import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
+import { byteLength, NAME_MAX_BYTES, sanitizeLabel } from '../../utils/sanitize.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import type { fetchMessage } from './client.ts'
 import { fetchHeaders, listMessageUids } from './client.ts'

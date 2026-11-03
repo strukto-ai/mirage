@@ -13,15 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { expect, it, vi } from 'vitest'
-import type { EmailAccessor } from '../../accessor/email.ts'
-import type * as ClientModule from './client.ts'
-import type { fetchMessage } from './client.ts'
-import * as client from './client.ts'
-import { readMany } from './read.ts'
-import { messageJsonBytes } from './render.ts'
+import type { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
+import type * as ClientModule from '@struktoai/mirage-core/core/email/client'
+import type { fetchMessage } from '@struktoai/mirage-core/core/email/client'
+import * as client from '@struktoai/mirage-core/core/email/client'
+import { readMany } from '@struktoai/mirage-core/core/email/read'
+import { messageJsonBytes } from '@struktoai/mirage-core/core/email/render'
 
-vi.mock('./client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
+vi.mock('@struktoai/mirage-core/core/email/client', async () => {
+  const actual = await vi.importActual<typeof ClientModule>(
+    '@struktoai/mirage-core/core/email/client',
+  )
   return { ...actual, fetchHeaders: vi.fn() }
 })
 

@@ -19,6 +19,7 @@ import { GH } from './builtin/gh/index.ts'
 import { GIT } from './builtin/git/index.ts'
 import { GWS } from './builtin/gws/index.ts'
 import { HF } from './builtin/hf/index.ts'
+import { HIMALAYA } from './builtin/himalaya/index.ts'
 import { LINEAR } from './builtin/linear/index.ts'
 import { NTN } from './builtin/ntn/index.ts'
 import { SEARCH } from './builtin/search/index.ts'
@@ -35,10 +36,9 @@ import { NAME as MCP_CLI } from './mcp/constants.ts'
 // packages add theirs through registerCliSpec from their entry point,
 // and user programs do the same before the workspace loads.
 const CLI_SPECS = new Map<string, CLI>(
-  [AIRTABLE, DISCORD, GH, GIT, GWS, HF, LINEAR, NTN, SEARCH, SLACK, TRELLO].map((spec) => [
-    spec.spec.name,
-    spec,
-  ]),
+  [AIRTABLE, DISCORD, GH, GIT, GWS, HF, HIMALAYA, LINEAR, NTN, SEARCH, SLACK, TRELLO].map(
+    (spec) => [spec.spec.name, spec],
+  ),
 )
 
 /** Make a CLI resolvable by name from YAML; its root name is the key. */

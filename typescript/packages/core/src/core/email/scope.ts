@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Codec, DATE } from '@struktoai/mirage-core/core/hierarchy/codec'
-import { makeDetectScope, Scope, Slot } from '@struktoai/mirage-core/core/hierarchy/scope'
-import { ContentType } from '@struktoai/mirage-core/types'
+import { Codec, DATE } from '../hierarchy/codec.ts'
+import { makeDetectScope, Scope, Slot } from '../hierarchy/scope.ts'
+import { ContentType } from '../../types.ts'
 
 const EMAIL_JSON = new Codec({ suffix: '.email.json' })
 

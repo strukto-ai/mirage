@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { materialize } from '@struktoai/mirage-core/io/types'
+import type { FlagView } from '../../../spec/index.ts'
+import type { ByteSource } from '../../../../io/types.ts'
+import { materialize } from '../../../../io/types.ts'
 import {
   assertHeaderValue,
   encodeBase64Lines,
@@ -22,8 +22,8 @@ import {
   foldAddressList,
   foldContentDisposition,
   foldUnstructured,
-} from '@struktoai/mirage-core/utils/mime'
-import { createHash } from 'node:crypto'
+} from '../../../../utils/mime.ts'
+import Hash from 'sha.js'
 import type { fetchMessage } from '../../../../core/email/client.ts'
 
 type SourceMode = 'reply' | 'forward'
@@ -60,10 +60,10 @@ export interface Compose {
  * and languages.
  */
 export function mixedBoundary(body: string, attachments: readonly Attachment[]): string {
-  const digest = createHash('sha256').update(Buffer.from(body, 'utf8'))
+  const digest = new Hash.sha256().update(body, 'utf8')
   for (const attachment of attachments) {
-    digest.update(Buffer.from(attachment.filename, 'utf8'))
-    digest.update(Buffer.from(attachment.contentType, 'utf8'))
+    digest.update(attachment.filename, 'utf8')
+    digest.update(attachment.contentType, 'utf8')
     digest.update(attachment.data)
   }
   return digest.digest('hex').slice(0, 32)

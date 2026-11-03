@@ -15,8 +15,13 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import type { fetchMessage } from '../../../../core/email/client.ts'
-import { build, type Attachment, type Compose, type Source } from './builder.ts'
+import type { fetchMessage } from '@struktoai/mirage-core/core/email/client'
+import {
+  build,
+  type Attachment,
+  type Compose,
+  type Source,
+} from '@struktoai/mirage-core/commands/cli/builtin/himalaya/builder'
 
 // The fixture is generated from the python builder
 // (EmailMessage.as_bytes(policy=SMTP)), which is the reference

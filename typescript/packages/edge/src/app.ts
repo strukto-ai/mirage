@@ -15,6 +15,7 @@
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
+import { inRequest } from '@struktoai/mirage-core/io/web/request'
 import { registerApi } from '@struktoai/mirage-server/api'
 import { AuthMode, resolveAuthConfig, type AuthConfig } from '@struktoai/mirage-server/auth/config'
 import { authenticator, PUBLIC_PATHS } from '@struktoai/mirage-server/auth/middleware'
@@ -123,7 +124,7 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
   }
   return {
     fetch(request) {
-      const response = answer(request)
+      const response = inRequest(() => answer(request))
       const settle = (): void => {
         answering.delete(response)
       }

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import type { fetchMessage } from './client.ts'
-import { envelopesJsonBytes, messageJsonBytes } from './render.ts'
+import type { fetchMessage } from '@struktoai/mirage-core/core/email/client'
+import { envelopesJsonBytes, messageJsonBytes } from '@struktoai/mirage-core/core/email/render'
 
 const MESSAGE: Awaited<ReturnType<typeof fetchMessage>> = {
   from: { name: 'Alice', email: 'alice@example.com' },
