@@ -12,8 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import os
+import shutil
+import threading
 
 import pytest
 
@@ -64,3 +67,29 @@ async def test_rm_r_records_partial_once_it_got_inside(tmp_path):
         True,
         errno.EACCES,
     )
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_rm_r_records_partial(tmp_path, monkeypatch):
+    (tmp_path / "d").mkdir()
+    entered, release = threading.Event(), threading.Event()
+
+    def stalled(path, onexc=None):
+        entered.set()
+        release.wait()
+
+    monkeypatch.setattr(shutil, "rmtree", stalled)
+    scope = RecordingScope()
+    try:
+        task = asyncio.create_task(
+            rm_r(DiskAccessor(tmp_path), PathSpec.from_str_path("/d"))
+        )
+        await asyncio.to_thread(entered.wait)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed) == ("partial", True)

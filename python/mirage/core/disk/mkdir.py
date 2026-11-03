@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -27,10 +28,17 @@ from mirage.observe.record import OpStatus
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
+logger = logging.getLogger(__name__)
+
 
 def _first_missing(path: Path) -> Path | None:
     missing = None
-    while not os.path.lexists(path):
+    while True:
+        try:
+            os.lstat(path)
+            break
+        except OSError as exc:
+            logger.debug("mkdir -p ancestor %s missing: %s", path, exc)
         missing = path
         if path.parent == path:
             break
@@ -68,10 +76,12 @@ async def mkdir(
             raise
         finally:
             # Also when it raised: the chain may have made its first
-            # directories before a later one failed.
-            changed = failure is None or (
-                missing is not None
-                and await asyncio.to_thread(os.path.lexists, missing)
+            # directories before a later one failed. A cancelled wait
+            # leaves its worker running, so only makedirs' own error is
+            # probed; anything else may still make the chain.
+            changed = (
+                not isinstance(failure, OSError)
+                or await asyncio.to_thread(_first_missing, p) != missing
             )
             record(
                 "mkdir",

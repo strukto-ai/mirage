@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import os
 import shutil
+import threading
 
 import pytest
 
@@ -175,3 +177,35 @@ async def test_copy_records_partial_after_bytes_were_written(
         True,
         errno.EACCES,
     )
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_copy_records_partial_without_probing(
+    accessor, monkeypatch
+):
+    (accessor.root / "src").write_bytes(b"content")
+    entered, release = threading.Event(), threading.Event()
+
+    def stalled(src, dst):
+        entered.set()
+        release.wait()
+
+    monkeypatch.setattr(shutil, "copyfile", stalled)
+    scope = RecordingScope()
+    try:
+        task = asyncio.create_task(
+            copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/dst"),
+            )
+        )
+        await asyncio.to_thread(entered.wait)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed) == ("partial", True)

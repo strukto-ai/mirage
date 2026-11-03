@@ -23,11 +23,14 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
+export const logger: { debug?: (message: string) => void } = {}
+
 async function signature(path: string): Promise<string | null> {
   try {
     const st = await stat(path, { bigint: true })
     return `${String(st.ino)}:${String(st.size)}:${String(st.mtimeNs)}:${String(st.ctimeNs)}`
-  } catch {
+  } catch (err) {
+    logger.debug?.(`copy destination ${path} not statable: ${String(err)}`)
     return null
   }
 }
