@@ -91,5 +91,20 @@
   "printf '[branch.gone]\\n\\tremote = origin\\n[Branch \"gone\"]\\n\\tremote = up\\n' >> dst/.git/config && git -C dst branch gone v1 && git -C dst branch -D gone && tail -2 dst/.git/config",
   "printf '[branch \"z\"]\\n\\tremote = origin' >> dst/.git/config && cd dst && git branch nl origin/topic && tail -6 .git/config",
   "printf '[branch]\\n\\tautoSetupMerge = never\\n' >> dst/.git/config",
-  "cd dst && git branch bad origin/main; git checkout -b bad2 origin/main; git switch -c bad3; git branch --list 'bad*'"
+  "cd dst && git branch bad origin/main; git checkout -b bad2 origin/main; git switch -c bad3; git branch --list 'bad*'",
+  "git -C odd ls-tree -r --name-only bad",
+  "cd odd && git checkout bad; echo $?; git status -sb",
+  "cd odd && git switch bad; echo $?; git rev-parse --abbrev-ref HEAD",
+  "cd odd && git checkout -b x bad; echo $?; git branch --list x; git rev-parse --abbrev-ref HEAD",
+  "cd odd && git switch -c y bad; echo $?; git branch --list y; git rev-parse --abbrev-ref HEAD",
+  "cd odd && git restore --source=bad .; echo $?; git status -s",
+  "cd odd && git checkout bad -- .; echo $?; git status -s",
+  "cd odd && git checkout -q main -- . && printf 'local\\n' > a && git restore --source=bad sub a; echo $?; cat a; git status -s; git checkout -q -- a",
+  "cd odd && git restore --source=bad nosuch sub; echo $?",
+  "cd odd && git checkout ntfs; echo $?; git status -s",
+  "cd odd && git restore --source=ntfs .gitmodules; echo $?",
+  "git clone -b bad odd c3; echo $?; ls -A c3; git -C c3 log --format=%s -1; test -e above.txt || echo absent",
+  "git clone -q -b bad odd c4; cd c4 && git reset; echo $?; git ls-files; git reset -q -- fresh; echo $?; git ls-files",
+  "git clone -q -b ntfs odd c5; cd c5 && git reset -- .gitmodules; echo $?; git ls-files",
+  "mkdir e6 && git clone -q -b ntfs odd e6; echo $?; ls -A e6"
 ]

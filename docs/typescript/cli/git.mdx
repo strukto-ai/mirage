@@ -174,6 +174,9 @@ git --git-dir=/repo/.git --work-tree=/repo status --short
 
 Clone and fetch can read another workspace repository or a smart-HTTP remote.
 Destinations must be writable mounts. There is no push or pull command.
+A path git refuses to check out is refused by `checkout`, `switch`, `restore` and
+`reset` as git refuses it; `git clone` then exits 128 and keeps the repository
+with an empty work tree.
 For authenticated GitHub clones, `gh repo clone` supplies its configured token,
 and only to its configured GitHub origin.
 
