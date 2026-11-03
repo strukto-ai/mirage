@@ -165,6 +165,9 @@ class Gateway {
   }
 
   private async serve(client: net.Socket): Promise<void> {
+    client.on('error', (err) => {
+      console.debug('gateway: program side failed:', err)
+    })
     client.pause()
     const ticket = await this.claimed(client.remotePort ?? 0)
     try {

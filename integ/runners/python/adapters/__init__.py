@@ -48,8 +48,10 @@ from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
 from mirage.cache.file.config import RedisCacheConfig
+from mirage.commands.cli.mcp import mcp_cli
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLI
+from mirage.config import build_mcp_clis, load_config, resolve_secrets
 from mirage.core.databricks_volume.client import create_directory
 from mirage.core.databricks_volume.path import configured_root
 from mirage.core.email.config import EmailConfig
@@ -1666,6 +1668,64 @@ class TrelloService:
         return None
 
 
+class MCPService:
+    """Builds the mcp installs from the shared fake MCP server.
+
+    The server (integ/server/mcp/) is stateless, so both hosts share one
+    instance; the tool list is read once, when the target opens. A
+    ``cli_door: yaml`` target builds them through the workspace config
+    loader with header auth, any other in code with a bearer.
+
+    Args:
+        installs (dict[str, tuple[CLI, dict[str, JsonValue]]]): each
+            CLI name's tree and install config.
+    """
+
+    def __init__(
+        self, installs: dict[str, tuple[CLI, dict[str, JsonValue]]]
+    ) -> None:
+        self.installs = installs
+
+    @classmethod
+    async def create(cls, target: dict) -> "MCPService":
+        url = os.environ["MCP_URL"]
+        names = target.get("clis", [])
+        if target.get("cli_door") == "yaml":
+            auth = {
+                "type": "header",
+                "name": "X-Api-Key",
+                "token": "integ-token",
+            }
+            config = await resolve_secrets(
+                load_config(
+                    {
+                        "mounts": {},
+                        "clis": {
+                            name: {
+                                "cli": "mcp",
+                                "config": {"url": url, "auth": auth},
+                            }
+                            for name in names
+                        },
+                    }
+                )
+            )
+            kwargs = config.to_workspace_kwargs(await build_mcp_clis(config))
+            return cls(kwargs["clis"])
+        install: dict[str, JsonValue] = {
+            "url": url,
+            "auth": {"type": "bearer", "token": "integ-token"},
+        }
+        cli = await mcp_cli(install)
+        return cls({name: (cli, install) for name in names})
+
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
+        return self.installs
+
+    async def teardown(self) -> None:
+        return None
+
+
 class DiscordService:
     """Points discord mounts at the shared fake discord.com/api server.
 
@@ -2604,6 +2664,7 @@ class PostgresService:
 
 Service = (
     AirtableService
+    | MCPService
     | S3Service
     | S3DeniedService
     | OneDriveService
@@ -3170,6 +3231,8 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await BoxService.create(run_id, target)
     if target.get("service") == "dropbox":
         return await DropboxService.create(run_id)
+    if target.get("service") == "mcp":
+        return await MCPService.create(target)
     if target.get("service") == "github":
         fixture = "cli" if "gh" in (target.get("clis") or []) else "v1"
         return await GitHubService.create(run_id, fixture)
@@ -3256,6 +3319,7 @@ def cli_install(
             GwsService,
             HfHubService,
             LinearService,
+            MCPService,
             NotionService,
             SlackService,
             TrelloService,

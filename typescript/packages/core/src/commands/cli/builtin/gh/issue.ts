@@ -27,6 +27,7 @@ import {
 import type { RepoRef } from '../../../../core/github/repo.ts'
 import type { JsonObject, PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import {
   bodyValue,
@@ -288,28 +289,18 @@ export async function editCmd(
   return textOut(`${textValue(edited.url)}\n`)
 }
 
-async function state(
-  accessor: GitHubAccount,
-  texts: string[],
-  ctx: Context,
-  next: 'open' | 'closed',
-): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(accessor, texts, fl)
-  const edited = issue(await editIssue(accessor.transport, ref, number, { state: next }))
-  const verb = next === 'closed' ? 'Closed' : 'Reopened'
-  return textOut(
-    `✓ ${verb} issue ${ref.owner}/${ref.repo}#${String(number)} (${textValue(edited.title)})\n`,
-  )
-}
-
 export async function closeCmd(
   accessor: GitHubAccount,
   _paths: PathSpec[],
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  return state(accessor, texts, ctx, 'closed')
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(accessor, texts, fl)
+  const edited = issue(await editIssue(accessor.transport, ref, number, { state: 'closed' }))
+  return textOut(
+    `✓ Closed issue ${ref.owner}/${ref.repo}#${String(number)} (${textValue(edited.title)})\n`,
+  )
 }
 
 export async function reopenCmd(
@@ -318,7 +309,21 @@ export async function reopenCmd(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  return state(accessor, texts, ctx, 'open')
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(accessor, texts, fl)
+  const transport = accessor.transport
+  const row = issue(await getIssue(transport, ref, number))
+  const name = `${ref.owner}/${ref.repo}#${String(number)} (${textValue(row.title)})`
+  if (row.closed !== true) {
+    return [
+      new Uint8Array(0),
+      new IOResult({ stderr: new TextEncoder().encode(`! Issue ${name} is already open\n`) }),
+    ]
+  }
+  const comment = fl.asStr('comment')
+  if (comment !== undefined && comment !== '') await commentIssue(transport, ref, number, comment)
+  await editIssue(transport, ref, number, { state: 'open' })
+  return textOut(`✓ Reopened issue ${name}\n`)
 }
 
 export async function commentCmd(

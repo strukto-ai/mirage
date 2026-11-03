@@ -21,6 +21,7 @@ import aiofiles.os
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_error
 from mirage.core.disk.utils import resolve_inside
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
@@ -30,16 +31,22 @@ async def copy(
     root = accessor.root
     s = await resolve_inside(root, src_spec)
     d = await resolve_inside(root, dst_spec)
+    timer = start_op()
     try:
-        await asyncio.to_thread(shutil.copyfile, s, d)
-        await asyncio.to_thread(shutil.copystat, s, d)
-    except OSError as exc:
-        # copyfile reports ENOENT and EACCES for either operand, so the
-        # operand to blame is only knowable after the failure: probe whether
-        # the source reads to tell them apart. Either way the host path
-        # never reaches the message.
-        blame_src = isinstance(
-            exc, (FileNotFoundError, PermissionError)
-        ) and not await aiofiles.os.access(s, os.R_OK)
-        spec = src_spec if blame_src else dst_spec
-        raise disk_error(exc, spec.virtual) from exc
+        try:
+            await asyncio.to_thread(shutil.copyfile, s, d)
+            await asyncio.to_thread(shutil.copystat, s, d)
+        except OSError as exc:
+            # copyfile reports ENOENT and EACCES for either operand, so the
+            # operand to blame is only knowable after the failure: probe whether
+            # the source reads to tell them apart. Either way the host path
+            # never reaches the message.
+            blame_src = isinstance(
+                exc, (FileNotFoundError, PermissionError)
+            ) and not await aiofiles.os.access(s, os.R_OK)
+            spec = src_spec if blame_src else dst_spec
+            raise disk_error(exc, spec.virtual) from exc
+    finally:
+        # Also when the copy raised: copyfile that fails part-way has
+        # already written the destination, as on the object stores.
+        record("copy", dst_spec.virtual, "disk", 0, timer)

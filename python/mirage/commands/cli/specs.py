@@ -15,6 +15,7 @@
 import importlib.metadata
 import logging
 
+from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
 from mirage.commands.cli.types import CLI
 from mirage.utils.loader import load_attr
 
@@ -48,9 +49,9 @@ BUILTIN_CLI_SPECS: dict[str, str] = {
 #     [project.entry-points."mirage.clis"]
 #     jira = "mypackage.clis:JIRA"
 #
-# The entry point must resolve to a CLI tree. Builtin and
-# explicitly registered names win over entry points, mirroring the
-# ``mirage.vfs`` group.
+# The entry point must resolve to a CLI tree. Builtin, explicitly
+# registered and the reserved ``mcp`` names win over entry points,
+# mirroring the ``mirage.vfs`` group.
 ENTRY_POINT_GROUP = "mirage.clis"
 _ENTRY_POINT_SPECS: dict[str, str] = {}
 _entry_points_loaded = False
@@ -69,7 +70,11 @@ def _load_entry_point_clis() -> None:
         return
     _entry_points_loaded = True
     for ep in importlib.metadata.entry_points(group=ENTRY_POINT_GROUP):
-        if ep.name in CLI_SPECS or ep.name in BUILTIN_CLI_SPECS:
+        if (
+            ep.name in CLI_SPECS
+            or ep.name in BUILTIN_CLI_SPECS
+            or ep.name == MCP_CLI
+        ):
             logger.debug("entry point %r shadowed by existing CLI", ep.name)
             continue
         _ENTRY_POINT_SPECS[ep.name] = ep.value
@@ -81,6 +86,11 @@ def register_cli_spec(spec: CLI) -> None:
     Args:
         spec (CLI): a program tree; its root ``name`` is the key.
     """
+    if spec.spec.name == MCP_CLI:
+        raise ValueError(
+            f"CLI spec {MCP_CLI!r} is reserved for MCP servers; build one "
+            "with mcp_cli"
+        )
     if spec.spec.name in CLI_SPECS or spec.spec.name in BUILTIN_CLI_SPECS:
         raise ValueError(f"CLI spec {spec.spec.name!r} is already registered")
     CLI_SPECS[spec.spec.name] = spec
@@ -111,6 +121,10 @@ def cli_spec_for(name: str) -> CLI:
         name (str): registered/builtin/entry-point name, or a
             ``"source:ATTR"`` reference.
     """
+    if name == MCP_CLI:
+        raise ValueError(
+            f"cli {MCP_CLI!r} is built from its server: await mcp_cli(config)"
+        )
     if name in CLI_SPECS:
         return CLI_SPECS[name]
     if name in BUILTIN_CLI_SPECS:

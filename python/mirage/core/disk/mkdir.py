@@ -18,6 +18,7 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.dest import mkdir_component_error
 from mirage.core.disk.errors import disk_error, disk_errors
 from mirage.core.disk.utils import resolve_inside
+from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
@@ -28,6 +29,7 @@ async def mkdir(
     path = path_spec.mount_path
     root = accessor.root
     p = await resolve_inside(root, path_spec, path)
+    timer = start_op()
     if parents:
         # Not `disk_errors`: that restamps every OSError against the
         # operand, which would undo the component naming below.
@@ -42,7 +44,21 @@ async def mkdir(
             raise (named or disk_error(exc, path_spec.virtual)) from exc
         except OSError as exc:
             raise disk_error(exc, path_spec.virtual) from exc
+        finally:
+            # Also when it raised: the chain may have made its first
+            # directories before a later one failed.
+            record("mkdir", path_spec.virtual, "disk", 0, timer)
         return
     # An existing target is EEXIST, not success: only -p is idempotent.
-    with disk_errors(path_spec.virtual):
-        await aiofiles.os.mkdir(p)
+    done = True
+    try:
+        with disk_errors(path_spec.virtual):
+            await aiofiles.os.mkdir(p)
+    except OSError:
+        done = False
+        raise
+    finally:
+        # A refused mkdir(2) made nothing; a cancelled wait may not have
+        # stopped the worker's.
+        if done:
+            record("mkdir", path_spec.virtual, "disk", 0, timer)

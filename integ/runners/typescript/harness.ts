@@ -137,6 +137,9 @@ export interface Target {
   // main.ts refuses it on any other VFS.
   secrets?: string
   clis?: string[]
+  // 'yaml' builds the target's MCP CLIs through the workspace config
+  // loader, header auth; else in code, bearer. Only the mcp opener consults it.
+  cli_door?: 'yaml'
   // Scope an installed account CLI to this mount's folder, so the CLI and
   // the mount are pointed at the same place.
   cli_scope?: string

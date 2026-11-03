@@ -12,12 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { NAME as MCP_CLI } from '@struktoai/mirage-core/commands/cli/mcp/constants'
+import { MCPToolsError } from '@struktoai/mirage-core/commands/cli/mcp/errors'
+import type { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { runWithNetwork } from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
+import { resolveSourcesFor } from '@struktoai/mirage-core/secrets/sources'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import { isPlainObject } from '@struktoai/mirage-core/utils/records'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
@@ -36,6 +41,7 @@ import {
   Workspace,
   type WorkspaceConfigRaw,
 } from '@struktoai/mirage-node'
+import { buildCliEntries } from '@struktoai/mirage-node/config'
 import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { Buffer } from 'node:buffer'
@@ -380,7 +386,8 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
             if (
               e instanceof SecretsError ||
               e instanceof z.ZodError ||
-              e instanceof VFSConfigError
+              e instanceof VFSConfigError ||
+              e instanceof MCPToolsError
             ) {
               // A `secrets:` block the host cannot resolve is the caller's
               // config, not a backend that would not answer. Resolution moved
@@ -649,6 +656,73 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
       } catch (err) {
         return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
       }
+      return { name }
+    },
+  )
+
+  /**
+   * Install an MCP server as a CLI on the live workspace. The body is one
+   * `clis:` entry, `cli: mcp` with its config, as a config file states it.
+   * Its pointers resolve and its tools are listed under the workspace's
+   * network. A name already installed answers 409.
+   */
+  app.put<{ Params: { id: string; name: string }; Body: unknown }>(
+    '/v1/workspaces/:id/clis/:name',
+    async (req, reply) => {
+      const entry = deps.registry.visible(req.params.id, req.account)
+      if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+      const ws = entry.runner.ws
+      const name = req.params.name
+      const block = req.body
+      const refusal = await admit(deps, req, reply, { clis: { [name]: block } })
+      if (refusal !== null) return refusal
+      const taken = (): boolean => ws.clis().has(name)
+      const install = async (): Promise<boolean> => {
+        if (!isPlainObject(block) || block.cli !== MCP_CLI) {
+          throw new Error('only a cli: mcp entry installs over HTTP')
+        }
+        if (taken()) return false
+        ws.registry.clis.checkName(name)
+        const sources = await resolveSourcesFor(ws.declaredSources, [
+          isPlainObject(block.config) ? block.config : {},
+        ])
+        const built = await buildCliEntries({ [name]: block }, sources)
+        const [cli, config] = built[name] ?? []
+        if (taken()) return false
+        ws.registerCli(name, cli as CLI, config ?? null)
+        return true
+      }
+      let installed: boolean
+      try {
+        installed = await entry.runner.call(
+          runWithNetwork(deps.registry.ruleFor(ws.network), install),
+        )
+      } catch (err) {
+        return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
+      }
+      if (!installed) {
+        return reply.status(409).send({ detail: `CLI name '${name}' is already installed` })
+      }
+      return { name }
+    },
+  )
+
+  /** Remove an MCP CLI from the live workspace. */
+  app.delete<{ Params: { id: string; name: string } }>(
+    '/v1/workspaces/:id/clis/:name',
+    async (req, reply) => {
+      const entry = deps.registry.visible(req.params.id, req.account)
+      if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+      const ws = entry.runner.ws
+      const name = req.params.name
+      const current = ws.clis().get(name)
+      if (current === undefined) {
+        return reply.status(404).send({ detail: `no CLI named '${name}'` })
+      }
+      if (current.cli.mcp === null) {
+        return reply.status(422).send({ detail: `CLI '${name}' is not an MCP server` })
+      }
+      await entry.runner.call(ws.unregisterCli(name))
       return { name }
     },
   )

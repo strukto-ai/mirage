@@ -161,7 +161,7 @@ async function through(
     await ended('refused', sent ?? 0, 0)
     throw new TypeError('Failed to fetch')
   }
-  if (response.body === null) {
+  if (response.body === null || [204, 205, 304].includes(response.status)) {
     if (timer !== null) clearTimeout(timer)
     await ended('closed', sent ?? 0, 0)
     return response

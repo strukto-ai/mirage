@@ -15,10 +15,19 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { rm } from 'node:fs/promises'
 
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { resolveInside } from './utils.ts'
 
 export async function rmR(accessor: DiskAccessor, path: PathSpec): Promise<void> {
   const full = await resolveInside(accessor.root, path)
-  await rm(full, { recursive: true, force: true })
+  const timer = startOp()
+  try {
+    await rm(full, { recursive: true, force: true })
+  } finally {
+    // Also when the walk raised: a removal that fails part-way has
+    // already removed entries, as on the object stores.
+    record('rm_r', path.virtual, VFSName.DISK, 0, timer)
+  }
 }

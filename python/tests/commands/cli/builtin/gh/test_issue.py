@@ -20,6 +20,7 @@ from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.issue import (
     ISSUE_FIELDS,
     list_cmd,
+    reopen_cmd,
     view_cmd,
 )
 from mirage.commands.config import Context
@@ -211,3 +212,59 @@ async def test_list_asks_graphql_with_the_narrowing_gh_sends(monkeypatch):
             "number,stateReason",
         )
     ]
+
+
+def _reopen_calls(monkeypatch, state) -> list[tuple]:
+    calls: list[tuple] = []
+
+    async def get(config, ref, number):
+        calls.append(("get", number))
+        return {"number": number, "title": "t", "state": state}
+
+    async def comment(config, ref, number, body):
+        calls.append(("comment", number, body))
+        return {}
+
+    async def edit(config, ref, number, body):
+        calls.append(("edit", number, body))
+        return {}
+
+    monkeypatch.setitem(reopen_cmd.__globals__, "get_issue", get)
+    monkeypatch.setitem(reopen_cmd.__globals__, "comment_issue", comment)
+    monkeypatch.setitem(reopen_cmd.__globals__, "edit_issue", edit)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_reopen_comments_before_it_reopens(monkeypatch):
+    calls = _reopen_calls(monkeypatch, "closed")
+
+    out, io = await reopen_cmd(*_args({"comment": "back"}))
+
+    assert await materialize(out) == "✓ Reopened issue o/r#4 (t)\n".encode()
+    assert io.exit_code == 0
+    assert calls == [
+        ("get", 4),
+        ("comment", 4, "back"),
+        ("edit", 4, {"state": "open"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reopen_without_a_comment_posts_none(monkeypatch):
+    calls = _reopen_calls(monkeypatch, "closed")
+
+    await reopen_cmd(*_args({"comment": ""}))
+
+    assert calls == [("get", 4), ("edit", 4, {"state": "open"})]
+
+
+@pytest.mark.asyncio
+async def test_reopen_leaves_an_open_issue_alone(monkeypatch):
+    calls = _reopen_calls(monkeypatch, "open")
+
+    _, io = await reopen_cmd(*_args({"comment": "back"}))
+
+    assert io.exit_code == 0
+    assert io.stderr == b"! Issue o/r#4 (t) is already open\n"
+    assert calls == [("get", 4)]

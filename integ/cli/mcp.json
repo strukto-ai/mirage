@@ -1,0 +1,229 @@
+{
+  "cases": [
+    {
+      "id": "mcp_help",
+      "seq": 571000,
+      "targets": [
+        "cli-mcp",
+        "cli-mcp-yaml"
+      ],
+      "command": "items --help",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: items [-h] {list-items,add-item,fail-always,echo-args} ...\n\nInteg Items\n\ncommands:\n  list-items   List the items.\n  add-item     Add an item.\n  fail-always  Always fails.\n  echo-args    Echo the arguments back.\n\noptions:\n  -h, --help  Show this help and exit\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mcp_leaf_help_shows_schema",
+      "seq": 571001,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items add-item --help",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: items add-item [-h] [JSON]\n\nAdd an item.\n\npositional arguments:\n  JSON  the tool's arguments as one object\n\noptions:\n  -h, --help  Show this help and exit\n\nJSON arguments (schema):\n{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mcp_read_tool",
+      "seq": 571002,
+      "targets": [
+        "cli-mcp",
+        "cli-mcp-yaml"
+      ],
+      "command": "items list-items",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\nbanana\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mcp_write_tool",
+      "seq": 571003,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items add-item '{\"name\": \"pear\"}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "added pear\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mcp_no_operand_sends_an_empty_object",
+      "seq": 571004,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args",
+      "expect": {
+        "exit": 0,
+        "stdout": "{}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mcp_arguments_pass_verbatim",
+      "seq": 571005,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args '{\"b\": [1, 2], \"a\": \"x\"}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"a\":\"x\",\"b\":[1,2]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mcp_bad_json_exits_2",
+      "seq": 571006,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args '{nope'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "echo-args: invalid JSON\n"
+      }
+    },
+    {
+      "id": "mcp_non_finite_json_exits_2",
+      "seq": 571013,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args '{\"n\": NaN}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "echo-args: invalid JSON\n"
+      }
+    },
+    {
+      "id": "mcp_overflowing_number_exits_2",
+      "seq": 571014,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args '{\"n\": 1e999}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "echo-args: invalid JSON\n"
+      }
+    },
+    {
+      "id": "mcp_overflowing_integer_exits_2",
+      "seq": 571015,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args '{\"n\": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "echo-args: invalid JSON\n"
+      }
+    },
+    {
+      "id": "mcp_a_float_passes_through",
+      "seq": 571016,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args '{\"n\": 1.5}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"n\":1.5}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "mcp_non_object_json_exits_2",
+      "seq": 571007,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args '[1]'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "echo-args: JSON must be an object\n"
+      }
+    },
+    {
+      "id": "mcp_two_operands_exit_2",
+      "seq": 571008,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items echo-args '{}' '{}'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "echo-args: takes one JSON object\n"
+      }
+    },
+    {
+      "id": "mcp_tool_error_exits_1",
+      "seq": 571009,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items fail-always",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "boom\n"
+      }
+    },
+    {
+      "id": "mcp_unknown_tool",
+      "seq": 571010,
+      "targets": [
+        "cli-mcp"
+      ],
+      "command": "items nope",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "items: 'nope' is not a items command. See 'items --help'.\n"
+      }
+    },
+    {
+      "id": "mcp_profile_denies_a_tool_by_name",
+      "seq": 571011,
+      "targets": [
+        "cli-mcp"
+      ],
+      "session": "guarded",
+      "command": "items add-item '{\"name\": \"x\"}'",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "items: Permission denied\n"
+      }
+    },
+    {
+      "id": "mcp_profile_allows_the_other_tools",
+      "seq": 571012,
+      "targets": [
+        "cli-mcp"
+      ],
+      "session": "guarded",
+      "command": "items list-items",
+      "expect": {
+        "exit": 0,
+        "stdout": "apple\nbanana\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -185,6 +185,7 @@ const UNBOUND: Caller = {
   lineAbort: null,
   recording: null,
   revisions: null,
+  history: null,
   commandSink: null,
   cache: null,
   readFacts: null,

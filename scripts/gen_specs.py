@@ -22,7 +22,7 @@ from collections.abc import Sequence
 from dataclasses import MISSING, Field, asdict, fields
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -34,6 +34,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.commands.spec.synopsis import SHELL_SYNOPSES, SYNOPSES
 from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.core.mcp.config import MCPAuth, MCPConfig
 from mirage.types import LineFacts
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.registry import REGISTRY, resolve_class
@@ -257,6 +258,30 @@ def _cli_specs() -> dict[str, Any]:
             "config_model": cli.config_model is not None,
         }
     return programs
+
+
+def _mcp_config() -> dict[str, Any]:
+    """The fields a ``cli: mcp`` entry's config takes, per model: what an
+    MCP CLI can be told, gated as a VFS config is.
+
+    Returns:
+        dict[str, Any]: per model, each field's wire name mapped to
+            whether it is required and, for an enum, its values.
+    """
+    return {
+        model.__name__: {
+            name: {
+                "required": field.is_required(),
+                **(
+                    {"values": list(get_args(field.annotation))}
+                    if get_origin(field.annotation) is Literal
+                    else {}
+                ),
+            }
+            for name, field in model.model_fields.items()
+        }
+        for model in (MCPConfig, MCPAuth)
+    }
 
 
 def _emit_one(
@@ -494,6 +519,7 @@ def _emit_vfs_names(registry: dict[str, list[Command]]) -> None:
         "capabilities": _capabilities(),
         "configs": _configs(),
         "cli_specs": _cli_specs(),
+        "mcp_config": _mcp_config(),
         "shell_specs": {
             name: _spec_payload(spec)
             for name, spec in sorted(SHELL_SPECS.items())

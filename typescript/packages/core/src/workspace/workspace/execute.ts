@@ -73,6 +73,7 @@ import type { Deny, HandOff, Pending } from '../../policy/index.ts'
 import type { Refusal } from '../../types.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { inputSubstitutionRedirect } from '../../shell/helpers.ts'
+import { LineHistory } from '../history/line.ts'
 import {
   recordStatus,
   restoreStatus,
@@ -190,24 +191,25 @@ async function answerLine(
   options: ExecuteOptions,
   session: SessionState,
   result: ExecuteResult,
+  history: LineHistory | null = null,
 ): Promise<ExecuteResult> {
   recordStatus(session, result.exitCode)
   if (options.record !== false && command.replaceAll('\n', '') !== '') {
+    const io = new IOResult({
+      exitCode: result.exitCode,
+      stderr: result.stderr,
+      refusal: result.refusal,
+    })
     await runCancellable(
-      env.observer.logResult(
-        await shown(
-          new IOResult({
-            exitCode: result.exitCode,
-            stderr: result.stderr,
-            refusal: result.refusal,
-          }),
-          options.sink,
-        ),
-        [],
-        session.sessionId,
-        options.cwd ?? session.cwd,
-        options.executionScope?.id,
-      ),
+      history !== null
+        ? history.end(io, [])
+        : env.observer.logResult(
+            await shown(io, options.sink),
+            [],
+            session.sessionId,
+            options.cwd ?? session.cwd,
+            options.executionScope?.id,
+          ),
       options.signal,
     )
   }
@@ -488,8 +490,30 @@ async function runPreparedLine(
         effectiveSession.aliasExpansion = null
         const recorded = options.record !== false && command.replaceAll('\n', '') !== ''
         try {
-          // The line is recorded as it starts; how it ended follows it.
-          if (recorded) {
+          const aliases = expandingAliases(effectiveSession)
+          const root =
+            argv === undefined
+              ? parser.parse(command, aliases, effectiveSession.shopts.extglob ?? false)
+              : literalTree(argv)
+          // A line bash's reader reads as several commands records each as
+          // it reaches it; any other is recorded as it starts, how it ended
+          // following it, as is one a postExecute policy sees whole before
+          // any of its output escapes.
+          const history =
+            recorded &&
+            argv === undefined &&
+            !(await env.registry.policies.wantsFor('postExecute', targetSession.sessionId))
+              ? LineHistory.open(
+                  env.observer,
+                  command,
+                  root as unknown as TSNodeLike,
+                  targetSession.sessionId,
+                  effectiveSession,
+                  options.executionScope?.id,
+                  options.sink,
+                )
+              : null
+          if (recorded && history === null) {
             await runCancellable(
               env.observer.logCommand(
                 command,
@@ -500,11 +524,6 @@ async function runPreparedLine(
               lineSignal,
             )
           }
-          const aliases = expandingAliases(effectiveSession)
-          const root =
-            argv === undefined
-              ? parser.parse(command, aliases, effectiveSession.shopts.extglob ?? false)
-              : literalTree(argv)
           // Syntax gates before policy, mirroring bash: an unparsable line exits 2
           // and the policy is never consulted about it. A refusal on a later
           // line leaves the lines before it to run first (`refusedRow`), as
@@ -526,6 +545,7 @@ async function runPreparedLine(
               options,
               targetSession,
               new ExecuteResult(new Uint8Array(), await materialize(io.stderr), io.exitCode),
+              history,
             )
           }
           const rootNode = root as unknown as TSNodeLike
@@ -607,6 +627,7 @@ async function runPreparedLine(
               options,
               targetSession,
               new ExecuteResult(new Uint8Array(), failed.stderr, failed.exitCode),
+              history,
             )
           }
           if ('kind' in placed) {
@@ -623,6 +644,7 @@ async function runPreparedLine(
               options,
               targetSession,
               placementRefused(placed, command),
+              history,
             )
           }
           const routingDecision = placed
@@ -829,44 +851,52 @@ async function runPreparedLine(
             options.sink !== undefined ? { ...lineDeps, sink: options.sink } : lineDeps,
             handed,
           )
+          const parsed = (): Promise<ExecuteResult> =>
+            runParsedLine(
+              env,
+              command,
+              options,
+              rootNode,
+              deps,
+              routingDecision,
+              targetSession,
+              context,
+              stdin,
+              (line) => parser.parse(line),
+              nested,
+              handed,
+              judged,
+              deadline,
+              topLevel,
+              history,
+            )
+          // The root program reaches each command of a line recorded a
+          // command at a time through the caller.
           const answered = await runWithEvaluation(
             context,
             () =>
-              runParsedLine(
-                env,
-                command,
-                options,
-                rootNode,
-                deps,
-                routingDecision,
-                targetSession,
-                context,
-                stdin,
-                (line) => parser.parse(line),
-                nested,
-                handed,
-                judged,
-                deadline,
-                topLevel,
-              ),
+              history === null ? parsed() : runWithCaller({ ...currentCaller(), history }, parsed),
             env.sessions,
           )
           // A path that answered before recording how the line ended (a
           // refused or failed preflight) ends it here, as Python's finally
           // ends every line; one already ended is left as it is.
           if (recorded) {
+            const io = new IOResult({
+              stdout: answered.stdout,
+              stderr: answered.stderr,
+              exitCode: answered.exitCode,
+            })
             await runCancellable(
-              env.observer.logResult(
-                new IOResult({
-                  stdout: answered.stdout,
-                  stderr: answered.stderr,
-                  exitCode: answered.exitCode,
-                }),
-                [],
-                targetSession.sessionId,
-                effectiveSession.cwd,
-                options.executionScope?.id,
-              ),
+              history !== null
+                ? history.end(io, [])
+                : env.observer.logResult(
+                    io,
+                    [],
+                    targetSession.sessionId,
+                    effectiveSession.cwd,
+                    options.executionScope?.id,
+                  ),
               lineSignal,
             )
           }
@@ -928,6 +958,8 @@ async function runParsedLine(
   // Whether this is the outermost line, which a nested one's memory refusal
   // ends.
   topLevel: boolean,
+  // The line's history when bash's reader reads it as several commands.
+  history: LineHistory | null = null,
 ): Promise<ExecuteResult> {
   const effectiveSession = context.session
   const cacheFacts = env.dispatcher.captureCacheFacts()
@@ -1062,21 +1094,21 @@ async function runParsedLine(
         held = isPending(refused.refusal)
         recordStatus(targetSession, refused.exitCode)
         if (isLine) {
+          const io = new IOResult({
+            exitCode: refused.exitCode,
+            stderr: refused.stderr,
+            refusal: refused.refusal,
+          })
           await runCancellable(
-            env.observer.logResult(
-              await shown(
-                new IOResult({
-                  exitCode: refused.exitCode,
-                  stderr: refused.stderr,
-                  refusal: refused.refusal,
-                }),
-                options.sink,
-              ),
-              [],
-              targetSession.sessionId,
-              effectiveSession.cwd,
-              options.executionScope?.id,
-            ),
+            history !== null
+              ? history.end(io, [])
+              : env.observer.logResult(
+                  await shown(io, options.sink),
+                  [],
+                  targetSession.sessionId,
+                  effectiveSession.cwd,
+                  options.executionScope?.id,
+                ),
             killed,
           )
         }
@@ -1140,16 +1172,20 @@ async function runParsedLine(
       // a fast one records before history is read.
       const logLine = async (io: IOResult): Promise<void> => {
         await runCancellable(
-          env.observer.logResult(
-            await shown(io, options.sink),
-            lineRecords,
-            targetSession.sessionId,
-            effectiveSession.cwd,
-            options.executionScope?.id,
-          ),
+          history !== null
+            ? history.end(io, lineRecords)
+            : env.observer.logResult(
+                await shown(io, options.sink),
+                lineRecords,
+                targetSession.sessionId,
+                effectiveSession.cwd,
+                options.executionScope?.id,
+              ),
           killed,
         )
       }
+      // A line a runtime runs whole is one command to it, recorded as typed.
+      if (isLine && history !== null) await runCancellable(history.typed(), killed)
       let result: Awaited<ReturnType<typeof runWholeLine>>
       try {
         result = await abortable(
@@ -1419,13 +1455,15 @@ async function runParsedLine(
     // Joined, not raced: a fast store still records the line before the
     // caller reads history, and a stalled one releases the caller.
     await runCancellable(
-      env.observer.logResult(
-        await shown(io, options.sink),
-        opRecords,
-        targetSession.sessionId,
-        effectiveSession.cwd,
-        options.executionScope?.id,
-      ),
+      history !== null
+        ? history.end(io, opRecords)
+        : env.observer.logResult(
+            await shown(io, options.sink),
+            opRecords,
+            targetSession.sessionId,
+            effectiveSession.cwd,
+            options.executionScope?.id,
+          ),
       killed,
     )
   }

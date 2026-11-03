@@ -15,6 +15,8 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { stat as fsStat, unlink as fsUnlink } from 'node:fs/promises'
 
+import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { eisdir } from '@struktoai/mirage-core/errors/fs'
 import { diskError } from './errors.ts'
@@ -22,6 +24,7 @@ import { resolveInside } from './utils.ts'
 
 export async function unlink(accessor: DiskAccessor, path: PathSpec): Promise<void> {
   const full = await resolveInside(accessor.root, path)
+  const timer = startOp()
   try {
     await fsUnlink(full)
   } catch (err) {
@@ -36,4 +39,5 @@ export async function unlink(accessor: DiskAccessor, path: PathSpec): Promise<vo
     }
     throw diskError(err, path)
   }
+  record('unlink', path.virtual, VFSName.DISK, 0, timer)
 }

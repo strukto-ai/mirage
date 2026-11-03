@@ -278,6 +278,36 @@ def merge_routes(
     return {**kept, **over}
 
 
+def narrowed(
+    base: NetworkRule | None, setting: NetworkSetting
+) -> NetworkRule | None:
+    """``base`` held also to ``setting``: its layer added and its routes
+    over the base's; ``base`` itself when the setting adds neither. A
+    rule built here starts watching the process's connections. Mirrors
+    TS's ``narrowed``.
+
+    Args:
+        base (NetworkRule | None): the rule already in force, None for
+            none.
+        setting (NetworkSetting): the ``network`` to hold it to as well.
+    """
+    layer = network_layer(setting)
+    routes = network_routes(setting)
+    layers = base.layers if base is not None else ()
+    held = base.routes if base is not None else {}
+    if (layer is None or layer in layers) and all(
+        held.get(source) == target for source, target in routes.items()
+    ):
+        return base
+    rule = NetworkRule(
+        [*layers, *(() if layer is None else (layer,))],
+        base is not None and base.metadata,
+        merge_routes(held, routes),
+    )
+    watch_network()
+    return rule
+
+
 def network_rule(
     setting: NetworkSetting = True, metadata: bool = False
 ) -> NetworkRule | None:

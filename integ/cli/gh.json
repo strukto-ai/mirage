@@ -2690,6 +2690,32 @@
         "stdout": "COMMANDS\n       list (ls)\n              List issues\n\n       view   View an issue\n\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "gh_pr_reopen_comments_then_reopens_and_refuses_a_merged_one",
+      "seq": 9940108,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "gh pr reopen 6 -c 'back again' && gh pr reopen 6; gh pr view 6 --json state,comments --jq '[.state, (.comments | map(.body))]'; gh pr reopen 5; echo \"exit=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "✓ Reopened pull request integ/repo-cli#6 (abandoned)\n[\"OPEN\",[\"back again\"]]\nexit=1\n",
+        "stderr": "! Pull request integ/repo-cli#6 (abandoned) is already open\nX Pull request integ/repo-cli#5 (merged-title) can't be reopened because it was already merged\n"
+      }
+    },
+    {
+      "id": "gh_issue_reopen_comments_then_reopens",
+      "seq": 9940109,
+      "targets": [
+        "cli-gh"
+      ],
+      "command": "url=$(gh issue create --title reopened --body b) && gh issue close \"$url\" >/dev/null && gh issue reopen \"$url\" --comment 'still broken' && gh issue reopen \"$url\"; gh issue view \"$url\" --json state,comments --jq '[.state, (.comments | map(.body))]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "✓ Reopened issue integ/repo-cli#13 (reopened)\n[\"OPEN\",[\"still broken\"]]\n",
+        "stderr": "! Issue integ/repo-cli#13 (reopened) is already open\n"
+      }
     }
   ]
 }
