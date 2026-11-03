@@ -364,6 +364,7 @@ flowchart LR
     ts --> J2["integ-ts"]
     core & ts --> J3["integ-shared-py · integ-shared-ts<br/>integ-shared-parity · integ-selftests<br/>integ-facets · integ-wandb"]
     core & ts --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack"]
+    core & ts --> EDGE["integ-edge<br/>the corpus on workerd:<br/>hf · email · slack · linear"]
     NC["Nextcloud tuning and full workflow"] --> ts & data
     data --> J4["integ-data · integ-events<br/>integ-tidb-filesystem"]
     database --> J5["integ-database"]

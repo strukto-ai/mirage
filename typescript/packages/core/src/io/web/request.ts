@@ -33,3 +33,13 @@ export function inRequest<T>(answer: () => Promise<T>): Promise<T> {
 export function currentRequest(): IncomingRequest | null {
   return requests.getStore() ?? null
 }
+
+/**
+ * `answer` run inside the request being answered, or as a request of its
+ * own when none is bound, as when a worker calls a workspace itself rather
+ * than through the edge app. A call never outlives the request that makes
+ * it, so a socket it opens is not left for a later one.
+ */
+export function withinRequest<T>(answer: () => Promise<T>): Promise<T> {
+  return currentRequest() === null ? inRequest(answer) : answer()
+}
