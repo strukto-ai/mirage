@@ -93,6 +93,7 @@ async function main(): Promise<void> {
     payload: JsonValue
     commit: boolean
     graphqlError: string | null
+    status: 200 | 503
   } | null = null
   const fake = await start<C>({
     ...linearFake,
@@ -114,8 +115,8 @@ async function main(): Promise<void> {
             fault = null
             if (injected.commit) await route.handler(ctx)
             return injected.graphqlError
-              ? { status: 200, body: { errors: [{ message: injected.graphqlError }] } }
-              : { status: 200, body: { data: { [injected.field]: injected.payload } } }
+              ? { status: injected.status, body: { errors: [{ message: injected.graphqlError }] } }
+              : { status: injected.status, body: { data: { [injected.field]: injected.payload } } }
           }
           return route.handler(ctx)
         },
@@ -259,6 +260,7 @@ async function main(): Promise<void> {
           payload: null,
           commit: false,
           graphqlError: 'Entity not found: Issue',
+          status: 200,
         }
         const notFound = await run(['add', 'PLAT-1', 'blocks', 'PLAT-2'])
         assert.equal(notFound.exit, host === 'reference' ? 3 : 1)
@@ -320,7 +322,13 @@ async function main(): Promise<void> {
           calls.some((call) => call.variables.after !== null && call.variables.after !== undefined),
         )
         for (const payload of [{ success: false }, {}]) {
-          fault = { field: 'issueRelationCreate', payload, commit: false, graphqlError: null }
+          fault = {
+            field: 'issueRelationCreate',
+            payload,
+            commit: false,
+            graphqlError: null,
+            status: 200,
+          }
           const failed = await run(['add', 'PLAT-1', 'related', 'PLAT-2'])
           assert.equal(failed.exit, 1)
           assert.equal(calls.filter((call) => call.query.includes('mutation ')).length, 1)
@@ -330,6 +338,7 @@ async function main(): Promise<void> {
           payload: null,
           commit: false,
           graphqlError: 'local injected GraphQL failure',
+          status: 200,
         }
         const graphqlFailure = await run(['add', 'PLAT-1', 'related', 'PLAT-2'])
         assert.equal(graphqlFailure.exit, 1)
@@ -339,17 +348,51 @@ async function main(): Promise<void> {
           payload: {},
           commit: true,
           graphqlError: null,
+          status: 200,
         }
         const uncertain = await run(['add', 'PLAT-1', 'related', 'PLAT-2'])
         assert.equal(uncertain.exit, 1)
         assert.equal(calls.filter((call) => call.query.includes('mutation ')).length, 1)
         for (const payload of [{ success: false }, {}]) {
-          fault = { field: 'issueRelationDelete', payload, commit: false, graphqlError: null }
+          fault = {
+            field: 'issueRelationDelete',
+            payload,
+            commit: false,
+            graphqlError: null,
+            status: 200,
+          }
           const failed = await run(['delete', 'PLAT-1', 'related', 'PLAT-2', '--yes'])
           assert.equal(failed.exit, 1)
           assert.equal(calls.filter((call) => call.query.includes('mutation ')).length, 1)
         }
         await success(['delete', 'PLAT-1', 'related', 'PLAT-2', '--yes'])
+        for (const operation of ['create', 'delete']) {
+          if (operation === 'delete') await success(['add', 'PLAT-1', 'related', 'PLAT-2'])
+          fault = {
+            field: operation === 'create' ? 'issueRelationCreate' : 'issueRelationDelete',
+            payload: null,
+            commit: true,
+            graphqlError: 'local reply failure after commit',
+            status: 503,
+          }
+          const result = await run(
+            operation === 'create'
+              ? ['add', 'PLAT-1', 'related', 'PLAT-2']
+              : ['delete', 'PLAT-1', 'related', 'PLAT-2', '--yes'],
+          )
+          assert.equal(result.exit, host === 'reference' ? 5 : 1)
+          assert.equal(calls.filter((call) => call.query.includes('mutation ')).length, 1)
+          if (host === 'mirage')
+            assert.match(result.stderr, /outcome is unknown.*check relations before retrying/)
+          if (operation === 'create')
+            await success(['delete', 'PLAT-1', 'related', 'PLAT-2', '--yes'])
+          const listed = await success(['list', 'PLAT-1'])
+          if (host === 'mirage')
+            assert(
+              JSON.parse(listed.stdout).every((row: { type: string }) => row.type !== 'related'),
+            )
+          else assert.doesNotMatch(listed.stdout, /PLAT-1 related /)
+        }
         summaries.push({ host, mutations })
       } finally {
         await ws.close()

@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { LinearAccessor } from '../../../../../accessor/linear.ts'
 import {
+  LinearApiError,
   issueRelationCreate,
   issueRelationDelete,
   listIssueRelations,
   type LinearTransport,
 } from '../../../../../core/linear/client.ts'
+import { CommandTimeoutError } from '../../../../../errors/types.ts'
 import { materialize } from '../../../../../io/types.ts'
 import { context } from '../../../../../../tests/workspace/fixtures/context.ts'
 import { LINEAR } from '../index.ts'
@@ -220,5 +222,52 @@ describe('issue relations', () => {
     expect(LINEAR.handlers['issue relation add']?.write).toBe(true)
     expect(LINEAR.handlers['issue relation delete']?.write).toBe(true)
     expect(LINEAR.handlers['issue relation list']?.write).toBe(false)
+  })
+})
+
+describe.each(['create', 'delete'])('relation %s request failures', (operation) => {
+  it.each([
+    new DOMException('caller canceled', 'AbortError'),
+    new CommandTimeoutError('linear', 1),
+  ])('preserves caller cancellation or budget timeout %s', async (failure) => {
+    const request = vi.fn().mockRejectedValue(failure)
+    const transport: LinearTransport = { graphql: request }
+    const pending =
+      operation === 'create'
+        ? issueRelationCreate(transport, {})
+        : issueRelationDelete(transport, 'r1')
+    await expect(pending).rejects.toBe(failure)
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    new TypeError('fetch failed'),
+    new DOMException('reply timed out', 'TimeoutError'),
+    new SyntaxError('truncated reply'),
+    new LinearApiError('upstream unavailable', [], 503),
+  ])('reports an uncertain outcome and preserves %s without retry', async (failure) => {
+    const request = vi.fn().mockRejectedValue(failure)
+    const transport: LinearTransport = { graphql: request }
+    const pending =
+      operation === 'create'
+        ? issueRelationCreate(transport, {})
+        : issueRelationDelete(transport, 'r1')
+    await expect(pending).rejects.toThrow('outcome is unknown')
+    await expect(pending).rejects.toHaveProperty('cause', failure)
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    new LinearApiError('access denied', [], 403),
+    new LinearApiError('invalid relation', [{ message: 'invalid relation' }]),
+  ])('preserves a confirmed refusal %s', async (failure) => {
+    const request = vi.fn().mockRejectedValue(failure)
+    const transport: LinearTransport = { graphql: request }
+    const pending =
+      operation === 'create'
+        ? issueRelationCreate(transport, {})
+        : issueRelationDelete(transport, 'r1')
+    await expect(pending).rejects.toBe(failure)
+    expect(request).toHaveBeenCalledTimes(1)
   })
 })
