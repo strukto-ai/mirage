@@ -12,8 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify } from '@struktoai/mirage-core/errors/classify'
+import { posixErrno } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { mkdir as fsMkdir } from 'node:fs/promises'
+import { lstat, mkdir as fsMkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -22,6 +25,24 @@ import { norm } from '@struktoai/mirage-core/utils/path'
 import { mkdirComponentError } from './dest.ts'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
+
+export const logger: { debug?: (message: string) => void } = {}
+
+async function firstMissing(path: string): Promise<string | null> {
+  let missing: string | null = null
+  for (;;) {
+    try {
+      await lstat(path)
+      break
+    } catch (err) {
+      logger.debug?.(`mkdir -p ancestor ${path} missing: ${String(err)}`)
+    }
+    missing = path
+    if (dirname(path) === path) break
+    path = dirname(path)
+  }
+  return missing
+}
 
 export async function mkdir(
   accessor: DiskAccessor,
@@ -32,9 +53,12 @@ export async function mkdir(
   const full = await resolveInside(root, path)
   const timer = startOp()
   if (parents) {
+    const missing = await firstMissing(full)
+    let failure: unknown = null
     try {
       await fsMkdir(full, { recursive: true })
     } catch (err) {
+      failure = err
       // The kernel names the whole path; GNU names the component it tripped
       // on, so the chain is walked only now that it is known to be broken.
       const named =
@@ -45,7 +69,13 @@ export async function mkdir(
     } finally {
       // Also when it threw: the chain may have made its first directories
       // before a later one failed.
-      record('mkdir', path.virtual, VFSName.DISK, 0, timer)
+      const changed = failure === null || (await firstMissing(full)) !== missing
+      const condition = classify(failure)
+      record('mkdir', path.virtual, VFSName.DISK, 0, timer, {
+        status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
+        changed,
+        errno: condition === null ? null : posixErrno(condition),
+      })
     }
     return
   }

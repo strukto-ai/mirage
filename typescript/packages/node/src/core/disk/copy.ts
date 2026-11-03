@@ -12,8 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify } from '@struktoai/mirage-core/errors/classify'
+import { posixErrno } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { access, constants, copyFile } from 'node:fs/promises'
+import { access, constants, copyFile, stat } from 'node:fs/promises'
 
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -21,10 +23,24 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
+export const logger: { debug?: (message: string) => void } = {}
+
+async function signature(path: string): Promise<string | null> {
+  try {
+    const st = await stat(path, { bigint: true })
+    return `${String(st.ino)}:${String(st.size)}:${String(st.mtimeNs)}:${String(st.ctimeNs)}`
+  } catch (err) {
+    logger.debug?.(`copy destination ${path} not statable: ${String(err)}`)
+    return null
+  }
+}
+
 export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const s = await resolveInside(accessor.root, src)
   const d = await resolveInside(accessor.root, dst)
   const timer = startOp()
+  const before = await signature(d)
+  let failure: unknown = null
   try {
     try {
       await copyFile(s, d)
@@ -43,9 +59,18 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
       }
       throw diskError(err, blame)
     }
+  } catch (err) {
+    failure = err
+    throw err
   } finally {
     // Also when the copy raised: copyFile that fails part-way has already
     // written the destination, as on the object stores.
-    record('copy', dst.virtual, VFSName.DISK, 0, timer)
+    const changed = failure === null || (await signature(d)) !== before
+    const condition = classify(failure)
+    record('copy', dst.virtual, VFSName.DISK, 0, timer, {
+      status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
+      changed,
+      errno: condition === null ? null : posixErrno(condition),
+    })
   }
 }

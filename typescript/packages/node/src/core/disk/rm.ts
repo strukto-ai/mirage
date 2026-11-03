@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { classify } from '@struktoai/mirage-core/errors/classify'
+import { posixErrno } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { rm } from 'node:fs/promises'
 
@@ -23,11 +25,23 @@ import { resolveInside } from './utils.ts'
 export async function rmR(accessor: DiskAccessor, path: PathSpec): Promise<void> {
   const full = await resolveInside(accessor.root, path)
   const timer = startOp()
+  let failure: unknown = null
   try {
     await rm(full, { recursive: true, force: true })
+  } catch (err) {
+    failure = err
+    throw err
   } finally {
     // Also when the walk raised: a removal that fails part-way has
-    // already removed entries, as on the object stores.
-    record('rm_r', path.virtual, VFSName.DISK, 0, timer)
+    // already removed entries, as on the object stores. Only a failure to
+    // read the top itself removed nothing.
+    const err = failure as NodeJS.ErrnoException | null
+    const changed = err?.path !== full || err.syscall === 'rmdir'
+    const condition = classify(failure)
+    record('rm_r', path.virtual, VFSName.DISK, 0, timer, {
+      status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
+      changed,
+      errno: condition === null ? null : posixErrno(condition),
+    })
   }
 }
