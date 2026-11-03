@@ -179,6 +179,12 @@ describe('the server API in workerd', () => {
     expect((again.json as { stdout: string }).stdout).toBe('7\n')
   })
 
+  it('answers SSH and codex-exec with 501', async () => {
+    const ssh = await call('GET', '/v1/workspaces/api/ssh')
+    expect([ssh.status, ssh.json]).toEqual([501, { detail: 'ssh needs the Node server' }])
+    expect((await call('GET', '/v1/workspaces/api/codex-exec')).status).toBe(501)
+  })
+
   it('closes a workspace', async () => {
     await call('POST', '/v1/workspaces', {
       id: 'gone',

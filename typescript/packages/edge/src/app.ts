@@ -96,6 +96,13 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
       exit: () => undefined,
       snapshotStore: options.snapshotStore,
     })
+    // The WebSocket routes run ssh2 and Codex's exec-server, which only
+    // the Node server hosts.
+    for (const path of ['/v1/workspaces/:id/ssh', '/v1/workspaces/:id/codex-exec']) {
+      routes.get(path, (_req, reply) =>
+        reply.status(501).send({ detail: `${path.split('/').pop() ?? ''} needs the Node server` }),
+      )
+    }
     served = { check, registry, routes, mcp }
     return served
   }
