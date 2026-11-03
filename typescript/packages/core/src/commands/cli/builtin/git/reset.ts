@@ -20,12 +20,18 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { headEntries, workChanges } from './changes.ts'
 import { isBare, requireWorkTree } from './discover.ts'
-import { AmbiguousArgumentError, BareResetError, GitError, RevisionResetError } from './errors.ts'
+import {
+  AmbiguousArgumentError,
+  BareResetError,
+  GitError,
+  InvalidPathError,
+  RevisionResetError,
+} from './errors.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
 import type { Repo } from './repo.ts'
 import { opened } from './session.ts'
 import { resolveCommit } from './revparse.ts'
-import type { TreeEntry } from './tree.ts'
+import { validPath, type TreeEntry } from './tree.ts'
 import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { scan, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
@@ -107,10 +113,23 @@ export async function reset(
   }
   const staged = new Map<string, StagedEntry>()
   const removed: string[] = []
-  for (const name of selected) {
+  for (const name of [...selected].sort(compareCodePoints)) {
     const recorded = tree.get(name)
-    if (recorded === undefined) removed.push(name)
-    else staged.set(name, restored(recorded.oid, Number.parseInt(recorded.mode, 8)))
+    const held = state.entries.get(name)
+    if (recorded === undefined) {
+      removed.push(name)
+      continue
+    }
+    const mode = Number.parseInt(recorded.mode, 8)
+    // git checks only an entry the reset changes.
+    const changes = held?.oid !== recorded.oid || held.mode !== mode
+    if (changes && !validPath(name, recorded.mode)) {
+      throw new InvalidPathError(
+        [name],
+        [new GitError(`make_cache_entry failed for path '${name}'`)],
+      )
+    }
+    staged.set(name, restored(recorded.oid, mode))
   }
   if (texts.length === 0)
     for (const item of visibleEntries(repo.location, state.conflicts).keys()) removed.push(item)

@@ -38,6 +38,7 @@ import { rstripSlash } from '../../../../utils/slash.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Files } from '../../../../workspace/files.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
+import { GITLINK_MODE, REGULAR_MODE, SYMLINK_MODE } from './constants.ts'
 import { GIT } from './index.ts'
 import {
   ensureDir,
@@ -3389,6 +3390,294 @@ describe('an object the store cannot read', () => {
       128,
       '',
       `fatal: Not a valid object name ${'1'.repeat(40)}\n`,
+    ])
+  })
+})
+
+/**
+ * Write a branch whose tree holds exactly the given paths, recorded verbatim,
+ * leaving HEAD alone.
+ *
+ * Built with `hash-object --literally` because git's own commands refuse the
+ * names the callers need: each `/`-separated part becomes its own tree entry,
+ * whatever it is called. Nothing of HEAD's tree is carried over, so every file
+ * HEAD has and the branch lacks is a removal. A gitlink names HEAD's commit;
+ * any other mode records the text as a blob.
+ */
+function branchWithPaths(
+  repo: string,
+  branch: string,
+  paths: Record<string, string>,
+  modes: Record<string, string> = {},
+): void {
+  interface Leaf {
+    mode: string
+    text: string
+  }
+  type Node = Map<string, Node | Leaf>
+  const root: Node = new Map()
+  for (const [path, text] of Object.entries(paths)) {
+    const parts = path.split('/')
+    let node = root
+    for (const part of parts.slice(0, -1)) {
+      let next = node.get(part)
+      if (!(next instanceof Map)) {
+        next = new Map()
+        node.set(part, next)
+      }
+      node = next
+    }
+    node.set(parts.at(-1) ?? '', { mode: modes[path] ?? REGULAR_MODE, text })
+  }
+  const store = (args: string[], input: string | Buffer): string =>
+    execFileSync('git', ['-C', repo, 'hash-object', '-w', ...args, '--stdin'], {
+      input,
+      encoding: 'utf8',
+    }).trim()
+  const head = git(repo, ['rev-parse', 'HEAD']).trim()
+  const build = (node: Node): string => {
+    const entries = [...node].map(([name, child]) =>
+      child instanceof Map
+        ? { key: `${name}/`, head: `40000 ${name}`, oid: build(child) }
+        : {
+            key: name,
+            head: `${child.mode} ${name}`,
+            oid: child.mode === GITLINK_MODE ? head : store([], child.text),
+          },
+    )
+    entries.sort((a, b) => Buffer.compare(Buffer.from(a.key), Buffer.from(b.key)))
+    const body = Buffer.concat(
+      entries.map((e) => Buffer.concat([Buffer.from(`${e.head}\0`), Buffer.from(e.oid, 'hex')])),
+    )
+    return store(['-t', 'tree', '--literally'], body)
+  }
+  const commit = git(repo, ['commit-tree', build(root), '-p', head, '-m', branch]).trim()
+  git(repo, ['update-ref', `refs/heads/${branch}`, commit])
+}
+
+const INVALID = {
+  '../above.txt': 'above\n',
+  'sub/.git/config': '[core]\n',
+  'fresh.txt': 'fresh\n',
+}
+
+describe('a tree path git rejects', () => {
+  it('refuses the whole checkout and names every one', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', INVALID)
+    })
+    expect(await h.run('checkout odd')).toEqual([
+      1,
+      '',
+      "error: invalid path '../above.txt'\nerror: invalid path 'sub/.git/config'\n",
+    ])
+    expect(await h.read('/above.txt')).toBeNull()
+    expect(await h.read('/repo/sub/.git/config')).toBeNull()
+    expect(await h.read('/repo/fresh.txt')).toBeNull()
+    expect((await h.run('rev-parse --abbrev-ref HEAD'))[1]).toBe('main\n')
+    expect((await h.run('ls-files'))[1]).toBe('docs/readme.md\nletters.txt\nnumbers.txt\n')
+  })
+
+  it('leaves alone one both branches hold unchanged', async () => {
+    const h = await harness((repo) => {
+      const held = {
+        'letters.txt': readFileSync(join(repo, 'letters.txt'), 'utf8'),
+        'sub/.git/config': '[core]\n',
+      }
+      branchWithPaths(repo, 'bad1', held)
+      git(repo, ['symbolic-ref', 'HEAD', 'refs/heads/bad1'])
+      branchWithPaths(repo, 'bad2', { ...held, 'new.txt': 'n\n' })
+    })
+    expect(await h.run('switch bad2')).toEqual([
+      0,
+      'A\tdocs/readme.md\nA\tnumbers.txt\nD\tsub/.git/config\n',
+      "Switched to branch 'bad2'\n",
+    ])
+    expect(DEC.decode((await h.read('/repo/new.txt')) ?? undefined)).toBe('n\n')
+    expect(await h.read('/repo/sub/.git/config')).toBeNull()
+  })
+
+  it.each([
+    ['.git/config', REGULAR_MODE],
+    ['.GiT/config', REGULAR_MODE],
+    ['./fresh.txt', REGULAR_MODE],
+    ['deep/../fresh.txt', REGULAR_MODE],
+    ['..', GITLINK_MODE],
+    ['sub/.git', GITLINK_MODE],
+    ['git~1/config', REGULAR_MODE],
+    ['.gitmodules', SYMLINK_MODE],
+  ])('refuses %s (mode %s)', async (path, mode) => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', { [path]: 'x\n' }, { [path]: mode })
+    })
+    const config = await h.read('/repo/.git/config')
+    expect(await h.run('checkout odd')).toEqual([1, '', `error: invalid path '${path}'\n`])
+    expect(await h.read('/repo/.git/config')).toEqual(config)
+    expect((await h.run('rev-parse --abbrev-ref HEAD'))[1]).toBe('main\n')
+  })
+
+  it('refuses a switch the same way', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', { 'sub/.git/config': 'x\n' })
+    })
+    expect(await h.run('switch odd')).toEqual([1, '', "error: invalid path 'sub/.git/config'\n"])
+    expect(await h.read('/repo/sub/.git/config')).toBeNull()
+    expect((await h.run('rev-parse --abbrev-ref HEAD'))[1]).toBe('main\n')
+  })
+
+  it.each(['restore --source=odd .', 'checkout odd -- .'])(
+    'skips each one under %s and restores the rest',
+    async (line) => {
+      const h = await harness((repo) => {
+        branchWithPaths(repo, 'odd', INVALID)
+      })
+      expect(await h.run(line)).toEqual([
+        0,
+        '',
+        "error: invalid path '../above.txt'\nerror: invalid path 'sub/.git/config'\n",
+      ])
+      expect(await h.read('/above.txt')).toBeNull()
+      expect(await h.read('/repo/sub/.git/config')).toBeNull()
+      expect(DEC.decode((await h.read('/repo/fresh.txt')) ?? new Uint8Array())).toBe('fresh\n')
+      const fresh = line.startsWith('checkout') ? 'fresh.txt\n' : ''
+      expect(await h.run('ls-files')).toEqual([
+        0,
+        `docs/readme.md\n${fresh}letters.txt\nnumbers.txt\n`,
+        '',
+      ])
+    },
+  )
+
+  it.each([
+    [
+      'restore --source=odd sub letters.txt',
+      "error: invalid path 'sub/.git/config'\nerror: pathspec 'sub' did not match any file(s) known to git\n",
+    ],
+    [
+      'checkout odd -- sub letters.txt',
+      "error: invalid path 'sub/.git/config'\nerror: pathspec 'sub' did not match any file(s) known to git\n",
+    ],
+    [
+      'restore --source=odd nosuch sub',
+      "error: invalid path 'sub/.git/config'\nerror: pathspec 'nosuch' did not match any file(s) known to git\nerror: pathspec 'sub' did not match any file(s) known to git\n",
+    ],
+  ])('treats an operand left with only rejected paths as unmatched under %s', async (line, err) => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', { 'letters.txt': 'restored\n', 'sub/.git/config': '[core]\n' })
+    })
+    await write(h, 'letters.txt', 'local\n')
+    expect(await h.run(line)).toEqual([1, '', err])
+    expect(DEC.decode((await h.read('/repo/letters.txt')) ?? new Uint8Array())).toBe('local\n')
+    expect(await h.read('/repo/sub/.git/config')).toBeNull()
+    expect((await h.run('ls-files'))[1]).toBe('docs/readme.md\nletters.txt\nnumbers.txt\n')
+  })
+
+  it('leaves a clone behind with nothing checked out', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', INVALID)
+    })
+    const result = await h.ws.shell('cd /repo && git clone -b odd . dst')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      128,
+      "Cloning into 'dst'...\n" +
+        'done.\n' +
+        "error: invalid path '../above.txt'\n" +
+        'fatal: unable to checkout working tree\n' +
+        'warning: Clone succeeded, but checkout failed.\n' +
+        "You can inspect what was checked out with 'git status'\n" +
+        "and retry with 'git restore --source=HEAD :/'\n\n",
+    ])
+    expect(await h.read('/repo/above.txt')).toBeNull()
+    expect(await readNames(h.dispatch, PathSpec.fromStrPath('/repo/dst'))).toEqual([
+      '/repo/dst/.git',
+    ])
+    const log = await h.ws.shell('git -C /repo/dst log --format=%s -1')
+    expect(DEC.decode(log.stdout)).toBe('odd\n')
+  })
+
+  it('refuses a reset that would stage one', async () => {
+    const h = await harness((repo) => {
+      const readme = readFileSync(join(repo, 'docs/readme.md'), 'utf8')
+      branchWithPaths(repo, 'odd', {
+        'docs/readme.md': readme,
+        'letters.txt': 'x\n',
+        'git~1/x': 'x\n',
+      })
+      git(repo, ['symbolic-ref', 'HEAD', 'refs/heads/odd'])
+    })
+    expect(await h.run('reset')).toEqual([
+      128,
+      '',
+      "error: invalid path 'git~1/x'\nfatal: make_cache_entry failed for path 'git~1/x'\n",
+    ])
+    expect((await h.run('ls-files'))[1]).toBe('docs/readme.md\nletters.txt\nnumbers.txt\n')
+  })
+
+  it('still stages a path git accepts', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', { fresh: 'f\n', 'git~1/x': 'x\n' })
+      git(repo, ['symbolic-ref', 'HEAD', 'refs/heads/odd'])
+    })
+    expect((await h.run('reset -q -- fresh'))[0]).toBe(0)
+    expect((await h.run('ls-files'))[1]).toBe('docs/readme.md\nfresh\nletters.txt\nnumbers.txt\n')
+  })
+
+  it('names only the first path git rejects', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', { 'git~1/x': 'x\n', '.git/y': 'x\n', z: 'z\n' })
+      git(repo, ['symbolic-ref', 'HEAD', 'refs/heads/odd'])
+    })
+    expect(await h.run('reset -q')).toEqual([
+      128,
+      '',
+      "error: invalid path '.git/y'\nfatal: make_cache_entry failed for path '.git/y'\n",
+    ])
+    expect((await h.run('ls-files'))[1]).toBe('docs/readme.md\nletters.txt\nnumbers.txt\n')
+  })
+
+  it.each([
+    [REGULAR_MODE, 'x\n', 0, 'docs/readme.md\ngit~1\n'],
+    ['100755', 'x\n', 128, 'docs/readme.md\ngit~1\nletters.txt\nnumbers.txt\n'],
+    [REGULAR_MODE, 'y\n', 128, 'docs/readme.md\ngit~1\nletters.txt\nnumbers.txt\n'],
+  ])(
+    'checks only an entry a reset changes (HEAD mode %s, staged %j)',
+    async (headMode, staged, code, listed) => {
+      const h = await harness((repo) => {
+        const readme = readFileSync(join(repo, 'docs/readme.md'), 'utf8')
+        branchWithPaths(
+          repo,
+          'odd',
+          { 'docs/readme.md': readme, 'git~1': 'x\n' },
+          { 'git~1': headMode },
+        )
+        const blob = execFileSync('git', ['-C', repo, 'hash-object', '-w', '--stdin'], {
+          input: staged,
+          encoding: 'utf8',
+        }).trim()
+        git(repo, [
+          '-c',
+          'core.protectNTFS=false',
+          'update-index',
+          '--add',
+          '--cacheinfo',
+          `${REGULAR_MODE},${blob},git~1`,
+        ])
+        git(repo, ['symbolic-ref', 'HEAD', 'refs/heads/odd'])
+      })
+      expect((await h.run('reset -q'))[0]).toBe(code)
+      expect((await h.run('ls-files'))[1]).toBe(listed)
+    },
+  )
+
+  it('still reads in history', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', INVALID)
+    })
+    expect(await h.run('log --format=%s -1 odd')).toEqual([0, 'odd\n', ''])
+    expect(await h.run('ls-tree -r --name-only odd')).toEqual([
+      0,
+      '../above.txt\nfresh.txt\nsub/.git/config\n',
+      '',
     ])
   })
 })

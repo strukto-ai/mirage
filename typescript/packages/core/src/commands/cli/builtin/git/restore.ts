@@ -24,6 +24,7 @@ import { headEntries } from './changes.ts'
 import { GITLINK_MODE, HEAD } from './constants.ts'
 import {
   GitError,
+  InvalidPathError,
   NoRestorePathsError,
   UnknownPathspecError,
   UnmergedPathError,
@@ -52,7 +53,7 @@ import { opened } from './session.ts'
 import { restored } from './reset.ts'
 import { COMMIT, TREE, resolveObject, unwrapped } from './revparse.ts'
 import { checkRules, ruledUnder } from './seen.ts'
-import { treeEntries, type TreeEntry } from './tree.ts'
+import { treeEntries, validPath, type TreeEntry } from './tree.ts'
 import type { GitObject, IndexEntry, RepoLocation } from './types.ts'
 import { checkSwitches, startPoint, requireVfs } from './util.ts'
 import { entryName } from '../../../../utils/remnants.ts'
@@ -300,12 +301,28 @@ export async function restorePaths(
           ...visibleEntries(repo.location, tree).keys(),
           ...visibleEntries(repo.location, state.conflicts).keys(),
         ])
+  // git drops the paths it rejects before matching the operands.
   const selected = new Set<string>()
+  const invalid = new Set<string>()
+  const unmatched: string[] = []
   for (const operand of operands) {
     const hits = matched(names, repoRelative(repo.location, start, operand))
-    if (hits.size === 0) throw new UnknownPathspecError(operand)
-    for (const path of hits) selected.add(path)
+    const rejected = new Set(
+      [...hits].filter((path) => !validPath(path, tree.get(path)?.mode ?? '')),
+    )
+    for (const path of rejected) invalid.add(path)
+    if (rejected.size === hits.size) unmatched.push(operand)
+    for (const path of hits) if (!rejected.has(path)) selected.add(path)
   }
+  if (invalid.size > 0 && unmatched.length > 0) {
+    throw new InvalidPathError(
+      [...invalid],
+      unmatched.map((operand) => new UnknownPathspecError(operand)),
+    )
+  }
+  const first = unmatched[0]
+  if (first !== undefined) throw new UnknownPathspecError(first)
+  if (invalid.size > 0) notes.push(`error: ${new InvalidPathError([...invalid]).message}\n`)
   const present = [...selected].filter((name) => tree.has(name)).sort(compareCodePoints)
   const absent = [...selected].filter((name) => !tree.has(name)).sort(compareCodePoints)
   // A selected path the source does not hold and the index still holds
