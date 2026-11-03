@@ -331,10 +331,15 @@ line made to a mount is a `vfs` entry between them.
 ```json
 [
   {"type": "command", "id": "exec_01a1", "command": "cat /data/a.txt", "cwd": "/", "session": "s1", "timestamp": 1792630121040},
-  {"type": "vfs", "parent": "exec_01a1", "vfs": "read", "path": "/data/a.txt", "source": "s3", "bytes": 6, "duration_ms": 12, "session": "s1", "timestamp": 1792630121048},
+  {"type": "vfs", "parent": "exec_01a1", "vfs": "read", "path": "/data/a.txt", "source": "s3", "bytes": 6, "duration_ms": 12, "status": "ok", "changed": false, "served": "backend", "session": "s1", "timestamp": 1792630121048},
   {"type": "result", "parent": "exec_01a1", "exit_code": 0, "stdout": "hello\n", "stderr": "", "duration_ms": 21, "cwd": "/", "session": "s1", "timestamp": 1792630121061}
 ]
 ```
+
+Each `vfs` entry says how the call ended: `status` is `ok`, `failed` or
+`partial`, `changed` whether it changed anything, `served` the layer that
+answered (`backend`, `cache`, `index` or `namespace`), and a failed call adds
+`errno`, its POSIX errno.
 
 `stdout` and `stderr` keep their first 4096 characters.
 
