@@ -5,6 +5,7 @@ from mirage.commands.builtin.generic.du import (
     DuFlags,
     du,
     du_generic,
+    parse_flags,
     rollup,
     to_virtual,
 )
@@ -360,3 +361,30 @@ async def test_du_long_link_aliases_keep_last_option_order():
             assert await result.stdout_str() == f"{expected}\t/data/link\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "unit,expected",
+    [("3", "6004799503160662"), ("18014398509481983", "2")],
+)
+async def test_du_large_byte_totals_keep_exact_units(unit, expected):
+    total = 18014398509481984
+    compute_size, compute_entries = _make_backend({"/dir/f": total})
+    parsed = parse_flags(
+        Context(flags={"block_size": unit, "all": True, "total": True})
+    )
+    assert isinstance(parsed, DuFlags)
+    out = await du(
+        [_spec("/dir", "dir")],
+        compute_size=compute_size,
+        compute_entries=compute_entries,
+        flags=parsed,
+    )
+    assert out.stdout.decode() == (
+        f"{expected}\t/dir/f\n{expected}\t/dir\n{expected}\ttotal\n"
+    )
+    assert out.stderr == b""
+    assert out.exit_code == 0
+    assert out.records is not None
+    assert [record.size for record in out.records] == [None, total]
