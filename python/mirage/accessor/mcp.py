@@ -140,7 +140,12 @@ class CappedStream(httpx2.AsyncByteStream):
         try:
             async for data in self._stream:
                 while data:
+                    # Bytes past the body's end would otherwise be fed back forever.
+                    if inflate.eof:
+                        raise self._error(REPLY_ENCODING)
                     chunk = inflate.decompress(data, INFLATE_CHUNK)
+                    if inflate.unused_data:
+                        raise self._error(REPLY_ENCODING)
                     data = inflate.unconsumed_tail
                     yield self._counted(chunk)
             tail = inflate.flush()
