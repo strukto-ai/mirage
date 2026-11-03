@@ -16,9 +16,13 @@ import { MontyRuntime } from '@struktoai/mirage-core/runtime/python/monty/runtim
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { useInProcessMonty } from '../src/index.ts'
+import { createApp, useInProcessMonty } from '../src/index.ts'
 
 useInProcessMonty({ maxSeconds: 2 })
+
+const TOKEN = 'edge-test-token'
+
+const app = createApp({ auth: { mode: 'token', bearerToken: TOKEN }, maxWorkspaces: 8 })
 
 interface Run {
   readonly lines: readonly string[]
@@ -29,6 +33,7 @@ const decoder = new TextDecoder()
 
 export default {
   async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).pathname !== '/run') return app.fetch(request)
     const run = (await request.json()) as Run
     const ws = new Workspace(
       { '/data': new RAMVFS(), '/tmp': new RAMVFS() },
@@ -44,8 +49,8 @@ export default {
         const result = await ws.shell(line)
         results.push({
           exit: result.exitCode,
-          stdout: decoder.decode(result.stdout ?? new Uint8Array()),
-          stderr: decoder.decode(result.stderr ?? new Uint8Array()),
+          stdout: decoder.decode(result.stdout),
+          stderr: decoder.decode(result.stderr),
         })
       }
       return Response.json(results)

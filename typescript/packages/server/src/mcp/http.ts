@@ -22,13 +22,13 @@ import { ioToStr } from '@struktoai/mirage-core/workspace/tools/io_text'
 import type { ToolResult } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { InFlight, rpcMessages } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
 import type { ExecutionTable } from '../jobs.ts'
 import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
+import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
 import { McpToolOperations, collectExecution, type OutputProgress } from './progress.ts'
 import { createMirageMcpServer } from './server.ts'
 
@@ -202,20 +202,15 @@ export class McpEndpoint {
     return new Response(body, response)
   }
 
-  async handle(req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> {
+  async handle(req: RouteRequest, reply: RouteReply): Promise<RouteReply> {
     const headers = new Headers()
     for (const [name, value] of Object.entries(req.headers)) {
-      if (value === undefined) continue
-      headers.set(name, Array.isArray(value) ? value.join(', ') : value)
+      if (value !== undefined) headers.set(name, value)
     }
-    const gone = new AbortController()
-    reply.raw.once('close', () => {
-      if (!reply.raw.writableFinished) gone.abort()
-    })
     const request = new Request(`http://${req.headers.host ?? 'localhost'}${req.url}`, {
       method: req.method,
       headers,
-      signal: gone.signal,
+      signal: req.closed,
     })
     return reply.send(await this.fetch(request, req.body, req.account))
   }
@@ -332,7 +327,7 @@ export class McpEndpoint {
  * check and auth as every other route is.
  */
 export function registerMcpRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   registry: WorkspaceRegistry,
   jobs: ExecutionTable,
 ): McpEndpoint {

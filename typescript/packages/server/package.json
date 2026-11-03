@@ -97,6 +97,22 @@
       "types": "./dist/rpc/index.d.ts",
       "import": "./dist/rpc/index.js"
     },
+    "./api": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    },
+    "./routes": {
+      "types": "./dist/routes.d.ts",
+      "import": "./dist/routes.js"
+    },
+    "./registry": {
+      "types": "./dist/registry.d.ts",
+      "import": "./dist/registry.js"
+    },
+    "./auth/middleware": {
+      "types": "./dist/auth/middleware.d.ts",
+      "import": "./dist/auth/middleware.js"
+    },
     "./package.json": "./package.json",
     "./bin/daemon": "./dist/bin/daemon.js"
   },

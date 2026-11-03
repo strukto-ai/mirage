@@ -494,6 +494,9 @@
   "server/auth/middleware": {
    "python_only": {
     "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline."
+   },
+   "typescript_only": {
+    "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the edge host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
    }
   },
   "server/routers/sessions": {

@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Console } from 'node:console'
 import { stderr } from 'node:process'
+import { format } from 'node:util'
 import { VERSION } from '@struktoai/mirage-core/version'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
@@ -51,7 +51,13 @@ import { McpToolOperations, OutputProgress } from './progress.ts'
 import { answered, checked, explanationToDict, failureToDict } from '../io_serde.ts'
 import { VFS_CALLS, schemaOf, type VfsCall } from '../vfs_calls.ts'
 
-const logger = new Console({ stdout: stderr, stderr })
+// Diagnostics go to stderr, never stdout, which a stdio transport speaks on;
+// written whole, as a Worker's node:console cannot build a Console.
+const logger = {
+  debug: (...args: unknown[]): void => {
+    stderr.write(`${format(...args)}\n`)
+  },
+}
 
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true }
 

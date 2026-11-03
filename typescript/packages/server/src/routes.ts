@@ -20,7 +20,13 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { MountBackend } from '@struktoai/mirage-core/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { FastifyInstance, RouteHandlerMethod } from 'fastify'
+import type {
+  FastifyError,
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+  RouteHandlerMethod,
+} from 'fastify'
 
 /**
  * The slice of an HTTP framework the routers use, so one set of routes runs
@@ -80,11 +86,13 @@ export interface BodySchema {
 
 /**
  * Per-route settings a host honours: the largest body it reads, in bytes,
- * and the shape the body must have, refused with 400 before the handler.
+ * the shape the body must have, refused with 400 before the handler, and
+ * the answer to a JSON body that does not parse, in place of the host's own.
  */
 export interface RouteConfig {
   bodyLimit?: number
   schema?: { body?: BodySchema }
+  invalidJson?: unknown
 }
 
 export interface RouteOptions<S extends RouteShape = RouteShape> extends RouteConfig {
@@ -168,6 +176,24 @@ export function streamOf(source: AsyncIterable<Uint8Array>): ReadableStream<Uint
  * registers as written.
  */
 export function fastifyRoutes(app: FastifyInstance): RouteApp {
+  const register = (options: RouteOptions): void => {
+    const { invalidJson, ...rest } = options
+    app.route({
+      ...rest,
+      method: options.method as string | string[],
+      handler: options.handler as unknown as RouteHandlerMethod,
+      ...(invalidJson === undefined
+        ? {}
+        : {
+            errorHandler: (error: FastifyError, _req: FastifyRequest, reply: FastifyReply) => {
+              const parse =
+                error.code === 'FST_ERR_CTP_INVALID_JSON_BODY' ||
+                error.code === 'FST_ERR_CTP_EMPTY_JSON_BODY'
+              void reply.send(parse ? invalidJson : error)
+            },
+          }),
+    })
+  }
   const method =
     (name: string): RouteMethod =>
     (path: string, configOrHandler: RouteConfig | RouteHandler, handler?: RouteHandler): void => {
@@ -175,7 +201,7 @@ export function fastifyRoutes(app: FastifyInstance): RouteApp {
         handler === undefined
           ? [{}, configOrHandler as RouteHandler]
           : [configOrHandler as RouteConfig, handler]
-      app.route({ method: name, url: path, ...config, handler: run as RouteHandlerMethod })
+      register({ method: name, url: path, ...config, handler: run })
     }
   return {
     get: method('GET'),
@@ -184,11 +210,7 @@ export function fastifyRoutes(app: FastifyInstance): RouteApp {
     patch: method('PATCH'),
     delete: method('DELETE'),
     route: (options) => {
-      app.route({
-        ...options,
-        method: options.method as string | string[],
-        handler: options.handler as RouteHandlerMethod,
-      })
+      register(options as RouteOptions)
     },
   }
 }

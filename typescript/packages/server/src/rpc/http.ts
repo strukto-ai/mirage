@@ -16,13 +16,13 @@ import { refused } from '../metrics.ts'
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import type { JsonValue } from '@struktoai/mirage-core/types'
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { InFlight } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
 import type { ExecutionTable } from '../jobs.ts'
 import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import type { McpEndpoint } from '../mcp/http.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
+import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
 import { RPC_INTERNAL_ERROR, RPC_INVALID_REQUEST, RPC_PARSE_ERROR } from './constants.ts'
 import {
   CANCEL_REQUEST,
@@ -119,19 +119,15 @@ class RpcEndpoint {
   }
 
   async handle(
-    req: FastifyRequest<{ Params: { workspaceId: string }; Querystring: { session_id?: string } }>,
-    reply: FastifyReply,
-  ): Promise<FastifyReply> {
+    req: RouteRequest<{ Params: { workspaceId: string }; Querystring: { session_id?: string } }>,
+    reply: RouteReply,
+  ): Promise<RouteReply> {
     const workspaceId = req.params.workspaceId
     const server = await this.server(workspaceId, req.query.session_id ?? null, req.account)
     if (typeof server === 'string') return reply.status(404).send({ detail: server })
     const parsed: unknown = req.body
     const batch = Array.isArray(parsed)
     const messages: unknown[] = batch ? parsed : [parsed]
-    const stop = new AbortController()
-    reply.raw.once('close', () => {
-      if (!reply.raw.writableFinished) stop.abort()
-    })
     const held: [string, () => void][] = []
     const answers: Promise<Record<string, JsonValue> | null>[] = []
     for (const message of messages) {
@@ -148,7 +144,7 @@ class RpcEndpoint {
         continue
       }
       const own = new AbortController()
-      const signal = AbortSignal.any([stop.signal, own.signal])
+      const signal = AbortSignal.any([req.closed, own.signal])
       if ('id' in record) {
         const key = InFlight.key(workspaceId, server.sessionId, record.id as JsonValue)
         const abort = (): void => {
@@ -176,7 +172,7 @@ class RpcEndpoint {
  * host check and auth as every other route is.
  */
 export function registerRpcRoutes(
-  app: FastifyInstance,
+  app: RouteApp,
   registry: WorkspaceRegistry,
   jobs: ExecutionTable,
   mcp: McpEndpoint,
@@ -186,12 +182,7 @@ export function registerRpcRoutes(
     RPC_PATH,
     {
       bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE,
-      errorHandler: (error, _req, reply) => {
-        const code = (error as { code?: string }).code
-        const parse =
-          code === 'FST_ERR_CTP_INVALID_JSON_BODY' || code === 'FST_ERR_CTP_EMPTY_JSON_BODY'
-        void reply.send(parse ? errorResponse(null, RPC_PARSE_ERROR, 'parse error') : error)
-      },
+      invalidJson: errorResponse(null, RPC_PARSE_ERROR, 'parse error'),
     },
     (req, reply) => endpoint.handle(req, reply),
   )
