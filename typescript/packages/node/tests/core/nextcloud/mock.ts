@@ -177,6 +177,7 @@ export class FakeFolder {
   settable = true
   locked = false
   busy = false
+  dates: Record<string, string> = {}
   calls: { method: string; url: string; headers: Record<string, string> }[] = []
   before = new Map<string, () => void>()
 
@@ -189,20 +190,31 @@ export class FakeFolder {
     this.modified = whole(this.clock - age)
   }
 
+  get url(): string {
+    return `${ROOT}/${this.name.split('/').map(encodeURIComponent).join('/')}/`
+  }
+
+  wait(ms: number): void {
+    this.clock += ms
+  }
+
   arrive(child: string): void {
     this.children.push(child)
     this.modified = whole(this.clock)
   }
 
   answer(status: number, body: string | null = null): Response {
-    return new Response(body, { status, headers: { Date: new Date(this.clock).toUTCString() } })
+    return new Response(body, {
+      status,
+      headers: { Date: this.dates.Date ?? new Date(this.clock).toUTCString() },
+    })
   }
 
   listing(depth: string): string {
-    const own = `${HREF}/${encodeURIComponent(this.name)}/`
+    const own = `${HREF}/${this.name.split('/').map(encodeURIComponent).join('/')}/`
     const rows = [
       `<d:response><d:href>${own}</d:href><d:propstat><d:prop>` +
-        `<d:getlastmodified>${new Date(this.modified).toUTCString()}</d:getlastmodified></d:prop>` +
+        `<d:getlastmodified>${this.dates.getlastmodified ?? new Date(this.modified).toUTCString()}</d:getlastmodified></d:prop>` +
         '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>',
       ...(depth === '1' ? this.children : []).map(
         (c) => `<d:response><d:href>${own}${encodeURIComponent(c)}</d:href></d:response>`,
@@ -214,6 +226,7 @@ export class FakeFolder {
   fetch = (url: string, init: RequestInit): Promise<Response> => {
     const method = init.method ?? 'GET'
     const headers = { ...(init.headers as Record<string, string>) }
+    if (url !== this.url) throw new Error(`unexpected target ${url}`)
     this.calls.push({ method, url, headers })
     this.clock += 300
     const hook = this.before.get(method)
@@ -226,6 +239,8 @@ export class FakeFolder {
 
   respond(method: string, headers: Record<string, string>, body: unknown): Response {
     if (!this.exists) return this.answer(404)
+    const since = headers['If-Unmodified-Since']
+    if (since !== undefined && this.modified > Date.parse(since)) return this.answer(412)
     if (method === 'PROPFIND') {
       if (this.busy) this.modified = whole(this.clock)
       return this.answer(207, this.listing(headers.Depth ?? ''))
@@ -237,7 +252,6 @@ export class FakeFolder {
       return this.answer(207, multistatus('200 OK', '<d:lastmodified/>'))
     }
     if (this.locked) return this.answer(423)
-    if (this.modified > Date.parse(headers['If-Unmodified-Since'] ?? '')) return this.answer(412)
     this.exists = false
     return this.answer(204)
   }

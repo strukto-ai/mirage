@@ -1,3 +1,4 @@
+import asyncio
 import errno
 from email.utils import parsedate_to_datetime
 
@@ -57,8 +58,9 @@ async def test_a_subtree_keeps_what_changed_after_the_survey(make_acc):
 
 
 @pytest.mark.asyncio
-async def test_a_child_that_came_and_went_is_surveyed_again(make_acc):
+async def test_a_child_that_came_and_went_is_surveyed_again(make_acc, waits):
     folder = FakeFolder("dir")
+    waits.side_effect = folder.wait
 
     def churn() -> None:
         folder.arrive("tmp")
@@ -72,16 +74,55 @@ async def test_a_child_that_came_and_went_is_surveyed_again(make_acc):
         "PROPFIND",
         "DELETE",
         "PROPFIND",
-        "PROPPATCH",
         "PROPFIND",
         "DELETE",
     ]
 
 
-@pytest.mark.parametrize("age", [0, 1, -86400])
+@pytest.mark.parametrize("age", [0, 1])
 @pytest.mark.asyncio
-async def test_a_fresh_or_future_collection_is_backdated(make_acc, age):
+async def test_a_fresh_collection_is_waited_out_not_rewritten(
+    make_acc, waits, age
+):
     folder = FakeFolder("dir", age=age)
+    original = folder.modified
+    waits.side_effect = folder.wait
+    with removing(folder):
+        await remove(make_acc(), DIR, empty=True)
+    assert not folder.exists
+    assert folder.methods() == ["PROPFIND", "PROPFIND", "DELETE"]
+    waits.assert_awaited_once_with(FENCE.total_seconds() - age)
+    assert folder.modified == original
+
+
+@pytest.mark.asyncio
+async def test_two_removers_racing_a_write_keep_it(make_acc, waits):
+    folder = FakeFolder("dir", age=0)
+
+    async def wait(seconds: float) -> None:
+        folder.wait(seconds)
+        await asyncio.sleep(0)
+
+    waits.side_effect = wait
+    folder.before["DELETE"] = lambda: folder.arrive("late.txt")
+    with removing(folder):
+        outcomes = await asyncio.gather(
+            remove(make_acc(), DIR, empty=True),
+            remove(make_acc(), DIR, empty=True),
+            return_exceptions=True,
+        )
+    assert [getattr(o, "errno", None) for o in outcomes] == [
+        errno.ENOTEMPTY,
+        errno.ENOTEMPTY,
+    ]
+    assert folder.exists and folder.children == ["late.txt"]
+    assert folder.methods()[:2] == ["PROPFIND", "PROPFIND"]
+    assert "PROPPATCH" not in folder.methods()
+
+
+@pytest.mark.asyncio
+async def test_a_future_dated_collection_is_backdated(make_acc):
+    folder = FakeFolder("dir", age=-86400)
     with removing(folder):
         await remove(make_acc(), DIR, empty=True)
     assert not folder.exists
@@ -89,27 +130,26 @@ async def test_a_fresh_or_future_collection_is_backdated(make_acc, age):
 
 
 @pytest.mark.asyncio
-async def test_a_child_in_the_backdated_second_survives(make_acc):
-    folder = FakeFolder("dir", age=0)
-    folder.before["DELETE"] = lambda: folder.arrive("late.txt")
+async def test_a_failed_removal_puts_the_backdated_time_back(make_acc):
+    folder = FakeFolder("dir", age=-86400)
+    original = folder.modified
+    folder.before["PROPPATCH"] = lambda: setattr(folder, "locked", True)
     with removing(folder), pytest.raises(OSError) as excinfo:
         await remove(make_acc(), DIR, empty=True)
-    assert excinfo.value.errno == errno.ENOTEMPTY
-    assert folder.exists and folder.children == ["late.txt"]
+    assert excinfo.value.errno == errno.EBUSY
+    assert folder.exists and folder.modified == original
+    assert folder.methods()[-1] == "PROPPATCH"
 
 
 @pytest.mark.asyncio
-async def test_a_fresh_collection_that_cannot_be_backdated_is_waited_out(
-    make_acc, waits
+async def test_a_future_dated_collection_that_cannot_be_backdated_is_busy(
+    make_acc,
 ):
-    folder = FakeFolder("dir", age=0, settable=False)
-    folder.before["PROPPATCH"] = lambda: setattr(
-        folder, "clock", folder.clock + FENCE
-    )
-    with removing(folder):
+    folder = FakeFolder("dir", age=-86400, settable=False)
+    with removing(folder), pytest.raises(OSError) as excinfo:
         await remove(make_acc(), DIR, empty=True)
-    assert not folder.exists
-    waits.assert_awaited_once_with(FENCE.total_seconds())
+    assert excinfo.value.errno == errno.EBUSY
+    assert folder.methods() == ["PROPFIND", "PROPPATCH"] * ATTEMPTS
 
 
 @pytest.mark.parametrize("empty", [True, False])
@@ -117,12 +157,13 @@ async def test_a_fresh_collection_that_cannot_be_backdated_is_waited_out(
 async def test_a_collection_that_keeps_changing_is_busy(
     make_acc, waits, empty
 ):
-    folder = FakeFolder("dir", settable=False)
+    folder = FakeFolder("dir")
     folder.busy = True
     with removing(folder), pytest.raises(OSError) as excinfo:
         await remove(make_acc(), DIR, empty=empty)
     assert excinfo.value.errno == errno.EBUSY
     assert folder.exists and waits.await_count == ATTEMPTS
+    assert "DELETE" not in folder.methods()
 
 
 @pytest.mark.parametrize(
@@ -142,10 +183,32 @@ async def test_the_server_refusal_maps_to_an_errno(make_acc, setup, code):
     assert excinfo.value.errno == code
 
 
+@pytest.mark.parametrize(
+    "dates",
+    [{"getlastmodified": ""}, {"getlastmodified": "soon"}, {"Date": "soon"}],
+)
 @pytest.mark.asyncio
-async def test_a_percent_encoded_name_is_not_its_own_child(make_acc):
-    folder = FakeFolder("a b#c")
+async def test_an_unreadable_date_is_eio_before_any_delete(make_acc, dates):
+    folder = FakeFolder("dir")
+    folder.dates = dates
+    with removing(folder), pytest.raises(OSError) as excinfo:
+        await remove(make_acc(), DIR, empty=True)
+    assert excinfo.value.errno == errno.EIO
+    assert folder.exists and folder.methods() == ["PROPFIND"]
+
+
+@pytest.mark.parametrize(
+    ("name", "url"),
+    [("a b#c", f"{ROOT}/a%20b%23c/"), ("x/a b", f"{ROOT}/x/a%20b/")],
+)
+@pytest.mark.asyncio
+async def test_an_encoded_or_nested_name_is_deleted_at_its_own_url(
+    make_acc, name, url
+):
+    folder = FakeFolder(name)
     with removing(folder):
-        await remove(make_acc(), PathSpec.from_str_path("/a b#c"), empty=True)
+        await remove(
+            make_acc(), PathSpec.from_str_path(f"/{name}"), empty=True
+        )
     assert not folder.exists
-    assert folder.calls[0][1] == f"{ROOT}/a%20b%23c/"
+    assert [u for _, u, _ in folder.calls] == [url, url]

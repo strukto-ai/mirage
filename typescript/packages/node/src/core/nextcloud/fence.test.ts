@@ -11,18 +11,26 @@ vi.mock('@struktoai/mirage-core/utils/abort', async (importOriginal) => ({
   sleep: vi.fn(() => Promise.resolve()),
 }))
 
-async function removing(folder: FakeFolder, empty = true): Promise<void> {
+function removing(folder: FakeFolder, empty = true): Promise<void> {
   vi.stubGlobal('fetch', folder.fetch)
-  await remove(
+  return remove(
     new NextcloudAccessor({ url: `${ROOT}/` }),
     PathSpec.fromStrPath(`/${folder.name}`),
     empty,
   )
 }
 
+function ageing(folder: FakeFolder): void {
+  vi.mocked(sleep).mockImplementation((ms) => {
+    folder.wait(ms)
+    return new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
-  vi.mocked(sleep).mockClear()
+  vi.mocked(sleep).mockReset()
+  vi.mocked(sleep).mockImplementation(() => Promise.resolve())
 })
 
 describe('nextcloud fenced removal', () => {
@@ -64,60 +72,81 @@ describe('nextcloud fenced removal', () => {
 
   it('surveys again after a child came and went', async () => {
     const folder = new FakeFolder('dir')
+    ageing(folder)
     folder.before.set('DELETE', () => {
       folder.arrive('tmp')
       folder.children = []
     })
     await removing(folder)
     expect(folder.exists).toBe(false)
-    expect(folder.methods()).toEqual([
-      'PROPFIND',
-      'DELETE',
-      'PROPFIND',
-      'PROPPATCH',
-      'PROPFIND',
-      'DELETE',
-    ])
+    expect(folder.methods()).toEqual(['PROPFIND', 'DELETE', 'PROPFIND', 'PROPFIND', 'DELETE'])
   })
 
-  it.each([0, 1000, -86_400_000])(
-    'backdates a fresh or future collection (age %i ms)',
+  it.each([0, 1000])(
+    'waits out a fresh collection without rewriting it (age %i ms)',
     async (age) => {
       const folder = new FakeFolder('dir', [], age)
+      const original = folder.modified
+      ageing(folder)
       await removing(folder)
       expect(folder.exists).toBe(false)
-      expect(folder.methods()).toEqual(['PROPFIND', 'PROPPATCH', 'PROPFIND', 'DELETE'])
+      expect(folder.methods()).toEqual(['PROPFIND', 'PROPFIND', 'DELETE'])
+      expect(sleep).toHaveBeenCalledOnce()
+      expect(sleep).toHaveBeenCalledWith(FENCE - age)
+      expect(folder.modified).toBe(original)
     },
   )
 
-  it('keeps a child created in the backdated second', async () => {
+  it('keeps a write raced by two removers', async () => {
     const folder = new FakeFolder('dir', [], 0)
+    ageing(folder)
     folder.before.set('DELETE', () => {
       folder.arrive('late.txt')
     })
-    await expect(removing(folder)).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    const outcomes = await Promise.allSettled([removing(folder), removing(folder)])
+    expect(
+      outcomes.map((o) => (o.status === 'rejected' ? (o.reason as { code: string }).code : null)),
+    ).toEqual(['ENOTEMPTY', 'ENOTEMPTY'])
     expect(folder.children).toEqual(['late.txt'])
+    expect(folder.methods().slice(0, 2)).toEqual(['PROPFIND', 'PROPFIND'])
+    expect(folder.methods()).not.toContain('PROPPATCH')
   })
 
-  it('waits out a fresh collection that cannot be backdated', async () => {
-    const folder = new FakeFolder('dir', [], 0)
-    folder.settable = false
-    folder.before.set('PROPPATCH', () => {
-      folder.clock += FENCE
-    })
+  it('backdates a future-dated collection', async () => {
+    const folder = new FakeFolder('dir', [], -86_400_000)
     await removing(folder)
     expect(folder.exists).toBe(false)
-    expect(sleep).toHaveBeenCalledOnce()
-    expect(sleep).toHaveBeenCalledWith(FENCE)
+    expect(folder.methods()).toEqual(['PROPFIND', 'PROPPATCH', 'PROPFIND', 'DELETE'])
+  })
+
+  it('puts the backdated time back when the removal fails', async () => {
+    const folder = new FakeFolder('dir', [], -86_400_000)
+    const original = folder.modified
+    folder.before.set('PROPPATCH', () => {
+      folder.locked = true
+    })
+    await expect(removing(folder)).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(folder.exists).toBe(true)
+    expect(folder.modified).toBe(original)
+    expect(folder.methods().at(-1)).toBe('PROPPATCH')
+  })
+
+  it('is busy when a future-dated collection cannot be backdated', async () => {
+    const folder = new FakeFolder('dir', [], -86_400_000)
+    folder.settable = false
+    await expect(removing(folder)).rejects.toMatchObject({ code: 'EBUSY' })
+    expect(folder.methods()).toEqual(
+      Array.from({ length: ATTEMPTS }, () => ['PROPFIND', 'PROPPATCH']).flat(),
+    )
   })
 
   it.each([true, false])('is busy when the collection keeps changing (empty %s)', async (empty) => {
     const folder = new FakeFolder('dir')
-    folder.settable = false
     folder.busy = true
     await expect(removing(folder, empty)).rejects.toMatchObject({ code: 'EBUSY' })
     expect(folder.exists).toBe(true)
     expect(sleep).toHaveBeenCalledTimes(ATTEMPTS)
+    expect(folder.methods()).not.toContain('DELETE')
   })
 
   it.each<[Partial<FakeFolder>, string]>([
@@ -128,10 +157,25 @@ describe('nextcloud fenced removal', () => {
     await expect(removing(folder)).rejects.toMatchObject({ code })
   })
 
-  it('does not take a percent-encoded name for its own child', async () => {
-    const folder = new FakeFolder('a b#c')
+  it.each<Record<string, string>>([
+    { getlastmodified: '' },
+    { getlastmodified: 'soon' },
+    { Date: 'soon' },
+  ])('refuses an unreadable date with EIO before any DELETE (%o)', async (dates) => {
+    const folder = new FakeFolder('dir')
+    folder.dates = dates
+    await expect(removing(folder)).rejects.toMatchObject({ code: 'EIO' })
+    expect(folder.exists).toBe(true)
+    expect(folder.methods()).toEqual(['PROPFIND'])
+  })
+
+  it.each([
+    ['a b#c', `${ROOT}/a%20b%23c/`],
+    ['x/a b', `${ROOT}/x/a%20b/`],
+  ])('deletes an encoded or nested name at its own URL (%s)', async (name, url) => {
+    const folder = new FakeFolder(name)
     await removing(folder)
     expect(folder.exists).toBe(false)
-    expect(folder.calls[0]?.url).toBe(`${ROOT}/a%20b%23c/`)
+    expect(folder.calls.map((call) => call.url)).toEqual([url, url])
   })
 })

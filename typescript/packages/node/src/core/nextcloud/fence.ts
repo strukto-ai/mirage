@@ -50,34 +50,47 @@ export async function survey(
     if (rstripSlash(decodeURIComponent(href)) !== own) child = true
     else modified = answered({ multistatus: { response: entry } }, 'getlastmodified')
   }
-  const date = response.headers.get('Date')
-  if (modified === null || date === null) throw fsError(path, 'EIO')
-  return { child, modified: new Date(modified), now: new Date(date) }
+  const stamp = new Date(modified ?? '')
+  const now = new Date(response.headers.get('Date') ?? '')
+  if (Number.isNaN(stamp.getTime()) || Number.isNaN(now.getTime())) throw fsError(path, 'EIO')
+  return { child, modified: stamp, now }
 }
 
 /**
- * Move a collection's modified time out of the fence: set it `FENCE` back
- * from the server's clock, or wait `FENCE` out where the server will not set
- * it. Mirrors Python's `settle`.
+ * Set a collection's modified time to `to` unless it changed after `since`
+ * (412). Mirrors Python's `retime`.
+ */
+export function retime(
+  accessor: NextcloudAccessor,
+  path: PathSpec,
+  since: Date,
+  to: Date,
+): Promise<Response> {
+  return davRequest(
+    accessor,
+    'PROPPATCH',
+    davUrl(accessor, path, true),
+    { 'Content-Type': 'application/xml', 'If-Unmodified-Since': since.toUTCString() },
+    mtimePatch(Math.trunc(to.getTime() / 1000)),
+  )
+}
+
+/**
+ * Set a future-dated collection's modified time `FENCE` back from the
+ * server's clock, if nothing changed since the survey. Whether it set the
+ * time. Mirrors Python's `settle`.
  */
 export async function settle(
   accessor: NextcloudAccessor,
   path: PathSpec,
+  modified: Date,
   now: Date,
-): Promise<void> {
-  const response = await davRequest(
-    accessor,
-    'PROPPATCH',
-    davUrl(accessor, path, true),
-    { 'Content-Type': 'application/xml' },
-    mtimePatch(Math.trunc((now.getTime() - FENCE) / 1000)),
+): Promise<boolean> {
+  const response = await retime(accessor, path, modified, new Date(now.getTime() - FENCE))
+  return (
+    response.status === 207 &&
+    answered(parser.parse(await response.text()) as XmlElement, 'lastmodified') !== null
   )
-  if (
-    response.status !== 207 ||
-    answered(parser.parse(await response.text()) as XmlElement, 'lastmodified') === null
-  ) {
-    await sleep(FENCE)
-  }
 }
 
 /**
@@ -96,11 +109,16 @@ export async function settle(
  *
  * Times are whole seconds, so a change landing in the second the collection
  * last changed would not move it. The fence needs the collection unchanged
- * for `FENCE` by the server's clock; a younger or future-dated one is
- * settled first (`settle`). A collection that keeps changing for `ATTEMPTS`
- * surveys is busy. With `empty`, a collection holding a child is refused
- * with ENOTEMPTY, as rmdir does; otherwise the whole subtree goes as the
- * survey saw it. Mirrors
+ * for `FENCE` by the server's clock, so a younger one is waited out; its
+ * time is never rewritten, since a rewrite racing another remover could hide
+ * a change. A future-dated collection never ages, so it is settled
+ * (`settle`) and a removal that then fails puts its time back unless
+ * something changed it since. An arrival moves a future-dated time back to
+ * the clock, which `If-Unmodified-Since` cannot tell from no change, so a
+ * future-dated collection is fenced only against a single remover. A
+ * collection that keeps changing for `ATTEMPTS` surveys is busy. With
+ * `empty`, a collection holding a child is refused with ENOTEMPTY, as rmdir
+ * does; otherwise the whole subtree goes as the survey saw it. Mirrors
  * Python's `remove`.
  */
 export async function remove(
@@ -108,19 +126,32 @@ export async function remove(
   path: PathSpec,
   empty: boolean,
 ): Promise<void> {
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-    const { child, modified, now } = await survey(accessor, path, empty ? '1' : '0')
-    if (child) throw enotempty(path)
-    if (now.getTime() - modified.getTime() < FENCE) {
-      await settle(accessor, path, now)
-      continue
+  let backdated: { original: Date; stamp: Date } | null = null
+  try {
+    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+      const { child, modified, now } = await survey(accessor, path, empty ? '1' : '0')
+      if (child) throw enotempty(path)
+      const age = now.getTime() - modified.getTime()
+      if (age < 0) {
+        if (await settle(accessor, path, modified, now)) {
+          backdated = { original: modified, stamp: new Date(now.getTime() - FENCE) }
+        }
+        continue
+      }
+      if (age < FENCE) {
+        await sleep(FENCE - age)
+        continue
+      }
+      const response = await davRequest(accessor, 'DELETE', davUrl(accessor, path, true), {
+        'If-Unmodified-Since': modified.toUTCString(),
+      })
+      if (response.ok) return
+      if (response.status !== 412) throw failure(path, response.status)
+      if (!empty) throw enotempty(path)
     }
-    const response = await davRequest(accessor, 'DELETE', davUrl(accessor, path, true), {
-      'If-Unmodified-Since': modified.toUTCString(),
-    })
-    if (response.ok) return
-    if (response.status !== 412) throw failure(path, response.status)
-    if (!empty) throw enotempty(path)
+    throw ebusy(path)
+  } catch (error) {
+    if (backdated !== null) await retime(accessor, path, backdated.stamp, backdated.original)
+    throw error
   }
-  throw ebusy(path)
 }

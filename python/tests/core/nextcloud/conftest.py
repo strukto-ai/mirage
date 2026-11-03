@@ -288,7 +288,8 @@ HREF = "/remote.php/dav/files/user"
 class FakeFolder:
     """One Nextcloud folder as a fenced removal sees it: its children,
     a modified time in whole seconds that every arrival moves to the
-    server's clock, and ``If-Unmodified-Since`` honoured on DELETE."""
+    server's clock, and ``If-Unmodified-Since`` honoured on PROPPATCH and
+    DELETE."""
 
     def __init__(
         self,
@@ -308,8 +309,16 @@ class FakeFolder:
         self.settable = settable
         self.locked = False
         self.busy = False
+        self.dates: dict[str, str] = {}
         self.calls: list[tuple[str, str, dict[str, str]]] = []
         self.before: dict[str, Callable[[], None]] = {}
+
+    @property
+    def url(self) -> str:
+        return f"{ROOT}/{quote(self.name)}/"
+
+    def wait(self, seconds: float) -> None:
+        self.clock += timedelta(seconds=seconds)
 
     def arrive(self, child: str) -> None:
         self.children.append(child)
@@ -319,13 +328,19 @@ class FakeFolder:
         return httpx.Response(
             status,
             content=body,
-            headers={"Date": format_datetime(self.clock, True)},
+            headers={
+                "Date": self.dates.get(
+                    "Date", format_datetime(self.clock, True)
+                )
+            },
             request=httpx.Request("GET", ROOT),
         )
 
     def listing(self, depth: str) -> bytes:
         own = f"{HREF}/{quote(self.name)}/"
-        stamp = format_datetime(self.modified, True)
+        stamp = self.dates.get(
+            "getlastmodified", format_datetime(self.modified, True)
+        )
         rows = [
             f"<d:response><d:href>{own}</d:href><d:propstat><d:prop>"
             f"<d:getlastmodified>{stamp}</d:getlastmodified></d:prop>"
@@ -351,6 +366,7 @@ class FakeFolder:
         content: bytes | None = None,
     ) -> httpx.Response:
         headers = dict(headers or {})
+        assert url == self.url, url
         self.calls.append((method, url, headers))
         self.clock += timedelta(milliseconds=300)
         if method in self.before:
@@ -361,6 +377,9 @@ class FakeFolder:
             if self.busy:
                 self.modified = self.clock.replace(microsecond=0)
             return self.answer(207, self.listing(headers["Depth"]))
+        since = headers.get("If-Unmodified-Since")
+        if since is not None and self.modified > parsedate_to_datetime(since):
+            return self.answer(412)
         if method == "PROPPATCH":
             if not self.settable:
                 return self.answer(
@@ -374,9 +393,6 @@ class FakeFolder:
             return self.answer(207, multistatus("200 OK", "<d:lastmodified/>"))
         if self.locked:
             return self.answer(423)
-        since = parsedate_to_datetime(headers["If-Unmodified-Since"])
-        if self.modified > since:
-            return self.answer(412)
         self.exists = False
         return self.answer(204)
 
