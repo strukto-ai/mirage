@@ -51,7 +51,8 @@ def listed(
     registry: MountRegistry, session: SessionState
 ) -> Iterator[tuple[MountEntry, str, MountMode]]:
     """The mounts the documents describe, each with its prefix and the
-    mode in force there: every one the session sees but mirage's own.
+    mode in force there: every one the session sees but mirage's
+    commands, history and documents.
 
     Args:
         registry (MountRegistry): the workspace's live mount registry.
@@ -60,8 +61,8 @@ def listed(
     for mount in sorted(registry.visible_mounts(), key=lambda m: m.prefix):
         prefix = mount.prefix.rstrip("/") or "/"
         if (
-            prefix in {"/dev", "/usr/bin", "/.bash_history"}
-            or mount.vfs.name in {"dev", "history", "bin", "document"}
+            prefix in {"/usr/bin", "/.bash_history"}
+            or mount.vfs.name in {"history", "bin", "document"}
             or not path_visible(session.visibility, prefix)
         ):
             continue
