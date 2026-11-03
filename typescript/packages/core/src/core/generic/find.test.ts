@@ -18,6 +18,7 @@ import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { CacheManager } from '../../cache/manager.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { modifiedTs, walkFind, type WalkFindDeps } from './find.ts'
+import type { PredNode } from './types.ts'
 import { isEnoent } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { parseFindExpression } from '../../rs/find.ts'
@@ -302,6 +303,21 @@ describe('walkFind', () => {
     const deps = { ...flaky(new Error('socket hang up'), calls), unstatted }
     expect(await walkFind(ROOT, deps, { minSize: 1 })).toEqual(['/', '/a.json', '/c.json'])
     expect(calls.filter((p) => p === '/b.json')).toHaveLength(1)
+  })
+
+  it('keeps an unstatted entry another -o arm matches', async () => {
+    const err = new Error('socket hang up')
+    const unstatted = new Map<string, unknown>()
+    const deps = { ...flaky(err), unstatted }
+    const tree: PredNode = {
+      op: 'or',
+      kids: [
+        { op: 'name', pattern: 'b.json', icase: false },
+        { op: 'mtime', lo: null, hi: 0 },
+      ],
+    }
+    expect(await walkFind(ROOT, deps, { tree })).toEqual(['/b.json'])
+    expect([...unstatted]).toEqual([['/b.json', err]])
   })
 
   it('propagates an entry failure the caller does not collect', async () => {

@@ -51,6 +51,35 @@ describe('system_time', () => {
     expect(await out(ws, "echo '{}' | jq -r 'now|todate'")).toBe('2026-03-02T09:01:00Z\n')
   })
 
+  it('counts find -mtime in whole days on the workspace clock', async () => {
+    const clock = new ManualClock(1_000_000)
+    const ws = started('2026-03-02T09:00:00Z', clock)
+    await ws.shell('touch /data/a')
+    clock.advance(23 * 3600)
+    expect(await out(ws, 'find /data/a -mtime +0')).toBe('')
+    expect(await out(ws, 'find /data/a -mtime 0')).toBe('/data/a\n')
+    clock.advance(13 * 3600)
+    expect(await out(ws, 'find /data/a -mtime +0')).toBe('/data/a\n')
+    expect(await out(ws, 'find /data/a -mtime +1')).toBe('')
+    expect(await out(ws, 'find /data/a -mtime 1')).toBe('/data/a\n')
+  })
+
+  it('decides a find time test under -o or ! per entry', async () => {
+    const clock = new ManualClock(1_000_000)
+    const ws = started('2026-03-02T09:00:00Z', clock)
+    await ws.shell('touch /data/keep; mkdir /data/d')
+    clock.advance(3600)
+    expect(await out(ws, 'find /data/keep -mtime +0 -o -name keep')).toBe('/data/keep\n')
+    expect(await out(ws, 'find /data/keep -mtime +1 -o -name keep')).toBe('/data/keep\n')
+    expect(await out(ws, 'find /data/keep ! -mtime +0')).toBe('/data/keep\n')
+    expect(await out(ws, 'find /data/keep \\( -mtime +0 \\)')).toBe('')
+    expect(await out(ws, 'find /data -name keep ! -mtime +0')).toBe('/data/keep\n')
+    expect(await out(ws, 'find /data -name keep \\( -mtime +0 \\)')).toBe('')
+    expect(await out(ws, 'find /data/d -mtime +0 -o -name x')).toBe('')
+    expect(await out(ws, 'find /data/d ! -mtime +0')).toBe('/data/d\n')
+    expect(await out(ws, 'find /data -mtime +0 -o -name x')).toBe('')
+  })
+
   it('stamps copies and processes', async () => {
     const ws = started('2026-03-02T09:00:00Z')
     const line =

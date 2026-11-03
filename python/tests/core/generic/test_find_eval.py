@@ -12,6 +12,7 @@ from mirage.core.generic.find_eval import (
     settle_prunes,
     tree_has_action,
     tree_has_prune,
+    tree_has_time,
     unrespell_raw,
     without_prune,
 )
@@ -487,6 +488,8 @@ def test_without_prune_and_tree_has_helpers():
     )
     assert not tree_has_prune(without_prune(tree))
     assert not tree_has_action(Or([Path("x"), Prune()]))
+    assert tree_has_time(And([Path("x"), Not(Mtime(None, 1.0))]))
+    assert not tree_has_time(tree)
 
 
 def test_display_path_joins_the_prefix_and_the_key_with_one_slash():

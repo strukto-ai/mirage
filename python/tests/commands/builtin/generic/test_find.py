@@ -1,4 +1,5 @@
 from dataclasses import asdict, replace
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -15,7 +16,7 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.core.generic.find import walk_find
-from mirage.core.generic.types import FindArgs, Name, Not, Or
+from mirage.core.generic.types import FindArgs, Mtime, Name, Not, Or
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.types import IOResult, materialize
 from mirage.types import (
@@ -241,6 +242,22 @@ async def test_walk_find_fails_a_stat_test_without_asking_again():
     )
     assert results == ["/", "/a.json", "/c.json"]
     assert calls.count("/b.json") == 1
+
+
+@pytest.mark.asyncio
+async def test_walk_find_keeps_an_unstatted_entry_another_or_arm_matches():
+    exc = RuntimeError("upstream 502 Bad Gateway")
+    readdir, stat = _flaky(exc)
+    unstatted: dict[str, Exception] = {}
+    results = await walk_find(
+        _root_spec(),
+        readdir=readdir,
+        stat=stat,
+        args=FindArgs(tree=Or([Name("b.json"), Mtime(None, 0.0)])),
+        unstatted=unstatted,
+    )
+    assert results == ["/b.json"]
+    assert unstatted == {"/b.json": exc}
 
 
 @pytest.mark.asyncio
@@ -797,6 +814,28 @@ async def test_start_point_streams_before_the_walk():
     )
     out, _ = await stream_walk_find(
         [root], [], Context(vfs=_files(probe)), readdir=readdir, stat=readdir
+    )
+    assert await anext(out) == b"/remote\n"
+    await out.aclose()
+    readdir.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_start_point_with_a_known_mtime_streams_before_the_walk():
+    root = PathSpec.from_str_path("/remote")
+    readdir = AsyncMock(side_effect=AssertionError("must not list"))
+    now = datetime.now(timezone.utc).isoformat()
+    probe = AsyncMock(
+        return_value=FileStat(
+            name="remote", type=FileType.DIRECTORY, modified=now
+        )
+    )
+    out, _ = await stream_walk_find(
+        [root],
+        ["-mtime", "+0", "-o", "-mtime", "-1"],
+        Context(vfs=_files(probe)),
+        readdir=readdir,
+        stat=readdir,
     )
     assert await anext(out) == b"/remote\n"
     await out.aclose()
