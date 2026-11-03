@@ -422,12 +422,19 @@ function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
 }
 
 /**
- * Whether the running line's newest word on `virtual` is that a change it
- * made took the path's version (a copy, a move, a removal). Bytes cached
- * before that change are not served: a later step of the same op can still
- * be running, and the path is evicted only once the op ends. A read or write
- * since stamps a newer record. Mirrors Python's `_retracted`.
+ * Whether a call that fails once begun may have changed part of what it
+ * names: a write or copy of bytes, or a walk below its path. A create,
+ * removal, rename or attribute change either happens or not. Mirrors
+ * Python's `_may_tear`.
  */
+function mayTear(mark: VfsCall): boolean {
+  return (
+    mark.effect === Effect.WRITE ||
+    mark.effect === Effect.COPY ||
+    (mark.subtree && mark.effect !== Effect.RENAME)
+  )
+}
+
 /**
  * Hand a call's failure to the rows of its own op it recorded before it
  * raised: one whose change may have landed is partial, any other failed. A
@@ -479,6 +486,13 @@ function forward(parent: Caller, row: OpRecord): void {
   }
 }
 
+/**
+ * Whether the running line's newest word on `virtual` is that a change it
+ * made took the path's version (a copy, a move, a removal). Bytes cached
+ * before that change are not served: a later step of the same op can still
+ * be running, and the path is evicted only once the op ends. A read or write
+ * since stamps a newer record. Mirrors Python's `_retracted`.
+ */
 function retracted(virtual: string): boolean {
   const records = activeRecords()
   if (records === undefined) return false
@@ -1041,10 +1055,10 @@ export class Dispatcher {
           const mark =
             (mount === null ? null : declared(mount.vfs.constructor, name)) ?? CALLS.get(name)
           const changed =
-            report.completed &&
             mark !== undefined &&
             mark.effect !== Effect.READ &&
-            mark.effect !== Effect.METADATA
+            mark.effect !== Effect.METADATA &&
+            (report.completed || (report.reached && mayTear(mark)))
           const condition = classify(failure)
           const bytes = report.bytes ?? (report.completed ? payloadBytes(answer, args, kwargs) : 0)
           const options = {
@@ -1393,6 +1407,7 @@ export class Dispatcher {
         ? await madeAbove(dispatchStat(this.dispatch), mount.prefix, call.path)
         : []
     let ran: Awaited<ReturnType<typeof this.callBackend>>
+    if (report !== undefined) report.reached = true
     try {
       const enclosing = currentCaller().commandSink?.[0]
       const [answer, records] = await commandRecords(async (mine) => {

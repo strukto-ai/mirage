@@ -701,6 +701,19 @@ def _payload_bytes(result: Any, kwargs: Mapping[str, Any]) -> int:
     )
 
 
+def _may_tear(mark: VfsCall) -> bool:
+    """Whether a call that fails once begun may have changed part of what
+    it names: a write or copy of bytes, or a walk below its path. A
+    create, removal, rename or attribute change either happens or not.
+
+    Args:
+        mark (VfsCall): the call's declaration.
+    """
+    return mark.effect in (Effect.WRITE, Effect.COPY) or (
+        mark.subtree and mark.effect is not Effect.RENAME
+    )
+
+
 def _settle_failed(
     op: str, rows: Iterable[OpRecord], failure: BaseException
 ) -> None:
@@ -1413,9 +1426,12 @@ class Dispatcher:
                         else None
                     ) or CALLS.get(name)
                     changed = (
-                        report.completed
-                        and mark is not None
+                        mark is not None
                         and mark.effect not in (Effect.READ, Effect.METADATA)
+                        and (
+                            report.completed
+                            or (report.reached and _may_tear(mark))
+                        )
                     )
                     condition = (
                         classify(failure) if failure is not None else None
@@ -1741,6 +1757,8 @@ class Dispatcher:
             if name == "mkdir" and kwargs.get("parents")
             else []
         )
+        if report is not None:
+            report.reached = True
         try:
             enclosing = current_caller().command_sink
             with command_records(own=True) as records:

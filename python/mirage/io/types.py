@@ -211,6 +211,8 @@ class OpReport:
     Args:
         completed (bool): the op ran against its answering store. False
             until the dispatcher says otherwise; a failed op still records its failure.
+        reached (bool): the backend call began, so a failure may have
+            left part of a write behind.
         answerer (OpServed | None): The answering layer; None is the backend.
         detached (bool): Collect the row here when async tasks share their context.
         record (OpRecord | None): The detached caller's row, delivered at close.
@@ -241,6 +243,7 @@ class OpReport:
     metadata_rows: bool = False
     answerer: "OpServed | None" = None
     completed: bool = False
+    reached: bool = False
     source: str | None = None
     bytes: int | None = None
     path: str | None = None

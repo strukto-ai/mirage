@@ -105,6 +105,8 @@ export async function materialize(source: ByteSource | null | undefined): Promis
  *
  * `completed` says the op ran against its answering store; false until
  * the dispatcher says otherwise; a failed op still records its failure.
+ * `reached` says the backend call began, so a failure may have left part
+ * of a write behind.
  * `answerer` names the answering layer independently of the backend.
  * `detached` keeps the default row on `record` for a file caller whose
  * shared browser context cannot attribute driver rows to overlapping calls.
@@ -130,6 +132,7 @@ export class OpReport {
   metadataRows = false
   answerer: OpServed = 'backend'
   completed = false
+  reached = false
   source: string | null = null
   bytes: number | null = null
   path: string | null = null

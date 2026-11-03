@@ -4133,3 +4133,39 @@ it('a streamed read is stamped when it finishes', async () => {
     await ws.close()
   }
 })
+
+class LostMidCallRAM extends RAMVFS {
+  override async write(_path: PathSpec, _data: ByteSource): Promise<void> {
+    await Promise.resolve()
+    throw Object.assign(new Error('lost'), { code: 'EIO' })
+  }
+
+  override async unlink(_path: PathSpec): Promise<void> {
+    await Promise.resolve()
+    throw Object.assign(new Error('lost'), { code: 'EIO' })
+  }
+}
+
+describe('a backend call that raised once begun', () => {
+  it('records a write as partial', async () => {
+    const ws = new Workspace({ '/m': new LostMidCallRAM() }, { mode: MountMode.WRITE })
+    try {
+      await expect(ws.vfs.write('/m/a', 'ab')).rejects.toThrow()
+      const rows = ws.records.filter((r) => r.op === 'write')
+      expect(rows.map((r) => [r.status, r.changed, r.errno])).toEqual([['partial', true, 5]])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('keeps an unlink failed', async () => {
+    const ws = new Workspace({ '/m': new LostMidCallRAM() }, { mode: MountMode.WRITE })
+    try {
+      await expect(ws.vfs.unlink('/m/a')).rejects.toThrow()
+      const rows = ws.records.filter((r) => r.op === 'unlink')
+      expect(rows.map((r) => [r.status, r.changed, r.errno])).toEqual([['failed', false, 5]])
+    } finally {
+      await ws.close()
+    }
+  })
+})

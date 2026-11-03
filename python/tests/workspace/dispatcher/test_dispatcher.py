@@ -4303,3 +4303,41 @@ async def test_a_streamed_read_is_stamped_when_it_finishes():
         ]
     finally:
         await ws.close()
+
+
+class _LostMidCallRAM(RAMVFS):
+    async def write(
+        self, path: PathSpec, data: Any, *, atomic: bool = False
+    ) -> None:
+        raise OSError(errno.EIO, "lost", path.virtual)
+
+    async def unlink(self, path: PathSpec) -> None:
+        raise OSError(errno.EIO, "lost", path.virtual)
+
+
+@pytest.mark.asyncio
+async def test_a_write_that_raised_in_the_backend_records_partial():
+    ws = Workspace({"/m": _LostMidCallRAM()}, mode=MountMode.WRITE)
+    try:
+        with pytest.raises(OSError):
+            await ws.vfs.write("/m/a", b"ab")
+        rows = [r for r in ws.vfs.records if r.op == "write"]
+        assert [(r.status, r.changed, r.errno) for r in rows] == [
+            ("partial", True, errno.EIO)
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_unlink_that_raised_in_the_backend_stays_failed():
+    ws = Workspace({"/m": _LostMidCallRAM()}, mode=MountMode.WRITE)
+    try:
+        with pytest.raises(OSError):
+            await ws.vfs.unlink("/m/a")
+        rows = [r for r in ws.vfs.records if r.op == "unlink"]
+        assert [(r.status, r.changed, r.errno) for r in rows] == [
+            ("failed", False, errno.EIO)
+        ]
+    finally:
+        await ws.close()
