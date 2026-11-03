@@ -15,7 +15,7 @@
 import functools
 from collections.abc import Mapping, Sequence
 
-from mirage.accessor.mcp import MCPAccessor, refusal
+from mirage.accessor.mcp import MCPAccessor, refusal, timed_out
 from mirage.commands.cli.mcp.call import call_tool, causes, command_name
 from mirage.commands.cli.mcp.constants import NAME
 from mirage.commands.cli.mcp.errors import MCPToolsError
@@ -125,7 +125,11 @@ async def mcp_cli(config: MCPConfig | Mapping[str, JsonValue]) -> CLI:
     try:
         title, tools = await MCPAccessor(validated).list_tools()
     except Exception as error:
-        reason = refusal(error) or "; ".join(causes(error))
+        reason = refusal(error) or (
+            "MCP server timed out"
+            if timed_out(error)
+            else "; ".join(causes(error))
+        )
         raise MCPToolsError(
             f"cannot list the server's tools: {reason}"
         ) from error

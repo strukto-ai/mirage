@@ -12,11 +12,28 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bearerConfig, servedMcp, TITLE, TOKEN } from '../../../../tests/fixtures/mcp_server.ts'
 import { MCPConfig } from '../../../core/mcp/config.ts'
+import type * as constants from '../../../core/mcp/constants.ts'
 import { MAX_REPLY, MAX_TOOLS } from '../../../core/mcp/constants.ts'
 import { buildCli, mcpCli, MCPToolsError, type MCPSource, type MCPTool } from './index.ts'
+
+const limits = vi.hoisted(() => ({ timeout: 0 }))
+
+vi.mock('../../../core/mcp/constants.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof constants>()
+  return {
+    ...real,
+    get TIMEOUT() {
+      return limits.timeout || real.TIMEOUT
+    },
+  }
+})
+
+afterEach(() => {
+  limits.timeout = 0
+})
 
 const SCHEMA = {
   type: 'object',
@@ -160,6 +177,23 @@ describe('mcpCli', () => {
       expect((await mcpCli(config)).spec.subcommands).toHaveLength(5)
       fake.pages = 65
       await expect(mcpCli(config)).rejects.toThrow(/64/)
+    } finally {
+      await fake.close()
+    }
+  })
+
+  it('gives a tool listing one deadline across its pages', async () => {
+    const fake = await servedMcp()
+    try {
+      limits.timeout = 1
+      fake.pages = 5
+      fake.pageDelay = 400
+      const error: unknown = await mcpCli(bearerConfig(fake)).then(
+        () => null,
+        (e: unknown) => e,
+      )
+      expect(error).toBeInstanceOf(MCPToolsError)
+      expect((error as Error).message).toBe("cannot list the server's tools: MCP server timed out")
     } finally {
       await fake.close()
     }

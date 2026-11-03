@@ -170,6 +170,18 @@ async def test_a_tool_list_reads_to_64_pages_and_no_further():
 
 
 @pytest.mark.asyncio
+async def test_a_tool_listing_has_one_deadline_across_its_pages(monkeypatch):
+    monkeypatch.setattr("mirage.accessor.mcp.TIMEOUT", 1.0)
+    async with served_mcp() as fake:
+        fake.pages, fake.page_delay = 5, 0.4
+        with pytest.raises(MCPToolsError) as caught:
+            await mcp_cli(fake.bearer_config())
+    assert str(caught.value) == (
+        "cannot list the server's tools: MCP server timed out"
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_page_the_server_repeats_ends_the_list():
     async with served_mcp() as fake:
         fake.repeating = True

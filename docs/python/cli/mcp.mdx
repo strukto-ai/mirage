@@ -35,8 +35,9 @@ issues search-issues '{"query": "login bug"}'
 A tool named `search_issues` becomes the subcommand `search-issues`; its
 `--help` prints the tool's description and the JSON schema of its
 arguments. `mcp_cli` raises `MCPToolsError` when the server cannot be
-listed, it lists more than 1024 tools or more than 16 MiB of them, or
-its tools cannot all become distinct subcommands.
+listed within 5 minutes in all, it lists more than 1024 tools or more
+than 16 MiB of them, or its tools cannot all become distinct
+subcommands.
 
 The tool list is read once, at registration. To pick up tools the server
 added later, list them again, then remove the CLI and register the new one:

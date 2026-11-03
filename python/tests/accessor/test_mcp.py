@@ -179,6 +179,7 @@ def test_only_an_error_the_server_answered_keeps_the_client(error, kept):
     "error, expired",
     [
         (MCPError(types.REQUEST_TIMEOUT, "x"), True),
+        (TimeoutError(), True),
         (ExceptionGroup("g", [ValueError("x"), MCPError(-32001, "x")]), True),
         (ExceptionGroup("g", [ValueError("x")]), False),
         (MCPError(-32000, "x"), False),

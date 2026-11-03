@@ -87,6 +87,8 @@ class FakeMCP:
             empty past the last tool.
         repeating (bool): every tool page is the first, naming itself
             as the next.
+        page_delay (float): seconds each tool page waits before it
+            answers.
         down (bool): every request is answered 503.
         oversized (dict[str, str]): MCP methods answered with a body
             past the reply cap, of the content type each maps to.
@@ -106,6 +108,7 @@ class FakeMCP:
     expired: set[str] = field(default_factory=set)
     pages: int | None = None
     repeating: bool = False
+    page_delay: float = 0.0
     down: bool = False
     oversized: dict[str, str] = field(default_factory=dict)
     encoding: str | None = None
@@ -138,6 +141,7 @@ def _server(fake: FakeMCP, tools: list[types.Tool]) -> Server:
         ctx: ServerRequestContext[Any],
         params: types.PaginatedRequestParams | None,
     ) -> types.ListToolsResult:
+        await anyio.sleep(fake.page_delay)
         start = int(params.cursor) if params and params.cursor else 0
         if fake.repeating:
             return types.ListToolsResult(tools=tools[:PAGE], next_cursor="0")
