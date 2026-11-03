@@ -196,7 +196,9 @@ export async function* partEvents(
   const parts = new Parts(boundary)
   for await (const chunk of source) {
     yield* parts.write(
-      Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength),
+      Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength),
     )
   }
   if (!parts.finished) throw new MultipartError(400, 'multipart body ended early')

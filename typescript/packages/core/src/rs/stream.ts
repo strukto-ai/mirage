@@ -96,7 +96,9 @@ export function compiledModule(): Promise<WebAssembly.Module> {
 export function moduleSync(): WebAssembly.Module {
   const source: string | WebAssembly.Module = MIRAGE_RS_WASM
   compiledSync ??=
-    typeof source === 'string' ? new WebAssembly.Module(decodeBase64(source) as BufferSource) : source
+    typeof source === 'string'
+      ? new WebAssembly.Module(decodeBase64(source) as BufferSource)
+      : source
   compiled ??= Promise.resolve(compiledSync)
   return compiledSync
 }

@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PolicyMethod, ProfileScript, ProfileScripts } from '@struktoai/mirage-core/policy/types'
+import type {
+  PolicyMethod,
+  ProfileScript,
+  ProfileScripts,
+} from '@struktoai/mirage-core/policy/types'
 import { METHODS } from '@struktoai/mirage-core/policy/constants'
 import { compileProgram, parseProgram } from '@struktoai/mirage-core/policy/profile'
 import {

@@ -54,7 +54,9 @@ describe('resolvePolicyFile', () => {
       )
       expect(Object.keys(resolvePolicyFile(loadPolicyFile, undefined, env))).toEqual(['preCommand'])
       await writeFile(join(home, 'config.toml'), '[daemon]\npolicy_file = "near.yaml"\n')
-      expect(Object.keys(resolvePolicyFile(loadPolicyFile, undefined, env))).toEqual(['postCommand'])
+      expect(Object.keys(resolvePolicyFile(loadPolicyFile, undefined, env))).toEqual([
+        'postCommand',
+      ])
     } finally {
       await rm(home, { recursive: true, force: true })
       await rm(elsewhere, { recursive: true, force: true })

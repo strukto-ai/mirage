@@ -27,7 +27,7 @@ export function registerOAuthRoutes(
     auth: AuthConfig
   },
 ): void {
-  app.get(PROTECTED_RESOURCE_PATH, async (req, reply) => {
+  app.get(PROTECTED_RESOURCE_PATH, (req, reply) => {
     const jwt = deps.auth.jwt
     if (jwt?.loginClientId === undefined || jwt.issuer === undefined) {
       return reply.status(404).send({ detail: 'this server publishes no login' })

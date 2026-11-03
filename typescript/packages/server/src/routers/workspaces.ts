@@ -497,7 +497,9 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         // these declarations; a container the constructor will reject
         // is left for it to reject. Mirrors the python load route.
         overrides = await runWithNetwork(rule, () =>
-          buildOverrideMounts(override ?? null, override?.secrets, deps.host.buildVfs),
+          buildOverrideMounts(override ?? null, override?.secrets, (name, config, sources) =>
+            deps.host.buildVfs(name, config, sources),
+          ),
         )
       } catch (e) {
         return answer(reply, 400, { detail: `override build failed: ${(e as Error).message}` })
@@ -635,7 +637,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
    */
   app.put<{ Params: { id: string; name: string }; Body: unknown }>(
     '/v1/workspaces/:id/profiles/:name',
-    async (req, reply) => {
+    (req, reply) => {
       const entry = deps.registry.visible(req.params.id, req.account)
       if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
       const name = req.params.name
@@ -724,7 +726,8 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       const source = deps.registry.visible(req.params.id, req.account)
       if (source === null) return reply.status(404).send({ detail: 'workspace not found' })
       const body = req.body
-      if (body.id !== undefined && deps.host.reservedIds.has(body.id)) return refuseDotId(reply, body.id)
+      if (body.id !== undefined && deps.host.reservedIds.has(body.id))
+        return refuseDotId(reply, body.id)
       if (
         body.id !== undefined &&
         (deps.registry.has(body.id) || deps.registry.removing(body.id))

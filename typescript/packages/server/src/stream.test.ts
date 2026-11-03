@@ -62,7 +62,7 @@ function replyFor(): {
 
 async function lines(body: ReadableStream<Uint8Array>): Promise<Record<string, unknown>[]> {
   const chunks: Buffer[] = []
-  for await (const chunk of body) chunks.push(Buffer.from(chunk as Uint8Array))
+  for await (const chunk of body) chunks.push(Buffer.from(chunk))
   return Buffer.concat(chunks)
     .toString()
     .trimEnd()
@@ -249,7 +249,7 @@ it('the final record does not wait for stdin to end', async () => {
   const records: string[] = []
   let ended = false
   const reading = (async () => {
-    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+    for await (const chunk of body) records.push(Buffer.from(chunk).toString())
     ended = true
   })()
   for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve))
@@ -294,7 +294,7 @@ it('a hang-up after the final record ends the body', async () => {
   const records: string[] = []
   let ended = false
   const reading = (async () => {
-    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+    for await (const chunk of body) records.push(Buffer.from(chunk).toString())
     ended = true
   })()
   for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve))
@@ -343,7 +343,7 @@ it('an upload that failed first fails the final record', async () => {
   shellResponse(Promise.resolve(null), table, job, reply, closed.signal, failed, undefined)
   if (source === undefined) throw new Error('response did not send a stream')
   const records: string[] = []
-  for await (const chunk of source) records.push(Buffer.from(chunk as Uint8Array).toString())
+  for await (const chunk of source) records.push(Buffer.from(chunk).toString())
   expect(JSON.parse(records.join(''))).toEqual({
     status: 'failed',
     result: null,
@@ -384,7 +384,7 @@ it('an upload failing while its cleanup runs fails the record', async () => {
   const body = source
   const records: string[] = []
   const reading = (async () => {
-    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+    for await (const chunk of body) records.push(Buffer.from(chunk).toString())
   })()
   for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve))
   held.release()
@@ -416,13 +416,21 @@ it('the final record survives its eviction', async () => {
       return reply
     },
   } as unknown as RouteReply
-  shellResponse(Promise.resolve(null), table, job, reply, closed.signal, Promise.resolve(undefined), undefined)
+  shellResponse(
+    Promise.resolve(null),
+    table,
+    job,
+    reply,
+    closed.signal,
+    Promise.resolve(undefined),
+    undefined,
+  )
   for (let i = 0; i < MAX_FINISHED_JOBS; i++) table.submit('workspace', 'other', work, 'session')
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
   const reading = (async () => {
-    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+    for await (const chunk of body) records.push(Buffer.from(chunk).toString())
   })()
   finish.release()
   await reading
