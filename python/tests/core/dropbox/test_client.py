@@ -274,7 +274,10 @@ async def test_upload_session_chunks_and_conditional_commit(fail, spooled):
     async with ByteSpool() as spool:
         await spool.append(payload)
         data = spool if spooled else payload
-        with aioresponses() as m:
+        with (
+            aioresponses() as m,
+            patch.object(spool, "read", wraps=spool.read) as read,
+        ):
             m.post(base + "/start", payload={"session_id": "session"})
             m.post(base + "/append_v2", payload=None, repeat=True)
             m.post(
@@ -304,6 +307,8 @@ async def test_upload_session_chunks_and_conditional_commit(fail, spooled):
             finish = m.requests[("POST", URL(base + "/finish"))][0].kwargs
             arg = json.loads(finish["headers"]["Dropbox-API-Arg"])
             assert arg["cursor"]["offset"] == len(payload)
+            # One window per read: the spool is never loaded whole.
+            assert all(c.args[1] <= 8 * MIB for c in read.await_args_list)
             assert arg["commit"]["mode"] == {
                 ".tag": "update",
                 "update": "rev1",

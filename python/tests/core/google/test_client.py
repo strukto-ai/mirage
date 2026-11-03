@@ -270,7 +270,10 @@ async def test_resumable_upload_honors_acknowledged_ranges(advance, spooled):
     async with ByteSpool(0) as spool:
         await spool.append(payload)
         data = spool if spooled else payload
-        with aioresponses() as mock:
+        with (
+            aioresponses() as mock,
+            patch.object(spool, "read", wraps=spool.read) as read,
+        ):
             mock.post(
                 url + "?uploadType=resumable", headers={"Location": upload}
             )
@@ -299,6 +302,10 @@ async def test_resumable_upload_honors_acknowledged_ranges(advance, spooled):
                 assert (
                     calls[1].kwargs["headers"]["Content-Range"]
                     == f"bytes 4194304-{total - 1}/{total}"
+                )
+                # One window per read: the spool is never loaded whole.
+                assert all(
+                    c.args[1] <= 8 * 1024 * 1024 for c in read.await_args_list
                 )
             else:
                 with pytest.raises(RuntimeError, match="no progress"):

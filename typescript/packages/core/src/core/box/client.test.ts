@@ -177,6 +177,7 @@ it.each([
     const payload = new TextEncoder().encode('abcdefg')
     const spool = new ByteSpool()
     await spool.append(payload)
+    const read = vi.spyOn(spool, 'read')
     const base = 'https://example.test/session'
     const fake = vi
       .fn()
@@ -217,6 +218,8 @@ it.each([
         Digest: 'sha=L7XhNBn8iSRoZeejJPR27GJOh0A=',
       })
       expect(calls.length).toBe(fail ? 5 : 4)
+      // One part per read: the spool is never loaded whole.
+      expect(read.mock.calls.every(([, size]) => size <= 4)).toBe(true)
     } finally {
       globalThis.fetch = previous
       await spool.close()

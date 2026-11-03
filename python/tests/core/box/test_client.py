@@ -207,7 +207,10 @@ async def test_upload_session_digests_commit_condition_and_abort(
     async with ByteSpool(0) as spool:
         await spool.append(b"abcdefg")
         data = spool if spooled else b"abcdefg"
-        with aioresponses() as mock:
+        with (
+            aioresponses() as mock,
+            patch.object(spool, "read", wraps=spool.read) as read,
+        ):
             mock.post(
                 base,
                 payload={
@@ -263,6 +266,8 @@ async def test_upload_session_digests_commit_condition_and_abort(
                 + base64.b64encode(hashlib.sha1(b"abcdefg").digest()).decode()
             )
             assert (("DELETE", URL(base)) in mock.requests) == fail
+            # One part per read: the spool is never loaded whole.
+            assert all(c.args[1] <= 4 for c in read.await_args_list)
     await tm.pool.close()
 
 

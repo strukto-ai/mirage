@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ByteSpool } from '../../io/spool.ts'
-import { sameBytes } from '../../test-utils.ts'
 import { googleResumable } from './client.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -309,6 +308,7 @@ it.each([
   const payload = new Uint8Array(total).fill(97, 0, half).fill(98, half)
   const spool = new ByteSpool()
   await spool.append(payload)
+  const read = vi.spyOn(spool, 'read')
   const data = spooled ? spool : payload
   const fake = vi
     .fn()
@@ -335,8 +335,12 @@ it.each([
       await expect(result).resolves.toEqual({ id: 'done' })
       const calls = fake.mock.calls as [string, RequestInit][]
       expect(calls[0]?.[1].headers).toMatchObject({ 'X-Upload-Content-Length': String(total) })
-      expect(sameBytes(calls[1]?.[1].body, payload.subarray(0, 8 * 1024 * 1024))).toBe(true)
-      expect(sameBytes(calls[2]?.[1].body, payload.subarray(half))).toBe(true)
+      expect(
+        Buffer.compare(calls[1]?.[1].body as Uint8Array, payload.subarray(0, 8 * 1024 * 1024)),
+      ).toBe(0)
+      expect(Buffer.compare(calls[2]?.[1].body as Uint8Array, payload.subarray(half))).toBe(0)
+      // One window per read: the spool is never loaded whole.
+      expect(read.mock.calls.every(([, size]) => size <= 8 * 1024 * 1024)).toBe(true)
       expect(calls[2]?.[1].headers).toMatchObject({
         'Content-Range': `bytes 4194304-${String(total - 1)}/${String(total)}`,
       })
