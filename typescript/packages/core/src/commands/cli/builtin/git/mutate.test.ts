@@ -1309,6 +1309,11 @@ describe('git mv', () => {
       '',
       'fatal: bad source, source=nosuch, destination=dest\n',
     ])
+    expect(await h.run('mv :/letters.txt dest')).toEqual([
+      128,
+      '',
+      'fatal: bad source, source=:/letters.txt, destination=dest\n',
+    ])
     await write(h, 'u.txt', 'u\n')
     expect(await h.run('mv u.txt dest')).toEqual([
       128,
@@ -3593,6 +3598,22 @@ describe('a tree path git rejects', () => {
     ])
     const log = await h.ws.shell('git -C /repo/dst log --format=%s -1')
     expect(DEC.decode(log.stdout)).toBe('odd\n')
+  })
+
+  it('restores the rest with the retry a refused clone suggests', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', { 'a.txt': 'a\n', 'sub/.git/config': '[core]\n' })
+    })
+    await h.ws.shell('cd /repo && git clone -b odd . dst')
+    const result = await h.ws.shell('cd /repo/dst && git restore --source=HEAD :/')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      0,
+      "error: invalid path 'sub/.git/config'\n",
+    ])
+    expect(DEC.decode((await h.read('/repo/dst/a.txt')) ?? new Uint8Array())).toBe('a\n')
+    expect(await h.read('/repo/dst/sub/.git/config')).toBeNull()
+    const staged = await h.ws.shell('cd /repo/dst && git ls-files')
+    expect(DEC.decode(staged.stdout)).toBe('')
   })
 
   it('refuses a reset that would stage one', async () => {
