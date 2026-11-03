@@ -49,6 +49,7 @@ def test_tree_shape_keeps_the_mount_grammar():
         "transition",
         "set-priority",
         "set-project",
+        "relation",
         "add-label",
     ]
     assert [v.name for v in leaf("comment").subcommands] == [

@@ -54,7 +54,8 @@
     "wandb:server": "tsx server/wandb/main.ts",
     "wandb:integ": "tsx wandb/run.ts",
     "wandb:conformance": "tsx wandb/conformance.ts",
-    "wandb:schema": "tsx wandb/schema.ts"
+    "wandb:schema": "tsx wandb/schema.ts",
+    "linear:conformance": "tsx linear_conformance.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",

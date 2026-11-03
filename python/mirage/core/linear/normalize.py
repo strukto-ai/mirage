@@ -203,3 +203,27 @@ def normalize_cycle(cycle: dict[str, Any], *, team_id: str) -> dict[str, Any]:
 # The fields of an issue's JSON Linear's issue search reads; every other
 # field is checked against the listing instead (``unsearched_text``).
 SEARCHED_FIELDS = ("title", "description")
+
+
+def normalize_relation(
+    relation: dict[str, Any], issue_id: str
+) -> dict[str, Any]:
+    source = relation["issue"]
+    target = relation["relatedIssue"]
+    incoming = source["id"] != issue_id
+    issue, related = (target, source) if incoming else (source, target)
+    kind = (
+        "blocked-by"
+        if incoming and relation["type"] == "blocks"
+        else relation["type"]
+    )
+    return {
+        "relation_id": relation["id"],
+        "type": kind,
+        "direction": "incoming" if incoming else "outgoing",
+        "issue_id": issue["id"],
+        "issue_key": issue["identifier"],
+        "related_issue_id": related["id"],
+        "related_issue_key": related["identifier"],
+        "related_issue_title": related["title"],
+    }

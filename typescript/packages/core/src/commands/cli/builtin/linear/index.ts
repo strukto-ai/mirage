@@ -25,6 +25,7 @@ import { setProject } from './issue/set_project.ts'
 import { transition } from './issue/transition.ts'
 import { update } from './issue/update.ts'
 import * as reads from './reads.ts'
+import * as relation from './issue/relation.ts'
 import { linearAccessor } from './util.ts'
 
 const TEAM_OPTION = new Argument('--team', { required: true, help: 'Team key, name, or ID' })
@@ -121,6 +122,39 @@ export const LINEAR = new CLI({
                 help: "Project name, looked up on the issue's team",
               }),
               ARG,
+            ],
+          }),
+          new CommandSpec({
+            name: 'relation',
+            description: 'Manage issue relations',
+            subcommands: [
+              new CommandSpec({
+                name: 'add',
+                description: 'Create an issue relation',
+                arguments: [
+                  new Argument('issue'),
+                  new Argument('relation'),
+                  new Argument('related'),
+                ],
+              }),
+              new CommandSpec({
+                name: 'list',
+                description: 'List incoming and outgoing relations',
+                arguments: [new Argument('issue')],
+              }),
+              new CommandSpec({
+                name: 'delete',
+                description: 'Delete an issue relation',
+                arguments: [
+                  new Argument('issue'),
+                  new Argument('relation'),
+                  new Argument('related'),
+                  new Argument(['--yes', '-y', '-f', '--force', '--confirm'], {
+                    action: 'store_true',
+                    help: 'Confirm relation deletion',
+                  }),
+                ],
+              }),
             ],
           }),
           new CommandSpec({
@@ -249,6 +283,9 @@ export const LINEAR = new CLI({
     'issue transition': new CLIHandler({ fn: transition, write: true }),
     'issue set-priority': new CLIHandler({ fn: setPriority, write: true }),
     'issue set-project': new CLIHandler({ fn: setProject, write: true }),
+    'issue relation add': new CLIHandler({ fn: relation.add, write: true }),
+    'issue relation list': new CLIHandler({ fn: relation.listRelations }),
+    'issue relation delete': new CLIHandler({ fn: relation.deleteRelation, write: true }),
     'issue add-label': new CLIHandler({ fn: addLabel, write: true }),
     'project list': new CLIHandler({ fn: reads.projectList }),
     'project get': new CLIHandler({ fn: reads.projectGet }),

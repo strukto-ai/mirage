@@ -2449,6 +2449,22 @@ jobs:
         working-directory: integ
         run: pnpm run prisma:clients
 
+      - name: Build pinned Linear CLI reference
+        run: |
+          git init /tmp/linear-cli-reference
+          git -C /tmp/linear-cli-reference fetch --depth 1 https://github.com/schpet/linear-cli.git 02571d34be662e5487204841fb80bf23ed79b4f0
+          git -C /tmp/linear-cli-reference checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/linear-cli-reference rev-parse HEAD)" = 02571d34be662e5487204841fb80bf23ed79b4f0
+          rustup toolchain install 1.93.0 --profile minimal
+          cargo +1.93.0 build --locked --manifest-path /tmp/linear-cli-reference/Cargo.toml --package linear --target-dir /tmp/linear-cli-build
+
+      - name: Check Linear relation conformance
+        working-directory: integ
+        env:
+          LINEAR_BIN: /tmp/linear-cli-build/debug/linear
+          LINEAR_REFERENCE: /tmp/linear-cli-reference
+        run: pnpm run linear:conformance
+
       # Trello, Linear and Discord are `shared` services: each fake holds ONE
       # world and re-seeds it on connect, so the two hosts, whose batteries
       # run at the same time below, get an instance each. The 51xx ones are

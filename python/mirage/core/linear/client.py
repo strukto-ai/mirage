@@ -12,7 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+# Relation behavior adapted from schpet/linear-cli v3.1.0,
+# 02571d34be662e5487204841fb80bf23ed79b4f0, ISC.
+# Copyright (c) Peter Schilling and contributors.
+# See licenses/third_party/schpet-linear-cli.txt for the permission notice.
+
 import json
+from enum import Enum
 from typing import Any
 
 import aiohttp
@@ -24,12 +30,17 @@ from mirage.core.linear.config import LinearConfig
 from mirage.core.linear.queries import (
     COMMENT_CREATE_MUTATION,
     COMMENT_UPDATE_MUTATION,
+    INCOMING_RELATIONS_QUERY,
     ISSUE_COMMENTS_QUERY,
     ISSUE_CREATE_MUTATION,
     ISSUE_LOOKUP_QUERY,
     ISSUE_QUERY,
     ISSUE_SEARCH_QUERY,
     ISSUE_UPDATE_MUTATION,
+    OUTGOING_RELATIONS_QUERY,
+    RELATION_CREATE_MUTATION,
+    RELATION_DELETE_MUTATION,
+    RELATION_ISSUE_QUERY,
     TEAM_CYCLES_QUERY,
     TEAM_DOCUMENTS_QUERY,
     TEAM_ISSUES_QUERY,
@@ -393,3 +404,156 @@ async def search_issues(
     ):
         raise LinearAPIError("unexpected response from searchIssues")
     return nodes
+
+
+class RelationType(str, Enum):
+    BLOCKS = "blocks"
+    BLOCKED_BY = "blocked-by"
+    RELATED = "related"
+    DUPLICATE = "duplicate"
+
+
+RELATION_DIRECTIONS = {
+    RelationType.BLOCKS: ("blocks", False),
+    RelationType.BLOCKED_BY: ("blocks", True),
+    RelationType.RELATED: ("related", False),
+    RelationType.DUPLICATE: ("duplicate", False),
+}
+
+
+def relation_input(
+    kind: RelationType, issue_id: str, related_issue_id: str
+) -> dict[str, str]:
+    stored, reverse = RELATION_DIRECTIONS[kind]
+    source, target = (
+        (related_issue_id, issue_id)
+        if reverse
+        else (issue_id, related_issue_id)
+    )
+    return {"issueId": source, "relatedIssueId": target, "type": stored}
+
+
+def _relation_issue(value: Any) -> dict[str, Any]:
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("id"), str)
+        or not value["id"]
+    ):
+        raise LinearAPIError("unexpected issue in relation response")
+    if not isinstance(value.get("identifier"), str) or not isinstance(
+        value.get("title"), str
+    ):
+        raise LinearAPIError("unexpected issue in relation response")
+    return value
+
+
+def _relation(value: Any) -> dict[str, Any]:
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("id"), str)
+        or not value["id"]
+    ):
+        raise LinearAPIError("unexpected relation response")
+    if not isinstance(value.get("type"), str) or not value["type"]:
+        raise LinearAPIError("unexpected relation response")
+    _relation_issue(value.get("issue"))
+    _relation_issue(value.get("relatedIssue"))
+    return value
+
+
+async def get_relation_issue(
+    accessor: LinearAccessor, reference: str
+) -> dict[str, Any]:
+    data = await graphql_request(
+        accessor, RELATION_ISSUE_QUERY, {"issueId": reference}
+    )
+    issue = data.get("issue")
+    if issue is None:
+        raise enoent(reference)
+    return _relation_issue(issue)
+
+
+async def list_issue_relations(
+    accessor: LinearAccessor, issue_id: str, *, incoming: bool = False
+) -> list[dict[str, Any]]:
+    field = "inverseRelations" if incoming else "relations"
+    query = INCOMING_RELATIONS_QUERY if incoming else OUTGOING_RELATIONS_QUERY
+    after: str | None = None
+    seen: set[str] = set()
+    nodes: list[dict[str, Any]] = []
+    while True:
+        data = await graphql_request(
+            accessor,
+            query,
+            {"issueId": issue_id, "first": 100, "after": after},
+        )
+        issue = data.get("issue")
+        if issue is None:
+            raise enoent(issue_id)
+        page = issue.get(field) if isinstance(issue, dict) else None
+        if not isinstance(page, dict) or not isinstance(
+            page.get("nodes"), list
+        ):
+            raise LinearAPIError("unexpected relation page")
+        nodes.extend(_relation(row) for row in page["nodes"])
+        info = page.get("pageInfo")
+        if (
+            not isinstance(info, dict)
+            or type(info.get("hasNextPage")) is not bool
+        ):
+            raise LinearAPIError("unexpected relation page info")
+        if not info["hasNextPage"]:
+            return nodes
+        cursor = info.get("endCursor")
+        if not isinstance(cursor, str) or not cursor or cursor in seen:
+            raise LinearAPIError("relation pagination did not advance")
+        seen.add(cursor)
+        after = cursor
+
+
+async def issue_relation_create(
+    accessor: LinearAccessor, payload: dict[str, str]
+) -> dict[str, Any]:
+    data = await graphql_request(
+        accessor, RELATION_CREATE_MUTATION, {"input": payload}
+    )
+    result = data.get("issueRelationCreate")
+    if not isinstance(result, dict) or type(result.get("success")) is not bool:
+        raise LinearAPIError(
+            "unexpected create relation response; the outcome is unknown, "
+            "check relations before retrying"
+        )
+    if not result["success"]:
+        raise LinearAPIError("Linear did not create the relation")
+    try:
+        created = _relation(result.get("issueRelation"))
+        if (
+            created["type"] != payload.get("type")
+            or created["issue"]["id"] != payload.get("issueId")
+            or created["relatedIssue"]["id"] != payload.get("relatedIssueId")
+        ):
+            raise LinearAPIError(
+                "created relation did not match the requested issues and type"
+            )
+        return created
+    except LinearAPIError as exc:
+        raise LinearAPIError(
+            "unexpected create relation response; the outcome is unknown, "
+            "check relations before retrying"
+        ) from exc
+
+
+async def issue_relation_delete(
+    accessor: LinearAccessor, relation_id: str
+) -> None:
+    data = await graphql_request(
+        accessor, RELATION_DELETE_MUTATION, {"id": relation_id}
+    )
+    result = data.get("issueRelationDelete")
+    if not isinstance(result, dict) or type(result.get("success")) is not bool:
+        raise LinearAPIError(
+            "unexpected delete relation response; the outcome is unknown, "
+            "check relations before retrying"
+        )
+    if not result["success"]:
+        raise LinearAPIError("Linear did not delete the relation")

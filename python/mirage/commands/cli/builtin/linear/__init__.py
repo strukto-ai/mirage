@@ -18,6 +18,7 @@ from mirage.commands.cli.builtin.linear.comment.add import add as comment_add
 from mirage.commands.cli.builtin.linear.comment.update import (
     update as comment_update,
 )
+from mirage.commands.cli.builtin.linear.issue import relation
 from mirage.commands.cli.builtin.linear.issue.add_label import add_label
 from mirage.commands.cli.builtin.linear.issue.assign import assign
 from mirage.commands.cli.builtin.linear.issue.create import create
@@ -140,6 +141,44 @@ LINEAR = CLI(
                                 "--project-name",
                                 help="Project name, looked up on "
                                 "the issue's team",
+                            ),
+                        ),
+                    ),
+                    CommandSpec(
+                        name="relation",
+                        description="Manage issue relations",
+                        subcommands=(
+                            CommandSpec(
+                                name="add",
+                                description="Create an issue relation",
+                                arguments=(
+                                    Argument("issue"),
+                                    Argument("relation"),
+                                    Argument("related"),
+                                ),
+                            ),
+                            CommandSpec(
+                                name="list",
+                                description="List incoming and outgoing relations",
+                                arguments=(Argument("issue"),),
+                            ),
+                            CommandSpec(
+                                name="delete",
+                                description="Delete an issue relation",
+                                arguments=(
+                                    Argument("issue"),
+                                    Argument("relation"),
+                                    Argument("related"),
+                                    Argument(
+                                        "--yes",
+                                        "-y",
+                                        "-f",
+                                        "--force",
+                                        "--confirm",
+                                        action="store_true",
+                                        help="Confirm relation deletion",
+                                    ),
+                                ),
                             ),
                         ),
                     ),
@@ -304,6 +343,11 @@ LINEAR = CLI(
         "issue transition": CLIHandler(fn=transition, write=True),
         "issue set-priority": CLIHandler(fn=set_priority, write=True),
         "issue set-project": CLIHandler(fn=set_project, write=True),
+        "issue relation add": CLIHandler(fn=relation.add, write=True),
+        "issue relation list": CLIHandler(fn=relation.list_relations),
+        "issue relation delete": CLIHandler(
+            fn=relation.delete_relation, write=True
+        ),
         "issue add-label": CLIHandler(fn=add_label, write=True),
         "project list": CLIHandler(fn=reads.project_list),
         "project get": CLIHandler(fn=reads.project_get),

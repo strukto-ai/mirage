@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Prisma } from '../../generated/linear/index.js'
-import type { Comment, Issue, WorkflowState } from '../../generated/linear/index.js'
+import type { Comment, Issue, IssueRelation, WorkflowState } from '../../generated/linear/index.js'
 import { idWhere, tenantWhere } from '../kit/typescript/tenant.ts'
 import { plainWords } from '../kit/typescript/words.ts'
 import type { Ctx } from '../kit/typescript/route.ts'
@@ -189,13 +189,13 @@ export const teamDocuments: Op = async (ctx, vars) => {
 
 async function issueById(ctx: Ctx<C>, id: string | null): Promise<Issue | null> {
   if (id === null) return null
-  return ctx.db.issue.findUnique({
-    where: idWhere<Prisma.IssueWhereUniqueInput>(ctx.tenant, id, config.tenantKind),
+  return ctx.db.issue.findFirst({
+    where: { ...scope(ctx), OR: [{ id }, { identifier: id }] },
   })
 }
 
 export const issue: Op = async (ctx, vars) => {
-  const row = await issueById(ctx, idOf(pyDictOr(vars).issueId))
+  const row = await issueById(ctx, idOf(pyDictOr(vars).issueId ?? pyDictOr(vars).id))
   if (row === null) return dataReply({ issue: null })
   const refs = await loadRefs(ctx.db, ctx.tenant)
   const links = await loadLabelLinks(ctx.db, ctx.tenant)
@@ -368,6 +368,19 @@ export const issueUpdate: Op = async (ctx, vars) => {
   const row = await issueById(ctx, idOf(v.id))
   if (row === null) return errorsReply('issue not found')
   const input = pyDictOr(v.input)
+  const requestedState =
+    typeof input.stateId === 'string'
+      ? await ctx.db.workflowState.findFirst({
+          where: { ...scope(ctx), id: input.stateId, type: 'duplicate' },
+        })
+      : null
+  if (
+    requestedState !== null &&
+    (await ctx.db.issueRelation.count({
+      where: { ...scope(ctx), issueId: row.id, type: 'duplicate' },
+    })) === 0
+  )
+    return errorsReply('missing duplicate relation')
   const raw = readRaw(row.raw)
   const data: Prisma.IssueUncheckedUpdateInput = { updatedAt: WRITE_STAMP }
   for (const key of UPDATABLE) {
@@ -465,6 +478,150 @@ export const commentUpdate: Op = async (ctx, vars) => {
   })
 }
 
+function displayIssue(value: Issue | null): JsonValue {
+  return value === null ? null : { id: value.id, identifier: value.identifier, title: value.title }
+}
+
+async function relationNode(ctx: Ctx<C>, row: IssueRelation): Promise<JsonValue> {
+  const source = await issueById(ctx, row.issueId)
+  const target = await issueById(ctx, row.relatedIssueId)
+  return {
+    id: row.id,
+    type: row.type,
+    issue: displayIssue(source),
+    relatedIssue: displayIssue(target),
+  }
+}
+
+async function relationPage(
+  ctx: Ctx<C>,
+  vars: JsonValue | undefined,
+  incoming: boolean,
+): Promise<JsonValue> {
+  const v = pyDictOr(vars)
+  const parent = await issueById(ctx, idOf(v.issueId ?? v.id))
+  if (parent === null) return null
+  const rows = await ctx.db.issueRelation.findMany({
+    where: {
+      ...scope(ctx),
+      ...(incoming ? { relatedIssueId: parent.id } : { issueId: parent.id }),
+    },
+    orderBy: SEQ_ASC,
+  })
+  const cursor = asString(v.after)
+  const offset = cursor === null ? 0 : rows.findIndex((row) => row.id === cursor) + 1
+  const first = typeof v.first === 'number' ? v.first : 100
+  const page = rows.slice(offset, offset + first)
+  return {
+    nodes: await Promise.all(page.map((row) => relationNode(ctx, row))),
+    pageInfo: { hasNextPage: offset + first < rows.length, endCursor: page.at(-1)?.id ?? null },
+  }
+}
+
+export const outgoingRelations: Op = async (ctx, vars) => {
+  const page = await relationPage(ctx, vars, false)
+  return dataReply({ issue: page === null ? null : { relations: page } })
+}
+
+export const incomingRelations: Op = async (ctx, vars) => {
+  const page = await relationPage(ctx, vars, true)
+  return dataReply({ issue: page === null ? null : { inverseRelations: page } })
+}
+
+export const listRelations: Op = async (ctx, vars) => {
+  const v = pyDictOr(vars)
+  const parent = await issueById(ctx, idOf(v.issueId ?? v.id))
+  if (parent === null) return dataReply({ issue: null })
+  return dataReply({
+    issue: {
+      id: parent.id,
+      identifier: parent.identifier,
+      title: parent.title,
+      relations: await relationPage(ctx, vars, false),
+      inverseRelations: await relationPage(ctx, vars, true),
+    },
+  })
+}
+
+export const createRelation: Op = async (ctx, vars) => {
+  const input = pyDictOr(pyDictOr(vars).input)
+  const source = await issueById(ctx, idOf(input.issueId))
+  const target = await issueById(ctx, idOf(input.relatedIssueId))
+  const type = asString(input.type)
+  if (source === null || target === null) return errorsReply('issue not found')
+  if (source.id === target.id) return errorsReply('an issue cannot relate to itself')
+  if (type === null || !['blocks', 'related', 'duplicate'].includes(type))
+    return errorsReply('invalid relation type')
+  const existing = await ctx.db.issueRelation.findFirst({
+    where: {
+      ...scope(ctx),
+      issueId: source.id,
+      type,
+      ...(type === 'duplicate' ? {} : { relatedIssueId: target.id }),
+    },
+  })
+  if (existing !== null) return errorsReply('relation already exists')
+  const top = await ctx.db.issueRelation.aggregate({ where: scope(ctx), _max: { seq: true } })
+  const seq = (top._max.seq ?? -1) + 1
+  const id = `relation_${source.id}_${target.id}_${type}`
+  const row = await ctx.db.issueRelation.create({
+    data: {
+      tenant: ctx.tenant,
+      id,
+      issueId: source.id,
+      relatedIssueId: target.id,
+      type,
+      seq,
+      previousStateId: type === 'duplicate' ? source.stateId : null,
+    },
+  })
+  if (type === 'duplicate') {
+    let state = await ctx.db.workflowState.findFirst({
+      where: { ...scope(ctx), teamId: source.teamId, type: 'duplicate' },
+    })
+    if (state === null)
+      state = await ctx.db.workflowState.create({
+        data: {
+          tenant: ctx.tenant,
+          id: `duplicate_${source.teamId}`,
+          teamId: source.teamId,
+          name: 'Duplicate',
+          type: 'duplicate',
+          seq: 1000,
+        },
+      })
+    const raw = readRaw(source.raw)
+    delete raw.stateId
+    await ctx.db.issue.update({
+      where: { tenant_id: { tenant: ctx.tenant, id: source.id } },
+      data: { stateId: state.id, raw: writeRaw(raw), updatedAt: WRITE_STAMP },
+    })
+  }
+  return dataReply({
+    issueRelationCreate: { success: true, issueRelation: await relationNode(ctx, row) },
+  })
+}
+
+export const deleteRelation: Op = async (ctx, vars) => {
+  const id = idOf(pyDictOr(vars).id)
+  const row =
+    id === null ? null : await ctx.db.issueRelation.findFirst({ where: { ...scope(ctx), id } })
+  if (row === null) return errorsReply('relation not found')
+  if (row.type === 'duplicate') {
+    const source = await issueById(ctx, row.issueId)
+    if (source !== null) {
+      const raw = readRaw(source.raw)
+      delete raw.stateId
+      await ctx.db.issue.update({
+        where: { tenant_id: { tenant: ctx.tenant, id: row.issueId } },
+        data: { stateId: row.previousStateId, raw: writeRaw(raw), updatedAt: WRITE_STAMP },
+      })
+    }
+  }
+  await ctx.db.issueRelation.delete({ where: { tenant_id: { tenant: ctx.tenant, id: row.id } } })
+  return dataReply({ issueRelationDelete: { success: true } })
+}
+
 // A Map, not an object literal. `OPS[name.toLowerCase()]` reached
 // Object.prototype for two names the operation pattern accepts:
 // `query constructor` found the Object constructor and `query __proto__`
@@ -472,6 +629,13 @@ export const commentUpdate: Op = async (ctx, vars) => {
 // `unknown operation`.
 export const OPS = new Map<string, Op>(
   Object.entries({
+    getissueid: issue,
+    listissuerelations: listRelations,
+    getoutgoingrelationspage: outgoingRelations,
+    getincomingrelationspage: incomingRelations,
+    findissuerelation: outgoingRelations,
+    createissuerelation: createRelation,
+    deleteissuerelation: deleteRelation,
     teams,
     teammembers: teamMembers,
     teamissues: teamIssues,
