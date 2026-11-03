@@ -104,7 +104,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10du/d && head -c 4096 /dev/zero > /data/r10du/f && echo hi > /data/r10du/d/g && du -h /data/r10du/f; du -a --max-depth=1 /data/r10du; (cd /data/r10du/d && du; du -a); rm -r /data/r10du",
+      "command": "mkdir -p /data/r10du/d && head -c 4096 /dev/zero > /data/r10du/f && echo hi > /data/r10du/d/g && du -h /data/r10du/f; du -a --max-depth=1 /data/r10du; (cd /data/r10du/d && du; du -a)",
       "expect": {
         "exit": 0,
         "stdout": "4.0K\t/data/r10du/f\n3\t/data/r10du/d\n4096\t/data/r10du/f\n4099\t/data/r10du\n3\t.\n3\t./g\n3\t.\n",
@@ -139,7 +139,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/dumd/sub/deep && printf 'deep\\n' > /data/dumd/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dumd/sub/nested.txt && du -a --max-depth=0 /data/dumd/sub; du --max-depth=-1 /data/dumd/sub; echo rc=$?; du -s --max-depth=0 /data/dumd/sub; echo rc=$?; du -s /data/dumd/sub; rm -r /data/dumd",
+      "command": "mkdir -p /data/dumd/sub/deep && printf 'deep\\n' > /data/dumd/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dumd/sub/nested.txt && du -a --max-depth=0 /data/dumd/sub; du --max-depth=-1 /data/dumd/sub; echo rc=$?; du -s --max-depth=0 /data/dumd/sub; echo rc=$?; du -s /data/dumd/sub",
       "expect": {
         "exit": 0,
         "stdout": "20\t/data/dumd/sub\n20\t/data/dumd/sub\nrc=0\n20\t/data/dumd/sub\nrc=0\n20\t/data/dumd/sub\n",

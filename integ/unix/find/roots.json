@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crfr/sub/d && echo x > /data/crfr/sub/d/f && find /data/crfr/sub /data/crfr/sub; rm -r /data/crfr",
+      "command": "mkdir -p /data/crfr/sub/d && echo x > /data/crfr/sub/d/f && find /data/crfr/sub /data/crfr/sub",
       "expect": {
         "exit": 0,
         "stdout": "/data/crfr/sub\n/data/crfr/sub/d\n/data/crfr/sub/d/f\n/data/crfr/sub\n/data/crfr/sub/d\n/data/crfr/sub/d/f\n",

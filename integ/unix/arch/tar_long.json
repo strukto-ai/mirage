@@ -25,7 +25,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/tlo131101 && tar --create --file=/data/tlo131101/a.tar --directory=/data a.txt b.txt && tar --list --file /data/tlo131101/a.tar; rc=$?; rm -r /data/tlo131101; exit $rc)",
+      "command": "(mkdir -p /data/tlo131101 && tar --create --file=/data/tlo131101/a.tar --directory=/data a.txt b.txt && tar --list --file /data/tlo131101/a.tar; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\nb.txt\n",
@@ -57,7 +57,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/tlo131102 && tar --crea -f /data/tlo131102/a.tar --direc=/data a.txt && tar -t -f /data/tlo131102/a.tar; rc=$?; rm -r /data/tlo131102; exit $rc)",
+      "command": "(mkdir -p /data/tlo131102 && tar --crea -f /data/tlo131102/a.tar --direc=/data a.txt && tar -t -f /data/tlo131102/a.tar; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\n",
@@ -124,7 +124,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/tlo131103 && tar --create --gzip -f /data/tlo131103/a.tgz -C /data a.txt && tar --list --gzip -f /data/tlo131103/a.tgz; rc=$?; rm -r /data/tlo131103; exit $rc)",
+      "command": "(mkdir -p /data/tlo131103 && tar --create --gzip -f /data/tlo131103/a.tgz -C /data a.txt && tar --list --gzip -f /data/tlo131103/a.tgz; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\n",
@@ -331,7 +331,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/tlo131104 && head -n 2 /data/a.txt > /data/tlo131104/source && ln -s source /data/tlo131104/l && tar --create --dereference --file=/data/tlo131104/a.tar --directory=/data/tlo131104 l && tar --extract --to-stdout --file=/data/tlo131104/a.tar && readlink /data/tlo131104/l; rc=$?; rm -r /data/tlo131104; exit $rc)",
+      "command": "(mkdir -p /data/tlo131104 && head -n 2 /data/a.txt > /data/tlo131104/source && ln -s source /data/tlo131104/l && tar --create --dereference --file=/data/tlo131104/a.tar --directory=/data/tlo131104 l && tar --extract --to-stdout --file=/data/tlo131104/a.tar && readlink /data/tlo131104/l; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "hello\nworld\nsource\n",
@@ -361,7 +361,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_tl/dir && cd /data/fcA_tl && printf 'x\\n' > a.txt && echo k > dir/.keep && tar -cf a.tar a.txt && tar --get -f a.tar --directory=dir && ls dir && tar --create --gzip --file=a.tgz a.txt && tar -t --gun -f a.tgz; rc=$?; cd / && rm -r /data/fcA_tl; exit $rc)",
+      "command": "(mkdir -p /data/fcA_tl/dir && cd /data/fcA_tl && printf 'x\\n' > a.txt && echo k > dir/.keep && tar -cf a.tar a.txt && tar --get -f a.tar --directory=dir && ls dir && tar --create --gzip --file=a.tgz a.txt && tar -t --gun -f a.tgz; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\na.txt\n",
@@ -426,7 +426,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_sc/1/2/3/4/5/6/7/8/9/10 /data/fcA_sc/out && cd /data/fcA_sc && echo deep > 1/2/3/4/5/6/7/8/9/10/k.txt && echo k > out/.keep && tar -cf a.tar 1/2/3/4/5/6/7/8/9/10/k.txt && tar -xf a.tar --strip-components=010 -C out && ls out && tar -xOf a.tar --strip-components=+1 && tar -tf a.tar --strip-components=' 2'; rc=$?; cd / && rm -r /data/fcA_sc; exit $rc)",
+      "command": "(mkdir -p /data/fcA_sc/1/2/3/4/5/6/7/8/9/10 /data/fcA_sc/out && cd /data/fcA_sc && echo deep > 1/2/3/4/5/6/7/8/9/10/k.txt && echo k > out/.keep && tar -cf a.tar 1/2/3/4/5/6/7/8/9/10/k.txt && tar -xf a.tar --strip-components=010 -C out && ls out && tar -xOf a.tar --strip-components=+1 && tar -tf a.tar --strip-components=' 2'; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "k.txt\ndeep\n1/2/3/4/5/6/7/8/9/10/k.txt\n",

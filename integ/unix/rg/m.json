@@ -298,7 +298,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/cfrgm/sub/deep; printf 'nested\\ncontent\\n' > /data/cfrgm/sub/nested.txt; printf 'deep\\n' > /data/cfrgm/sub/deep/deeper.txt; rg -m 0 nested /data/cfrgm/sub; echo rc=$?; rm -rf /data/cfrgm",
+      "command": "mkdir -p /data/cfrgm/sub/deep; printf 'nested\\ncontent\\n' > /data/cfrgm/sub/nested.txt; printf 'deep\\n' > /data/cfrgm/sub/deep/deeper.txt; rg -m 0 nested /data/cfrgm/sub; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",

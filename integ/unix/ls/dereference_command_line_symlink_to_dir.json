@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_ls/t && echo x > /data/fcF_ls/t/f && ln -s t /data/fcF_ls/l && ln -s t/f /data/fcF_ls/lf && ls -F /data/fcF_ls/l; ls -F --dereference-command-line-symlink-to-dir /data/fcF_ls/l; ls -dF --dereference-command-line-symlink-to-dir /data/fcF_ls/l /data/fcF_ls/lf; ls -F --dereference-command-line-symlink-to-dir /data/fcF_ls; rm -r /data/fcF_ls",
+      "command": "mkdir -p /data/fcF_ls/t && echo x > /data/fcF_ls/t/f && ln -s t /data/fcF_ls/l && ln -s t/f /data/fcF_ls/lf && ls -F /data/fcF_ls/l; ls -F --dereference-command-line-symlink-to-dir /data/fcF_ls/l; ls -dF --dereference-command-line-symlink-to-dir /data/fcF_ls/l /data/fcF_ls/lf; ls -F --dereference-command-line-symlink-to-dir /data/fcF_ls",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcF_ls/l@\nf\n/data/fcF_ls/l/\n/data/fcF_ls/lf@\nl@\nlf@\nt/\n",

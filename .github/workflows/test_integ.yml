@@ -19,6 +19,7 @@ permissions:
       - .github/actions/setup-rust/action.yml
       - .github/actions/integ-battery-setup/action.yml
       - .github/actions/nextcloud-tune/action.yml
+      - .github/workflows/test_nextcloud_full.yml
       # README files under these trees are prose that nothing loads, so a
       # change to one alone runs nothing. integ/fixtures/** is not listed:
       # the fake hubs serve the READMEs there as fixture content.
@@ -140,6 +141,7 @@ jobs:
               - '.github/actions/setup-uv/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
               - '.github/actions/nextcloud-tune/action.yml'
+              - '.github/workflows/test_nextcloud_full.yml'
               - '!integ/README.md'
               - '!integ/runtime/**/README.md'
               - '!typescript/**/README.md'
@@ -190,6 +192,7 @@ jobs:
               - '.github/actions/setup-uv/action.yml'
               - '.github/actions/integ-battery-setup/action.yml'
               - '.github/actions/nextcloud-tune/action.yml'
+              - '.github/workflows/test_nextcloud_full.yml'
               - '!integ/README.md'
               - '!integ/runtime/**/README.md'
               - '!python/**/README.md'
@@ -549,7 +552,7 @@ jobs:
       - name: Start the declarative battery on Nextcloud (background)
         run: |
           integ/scripts/background.sh start nextcloud \
-            'cd integ && pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --target nextcloud --strict'
+            'cd integ && pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --target nextcloud --suite nextcloud --strict'
 
       - name: Start MinIO
         run: |
@@ -1238,7 +1241,7 @@ jobs:
           admin-password: ${{ env.NEXTCLOUD_PASSWORD }}
 
       - name: Run declarative battery on nextcloud
-        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --suite nextcloud --strict
 
   # TiDB Cloud Filesystem runs on the open-source drive9 server, so both
   # hosts' batteries reach the same REST API on a server built here at a

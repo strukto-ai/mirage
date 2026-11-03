@@ -26,7 +26,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "source lib.sh && . /data/g10/lib.sh && cd / && rm -r /data/g10",
+      "command": "source lib.sh && . /data/g10/lib.sh && cd /",
       "expect": {
         "exit": 0,
         "stdout": "sourced-ok\nsourced-ok\n",

@@ -603,7 +603,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfsk; printf 'a 2 z\\nb 2 a\\nc 1 m\\n' > /data/cfsk/sk_fields.txt; sort -k2 /data/cfsk/sk_fields.txt; echo rc=$?; sort -k2,2 /data/cfsk/sk_fields.txt; echo rc=$?; sort -k2,2n -k1,1r /data/cfsk/sk_fields.txt; echo rc=$?; rm -rf /data/cfsk",
+      "command": "mkdir -p /data/cfsk; printf 'a 2 z\\nb 2 a\\nc 1 m\\n' > /data/cfsk/sk_fields.txt; sort -k2 /data/cfsk/sk_fields.txt; echo rc=$?; sort -k2,2 /data/cfsk/sk_fields.txt; echo rc=$?; sort -k2,2n -k1,1r /data/cfsk/sk_fields.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "c 1 m\nb 2 a\na 2 z\nrc=0\nc 1 m\na 2 z\nb 2 a\nrc=0\nc 1 m\nb 2 a\na 2 z\nrc=0\n",
@@ -643,7 +643,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfsk; printf 'z 2\\nm 2\\na 2\\n' > /data/cfsk/sk_ties.txt; sort -k2,2n /data/cfsk/sk_ties.txt; echo rc=$?; sort -s -k2,2n /data/cfsk/sk_ties.txt; echo rc=$?; sort -rk2,2n /data/cfsk/sk_ties.txt; echo rc=$?; rm -rf /data/cfsk",
+      "command": "mkdir -p /data/cfsk; printf 'z 2\\nm 2\\na 2\\n' > /data/cfsk/sk_ties.txt; sort -k2,2n /data/cfsk/sk_ties.txt; echo rc=$?; sort -s -k2,2n /data/cfsk/sk_ties.txt; echo rc=$?; sort -rk2,2n /data/cfsk/sk_ties.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "a 2\nm 2\nz 2\nrc=0\nz 2\nm 2\na 2\nrc=0\nz 2\nm 2\na 2\nrc=0\n",
@@ -684,7 +684,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfsk; printf 'apple:12\\nbee:3\\ncat:100\\n' > /data/cfsk/sk_colon.txt; sort -t: -k1.2,1.3 /data/cfsk/sk_colon.txt; echo rc=$?; rm -rf /data/cfsk",
+      "command": "mkdir -p /data/cfsk; printf 'apple:12\\nbee:3\\ncat:100\\n' > /data/cfsk/sk_colon.txt; sort -t: -k1.2,1.3 /data/cfsk/sk_colon.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "cat:100\nbee:3\napple:12\nrc=0\n",

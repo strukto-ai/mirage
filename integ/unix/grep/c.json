@@ -372,7 +372,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgA; printf 'a\\nb\\nc\\n' > /data/cfgA/g1; printf 'x\\na\\ny\\n' > /data/cfgA/g2; printf 'zzz\\n' > /data/cfgA/g0; grep -c -A1 a /data/cfgA/g1 /data/cfgA/g2; echo rc=$?; rm -rf /data/cfgA",
+      "command": "mkdir -p /data/cfgA; printf 'a\\nb\\nc\\n' > /data/cfgA/g1; printf 'x\\na\\ny\\n' > /data/cfgA/g2; printf 'zzz\\n' > /data/cfgA/g0; grep -c -A1 a /data/cfgA/g1 /data/cfgA/g2; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/cfgA/g1:1\n/data/cfgA/g2:1\nrc=0\n",
@@ -411,7 +411,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "grep -c hello /data/a.txt /data/b.txt; echo rc=$?; mkdir -p /data/grc && echo x > /data/grc/f && grep -rc zzz /data/grc; echo rc=$?; rm -r /data/grc",
+      "command": "grep -c hello /data/a.txt /data/b.txt; echo rc=$?; mkdir -p /data/grc && echo x > /data/grc/f && grep -rc zzz /data/grc; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/a.txt:1\n/data/b.txt:0\nrc=0\n/data/grc/f:0\nrc=1\n",

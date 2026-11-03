@@ -203,7 +203,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rm /data/symv/tab /data/symv/bs /data/symv/sp && rm -r /data/symv",
+      "command": "rm /data/symv/tab /data/symv/bs /data/symv/sp",
       "expect": {
         "exit": 0,
         "stdout": "",

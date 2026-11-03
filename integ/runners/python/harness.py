@@ -227,6 +227,41 @@ def load_cases(root: Path) -> list[dict]:
     return cases
 
 
+def select_suite(root: Path, cases: list[dict], name: str) -> list[dict]:
+    """Select an ordered backend contract suite from the shared corpus.
+
+    Args:
+        root (Path): the integ directory.
+        cases (list[dict]): loaded cases, in execution order.
+        name (str): the backend target and suite manifest name.
+    """
+    if name != "nextcloud":
+        raise ValueError(f"unknown suite: {name}")
+    selectors = json.loads((root / "ci" / f"{name}.json").read_text())
+    if (
+        not isinstance(selectors, list)
+        or not selectors
+        or any(not isinstance(s, str) or not s for s in selectors)
+        or len(set(selectors)) != len(selectors)
+    ):
+        raise ValueError("suite selectors must be unique nonempty strings")
+    eligible = [case for case in cases if name in case["targets"]]
+    selected: set[str] = set()
+    for selector in selectors:
+        matches = [
+            case["id"]
+            for case in eligible
+            if case["id"] == selector
+            or case["_source"] == selector
+            or selector.endswith("/")
+            and case["_source"].startswith(selector)
+        ]
+        if not matches:
+            raise ValueError(f"suite {name}: unused selector {selector}")
+        selected.update(matches)
+    return [case for case in eligible if case["id"] in selected]
+
+
 def validate_cases(root: Path, cases: list[dict]) -> None:
     """Fail loudly on the ways a case silently stops being tested.
 

@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "tail --retry /data/fcD_nope.txt; echo rc=$?; mkdir -p /data/fcD_rd; printf k > /data/fcD_rd/k; tail --follow=descriptor --retry /data/fcD_rd; echo rc=$?; rm -r /data/fcD_rd",
+      "command": "tail --retry /data/fcD_nope.txt; echo rc=$?; mkdir -p /data/fcD_rd; printf k > /data/fcD_rd/k; tail --follow=descriptor --retry /data/fcD_rd; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",

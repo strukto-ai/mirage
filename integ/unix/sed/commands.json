@@ -448,7 +448,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sF && printf 'a\\n' > /data/sF/f1 && printf 'b\\n' > /data/sF/f2 && sed F /data/sF/f1 /data/sF/f2; rm -r /data/sF",
+      "command": "mkdir -p /data/sF && printf 'a\\n' > /data/sF/f1 && printf 'b\\n' > /data/sF/f2 && sed F /data/sF/f1 /data/sF/f2",
       "expect": {
         "exit": 0,
         "stdout": "/data/sF/f1\na\n/data/sF/f2\nb\n",

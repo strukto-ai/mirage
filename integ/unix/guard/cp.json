@@ -240,7 +240,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cp -r /data/guard/sub /data/guard/copied/ && test -f /data/guard/copied/s.txt && rm -r /data/guard/copied",
+      "command": "cp -r /data/guard/sub /data/guard/copied/ && test -f /data/guard/copied/s.txt",
       "expect": {
         "exit": 0,
         "stdout": "",
@@ -273,7 +273,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(cd /data && mkdir -p r10g/s && cp a.txt a.txt; echo rc=$?; cp -r r10g r10g/s; echo rc=$?; cp -r r10g a.txt; echo rc=$?; cp r10g r10gx; echo rc=$?; rm -r r10g)",
+      "command": "(cd /data && mkdir -p r10g/s && cp a.txt a.txt; echo rc=$?; cp -r r10g r10g/s; echo rc=$?; cp -r r10g a.txt; echo rc=$?; cp r10g r10gx; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",

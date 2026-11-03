@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_du/t /data/fcF_du/d && echo x > /data/fcF_du/t/f && echo y > /data/fcF_du/d/g && ln -s ../t /data/fcF_du/d/l && du -aP /data/fcF_du/d | cut -f2 | sort; du -aP /data/fcF_du/d/l | cut -f2; rm -r /data/fcF_du",
+      "command": "mkdir -p /data/fcF_du/t /data/fcF_du/d && echo x > /data/fcF_du/t/f && echo y > /data/fcF_du/d/g && ln -s ../t /data/fcF_du/d/l && du -aP /data/fcF_du/d | cut -f2 | sort; du -aP /data/fcF_du/d/l | cut -f2",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcF_du/d\n/data/fcF_du/d/g\n/data/fcF_du/d/l\n/data/fcF_du/d/l\n",
@@ -67,7 +67,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_du2/t /data/fcF_du2/d && echo x > /data/fcF_du2/t/f && echo y > /data/fcF_du2/d/g && ln -s ../t /data/fcF_du2/d/l && du -aLP /data/fcF_du2/d/l | cut -f2; du -aPL /data/fcF_du2/d/l | cut -f2; rm -r /data/fcF_du2",
+      "command": "mkdir -p /data/fcF_du2/t /data/fcF_du2/d && echo x > /data/fcF_du2/t/f && echo y > /data/fcF_du2/d/g && ln -s ../t /data/fcF_du2/d/l && du -aLP /data/fcF_du2/d/l | cut -f2; du -aPL /data/fcF_du2/d/l | cut -f2",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcF_du2/d/l\n/data/fcF_du2/d/l/f\n/data/fcF_du2/d/l\n",

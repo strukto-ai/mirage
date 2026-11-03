@@ -33,6 +33,7 @@ import {
   parseAllowSkip,
   runConsistencyCase,
   seedFixture,
+  selectSuite,
   seedMountRoot,
 } from './harness.ts'
 
@@ -59,6 +60,7 @@ function parseArgs(): {
   excluded: string[]
   emit: string | undefined
   facet: string | undefined
+  suite: string | undefined
   strict: boolean
   allowSkip: string
   targetJobs: number
@@ -67,6 +69,7 @@ function parseArgs(): {
   const excluded: string[] = []
   let emit: string | undefined
   let facet: string | undefined
+  let suite: string | undefined
   let strict = false
   let allowSkip = ''
   // How many targets may be in flight. One is the plain loop, which stays the
@@ -77,7 +80,10 @@ function parseArgs(): {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--target' && i + 1 < argv.length) targets.push(argv[++i])
     else if (argv[i] === '--facet' && i + 1 < argv.length) facet = argv[++i]
-    else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
+    else if (argv[i] === '--suite' || argv[i]?.startsWith('--suite=')) {
+      suite = argv[i] === '--suite' ? argv[++i] : argv[i]?.slice('--suite='.length)
+      if (suite !== 'nextcloud') throw new Error('--suite requires nextcloud')
+    } else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
     else if (argv[i] === '--strict') strict = true
     else if (argv[i] === '--exclude-case') {
       const id = argv[++i]
@@ -98,7 +104,7 @@ function parseArgs(): {
       )
     }
   }
-  return { targets, excluded, emit, facet, strict, allowSkip, targetJobs }
+  return { targets, excluded, emit, facet, suite, strict, allowSkip, targetJobs }
 }
 
 /**
@@ -409,10 +415,19 @@ async function main(): Promise<void> {
   const services = loadServices(root)
   const allCases = loadCases(root)
 
-  const { targets, excluded, emit: emitPath, facet, strict, allowSkip, targetJobs } = parseArgs()
+  const {
+    targets,
+    excluded,
+    emit: emitPath,
+    facet,
+    suite,
+    strict,
+    allowSkip,
+    targetJobs,
+  } = parseArgs()
   const known = new Set(allCases.map((c) => c.id))
   for (const id of excluded) if (!known.has(id)) throw new Error(`unknown excluded case: ${id}`)
-  const cases = allCases.filter((c) => !excluded.includes(c.id))
+  let cases = allCases.filter((c) => !excluded.includes(c.id))
   // Targets are grouped into facets so CI can run one backend family per job; a
   // target with no facet belongs to "core", which the shared battery runs.
   let ids: string[]
@@ -424,6 +439,13 @@ async function main(): Promise<void> {
     }
   } else {
     ids = targets.length ? targets : [...manifest.keys()]
+  }
+  if (suite !== undefined) {
+    if (ids.length !== 1 || ids[0] !== suite || excluded.length > 0) {
+      throw new Error('--suite requires its single --target and no --exclude-case')
+    }
+    cases = selectSuite(root, cases, suite)
+    process.stdout.write(`suite ${suite}: ${String(cases.length)} cases\n`)
   }
   const report = new Report()
   const emit: EmitRow[] | null = emitPath ? [] : null

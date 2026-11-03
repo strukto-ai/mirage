@@ -25,7 +25,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1320stream; printf 'hello\\nworld\\n' > /data/t1320stream/a.txt; cd /data/t1320stream && tar -cf - a.txt | tar -tf -; test ! -e ./-; rc=$?; rm -r /data/t1320stream; exit $rc)",
+      "command": "(mkdir -p /data/t1320stream; printf 'hello\\nworld\\n' > /data/t1320stream/a.txt; cd /data/t1320stream && tar -cf - a.txt | tar -tf -; test ! -e ./-; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\n",
@@ -57,7 +57,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1320stream; printf 'hello\\nworld\\n' > /data/t1320stream/a.txt; cd /data/t1320stream && tar -cvf - a.txt | tar -xOf -; rc=$?; rm -r /data/t1320stream; exit $rc)",
+      "command": "(mkdir -p /data/t1320stream; printf 'hello\\nworld\\n' > /data/t1320stream/a.txt; cd /data/t1320stream && tar -cvf - a.txt | tar -xOf -; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "hello\nworld\n",
@@ -89,7 +89,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1320stream; printf 'hello\\nworld\\n' > /data/t1320stream/a.txt; cd /data/t1320stream && tar -czf - a.txt | tar -tzf -; rc=$?; rm -r /data/t1320stream; exit $rc)",
+      "command": "(mkdir -p /data/t1320stream; printf 'hello\\nworld\\n' > /data/t1320stream/a.txt; cd /data/t1320stream && tar -czf - a.txt | tar -tzf -; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\n",
@@ -121,7 +121,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1320stream; printf 'hello\\nworld\\n' > /data/t1320stream/a.txt; cd /data/t1320stream && tar --create --file=- a.txt | tar --extract --to-stdout --file=-; rc=$?; rm -r /data/t1320stream; exit $rc)",
+      "command": "(mkdir -p /data/t1320stream; printf 'hello\\nworld\\n' > /data/t1320stream/a.txt; cd /data/t1320stream && tar --create --file=- a.txt | tar --extract --to-stdout --file=-; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "hello\nworld\n",
@@ -153,7 +153,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1320dash && printf keep > /data/t1320dash/.keep && cd /data/t1320dash && tar -cf ./- -C /data a.txt && tar -tf ./-; rc=$?; rm -r /data/t1320dash; exit $rc)",
+      "command": "(mkdir -p /data/t1320dash && printf keep > /data/t1320dash/.keep && cd /data/t1320dash && tar -cf ./- -C /data a.txt && tar -tf ./-; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\n",
@@ -185,7 +185,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1320pipe/out && printf keep > /data/t1320pipe/out/.keep; printf 'hello\\nworld\\n' > /data/t1320pipe/a.txt; cd /data/t1320pipe && tar -cf - a.txt | tar -xf - -C out; cat out/a.txt; rc=$?; rm -r /data/t1320pipe; exit $rc)",
+      "command": "(mkdir -p /data/t1320pipe/out && printf keep > /data/t1320pipe/out/.keep; printf 'hello\\nworld\\n' > /data/t1320pipe/a.txt; cd /data/t1320pipe && tar -cf - a.txt | tar -xf - -C out; cat out/a.txt; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "hello\nworld\n",
@@ -473,7 +473,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1320eof; printf 'hello\\n' > /data/t1320eof/a.txt; tar -cf /data/t1320eof/a.tar -C /data/t1320eof a.txt; head -c 1024 /data/t1320eof/a.tar | tar -tf -; printf junk >> /data/t1320eof/a.tar; tar -tf /data/t1320eof/a.tar; rc=$?; rm -r /data/t1320eof; exit $rc)",
+      "command": "(mkdir -p /data/t1320eof; printf 'hello\\n' > /data/t1320eof/a.txt; tar -cf /data/t1320eof/a.tar -C /data/t1320eof a.txt; head -c 1024 /data/t1320eof/a.tar | tar -tf -; printf junk >> /data/t1320eof/a.tar; tar -tf /data/t1320eof/a.tar; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\na.txt\n",

@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/st && printf 'bibtexurl: x\\nnext\\n' > /data/st/f && sed -i \"/^bibtexurl:/a codeurl: 'https:\\/\\/github.com\\/u\\/r'\" /data/st/f && cat /data/st/f && rm -r /data/st",
+      "command": "mkdir -p /data/st && printf 'bibtexurl: x\\nnext\\n' > /data/st/f && sed -i \"/^bibtexurl:/a codeurl: 'https:\\/\\/github.com\\/u\\/r'\" /data/st/f && cat /data/st/f",
       "expect": {
         "exit": 0,
         "stdout": "bibtexurl: x\ncodeurl: 'https://github.com/u/r'\nnext\n",
@@ -378,7 +378,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sh && printf 'x\\n' > /data/sh/f && sed -i 'a y\\xff' /data/sh/f && od -An -tx1 /data/sh/f && rm -r /data/sh",
+      "command": "mkdir -p /data/sh && printf 'x\\n' > /data/sh/f && sed -i 'a y\\xff' /data/sh/f && od -An -tx1 /data/sh/f",
       "expect": {
         "exit": 0,
         "stdout": " 78 0a 79 ff 0a\n",

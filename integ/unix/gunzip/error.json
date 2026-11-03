@@ -486,7 +486,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_gt && cd /data/fcA_gt && (printf hello | gzip; printf junk) > a.gz && printf w | gzip > b.gz && gunzip a.gz b.gz; echo rc=$?; ls; cat a b; cd / && rm -r /data/fcA_gt)",
+      "command": "(mkdir -p /data/fcA_gt && cd /data/fcA_gt && (printf hello | gzip; printf junk) > a.gz && printf w | gzip > b.gz && gunzip a.gz b.gz; echo rc=$?; ls; cat a b)",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\na\nb\nhellow",
@@ -551,7 +551,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_gp && cd /data/fcA_gp && printf 'file\\n' > b.txt && printf 'plain\\n' > p.gz && gzip b.txt && gunzip p.gz b.txt.gz; echo rc=$?; ls; cat b.txt; cd / && rm -r /data/fcA_gp)",
+      "command": "(mkdir -p /data/fcA_gp && cd /data/fcA_gp && printf 'file\\n' > b.txt && printf 'plain\\n' > p.gz && gzip b.txt && gunzip p.gz b.txt.gz; echo rc=$?; ls; cat b.txt)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nb.txt\np.gz\nfile\n",
@@ -581,7 +581,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_gd && cd /data/fcA_gd && printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' > bad.gz && printf 'x\\n' | gzip > ok.gz && gunzip -c bad.gz ok.gz; echo rc=$?; gunzip -t bad.gz ok.gz; echo rc=$?; ls; cd / && rm -r /data/fcA_gd)",
+      "command": "(mkdir -p /data/fcA_gd && cd /data/fcA_gd && printf '\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\xcb\\x48\\xcd\\xc9\\xc9\\xe7\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00' > bad.gz && printf 'x\\n' | gzip > ok.gz && gunzip -c bad.gz ok.gz; echo rc=$?; gunzip -t bad.gz ok.gz; echo rc=$?; ls)",
       "expect": {
         "exit": 0,
         "stdout": "hello\nrc=1\nrc=1\nbad.gz\nok.gz\n",

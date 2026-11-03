@@ -307,6 +307,35 @@ export function loadCases(root: string): Case[] {
   return cases
 }
 
+/** Select an ordered backend contract suite from the shared corpus. */
+export function selectSuite(root: string, cases: Case[], name: string): Case[] {
+  if (name !== 'nextcloud') throw new Error(`unknown suite: ${name}`)
+  const selectors: unknown = JSON.parse(readFileSync(join(root, 'ci', `${name}.json`), 'utf8'))
+  if (
+    !Array.isArray(selectors) ||
+    selectors.length === 0 ||
+    !selectors.every((s: unknown): s is string => typeof s === 'string' && s.length > 0) ||
+    new Set(selectors).size !== selectors.length
+  ) {
+    throw new Error('suite selectors must be unique nonempty strings')
+  }
+  const eligible = cases.filter((c) => c.targets.includes(name))
+  const selected = new Set<string>()
+  for (const selector of selectors) {
+    const matches = eligible.filter((c) => {
+      const source = c._source?.split(sep).join('/') ?? ''
+      return (
+        c.id === selector ||
+        source === selector ||
+        (selector.endsWith('/') && source.startsWith(selector))
+      )
+    })
+    if (matches.length === 0) throw new Error(`suite ${name}: unused selector ${selector}`)
+    for (const c of matches) selected.add(c.id)
+  }
+  return eligible.filter((c) => selected.has(c.id))
+}
+
 /**
  * Fail loudly on the two ways a case silently stops being tested.
  *

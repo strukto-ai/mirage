@@ -101,7 +101,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r17mi/s/sub /data/r17mi/t/a && printf a > /data/r17mi/s/a && printf b > /data/r17mi/s/sub/b && printf z > /data/r17mi/t/a/z && printf x > /data/r17mi/t/sub && (cd /data/r17mi && mv -i s/a t < /dev/null; echo rc=$?; echo y | mv -i s/sub t; echo rc=$?); find /data/r17mi | sort; rm -r /data/r17mi",
+      "command": "mkdir -p /data/r17mi/s/sub /data/r17mi/t/a && printf a > /data/r17mi/s/a && printf b > /data/r17mi/s/sub/b && printf z > /data/r17mi/t/a/z && printf x > /data/r17mi/t/sub && (cd /data/r17mi && mv -i s/a t < /dev/null; echo rc=$?; echo y | mv -i s/sub t; echo rc=$?); find /data/r17mi | sort",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\n/data/r17mi\n/data/r17mi/s\n/data/r17mi/s/a\n/data/r17mi/s/sub\n/data/r17mi/s/sub/b\n/data/r17mi/t\n/data/r17mi/t/a\n/data/r17mi/t/a/z\n/data/r17mi/t/sub\n",

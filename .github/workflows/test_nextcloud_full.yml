@@ -1,0 +1,84 @@
+name: Nextcloud full
+
+permissions:
+  contents: read
+
+"on":
+  pull_request:
+    paths:
+      - .github/workflows/test_nextcloud_full.yml
+      - .github/actions/nextcloud-tune/action.yml
+  schedule:
+    - cron: '23 19 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nextcloud-full-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_HTTP_TIMEOUT: 120
+  MEM0_TELEMETRY: "False"
+  TSX_V8_FLAGS: --wasm-wrapper-tiering-budget=1000000000
+
+jobs:
+  nextcloud:
+    name: Nextcloud full (${{ matrix.host }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [python, typescript]
+    services:
+      nextcloud:
+        image: nextcloud:30-apache
+        ports:
+          - 8080:80
+        options: --tmpfs /var/www/html/data:rw,uid=33,gid=33,mode=0770
+        env:
+          SQLITE_DATABASE: nextcloud
+          NEXTCLOUD_ADMIN_USER: admin
+          NEXTCLOUD_ADMIN_PASSWORD: admin123
+          NEXTCLOUD_TRUSTED_DOMAINS: localhost
+    env:
+      NEXTCLOUD_URL: http://localhost:8080/remote.php/dav/files/admin/
+      NEXTCLOUD_USERNAME: admin
+      NEXTCLOUD_PASSWORD: admin123
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        if: matrix.host == 'python'
+        with:
+          python-version: '3.12'
+      - uses: ./.github/actions/setup-uv
+        if: matrix.host == 'python'
+      - name: Install Python dependencies
+        if: matrix.host == 'python'
+        working-directory: python
+        run: uv sync --all-extras
+      - uses: ./.github/actions/setup-node-pnpm
+        if: matrix.host == 'typescript'
+        with:
+          node-version: '24'
+      - name: Install TypeScript dependencies
+        if: matrix.host == 'typescript'
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+      - name: Build TypeScript packages
+        if: matrix.host == 'typescript'
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node --filter @struktoai/mirage-browser --filter @struktoai/mirage-server build
+      - name: Wait for Nextcloud and tune it for the battery
+        uses: ./.github/actions/nextcloud-tune
+        timeout-minutes: 10
+        with:
+          container-id: ${{ job.services.nextcloud.id }}
+          admin-password: ${{ env.NEXTCLOUD_PASSWORD }}
+      - name: Full Nextcloud battery (python)
+        if: matrix.host == 'python'
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict
+      - name: Full Nextcloud battery (typescript)
+        if: matrix.host == 'typescript'
+        working-directory: integ
+        run: pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --target nextcloud --strict

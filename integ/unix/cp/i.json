@@ -101,7 +101,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fc0j/d1 /data/fc0j/d2 /data/fc0j/dst && echo 1 > /data/fc0j/d1/f && echo 2 > /data/fc0j/d2/f && cd /data/fc0j && printf 'y\\ny\\n' | cp -i d1/f d2/f dst; echo rc=$?; cat dst/f; cd / && rm -rf /data/fc0j)",
+      "command": "(mkdir -p /data/fc0j/d1 /data/fc0j/d2 /data/fc0j/dst && echo 1 > /data/fc0j/d1/f && echo 2 > /data/fc0j/d2/f && cd /data/fc0j && printf 'y\\ny\\n' | cp -i d1/f d2/f dst; echo rc=$?; cat dst/f)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n1\n",

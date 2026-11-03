@@ -64,7 +64,7 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/tl/d/e && printf x > /data/tl/d/e/f && cd /data/tl && for l in abc '' 0 -1; do tree -L \"$l\" d; echo rc=$?; done; tree -L 1x d; tree -L 0x2 d; cd / && rm -r /data/tl",
+      "command": "mkdir -p /data/tl/d/e && printf x > /data/tl/d/e/f && cd /data/tl && for l in abc '' 0 -1; do tree -L \"$l\" d; echo rc=$?; done; tree -L 1x d; tree -L 0x2 d; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nd\n`-- e\n\n2 directories, 0 files\nd\n`-- e\n    `-- f\n\n2 directories, 1 file\n",

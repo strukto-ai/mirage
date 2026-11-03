@@ -57,7 +57,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/xm_rt_tree /data2/xm_rt_tree; printf x > /data/xm_rt_tree/f; printf y > /data2/xm_rt_tree/g; tree /data/xm_rt_tree /data2/xm_rt_tree; rm -r /data/xm_rt_tree /data2/xm_rt_tree",
+      "command": "mkdir -p /data/xm_rt_tree /data2/xm_rt_tree; printf x > /data/xm_rt_tree/f; printf y > /data2/xm_rt_tree/g; tree /data/xm_rt_tree /data2/xm_rt_tree",
       "expect": {
         "exit": 0,
         "stdout": "/data/xm_rt_tree\n`-- f\n/data2/xm_rt_tree\n`-- g\n\n2 directories, 2 files\n",

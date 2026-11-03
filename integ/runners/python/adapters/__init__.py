@@ -568,12 +568,14 @@ class NextcloudService:
         username: str | None,
         password: str | None,
         admin_ws: Workspace,
+        admin: NextcloudVFS,
         base: str,
     ) -> None:
         self.url = url
         self.username = username
         self.password = password
         self.admin_ws = admin_ws
+        self.admin = admin
         self.base = base
 
     @classmethod
@@ -590,7 +592,7 @@ class NextcloudService:
             f"/admin/{base}/{m['root']}" for m in target["mounts"]
         )
         await _admin_exec(admin_ws, f"mkdir -p {paths}")
-        return cls(url, username, password, admin_ws, base)
+        return cls(url, username, password, admin_ws, admin, base)
 
     def vfs(self, mount: dict) -> NextcloudVFS:
         url = f"{self.url.rstrip('/')}/{self.base}/{mount['root']}/"
@@ -601,8 +603,10 @@ class NextcloudService:
         )
 
     async def teardown(self) -> None:
-        await _admin_exec(self.admin_ws, f"rm -rf /admin/{self.base}")
-        await self.admin_ws.close()
+        try:
+            await self.admin.rm_r(PathSpec.from_str_path(f"/{self.base}"))
+        finally:
+            await self.admin_ws.close()
 
 
 class TiDBFilesystemService:

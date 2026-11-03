@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/treo/sub/deep && printf 'deep\\n' > /data/treo/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/treo/sub/nested.txt && tree /data/nosuch /data/treo/sub; echo rc=$?; tree /data/treo/sub /data/nosuch; echo rc=$?; tree /data/a.txt /data/treo/sub; echo rc=$?; rm -r /data/treo",
+      "command": "mkdir -p /data/treo/sub/deep && printf 'deep\\n' > /data/treo/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/treo/sub/nested.txt && tree /data/nosuch /data/treo/sub; echo rc=$?; tree /data/treo/sub /data/nosuch; echo rc=$?; tree /data/a.txt /data/treo/sub; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/nosuch  [error opening dir]\n/data/treo/sub\n|-- deep\n|   `-- deeper.txt\n`-- nested.txt\n\n2 directories, 2 files\nrc=2\n/data/treo/sub\n|-- deep\n|   `-- deeper.txt\n`-- nested.txt\n/data/nosuch  [error opening dir]\n\n2 directories, 2 files\nrc=2\n/data/a.txt  [error opening dir]\n/data/treo/sub\n|-- deep\n|   `-- deeper.txt\n`-- nested.txt\n\n2 directories, 3 files\nrc=0\n",

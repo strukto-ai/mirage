@@ -66,7 +66,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfwc; printf '\\346\\274\\242\\345\\255\\227 cjk\\n\\343\\203\\206\\343\\202\\271\\343\\203\\210 test\\n' > /data/cfwc/cjk.txt; printf 'e\\314\\201cole\\ncafe\\314\\201\\n' > /data/cfwc/utf8.txt; printf '\\360\\237\\230\\200\\n\\356\\200\\200\\nb\\n' > /data/cfwc/astral.txt; wc -mc /data/cfwc/cjk.txt; echo rc=$?; wc -mc /data/cfwc/utf8.txt; echo rc=$?; wc -mc /data/cfwc/astral.txt; echo rc=$?; rm -rf /data/cfwc",
+      "command": "mkdir -p /data/cfwc; printf '\\346\\274\\242\\345\\255\\227 cjk\\n\\343\\203\\206\\343\\202\\271\\343\\203\\210 test\\n' > /data/cfwc/cjk.txt; printf 'e\\314\\201cole\\ncafe\\314\\201\\n' > /data/cfwc/utf8.txt; printf '\\360\\237\\230\\200\\n\\356\\200\\200\\nb\\n' > /data/cfwc/astral.txt; wc -mc /data/cfwc/cjk.txt; echo rc=$?; wc -mc /data/cfwc/utf8.txt; echo rc=$?; wc -mc /data/cfwc/astral.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "16 26 /data/cfwc/cjk.txt\nrc=0\n13 15 /data/cfwc/utf8.txt\nrc=0\n 6 11 /data/cfwc/astral.txt\nrc=0\n",

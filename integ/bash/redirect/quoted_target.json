@@ -422,7 +422,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "cd / && rm -r /data/rq",
+      "command": "cd /",
       "expect": {
         "exit": 0,
         "stdout": "",
