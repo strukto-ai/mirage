@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -T foo /data/gfl/a.txt /data/gfl/b.txt; grep -T -n foo /data/gfl/a.txt; grep -T -n -b foo /data/gfl/a.txt; grep -T -n -C1 one /data/gfl/a.txt; grep -T foo /data/gfl/a.txt; grep -T -c foo /data/gfl/a.txt /data/gfl/b.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -T foo /data/gfl/a.txt /data/gfl/b.txt; grep -T -n foo /data/gfl/a.txt; grep -T -n -b foo /data/gfl/a.txt; grep -T -n -C1 one /data/gfl/a.txt; grep -T foo /data/gfl/a.txt; grep -T -c foo /data/gfl/a.txt /data/gfl/b.txt",
       "expect": {
         "exit": 0,
         "stdout": "/data/gfl/a.txt:\tfoo one\n/data/gfl/a.txt:\tfoo two\n/data/gfl/b.txt:\tfoo\tbar\n 3:\tfoo one\n 6:\tfoo two\n 3:11:\tfoo one\n 6:31:\tfoo two\n 2-\tbeta\n 3:\tfoo one\n 4-\tgamma\nfoo one\nfoo two\n/data/gfl/a.txt:2\n/data/gfl/b.txt:1\n",
@@ -70,7 +70,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; seq 1 120 | sed 's/^/l/' > /data/gfl/big.txt; printf 'foo\\n\\nfoo\\n' > /data/gfl/e.txt; grep -T -n -b 'l110$' /data/gfl/big.txt; grep -T -n 'l9$' /data/gfl/big.txt; grep -T -n '^' /data/gfl/e.txt; grep -T -H foo /data/gfl/e.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; seq 1 120 | sed 's/^/l/' > /data/gfl/big.txt; printf 'foo\\n\\nfoo\\n' > /data/gfl/e.txt; grep -T -n -b 'l110$' /data/gfl/big.txt; grep -T -n 'l9$' /data/gfl/big.txt; grep -T -n '^' /data/gfl/e.txt; grep -T -H foo /data/gfl/e.txt",
       "expect": {
         "exit": 0,
         "stdout": "110:437:\tl110\n  9:\tl9\n 1:\tfoo\n 2:\n 3:\tfoo\n/data/gfl/e.txt:\tfoo\n/data/gfl/e.txt:\tfoo\n",

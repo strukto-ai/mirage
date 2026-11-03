@@ -61,7 +61,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10j && touch /data/r10j/a && (cd /data/r10j && printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -1 99999999999999999999999 -a1 a b; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -j1 a b x; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -j1 -- 2 a b; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -1 2 -j1 a; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -j1 1 -j1 2 a b; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -1 2x a b; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -1 2 -j 3 a b; echo rc=$?); rm -r /data/r10j",
+      "command": "mkdir -p /data/r10j && touch /data/r10j/a && (cd /data/r10j && printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -1 99999999999999999999999 -a1 a b; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -j1 a b x; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -j1 -- 2 a b; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -1 2 -j1 a; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -j1 1 -j1 2 a b; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -1 2x a b; echo rc=$?; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -1 2 -j 3 a b; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": " 1 a\n 2 b\n 3 c\nrc=0\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
@@ -93,7 +93,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/join_601561 && touch /data/join_601561/a && (cd /data/join_601561 || exit 1; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -j2 a -j1 b; echo rc=$?; join -j1 a -1 2 b; echo rc=$?; join -j1 1 a -1 2 b; echo rc=$?; join -j1 2 -j1 3 -j1 2 a b; echo rc=$?; join -j1 1 a b -j1 1; echo rc=$?; join -1 2 -j1 a; echo rc=$?; join -1 2 -j1 - -; echo rc=$?; join -j1 2 - - b; echo rc=$?; join -1 99999999999999999999 -1 1 a b; echo rc=$?; join -1 9223372036854775806 -1 92233720368547758060 a b; echo rc=$?; join -1 99999999999999999999 -a1 -o auto -e E a b; echo rc=$?); rm -r /data/join_601561",
+      "command": "mkdir -p /data/join_601561 && touch /data/join_601561/a && (cd /data/join_601561 || exit 1; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && join -j2 a -j1 b; echo rc=$?; join -j1 a -1 2 b; echo rc=$?; join -j1 1 a -1 2 b; echo rc=$?; join -j1 2 -j1 3 -j1 2 a b; echo rc=$?; join -j1 1 a b -j1 1; echo rc=$?; join -1 2 -j1 a; echo rc=$?; join -1 2 -j1 - -; echo rc=$?; join -j1 2 - - b; echo rc=$?; join -1 99999999999999999999 -1 1 a b; echo rc=$?; join -1 9223372036854775806 -1 92233720368547758060 a b; echo rc=$?; join -1 99999999999999999999 -a1 -o auto -e E a b; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nE 1 a E\nE 2 b E\nE 3 c E\nrc=0\n",

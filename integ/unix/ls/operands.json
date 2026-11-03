@@ -59,7 +59,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ls /data/lsop/b /data/lsop/zf.txt /data/lsop/a && rm -r /data/lsop",
+      "command": "ls /data/lsop/b /data/lsop/zf.txt /data/lsop/a",
       "expect": {
         "exit": 0,
         "stdout": "/data/lsop/zf.txt\n\n/data/lsop/a:\nf.txt\nsub\n\n/data/lsop/b:\ng.txt\n",
@@ -94,7 +94,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crlo/a/sub /data/crlo/b && touch /data/crlo/a/f.txt /data/crlo/a/sub/x /data/crlo/b/g.txt /data/crlo/zfile && cd /data/crlo && ls -r a b; ls a a; ls -R a zfile; cd / && rm -r /data/crlo",
+      "command": "mkdir -p /data/crlo/a/sub /data/crlo/b && touch /data/crlo/a/f.txt /data/crlo/a/sub/x /data/crlo/b/g.txt /data/crlo/zfile && cd /data/crlo && ls -r a b; ls a a; ls -R a zfile; cd /",
       "expect": {
         "exit": 0,
         "stdout": "b:\ng.txt\n\na:\nsub\nf.txt\na:\nf.txt\nsub\n\na:\nf.txt\nsub\nzfile\n\na:\nf.txt\nsub\n\na/sub:\nx\n",
@@ -129,7 +129,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crlw/a /data/crlw/b && head -c 1000 /dev/zero > /data/crlw/a/big && printf x > /data/crlw/b/small && ls -go --time-style=+x /data/crlw/a /data/crlw/b | grep -v total; rm -r /data/crlw",
+      "command": "mkdir -p /data/crlw/a /data/crlw/b && head -c 1000 /dev/zero > /data/crlw/a/big && printf x > /data/crlw/b/small && ls -go --time-style=+x /data/crlw/a /data/crlw/b | grep -v total",
       "expect": {
         "exit": 0,
         "stdout": "/data/crlw/a:\n-rw-r--r-- 1 1000 x big\n\n/data/crlw/b:\n-rw-r--r-- 1 1 x small\n",
@@ -162,7 +162,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crle/b /data/crle/c && touch /data/crle/b/g.txt && ls /data/crle/b /data/crle/c; rm -r /data/crle",
+      "command": "mkdir -p /data/crle/b /data/crle/c && touch /data/crle/b/g.txt && ls /data/crle/b /data/crle/c",
       "expect": {
         "exit": 0,
         "stdout": "/data/crle/b:\ng.txt\n\n/data/crle/c:\n",

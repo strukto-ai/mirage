@@ -92,7 +92,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "f() { echo $1 $#; }; f sub/*.txt && cd / && rm -r /data/g12",
+      "command": "f() { echo $1 $#; }; f sub/*.txt && cd /",
       "expect": {
         "exit": 0,
         "stdout": "sub/a.txt 2\n",

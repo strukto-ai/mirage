@@ -236,7 +236,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_gf && cd /data/fcA_gf && printf '' > e.gz && (printf hello | gzip; printf x) > x.gz && (printf hello | gzip; printf '\\037') > y.gz && zcat e.gz nope.gz; echo rc=$?; zcat x.gz nope.gz; echo \" rc=$?\"; printf 'hi\\n' | gzip | zcat y.gz nope.gz -; echo \" rc=$?\"; cd / && rm -r /data/fcA_gf)",
+      "command": "(mkdir -p /data/fcA_gf && cd /data/fcA_gf && printf '' > e.gz && (printf hello | gzip; printf x) > x.gz && (printf hello | gzip; printf '\\037') > y.gz && zcat e.gz nope.gz; echo rc=$?; zcat x.gz nope.gz; echo \" rc=$?\"; printf 'hi\\n' | gzip | zcat y.gz nope.gz -; echo \" rc=$?\")",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nhello rc=1\nhello rc=1\n",

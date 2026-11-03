@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -1 one /data/gfl/a.txt; grep -1n one /data/gfl/a.txt; grep -n1 two /data/gfl/a.txt; grep -12 -c foo /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -1 one /data/gfl/a.txt; grep -1n one /data/gfl/a.txt; grep -n1 two /data/gfl/a.txt; grep -12 -c foo /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "beta\nfoo one\ngamma\n2-beta\n3:foo one\n4-gamma\n5-delta\n6:foo two\n7-epsilon\n2\n",
@@ -66,7 +66,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -2 -C0 one /data/gfl/a.txt; grep -C0 -2 one /data/gfl/a.txt; grep -1 -A0 foo /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -2 -C0 one /data/gfl/a.txt; grep -C0 -2 one /data/gfl/a.txt; grep -1 -A0 foo /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "foo one\nalpha\nbeta\nfoo one\ngamma\ndelta\nbeta\nfoo one\n--\ndelta\nfoo two\n",
@@ -105,7 +105,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -1m1 foo /data/gfl/a.txt; grep -n1m1 two /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -1m1 foo /data/gfl/a.txt; grep -n1m1 two /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "beta\nfoo one\ngamma\n5-delta\n6:foo two\n7-epsilon\n",

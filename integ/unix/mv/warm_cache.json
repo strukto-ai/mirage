@@ -27,7 +27,7 @@
         "box",
         "ram-redis-cache"
       ],
-      "command": "mkdir -p /data/mvw1 && printf 'new\\n' > /data/mvw1/a.txt && printf 'old\\n' > /data/mvw1/b.txt && cat /data/mvw1/a.txt /data/mvw1/b.txt > /dev/null && ls /data/mvw1 > /dev/null && mv /data/mvw1/a.txt /data/mvw1/b.txt && cat /data/mvw1/b.txt && ls /data/mvw1; cat /data/mvw1/a.txt; echo rc=$?; rm -r /data/mvw1",
+      "command": "mkdir -p /data/mvw1 && printf 'new\\n' > /data/mvw1/a.txt && printf 'old\\n' > /data/mvw1/b.txt && cat /data/mvw1/a.txt /data/mvw1/b.txt > /dev/null && ls /data/mvw1 > /dev/null && mv /data/mvw1/a.txt /data/mvw1/b.txt && cat /data/mvw1/b.txt && ls /data/mvw1; cat /data/mvw1/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "new\nb.txt\nrc=1\n",
@@ -61,7 +61,7 @@
         "box",
         "ram-redis-cache"
       ],
-      "command": "mkdir -p /data/mvw2/x /data/mvw2/y && printf 'f\\n' > /data/mvw2/x/f.txt && printf 'e\\n' > /data/mvw2/x/e.txt && printf 'k\\n' > /data/mvw2/y/k.txt && cat /data/mvw2/x/f.txt > /dev/null && ls /data/mvw2/x /data/mvw2/y > /dev/null && mv /data/mvw2/x/f.txt /data/mvw2/y/g.txt && ls /data/mvw2/x /data/mvw2/y && cat /data/mvw2/y/g.txt; rm -r /data/mvw2",
+      "command": "mkdir -p /data/mvw2/x /data/mvw2/y && printf 'f\\n' > /data/mvw2/x/f.txt && printf 'e\\n' > /data/mvw2/x/e.txt && printf 'k\\n' > /data/mvw2/y/k.txt && cat /data/mvw2/x/f.txt > /dev/null && ls /data/mvw2/x /data/mvw2/y > /dev/null && mv /data/mvw2/x/f.txt /data/mvw2/y/g.txt && ls /data/mvw2/x /data/mvw2/y && cat /data/mvw2/y/g.txt",
       "expect": {
         "exit": 0,
         "stdout": "/data/mvw2/x:\ne.txt\n\n/data/mvw2/y:\ng.txt\nk.txt\nf\n",
@@ -95,7 +95,7 @@
         "box",
         "ram-redis-cache"
       ],
-      "command": "mkdir -p /data/mvw3/d/sub && printf 'x\\n' > /data/mvw3/d/sub/x.txt && cat /data/mvw3/d/sub/x.txt > /dev/null && ls /data/mvw3/d /data/mvw3/d/sub > /dev/null && mv /data/mvw3/d /data/mvw3/e && cat /data/mvw3/e/sub/x.txt && ls /data/mvw3; cat /data/mvw3/d/sub/x.txt; echo rc=$?; rm -r /data/mvw3",
+      "command": "mkdir -p /data/mvw3/d/sub && printf 'x\\n' > /data/mvw3/d/sub/x.txt && cat /data/mvw3/d/sub/x.txt > /dev/null && ls /data/mvw3/d /data/mvw3/d/sub > /dev/null && mv /data/mvw3/d /data/mvw3/e && cat /data/mvw3/e/sub/x.txt && ls /data/mvw3; cat /data/mvw3/d/sub/x.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "x\ne\nrc=1\n",

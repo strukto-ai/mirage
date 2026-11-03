@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sa && printf 'x\\na/b\\ny\\n' > /data/sa/f && sed '/a\\/b/d' /data/sa/f && rm -r /data/sa",
+      "command": "mkdir -p /data/sa && printf 'x\\na/b\\ny\\n' > /data/sa/f && sed '/a\\/b/d' /data/sa/f",
       "expect": {
         "exit": 0,
         "stdout": "x\ny\n",
@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sa2 && printf 'a/b\\nz\\n' > /data/sa2/f && sed '\\%a/b%d' /data/sa2/f && rm -r /data/sa2",
+      "command": "mkdir -p /data/sa2 && printf 'a/b\\nz\\n' > /data/sa2/f && sed '\\%a/b%d' /data/sa2/f",
       "expect": {
         "exit": 0,
         "stdout": "z\n",

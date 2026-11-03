@@ -203,7 +203,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1329src /data2/t1329out && printf keep > /data2/t1329out/.keep && printf 'relay\\n' > /data/t1329src/a.txt && tar -czf - -C /data/t1329src a.txt | tar -tzf - -C /data/t1329src -C /data2/t1329out; rc=$?; rm -r /data/t1329src /data2/t1329out; exit $rc)",
+      "command": "(mkdir -p /data/t1329src /data2/t1329out && printf keep > /data2/t1329out/.keep && printf 'relay\\n' > /data/t1329src/a.txt && tar -czf - -C /data/t1329src a.txt | tar -tzf - -C /data/t1329src -C /data2/t1329out; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\n",
@@ -238,7 +238,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1329src /data2/t1329out && printf keep > /data2/t1329out/.keep && printf 'relay\\n' > /data/t1329src/a.txt && tar -czf - -C /data/t1329src a.txt | tar -xzf - -C /data/t1329src -C /data2/t1329out && cat /data2/t1329out/a.txt; rc=$?; rm -r /data/t1329src /data2/t1329out; exit $rc)",
+      "command": "(mkdir -p /data/t1329src /data2/t1329out && printf keep > /data2/t1329out/.keep && printf 'relay\\n' > /data/t1329src/a.txt && tar -czf - -C /data/t1329src a.txt | tar -xzf - -C /data/t1329src -C /data2/t1329out && cat /data2/t1329out/a.txt; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "relay\n",
@@ -273,7 +273,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/t1329src /data2/t1329out && printf keep > /data2/t1329out/.keep && printf 'relay\\n' > /data/t1329src/a.txt && tar -czf - -C /data/t1329src a.txt | tar -xOzf - -C /data/t1329src -C /data2/t1329out; rc=$?; rm -r /data/t1329src /data2/t1329out; exit $rc)",
+      "command": "(mkdir -p /data/t1329src /data2/t1329out && printf keep > /data2/t1329out/.keep && printf 'relay\\n' > /data/t1329src/a.txt && tar -czf - -C /data/t1329src a.txt | tar -xOzf - -C /data/t1329src -C /data2/t1329out; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "relay\n",
@@ -308,7 +308,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data2/fcA_xe && echo hello > /data2/fcA_xe/a.txt && cd /data && tar -cf '' /data2/fcA_xe/a.txt; rc=$?; rm -r /data2/fcA_xe; exit $rc)",
+      "command": "(mkdir -p /data2/fcA_xe && echo hello > /data2/fcA_xe/a.txt && cd /data && tar -cf '' /data2/fcA_xe/a.txt; rc=$?; exit $rc)",
       "expect": {
         "exit": 2,
         "stdout": "",
@@ -343,7 +343,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/xm_rt_tc; printf x > /data/xm_rt_tc/f; tar -cf /data2/xm_rt_tc.tar -C /data/xm_rt_tc .; tar -tf /data2/xm_rt_tc.tar; rm -r /data/xm_rt_tc /data2/xm_rt_tc.tar",
+      "command": "mkdir -p /data/xm_rt_tc; printf x > /data/xm_rt_tc/f; tar -cf /data2/xm_rt_tc.tar -C /data/xm_rt_tc .; tar -tf /data2/xm_rt_tc.tar",
       "expect": {
         "exit": 0,
         "stdout": "./\n./f\n",

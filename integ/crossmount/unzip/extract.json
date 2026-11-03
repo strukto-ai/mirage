@@ -133,7 +133,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_xzl && echo l > /data/fcA_xzl/f.txt && zip -q -r /data/fcA_xzl.zip /data/fcA_xzl && unzip -l /data/fcA_xzl.zip -d /data2/fcA_xzlout > /dev/null 2>&1; ls /data2/fcA_xzlout; rc=$?; rm -r /data/fcA_xzl /data/fcA_xzl.zip; exit $rc)",
+      "command": "(mkdir -p /data/fcA_xzl && echo l > /data/fcA_xzl/f.txt && zip -q -r /data/fcA_xzl.zip /data/fcA_xzl && unzip -l /data/fcA_xzl.zip -d /data2/fcA_xzlout > /dev/null 2>&1; ls /data2/fcA_xzlout; rc=$?; exit $rc)",
       "expect": {
         "exit": 2,
         "stdout": "",

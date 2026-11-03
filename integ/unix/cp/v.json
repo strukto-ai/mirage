@@ -62,7 +62,7 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "(cd /data && mkdir -p r10cps/d && echo x > r10cps/d/f && cp -v a.txt r10cpv.txt && cp -rv r10cps r10cpvd; rc=$?; rm -r r10cps r10cpv.txt r10cpvd; exit $rc)",
+      "command": "(cd /data && mkdir -p r10cps/d && echo x > r10cps/d/f && cp -v a.txt r10cpv.txt && cp -rv r10cps r10cpvd; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "'a.txt' -> 'r10cpv.txt'\n'r10cps' -> 'r10cpvd'\n'r10cps/d' -> 'r10cpvd/d'\n'r10cps/d/f' -> 'r10cpvd/d/f'\n",
@@ -95,7 +95,7 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "(cd /data && mkdir -p r10rv/s/n r10rv/d/s && echo a > r10rv/s/n/f && cp -rv r10rv/s r10rv/d; echo rc=$?; find r10rv/d | sort; rm -r r10rv)",
+      "command": "(cd /data && mkdir -p r10rv/s/n r10rv/d/s && echo a > r10rv/s/n/f && cp -rv r10rv/s r10rv/d; echo rc=$?; find r10rv/d | sort)",
       "expect": {
         "exit": 0,
         "stdout": "'r10rv/s/n' -> 'r10rv/d/s/n'\n'r10rv/s/n/f' -> 'r10rv/d/s/n/f'\nrc=0\nr10rv/d\nr10rv/d/s\nr10rv/d/s/n\nr10rv/d/s/n/f\n",
@@ -128,7 +128,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && mkdir -p r16vc/s/sub && printf a > r16vc/s/f && printf b > r16vc/s/sub/g && cd r16vc && cp -v s/f nodir/x; echo rc=$?; cp -v s/f newname/; echo rc=$?; cp -rv s/sub nodir/y; echo rc=$?; cd /data && rm -r r16vc)",
+      "command": "(cd /data && mkdir -p r16vc/s/sub && printf a > r16vc/s/f && printf b > r16vc/s/sub/g && cd r16vc && cp -v s/f nodir/x; echo rc=$?; cp -v s/f newname/; echo rc=$?; cp -rv s/sub nodir/y; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "'s/f' -> 'nodir/x'\nrc=1\n's/f' -> 'newname/'\nrc=1\nrc=1\n",
@@ -161,7 +161,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && mkdir -p r16vm/s/sub r16vm/t r16vm/u/sub/g && printf a > r16vm/s/f && printf b > r16vm/s/sub/g && printf x > r16vm/t/sub && cd r16vm && cp -rv s/. t; echo rc=$?; cp -rv s/. u; echo rc=$?; find t u | sort; cd /data && rm -r r16vm)",
+      "command": "(cd /data && mkdir -p r16vm/s/sub r16vm/t r16vm/u/sub/g && printf a > r16vm/s/f && printf b > r16vm/s/sub/g && printf x > r16vm/t/sub && cd r16vm && cp -rv s/. t; echo rc=$?; cp -rv s/. u; echo rc=$?; find t u | sort)",
       "expect": {
         "exit": 0,
         "stdout": "'s/./f' -> 't/./f'\nrc=1\n's/./f' -> 'u/./f'\nrc=1\nt\nt/f\nt/sub\nu\nu/f\nu/sub\nu/sub/g\n",

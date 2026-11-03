@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -d skip foo /data/gfl; echo rc=$?; grep -d skip foo /data/gfl /data/gfl/b.txt; grep -d read foo /data/gfl; echo rc=$?; grep -d recurse -c none /data/gfl; grep --directories=recurse -l bar /data/gfl; grep -d rec -l bar /data/gfl; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -d skip foo /data/gfl; echo rc=$?; grep -d skip foo /data/gfl /data/gfl/b.txt; grep -d read foo /data/gfl; echo rc=$?; grep -d recurse -c none /data/gfl; grep --directories=recurse -l bar /data/gfl; grep -d rec -l bar /data/gfl",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n/data/gfl/b.txt:foo\tbar\nrc=2\n/data/gfl/a.txt:0\n/data/gfl/b.txt:1\n/data/gfl/b.txt\n/data/gfl/b.txt\n",
@@ -67,7 +67,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -r -d skip foo /data/gfl; echo rc=$?; grep -d skip -r -l bar /data/gfl; grep -c -d skip foo /data/gfl /data/gfl/a.txt; grep -L -d skip foo /data/gfl /data/gfl/a.txt; echo rc=$?; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -r -d skip foo /data/gfl; echo rc=$?; grep -d skip -r -l bar /data/gfl; grep -c -d skip foo /data/gfl /data/gfl/a.txt; grep -L -d skip foo /data/gfl /data/gfl/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n/data/gfl/b.txt\n/data/gfl/a.txt:2\nrc=0\n",
@@ -108,7 +108,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -d re foo /data/gfl; echo rc=$?; grep -d bogus foo /data/gfl; echo rc=$?; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -d re foo /data/gfl; echo rc=$?; grep -d bogus foo /data/gfl; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",
@@ -146,7 +146,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; cd /data/gfl && grep -d recurse -l bar; cd /; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; cd /data/gfl && grep -d recurse -l bar; cd /",
       "expect": {
         "exit": 0,
         "stdout": "b.txt\n",
@@ -184,7 +184,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -d bogus -r foo /data/gfl/a.txt; echo rc=$?; grep -D bogus -D read foo /data/gfl/a.txt; echo rc=$?; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -d bogus -r foo /data/gfl/a.txt; echo rc=$?; grep -D bogus -D read foo /data/gfl/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=2\n",

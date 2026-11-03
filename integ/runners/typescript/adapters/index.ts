@@ -722,30 +722,48 @@ async function openS3(target: Target, options?: OpenOptions): Promise<Open> {
   return { ws: opened.ws, shadow: opened.shadow, cleanup }
 }
 
-function nextcloudMountUrl(root: string | undefined): string {
+function nextcloudUrl(): string {
   if (NEXTCLOUD_URL === undefined || NEXTCLOUD_URL === '') {
     throw new Error('nextcloud target requires NEXTCLOUD_URL')
   }
-  const base = NEXTCLOUD_URL.endsWith('/') ? NEXTCLOUD_URL : `${NEXTCLOUD_URL}/`
-  const relative = (root ?? '')
-    .split('/')
-    .filter((part) => part !== '')
-    .map(encodeURIComponent)
-    .join('/')
-  return relative !== '' ? `${base}${relative}/` : base
+  return NEXTCLOUD_URL.endsWith('/') ? NEXTCLOUD_URL : `${NEXTCLOUD_URL}/`
 }
 
+// Each mount roots in a folder of this run's own, made and removed through a
+// mount of the account's root, as python's NextcloudService does: a case
+// leaves what it wrote behind and the run's teardown removes it all at once.
 async function openNextcloud(target: Target): Promise<Open> {
+  const url = nextcloudUrl()
+  const base = `mirage-integ-${runId()}`
+  const adminVfs = new NextcloudVFS({
+    url,
+    username: NEXTCLOUD_USERNAME,
+    password: NEXTCLOUD_PASSWORD,
+  })
+  const admin = new Workspace({ '/admin': adminVfs }, { mode: MountMode.WRITE })
+  const paths = target.mounts.map((m) => `/admin/${base}/${String(m.root)}`).join(' ')
+  await adminExec(admin, `mkdir -p ${paths}`)
   const mounts: Record<string, NextcloudVFS> = {}
   for (const mount of target.mounts) {
     mounts[mount.path] = new NextcloudVFS({
-      url: nextcloudMountUrl(mount.root),
+      url: `${url}${base}/${encodeURIComponent(String(mount.root))}/`,
       username: NEXTCLOUD_USERNAME,
       password: NEXTCLOUD_PASSWORD,
     })
   }
   const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
-  return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
+  const cleanup = async (): Promise<void> => {
+    try {
+      await ws.close()
+    } finally {
+      try {
+        await adminVfs.rmR(PathSpec.fromStrPath(`/${base}`))
+      } finally {
+        await admin.close()
+      }
+    }
+  }
+  return { ws: ws as unknown as ExecWorkspace, cleanup }
 }
 
 const EMAIL_IMAP_PORT = Number(process.env.EMAIL_IMAP_PORT ?? '3143')
@@ -1870,8 +1888,11 @@ async function openSsh(target: Target, options?: OpenOptions): Promise<Open> {
   const opened = openWorkspaces(build, options)
   const cleanup = async (): Promise<void> => {
     await opened.closeAll()
-    await adminExec(admin, `rm -rf /admin/${base}`)
-    await admin.close()
+    try {
+      await adminVfs.rmR(PathSpec.fromStrPath(`/${base}`))
+    } finally {
+      await admin.close()
+    }
   }
   return { ws: opened.ws, shadow: opened.shadow, cleanup }
 }
@@ -1889,14 +1910,10 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
     )
   }
   const base = `/mirage-integ-${runId()}`
-  const admin = new Workspace(
-    {
-      '/admin': await TiDBFilesystemVFS.create(
-        parseConfigWithSchema(TiDBFilesystemConfig, { host, token }),
-      ),
-    },
-    { mode: MountMode.WRITE },
+  const adminVfs = await TiDBFilesystemVFS.create(
+    parseConfigWithSchema(TiDBFilesystemConfig, { host, token }),
   )
+  const admin = new Workspace({ '/admin': adminVfs }, { mode: MountMode.WRITE })
   const paths = target.mounts.map((m) => `/admin${base}/${String(m.root)}`).join(' ')
   await adminExec(admin, `mkdir -p ${paths}`)
   const mounts: Record<string, TiDBFilesystemVFS> = {}
@@ -1912,8 +1929,11 @@ async function openTiDBFilesystem(target: Target): Promise<Open> {
   const ws = new Workspace(mounts, WORKSPACE_OPTIONS)
   const cleanup = async (): Promise<void> => {
     await ws.close()
-    await adminExec(admin, `rm -rf /admin${base}`)
-    await admin.close()
+    try {
+      await adminVfs.rmR(PathSpec.fromStrPath(base))
+    } finally {
+      await admin.close()
+    }
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }
 }

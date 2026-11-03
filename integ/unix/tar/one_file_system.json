@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_o/d/sub && printf 'x\\n' > /data/fcA_o/d/sub/f && cd /data/fcA_o && tar -cv --one-file-system -f a.tar d && tar -tf a.tar; rc=$?; cd / && rm -r /data/fcA_o; exit $rc)",
+      "command": "(mkdir -p /data/fcA_o/d/sub && printf 'x\\n' > /data/fcA_o/d/sub/f && cd /data/fcA_o && tar -cv --one-file-system -f a.tar d && tar -tf a.tar; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "d/\nd/sub/\nd/sub/f\nd/\nd/sub/\nd/sub/f\n",

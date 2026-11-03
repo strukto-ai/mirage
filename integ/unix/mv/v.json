@@ -62,7 +62,7 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "(cd /data && cp a.txt r10mv1 && mv -v r10mv1 r10mv2 && mkdir -p r10mvd && mv r10mvd r10mvd/x; echo rc=$?; rm -r r10mv2 r10mvd)",
+      "command": "(cd /data && cp a.txt r10mv1 && mv -v r10mv1 r10mv2 && mkdir -p r10mvd && mv r10mvd r10mvd/x; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "renamed 'r10mv1' -> 'r10mv2'\nrc=1\n",

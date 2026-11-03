@@ -24,3 +24,13 @@ export const CHECKSUM_TYPES: Readonly<Record<string, readonly [string, number]>>
   sha1: ['SHA1', 40],
   sha256: ['SHA256', 64],
 }
+
+// The PROPFIND a removal surveys a folder with: its modified time.
+export const MTIME_PROPFIND =
+  '<?xml version="1.0" encoding="utf-8"?>' +
+  '<d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/></d:prop></d:propfind>'
+// How long (ms) a folder stays unchanged by the server's clock before a
+// removal's If-Unmodified-Since sees every change after its survey, and the
+// surveys before a folder that keeps changing is busy.
+export const FENCE = 2000
+export const ATTEMPTS = 4

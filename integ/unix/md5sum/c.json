@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_k1 && echo one > /data/fcF_k1/ok && (cd /data/fcF_k1 && md5sum ok > L1 && md5sum ok | sed 's/ok$/gone/' >> L1 && md5sum ok > L2 && echo junk >> L2 && md5sum -c --ignore-missing L1; echo rc=$?; md5sum -c --status L1; echo rc=$?; md5sum --check --quiet L1; echo rc=$?; md5sum -c -w L2; echo rc=$?; md5sum -c --strict L2; echo rc=$?); rm -r /data/fcF_k1",
+      "command": "mkdir -p /data/fcF_k1 && echo one > /data/fcF_k1/ok && (cd /data/fcF_k1 && md5sum ok > L1 && md5sum ok | sed 's/ok$/gone/' >> L1 && md5sum ok > L2 && echo junk >> L2 && md5sum -c --ignore-missing L1; echo rc=$?; md5sum -c --status L1; echo rc=$?; md5sum --check --quiet L1; echo rc=$?; md5sum -c -w L2; echo rc=$?; md5sum -c --strict L2; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "ok: OK\nrc=0\nrc=1\ngone: FAILED open or read\nrc=1\nok: OK\nrc=0\nok: OK\nrc=1\n",
@@ -112,7 +112,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_k2/d && echo x > /data/fcF_k2/d/f && (cd /data/fcF_k2 && echo 'd41d8cd98f00b204e9800998ecf8427e  d' > L && md5sum -c L; echo rc=$?); rm -r /data/fcF_k2",
+      "command": "mkdir -p /data/fcF_k2/d && echo x > /data/fcF_k2/d/f && (cd /data/fcF_k2 && echo 'd41d8cd98f00b204e9800998ecf8427e  d' > L && md5sum -c L; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "d: FAILED open or read\nrc=1\n",

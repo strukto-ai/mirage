@@ -491,6 +491,7 @@ async def main() -> None:
     parser.add_argument("--target", action="append", dest="targets")
     parser.add_argument("--facet", dest="facet")
     parser.add_argument("--emit", dest="emit")
+    parser.add_argument("--suite", choices=["nextcloud"])
     parser.add_argument("--strict", action="store_true")
     parser.add_argument("--exclude-case", action="append", default=[])
     # A facet can be split across CI jobs (core's databases and vector
@@ -532,6 +533,13 @@ async def main() -> None:
             sys.exit(2)
     else:
         selected = args.targets or list(manifest)
+    if args.suite:
+        if selected != [args.suite] or args.exclude_case:
+            parser.error(
+                "--suite requires its single --target and no --exclude-case"
+            )
+        cases = harness.select_suite(root, cases, args.suite)
+        print(f"suite {args.suite}: {len(cases)} cases")
     report = harness.Report()
     emit: list[dict] | None = [] if args.emit else None
     ran = 0

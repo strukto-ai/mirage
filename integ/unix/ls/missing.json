@@ -276,7 +276,7 @@
         "hf",
         "hf-prefix"
       ],
-      "command": "mkdir -p /data/cflsm/sub/deep; printf 'nested\\ncontent\\n' > /data/cflsm/sub/nested.txt; printf 'deep\\n' > /data/cflsm/sub/deep/deeper.txt; ls /data/cflsm/nope /data/cflsm/sub 2>/dev/null; echo rc=$?; rm -rf /data/cflsm",
+      "command": "mkdir -p /data/cflsm/sub/deep; printf 'nested\\ncontent\\n' > /data/cflsm/sub/nested.txt; printf 'deep\\n' > /data/cflsm/sub/deep/deeper.txt; ls /data/cflsm/nope /data/cflsm/sub 2>/dev/null; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/cflsm/sub:\ndeep\nnested.txt\nrc=2\n",

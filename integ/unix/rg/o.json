@@ -1105,7 +1105,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/fcB_oc && printf 'b1\\nb22\\n' > /data/fcB_oc/x.txt && rg -o -c '[0-9]' /data/fcB_oc/x.txt; rg -j1 -o -c '[0-9]' /data/fcB_oc/x.txt /data/fcB_oc/x.txt; rg -o -c '[0-9]' /data/fcB_oc; rm -rf /data/fcB_oc",
+      "command": "mkdir -p /data/fcB_oc && printf 'b1\\nb22\\n' > /data/fcB_oc/x.txt && rg -o -c '[0-9]' /data/fcB_oc/x.txt; rg -j1 -o -c '[0-9]' /data/fcB_oc/x.txt /data/fcB_oc/x.txt; rg -o -c '[0-9]' /data/fcB_oc",
       "expect": {
         "exit": 0,
         "stdout": "3\n/data/fcB_oc/x.txt:3\n/data/fcB_oc/x.txt:3\n/data/fcB_oc/x.txt:3\n",

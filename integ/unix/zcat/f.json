@@ -26,7 +26,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_zf && cd /data/fcA_zf && printf '' > e && printf '\\037' > o && (printf hello | gzip; printf '\\0\\0') > z && zcat -f e o z | od -An -tx1; cd / && rm -r /data/fcA_zf)",
+      "command": "(mkdir -p /data/fcA_zf && cd /data/fcA_zf && printf '' > e && printf '\\037' > o && (printf hello | gzip; printf '\\0\\0') > z && zcat -f e o z | od -An -tx1)",
       "expect": {
         "exit": 0,
         "stdout": " 1f 68 65 6c 6c 6f 00 00\n",

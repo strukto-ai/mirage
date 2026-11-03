@@ -96,7 +96,7 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/r10bare/d && echo hi > /data/r10bare/d/f && (cd /data/r10bare && tree; tree -a); rm -r /data/r10bare",
+      "command": "mkdir -p /data/r10bare/d && echo hi > /data/r10bare/d/f && (cd /data/r10bare && tree; tree -a)",
       "expect": {
         "exit": 0,
         "stdout": ".\n`-- d\n    `-- f\n\n2 directories, 1 file\n.\n`-- d\n    `-- f\n\n2 directories, 1 file\n",
@@ -129,7 +129,7 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/fcC_e && tree /data/fcC_e; echo rc=$?; rm -r /data/fcC_e",
+      "command": "mkdir -p /data/fcC_e && tree /data/fcC_e; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcC_e\n\n0 directories, 0 files\nrc=0\n",

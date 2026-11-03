@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_dx/s /data2/fcF_dx && echo x > /data/fcF_dx/s/f && echo y > /data2/fcF_dx/g && du -ax /data/fcF_dx /data2/fcF_dx | cut -f2; rm -r /data/fcF_dx /data2/fcF_dx",
+      "command": "mkdir -p /data/fcF_dx/s /data2/fcF_dx && echo x > /data/fcF_dx/s/f && echo y > /data2/fcF_dx/g && du -ax /data/fcF_dx /data2/fcF_dx | cut -f2",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcF_dx/s/f\n/data/fcF_dx/s\n/data/fcF_dx\n/data2/fcF_dx/g\n/data2/fcF_dx\n",
@@ -67,7 +67,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcX_dxl /data2/fcX_dxl/sub && echo t > /data2/fcX_dxl/sub/f && echo y > /data/fcX_dxl/own && ln -s /data2/fcX_dxl /data/fcX_dxl/link && ln -s /data2/fcX_dxl/sub/f /data/fcX_dxl/flink && du -axL /data/fcX_dxl | cut -f2; rm -r /data/fcX_dxl /data2/fcX_dxl",
+      "command": "mkdir -p /data/fcX_dxl /data2/fcX_dxl/sub && echo t > /data2/fcX_dxl/sub/f && echo y > /data/fcX_dxl/own && ln -s /data2/fcX_dxl /data/fcX_dxl/link && ln -s /data2/fcX_dxl/sub/f /data/fcX_dxl/flink && du -axL /data/fcX_dxl | cut -f2",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcX_dxl/own\n/data/fcX_dxl\n",

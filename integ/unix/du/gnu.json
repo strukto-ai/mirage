@@ -282,7 +282,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/dua/sub/deep && printf 'deep\\n' > /data/dua/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dua/sub/nested.txt && du -a /data/a.txt; (cd /data/dua && du -a sub); rm -r /data/dua",
+      "command": "mkdir -p /data/dua/sub/deep && printf 'deep\\n' > /data/dua/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dua/sub/nested.txt && du -a /data/a.txt; (cd /data/dua && du -a sub)",
       "expect": {
         "exit": 0,
         "stdout": "24\t/data/a.txt\n5\tsub/deep/deeper.txt\n5\tsub/deep\n15\tsub/nested.txt\n20\tsub\n",
@@ -317,7 +317,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/dum/sub/deep && printf 'deep\\n' > /data/dum/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dum/sub/nested.txt && du /data/dum/sub /data/dum/nosuch; echo code=$?; rm -r /data/dum",
+      "command": "mkdir -p /data/dum/sub/deep && printf 'deep\\n' > /data/dum/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/dum/sub/nested.txt && du /data/dum/sub /data/dum/nosuch; echo code=$?",
       "expect": {
         "exit": 0,
         "stdout": "5\t/data/dum/sub/deep\n20\t/data/dum/sub\ncode=1\n",

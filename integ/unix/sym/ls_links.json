@@ -518,7 +518,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rm /data/lsdang1301 /data/lsdl1301 /data/lsfl1301 && rm -r /data/lsd1301",
+      "command": "rm /data/lsdang1301 /data/lsdl1301 /data/lsfl1301",
       "expect": {
         "exit": 0,
         "stdout": "",

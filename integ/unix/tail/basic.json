@@ -98,7 +98,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcD_dir; printf k > /data/fcD_dir/k; tail -n1 /data/fcD_dir /data/a.txt; echo rc=$?; tail -n1 /data/a.txt /data/fcD_dir /data/b.txt; echo rc=$?; rm -r /data/fcD_dir",
+      "command": "mkdir -p /data/fcD_dir; printf k > /data/fcD_dir/k; tail -n1 /data/fcD_dir /data/a.txt; echo rc=$?; tail -n1 /data/a.txt /data/fcD_dir /data/b.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "==> /data/fcD_dir <==\n\n==> /data/a.txt <==\nbaz\nrc=1\n==> /data/a.txt <==\nbaz\n\n==> /data/fcD_dir <==\n\n==> /data/b.txt <==\n3\nrc=1\n",

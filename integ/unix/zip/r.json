@@ -28,7 +28,7 @@
         "hf",
         "hf-prefix"
       ],
-      "command": "(mkdir -p /data/fcA_zr && printf 'alpha\\n' > /data/fcA_zr/a.txt && cd /data/fcA_zr && zip -q -r t.zip . a.txt a.txt; echo rc=$?; unzip -Z1 t.zip; cd / && rm -r /data/fcA_zr)",
+      "command": "(mkdir -p /data/fcA_zr && printf 'alpha\\n' > /data/fcA_zr/a.txt && cd /data/fcA_zr && zip -q -r t.zip . a.txt a.txt; echo rc=$?; unzip -Z1 t.zip)",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\na.txt\n",

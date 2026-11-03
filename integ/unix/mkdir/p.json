@@ -130,7 +130,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(cd /data && mkdir -pv r10mk/a/b && mkdir -pv r10mk/a/c && mkdir -pv sub && mkdir -v r10mk2 && cd sub && mkdir -pv ../r10mk3/x; cd /data && rm -r r10mk r10mk2 r10mk3)",
+      "command": "(cd /data && mkdir -pv r10mk/a/b && mkdir -pv r10mk/a/c && mkdir -pv sub && mkdir -v r10mk2 && cd sub && mkdir -pv ../r10mk3/x)",
       "expect": {
         "exit": 0,
         "stdout": "mkdir: created directory 'r10mk'\nmkdir: created directory 'r10mk/a'\nmkdir: created directory 'r10mk/a/b'\nmkdir: created directory 'r10mk/a/c'\nmkdir: created directory 'r10mk2'\nmkdir: created directory '../r10mk3'\nmkdir: created directory '../r10mk3/x'\n",

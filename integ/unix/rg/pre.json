@@ -24,7 +24,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'alpha\\nfoo here\\n' > /data/rgfl/p.txt; printf 'foo log\\n' > /data/rgfl/sub/p.log; rg --pre rev oof /data/rgfl/p.txt; rg -j1 --pre rev -n 'ereh oof' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg -j1 --pre rev --pre-glob '*.log' 'oof|foo' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg -j1 --pre rev --pre-glob '!*.log' 'oof|foo' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg --pre cat foo /data/rgfl/p.txt; rg --pre '' foo /data/rgfl/p.txt; rg --pre rev --no-pre foo /data/rgfl/p.txt; printf 'foo\\n' | rg --pre rev oof; echo rc=$?; rm -rf /data/rgfl",
+      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'alpha\\nfoo here\\n' > /data/rgfl/p.txt; printf 'foo log\\n' > /data/rgfl/sub/p.log; rg --pre rev oof /data/rgfl/p.txt; rg -j1 --pre rev -n 'ereh oof' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg -j1 --pre rev --pre-glob '*.log' 'oof|foo' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg -j1 --pre rev --pre-glob '!*.log' 'oof|foo' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg --pre cat foo /data/rgfl/p.txt; rg --pre '' foo /data/rgfl/p.txt; rg --pre rev --no-pre foo /data/rgfl/p.txt; printf 'foo\\n' | rg --pre rev oof; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "ereh oof\n/data/rgfl/p.txt:2:ereh oof\n/data/rgfl/p.txt:foo here\n/data/rgfl/sub/p.log:gol oof\n/data/rgfl/p.txt:ereh oof\n/data/rgfl/sub/p.log:foo log\nfoo here\nfoo here\nfoo here\nrc=1\n",
@@ -62,7 +62,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --pre false foo /data/rgfl/a.txt; echo rc=$?; rg --pre nope foo /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl",
+      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --pre false foo /data/rgfl/a.txt; echo rc=$?; rg --pre nope foo /data/rgfl/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\nrc=2\n",
@@ -96,7 +96,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'alpha\\nfoo here\\n' > /data/rgfl/sub/q.txt; (cd /data/rgfl && rg --pre rev --pre-glob 'sub/*.txt' oof /data/rgfl/sub/q.txt; rg --pre rev --pre-glob 'sub/*.txt' oof sub/q.txt; rg --pre rev --pre-glob 'q.txt' oof /data/rgfl/sub/q.txt; rg --pre rev --pre-glob '/data/rgfl/sub/*.txt' oof sub/q.txt; echo rc=$?); rm -rf /data/rgfl",
+      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'alpha\\nfoo here\\n' > /data/rgfl/sub/q.txt; (cd /data/rgfl && rg --pre rev --pre-glob 'sub/*.txt' oof /data/rgfl/sub/q.txt; rg --pre rev --pre-glob 'sub/*.txt' oof sub/q.txt; rg --pre rev --pre-glob 'q.txt' oof /data/rgfl/sub/q.txt; rg --pre rev --pre-glob '/data/rgfl/sub/*.txt' oof sub/q.txt; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "ereh oof\nereh oof\nereh oof\nrc=1\n",

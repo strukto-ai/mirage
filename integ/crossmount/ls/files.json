@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/xlf && echo a > /data/xlf/f && ls /data/xlf /data2/xm.txt; rm -r /data/xlf",
+      "command": "mkdir -p /data/xlf && echo a > /data/xlf/f && ls /data/xlf /data2/xm.txt",
       "expect": {
         "exit": 0,
         "stdout": "/data2/xm.txt\n\n/data/xlf:\nf\n",

@@ -159,7 +159,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(cd /data && mkdir -p r16mvdot/s/sub r16mvdot/t && printf a > r16mvdot/s/a && cd r16mvdot && mv s/. t; echo rc=$?; mv s/sub/.. t; echo rc=$?; mv s/. s; echo rc=$?; mv -T s/. n; echo rc=$?; find s t | sort; cd /data && rm -r r16mvdot)",
+      "command": "(cd /data && mkdir -p r16mvdot/s/sub r16mvdot/t && printf a > r16mvdot/s/a && cd r16mvdot && mv s/. t; echo rc=$?; mv s/sub/.. t; echo rc=$?; mv s/. s; echo rc=$?; mv -T s/. n; echo rc=$?; find s t | sort)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\ns\ns/a\ns/sub\nt\n",

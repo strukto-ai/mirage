@@ -135,7 +135,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10j && touch /data/r10j/a && (cd /data/r10j && printf '1 a\\015\\n2 b\\015\\n' > a && printf '1 x\\n2 y\\n' > b && join a b; echo rc=$?; printf '1 a  \\n2 b\\t\\n' > a && printf '1 x \\n2 y\\n' > b && join a b; echo rc=$?; printf 'A 1\\n_ 2\\n' > a && printf '_ y\\n' > b && join -i a b; echo rc=$?; printf '\\303\\211 1\\n' > a && printf '\\303\\251 x\\n' > b && join -i -a1 -a2 a b; echo rc=$?; printf 'id name\\n1 a\\n2 b\\n' > a && printf 'id val\\n2 y\\n3 z\\n' > b && join --header -a1 -a2 a b; echo rc=$?; printf 'k h\\nb 1\\na 2\\n' > a && printf 'k g\\na x\\n' > b && join --header a b; echo rc=$?); rm -r /data/r10j",
+      "command": "mkdir -p /data/r10j && touch /data/r10j/a && (cd /data/r10j && printf '1 a\\015\\n2 b\\015\\n' > a && printf '1 x\\n2 y\\n' > b && join a b; echo rc=$?; printf '1 a  \\n2 b\\t\\n' > a && printf '1 x \\n2 y\\n' > b && join a b; echo rc=$?; printf 'A 1\\n_ 2\\n' > a && printf '_ y\\n' > b && join -i a b; echo rc=$?; printf '\\303\\211 1\\n' > a && printf '\\303\\251 x\\n' > b && join -i -a1 -a2 a b; echo rc=$?; printf 'id name\\n1 a\\n2 b\\n' > a && printf 'id val\\n2 y\\n3 z\\n' > b && join --header -a1 -a2 a b; echo rc=$?; printf 'k h\\nb 1\\na 2\\n' > a && printf 'k g\\na x\\n' > b && join --header a b; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "1 a\r x\n2 b\r y\nrc=0\n1 a x\n2 b y\nrc=0\n_ 2 y\nrc=0\nÉ 1\né x\nrc=0\nid name val\n1 a\n2 b y\n3 z\nrc=0\nk h g\nrc=1\n",
@@ -167,7 +167,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/join_601563 && touch /data/join_601563/a && (cd /data/join_601563 || exit 1; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && printf 'h1 h2\\n1 a\\n' > a && : > b && join --header a b; echo rc=$?; join --header -v2 a b; echo rc=$?; join --header -o 0,1.2,2.2 -e E a b; echo rc=$?; join --header -o auto b a; echo rc=$?; printf 'h\\nb 1\\na 2\\n' > a && join --header a b; echo rc=$?; join --header --check-order a b; echo rc=$?; printf 'z h\\na 1\\n' > a && printf 'z g\\na x\\n' > b && join --header --check-order a b; echo rc=$?); rm -r /data/join_601563",
+      "command": "mkdir -p /data/join_601563 && touch /data/join_601563/a && (cd /data/join_601563 || exit 1; printf '1 a\\n2 b\\n3 c\\n' > a && printf '1 x\\n3 z\\n4 w\\n' > b && printf 'h1 h2\\n1 a\\n' > a && : > b && join --header a b; echo rc=$?; join --header -v2 a b; echo rc=$?; join --header -o 0,1.2,2.2 -e E a b; echo rc=$?; join --header -o auto b a; echo rc=$?; printf 'h\\nb 1\\na 2\\n' > a && join --header a b; echo rc=$?; join --header --check-order a b; echo rc=$?; printf 'z h\\na 1\\n' > a && printf 'z g\\na x\\n' > b && join --header --check-order a b; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "h1 h2\nrc=0\nh1 h2\nrc=0\nh1 h2 E\nrc=0\nh1 h2\nrc=0\nh\nrc=0\nh\nrc=1\nz h g\na 1 x\nrc=0\n",
@@ -208,7 +208,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/join_601565/d && touch /data/join_601565/a /data/join_601565/d/x && (cd /data/join_601565 || exit 1; printf '1 a\\n' > a && join d missing; echo rc=$?; join missing d; echo rc=$?; join a d; echo rc=$?; join d a; echo rc=$?); rm -r /data/join_601565",
+      "command": "mkdir -p /data/join_601565/d && touch /data/join_601565/a /data/join_601565/d/x && (cd /data/join_601565 || exit 1; printf '1 a\\n' > a && join d missing; echo rc=$?; join missing d; echo rc=$?; join a d; echo rc=$?; join d a; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",

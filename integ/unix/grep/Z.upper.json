@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -Z foo /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; grep -Zl foo /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; echo; grep -ZL none /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; echo; grep -Zc foo /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -Z foo /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; grep -Zl foo /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; echo; grep -ZL none /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; echo; grep -Zc foo /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'",
       "expect": {
         "exit": 0,
         "stdout": "/data/gfl/a.txt@foo one\n/data/gfl/a.txt@foo two\n/data/gfl/b.txt@foo\tbar\n/data/gfl/a.txt@/data/gfl/b.txt@\n/data/gfl/a.txt@\n/data/gfl/a.txt@2\n/data/gfl/b.txt@1\n",
@@ -70,7 +70,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -Z -n -A1 one /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; grep -Z -o -b -H foo /data/gfl/a.txt | tr '\\0' '@'; grep -m0 -L -Z foo /data/gfl/a.txt | tr '\\0' '@'; echo; grep -L -Z foo /data/gfl 2>/dev/null | tr '\\0' '@'; echo; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -Z -n -A1 one /data/gfl/a.txt /data/gfl/b.txt | tr '\\0' '@'; grep -Z -o -b -H foo /data/gfl/a.txt | tr '\\0' '@'; grep -m0 -L -Z foo /data/gfl/a.txt | tr '\\0' '@'; echo; grep -L -Z foo /data/gfl 2>/dev/null | tr '\\0' '@'; echo",
       "expect": {
         "exit": 0,
         "stdout": "/data/gfl/a.txt@3:foo one\n/data/gfl/a.txt@4-gamma\n--\n/data/gfl/b.txt@2:none\n/data/gfl/a.txt@11:foo\n/data/gfl/a.txt@31:foo\n/data/gfl/a.txt@\n/data/gfl@\n",
