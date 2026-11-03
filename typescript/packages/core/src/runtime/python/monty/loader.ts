@@ -66,7 +66,7 @@ let provided: (() => Promise<MontyModuleLike>) | undefined
 
 /**
  * Use the host's monty module in place of `@pydantic/monty`'s own: a runtime
- * that cannot start a worker (a Cloudflare Worker) hands in one whose pool
+ * that cannot start a worker (an edge runtime) hands in one whose pool
  * runs each program in the same isolate. Set it before the first run.
  */
 export function provideMontyModule(load: () => Promise<MontyModuleLike>): void {

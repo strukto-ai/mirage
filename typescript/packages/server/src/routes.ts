@@ -31,8 +31,8 @@ import type {
 /**
  * The slice of an HTTP framework the routers use, so one set of routes runs
  * on every host: Fastify on Node (`app.ts` adapts it) and the web
- * `Request`/`Response` of a runtime with no Node, such as a Cloudflare
- * Worker (`@struktoai/mirage-edge`). A router imports nothing from a host:
+ * `Request`/`Response` of an edge runtime with no Node
+ * (`@struktoai/mirage-edge`). A router imports nothing from a host:
  * what a host must supply it gets through its deps.
  */
 export interface RouteShape {
@@ -124,7 +124,7 @@ export interface RouteApp {
  * host rebuilds a saved mount from its own VFS table), the mounts and options
  * a config names, its CLIs, a profile's policy files, the store the server
  * keeps workspaces' state in, and the network watch a rule needs. Node
- * builds these from `@struktoai/mirage-node`; a Cloudflare Worker from core.
+ * builds these from `@struktoai/mirage-node`; an edge runtime from core.
  */
 export interface ServerHost {
   readonly Workspace: typeof Workspace
