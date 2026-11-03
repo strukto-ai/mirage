@@ -1134,7 +1134,8 @@
   },
   "vfs/registry": {
    "typescript_only": {
-    "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords."
+    "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords.",
+    "buildVfsFrom": "TypeScript splits its backends across core, node and browser, so each runtime's buildVfs is this one build over its own table; Python keeps every backend in one REGISTRY and needs no table parameter."
    }
   },
   "io/gateway": {

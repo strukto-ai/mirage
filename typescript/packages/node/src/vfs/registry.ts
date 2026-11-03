@@ -12,22 +12,30 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { resolveConfigSecrets } from '@struktoai/mirage-core/secrets/sources'
-import { errorSummary } from '@struktoai/mirage-core/secrets/summary'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import { normalizeFields } from '@struktoai/mirage-core/utils/normalize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { type BaseVFS, VFS_BRAND } from '@struktoai/mirage-core/vfs/base'
-import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
-import type { RAMVFSOptions } from '@struktoai/mirage-core/vfs/ram/ram'
-import { parseConfigWithSchema, refuseUnknownKeys, z } from '@struktoai/mirage-core/vfs/secrets'
+import {
+  buildVfsFrom,
+  REGISTRY as CORE_REGISTRY,
+  type VFSFactory,
+} from '@struktoai/mirage-core/vfs/registry'
+import { parseConfigWithSchema, refuseUnknownKeys } from '@struktoai/mirage-core/vfs/secrets'
 import { loadAttr } from '../utils/loader.ts'
 import type { DiskVFSOptions } from './disk/disk.ts'
 import type { RedisVFSOptions } from './redis/redis.ts'
 
+// The backends that take their options without a schema, and the option
+// names each takes. Python builds them from constructor keywords,
+// so a key outside these is refused on both sides rather than ignored here.
+const DISK_OPTIONS: readonly (keyof DiskVFSOptions)[] = ['root', 'folderVersions', 'capacity']
+const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', 'capacity']
+
 /**
- * Construct a VFS by registry name. Mirrors Python's
- * `mirage.vfs.registry.build_vfs`.
+ * Node's VFS table: the backends core implements (`REGISTRY` in
+ * `@struktoai/mirage-core/vfs/registry`) plus the ones this package
+ * implements for Node. Mirrors Python's `mirage.vfs.registry.build_vfs`.
  *
  * Each entry is an async factory that lazy-imports its module so that
  * importing this file doesn't pull in every backend's dependencies.
@@ -38,21 +46,8 @@ import type { RedisVFSOptions } from './redis/redis.ts'
  * by the Python `mirage.config` loader) to TS-idiomatic camelCase. So
  * the same YAML file works in both Python and TS.
  */
-export type VFSFactory = (config: Record<string, unknown>) => Promise<BaseVFS>
-
-// The backends that take their options without a schema, and the option
-// names each takes. Python builds the same three from constructor keywords,
-// so a key outside these is refused on both sides rather than ignored here.
-const RAM_OPTIONS: readonly (keyof RAMVFSOptions)[] = ['capacity']
-const DISK_OPTIONS: readonly (keyof DiskVFSOptions)[] = ['root', 'folderVersions', 'capacity']
-const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', 'capacity']
-
 const REGISTRY: Record<string, VFSFactory> = {
-  ram: async (config) => {
-    refuseUnknownKeys(config, RAM_OPTIONS)
-    const { RAMVFS } = await import('@struktoai/mirage-core/vfs/ram/ram')
-    return new RAMVFS(normalizeFields(config) as RAMVFSOptions)
-  },
+  ...CORE_REGISTRY,
   disk: async (config) => {
     refuseUnknownKeys(config, DISK_OPTIONS)
     const { DiskVFS } = await import('./disk/disk.ts')
@@ -187,21 +182,6 @@ const REGISTRY: Record<string, VFSFactory> = {
     const { MongoDBConfig } = await import('@struktoai/mirage-core/vfs/mongodb/config')
     return new MongoDBVFS(parseConfigWithSchema(MongoDBConfig, config))
   },
-  chroma: async (config) => {
-    const { ChromaVFS } = await import('@struktoai/mirage-core/vfs/chroma/chroma')
-    const { ChromaConfig } = await import('@struktoai/mirage-core/vfs/chroma/config')
-    return new ChromaVFS(parseConfigWithSchema(ChromaConfig, config))
-  },
-  dify: async (config) => {
-    const { DifyVFS } = await import('@struktoai/mirage-core/vfs/dify/dify')
-    const { DifyConfig } = await import('@struktoai/mirage-core/vfs/dify/config')
-    return new DifyVFS(parseConfigWithSchema(DifyConfig, config))
-  },
-  qdrant: async (config) => {
-    const { QdrantVFS } = await import('@struktoai/mirage-core/vfs/qdrant/qdrant')
-    const { QdrantConfig } = await import('@struktoai/mirage-core/vfs/qdrant/config')
-    return new QdrantVFS(parseConfigWithSchema(QdrantConfig, config))
-  },
   lancedb: async (config) => {
     const { LanceDBVFS } = await import('./lancedb/lancedb.ts')
     const { LanceDBConfig } = await import('@struktoai/mirage-core/vfs/lancedb/config')
@@ -227,100 +207,20 @@ const REGISTRY: Record<string, VFSFactory> = {
     const { DiscordConfig } = await import('@struktoai/mirage-core/vfs/discord/config')
     return new DiscordVFS(parseConfigWithSchema(DiscordConfig, config))
   },
-  trello: async (config) => {
-    const { TrelloVFS } = await import('@struktoai/mirage-core/vfs/trello/trello')
-    const { TrelloConfig } = await import('@struktoai/mirage-core/core/trello/config')
-    return new TrelloVFS(parseConfigWithSchema(TrelloConfig, config))
-  },
-  wandb: async (config) => {
-    const { WandbVFS } = await import('@struktoai/mirage-core/vfs/wandb/wandb')
-    const { WandbConfig } = await import('@struktoai/mirage-core/core/wandb/config')
-    return new WandbVFS(parseConfigWithSchema(WandbConfig, config))
-  },
-  linear: async (config) => {
-    const { LinearVFS } = await import('@struktoai/mirage-core/vfs/linear/linear')
-    const { LinearConfig } = await import('@struktoai/mirage-core/core/linear/config')
-    return new LinearVFS(parseConfigWithSchema(LinearConfig, config))
-  },
   notion: async (config) => {
     const { NotionVFS } = await import('./notion/notion.ts')
     const { NotionConfig } = await import('@struktoai/mirage-core/core/notion/config')
     return new NotionVFS(parseConfigWithSchema(NotionConfig, config))
-  },
-  langfuse: async (config) => {
-    const { LangfuseVFS } = await import('@struktoai/mirage-core/vfs/langfuse/langfuse')
-    const { LangfuseConfig } = await import('@struktoai/mirage-core/vfs/langfuse/config')
-    return new LangfuseVFS(parseConfigWithSchema(LangfuseConfig, config))
   },
   jaeger: async (config) => {
     const { JaegerVFS } = await import('./jaeger/jaeger.ts')
     const { JaegerConfig } = await import('@struktoai/mirage-core/vfs/jaeger/config')
     return new JaegerVFS(parseConfigWithSchema(JaegerConfig, config))
   },
-  github: async (config) => {
-    const { GitHubVFS } = await import('@struktoai/mirage-core/vfs/github/github')
-    const { GitHubConfig } = await import('@struktoai/mirage-core/core/github/config')
-    return GitHubVFS.create(parseConfigWithSchema(GitHubConfig, config))
-  },
-  gcal: async (config) => {
-    const { GCalVFS } = await import('@struktoai/mirage-core/vfs/gcal/gcal')
-    const { GCalConfig } = await import('@struktoai/mirage-core/vfs/gcal/config')
-    return new GCalVFS(parseConfigWithSchema(GCalConfig, config))
-  },
-  gdocs: async (config) => {
-    const { GDocsVFS } = await import('@struktoai/mirage-core/vfs/gdocs/gdocs')
-    const { GDocsConfig } = await import('@struktoai/mirage-core/vfs/gdocs/config')
-    return new GDocsVFS(parseConfigWithSchema(GDocsConfig, config))
-  },
-  gsheets: async (config) => {
-    const { GSheetsVFS } = await import('@struktoai/mirage-core/vfs/gsheets/gsheets')
-    const { GSheetsConfig } = await import('@struktoai/mirage-core/vfs/gsheets/config')
-    return new GSheetsVFS(parseConfigWithSchema(GSheetsConfig, config))
-  },
-  gslides: async (config) => {
-    const { GSlidesVFS } = await import('@struktoai/mirage-core/vfs/gslides/gslides')
-    const { GSlidesConfig } = await import('@struktoai/mirage-core/vfs/gslides/config')
-    return new GSlidesVFS(parseConfigWithSchema(GSlidesConfig, config))
-  },
-  gdrive: async (config) => {
-    const { GoogleDriveVFS } = await import('@struktoai/mirage-core/vfs/gdrive/gdrive')
-    const { GoogleDriveConfig } = await import('@struktoai/mirage-core/vfs/gdrive/config')
-    return new GoogleDriveVFS(parseConfigWithSchema(GoogleDriveConfig, config))
-  },
-  onedrive: async (config) => {
-    const { OneDriveConfig } = await import('@struktoai/mirage-core/accessor/onedrive')
-    const { OneDriveVFS } = await import('@struktoai/mirage-core/vfs/onedrive/onedrive')
-    return new OneDriveVFS(parseConfigWithSchema(OneDriveConfig, config))
-  },
-  sharepoint: async (config) => {
-    const { SharePointConfig } = await import('@struktoai/mirage-core/accessor/sharepoint')
-    const { SharePointVFS } = await import('@struktoai/mirage-core/vfs/sharepoint/sharepoint')
-    return new SharePointVFS(parseConfigWithSchema(SharePointConfig, config))
-  },
-  airtable: async (config) => {
-    const { AirtableConfig } = await import('@struktoai/mirage-core/core/airtable/config')
-    const { AirtableVFS } = await import('@struktoai/mirage-core/vfs/airtable/airtable')
-    return new AirtableVFS(parseConfigWithSchema(AirtableConfig, config))
-  },
-  mem0: async (config) => {
-    const { Mem0Config } = await import('@struktoai/mirage-core/vfs/mem0/config')
-    const { Mem0VFS } = await import('@struktoai/mirage-core/vfs/mem0/mem0')
-    return new Mem0VFS(parseConfigWithSchema(Mem0Config, config))
-  },
   dropbox: async (config) => {
     const { DropboxVFS } = await import('@struktoai/mirage-core/vfs/dropbox/dropbox')
     const { DropboxConfig } = await import('./dropbox/config.ts')
     return new DropboxVFS(parseConfigWithSchema(DropboxConfig, config))
-  },
-  box: async (config) => {
-    const { BoxVFS } = await import('@struktoai/mirage-core/vfs/box/box')
-    const { BoxConfig } = await import('@struktoai/mirage-core/vfs/box/config')
-    return new BoxVFS(parseConfigWithSchema(BoxConfig, config))
-  },
-  gmail: async (config) => {
-    const { GmailVFS } = await import('@struktoai/mirage-core/vfs/gmail/gmail')
-    const { GmailConfig } = await import('@struktoai/mirage-core/vfs/gmail/config')
-    return new GmailVFS(parseConfigWithSchema(GmailConfig, config))
   },
   email: async (config) => {
     const { EmailVFS } = await import('./email/email.ts')
@@ -328,6 +228,8 @@ const REGISTRY: Record<string, VFSFactory> = {
     return new EmailVFS(parseConfigWithSchema(EmailConfig, config))
   },
 }
+
+export type { VFSFactory }
 
 const CUSTOM: Record<string, VFSFactory> = {}
 
@@ -414,32 +316,7 @@ export async function buildVfs(
   config: Record<string, unknown> = {},
   sources?: Readonly<Record<string, ResolvedSource>>,
 ): Promise<BaseVFS> {
-  // A `{from, ref, key}` in the config is fetched here, before the
-  // VFS's own schema parses, so every credential reaches its
-  // client as the plain string it already reads. Python resolves one
-  // step earlier, in its config loader (`resolve_secrets`), because
-  // `build_vfs` is sync by rule there. A config with no pointer
-  // does no I/O.
-  const resolved = await resolveConfigSecrets(config, sources, `mounts.${name}.config`)
-  const factory = REGISTRY[name] ?? CUSTOM[name]
-  let built: BaseVFS | null
-  try {
-    built =
-      factory !== undefined
-        ? await factory(resolved)
-        : name.includes(':')
-          ? await buildFromRef(name, resolved)
-          : null
-  } catch (err) {
-    // A mount config is where a fetched credential lands, and the create
-    // route answers this message as its 400 detail: zod's own rendering
-    // would hand the refused value straight back. Field and code only, the
-    // way python's `build_vfs` reports its config class.
-    if (err instanceof z.ZodError) throw new VFSConfigError(`${name}: ${errorSummary(err)}`)
-    throw err
-  }
-  if (built === null) {
-    throw new Error(`unknown VFS ${JSON.stringify(name)}; known: ${knownVfsNames().join(', ')}`)
-  }
-  return built
+  return buildVfsFrom(REGISTRY, CUSTOM, name, config, sources, (unknown, resolved) =>
+    unknown.includes(':') ? buildFromRef(unknown, resolved) : Promise.resolve(null),
+  )
 }
