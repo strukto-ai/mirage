@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { OpServed } from '../observe/record.ts'
 import type { PathSpec, Producer, Refusal } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { chunks } from './cooperative.ts'
@@ -125,6 +126,8 @@ export class OpReport {
    * Null when no mount answers.
    */
   store: string | null = null
+  /** The layer that answered, null for the backend. */
+  answerer: OpServed | null = null
 
   /** Stamp the report at the moment an op completes. */
   served(source: string | null = null, moved: number | null = null): void {

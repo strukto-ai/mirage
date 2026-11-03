@@ -29,7 +29,7 @@ import {
   startOp,
   withMountContext,
 } from './context.ts'
-import type { OpRecord } from './record.ts'
+import type { OpRecord, OpStatus } from './record.ts'
 import { ManualClock, SystemClock } from '../utils/clock.ts'
 
 describe('the recording clock', () => {
@@ -373,4 +373,17 @@ it('stream completion starts pending and stays out of serialized observations', 
   expect(records[0]?.complete).toBe(true)
   expect(records[1]?.complete).toBe(true)
   expect(records[1]?.toDict()).not.toHaveProperty('complete')
+})
+
+describe('a writer that leaves changed unsaid', () => {
+  it.each([
+    ['a read', 'read', 'ok', false],
+    ['a mutation', 'write', 'ok', true],
+    ['a failed mutation', 'write', 'failed', false],
+  ] as const)('%s gets the helper default', async (_, op, status: OpStatus, changed) => {
+    const [, records] = await runWithRecording(async () => {
+      record(op, '/a.txt', 's3', 0, startOp(), { status })
+    })
+    expect(records.map((r) => r.changed)).toEqual([changed])
+  })
 })

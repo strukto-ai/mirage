@@ -2104,7 +2104,7 @@ export class Dispatcher {
     if (mark === undefined) throw new Error(`missing ${call.name} call definition`)
     const boundary = this.boundary(owner)
     await this.admit(call, boundary, mark)
-    memoryAnswered(call.report, held instanceof Uint8Array ? held.byteLength : 0)
+    memoryAnswered(call.report, held instanceof Uint8Array ? held.byteLength : 0, 'cache')
     return boundary.complete(mark, call.path, call.write, held, call.issuer)
   }
 
@@ -2152,7 +2152,7 @@ export class Dispatcher {
     // the caller able to tell: without the stamp a refused warm read is
     // recorded against the backend and counted as traffic that never
     // happened.
-    memoryAnswered(call.report, window.byteLength)
+    memoryAnswered(call.report, window.byteLength, 'cache')
     const result = (await boundary.complete(
       mark,
       call.path,
@@ -2164,6 +2164,7 @@ export class Dispatcher {
       call.readRecords = [
         finishRecord('read', call.path.virtual, 'ram', window.byteLength, startOp(), {
           fingerprint: held?.[1] ?? null,
+          served: 'cache',
         }),
       ]
       if (call.stream) {
@@ -2412,7 +2413,7 @@ export class Dispatcher {
             const pending = Promise.resolve(
               name === 'setattr'
                 ? this.applySetattr(mount, scope, p, opKwargs)
-                : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
+                : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access, call.report),
             )
             onCall?.(pending)
             return pending
@@ -2521,6 +2522,7 @@ export class Dispatcher {
           fullKwargs.files = await this.fullWalkFiles(mount, vfs, call)
         if (names(call, this.caller)) await this.reconciler.reconcileRead(mount, p.virtual)
         const answered = probed(call, mount)
+        if (answered !== null && call.report !== undefined) call.report.answerer = 'index'
         result = answered ?? (await run(fullKwargs))
         if (call.fresh) {
           await this.reconciler.onFreshStat(
@@ -3517,7 +3519,9 @@ export class Dispatcher {
       target = found
       result = found
     }
-    record(name, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer)
+    record(name, path.virtual, VFSName.RAM, encodeText(target).byteLength, timer, {
+      served: 'namespace',
+    })
     memoryAnswered(report)
     return (await boundary.complete(mark, path, write, result, issuer)) as string | FileStat | null
   }
@@ -3812,6 +3816,7 @@ export class Dispatcher {
       VFSName.RAM,
       result instanceof Uint8Array ? result.byteLength : 0,
       timer,
+      { served: 'namespace' },
     )
     report?.served(null, null)
     return boundary.complete(mark, path, write, result, issuer)
@@ -3935,7 +3940,7 @@ export class Dispatcher {
       if (value !== undefined && value !== null) overlay[key] = value as number | string
     }
     await this.writeOverlay(p.virtual, overlay)
-    record('setattr', p.virtual, VFSName.RAM, 0, timer)
+    record('setattr', p.virtual, VFSName.RAM, 0, timer, { served: 'namespace' })
     return overlay
   }
 

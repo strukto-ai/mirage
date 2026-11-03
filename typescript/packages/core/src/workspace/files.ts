@@ -19,7 +19,7 @@ import { finishRecord, OpTimer, record } from '../observe/context.ts'
 import { SystemClock, type Clock } from '../utils/clock.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
-import { FileType, type MountMode, PathSpec } from '../types.ts'
+import { FileType, type MountMode, PathSpec, VFSName } from '../types.ts'
 import { isEnotdir, isMissingPath } from '../errors/fs.ts'
 import {
   type Caller,
@@ -420,15 +420,16 @@ export class Files {
       const owner = this.reader().owner(ran)
       const source = owner === null ? null : (report.source ?? owner.kind)
       const bytes = report.bytes ?? payloadBytes(answer, args)
+      const served = report.answerer ?? 'backend'
       if (!isolated) {
         if (!fallback || !report.completed || source === null) return
-        const rec = finishRecord(op, ran, source, bytes, timer)
+        const rec = finishRecord(op, ran, source, bytes, timer, { served })
         this.recorded.push(rec)
         if (this.sink !== null) await this.sink(rec, this.sessionFor(seen))
         return
       }
       if (fallback && mine.length === 0 && report.completed && source !== null) {
-        callsAs(caller, record)(op, ran, source, bytes, timer)
+        callsAs(caller, record)(op, ran, source, bytes, timer, { served })
       }
       enclosing?.push(...mine)
       if (own === null || own.records.length === 0) return
@@ -794,17 +795,19 @@ export class WorkspaceFiles extends Files {
     return this.recorded
   }
 
-  /** Total bytes transferred over the network. */
+  /** Total bytes a backend moved, past a RAM mount, which crosses no network. */
   get networkBytes(): number {
     let total = 0
-    for (const r of this.recorded) if (!r.isCache) total += r.bytes
+    for (const r of this.recorded) {
+      if (r.served === 'backend' && r.source !== VFSName.RAM) total += r.bytes
+    }
     return total
   }
 
-  /** Total bytes served from cache. */
+  /** Total bytes a warm file cache served. */
   get cacheBytes(): number {
     let total = 0
-    for (const r of this.recorded) if (r.isCache) total += r.bytes
+    for (const r of this.recorded) if (r.served === 'cache') total += r.bytes
     return total
   }
 }

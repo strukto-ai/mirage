@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.key_prefix import under_path
@@ -79,6 +80,40 @@ VERSION_OPS = STAMP_FINGERPRINT_OPS | RETRACT_FINGERPRINT_OPS
 SUBTREE_RETRACT_OPS = frozenset({"rm_r", "rename_prefix", "copy_prefix"})
 
 
+class OpStatus(StrEnum):
+    OK = "ok"
+    FAILED = "failed"
+    PARTIAL = "partial"
+
+
+class OpServed(StrEnum):
+    BACKEND = "backend"
+    CACHE = "cache"
+    INDEX = "index"
+    NAMESPACE = "namespace"
+
+
+MUTATION_OPS = (
+    CONTENT_CHANGING_OPS
+    | RETRACT_FINGERPRINT_OPS
+    | frozenset(
+        {"mkdir", "setattr", "symlink", "setxattr", "removexattr", "dir_copy"}
+    )
+)
+
+
+def default_changed(op: str, status: OpStatus) -> bool:
+    """What a writer helper states for a row whose writer left
+    ``changed`` unsaid: a mutation op that did not fail. The one place
+    the rule lives, until each writer states it itself.
+
+    Args:
+        op (str): the row's op.
+        status (OpStatus): the row's outcome.
+    """
+    return status != OpStatus.FAILED and op in MUTATION_OPS
+
+
 @dataclass
 class OpRecord:
     """A single observed I/O operation.
@@ -104,6 +139,10 @@ class OpRecord:
             bytes can be re-fetched even if the live object has moved on.
             Strictly stronger than ``fingerprint`` — populated only by
             backends that can guarantee revision durability.
+        status (OpStatus): Whether the op succeeded, failed or partly changed state.
+        errno (int | None): The failure's POSIX errno, when available.
+        changed (bool): Whether state changed, as its writer states it.
+        served (OpServed): The answering layer, independent of the backend.
         mount_id (str | None): In-process mount identity for snapshot
             ownership checks; never used as a persisted backend revision.
     """
@@ -120,10 +159,23 @@ class OpRecord:
     execution_id: str | None = None
     complete: bool = field(default=True, init=False, repr=False, compare=False)
 
+    status: OpStatus = field(default=OpStatus.OK, kw_only=True)
+    errno: int | None = field(default=None, kw_only=True)
+    changed: bool = field(default=False, kw_only=True)
+    served: OpServed = field(default=OpServed.BACKEND, kw_only=True)
+
+    def __post_init__(self) -> None:
+        self.status = OpStatus(self.status)
+        self.served = OpServed(self.served)
+
     @property
-    def is_cache(self) -> bool:
-        """Whether this op was served from the in-memory cache."""
-        return self.source == "ram"
+    def settles(self) -> bool:
+        """Whether the row speaks for the path's version: a read, or a
+        change that landed. A failed op and a mutation that changed
+        nothing leave the version as it was."""
+        return self.status != OpStatus.FAILED and (
+            self.op == "read" or self.changed
+        )
 
     def to_dict(self) -> dict[str, str | int | None]:
         """Public observation fields, excluding in-process mount ownership."""
@@ -136,6 +188,10 @@ class OpRecord:
             "duration_ms": self.duration_ms,
             "fingerprint": self.fingerprint,
             "revision": self.revision,
+            "status": self.status,
+            "errno": self.errno,
+            "changed": self.changed,
+            "served": self.served,
             **(
                 {"execution_id": self.execution_id}
                 if self.execution_id is not None
@@ -165,6 +221,8 @@ class RecordIndex:
     def _absorb(self) -> None:
         for i in range(self._seen, len(self._records)):
             rec = self._records[i]
+            if not rec.settles:
+                continue
             if rec.op in VERSION_OPS:
                 self._at[rec.path] = i
             if rec.op in SUBTREE_RETRACT_OPS:
@@ -273,7 +331,10 @@ class LostPaths:
         if mark is None:
             return False
         return not any(
-            rec.path == key and rec.op in STAMP_FINGERPRINT_OPS
+            rec.path == key
+            and rec.op in STAMP_FINGERPRINT_OPS
+            and rec.status == OpStatus.OK
+            and rec.settles
             for rec in self.sink[mark.at :]
         )
 

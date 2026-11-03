@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { VFSName } from '../types.ts'
 import type { Clock } from '../utils/clock.ts'
 import { underPath } from '../utils/key_prefix.ts'
 
@@ -111,6 +110,7 @@ export class RecordIndex {
     for (let i = this.seen; i < this.records.length; i++) {
       const rec = this.records[i]
       if (rec === undefined) continue
+      if (!rec.settles) continue
       if (VERSION_OPS.has(rec.op)) this.at.set(rec.path, i)
       if (SUBTREE_RETRACT_OPS.has(rec.op)) this.subtree.push(i)
     }
@@ -136,6 +136,29 @@ export class RecordIndex {
   }
 }
 
+export type OpStatus = 'ok' | 'failed' | 'partial'
+export type OpServed = 'backend' | 'cache' | 'index' | 'namespace'
+
+export const MUTATION_OPS: ReadonlySet<string> = new Set([
+  ...CONTENT_CHANGING_OPS,
+  ...RETRACT_FINGERPRINT_OPS,
+  'mkdir',
+  'setattr',
+  'symlink',
+  'setxattr',
+  'removexattr',
+  'dir_copy',
+])
+
+/**
+ * What a writer helper states for a row whose writer left `changed` unsaid: a
+ * mutation op that did not fail. The one place the rule lives, until each
+ * writer states it itself. Mirrors Python's `default_changed`.
+ */
+export function defaultChanged(op: string, status: OpStatus): boolean {
+  return status !== 'failed' && MUTATION_OPS.has(op)
+}
+
 export class OpRecord {
   /** In-process transfer lifecycle; excluded from serialized observations. */
   complete = true
@@ -149,10 +172,26 @@ export class OpRecord {
   fingerprint: string | null
   revision: string | null
   readonly mountId: string | null
+  status: OpStatus
+  errno: number | null
+  changed: boolean
+  readonly served: OpServed
 
   constructor(
     init: Pick<OpRecord, 'op' | 'path' | 'source' | 'bytes' | 'timestamp' | 'durationMs'> &
-      Partial<Pick<OpRecord, 'executionId' | 'fingerprint' | 'revision' | 'mountId'>>,
+      Partial<
+        Pick<
+          OpRecord,
+          | 'executionId'
+          | 'fingerprint'
+          | 'revision'
+          | 'mountId'
+          | 'status'
+          | 'errno'
+          | 'changed'
+          | 'served'
+        >
+      >,
   ) {
     this.executionId = init.executionId ?? null
     this.op = init.op
@@ -164,10 +203,15 @@ export class OpRecord {
     this.fingerprint = init.fingerprint ?? null
     this.revision = init.revision ?? null
     this.mountId = init.mountId ?? null
+    this.status = init.status ?? 'ok'
+    this.errno = init.errno ?? null
+    this.changed = init.changed ?? false
+    this.served = init.served ?? 'backend'
   }
 
-  get isCache(): boolean {
-    return this.source === VFSName.RAM
+  /** Whether the row speaks for the path's version: a read, or a change that landed. */
+  get settles(): boolean {
+    return this.status !== 'failed' && (this.op === 'read' || this.changed)
   }
 
   toJSON(): Record<string, unknown> {
@@ -184,6 +228,10 @@ export class OpRecord {
       durationMs: this.durationMs,
       fingerprint: this.fingerprint,
       revision: this.revision,
+      status: this.status,
+      errno: this.errno,
+      changed: this.changed,
+      served: this.served,
       ...(this.executionId === null ? {} : { execution_id: this.executionId }),
     }
   }
@@ -268,6 +316,12 @@ export class LostPaths {
     if (mark === undefined) return false
     return !this.records
       .slice(mark.at)
-      .some((rec) => rec.path === key && STAMP_FINGERPRINT_OPS.has(rec.op))
+      .some(
+        (rec) =>
+          rec.path === key &&
+          STAMP_FINGERPRINT_OPS.has(rec.op) &&
+          rec.status === 'ok' &&
+          rec.settles,
+      )
   }
 }

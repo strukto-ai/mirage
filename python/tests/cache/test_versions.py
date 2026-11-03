@@ -16,12 +16,21 @@ import pytest
 
 from mirage.cache.types import OwnRead
 from mirage.cache.versions import VersionHistory, VersionScope
-from mirage.observe.record import OpRecord
+from mirage.observe.record import MUTATION_OPS, OpRecord
 from mirage.workspace.session.session import SessionState
 
 
 def record(op="read", version="v1"):
-    return OpRecord(op, "/f", "s3", 1, 0, 0, fingerprint=version)
+    return OpRecord(
+        op,
+        "/f",
+        "s3",
+        1,
+        0,
+        0,
+        fingerprint=version,
+        changed=op in MUTATION_OPS,
+    )
 
 
 def test_histories_are_session_and_mount_owned():

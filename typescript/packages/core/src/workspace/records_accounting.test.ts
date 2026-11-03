@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpRecord } from '../observe/record.ts'
+import { OpRecord, type OpServed } from '../observe/record.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-function record(source: string, bytes: number): OpRecord {
+function record(source: string, bytes: number, served: OpServed = 'backend'): OpRecord {
   return new OpRecord({
     op: 'read',
     path: '/data/a.txt',
@@ -26,6 +26,7 @@ function record(source: string, bytes: number): OpRecord {
     bytes,
     timestamp: 1,
     durationMs: 1,
+    served,
   })
 }
 
@@ -33,8 +34,10 @@ describe('Workspace record accounting', () => {
   it('splits bytes by network vs cache', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     ws.records.push(record(VFSName.S3, 100))
-    ws.records.push(record(VFSName.RAM, 30))
+    ws.records.push(record(VFSName.RAM, 30, 'cache'))
     ws.records.push(record(VFSName.S3, 7))
+    ws.records.push(record(VFSName.RAM, 5))
+    ws.records.push(record(VFSName.RAM, 3, 'namespace'))
     expect(ws.networkBytes).toBe(107)
     expect(ws.cacheBytes).toBe(30)
   })

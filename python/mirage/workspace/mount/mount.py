@@ -106,14 +106,14 @@ from mirage.io.gateway import with_egress
 from mirage.io.memory import check_memory
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, IOResult, OpReport, materialize
 from mirage.observe.context import (
     RecordingScope,
     active_recorder,
     command_records,
     with_mount_context,
 )
-from mirage.observe.record import OpRecord
+from mirage.observe.record import OpRecord, OpServed
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import NOT_FOUND_STATUS
@@ -2603,6 +2603,7 @@ class MountEntry:
         path: str | PathSpec,
         /,
         *args: Any,
+        report: OpReport | None = None,
         **kwargs: Any,
     ) -> Any:
         """Run an op on this mount's VFS.
@@ -2626,6 +2627,8 @@ class MountEntry:
             name (str): operation name (e.g. "read", "stat").
             path (str | PathSpec): virtual path; a listing of a glob word
                 lists its directory for the pattern.
+            report (OpReport | None): the caller's report, told when the
+                mount's index answered.
         """
         virtual = path if isinstance(path, str) else path.virtual
         if name == "read_tree" and kwargs.pop("level", False):
@@ -2681,6 +2684,8 @@ class MountEntry:
                                 )
                                 stored = await self._stored(name, scope, index)
                             if stored is not None:
+                                if report is not None:
+                                    report.answerer = OpServed.INDEX
                                 return stored
                         for fn in levels:
                             refill = (

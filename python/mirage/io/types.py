@@ -21,11 +21,14 @@ from collections.abc import (
 )
 from contextlib import aclosing
 from dataclasses import dataclass, field
-from typing import Any, Generic, Literal, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, TypeVar
 
 from mirage.io.cooperative import chunks
 from mirage.io.memory import check_memory
 from mirage.types import PathSpec, Producer, Refusal
+
+if TYPE_CHECKING:
+    from mirage.observe.record import OpServed
 
 ByteSource = bytes | AsyncIterator[bytes]
 StreamName = Literal["stdout", "stderr"]
@@ -213,6 +216,8 @@ class OpReport:
             mount: "ram" for a warm file-cache hit and for a synthetic
             namespace answer, since neither contacted a backend. None
             means the owning mount answered.
+        answerer (OpServed | None): the layer that answered, None for
+            the backend.
         bytes (int | None): bytes the answering store moved, when the
             delivered result no longer measures them. None means "the
             result is the measure".
@@ -227,6 +232,7 @@ class OpReport:
 
     completed: bool = False
     source: str | None = None
+    answerer: "OpServed | None" = None
     bytes: int | None = None
     path: str | None = None
     store: str | None = None

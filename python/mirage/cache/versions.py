@@ -74,6 +74,8 @@ class VersionHistory:
             key (str): resolved mount-relative file name.
             rec (OpRecord): the operation's own result.
         """
+        if not rec.settles:
+            return
         if (
             rec.op == "read"
             and not rec.complete

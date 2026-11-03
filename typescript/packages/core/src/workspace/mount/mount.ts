@@ -67,7 +67,7 @@ import { checkMemory } from '../../io/memory.ts'
 import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { closeQuietly, OutputStream, rechunk } from '../../io/stream.ts'
-import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
+import { type ByteSource, IOResult, materialize, type OpReport } from '../../io/types.ts'
 import {
   activeRecords,
   commandRecords,
@@ -1631,6 +1631,7 @@ export class MountEntry {
     args: readonly unknown[] = [],
     kwargs: OpKwargs = {},
     access?: SessionAccess,
+    report?: OpReport,
   ): Promise<unknown> {
     if (name === 'read_tree' && kwargs.level === true) {
       return this.level(scope.virtual, kwargs.limit as number | undefined, access)
@@ -1660,7 +1661,10 @@ export class MountEntry {
           found = await this.handedFor(name, scope, null, index)
           stored = await this.stored(name, scope, index)
         }
-        if (stored !== null) return stored
+        if (stored !== null) {
+          if (report !== undefined) report.answerer = 'index'
+          return stored
+        }
       }
       for (const call of levels) {
         const refill =

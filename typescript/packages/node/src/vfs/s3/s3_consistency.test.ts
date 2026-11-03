@@ -430,7 +430,7 @@ describe('S3 cache consistency (mocked)', () => {
         expect(
           ws.records
             .slice(mark)
-            .filter((r) => !r.isCache)
+            .filter((r) => r.served === 'backend')
             .map((r) => [r.op, r.path]),
         ).toEqual([['read', `${fresh}/f.txt`]])
         mock.resetCalls()

@@ -98,7 +98,7 @@ describe('hf_buckets under read: fresh', () => {
     try {
       await out(w, 'tee /m/w.txt', ENC.encode('hi\n'))
       const writes = w.records
-        .filter((r) => !r.isCache && r.op === 'write')
+        .filter((r) => r.served === 'backend' && r.op === 'write')
         .map((r) => r.fingerprint)
       expect(writes).toEqual([null])
       // Absent, not merely different: an invented token would pass a check
