@@ -390,6 +390,84 @@ describe('the server API in workerd', () => {
     },
   )
 
+  it('runs an MCP server as a CLI, its client kept across requests', async () => {
+    const seen: string[] = []
+    const server: Server = createServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk: Buffer) => (raw += chunk.toString()))
+      req.on('end', () => {
+        seen.push(`${req.method ?? ''} ${req.headers.authorization ?? ''}`)
+        if (req.method !== 'POST') {
+          res.writeHead(405).end()
+          return
+        }
+        const msg = JSON.parse(raw) as {
+          id?: number
+          method: string
+          params?: { arguments?: { text?: string } }
+        }
+        if (msg.id === undefined) {
+          res.writeHead(202).end()
+          return
+        }
+        const result =
+          msg.method === 'initialize'
+            ? {
+                protocolVersion: '2025-06-18',
+                capabilities: { tools: {} },
+                serverInfo: { name: 'echo', version: '1.0.0' },
+              }
+            : msg.method === 'tools/list'
+              ? {
+                  tools: [
+                    {
+                      name: 'echo_text',
+                      description: 'Echo the text back.',
+                      inputSchema: {
+                        type: 'object',
+                        properties: { text: { type: 'string' } },
+                        required: ['text'],
+                      },
+                    },
+                  ],
+                }
+              : { content: [{ type: 'text', text: `echo: ${msg.params?.arguments?.text ?? ''}` }] }
+        const reply = JSON.stringify({ jsonrpc: '2.0', id: msg.id, result })
+        if (msg.method === 'tools/call') {
+          res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': 's1' })
+          res.end(`event: message\ndata: ${reply}\n\n`)
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 's1' })
+        res.end(reply)
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`
+    try {
+      const created = await call('POST', '/v1/workspaces', {
+        id: 'mcp-cli',
+        config: {
+          mounts: { '/': { vfs: 'ram' } },
+          clis: {
+            wiki: {
+              cli: 'mcp',
+              config: { url: base, auth: { type: 'bearer', token: 'mcp-edge' } },
+            },
+          },
+        },
+      })
+      expect(created.status).toBe(201)
+      const first = await shell('mcp-cli', `wiki echo-text '{"text": "one"}'`)
+      expect(first.stdout).toContain('echo: one')
+      const second = await shell('mcp-cli', `wiki echo-text '{"text": "two"}'`)
+      expect(second.stdout).toContain('echo: two')
+      expect(seen.every((s) => s.endsWith('Bearer mcp-edge'))).toBe(true)
+    } finally {
+      server.close()
+    }
+  }, 60_000)
+
   it('closes a workspace', async () => {
     await call('POST', '/v1/workspaces', {
       id: 'gone',
